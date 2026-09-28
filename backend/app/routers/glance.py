@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -61,15 +61,18 @@ from app.models.member import Member
 from app.models.pm import Story, StoryActivity
 from app.models.project import Project
 from app.models.workflow_line import WorkflowLineStepApproval
-from app.services.evidence_service import batch_human_verified
+from app.services.evidence_service import gate_approval_filter
 from app.services.project_auth import accessible_project_ids_in_org, has_project_access
-from app.services.trust_pipeline import batch_unresolved_blocker, batch_verify_fail
+from app.services.trust_pipeline import unresolved_blocker_select, verify_fail_filter
 
 router = APIRouter(prefix="/api/v2/glance", tags=["glance", "Work"])
 
 # blocked/merge_ready 판정의 "아직 open" = non-done(command_center 규율 재사용).
 _OPEN_EXCLUDED_STATUSES = ("done",)
 _LIMIT = 100
+# story #4382 — 다섯 신호 쿼리는 판정 조건을 SQL에 다 건 뒤 «그 상태에 가장 오래 있던 것 먼저 · id 보조 키»로 정렬하고 _LIMIT + 1행을
+# 읽는다. 한 행이 더 오면 그 신호는 잘린 것 — 응답 `truncated_kinds`에 싣는다(화면이 받은 목록을 «전부»로 단정하지 않게).
+# 예전: ORDER BY 없는 LIMIT 100 + merge_ready는 100개를 읽은 뒤 파이썬에서 거름 → in-review 101건이면 요청마다 DB가 고른 1건이 빠졌다.
 
 # story #2249(오르테가군 리뷰): entered_state_at의 정밀도 — 모듈 docstring 참조.
 _PRECISION_EXACT = "exact"
@@ -88,51 +91,18 @@ _STALLED_EXCLUDED_STATUSES = ("done", "backlog")
 _STALLED_THRESHOLD_HOURS = 48
 
 
-async def _batch_story_entered_in_review_at(
-    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
-) -> dict[uuid.UUID, datetime]:
-    """merge_ready 신호원 — Story가 **마지막으로** in-review로 전이한 시각(StoryActivity 감사
-    로그 최신 행, #2249). best-effort — story_status_events.emit_story_status_changed가
-    actor_id 없으면 행을 안 남긴다(시스템 트리거 시 유실 가능, 알려진 한계)."""
-    if not story_ids:
-        return {}
-    rows = (
-        await session.execute(
-            select(StoryActivity.story_id, func.max(StoryActivity.created_at))
-            .where(
-                StoryActivity.org_id == org_id,
-                StoryActivity.story_id.in_(story_ids),
-                StoryActivity.activity_type == "status_changed",
-                StoryActivity.new_value == "in-review",
-            )
-            .group_by(StoryActivity.story_id)
-        )
-    ).all()
-    return {story_id: entered_at for story_id, entered_at in rows}
-
-
-async def _batch_latest_status_changed_at(
-    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
-) -> dict[uuid.UUID, datetime]:
-    """story #2250 stalled 신호원 — `_batch_story_entered_in_review_at`과 동형이나 `new_value`
-    필터가 없다(어느 상태로 전이했든 "가장 최근 상태 변화" 그 자체가 관심사 — ㉠좁은 정의,
-    #2250 §"측정 준비" 오르테가군 확定). 행이 아예 없는 story는 반환 dict에서 빠진다 —
-    "그 story는 언제 마지막으로 바뀌었는지 모른다"는 뜻이라 호출부가 별도로 None 취급한다
-    (created_at 등으로 대체해 추측하지 않는다 — blocked 신호와 동일 "모르면 안 준다" 원칙)."""
-    if not story_ids:
-        return {}
-    rows = (
-        await session.execute(
-            select(StoryActivity.story_id, func.max(StoryActivity.created_at))
-            .where(
-                StoryActivity.org_id == org_id,
-                StoryActivity.story_id.in_(story_ids),
-                StoryActivity.activity_type == "status_changed",
-            )
-            .group_by(StoryActivity.story_id)
-        )
-    ).all()
-    return {story_id: latest for story_id, latest in rows}
+def _last_status_change_at(org_id: uuid.UUID, story_id_col, *, new_value: str | None = None):
+    """story별 마지막 status_changed 시각(StoryActivity 감사 로그 #2249) — 부르는 SELECT의 story 행마다 붙는 스칼라 서브쿼리.
+    `new_value`를 주면 그 상태로의 전이만(merge_ready = in-review 진입), 안 주면 어느 상태든(stalled). 행이 없으면 NULL —
+    created_at 등으로 대체 추측하지 않는다(blocked 신호와 같은 "모르면 안 준다" 원칙)."""
+    conds = [
+        StoryActivity.org_id == org_id,
+        StoryActivity.story_id == story_id_col,
+        StoryActivity.activity_type == "status_changed",
+    ]
+    if new_value is not None:
+        conds.append(StoryActivity.new_value == new_value)
+    return select(func.max(StoryActivity.created_at)).where(*conds).scalar_subquery()
 
 
 class AttentionItem(BaseModel):
@@ -183,6 +153,8 @@ class AttentionResponse(BaseModel):
     # 부가정보만) — 지어내지 않는다(값 없이 카피를 쓰거나 population을 추측하는 대신 실제
     # 쿼리 결과 그대로).
     stalled_population_count: int
+    # story #4382 — _LIMIT을 넘어 잘린 신호 kind(없으면 빈 목록). 잘린 신호는 «그 상태에 가장 오래 있던 것부터 _LIMIT건».
+    truncated_kinds: list[str] = Field(default_factory=list)
 
 
 async def _compute_attention_for_project(
@@ -194,6 +166,13 @@ async def _compute_attention_for_project(
     걸러진 id만 넘긴다). 로직 재구현 0(쌍둥이 시스템 금지) — org-wide 집계도 이 프로젝트가
     단독으로 계산했을 때와 100% 같은 결과(AC5 배타 포함)를 낸다."""
     items: list[AttentionItem] = []
+    truncated_kinds: list[str] = []
+
+    def _capped(kind: str, rows):
+        if len(rows) > _LIMIT:
+            truncated_kinds.append(kind)
+            return rows[:_LIMIT]
+        return rows
 
     # ① gate_pending = 프로젝트의 pending blocking approval(그 gate의 story title enrich).
     gate_story = aliased(Story)
@@ -218,9 +197,11 @@ async def _compute_attention_for_project(
                 WorkflowLineStepApproval.status == "pending",
                 WorkflowLineStepApproval.blocking.is_(True),
             )
-            .limit(_LIMIT)
+            .order_by(WorkflowLineStepApproval.created_at, WorkflowLineStepApproval.id)
+            .limit(_LIMIT + 1)
         )
     ).all()
+    gate_rows = _capped("gate_pending", gate_rows)
     for approval_id, gate_id, story_id, title, entered_at in gate_rows:
         items.append(AttentionItem(
             kind="gate_pending",
@@ -250,9 +231,12 @@ async def _compute_attention_for_project(
                 blocker.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 blocker.deleted_at.is_(None),
             )
-            .limit(_LIMIT)
+            # 표시 시각은 안 싣지만(아래 ⛔) 자르는 순서는 정해야 한다 — 의존 행 생성 순 + id.
+            .order_by(ItemDependency.created_at, ItemDependency.id)
+            .limit(_LIMIT + 1)
         )
     ).all()
+    blocked_rows = _capped("blocked", blocked_rows)
     for blocked_id, title, blocker_id in blocked_rows:
         items.append(AttentionItem(
             kind="blocked",
@@ -269,31 +253,36 @@ async def _compute_attention_for_project(
     # ③ merge_ready = 프로젝트의 in-review story 중 **실제 병합 가능**(P0-04 엄격화 — doc
     # trust-pipeline-be-design §2/§3: human_verified + 미해결 blocker 없음 + verify_fail 없음.
     # 기존 완화판(status==in-review만)보다 좁아짐 — 회귀 아닌 의도된 강화(doc §8)).
+    # story #4299 ① — in-review story와 그 판정 칸(human_verified · verify_fail · 미해결 blocker · 마지막 in-review 진입 시각)을
+    # 한 SQL로(예전엔 story 목록 1 + 판정 셋 + 활동 시각 1 = 왕복 다섯). 조건은 trust_pipeline · evidence_service 필터 빌더 그대로.
+    # story #4382 — 판정(human_verified · verify_fail 없음 · 미해결 blocker 없음)을 WHERE로 먼저 걸고 LIMIT(예전엔 in-review 100개를 읽은
+    # 뒤 파이썬에서 걸러, 101건째 병합 가능 스토리가 요청마다 임의로 빠질 수 있었다).
+    # merge_ready 진입 시각 — **마지막으로** in-review로 전이한 시각(StoryActivity 감사 로그 #2249). best-effort —
+    # story_status_events.emit_story_status_changed가 actor_id 없으면 행을 안 남긴다(시스템 트리거 시 유실 가능, 알려진 한계).
+    review_entered_at = _last_status_change_at(org_id, Story.id, new_value="in-review")
     review_rows = (
         await session.execute(
-            select(Story.id, Story.title)
+            select(Story.id, Story.title, review_entered_at)
             .where(
                 Story.org_id == org_id,
                 Story.project_id == project_id,
                 Story.status == "in-review",
                 Story.deleted_at.is_(None),
+                exists().where(*gate_approval_filter("story"), Evidence.work_item_id == Story.id),
+                not_(exists().where(*verify_fail_filter(org_id), Gate.work_item_id == Story.id)),
+                not_(unresolved_blocker_select(org_id).where(ItemDependency.to_id == Story.id).exists()),
             )
-            .limit(_LIMIT)
+            .order_by(review_entered_at.asc().nulls_last(), Story.id)
+            .limit(_LIMIT + 1)
         )
     ).all()
-    review_ids = [r[0] for r in review_rows]
-    verified_map = await batch_human_verified(session, review_ids, "story")
-    verify_fail_ids = await batch_verify_fail(session, org_id, review_ids)
-    blocked_ids = await batch_unresolved_blocker(session, org_id, review_ids)
-    entered_in_review_map = await _batch_story_entered_in_review_at(session, org_id, review_ids)
-    for story_id, title in review_rows:
-        if story_id in verified_map and story_id not in verify_fail_ids and story_id not in blocked_ids:
-            _entered_at = entered_in_review_map.get(story_id)
-            items.append(AttentionItem(
-                kind="merge_ready", story_id=story_id, title=title,
-                entered_state_at=_entered_at,
-                entered_state_at_precision=_PRECISION_EXACT if _entered_at is not None else None,
-            ))
+    review_rows = _capped("merge_ready", review_rows)
+    for story_id, title, _entered_at in review_rows:
+        items.append(AttentionItem(
+            kind="merge_ready", story_id=story_id, title=title,
+            entered_state_at=_entered_at,
+            entered_state_at_precision=_PRECISION_EXACT if _entered_at is not None else None,
+        ))
 
     # ④ needs_input = 프로젝트의 오픈 story 중 사람 판단 대기(§7 확定① — Gate(requires_human, pending)).
     # ⛔story #2232(2026-07-30, PO 판정 — 실측으로 "degraded로 접을 이유 없음" 확認 후 지금 굴림):
@@ -316,9 +305,11 @@ async def _compute_attention_for_project(
                 Story.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 Story.deleted_at.is_(None),
             )
-            .limit(_LIMIT)
+            .order_by(Gate.status_entered_at.asc().nulls_last(), Gate.id)
+            .limit(_LIMIT + 1)
         )
     ).all()
+    needs_input_rows = _capped("needs_input", needs_input_rows)
     for story_id, title, entered_at, gate_id, gate_type, evidence_status in needs_input_rows:
         items.append(AttentionItem(
             kind="needs_input", story_id=story_id, title=title, entered_state_at=entered_at,
@@ -342,9 +333,10 @@ async def _compute_attention_for_project(
     # blocked로 «가장 오래» 묶여 있던 시점을 보여줘야 밀린 순서가 거짓으로 짧아지지 않는다.
     # 나머지 3곳(trust_pipeline/merge_gate_metrics/goal 리포지토리)은 동일 갭이 있을 수 있으나
     # PR① 스코프 밖 후속으로 유지(PR① 본문 명기).
+    verify_fail_entered_at = func.min(Gate.evidence_status_entered_at)
     verify_fail_rows = (
         await session.execute(
-            select(Story.id, Story.title, func.min(Gate.evidence_status_entered_at))
+            select(Story.id, Story.title, verify_fail_entered_at)
             .select_from(Gate)
             .join(Story, (Story.id == Gate.work_item_id) & (Gate.work_item_type == "story"))
             .where(
@@ -356,9 +348,11 @@ async def _compute_attention_for_project(
                 Story.deleted_at.is_(None),
             )
             .group_by(Story.id, Story.title)
-            .limit(_LIMIT)
+            .order_by(verify_fail_entered_at.asc().nulls_last(), Story.id)
+            .limit(_LIMIT + 1)
         )
     ).all()
+    verify_fail_rows = _capped("verify_fail", verify_fail_rows)
     for story_id, title, entered_at in verify_fail_rows:
         items.append(AttentionItem(
             kind="verify_fail", story_id=story_id, title=title, entered_state_at=entered_at,
@@ -372,9 +366,11 @@ async def _compute_attention_for_project(
     # 위에서 이미 만든 항목의 story_id는 후보에서 뺀다 — 같은 story가 stalled와 다른 kind로
     # 동시에 뜨면 "할 일 목록"이 "사정 나열"이 된다(유나 규칙, 모듈 docstring 참조).
     _already_signaled_ids = {item.story_id for item in items if item.story_id is not None}
+    # story #4299 ① — 모집단과 story별 마지막 상태 변화 시각(status_changed 최신 · new_value 무관 — ㉠좁은 정의, #2250 §"측정 준비"
+    # 오르테가군 확定)을 한 SQL로. 행이 없으면 NULL = «언제 마지막으로 바뀌었는지 모른다».
     stalled_population_rows = (
         await session.execute(
-            select(Story.id, Story.title, Story.assignee_id)
+            select(Story.id, Story.title, Story.assignee_id, _last_status_change_at(org_id, Story.id))
             .where(
                 Story.org_id == org_id,
                 Story.project_id == project_id,
@@ -383,17 +379,10 @@ async def _compute_attention_for_project(
             )
         )
     ).all()
-    stalled_candidates = [
-        (story_id, title, assignee_id) for story_id, title, assignee_id in stalled_population_rows
-        if story_id not in _already_signaled_ids
-    ]
-    latest_changed_map = await _batch_latest_status_changed_at(
-        session, org_id, [story_id for story_id, _, _ in stalled_candidates],
-    )
+    stalled_candidates = [row for row in stalled_population_rows if row[0] not in _already_signaled_ids]
     _now = datetime.now(timezone.utc)
     stalled_items: list[AttentionItem] = []
-    for story_id, title, assignee_id in stalled_candidates:
-        latest_changed = latest_changed_map.get(story_id)
+    for story_id, title, assignee_id, latest_changed in stalled_candidates:
         # 「모르면 안 준다」(blocked와 동일 원칙, 모듈 docstring 참조) — 이 story가 언제
         # 마지막으로 바뀌었는지 자체를 모르면(status_changed 행이 아예 없음) 48h+ 여부를
         # 판정할 근거가 없다 — created_at 등으로 대체 추측하지 않고 stalled 후보에서 뺀다.
@@ -408,12 +397,14 @@ async def _compute_attention_for_project(
         ))
     # ⛔BE는 top-N으로 자르지 않는다(모듈 docstring·#2250 페드루 판정 2026-08-27) — 무변화
     # 내림차순(=entered_state_at 오름차순, 가장 오래 안 바뀐 것 먼저)으로 전량 정렬만 한다.
-    stalled_items.sort(key=lambda item: item.entered_state_at)
+    # story #4382 — 같은 시각이면 story id로(모집단 쿼리에 ORDER BY가 없어 동률 순서가 요청마다 달라질 수 있었다).
+    stalled_items.sort(key=lambda item: (item.entered_state_at, str(item.story_id)))
     items.extend(stalled_items)
 
     return AttentionResponse(
         items=items, stalled_computed_at=_now,
         stalled_population_count=len(stalled_population_rows),
+        truncated_kinds=truncated_kinds,
     )
 
 
@@ -474,7 +465,7 @@ async def glance_attention_org_stalled(
 
     # ⛔BE는 top-N으로 자르지 않는다(단일-프로젝트 `/attention`과 동일 규율) — 무변화
     # 내림차순(entered_state_at 오름차순, 가장 오래 안 바뀐 것 먼저) 전량 정렬.
-    all_stalled.sort(key=lambda item: item.entered_state_at)
+    all_stalled.sort(key=lambda item: (item.entered_state_at, str(item.story_id)))  # story #4382 — 동률이면 story id로
     return AttentionResponse(
         items=all_stalled, stalled_computed_at=datetime.now(timezone.utc),
         stalled_population_count=total_population,
@@ -568,7 +559,7 @@ async def glance_hero(
                 Evidence.work_item_type == "story",
                 Evidence.type == "gate_approval",
             )
-            .order_by(Evidence.created_at.desc())
+            .order_by(Evidence.created_at.desc(), Evidence.id.desc())  # story #4382 — 동률이면 id로(«확인한 사람» 고정)
             .limit(1)
         )
     ).first()
@@ -600,7 +591,7 @@ async def glance_hero(
                 Gate.work_item_type == "story",
                 Gate.gate_type == "merge",
             )
-            .order_by(Gate.created_at.desc())
+            .order_by(Gate.created_at.desc(), Gate.id.desc())  # story #4382 — 동률이면 id로
             .limit(1)
         )
     ).scalar_one_or_none()
@@ -616,7 +607,7 @@ async def glance_hero(
                 Gate.work_item_type == "story",
                 Gate.status == "pending",
             )
-            .order_by(Gate.created_at.desc())
+            .order_by(Gate.created_at.desc(), Gate.id.desc())  # story #4382 — 동률이면 id로
             .limit(1)
         )
     ).scalar_one_or_none()

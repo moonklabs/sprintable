@@ -39,7 +39,7 @@ async def link_gate_to_task(args: LinkGateToTaskInput) -> list[TextContent]:
         )
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 class ListAgentCardsInput(SprintableInput):
@@ -64,4 +64,4 @@ async def list_agent_cards(args: ListAgentCardsInput) -> list[TextContent]:
         result = await client.get("/api/v2/a2a/members", params=params or None)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

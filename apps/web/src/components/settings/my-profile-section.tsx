@@ -9,6 +9,7 @@ import { TrustScoreCard } from '@/components/cage/trust-score-card';
 import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { memberDisplayLabel } from '@/lib/member-display';
 
@@ -62,7 +63,7 @@ export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
     // 아니라) 이 아래 await가 그대로 throw해 `void fetchProfile()`(:49) 밖으로
     // unhandled rejection이 샜다. 최소 방어만(빈 폴백, 별도 에러 배너는 이 섹션 범위 밖).
     let res: Response;
-    try { res = await fetchWithAuth('/api/me'); } catch { setLoadFailed(true); onLoadError?.(); return; }
+    try { res = await fetchMe(); } catch { setLoadFailed(true); onLoadError?.(); return; }
     if (!res.ok) { setLoadFailed(true); onLoadError?.(); return; }
     const json = await res.json() as { data: MyProfile };
     setProfile(json.data);

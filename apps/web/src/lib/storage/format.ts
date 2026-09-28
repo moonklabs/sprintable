@@ -5,7 +5,7 @@
 
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import type { AssetSourceLink } from '@/lib/storage/types';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt, toDateKey } from '@/components/content/schedule-format';
 
 /** 파일 아이콘 틴트 분류 — 목업 `.fic.*` 5종에 1:1 대응. */
 export type FileTint = 'img' | 'pdf' | 'doc' | 'zip' | 'code';
@@ -64,8 +64,9 @@ export function avatarColor(isAgent: boolean): string {
   return isAgent ? AGENT_MARK_FILL_CLASS : 'bg-proof-sunk text-proof-ink-2';
 }
 
-export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+export function initials(name: string | null | undefined): string {
+  // story #4284 — 구성원 이름은 nullable(표시 이름 없는 휴먼) — 빈 이름과 같게 «?»(문자열만 받는 자리용 · 화면 아바타는 사람 아이콘을 쓴다).
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
   const first = parts[0] ?? '';
   const isLatin = /[a-zA-Z]/.test(first);
@@ -146,11 +147,12 @@ export function formatStorageSize(bytes: number): string {
   return `${(gb / 1024).toFixed(1)} TB`;
 }
 
-/** ISO → YYYY-MM-DD (상세 메타 '생성' 행). */
-export function formatDate(iso: string): string {
+/** ISO → YYYY-MM-DD (상세 메타 '생성' 행 · 검증일) — tz 기준 날짜. story #4280: 예전엔 `toISOString().slice(0, 10)`(UTC 날짜)라
+ * KST 00~09시에 생긴 것이 전날로 찍혔다. 옆 줄의 formatRelativeTime과 같은 tz를 받는다(필수 — 빼먹으면 tsc가 잡는다). */
+export function formatDate(iso: string, tz: string): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return '';
-  return new Date(iso).toISOString().slice(0, 10);
+  return toDateKey(iso, tz);
 }
 
 /**
@@ -175,16 +177,18 @@ function safeInternalPath(path: string): string | null {
  *   - doc: `/docs/{doc_slug}`
  *   - story: `/board?story={story_id}` (notification-bell 관례 재사용)
  */
-export function resolveDeeplinkHref(link: AssetSourceLink): string | null {
+/** withProject — flat 목적지(대화 · 문서 · 보드)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 호출처는 useFlatHref()를 넘긴다. */
+export function resolveDeeplinkHref(link: AssetSourceLink, withProject: (href: string) => string): string | null {
   const d = link.deeplink;
   if (d == null) return null;
   if (typeof d === 'string') return safeInternalPath(d);
   if ('conversation_id' in d && d.conversation_id) {
-    const base = `/chats/${encodeURIComponent(d.conversation_id)}`;
     const messageId = 'message_id' in d ? d.message_id : undefined;
-    return messageId ? `${base}?messageId=${encodeURIComponent(messageId)}` : base;
+    return withProject(messageId
+      ? `/chats/${encodeURIComponent(d.conversation_id)}?messageId=${encodeURIComponent(messageId)}`
+      : `/chats/${encodeURIComponent(d.conversation_id)}`);
   }
-  if ('doc_slug' in d && d.doc_slug) return `/docs/${encodeURIComponent(d.doc_slug)}`;
-  if ('story_id' in d && d.story_id) return `/board?story=${encodeURIComponent(d.story_id)}`;
+  if ('doc_slug' in d && d.doc_slug) return withProject(`/docs/${encodeURIComponent(d.doc_slug)}`);
+  if ('story_id' in d && d.story_id) return withProject(`/flow?story=${encodeURIComponent(d.story_id)}`); // 옛 자원 경로도 flat(#4231 4차)
   return null;
 }

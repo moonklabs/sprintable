@@ -112,6 +112,16 @@ export function runtimeLabel(key: string | null | undefined): string | null {
 }
 
 /**
+ * story #3994(«거짓 경고» 클래스, PO 확定) — `system-publisher`는 사람이 연결하는
+ * 에이전트가 아니라 시스템 자동 알림·기록의 발신 주체(위 §3107 주석)라 "연결 안 됨"
+ * 판정 대상 자체가 아니다. `verified===false`만 보고 경고를 다는 자리마다 이 값도
+ * 같이 대조해야 거짓 경고가 안 뜬다(공용 판정 1개 — 문자열 비교 복제 금지).
+ */
+export function isSystemPublisher(runtimeType: string | null | undefined): boolean {
+  return runtimeType === 'system-publisher';
+}
+
+/**
  * story #3092(3단계, 유나 규격 v3 doc cd8983c4 + 실행 패키지 doc 5745ad66) — 아바타 코너
  * 배지를 커넥터별 공식 아이콘으로 승격. 9종 중 claude-code·gemini는 3단계 착수 시점엔
  * 상표 사인오프 전이라 이니셜(«CC»·«G»)로 선출시했으나, **4단계(2026-08-26, 선생님 확定)**

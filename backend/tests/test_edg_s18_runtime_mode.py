@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+# story #4270 — step run project_id는 필수(폴백 제거). 실제 호출처처럼 엔터티 project_id를 넘긴다(라인 정의는 org 수준 그대로).
+_ENTITY_PROJECT = uuid.uuid4()
 
 # story 8236bbc3: create_all(+drop_all)로 자체 스키마를 직접 다룸 — 공유 alembic-migrated
 # DB 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
@@ -198,7 +200,7 @@ async def test_engine_enabled_shadow_enters_and_records(monkeypatch):
         await _seed_line(s, org, "enforcing")  # config=enforcing
         _set(monkeypatch, enabled=True, mode="shadow")  # runtime=shadow → min=shadow(관측만)
         d = await evaluate_line_for_transition(
-            s, org_id=org, project_id=None, entity_type="story", entity_id=uuid.uuid4(),
+            s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=uuid.uuid4(),
             from_status="in-review", to_status="done")
         # runtime shadow 가 config enforcing 을 cap → advisory_only(관측·비차단·relay 안 함)
         assert d.mode == "advisory_only" and d.proceeds and d.relay_step_run_id is None

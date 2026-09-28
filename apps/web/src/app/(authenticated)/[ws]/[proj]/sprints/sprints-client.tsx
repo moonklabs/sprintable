@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
+import { WorkspaceFrameLoading } from '@/components/workspace/workspace-frame-loading';
 // story #3845(§① 2026-09-14) — 「하루 체크인」 절. 독립 /standup 라우트가 은퇴(legacy-
 // resource-tables.ts RENAMED_RESOURCES 참고)하며 이 컴포넌트의 유일한 마운트 지점이
 // 됐다 — 경로는 그대로 두고(비route 파일로 남김, 파일 이동에 따른 import 처짐 회피)
@@ -43,6 +43,10 @@ import { OpenLoopCockpit } from '@/components/sprints/open-loop-cockpit';
 import type { RetroHypothesisResult } from '@/services/retro-session';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { prefetchSprintScreen, sprintScreenUrls, takeSprintScreenOrFetch } from '@/components/sprints/sprint-screen-prefetch';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -155,17 +159,36 @@ function localDateISO(offsetDays = 0): string {
 }
 
 // story #2755 테스트 접근용 export(내부 사용 불변) — «침묵 금지» 렌더 검증(loud validation) 대상.
+/** 옆 패널 빠른 선언의 빈 값(빈 카드 하나 · 안정 참조). */
+const QUICK_DECLARATIONS_EMPTY: HypothesisDeclarationValue[] = [EMPTY_DECLARATION];
+
+interface SprintCreateDraft {
+  title: string; startDate: string; endDate: string; goal: string; capacity: string; teamSize: string;
+  declarations: HypothesisDeclarationValue[];
+}
+
 export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   const t = useTranslations('sprints');
-  const [title, setTitle] = useState('');
-  const [startDate, setStartDate] = useState(() => localDateISO(0));
-  const [endDate, setEndDate] = useState(() => localDateISO(SPRINT_DEFAULT_SPAN_DAYS));
-  const [goal, setGoal] = useState('');
-  const [capacity, setCapacity] = useState('');
-  const [teamSize, setTeamSize] = useState('');
-  // E-SPRINT-LOOP FE(278314e9) — sprint-open 定: 단일 optional success_hypothesis는 N-선언으로
-  // 흡수(핸드오프 §7 KEEP). 임시저장(planning)은 0개도 허용, 활성화(定)만 ≥1(완결된) 선언 요구.
-  const [declarations, setDeclarations] = useState<HypothesisDeclarationValue[]>([]);
+  const tc = useTranslations('common');
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(목표 · 가설 문장)이 든 폼이라 **폼 전체**가 프로젝트별 초안 하나: 창이 ✕ · 바깥 · Esc로
+  // 닫혀도 남고 보이는 «취소»와 만들기 성공에서만 지운다. 빈 값의 기본 날짜는 이 창이 열린 날 기준(마운트마다 한 번).
+  const emptyForm = useMemo<SprintCreateDraft>(() => ({
+    title: '', startDate: localDateISO(0), endDate: localDateISO(SPRINT_DEFAULT_SPAN_DAYS), goal: '', capacity: '', teamSize: '',
+    // E-SPRINT-LOOP FE(278314e9) — sprint-open 定: 단일 optional success_hypothesis는 N-선언으로
+    // 흡수(핸드오프 §7 KEEP). 임시저장(planning)은 0개도 허용, 활성화(定)만 ≥1(완결된) 선언 요구.
+    declarations: [],
+  }), []);
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<SprintCreateDraft>(
+    { surface: 'sprint-create', targetId: projectId, field: 'form' }, emptyForm,
+  );
+  const { title, startDate, endDate, goal, capacity, teamSize, declarations } = form;
+  const setTitle = (v: string) => setForm((f) => ({ ...f, title: v }));
+  const setStartDate = (v: string) => setForm((f) => ({ ...f, startDate: v }));
+  const setEndDate = (v: string) => setForm((f) => ({ ...f, endDate: v }));
+  const setGoal = (v: string) => setForm((f) => ({ ...f, goal: v }));
+  const setCapacity = (v: string) => setForm((f) => ({ ...f, capacity: v }));
+  const setTeamSize = (v: string) => setForm((f) => ({ ...f, teamSize: v }));
+  const setDeclarations = (v: HypothesisDeclarationValue[]) => setForm((f) => ({ ...f, declarations: v }));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -212,6 +235,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
       if (activateAfterCreate) {
         await fetchWithAuth(`/api/sprints/${data.id}/activate`, { method: 'POST' }).catch(() => {});
       }
+      clearFormDraft();
       onCreated(data);
     } catch {
       setError(t('createError'));
@@ -225,7 +249,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
       <DialogContent className="max-h-[90vh] max-w-lg" showCloseButton={false}>
         <div className="mb-4 flex items-center justify-between">
           <DialogTitle className="text-base font-bold text-foreground">{t('newSprint')}</DialogTitle>
-          <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted">
+          <button type="button" onClick={onClose} aria-label={tc('close')} className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted">
             <X className="size-4" />
           </button>
         </div>
@@ -332,7 +356,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
               ) : t('activateBlocked')}
             </span>
             <div className="flex gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('cancel')}</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => { clearFormDraft(); onClose(); }}>{t('cancel')}</Button>
               {/* story #2755 — disabled를 submitting만으로 좁혀 «클릭이 항상 handleSubmit을 실행»
                   하게 한다(무설명 disabled 제거). 미충족 필드는 handleSubmit이 setError로 사유를
                   띄운다. 연타/중복 제출은 submitting 가드로 커버. */}
@@ -391,6 +415,7 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
 // ─── Main Client ──────────────────────────────────────────────────────────────
 
 export function SprintsClient({ projectId }: SprintsClientProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('sprints');
   const tc = useTranslations('common');
   // story #3878(§⑤ 낱말 드리프트, 유나 §⑤ 표 확定 2026-09-14) — 스프린트 생애주기
@@ -440,7 +465,11 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const [hypotheses, setHypotheses] = useState<RetroHypothesisResult[]>([]);
   const [activateGateBlocked, setActivateGateBlocked] = useState(false);
   const [addingHypothesis, setAddingHypothesis] = useState(false);
-  const [quickDeclarations, setQuickDeclarations] = useState<HypothesisDeclarationValue[]>([EMPTY_DECLARATION]);
+  // story #4370 — 옆 패널 «가설 빠르게 선언»(여러 줄 가설 문장이 든 카드 목록)은 스프린트별 폼 초안: 패널을 닫거나(✕) 다른 스프린트로
+  // 옮겨도 그 스프린트로 돌아오면 쓰던 선언이 그대로 · 추가 성공에서만 지운다. 스프린트가 바뀌면 키가 바뀌어 그 스프린트의 초안.
+  const [quickDeclarations, setQuickDeclarations, clearQuickDeclarationsDraft] = useJsonFieldDraft<HypothesisDeclarationValue[]>(
+    { surface: 'sprint-quick-hypotheses', targetId: selected?.id ?? null, field: 'form' }, QUICK_DECLARATIONS_EMPTY,
+  );
 
   const loadHypotheses = useCallback(async (sprintId: string) => {
     try {
@@ -453,10 +482,16 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     }
   }, []);
 
+  // story #4328 — 첫 물결 선출발: 스프린트 목록 + 아래 「하루 체크인」(embedded 스탠드업 · 목록이 온 뒤에야 마운트된다)의 요청 여섯을 **같이**
+  // 출발시키고 각자 넘겨받는다(로딩 경계에서 이미 출발했으면 규칙상 다시 안 보냄). 목록 effect보다 **먼저** 선언 — effect는 선언 순서로 돈다
+  // (뒤에 두면 목록이 먼저 새로 요청하고 선출발이 또 보내 두 번 간다).
+  const { currentTeamMemberId: prefetchMemberId } = useDashboardContext();
+  useEffect(() => { prefetchSprintScreen({ memberId: prefetchMemberId, projectId }); }, [prefetchMemberId, projectId]);
+
   const loadSprints = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetchWithAuth(`/api/sprints?project_id=${projectId}`);
+      const res = await takeSprintScreenOrFetch(sprintScreenUrls.sprintList(projectId), { memberId: prefetchMemberId, projectId });
       if (res.ok) {
         const json = await res.json();
         setSprints(json.data ?? []);
@@ -464,7 +499,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, prefetchMemberId]);
 
   useEffect(() => { void loadSprints(); }, [loadSprints]);
 
@@ -563,7 +598,6 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setSelected(sprint);
     setActivateGateBlocked(false);
     setAddingHypothesis(false);
-    setQuickDeclarations([EMPTY_DECLARATION]);
     await Promise.all([loadSprintDetail(sprint), loadHypotheses(sprint.id)]);
   }, [loadSprintDetail, loadHypotheses]);
 
@@ -612,20 +646,30 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     const completed = quickDeclarations.filter(isDeclarationComplete);
     if (completed.length === 0) return;
     setActivating(true);
+    setActionError(null);
     try {
+      // story #4370(까디르 P2) — fetchWithAuth는 4xx/5xx에도 던지지 않는다. 응답마다 ok를 보고, 저장 못 한 선언은 초안에 남긴다
+      // (예전엔 실패해도 초안을 지워 쓴 선언이 사라졌다). 전부 저장됐을 때만 초안을 지운다.
+      const failed: HypothesisDeclarationValue[] = [];
       for (const d of completed) {
         const body = toDeclarationPayload(d);
         if (!body) continue;
-        await fetchWithAuth(`/api/sprints/${selected.id}/hypotheses`, {
+        const res = await fetchWithAuth(`/api/sprints/${selected.id}/hypotheses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        }).catch(() => {});
+        }).catch(() => null);
+        if (!res?.ok) failed.push(d);
       }
       await loadHypotheses(selected.id);
+      if (failed.length > 0) {
+        setQuickDeclarations(failed);
+        setActionError(t('quickDeclareError'));
+        return;
+      }
       setActivateGateBlocked(false);
       setAddingHypothesis(false);
-      setQuickDeclarations([EMPTY_DECLARATION]);
+      clearQuickDeclarationsDraft();
     } finally {
       setActivating(false);
     }
@@ -722,7 +766,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   };
 
   if (loading) {
-    return <p className="p-6 text-sm text-muted-foreground">{t('loading')}</p>;
+    // story #4274(유나 판정) — 서버 page는 곧바로 끝나고 보이는 로딩은 이 분기라, 맨 글자만 그리면 보드 → 스프린트 이동 때 탭 줄이
+    // ~1.4s 사라졌다(sprints/loading.tsx의 탭 줄이 여기서 끊김). 같은 프레임 스켈레톤(탭 줄 · sticky 자리)으로.
+    return <WorkspaceFrameLoading />;
   }
 
   return (
@@ -737,21 +783,23 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         }
         showContextChip
       />
-      {/* story #2930(P0-G) I3 — flow 쪽과 짝(WorkspaceFrameTabs 컴포넌트 주석 참고). nav에서
-          sprints 1차 메뉴가 빠진 자리를 메우는 얕은 프레임. */}
-      <div className="px-6 pt-3">
-        <WorkspaceFrameTabs active="sprints" />
-      </div>
       {/* story #3845(§① 2026-09-14) — 「하루 체크인」 절을 이 페이지에 추가하며 리스트/상세
           split(원래 flex-1로 남은 세로 공간 전부를 차지·각 컬럼이 자체 overflow-y-auto로
           내부 스크롤)이 더 이상 페이지의 유일한 콘텐츠가 아니게 됐다 — 바깥을 세로 스크롤
           컬럼으로 바꾸고(retro/page.tsx·docs 등 다른 [ws]/[proj] 페이지가 이미 쓰는
           flex-1 overflow-y-auto 관례), split 자체는 고정 최소높이(shrink-0)로 내부
-          스크롤을 유지한 채 그 안 콘텐츠 조각이 된다. */}
-      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+          스크롤을 유지한 채 그 안 콘텐츠 조각이 된다.
+          story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          이 바깥 스크롤 컬럼이 자기 높이를 잃어 안의 split(각자 독립 overflow-y-auto)도
+          같이 풀린다 — 여기서 직접 앵커(h-[calc(100svh-var(--shell-chrome-h))] — story #4131,
+          --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT). */}
+      {/* story #4291 — 탭 줄은 `[ws]/[proj]` 레이아웃의 sticky 띠로 올라갔다(한 자리 · 전환 때 안 다시 그려짐). 이 칼럼의 뷰포트 앵커는
+          그 띠 높이(--work-tabs-h)만큼 뺀다(빼지 않으면 띠 높이만큼 셸이 한 번 더 스크롤된다). */}
+      <div className="focus-inset flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-y-auto">
       <div className="flex min-h-[420px] shrink-0 overflow-hidden border-b border-border">
       {/* Sprint list */}
-      <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
+      {/* story #4291(유나) — 본문 바깥 여백 24 → 16px(레이아웃 탭 띠 `px-4`와 한 왼쪽 끝). */}
+      <div className={`flex flex-col gap-3 overflow-y-auto p-4 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
         {sprints.length === 0 ? (
           <EmptyState
             icon={<Target className="size-8" />}
@@ -800,7 +848,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
               </p>
               {sprint.report_doc_id ? (
                 <a
-                  href={`/docs?id=${sprint.report_doc_id}`}
+                  href={flatHref(`/docs?id=${sprint.report_doc_id}`)}
                   onClick={(e) => e.stopPropagation()}
                   className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                 >
@@ -815,7 +863,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
   {/* Detail panel */}
   {selected ? (
-    <div className="flex w-full flex-col overflow-y-auto border-l border-border p-6 lg:w-1/2">
+    <div className="flex w-full flex-col overflow-y-auto border-l border-border p-4 lg:w-1/2">
       {/* Header */}
       <div className="mb-4 flex items-start justify-between gap-2">
         <div>
@@ -924,9 +972,15 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                 declarations={quickDeclarations}
                 onChange={setQuickDeclarations}
               />
-              <Button size="sm" className="w-full" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
-                {activating ? '...' : t('declareSectionTitle')}
-              </Button>
+              <div className="flex gap-2">
+                {/* story #4370 — 선언 초안을 버릴 보이는 길(패널을 닫거나 옮겨도 초안은 남는다). */}
+                <Button size="sm" variant="ghost" onClick={() => { clearQuickDeclarationsDraft(); setAddingHypothesis(false); }} disabled={activating}>
+                  {t('cancel')}
+                </Button>
+                <Button size="sm" className="flex-1" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
+                  {activating ? '...' : t('declareSectionTitle')}
+                </Button>
+              </div>
             </div>
           )}
         </div>
@@ -982,7 +1036,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           ) : null}
           {selected.report_doc_id ? (
             <a
-              href={`/docs?id=${selected.report_doc_id}`}
+              href={flatHref(`/docs?id=${selected.report_doc_id}`)}
               className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm font-medium text-primary transition hover:bg-primary/10"
             >
               📄 {t('viewReport')}

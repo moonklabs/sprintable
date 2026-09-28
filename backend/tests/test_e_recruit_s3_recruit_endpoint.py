@@ -41,7 +41,7 @@ async def test_recruit_404_when_agent_not_found():
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
-    with patch("app.routers.agents.assert_agent_owner",
+    with patch("app.routers.agents.assert_agent_owner_mutable",
                AsyncMock(side_effect=HTTPException(status_code=404, detail="Agent not found"))):
         with pytest.raises(HTTPException) as ei:
             await recruit_agent_endpoint(
@@ -59,7 +59,7 @@ async def test_recruit_403_when_caller_not_owner_or_admin():
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
-    with patch("app.routers.agents.assert_agent_owner",
+    with patch("app.routers.agents.assert_agent_owner_mutable",
                AsyncMock(side_effect=HTTPException(status_code=403, detail="Not the owner of this agent"))):
         with pytest.raises(HTTPException) as ei:
             await recruit_agent_endpoint(
@@ -77,7 +77,7 @@ async def test_recruit_400_on_unsupported_runtime():
 
     session = MagicMock()
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
-    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)):
+    with patch("app.routers.agents.assert_agent_owner_mutable", AsyncMock(return_value=member)):
         with pytest.raises(HTTPException) as ei:
             await recruit_agent_endpoint(
                 uuid.uuid4(), RecruitRequest(role_template_slug="backend", runtime="bogus-runtime"),
@@ -94,7 +94,7 @@ async def test_recruit_404_when_role_template_not_found():
 
     session = MagicMock()
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
-    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner_mutable", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=None)):
         with pytest.raises(HTTPException) as ei:
             await recruit_agent_endpoint(
@@ -115,7 +115,7 @@ async def test_recruit_400_when_recruit_agent_raises_value_error():
     session.commit = AsyncMock()
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
     role_template = SimpleNamespace(slug="bogus", default_tool_groups=["not-real"])
-    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner_mutable", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
          patch("app.routers.agents.recruit_agent", AsyncMock(side_effect=ValueError("unknown group"))):
         with pytest.raises(HTTPException) as ei:
@@ -148,7 +148,7 @@ async def test_recruit_success_response_shape():
         "mcp_config_alternatives": {},
     }
 
-    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner_mutable", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
          patch("app.routers.agents.recruit_agent", AsyncMock(return_value=recruit_result)), \
          patch("app.routers.agents.build_agent_mcp_config_bundle", MagicMock(return_value=bundle)), \
@@ -193,7 +193,7 @@ async def test_recruit_success_connector_only_runtime_mcp_config_null_no_crash(r
         "tool_allowlist": ["stories", "tasks"],
     }
 
-    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner_mutable", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
          patch("app.routers.agents.recruit_agent", AsyncMock(return_value=recruit_result)), \
          patch("app.routers.agents.emit_onboarding_event", AsyncMock()):
@@ -229,7 +229,7 @@ async def test_recruit_success_hermes_http_capable_returns_real_mcp_config(monke
         "tool_allowlist": ["stories", "tasks"],
     }
 
-    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner_mutable", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
          patch("app.routers.agents.recruit_agent", AsyncMock(return_value=recruit_result)), \
          patch("app.routers.agents.emit_onboarding_event", AsyncMock()):
@@ -261,7 +261,7 @@ async def _recruit_with_locale(body, accept_language=None):
         "tool_allowlist": ["stories", "tasks"],
     }
     recruit_mock = AsyncMock(return_value=recruit_result)
-    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner_mutable", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
          patch("app.routers.agents.recruit_agent", recruit_mock), \
          patch("app.routers.agents.emit_onboarding_event", AsyncMock()):

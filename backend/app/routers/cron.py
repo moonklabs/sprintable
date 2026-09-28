@@ -1,10 +1,11 @@
 """
-Internal cron endpoints — called by Next.js /api/cron/* routes.
+Internal cron endpoints — called by Cloud Scheduler directly (definitions: infra/cloud-scheduler/jobs.json, story #4234).
 All endpoints require CRON_SECRET via Authorization: Bearer header.
 """
 from __future__ import annotations
 
 import asyncio
+import time
 import logging
 import os
 import uuid
@@ -123,18 +124,6 @@ async def agent_session_recovery(
     except Exception as exc:
         logger.exception("cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
-
-
-# ─── POST /api/v2/internal/cron/anonymize ─────────────────────────────────────
-
-@router.post("/anonymize")
-async def anonymize(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    verify_cron(request)
-    # OSS 모드에서는 Supabase auth 삭제가 없음 — no-op 반환
-    return _ok({"anonymized": [], "deleted": []})
 
 
 # ─── GET /api/v2/internal/cron/hitl-timeouts ──────────────────────────────────
@@ -1008,6 +997,7 @@ async def toss_billing_maintenance(
         )
         from app.services.org_subscription_downgrade import sweep_pending_tier_downgrades
 
+        # story #4335 — 결제 시도(checkout · change-tier) 쓸기는 하루 한 번인 이 잡이 아니라 5분 잡(`billing-payment-attempts`)이 한다.
         renewal_result = await trigger_due_charges(session)
         dunning_result = await sweep_dunning_retries(session)
         reconciliation_result = await sweep_stale_pending_orders(session)
@@ -1025,6 +1015,24 @@ async def toss_billing_maintenance(
         })
     except Exception as exc:
         logger.exception("toss-billing-maintenance cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── POST /api/v2/internal/cron/billing-payment-attempts ──────────────────────
+# story #4335(PO 04:08Z «Toss 결과 모름 = 비종결») — 결제 시도 쓸기 5분 잡: 진행 중 시도 대사 · 청구 시작 흔적이 있는 종결 시도
+# 재조회(24시간) · 환불 대기. 시도마다 `next_check_at`으로 간격을 늘려 가며 부르고, 한 틱은 예산(240초) 안에서 끝난다.
+@router.post("/billing-payment-attempts")
+async def billing_payment_attempts(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.billing_payment_attempt import sweep_processing_attempts
+
+        return _ok(await sweep_processing_attempts(session))
+    except Exception as exc:
+        logger.exception("billing-payment-attempts cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
@@ -1178,6 +1186,8 @@ async def publication_commands_tick(
     session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     verify_cron(request)
+    # story #4336 PR2 — 공용 작업 줄이 이 틱의 남은 예산을 쓰도록 틱 시작 시각을 잡아 둔다.
+    tick_started = time.monotonic()
     try:
         from app.services.publication_command import process_due_publication_commands
         counts = await process_due_publication_commands(session)
@@ -1256,6 +1266,46 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("newsletter-sends tick error: %s", exc)
             counts["newsletter_sends"] = {"error": "unhandled"}
+        # story #4141(PO 지적, 2026-09-22 04:50Z) — evidence/artifact entity_references
+        # 백필(신설 write-path 前 생성분)을 독립 scripts/jobs CLI 대신 이 tick에 피기백
+        # (위 축들과 같은 "새 Cloud Scheduler 잡 0" 사상 — CLI는 gcloud로 돌릴 사람이
+        # 있어야 실행되는데 dev 실행 주체가 0이라 탈락). bounded·idempotent(evidence_
+        # artifact_reference_backfill.py 모듈 docstring 참조) — 독립 try로 이 축의
+        # 미분류 버그가 이미 커밋된 다른 축 결과를 500으로 덮지 않는다.
+        try:
+            from app.services.evidence_artifact_reference_backfill import (
+                sweep_artifact_references,
+                sweep_evidence_references,
+            )
+            evidence_result = await sweep_evidence_references(session)
+            artifact_result = await sweep_artifact_references(session)
+            counts["entity_references_backfill"] = {
+                "evidence": evidence_result.as_dict(),
+                "artifact": artifact_result.as_dict(),
+            }
+        except Exception as exc:
+            logger.exception("entity-references-backfill sweep tick error: %s", exc)
+            counts["entity_references_backfill"] = {"error": "unhandled"}
+        # story #4341 — 운영 알림 재시도(전달 실패 · 받는 곳 미설정으로 pending인 것). 위 축들과 같은 피기백 사상(새 Cloud Scheduler
+        # 잡 0) — 독립 try. 자기 세션으로 돌고 한 틱 몫(건수 · 초, operator_alerts.RETRY_TICK_*) 안에서만 — 발행 처리 예산을 먹지 않게.
+        try:
+            from app.services.operator_alerts import process_due_operator_alerts
+            counts["operator_alerts"] = await process_due_operator_alerts()
+        except Exception as exc:
+            logger.exception("operator-alerts retry tick error: %s", exc)
+            counts["operator_alerts"] = {"error": "unhandled"}
+        # story #4336 PR2(PO 04:32Z) — 요청 한도를 넘을 수 있는 일(영상 확인 등)의 공용 작업 줄. 같은 피기백 사상(새 Cloud Scheduler 잡 0) ·
+        # 독립 try. 발행 명령이 먼저 쓰고 **남은 틱 예산**(틱 예산 = worker_tick_budget_seconds() · 4716과 같은 식) 안에서만 — 종류마다 최악
+        # 소요가 남은 예산보다 크면 그 틱엔 시작하지 않고 다음 틱으로.
+        try:
+            from app.services.background_jobs import process_due_background_jobs
+            from app.services.publication_command import worker_tick_budget_seconds
+            counts["background_jobs"] = await process_due_background_jobs(
+                session, deadline_monotonic=tick_started + worker_tick_budget_seconds(),
+            )
+        except Exception as exc:
+            logger.exception("background-jobs tick error: %s", exc)
+            counts["background_jobs"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)

@@ -14,7 +14,9 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 import { SupportWidgetLauncher } from './support-widget-launcher';
 
-const ACTIVATION_COMPLETE_KEY = 'sprintable_activation_checklist_complete';
+const ACTIVATION_COMPLETE_KEY = 'sprintable_activation_checklist_complete:org-1';
+// story #4219 F1 — 완주 플래그는 org 범위라 런처도 대시보드 컨텍스트의 org로 읽는다.
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ orgId: 'org-1' }) }));
 
 // story #3260 2차 finding(유나 라이브 실측 FAIL — 재시도 스톰, 2026-08-31) 회귀가드용 —
 // isSupportGatewayConfiguredMock 기본값은 false(기존 테스트 전부가 'unavailable'을 가정
@@ -369,5 +371,38 @@ describe('SupportWidgetLauncher — story #3274 2차: 설정 라우트 숨김(�
     usePathnameMock.mockReturnValue('/board');
     await mount();
     expect(container.querySelector('button')).toBeTruthy();
+  });
+});
+
+// [SID:4369] 유나 규칙 배선 — 런처 window Esc도 층 뿌리(패널 · tabIndex=-1)로 규칙을 부른다. 지금 패널의 글 칸은 한 줄(input)이라
+// 규칙 ②가 걸릴 여러 줄 칸이 없다 → 배선 확인을 위해 패널 안에 textarea 하나를 테스트에서 끼워 잰다(실제 패널 DOM · 실제 리스너).
+describe('SupportWidgetLauncher — Esc 규칙 배선([SID:4369])', () => {
+  async function openPanel() {
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    return container.querySelector('[role="dialog"]') as HTMLElement;
+  }
+  it('패널 안 글 있는 여러 줄 칸: 첫 Esc = 칸에서만(패널 그대로 · 초점 = 패널) · 둘째 Esc = 닫힘', async () => {
+    const panel = await openPanel();
+    const ta = document.createElement('textarea');
+    ta.value = '문의 쓰던 글';
+    panel.appendChild(ta);
+    ta.focus();
+    await act(async () => { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(document.activeElement).toBe(panel);
+    await act(async () => { panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+  it('조합 중 Esc = 패널 그대로 · 안쪽이 쓴 Esc(표시) = 패널 그대로', async () => {
+    const panel = await openPanel();
+    await act(async () => { panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, isComposing: true })); });
+    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
+    const inner = document.createElement('button');
+    panel.appendChild(inner);
+    inner.addEventListener('keydown', (e) => e.preventDefault());
+    await act(async () => { inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
   });
 });

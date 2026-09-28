@@ -28,6 +28,8 @@ infrequent해 latency/비용 허용). 결과에서 자기 자신(entity_type='lo
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import uuid
 
@@ -55,7 +57,8 @@ async def assemble_context_pack_briefing(
             from app.services.embedding_enqueue import build_loop_embedding_text
 
             query_text = build_loop_embedding_text(loop.title, loop.goal_tags)
-            vector = embed_text(query_text)
+            # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+            vector = await asyncio.to_thread(embed_text, query_text)
             if vector is None:
                 embed_unavailable = True
             else:

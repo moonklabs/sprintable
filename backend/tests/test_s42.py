@@ -31,6 +31,20 @@ def _mock_resolve_member_db_verified(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _mock_assert_agent_owner(monkeypatch):
+    """story #4000(보안 감사) — 4개 라우트가 이제 assert_agent_owner(TeamMember VIEW 실조회
+    +ownership 판정)를 부른다. 이 파일은 순수 AsyncMock 세션(CRUD 200/404/403-builtin 등
+    ownership과 무관한 계약)이 대상이라, bare AsyncMock()의 자식 속성이 재귀적으로 전부
+    AsyncMock이 되는 특성상 `result.scalar_one_or_none()`(원래 sync)이 미await 코루틴을
+    반환해 AttributeError가 난다 — resolve_member_db_verified와 동형으로 이 가드 자체를
+    통과 처리(가드 자체 검증은 test_4000_agent_owner_guard_realdb.py의 실DB 몫)."""
+    monkeypatch.setattr(
+        "app.routers.agent_personas.assert_agent_owner",
+        AsyncMock(return_value=MagicMock()),
+    )
+
+
 async def _client():
     from app.main import app
     ctx = MagicMock()
@@ -134,11 +148,8 @@ async def test_get_persona_not_found_404():
 async def test_create_persona_201():
     client, session, app = await _client()
     try:
-        # E-SECURITY SEC-S7: create_persona가 먼저 target agent의 실 org_id를 조회해 caller org
-        # (ORG_ID)와 대조한다 — 이 목이 그 조회에 응답해야 가드를 통과한다.
-        org_lookup_mock = MagicMock()
-        org_lookup_mock.scalar_one_or_none.return_value = ORG_ID
-        session.execute = AsyncMock(return_value=org_lookup_mock)
+        # story #4000 — org/ownership 가드는 이제 assert_agent_owner 하나로 통합돼
+        # 모듈 autouse 픽스처(_mock_assert_agent_owner)가 전담 통과 처리한다.
         with patch("app.repositories.agent_persona.AgentPersonaRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = _make_persona_summary()
             payload = {"agent_id": str(AGENT_ID), "name": "Test Persona", "system_prompt": "You are a helpful assistant."}
@@ -230,10 +241,7 @@ async def test_update_builtin_persona_403():
 async def test_seed_builtin_200():
     client, session, app = await _client()
     try:
-        # E-SECURITY SEC-S7: seed_builtin_personas도 동일하게 target agent org_id를 먼저 조회.
-        org_lookup_mock = MagicMock()
-        org_lookup_mock.scalar_one_or_none.return_value = ORG_ID
-        session.execute = AsyncMock(return_value=org_lookup_mock)
+        # story #4000 — 모듈 autouse 픽스처(_mock_assert_agent_owner)가 가드 통과 처리.
         with patch("app.repositories.agent_persona.AgentPersonaRepository.seed_builtin", new_callable=AsyncMock) as mock_seed:
             mock_seed.return_value = {"seeded": True}
             async with client as c:

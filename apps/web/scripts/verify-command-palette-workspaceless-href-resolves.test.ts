@@ -88,12 +88,14 @@ describe('command-palette — 워크스페이스 없는 href 전부가 실제로
     },
   );
 
-  it('양성대조① — MIGRATED_RESOURCES에서 work-list를 빼면 그 앵커 항목이 RED', () => {
+  it('양성대조① — MIGRATED_RESOURCES에서 work-list를 빼면 flat `/work-list`가 RED', () => {
+    // story #4274 — ⌘K 앵커(go-work-list 등)는 이제 `/{ws}/{proj}/{자원}` 직접 주소(resolveResourceHref)라 워크스페이스 없는 후보가 아니다.
+    // 판정 함수 자체의 민감도는 같은 경로 문자열로 그대로 잰다.
     const withoutWorkList = { ...MIGRATED_RESOURCES };
     delete withoutWorkList['work-list'];
-    const workListItem = workspacelessCandidates().find((item) => item.id === 'go-work-list');
-    expect(workListItem).toBeDefined();
-    expect(resolves(workListItem!.href, withoutWorkList, RENAMED_RESOURCES)).toBe(false);
+    expect(resolves('/work-list', MIGRATED_RESOURCES, RENAMED_RESOURCES)).toBe(true);
+    expect(resolves('/work-list', withoutWorkList, RENAMED_RESOURCES)).toBe(false);
+    expect(workspacelessCandidates().some((item) => item.id === 'go-work-list'), '앵커는 워크스페이스 없는 후보가 아님').toBe(false);
   });
 
   it('양성대조② — nav 파생 쪽에 없는(합성) 경로는 RED', () => {

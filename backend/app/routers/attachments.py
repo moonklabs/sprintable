@@ -199,6 +199,27 @@ async def authorize_attachment(
     return {"authorized": True}
 
 
+# story #4336 PR2 ② — 첨부 변환 요청의 예산(BFF 55s 아래). 넘으면 작업으로.
+CONVERT_REQUEST_BUDGET_SECONDS = 40.0
+
+
+def convert_http_error(exc: Exception) -> HTTPException | None:
+    """변환 예외 → 요청이 받았을 상태 · 본문(한 자리) — 라우트와 워커(attachment_convert 실패 본문)가 같이 쓴다."""
+    if isinstance(exc, office_conversion.ConversionUnavailable):
+        return HTTPException(status_code=503, detail="conversion service not configured")
+    if isinstance(exc, office_conversion.ConversionFailed):
+        return HTTPException(status_code=502, detail="conversion failed")
+    return None
+
+
+def converted_asset_view(converted) -> dict:
+    return {
+        "asset_id": str(converted.id),
+        "name": converted.name,
+        "content_type": converted.content_type,
+    }
+
+
 @router.post("/{asset_id}/convert")
 async def convert_attachment(
     asset_id: uuid.UUID,
@@ -235,15 +256,32 @@ async def convert_attachment(
     if not office_conversion.is_convertible(asset.name, asset.content_type):
         raise HTTPException(status_code=422, detail="Asset is not a convertible office document")
 
-    try:
-        converted = await office_conversion.get_or_convert_pdf(db, source_asset=asset)
-    except office_conversion.ConversionUnavailable as exc:
-        raise HTTPException(status_code=503, detail="conversion service not configured") from exc
-    except office_conversion.ConversionFailed as exc:
-        raise HTTPException(status_code=502, detail="conversion failed") from exc
+    # story #4336 PR2 ②(PO 04:32Z) — 요청 안 예산 40s(작은 파일은 지금처럼 바로 · 캐시 적중도 바로). 넘으면 이 요청은 멈추고(롤백) 작업
+    # (attachment_convert)으로 넘겨 202 + 작업 — 워커가 이어서 변환(Gotenberg 120s)하고 화면은 작업 상태로 결과를 받는다. 앞 40s가 버려지는 건
+    # PO가 받은 맞바꿈. 변환 산출물 경로는 결정적이고 행은 upsert라 도중에 끊기거나 워커가 다시 해도 안전(office_conversion.get_or_convert_pdf).
+    import asyncio
 
-    return {
-        "asset_id": str(converted.id),
-        "name": converted.name,
-        "content_type": converted.content_type,
-    }
+    from fastapi.responses import JSONResponse
+
+    from app.services.background_jobs import background_job_view, enqueue_background_job
+    from app.services.member_resolver import resolve_member
+
+    try:
+        async with asyncio.timeout(CONVERT_REQUEST_BUDGET_SECONDS):
+            converted = await office_conversion.get_or_convert_pdf(db, source_asset=asset)
+    except TimeoutError:
+        await db.rollback()
+        requester = await resolve_member(auth, org_id, db)
+        job = await enqueue_background_job(
+            db, org_id=org_id, kind="attachment_convert", requested_by_member_id=requester.id, payload={"asset_id": str(asset_id)},
+            dedup_key=f"asset:{asset_id}",  # 뷰어를 다시 열어도 열린 변환 작업 하나
+        )
+        await db.commit()
+        return JSONResponse(status_code=202, content=background_job_view(job))
+    except Exception as exc:  # noqa: BLE001 — 아는 변환 실패만 본문으로
+        http_error = convert_http_error(exc)
+        if http_error is None:
+            raise
+        raise http_error from exc
+
+    return converted_asset_view(converted)

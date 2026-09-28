@@ -149,10 +149,7 @@ app/routers/channel_posts.py::unscheduled는 scheduled_from/scheduled_to와 함�
 app/routers/channel_posts.py::«마지막 발행» publication의 id(버전 무관) — published_at/permalink/external_id와 같은 publication 행에서 온다. 발행 済 게시물에 새 버전이 생겨 재승인 대기(gate pending) 中이어도 null이 되지 않는다: 밖에 나가 있는 게시물은 새 버전과 무관하게 살아 있다(story #3525). 댓글·인사이트 조회 API(/publications/{publication_id}/comments·insights)의 path 파라미터가 이 값이다. "지금 버전 자체"의 발행 시도 상태는 publication_status/error_code가 별도로 담당(다른 축).
 app/routers/channel_posts.py::발행 취소·회수는 조직 owner 또는 admin만 가능합니다.
 app/routers/channel_posts.py::발행 취소·회수는 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).
-app/routers/channel_posts.py::예약 시각 범위 끝(tz-aware ISO, gate.sealed_scheduled_at 기준). unscheduled와 함께 줄 수 없다.
-app/routers/channel_posts.py::예약 시각 범위 시작(tz-aware ISO, gate.sealed_scheduled_at 기준 — publication_command의 스냅샷 값이 아니다). unscheduled와 함께 줄 수 없다.
 app/routers/channel_posts.py::원문을 찾을 수 없습니다:
-app/routers/channel_posts.py::은 timezone 정보가 있어야 합니다(예: Z 또는 +09:00).
 app/routers/channel_posts.py::채널 포스트 발행은 휴먼 멤버만 가능해요(에이전트는 초안·상신까지).
 app/routers/content_rules.py::콘텐츠 규칙 편집은 조직 owner·admin만 가능합니다.
 app/routers/context_pack.py::임베딩 서비스를 사용할 수 없습니다. 잠시 후 다시 시도하세요.
@@ -183,26 +180,11 @@ app/routers/docs.py::유효하지 않은 슬러그
 app/routers/docs.py::이미 사용 중인 슬러그
 app/routers/docs.py::전문 검색 — 제목 + 본문
 app/routers/docs.py::해당 문서의 프로젝트 접근 권한이 없습니다
-app/routers/events.py::(설정 화면에서 등록하세요).
 app/routers/events.py::)는
 app/routers/events.py::)는 human 발행자만 허용합니다.
 app/routers/events.py::** 담당 —
-app/routers/events.py::- 게이트:
-app/routers/events.py::- 다음 단계:
-app/routers/events.py::- 다음 단계: 없음(마지막 stage)
-app/routers/events.py::- 다음 단계로 넘기는 발행 예시: publish_event(
-app/routers/events.py::- 다음 행동:
-app/routers/events.py::- 다음 행동: channel=
-app/routers/events.py::- 다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 발행으로 자동 재오픈됩니다.
-app/routers/events.py::- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 승인 게이트를 확인하는 발행 도구를 쓰세요).
-app/routers/events.py::- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다.
 app/routers/events.py::- 단계 `
-app/routers/events.py::- 대상 산출물:
-app/routers/events.py::- 사유:
-app/routers/events.py::- 할 일:
 app/routers/events.py::Cursor: ISO 8601 created_at, fetch after this time(오래된순 정렬 forward-cursor)
-app/routers/events.py::[이벤트]
-app/routers/events.py::[이벤트] preset.gate.verdict
 app/routers/events.py::extra_broadcast_member_ids에 이 org의 실존 회원이 아닌 id가 있습니다:
 app/routers/events.py::name은 key와 같을 수 없습니다(코드 키를 이름으로 쓸 수 없음)
 app/routers/events.py::name은 비울 수 없습니다(공백뿐인 값도 안 됨)
@@ -211,20 +193,12 @@ app/routers/events.py::role_mapping에 이 정의의 stage_metadata에 없는 st
 app/routers/events.py::role만 허용합니다.
 app/routers/events.py::미확認
 app/routers/events.py::발행 시 필수 항목:
-app/routers/events.py::발행은 성공했으나 escalation·broadcast 대상이 모두 0명입니다 — work_item이 미배정이거나 routing이 아무도 가리키지 않습니다.
 app/routers/events.py::시스템 발행
 app/routers/events.py::아래는 이 조직에서 발행 가능한 이벤트 전부입니다. 사이클형 이벤트는 각 단계마다 누가(역할) 무엇을(행동) 해야 하는지 그대로 적혀 있습니다 — 외우지 말고 그때그때 이 표를 다시 확인하세요. 한 번에 한 단계만 진행하세요. 무엇을 할지 모르겠으면 지어내지 말고 이 표에서 찾으세요.
-app/routers/events.py::앞 단계 산출물
 app/routers/events.py::에 anchor할 project가 없음 — 시스템 발신자 프로비저닝 불가
-app/routers/events.py::에 대한 커넥터 매핑이 없습니다 — 조직 설정에 channel_connector_map을 등록하세요.
-app/routers/events.py::을 지원하는 커넥터가 이 org에 등록돼 있지 않습니다 — 설정 스킬을 먼저 실행하세요.
-app/routers/events.py::의 필수 설정값이 비어 있습니다 —
 app/routers/events.py::이 이벤트(
 app/routers/events.py::이 이벤트는 다음 상황에서 발행하세요:
 app/routers/events.py::지정된 conversation_id에 escalation 대상이 참가자로 없어 발행을 거부합니다(지시가 조용히 미도달하는 것을 막기 위함).
-app/routers/events.py::커넥터가 등록돼 있지 않습니다 — 설정 스킬을 먼저 실행하세요.
-app/routers/events.py::커넥터는 등록돼 있지만 필수 설정값이 아직 비어 있습니다 — 설정 화면에서 등록하세요.
-app/routers/events.py::커넥터로 발행하세요(channel=
 app/routers/evidence.py::(gate_approval은 게이트 승인 시 시스템이 자동 생성)
 app/routers/evidence.py::)와 일치해야 합니다.
 app/routers/evidence.py::currency는 조직 정책 통화(
@@ -235,8 +209,6 @@ app/routers/evidence.py::story #2722 — artifact_version_id 하나로는 FE가 
 app/routers/evidence.py::verification_sheet evidence의 items는 1건 이상의 배열이어야 합니다.
 app/routers/evidence.py::verification_sheet evidence의 각 item은 name(비어있지 않은 문자열)·verdict(
 app/routers/evidence.py::중 하나)가 필요하고, note는 있으면 문자열이어야 합니다.
-app/routers/gate_metrics.py::window 끝(이하)
-app/routers/gate_metrics.py::window 시작(이상)
 app/routers/gates.py::)는 재평가 대상이 아닙니다(pending/auto_passed만 가능).
 app/routers/gates.py::comma-separated gate ids — 배치 앵커 조회
 app/routers/gates.py::generic transition 은
@@ -269,14 +241,12 @@ app/routers/insights_board.py::후속 작업 생성은 휴먼 멤버만 가능�
 app/routers/labels.py::이미 부착된 라벨
 app/routers/loops.py::루프 결정은 휴먼 멤버만 가능합니다 (에이전트 불가).
 app/routers/loops.py::루프를 찾을 수 없습니다.
-app/routers/me.py::SELECT DISTINCT p.id::text AS project_id, p.name AS project_name\n            FROM projects p\n            WHERE p.deleted_at IS NULL\n              AND (CAST(:org_id AS uuid) IS NULL OR p.org_id = :org_id)\n              AND (\n                -- 1. TeamMember 직접 등록 (기존)\n                EXISTS (\n                    SELECT 1 FROM team_members tm\n                    WHERE tm.project_id = p.id\n                      AND (tm.id = :user_id OR tm.user_id = :user_id)\n                      AND tm.is_active = true\n                      AND tm.type = 'human'\n                )\n                -- 2. ProjectAccess grant (S-MBR-10, members.py 패턴 정합)\n                OR EXISTS (\n                    SELECT 1 FROM project_access pa\n                    JOIN org_members om ON pa.org_member_id = om.id\n                    WHERE pa.project_id = p.id\n                      AND om.user_id = :user_id\n                      AND om.deleted_at IS NULL\n                      AND pa.permission = 'granted'\n                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)\n                )\n                -- 3. owner/admin은 grant 없이도 org 전체 (AC2, S-MBR-03 정합)\n                OR EXISTS (\n                    SELECT 1 FROM org_members om\n                    WHERE om.user_id = :user_id\n                      AND om.deleted_at IS NULL\n                      AND om.role IN ('owner', 'admin')\n                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)\n                      AND p.org_id = om.org_id\n                )\n              )\n            ORDER BY project_name
+app/routers/me.py::SELECT DISTINCT p.id::text AS project_id, p.name AS project_name, p.slug AS project_slug, p.org_id::text AS org_id\n            FROM projects p\n            WHERE p.deleted_at IS NULL\n              AND (CAST(:org_id AS uuid) IS NULL OR p.org_id = :org_id)\n              AND (\n                -- 1. TeamMember 직접 등록 (기존)\n                EXISTS (\n                    SELECT 1 FROM team_members tm\n                    WHERE tm.project_id = p.id\n                      AND (tm.id = :user_id OR tm.user_id = :user_id)\n                      AND tm.is_active = true\n                      AND tm.type = 'human'\n                )\n                -- 2. ProjectAccess grant (S-MBR-10, members.py 패턴 정합)\n                OR EXISTS (\n                    SELECT 1 FROM project_access pa\n                    JOIN org_members om ON pa.org_member_id = om.id\n                    WHERE pa.project_id = p.id\n                      AND om.user_id = :user_id\n                      AND om.deleted_at IS NULL\n                      AND pa.permission = 'granted'\n                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)\n                )\n                -- 3. owner/admin은 grant 없이도 org 전체 (AC2, S-MBR-03 정합)\n                OR EXISTS (\n                    SELECT 1 FROM org_members om\n                    WHERE om.user_id = :user_id\n                      AND om.deleted_at IS NULL\n                      AND om.role IN ('owner', 'admin')\n                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)\n                      AND p.org_id = om.org_id\n                )\n              )\n            ORDER BY project_name
 app/routers/measurement_connections.py::GA4 재인증이 필요합니다.
 app/routers/measurement_connections.py::GA4가 연결되어 있지 않습니다.
 app/routers/measurement_connections.py::이 계정에서 접근 가능한 속성이 아닙니다.
 app/routers/measurement_connections.py::이 환경에 GA4 연결이 아직 구성되지 않았습니다(google_client_id/backend_url 미설정).
 app/routers/meetings.py::Meeting 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
-app/routers/merge_gate.py::window 끝(이하)
-app/routers/merge_gate.py::window 시작(이상)
 app/routers/notification_preferences.py::'는 event_key를 가질 수 없습니다.
 app/routers/notification_preferences.py::scope_type='event_key'는 event_key가 필수입니다.
 app/routers/notification_preferences.py::scope_type='event_key'는 scope_id를 가질 수 없습니다.
@@ -318,7 +288,6 @@ app/routers/role_templates.py::콘텐츠
 app/routers/role_templates.py::품질
 app/routers/role_templates.py::프로덕트
 app/routers/role_templates.py::플랫폼/DevOps
-app/routers/session_context.py::이 시각 이후 활동만 포함(AC4 — 생략하면 recent_activity 축 전체가 null, 빈 배열이 아니다)
 app/routers/site_posts.py::draft를 찾을 수 없습니다
 app/routers/site_posts.py::draft를 찾을 수 없습니다:
 app/routers/site_posts.py::story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 포함한다(「보관됨 보기」 필터). 기본은 제외.
@@ -958,8 +927,8 @@ app/services/gate_service.py::상태입니다 (pending만 가능).
 app/services/gate_service.py::상태입니다 (승인/반려된 게이트만 취소 가능).
 app/services/gate_service.py::예약 명령 미생성(draft 해석 실패)
 app/services/gate_service.py::예약 명령 미생성(승인된 목적지와 초안의 현재 목적지 불일치)
-app/services/gate_service.py::이(가) 정본으로 확정됐어요.
 app/services/gate_service.py::정본 확정:
+app/services/gate_service.py::정본으로 확정됐어요.
 app/services/gate_service.py::취소 불가: 게이트가
 app/services/gate_service.py::취소 창(
 app/services/gate_service.py::컨셉 승인이 완료되지 않았습니다(gate_id=
@@ -1131,7 +1100,6 @@ app/services/org_subscription_tier_change.py::는 상향이 아님(하향/동일
 app/services/org_subscription_tier_change.py::는 유료 티어만(starter/team/business)
 app/services/org_subscription_tier_change.py::를 찾을 수 없음
 app/services/org_subscription_tier_change.py::상향
-app/services/org_subscription_tier_change.py::에 다른 결제 작업이 이미 진행 중 — 완료 후 재시도
 app/services/org_subscription_tier_change.py::의 활성 offering_version(krw)을 찾을 수 없음
 app/services/org_subscription_tier_change.py::활성 유료 구독이 아님 — 상향 엔진(change-tier)이 아니라 신규 결제(checkout)로 진입해야 함
 app/services/participation_helpers.py::구현

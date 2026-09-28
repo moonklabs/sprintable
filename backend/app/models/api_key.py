@@ -13,10 +13,12 @@ class ApiKey(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # E-MEMBER-SSOT AC3-5 ③: team_member_id DEPRECATED — canonical 식별자는 member_id(members.id 미러).
-    # dual 유지(레거시 호환). ⚠️ FK는 0088 rename로 team_members_legacy를 가리킴(team_members는 뷰);
-    # 모델 선언("team_members.id")은 stale-drift(런타임 무관, DB 제약이 권위).
+    # dual 유지(레거시 호환). story #4157 실측(fresh 마이그 DB + baseline/schema.sql 직접 대조) —
+    # 옛 주석("FK는 team_members_legacy를 가리킴")은 틀렸다: 이 컬럼은 baseline(0096) 스냅샷에도
+    # FK가 없다(0004가 만들었으나 이후 소실, 어느 마이그인지는 baseline squash라 추적 불가) — FK
+    # 선언 없음이 실 DB와 정합.
     team_member_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), nullable=False, index=True
     )
     # E-MEMBER-SSOT AC3-1: canonical members.id 미러 (team_member_id와 1:1 dual-write, 0075 ID 보존).
     # AC3-1b(0080): anchor write-sync로 신규 agent members 선행 보장 → FK 재추가(QA H1 해소).

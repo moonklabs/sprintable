@@ -149,7 +149,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   className={cn(
                     'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                     isSelected
-                      ? 'border-brand/20 bg-brand/14 text-[color:var(--brand-soft)]'
+                      ? 'border-brand/20 bg-brand/14 text-brand-text'
                       : 'border-white/8 bg-white/5 text-foreground/88 hover:bg-white/8',
                   )}
                 >
@@ -223,7 +223,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                         className={cn(
                           'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                           isSelected
-                            ? 'border-brand/20 bg-brand/14 text-[color:var(--brand-soft)]'
+                            ? 'border-brand/20 bg-brand/14 text-brand-text'
                             : 'border-white/8 bg-white/5 text-foreground/88 hover:bg-white/8',
                         )}
                       >

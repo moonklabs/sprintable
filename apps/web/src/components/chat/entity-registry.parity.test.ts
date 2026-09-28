@@ -65,7 +65,8 @@ describe('entity-registry.tsx 엔티티 키 집합 ↔ BE ENTITY_RESOLVERS 코�
     const source = readFileSync(resolve(__dirname, 'embed-card.tsx'), 'utf-8');
     const feHrefTypes = parseFeSwitchKeys(
       source,
-      /export function getEntityHref\(entityType: string, entityId: string\): string \| null \{\s*switch \(entityType\) \{([\s\S]*?)\n {4}default:/,
+      // story #4231 3차 — 세 번째 인자 withProject(프로젝트를 싣는 함수 · 필수)가 붙었다.
+      /export function getEntityHref\(entityType: string, entityId: string, withProject: \(href: string\) => string\): string \| null \{\s*switch \(entityType\) \{([\s\S]*?)\n {4}default:/,
     );
     for (const t of backendTypes) expect(feHrefTypes.has(t)).toBe(true);
     expect(feHrefTypes).toEqual(new Set([...backendTypes, ...FE_ONLY_TYPES]));

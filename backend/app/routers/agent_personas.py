@@ -2,16 +2,14 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.models.member import Member
+from app.dependencies.ownership import assert_agent_owner
 from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.agent_persona import CreatePersonaRequest, UpdatePersonaRequest
 from app.services.member_resolver import resolve_member_db_verified
-from app.services.project_auth import assert_target_in_caller_org
 
 router = APIRouter(prefix="/api/v2/agent-personas", tags=["agent-personas", "Organization"])
 
@@ -37,17 +35,6 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID, uuid.UUID]:
     return uuid.UUID(str(org_id_str)), uuid.UUID(str(project_id_str))
 
 
-async def _assert_agent_in_caller_org(session: AsyncSession, caller_org_id: uuid.UUID, agent_id: uuid.UUID) -> None:
-    """E-SECURITY SEC-S7(story a7dd0431·까심 QA 부수발견 E): create_persona/seed_builtin_personas가
-    caller의 org_id만으로 target agent_id에 persona를 생성해 타 org agent 오염(public AgentCard
-    내용 오염 + default persona collision DoS)이 가능했다. SEC-S6의 `assert_target_in_caller_org`
-    공통 가드 재사용 — target(agent)의 실제 org를 조회해 caller org와 대조."""
-    target_org_id = (await session.execute(
-        select(Member.org_id).where(Member.id == agent_id, Member.type == "agent")
-    )).scalar_one_or_none()
-    assert_target_in_caller_org(caller_org_id, target_org_id, not_found_detail="Agent not found")
-
-
 @router.get("")
 async def list_personas(
     agent_id: uuid.UUID = Query(...),
@@ -71,7 +58,10 @@ async def create_persona(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
-    await _assert_agent_in_caller_org(repo.session, org_id, body.agent_id)
+    # story #4000(보안 감사) — org 소속만으로는 남의 agent에 persona(system_prompt 포함)를
+    # 붙일 수 있었다(SEC-S7이 막은 건 타 org 축뿐, 같은 org 안 타 agent 축은 열려 있었다).
+    # assert_agent_owner가 존재+org+ownership(생성자 or org admin)을 한 번에 검증.
+    await assert_agent_owner(body.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     try:
         # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
         # AgentPersona.created_by로 영속된다. resolve_member_db_verified()의 영속
@@ -108,7 +98,8 @@ async def seed_builtin_personas(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
-    await _assert_agent_in_caller_org(repo.session, org_id, agent_id)
+    # story #4000 — create_persona와 동일 축(위 참고).
+    await assert_agent_owner(agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     result = await repo.seed_builtin(org_id, project_id, agent_id)
     return _ok(result)
 
@@ -138,6 +129,14 @@ async def update_persona(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #4000(보안 감사) — PATCH는 raw repo.update()로 바로 넘어가 소유권 검사가 아예
+    # 없었다(org/project 스코프만) — 대상 agent_id를 먼저 찾아 assert_agent_owner로 막는다.
+    # assert_agent_owner의 HTTPException(403/404)은 그대로 전파(api_keys.py 등 기존
+    # 8곳 이상의 호출부와 동일 관례 — app.main의 구조적 에러 핸들러가 일관 포맷으로 감싼다).
+    agent_id = await repo.get_agent_id(id, org_id, project_id)
+    if agent_id is None:
+        return _err("NOT_FOUND", "Persona not found", 404)
+    await assert_agent_owner(agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     try:
         # story #3370 회귀 클래스 — create_persona와 같은 actor_id 축(위 참고).
         resolved = await resolve_member_db_verified(auth, org_id, repo.session)
@@ -162,6 +161,11 @@ async def delete_persona(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #4000(보안 감사) — update_persona와 동일 축(위 참고).
+    agent_id = await repo.get_agent_id(id, org_id, project_id)
+    if agent_id is None:
+        return _err("NOT_FOUND", "Persona not found", 404)
+    await assert_agent_owner(agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     try:
         ok = await repo.delete(id, org_id, project_id)
         if not ok:

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import { Button } from '@/components/ui/button';
 import { InsightsBoardMetricCell } from './insights-board-metric-cell';
 import { FollowUpDialog } from './follow-up-dialog';
@@ -60,6 +60,7 @@ function PublicationCard({
   ga4ConnectionStatus: Ga4ConnectionStatus;
 }) {
   const [followUpOpen, setFollowUpOpen] = useState(false);
+  const channelLabel = useChannelLabel();
   const declared = declaredMetricsForChannel(row.channel);
   const orderedMetrics = METRIC_KEYS.filter((m) => declared.includes(m));
   const sourceLabelKey = isBlogRow(row) ? 'storyCompareSourceSiteBeacon' : 'storyCompareSourceChannelApi';
@@ -75,7 +76,7 @@ function PublicationCard({
           ) : (
             <p className="text-sm font-medium text-foreground">{row.title}</p>
           )}
-          <p className="text-xs text-muted-foreground">{channelLabel(row.channel, tContent)}</p>
+          <p className="text-xs text-muted-foreground">{channelLabel(row.channel)}</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={() => setFollowUpOpen(true)} data-testid="story-compare-follow-up-button">
           {tBoard('followUpAction')}

@@ -148,9 +148,8 @@ class UpdateStoryStatusInput(SprintableInput):
 async def list_stories(args: ListStoriesInput) -> list[TextContent]:
     """프로젝트 스토리 목록 조회."""
     try:
+        # story #4329 — `org_id`는 싣지 않는다: 라우트가 받지 않고(조직은 인증 키에서 정한다) 조용히 버려졌다.
         params: dict = {"project_id": client.require_project_id()}
-        if client.org_id:
-            params["org_id"] = client.org_id
         if args.sprint_id:
             params["sprint_id"] = args.sprint_id
         if args.epic_id:
@@ -169,7 +168,7 @@ async def list_stories(args: ListStoriesInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_stories")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_backlog(args: ListBacklogInput) -> list[TextContent]:
@@ -203,7 +202,7 @@ async def list_backlog(args: ListBacklogInput) -> list[TextContent]:
             ))
         return blocks
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def add_story(args: AddStoryInput) -> list[TextContent]:
@@ -246,7 +245,7 @@ async def add_story(args: AddStoryInput) -> list[TextContent]:
             }
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_story(args: UpdateStoryInput) -> list[TextContent]:
@@ -316,7 +315,7 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
                 updates["attachments"] = existing + uploaded
         return ok(await client.patch(f"/api/v2/stories/{args.story_id}", json=updates))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def assign_story_to_sprint(args: AssignStoryToSprintInput) -> list[TextContent]:
@@ -324,7 +323,7 @@ async def assign_story_to_sprint(args: AssignStoryToSprintInput) -> list[TextCon
     try:
         return ok(await client.patch(f"/api/v2/stories/{args.story_id}", json={"sprint_id": args.sprint_id}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def unassign_story_from_sprint(args: UnassignStoryFromSprintInput) -> list[TextContent]:
@@ -332,7 +331,7 @@ async def unassign_story_from_sprint(args: UnassignStoryFromSprintInput) -> list
     try:
         return ok(await client.patch(f"/api/v2/stories/{args.story_id}", json={"sprint_id": None}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_story_status(args: UpdateStoryStatusInput) -> list[TextContent] | CallToolResult:
@@ -340,4 +339,4 @@ async def update_story_status(args: UpdateStoryStatusInput) -> list[TextContent]
     try:
         return ok(await client.patch(f"/api/v2/stories/{args.story_id}/status", json={"status": args.status.value}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

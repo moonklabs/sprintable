@@ -3,7 +3,7 @@ import { fastapiCall } from './utils';
 
 interface RawDocPageResponse {
   data: DocSummary[];
-  meta: { has_more: boolean; next_cursor: string | null };
+  meta: { has_more: boolean; next_cursor: string | null; total?: number | null };
 }
 
 export class ApiDocRepository implements IDocRepository {
@@ -23,9 +23,14 @@ export class ApiDocRepository implements IDocRepository {
         // (docs.py list_docs 실측 — 다른 분기와 같은 envelope, has_more/next_cursor는
         // 항상 false/null이라 이 함수의 기존 res.meta 읽기 코드가 그대로 안전하다).
         ids: filters.ids?.join(','),
+        // story #4376 — 트리 한 번에(BE 상한까지) + meta.total.
+        tree: filters.tree ? 'true' : undefined,
       },
     });
-    return { items: res.data, hasMore: res.meta.has_more, nextCursor: res.meta.next_cursor };
+    return {
+      items: res.data, hasMore: res.meta.has_more, nextCursor: res.meta.next_cursor,
+      ...(filters.tree ? { total: res.meta.total ?? null } : {}),
+    };
   }
 
   // story #2191: 단건 slug 조회도 BE에서 이제 {data,meta} 봉투로 온다(has_more는 구조적으로
@@ -36,7 +41,9 @@ export class ApiDocRepository implements IDocRepository {
     });
     const first = res.data[0];
     if (!first) throw new Error(`Doc not found: ${slug}`);
-    return fastapiCall<Doc>('GET', `/api/v2/docs/${first.id}`, this.accessToken);
+    const doc = await fastapiCall<Doc>('GET', `/api/v2/docs/${first.id}`, this.accessToken);
+    // story #4313 — 위키 링크 대응(적힌 slug → 지금 slug)은 slug 단건 경로 응답에만 있다(상세 GET엔 없음) — 이미 받은 값을 실어 보낸다(요청 추가 0).
+    return { ...doc, wiki_link_targets: first.wiki_link_targets ?? null };
   }
 
   async getById(id: string, _scope?: RepositoryScopeContext): Promise<Doc> {

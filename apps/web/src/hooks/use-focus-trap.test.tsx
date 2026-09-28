@@ -116,3 +116,74 @@ describe('useFocusTrap — story #2061', () => {
     trigger.remove();
   });
 });
+
+// [SID:4367] 한 Esc = 한 층 — 안쪽 층(새 폴더 입력칸 · 후보 목록 · 포털 메뉴)이 Esc로 자기를 닫고 preventDefault로 «썼다»고 표시하면
+// 가두기는 onClose를 부르지 않는다. 안쪽 React 핸들러는 뿌리 리스너라 이 훅의 document 리스너보다 먼저 돈다(App Router는 뿌리가 document).
+describe('useFocusTrap — 안쪽이 쓴 Esc는 건너뜀([SID:4367])', () => {
+  function WithInnerLayer({ onClose }: { onClose: () => void }) {
+    const ref = useFocusTrap(true, onClose);
+    return (
+      <div ref={ref} tabIndex={-1}>
+        <input data-testid="inner" onKeyDown={(e) => { if (e.key === 'Escape') e.preventDefault(); }} />
+        <button type="button" data-testid="plain">plain</button>
+      </div>
+    );
+  }
+
+  it('안쪽 입력칸이 preventDefault한 Esc → onClose 0 · 표시 없는 Esc(다른 버튼) → onClose 1', async () => {
+    const onClose = vi.fn();
+    await act(async () => { root.render(<WithInnerLayer onClose={onClose} />); });
+    const inner = container.querySelector('[data-testid="inner"]')!;
+    await act(async () => { dispatchKey(inner, 'Escape'); });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { dispatchKey(container.querySelector('[data-testid="plain"]')!, 'Escape'); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// [SID:4369] 유나 규칙 — 서랍 안 글 있는 여러 줄 칸의 첫 Esc = 칸에서만(초점 = 서랍 뿌리 · 글 그대로) · 둘째 Esc = 닫힘 ·
+// 조합 중 Esc = 아무것도 안 함 · 빈 칸 · 한 줄 칸 = 한 번에 닫힘.
+describe('useFocusTrap — 여러 줄 칸 Esc 규칙([SID:4369])', () => {
+  function WithFields({ onClose }: { onClose: () => void }) {
+    const ref = useFocusTrap(true, onClose);
+    return (
+      <div ref={ref} tabIndex={-1} data-testid="drawer">
+        <textarea data-testid="multi" defaultValue="쓰던 글" />
+        <textarea data-testid="empty" defaultValue="" />
+        <input data-testid="line" defaultValue="한 줄 글" />
+      </div>
+    );
+  }
+  const q = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement;
+
+  it('② 글 있는 여러 줄 칸: 첫 Esc = 칸에서만 · 둘째 Esc = 닫힘', async () => {
+    const onClose = vi.fn();
+    await act(async () => { root.render(<WithFields onClose={onClose} />); });
+    q('multi').focus();
+    await act(async () => { dispatchKey(q('multi'), 'Escape'); });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(q('drawer'));
+    expect((q('multi') as HTMLTextAreaElement).value).toBe('쓰던 글');
+    await act(async () => { dispatchKey(document.activeElement!, 'Escape'); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('③ 빈 여러 줄 칸 · 한 줄 칸(글 있어도) = 한 번에 닫힘', async () => {
+    for (const id of ['empty', 'line']) {
+      const onClose = vi.fn();
+      await act(async () => { root.render(<WithFields key={id} onClose={onClose} />); });
+      q(id).focus();
+      await act(async () => { dispatchKey(q(id), 'Escape'); });
+      expect(onClose, id).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('① 조합 중 Esc = 아무것도 안 함(닫힘 0 · 초점 칸 그대로)', async () => {
+    const onClose = vi.fn();
+    await act(async () => { root.render(<WithFields onClose={onClose} />); });
+    q('multi').focus();
+    await act(async () => { q('multi').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, isComposing: true })); });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(q('multi'));
+  });
+});

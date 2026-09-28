@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -24,13 +25,21 @@ export function GuidedHypothesisForm({
   submitting = false,
   onSubmit,
   onCancel,
+  projectId,
 }: {
   submitting?: boolean;
-  onSubmit: (value: { statement: string; metric: string; target: number; direction: 'up' | 'down' }) => void;
+  /** 성공이면 true — 그때만 초안을 지운다(story #4370). */
+  onSubmit: (value: { statement: string; metric: string; target: number; direction: 'up' | 'down' }) => Promise<boolean>;
   onCancel: () => void;
+  /** story #4370 — 폼 초안 키(프로젝트). */
+  projectId: string;
 }) {
   const t = useTranslations('flow');
-  const [value, setValue] = useState<GuidedHypothesisValue>(EMPTY);
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(가설 문장)이 든 폼이라 폼 전체(문장 · 지표 · 목표 · 방향)가 프로젝트별 초안 하나:
+  // 창/시트가 ✕ · 바깥 · Esc로 닫혀도 남고 보이는 «취소»와 만들기 성공에서만 지운다.
+  const [value, setValue, clearFormDraft] = useJsonFieldDraft<GuidedHypothesisValue>(
+    { surface: 'guided-hypothesis', targetId: projectId, field: 'form' }, EMPTY,
+  );
   const [activeExample, setActiveExample] = useState<string | null>(null);
 
   const EXAMPLES = [
@@ -89,7 +98,10 @@ export function GuidedHypothesisForm({
       className="focus-inset flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
       onSubmit={(e) => {
         e.preventDefault();
-        if (canSubmit) onSubmit({ statement: value.statement, metric: value.metric, target: Number(target), direction: value.direction });
+        if (canSubmit) {
+          void Promise.resolve(onSubmit({ statement: value.statement, metric: value.metric, target: Number(target), direction: value.direction }))
+            .then((ok) => { if (ok === true) clearFormDraft(); });
+        }
       }}
     >
       <p className="text-xs text-muted-foreground">{t('guidedFormSubtitle')}</p>
@@ -163,7 +175,7 @@ export function GuidedHypothesisForm({
       </div>
 
       <div className="mt-auto flex justify-end gap-2 pt-1">
-        <Button type="button" variant="ghost" onClick={onCancel}>
+        <Button type="button" variant="ghost" onClick={() => { clearFormDraft(); onCancel(); }}>
           {t('guidedCancel')}
         </Button>
         <Button type="submit" disabled={!canSubmit}>

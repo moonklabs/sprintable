@@ -13,6 +13,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { DocContentRenderer } from './doc-content-renderer';
 
 // next/image → plain <img> (keeps the markdown legacy-image assertion DOM-simple).
+// story #4309 — 렌더러가 본문 문서 링크의 클라이언트 이동에 useRouter를 쓴다(앱 라우터 밖 테스트라 목).
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/navigation')>()),
+  useParams: () => ({}),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), forward: vi.fn(), prefetch: vi.fn() }),
+}));
 vi.mock('next/image', () => ({
   default: ({ src, alt }: { src?: string; alt?: string }) =>
     // eslint-disable-next-line @next/next/no-img-element
@@ -67,10 +73,10 @@ async function mount(node: React.ReactElement) {
 
 describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
   it('authed (html): resolves the asset-ref image src + makes the asset-ref file clickable (not inert/blank)', async () => {
-    await mount(<DocContentRenderer content={ASSET_REF_HTML} contentFormat="html" untitledEmbedLabel="Untitled" />);
+    await mount(<DocContentRenderer content={ASSET_REF_HTML} contentFormat="html" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />);
 
     // image: signed route hit → img.src set to the signed URL (was blank before the fix).
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=img-1'), undefined);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=img-1'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const img = container.querySelector<HTMLImageElement>('img[data-asset-id="img-1"]');
     expect(img).not.toBeNull();
     expect(img?.getAttribute('src')).toBe(SIGNED_URL);
@@ -78,17 +84,18 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     // file: NOT the inert public placeholder — it carries an interactive (cursor-pointer) card.
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
     expect(fileBlock).not.toBeNull();
-    expect(fileBlock?.innerHTML).toContain('cursor-pointer');
+    // story #4331 — 누를 수 있는 카드의 표지는 이제 진짜 button 요소(디자인 Button 토큰 · cursor-pointer 클래스 없음).
+    expect(fileBlock?.querySelector('button')).not.toBeNull();
 
     // clicking the ref file resolves via the signed route with attachment disposition → new tab.
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve(); await Promise.resolve();
     });
     // story #2691 — 이 클릭 경로는 fetchWithAuth로 전환됨(마운트시 img 경로는 미전환·1인자
-    // 유지). fetchWithAuth(url)이 내부에서 fetch(input, init)을 호출해 init 생략 시 undefined를
-    // 명시로 넘긴다.
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=file-1&disposition=attachment'), undefined);
+    // 유지). fetchWithAuth(url)은 init을 안 받아도 시간 제한 신호(signal)를 실은 init으로 fetch한다(story #4310).
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=file-1&disposition=attachment'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(openMock).toHaveBeenCalledWith(SIGNED_URL, '_blank', 'noopener,noreferrer');
   });
 
@@ -100,7 +107,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
         publicMode
         publicAttachmentLabel="Attachment unavailable in public view"
         publicImageLabel="Image unavailable in public view"
-        untitledEmbedLabel="Untitled"
+        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요"
       />,
     );
 
@@ -117,11 +124,11 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
     expect(fileBlock?.innerHTML).toContain('opacity-70');
     expect(fileBlock?.innerHTML).toContain('Attachment unavailable in public view');
-    expect(fileBlock?.innerHTML).not.toContain('cursor-pointer');
+    expect(fileBlock?.querySelector('button')).toBeNull(); // story #4331 — 비활성 카드엔 누를 button이 없다.
   });
 
   it('authed (html): legacy base64 image + file render directly and unchanged (regression 0)', async () => {
-    await mount(<DocContentRenderer content={LEGACY_HTML} contentFormat="html" untitledEmbedLabel="Untitled" />);
+    await mount(<DocContentRenderer content={LEGACY_HTML} contentFormat="html" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />);
 
     // legacy image keeps its data: src untouched (no signed resolution).
     const img = container.querySelector<HTMLImageElement>('img');
@@ -131,9 +138,12 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
 
     // legacy file → interactive card; clicking triggers the blob download (no signed fetch).
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
-    expect(fileBlock?.innerHTML).toContain('cursor-pointer');
+    // story #4331 — 누를 수 있는 카드의 표지는 이제 진짜 button 요소(디자인 Button 토큰 · cursor-pointer 클래스 없음).
+    expect(fileBlock?.querySelector('button')).not.toBeNull();
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      expect(fileBlock?.querySelector('button')).not.toBeNull();
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -143,9 +153,9 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     // raw asset-ref <img> embedded in a markdown doc — guards the rehype-sanitize schema
     // extension (default schema strips img data-* → would render blank without the fix).
     const md = 'Intro\n\n<img data-asset-id="md-1" data-filename="m.png" data-size="5" data-mime-type="image/png" alt="md shot">\n\nOutro';
-    await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" />);
+    await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />);
 
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=md-1'), undefined);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=md-1'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const img = container.querySelector<HTMLImageElement>('img');
     expect(img?.getAttribute('src')).toBe(SIGNED_URL);
     // it is the resolver-rendered <img>, NOT a blank NextImage (mock tags those data-next-image).
@@ -157,24 +167,26 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     // strips div data-type/data-asset-id, so the resolver (querySelectorAll[data-type]) would miss
     // it → inert. The docMarkdownSanitizeSchema div extension keeps it resolvable.
     const md = 'Intro\n\n<div data-type="fileAttachment" data-filename="r.pdf" data-size="9" data-mime-type="application/pdf" data-asset-id="mdfile-1"></div>\n\nOutro';
-    await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" />);
+    await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />);
 
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
     expect(fileBlock).not.toBeNull();
-    expect(fileBlock?.innerHTML).toContain('cursor-pointer');
+    // story #4331 — 누를 수 있는 카드의 표지는 이제 진짜 button 요소(디자인 Button 토큰 · cursor-pointer 클래스 없음).
+    expect(fileBlock?.querySelector('button')).not.toBeNull();
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve(); await Promise.resolve();
     });
     // story #2691 — fetchWithAuth 전환(위와 동일 사유).
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=mdfile-1&disposition=attachment'), undefined);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=mdfile-1&disposition=attachment'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(openMock).toHaveBeenCalledWith(SIGNED_URL, '_blank', 'noopener,noreferrer');
   });
 
   it('public (markdown): asset-ref image never triggers the signed route', async () => {
     const md = 'Intro\n\n<img data-asset-id="md-2" data-filename="m.png" data-size="5" data-mime-type="image/png" alt="md shot">';
     await mount(
-      <DocContentRenderer content={md} contentFormat="markdown" publicMode publicImageLabel="Image unavailable in public view" untitledEmbedLabel="Untitled" />,
+      <DocContentRenderer content={md} contentFormat="markdown" publicMode publicImageLabel="Image unavailable in public view" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

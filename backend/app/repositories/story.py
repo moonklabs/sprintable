@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, case, exists, func, or_, select, true
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import HypothesisStoryLink
 from app.models.pm import Story
+from app.models.story_assignee import StoryAssignee
 from app.repositories.base import BaseRepository
 from app.schemas.story import STATUS_TRANSITIONS
 
@@ -73,6 +75,15 @@ def _unattached_clause():
     )
 
 
+def _no_assignee_clause():
+    """story #4329 — 담당자 없는 story(MCP `get_unassigned_stories`가 보내던 거름 · 전엔 버려져 전부가 왔다). 응답의 `assignee_ids`
+    (`_attach_assignee_ids`)와 같은 정의 — 복수 담당 join(`story_assignees`) 행이 없고 레거시 단일 `assignee_id`도 비어 있다.
+    `include_unassigned`(에픽 없음 · #3019) · `unattached`(에픽 · 가설 없음 · #2532)와 다른 축이다."""
+    return Story.assignee_id.is_(None) & ~exists(
+        select(StoryAssignee.id).where(StoryAssignee.story_id == Story.id)
+    )
+
+
 async def allocate_story_number(session: AsyncSession, project_id: uuid.UUID) -> int:
     """story 9ac9b80f(FR·대표요청): 프로젝트별 race-safe sequential #N 채번.
 
@@ -104,7 +115,8 @@ class StoryRepository(BaseRepository[Story]):
     async def list(
         self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None,
         unattached: bool = False, epic_ids: list[uuid.UUID] | None = None,
-        include_unassigned: bool = False, done_within_days: int | None = None, **filters,
+        include_unassigned: bool = False, done_within_days: int | None = None, no_assignee: bool = False,
+        project_ids: Collection[uuid.UUID] | None = None, **filters,
     ) -> tuple[list[Story], int]:
         """story #2537(카디르 QA #2932 실측, 2026-08-09) — `list_board()`와 동형으로
         `(stories, total)` 튜플을 반환한다. 이전엔 `list[Story]`만 반환해 이 분기(status
@@ -161,12 +173,19 @@ class StoryRepository(BaseRepository[Story]):
         query = select(Story).where(self._org_filter(), Story.deleted_at.is_(None))
         for attr, val in filters.items():
             query = query.where(getattr(Story, attr) == val)
+        # story #4350 — project 필터 없는 목록은 caller가 접근 가능한 프로젝트로만(SQL IN · base.list_paginated와 같은 규칙).
+        if project_ids is not None:
+            if not project_ids:
+                return [], 0
+            query = query.where(Story.project_id.in_(list(project_ids)))
         if q:
             query = query.where(_title_search_filter(q))
         if cursor:
             query = query.where(Story.created_at < cursor)
         if unattached:
             query = query.where(_unattached_clause())
+        if no_assignee:
+            query = query.where(_no_assignee_clause())
         if epic_ids is not None:
             epic_clause = Story.epic_id.in_(epic_ids)
             query = query.where(or_(epic_clause, Story.epic_id.is_(None)) if include_unassigned else epic_clause)
@@ -176,12 +195,11 @@ class StoryRepository(BaseRepository[Story]):
             cutoff = datetime.now(timezone.utc) - timedelta(days=done_within_days)
             query = query.where(or_(Story.status != "done", Story.created_at >= cutoff))
 
-        count_q = select(func.count()).select_from(query.subquery())
-        total = (await self.session.execute(count_q)).scalar_one()
-
-        query = query.order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
-        result = await self.session.execute(query)
-        return list(result.scalars().all()), total
+        # story #4299 ① — 전체 수를 따로 세던 count 문장 대신 같은 문장의 창 함수로(요청당 왕복 하나 덜 · 같은 WHERE라 값도 같다).
+        # count(*) over()는 LIMIT 전의 걸러진 행 수 — 페이지가 비는 건 걸러진 행이 0일 때뿐이라 그땐 0.
+        query = query.add_columns(func.count().over()).order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
+        rows = (await self.session.execute(query)).all()
+        return [row[0] for row in rows], (rows[0][1] if rows else 0)
 
     async def list_by_ids(self, ids: list[uuid.UUID], *, unattached: bool = False) -> list[Story]:
         """배치 앵커 조회(story ca37b2b0 ② — 갤러리 등 정확한 story 집합 필요 소비자용).
@@ -211,6 +229,8 @@ class StoryRepository(BaseRepository[Story]):
         story_number: int | None = None,
         q_text: str | None = None,
         unattached: bool = False,
+        priority: str | None = None,
+        no_assignee: bool = False,
     ) -> tuple[list[Story], int]:
         """CB-S4: 보드 상태별 쿼리 — created_at DESC + priority 보조 정렬 + cursor 페이징.
 
@@ -240,6 +260,11 @@ class StoryRepository(BaseRepository[Story]):
             q = q.where(_title_search_filter(q_text))
         if unattached:
             q = q.where(_unattached_clause())
+        # story #4329 — 두 거름도 이 분기에 붙인다(#2188 부류: 분기가 바뀌며 필터가 사라지지 않게).
+        if priority:
+            q = q.where(Story.priority == priority)
+        if no_assignee:
+            q = q.where(_no_assignee_clause())
 
         # done: 최근 7일 제한
         if status == "done":
@@ -269,6 +294,8 @@ class StoryRepository(BaseRepository[Story]):
         q: str | None = None,
         unattached: bool = False,
         exclude_statuses: list[str] | None = None,
+        priority: str | None = None,
+        no_assignee: bool = False,
     ) -> tuple[list[Story], int]:
         """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
 
@@ -320,11 +347,17 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(_title_search_filter(q))
         if unattached:
             query = query.where(_unattached_clause())
+        if priority:
+            query = query.where(Story.priority == priority)
+        if no_assignee:
+            query = query.where(_no_assignee_clause())
 
         count_q = select(func.count()).select_from(query.subquery())
         total = (await self.session.execute(count_q)).scalar_one()
 
-        result = await self.session.execute(query.limit(limit))
+        # story #4382 — 순서 없는 LIMIT이면 limit을 넘는 백로그에서 어느 스토리가 빠질지 요청마다 달라질 수 있었다. 예전에 보이던 순서
+        # (대개 넣은 순)에 가장 가깝게 생성 시각 오름차순 + id.
+        result = await self.session.execute(query.order_by(Story.created_at, Story.id).limit(limit))
         return list(result.scalars().all()), total
 
     async def transition_status(self, id: uuid.UUID) -> Story:

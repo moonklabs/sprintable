@@ -13,9 +13,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
+// story #4171 — 스프린트 칩 라벨 테스트가 ?sprint_id를 싣는다(기본은 빈 쿼리 — 기존 테스트 무변).
+const { searchRef } = vi.hoisted(() => ({ searchRef: { current: '' } }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  // story #4307 — replace가 실제로 쿼리를 바꾸게(필터 변경 → 다시 불러오기 재현). 다른 테스트는 다시 그리지 않으니 무영향.
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn((url: string) => { searchRef.current = url.includes('?') ? url.slice(url.indexOf('?') + 1) : ''; }) }),
+  useSearchParams: () => new URLSearchParams(searchRef.current),
 }));
 
 vi.mock('@/components/nav/top-bar-slot', () => ({
@@ -161,6 +164,7 @@ beforeEach(() => {
   });
   capturedDragEndHandlers.length = 0;
   isMobileMock = false;
+  searchRef.current = '';
 });
 
 afterEach(async () => {
@@ -330,6 +334,198 @@ describe('KanbanBoard — Promise.all 부수 격리(story #3519)', () => {
     }));
     await mount();
     expect(container.textContent).toContain('살아남은 스토리');
+  });
+});
+
+// story #4171(E-MOBILE-SPEED) — 첫 화면 호출 폭포. 목록(스토리)은 카드 몸통(stories·goals·members)만
+// 기다려 뜨고, 스프린트·배지용 호출(실행 요약·라인 상태·의존 그래프·라벨·라벨 연결·대기 게이트)은
+// 그 뒤에 한꺼번에 병렬로 나간다(예전엔 sprints가 스켈레톤을 붙잡고 배지 6건이 순차였다).
+describe('KanbanBoard — 첫 그림은 스토리만 기다린다(story #4171)', () => {
+  it('스프린트·배지 호출이 아직 안 끝나도 스토리가 뜨고, 그 호출들은 동시에 나가 있다', async () => {
+    const SECONDARY = ['/api/sprints', '/api/workflow-executions/story-summary', '/api/stories/workflow-line/status',
+      '/api/dependencies/graph', '/api/labels', '/api/item-labels', '/api/gates?'];
+    const fetchMock = vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = status === 'backlog' ? [{ id: 's1', title: '먼저 뜨는 스토리', status: 'backlog', priority: 'medium', trust_stage: 'queued' }] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) });
+      }
+      if (SECONDARY.some((p) => url.startsWith(p))) return new Promise(() => {}); // 영원히 대기
+      return Promise.resolve({ ok: false, json: async () => null });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    expect(container.textContent).toContain('먼저 뜨는 스토리');
+    const called = (p: string) => fetchMock.mock.calls.some(([u]) => String(u).startsWith(p));
+    for (const p of SECONDARY) expect(called(p), p).toBe(true);
+  });
+});
+
+// story #4275(E-MOBILE-SPEED · 민 기기 실측 — 2단이 1단 마지막 응답 뒤 2~5ms에 출발해 정착 +0.53~0.74초). 1단 결과(story id)가
+// 필요 없는 부수 요청은 1단과 같이 출발한다 — 스토리 목록이 아직 하나도 안 왔어도 이미 나가 있어야 한다. story id가 필요한
+// 두 갈래(실행 요약 · 라인 상태)만 1단 뒤. 뮤테이션: 네 갈래를 1단 뒤로 되돌리면 첫 단언 RED · 두 갈래를 앞으로 당기면
+// 둘째 단언 RED.
+describe('KanbanBoard — story id가 필요 없는 부수 요청은 1단과 같이 출발한다(story #4275)', () => {
+  it('스토리 목록 응답 전에 sprints · 의존 그래프 · 라벨 · 라벨 연결 · 대기 게이트가 이미 나가 있고, 실행 요약 · 라인 상태는 아직', async () => {
+    const INDEPENDENT = ['/api/sprints', '/api/dependencies/graph', '/api/labels', '/api/item-labels', '/api/gates?'];
+    const NEEDS_STORY_IDS = ['/api/workflow-executions/story-summary', '/api/stories/workflow-line/status'];
+    const fetchMock = vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) return new Promise(() => {}); // 1단이 안 끝난다
+      return new Promise(() => {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    const called = (p: string) => fetchMock.mock.calls.some(([u]) => String(u).startsWith(p));
+    expect(called('/api/stories?')).toBe(true);
+    for (const p of INDEPENDENT) expect(called(p), p).toBe(true);
+    for (const p of NEEDS_STORY_IDS) expect(called(p), p).toBe(false);
+  });
+});
+
+describe('KanbanBoard — 스프린트 칩 라벨이 거짓말하지 않는다(story #4171 까디르 QA a)', () => {
+  function stubWithSprints(sprints: 'pending' | 'fail' | Array<{ id: string; title: string }>) {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) return Promise.resolve({ ok: true, json: async () => ({ data: [], meta: { total: 0, nextCursor: null } }) });
+      if (url.startsWith('/api/sprints')) {
+        if (sprints === 'pending') return new Promise(() => {});
+        if (sprints === 'fail') return Promise.resolve({ ok: false, json: async () => null });
+        return Promise.resolve({ ok: true, json: async () => ({ data: sprints }) });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+  }
+  const b = koMessages.board;
+
+  it('?sprint_id가 있고 sprints가 아직이면 «불러오는 중»(«전체 스프린트» 아님)', async () => {
+    searchRef.current = 'sprint_id=spr-1';
+    stubWithSprints('pending');
+    await mount();
+    expect(container.textContent).toContain(b.sprintChipLoading);
+    expect(container.textContent).not.toContain(b.allSprints);
+  });
+
+  it('sprints 실패면 «선택한 스프린트»', async () => {
+    searchRef.current = 'sprint_id=spr-1';
+    stubWithSprints('fail');
+    await mount();
+    expect(container.textContent).toContain(b.sprintChipSelected);
+    expect(container.textContent).not.toContain(b.allSprints);
+  });
+
+  it('sprints가 오면 그 스프린트 이름', async () => {
+    searchRef.current = 'sprint_id=spr-1';
+    stubWithSprints([{ id: 'spr-1', title: '9월 2주차' }]);
+    await mount();
+    expect(container.textContent).toContain('9월 2주차');
+  });
+});
+
+describe('KanbanBoard — 딥링크로 보드와 패널이 함께 열릴 때 명단 전 «알 수 없는 구성원» 0([SID:4300] 까디르 4682 ①)', () => {
+  // 보드는 스토리 · 구성원을 같은 Promise.all로 받고 스토리를 먼저 세운 뒤 구성원 본문을 파싱한다. 구성원 응답은 오되 본문(json)은
+  // 늦게 풀리게 해 «스토리는 섰는데 명단은 아직»인 창을 재현한다.
+  const story = { id: 's1', title: 'S1 딥링크', status: 'backlog', priority: 'medium', assignee_id: 'm1', assignee_ids: ['m1'], trust_stage: 'queued' };
+  let resolveMembersJson!: (v: unknown) => void;
+  function stubDeepLink() {
+    searchRef.current = 'story=s1';
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) {
+        const data = new URL(url, 'http://localhost').searchParams.get('status') === 'backlog' ? [story] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data, meta: { total: data.length, nextCursor: null } }) });
+      }
+      if (url.startsWith('/api/members')) return Promise.resolve({ ok: true, json: () => new Promise((r) => { resolveMembersJson = r; }) });
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+  }
+
+  it('명단 본문을 받기 전엔 «알 수 없는 구성원»이 어디에도 안 서고, 명단이 오면 패널에 이름', async () => {
+    stubDeepLink();
+    await mount();
+    const everywhere = () => document.body.textContent ?? '';
+    expect(everywhere()).not.toContain(koMessages.common.memberUnknown);
+    await act(async () => { resolveMembersJson({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('S1 딥링크');
+    expect(dialog?.textContent).toContain('Alice');
+    expect(everywhere()).not.toContain(koMessages.common.memberUnknown);
+  });
+
+  // 지금은 첫 불러오기 스켈레톤이 명단 파싱까지 패널을 가려(loading → setMembersLoaded 뒤 해제) 위 테스트가 이 줄 없이도 초록이다 —
+  // 스켈레톤이 바뀌어도(예: 4307 뒤 부분 로딩) 패널이 패널 기본값(true)으로 «알 수 없는»을 먼저 세우지 않게 배선을 핀으로 둔다.
+  it('보드가 패널에 memberMapLoaded를 명시로 넘긴다(보드의 명단 상태 그대로) — 패널 기본값(true)에 기대지 않는다', async () => {
+    const seen: Array<boolean | undefined> = [];
+    vi.resetModules();
+    vi.doMock('./story-detail-panel', () => ({
+      StoryDetailPanel: (props: { memberMapLoaded?: boolean }) => { seen.push(props.memberMapLoaded); return <div role="dialog">panel</div>; },
+    }));
+    try {
+      stubDeepLink();
+      await mount();
+      await act(async () => { resolveMembersJson({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      expect(seen.length).toBeGreaterThan(0); // 패널이 그려졌다
+      expect(seen.every((v) => typeof v === 'boolean')).toBe(true); // 넘기지 않으면 undefined(패널 기본값 true로 떨어짐)
+      expect(seen[seen.length - 1]).toBe(true);
+    } finally {
+      vi.doUnmock('./story-detail-panel');
+      vi.resetModules();
+    }
+  });
+});
+
+describe('KanbanBoard — 늦게 온 이전 실행 결과는 버린다(story #4171 까디르 QA c)', () => {
+  it('프로젝트 전환 뒤 이전 프로젝트 goals가 늦게 파싱돼도 새 goals를 덮지 않는다', async () => {
+    let resolveOldGoals!: (v: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const u = new URL(url, 'http://localhost');
+      const pid = u.searchParams.get('project_id');
+      if (url.startsWith('/api/stories?')) {
+        const data = u.searchParams.get('status') === 'backlog'
+          ? [{ id: `s-${pid}`, title: `스토리 ${pid}`, status: 'backlog', priority: 'medium', trust_stage: 'queued', epic_id: 'e1' }] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data, meta: { total: data.length, nextCursor: null } }) });
+      }
+      if (url.startsWith('/api/goals')) {
+        if (pid === 'proj-old') return Promise.resolve({ ok: true, json: () => new Promise((r) => { resolveOldGoals = r; }) });
+        return Promise.resolve({ ok: true, json: async () => ({ data: [{ id: 'e1', title: '새 목표' }], meta: {} }) });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+    const { KanbanBoard } = await import('./kanban-board');
+    const { ToastProvider } = await import('@/components/ui/toast');
+    const render = (projectId: string) => root.render(wrap(
+      <ToastProvider><KanbanBoard projectId={projectId} wsSlug="ws-1" projSlug="p" /></ToastProvider>,
+    ));
+    await act(async () => { render('proj-old'); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { render('proj-new'); });
+    await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('새 목표');
+    await act(async () => { resolveOldGoals({ data: [{ id: 'e1', title: '옛 목표' }], meta: {} }); for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('새 목표');
+    expect(container.textContent).not.toContain('옛 목표');
+  });
+});
+
+describe('KanbanBoard — 카드 높이 바꾸는 배지는 한 번에(story #4171 유나 design)', () => {
+  it('라벨이 먼저 와도 대기 게이트가 올 때까지 카드에 안 붙고, 마지막이 오면 함께 붙는다', async () => {
+    let resolveGates!: (v: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const data = status === 'backlog' ? [{ id: 's1', title: '배지 스토리', status: 'backlog', priority: 'medium', trust_stage: 'queued' }] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data, meta: { total: data.length, nextCursor: null } }) });
+      }
+      if (url.startsWith('/api/labels')) return Promise.resolve({ ok: true, json: async () => [{ id: 'l1', name: '먼저온라벨', color: '#ff0000' }] });
+      if (url.startsWith('/api/item-labels')) return Promise.resolve({ ok: true, json: async () => [{ item_id: 's1', label_id: 'l1' }] });
+      if (url.startsWith('/api/gates?')) return Promise.resolve({ ok: true, json: () => new Promise((r) => { resolveGates = r; }) });
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+    await mount();
+    await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('배지 스토리');
+    expect(container.textContent).not.toContain('먼저온라벨');
+    await act(async () => { resolveGates([]); for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('먼저온라벨');
   });
 });
 
@@ -1398,5 +1594,523 @@ describe('KanbanBoard — org 라벨 오버라이드 소비(#3287 AC4)', () => {
     expect(container.textContent).toContain('입력 필요');
     // 카드 내부 배지는 story.status(canonical, 축과 무관)를 보여주므로 오버라이드가 반영된다.
     expect(container.textContent).toContain('아이디어');
+  });
+});
+
+// story #4306(유나 4646 재측) — 보드 필터 메뉴(스프린트 · 목표 · 담당자 · 라벨)를 열면 초점이 검색칸으로 가야 한다. 예전엔 메뉴가 열리며
+// 첫 항목으로 초점을 옮겨(키보드로 열 때 Base UI 목록 탐색) 입력이 타이프어헤드로 새고 검색칸이 비었다. 뮤테이션: MenuSearchInput 대신
+// 옛 `<Input autoFocus>`로 되돌리면 RED.
+describe('KanbanBoard — 필터 메뉴를 열면 초점 = 검색칸(story #4306)', () => {
+  const B = koMessages.board as unknown as Record<string, string>;
+  const frames = async () => {
+    for (let i = 0; i < 4; i += 1) {
+      await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(null))); });
+    }
+  };
+  const triggerFor = (label: string) => [...container.querySelectorAll('button')]
+    .find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
+
+  it.each([
+    ['스프린트', 'allSprints', 'searchSprints'],
+    ['목표', 'allEpics', 'searchEpics'],
+    ['담당자', 'allAssignees', 'searchAssignees'],
+  ])('⭐%s 필터 — 키보드로 열어도 초점이 검색칸 · 바로 입력하면 검색칸에 들어간다', async (_name, triggerKey, placeholderKey) => {
+    stubFetch([]);
+    await mount();
+    const trigger = triggerFor(B[triggerKey]!);
+    expect(trigger, `${triggerKey} 트리거`).toBeDefined();
+    await act(async () => { trigger!.focus(); trigger!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); trigger!.click(); });
+    await frames();
+    const input = document.querySelector(`input[placeholder="${B[placeholderKey]}"]`) as HTMLInputElement | null;
+    expect(input, `${placeholderKey} 검색칸`).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('⭐담당자 — 열자마자 입력하면(검색칸을 누르지 않고) 검색칸에 들어가 목록이 좁혀진다', async () => {
+    stubFetch([], [
+      { id: 'm1', name: 'Alice', type: 'human' },
+      { id: 'm2', name: 'Bob', type: 'human' },
+    ]);
+    await mount();
+    const trigger = triggerFor(B.allAssignees!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const typed = document.activeElement as HTMLInputElement;
+    expect(typed.placeholder).toBe(B.searchAssignees);
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(typed, 'ali');
+      typed.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const names = [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent ?? '');
+    expect(names.some((n) => n.includes('Alice'))).toBe(true);
+    expect(names.some((n) => n.includes('Bob'))).toBe(false);
+  });
+
+  it('포인터로 열어도(pointerdown → click) 초점 = 검색칸', async () => {
+    stubFetch([]);
+    await mount();
+    const trigger = triggerFor(B.allSprints!);
+    await act(async () => {
+      const pointer = (type: string) => Object.assign(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail: 1 }), { pointerType: 'mouse', pointerId: 1 });
+      trigger!.dispatchEvent(pointer('pointerdown'));
+      trigger!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+      trigger!.dispatchEvent(pointer('pointerup'));
+      trigger!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+      trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+    });
+    await frames();
+    expect((document.activeElement as HTMLInputElement | null)?.placeholder).toBe(B.searchSprints);
+  });
+
+  it('검색칸에서 누른 글자는 메뉴 타이프어헤드로 새지 않는다(초점이 항목으로 튀지 않음)', async () => {
+    stubFetch([], [
+      { id: 'm1', name: 'Alice', type: 'human' },
+      { id: 'm2', name: 'Bob', type: 'human' },
+    ]);
+    await mount();
+    const trigger = triggerFor(B.allAssignees!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.activeElement as HTMLInputElement;
+    expect(input.placeholder).toBe(B.searchAssignees);
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true })); });
+    await frames();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('⭐Escape는 메뉴로 통과 — 메뉴가 닫히고 초점이 트리거로 돌아온다(까디르 QA · PO 10:06Z)', async () => {
+    stubFetch([]);
+    await mount();
+    const trigger = triggerFor(B.allSprints!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.activeElement as HTMLInputElement;
+    expect(input.placeholder).toBe(B.searchSprints);
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    await frames();
+    expect(document.querySelector(`input[placeholder="${B.searchSprints}"]`)).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('⭐↓ = 목록 첫 항목(보이는 순서 · «전체 담당자») → 첫 항목에서 ↑ = 검색칸으로(맨 끝으로 감지 않음) · 유나 확정', async () => {
+    stubFetch([], [{ id: 'm1', name: 'Alice', type: 'human' }, { id: 'm2', name: 'Bob', type: 'human' }]);
+    await mount();
+    const trigger = triggerFor(B.allAssignees!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.activeElement as HTMLInputElement;
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); });
+    await frames();
+    const first = document.activeElement as HTMLElement;
+    expect(first.getAttribute('role')).toBe('menuitem');
+    expect(first).toBe(document.querySelector('[role="menu"] [role="menuitem"]'));
+    expect(first.textContent).toContain(B.allAssignees);
+    await act(async () => { first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })); });
+    await frames();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('Enter(검색칸) = 아무것도 안 함 — 메뉴는 열린 채 · 초점 검색칸', async () => {
+    stubFetch([]);
+    await mount();
+    const trigger = triggerFor(B.allSprints!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.activeElement as HTMLInputElement;
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    await frames();
+    expect(document.activeElement).toBe(input);
+    expect(document.querySelector(`input[placeholder="${B.searchSprints}"]`)).not.toBeNull();
+  });
+
+  it.each([
+    ['allSprints', 'searchSprints'],
+    ['allEpics', 'searchEpics'],
+    ['allAssignees', 'searchAssignees'],
+  ])('검색칸 접근 이름 = 번역된 자리표시 글자(끝 말줄임 뺌) — %s', async (triggerKey, placeholderKey) => {
+    stubFetch([]);
+    await mount();
+    const trigger = triggerFor(B[triggerKey]!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.querySelector(`input[placeholder="${B[placeholderKey]}"]`)!;
+    expect(input.getAttribute('aria-label')).toBe(B[placeholderKey]!.replace(/(\.{3}|…)\s*$/, '').trim());
+    expect(input.getAttribute('aria-label')).not.toMatch(/(\.{3}|…)$/);
+  });
+
+  it.each(['allSprints', 'allEpics', 'allAssignees'])('⭐#4308 — %s 메뉴의 목록 스크롤 칸은 탭 순서 밖(tabindex=-1) · 이름 없는 초점 칸 0', async (triggerKey) => {
+    stubFetch([], [{ id: 'm1', name: 'Alice', type: 'human' }]);
+    await mount();
+    const trigger = triggerFor(B[triggerKey]!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const menu = document.querySelector('[role="menu"]')!;
+    const scrollers = [...menu.querySelectorAll<HTMLElement>('div')].filter((el) => /\boverflow-y-auto\b/.test(el.className));
+    expect(scrollers.length).toBeGreaterThan(0);
+    for (const el of scrollers) expect(el.getAttribute('tabindex')).toBe('-1');
+  });
+});
+
+// story #4307(유나 · PO 10:42Z) — 스프린트 · 담당자 필터는 서버 조회 조건이라 고르면 다시 불러온다. 예전엔 그동안 `if (loading) return <KanbanSkeleton />`
+// 가 보드 전체(툴바 포함)를 갈아끼워 필터 버튼이 사라지고 초점이 body로 빠졌다(목표 · 라벨은 화면 안 거르기라 안 빠짐). 이제 전면 스켈레톤은
+// 첫 불러오기만 · 다시 불러오는 동안 툴바는 그대로 · 컬럼 자리만 스켈레톤 + aria-busy. 뮤테이션: 전면 스켈레톤을 되살리면 RED.
+describe('KanbanBoard — 필터를 고른 뒤 초점 = 그 필터 버튼 · 다시 불러오는 동안 툴바 유지(story #4307)', () => {
+  const B = koMessages.board as unknown as Record<string, string>;
+  const frames = async () => {
+    for (let i = 0; i < 4; i += 1) {
+      await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(null))); });
+    }
+  };
+  let releaseRefetch: (() => void) | null = null;
+
+  function stubBoard() {
+    releaseRefetch = null;
+    let gate: Promise<void> | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = new URL(url, 'http://localhost');
+      if (u.pathname === '/api/stories') {
+        // 필터가 걸린 다시 불러오기는 붙잡아 둔다(불러오는 동안의 화면을 재려고).
+        if (u.searchParams.get('sprint_id') || u.searchParams.get('assignee_id')) {
+          gate ??= new Promise<void>((r) => { releaseRefetch = r; });
+          await gate;
+        }
+        return { ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) };
+      }
+      if (u.pathname === '/api/sprints') return { ok: true, json: async () => ({ data: [{ id: 'spr-1', title: '스프린트 A', status: 'active' }] }) };
+      if (u.pathname === '/api/goals') return { ok: true, json: async () => ({ data: [{ id: 'ep-1', title: '목표 A' }], meta: { nextCursor: null } }) };
+      if (u.pathname === '/api/members') return { ok: true, json: async () => ({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }) };
+      if (u.pathname === '/api/labels') return { ok: true, json: async () => [{ id: 'lb-1', name: '라벨 A', color: '#000' }] };
+      return { ok: false, json: async () => null };
+    }));
+  }
+
+  const triggerFor = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
+  const itemNamed = (name: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => el.textContent?.includes(name));
+
+  it.each([
+    ['스프린트', 'allSprints', '스프린트 A', true],
+    ['담당자', 'allAssignees', 'Alice', true],
+    ['목표', 'allEpics', '목표 A', false],
+    ['라벨', 'allLabels', '라벨 A', false],
+  ])('⭐%s — 키보드로 고른 뒤 초점 = 그 필터 버튼(다시 불러오는 동안에도 툴바 · 버튼 그대로)', async (_n, triggerKey, itemName, refetches) => {
+    stubBoard();
+    await mount();
+    const trigger = triggerFor(B[triggerKey]!)!;
+    expect(trigger).toBeDefined();
+    await act(async () => { trigger.focus(); trigger.click(); });
+    await frames();
+    const item = itemNamed(itemName)!;
+    expect(item, `${itemName} 항목`).toBeDefined();
+    await act(async () => { item.focus(); item.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); item.click(); });
+    await mount(); // 바뀐 쿼리(searchRef)로 다시 그림 = 실제 앱의 useSearchParams 갱신
+    await frames();
+    const area = container.querySelector('[data-testid="kanban-content-area"]');
+    if (refetches) {
+      // 다시 불러오는 중 — 툴바의 필터 버튼은 그대로 · 컬럼 자리만 스켈레톤 + aria-busy(툴바엔 안 검).
+      expect(area?.getAttribute('aria-busy')).toBe('true');
+      expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).not.toBeNull();
+    }
+    // 초점은 바로 그 필터 버튼(같은 DOM 노드 — 툴바가 갈아끼워지지 않았으니 그대로 남아 있다).
+    expect(document.activeElement).toBe(trigger);
+    expect(container.contains(trigger)).toBe(true);
+    await act(async () => { releaseRefetch?.(); });
+    await frames();
+    expect(area?.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('포인터로 고른 담당자도 초점 = 필터 버튼 · 다시 불러오는 동안 전면 스켈레톤이 아니다(툴바 버튼이 DOM에 남음)', async () => {
+    stubBoard();
+    await mount();
+    const trigger = triggerFor(B.allAssignees!)!;
+    await act(async () => { trigger.click(); });
+    await frames();
+    await act(async () => { itemNamed('Alice')!.click(); });
+    await mount();
+    await frames();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).not.toBeNull();
+    const assigneeButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Alice'));
+    expect(assigneeButton, '툴바의 담당자 버튼(이제 «Alice»)이 DOM에 남아 있다').toBeDefined();
+    expect(document.activeElement).toBe(trigger);
+    await act(async () => { releaseRefetch?.(); });
+    await frames();
+  });
+
+  it('목록 보기에서도 같은 원칙 — 다시 불러오는 동안 행 자리만 스켈레톤(툴바 그대로 · 유나 확정)', async () => {
+    stubBoard();
+    await mount();
+    const listToggle = container.querySelector(`button[aria-label="${B.listViewLabel}"]`) as HTMLButtonElement;
+    await act(async () => { listToggle.click(); });
+    const trigger = triggerFor(B.allSprints!)!;
+    await act(async () => { trigger.click(); });
+    await frames();
+    await act(async () => { itemNamed('스프린트 A')!.click(); });
+    await mount();
+    await frames();
+    expect(container.querySelector('[data-testid="kanban-list-skeleton"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).toBeNull();
+    expect(container.contains(trigger)).toBe(true);
+    await act(async () => { releaseRefetch?.(); });
+    await frames();
+  });
+
+  // PO 10:51Z — 다시 불러오기가 실패하면(망 오류 · 5xx) 스켈레톤 · busy가 남지 않고 컬럼 자리에 오류 + 다시 시도 · 늦게 실패한 옛 요청은 새 화면을 덮지 않는다.
+  type Outcome = 'ok' | 'fail5xx' | 'network';
+  function stubControlled(plan: { sprint: Outcome; assignee?: Outcome }) {
+    const waiters: Record<string, () => void> = {};
+    const gates: Record<string, Promise<void>> = {};
+    const gate = (key: string) => (gates[key] ??= new Promise<void>((r) => { waiters[key] = r; }));
+    let retryOk = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = new URL(url, 'http://localhost');
+      if (u.pathname === '/api/stories') {
+        const key = u.searchParams.get('assignee_id') ? 'assignee' : u.searchParams.get('sprint_id') ? 'sprint' : null;
+        if (key && !retryOk) {
+          await gate(key);
+          const outcome = key === 'sprint' ? plan.sprint : (plan.assignee ?? 'ok');
+          if (outcome === 'network') throw new TypeError('Failed to fetch');
+          if (outcome === 'fail5xx') return { ok: false, status: 503, json: async () => null };
+        }
+        return { ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) };
+      }
+      if (u.pathname === '/api/sprints') return { ok: true, json: async () => ({ data: [{ id: 'spr-1', title: '스프린트 A', status: 'active' }] }) };
+      if (u.pathname === '/api/members') return { ok: true, json: async () => ({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }) };
+      return { ok: false, json: async () => null };
+    }));
+    return {
+      release: async (key: string) => { await act(async () => { gate(key); waiters[key]?.(); }); await frames(); },
+      allowRetry: () => { retryOk = true; },
+    };
+  }
+  const choose = async (triggerKey: string, itemName: string) => {
+    const trigger = triggerFor(B[triggerKey]!)!;
+    await act(async () => { trigger.click(); });
+    await frames();
+    await act(async () => { itemNamed(itemName)!.click(); });
+    await mount();
+    await frames();
+    return trigger;
+  };
+
+  it.each([['5xx', 'fail5xx'], ['망 오류', 'network']] as const)('⭐다시 불러오기 실패(%s) — busy가 풀리고 컬럼 자리에 오류 + 다시 시도 · 다시 시도하면 컬럼이 돌아온다', async (_n, outcome) => {
+    const ctl = stubControlled({ sprint: outcome });
+    await mount();
+    await choose('allSprints', '스프린트 A');
+    const area = () => container.querySelector('[data-testid="kanban-content-area"]');
+    expect(area()?.getAttribute('aria-busy')).toBe('true');
+    await ctl.release('sprint');
+    expect(area()?.getAttribute('aria-busy')).toBeNull();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).toBeNull();
+    const err = container.querySelector('[data-testid="kanban-load-error"]');
+    expect(err?.getAttribute('role')).toBe('alert');
+    expect(err?.textContent).toContain((koMessages.board as unknown as Record<string, string>).boardLoadFailed);
+    // 버튼은 공용 «다시 시도»(common.retry) — 남의 자리 키(에픽 줄)를 빌리지 않는다(PO 10:57Z).
+    expect(container.querySelector('[data-testid="kanban-load-retry"]')?.textContent).toBe(koMessages.common.retry);
+    ctl.allowRetry();
+    await act(async () => { (container.querySelector('[data-testid="kanban-load-retry"]') as HTMLButtonElement).click(); });
+    await frames();
+    expect(container.querySelector('[data-testid="kanban-load-error"]')).toBeNull();
+    expect(area()?.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('⭐그 사이 필터를 또 바꾸면 — 앞(스프린트) 요청이 늦게 실패해도 새(담당자) 조건 화면을 덮지 않는다', async () => {
+    const ctl = stubControlled({ sprint: 'fail5xx', assignee: 'ok' });
+    await mount();
+    await choose('allSprints', '스프린트 A');
+    await choose('allAssignees', 'Alice');
+    await ctl.release('assignee');
+    expect(container.querySelector('[data-testid="kanban-content-area"]')?.getAttribute('aria-busy')).toBeNull();
+    await ctl.release('sprint'); // 옛 요청이 이제야 실패
+    expect(container.querySelector('[data-testid="kanban-load-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).toBeNull();
+  });
+});
+
+// story #4284 — BE `team_members.name`은 nullable(표시 이름 없는 휴먼 · story #3758). FE 타입이 `name: string`이라 tsc가 못 잡았고,
+// 이름 없는 구성원이 하나라도 있으면 담당자 필터 렌더(`m.name.toLowerCase()`)에서 throw → 일감 보드 전체가 오류 화면이었다.
+describe('KanbanBoard — 이름 없는 구성원(story #4284)', () => {
+  const MEMBERS = [
+    { id: 'm-unnamed', name: null, type: 'human' },
+    { id: 'm-named', name: '송윤재', type: 'human' },
+    { id: 'a-1', name: '디디', type: 'agent' },
+  ];
+
+  async function openAssigneeFilter(): Promise<HTMLElement> {
+    const trigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.board.allAssignees));
+    expect(trigger, '담당자 필터 버튼').toBeTruthy();
+    // DropdownMenu는 Base UI Menu — 클릭으로 열린다(내용은 body 포털).
+    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
+    expect(menu, '담당자 필터 메뉴').toBeTruthy();
+    return menu!;
+  }
+
+  it('⭐보드가 오류 화면 없이 그려지고, 담당자 필터에 «이름 없는 구성원»이 뜬다', async () => {
+    stubFetch([{ id: 's1', title: '이름 없는 담당자 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-unnamed' }], MEMBERS);
+    await mount();
+    expect(container.textContent).toContain('이름 없는 담당자 스토리');
+    const menu = await openAssigneeFilter();
+    expect(menu.textContent).toContain(koMessages.common.memberUnnamed);
+    expect(menu.textContent).toContain('송윤재');
+  });
+
+  it('⭐보드 전체 검색 — 담당자의 보이는 라벨(«이름 없는»)로도 스토리가 찾힌다', async () => {
+    stubFetch([
+      { id: 's1', title: '이름 없는 사람 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-unnamed' },
+      { id: 's2', title: '실명 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-named' },
+    ], MEMBERS);
+    await mount();
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.getAttribute('title') === koMessages.board.searchPlaceholder)!;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('input[type="search"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, '이름 없는 구성원'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(container.textContent).toContain('이름 없는 사람 스토리');
+    expect(container.textContent).not.toContain('실명 스토리');
+  });
+
+  it('⭐이름 없는 사람 둘 → 필터 행이 id 꼬리로 갈리고, 고른 뒤 트리거도 같은 라벨 · 묶음에 하나뿐인 이름 없는 에이전트는 꼬리 없음(유나 판정)', async () => {
+    const TWO = [
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'human' },
+      { id: 'c3000000-0000-4000-8000-000000000003', name: null, type: 'agent' },
+    ];
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], TWO);
+    await mount();
+    const menu = await openAssigneeFilter();
+    const rowTexts = [...menu.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim() ?? '');
+    const unnamed = koMessages.common.memberUnnamed;
+    expect(rowTexts).toContain(`${unnamed} · a1000000`);
+    expect(rowTexts).toContain(`${unnamed} · b2000000`);
+    expect(rowTexts, '에이전트 묶음엔 이름 없는 행이 하나 — 꼬리 없음').toContain(unnamed);
+  });
+
+  it('⭐이름 없는 사람 둘 중 하나를 고른 상태 → 필터 트리거도 그 행 라벨(id 꼬리)', async () => {
+    searchRef.current = 'assignee_id=b2000000-0000-4000-8000-000000000002';
+    try {
+      stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], [
+        { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+        { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'human' },
+      ]);
+      await mount();
+      const trigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(`${koMessages.common.memberUnnamed} · b2000000`));
+      expect(trigger, '필터 트리거가 고른 행과 같은 라벨').toBeTruthy();
+    } finally {
+      searchRef.current = '';
+    }
+  });
+
+  it('담당자 검색 — 보이는 라벨로 찾는다(«이름 없는»으로 이름 없는 구성원이 걸리고, 실명 검색에서 오류 없음)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], MEMBERS);
+    await mount();
+    const menu = await openAssigneeFilter();
+    const input = menu.querySelector('input') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, '이름 없는'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(menu.textContent).toContain(koMessages.common.memberUnnamed);
+    expect(menu.textContent).not.toContain('송윤재');
+    await act(async () => { setter.call(input, '송윤'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(menu.textContent).toContain('송윤재');
+    expect(menu.textContent).not.toContain(koMessages.common.memberUnnamed);
+  });
+});
+
+// story #4310 AC3 — 보드 요청이 응답 없이 걸려도 fetchWithAuth 시간 제한(30s) 뒤 화면이 풀린다. 예전엔 제한이 없어 스켈레톤이 CF 524(~100초)까지 그대로였다.
+// 실제 fetch처럼 신호가 끊겨야만 reject하는 가짜 fetch.
+describe('KanbanBoard — 걸린 요청은 30s 뒤 풀림(story #4310)', () => {
+  function stubHanging(hang: (pathname: string) => boolean) {
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      const u = new URL(url, 'http://localhost');
+      if (hang(u.pathname)) {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+        });
+      }
+      if (u.pathname === '/api/stories') return Promise.resolve({ ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) });
+      if (u.pathname === '/api/sprints') return Promise.resolve({ ok: true, json: async () => ({ data: [] }) });
+      if (u.pathname === '/api/goals') return Promise.resolve({ ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) });
+      if (u.pathname === '/api/members') return Promise.resolve({ ok: true, json: async () => ({ data: [] }) });
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+  }
+  const skeleton = () => container.querySelector('[data-testid="kanban-columns-skeleton"]');
+  const loadError = () => container.querySelector('[data-testid="kanban-load-error"]');
+
+  it('⭐스토리 요청이 걸리면 30s 뒤 컬럼 자리에 오류 + 다시 시도(4663과 같은 모양) — 그 전엔 스켈레톤', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      stubHanging((p) => p === '/api/stories');
+      await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+      expect(skeleton(), '30s 전엔 불러오는 중').not.toBeNull();
+      expect(loadError()).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(skeleton()).toBeNull();
+      expect(loadError()?.getAttribute('role')).toBe('alert');
+      expect(loadError()?.textContent).toContain((koMessages.board as unknown as Record<string, string>).boardLoadFailed);
+      expect(container.querySelector('[data-testid="kanban-load-retry"]')?.textContent).toBe(koMessages.common.retry);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐곁 요청(목표)만 걸려도 30s 뒤 보드가 그려짐 — 스켈레톤이 남지 않음(곁 요청은 null로 격리)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      stubHanging((p) => p === '/api/goals');
+      await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+      expect(skeleton(), '30s 전엔 곁 요청을 기다리는 중').not.toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(skeleton()).toBeNull();
+      expect(loadError(), '스토리는 성공 — 오류 칸 아님').toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// [SID:4300] 보드 카드 담당 — 프로젝트 구성원 목록(담당자 고르는 목록 · 권한 있는 사람)에 없는 담당자(다른 프로젝트 에이전트 · 권한 회수)가
+// 카드에서 조용히 빠지던 것을 조직 범위(비활성 포함)로 채운다. 첫 화면 뒤 · 없을 때만 — 다 풀리면 조직 요청 0.
+describe('KanbanBoard — 카드 담당 이름 조직 범위 보충([SID:4300])', () => {
+  function stubWithOrg(members: Array<Record<string, unknown>>, orgRows: Array<Record<string, unknown>>) {
+    const calls: string[] = [];
+    const stories = [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: 'ag-other', assignee_ids: ['ag-other'], trust_stage: deriveDefaultTrustStage('backlog') }];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = stories.filter((st) => st.status === status);
+        return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+      }
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: members }) };
+      if (url === '/api/team-members?include_inactive=true') return { ok: true, json: async () => ({ data: orgRows }) };
+      return { ok: false, json: async () => null };
+    }));
+    return calls;
+  }
+  const settle = async () => { for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+
+  it('프로젝트 목록 밖 담당자 → 조직 목록 한 번으로 카드에 이름', async () => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human', bottomDockBannerSlot: bannerSlot, orgId: 'org-1',
+    });
+    const calls = stubWithOrg([], [{ id: 'ag-other', name: '다른봇', type: 'agent' }]);
+    await mount();
+    await settle();
+    expect(container.querySelector('[title="다른봇"]')).not.toBeNull();
+    expect(calls.filter((u) => u === '/api/team-members?include_inactive=true')).toHaveLength(1);
+  });
+
+  it('담당자가 전부 프로젝트 목록에 있으면 조직 요청 0', async () => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human', bottomDockBannerSlot: bannerSlot, orgId: 'org-1',
+    });
+    const calls = stubWithOrg([{ id: 'ag-other', name: '우리봇', type: 'agent' }], []);
+    await mount();
+    await settle();
+    expect(container.querySelector('[title="우리봇"]')).not.toBeNull();
+    expect(calls.filter((u) => u.startsWith('/api/team-members'))).toHaveLength(0);
   });
 });

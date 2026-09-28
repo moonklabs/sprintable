@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Autocomplete } from '@base-ui/react/autocomplete';
+import { scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
@@ -10,6 +12,7 @@ import {
   FolderKanban,
   Gauge,
   GitPullRequest,
+  Lightbulb,
   List,
   Search,
   UserPlus,
@@ -19,6 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { fetchWithAuth } from '@/lib/db/client';
 import { NAV_GROUPS, CHAT_CENTER_ITEM, LEGACY_NAV_ITEMS } from '@/lib/nav-config';
 import { pickEuroJosa } from '@/lib/korean-particle';
@@ -77,6 +81,9 @@ export const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey:
   // RED) — WorkspaceFrameTabs가 얹은 탭 경로는 이 가드가 진입점으로 안 센다(4264가 retro를
   // 여기 앵커한 선례 그대로) — work-list도 동형으로 앵커.
   { id: 'go-work-list', icon: List, labelKey: 'goWorkList', href: '/work-list' },
+  // story #3989(「일감」 흡수 3/N) — 「가설」 탭도 WorkspaceFrameTabs 전용 진입점(router.push
+  // 템플릿 리터럴)뿐이라 같은 이유로 앵커가 필요하다(go-work-list·go-retro 선례 그대로).
+  { id: 'go-hypotheses', icon: Lightbulb, labelKey: 'goHypotheses', href: '/hypotheses' },
 ];
 
 export interface DerivedNavItem {
@@ -112,7 +119,8 @@ export function deriveNavigateItems(resolveResourceHref: (resource: string) => s
     if (navItem.id === 'board') {
       return {
         id: navItem.id, icon: navItem.icon, labelKey: navItem.labelKey,
-        href: `${resolveResourceHref('flow')}?view=list`, labelSource: 'nav', isWorkspaceless: false,
+        // story #4231 다음 조각 — 쿼리는 감싸기 전에(폴백이 `?p=`를 실어도 `?`가 둘이 되지 않게).
+        href: resolveResourceHref('flow?view=list'), labelSource: 'nav', isWorkspaceless: false,
       };
     }
     if (navItem.id === 'docs') {
@@ -128,9 +136,11 @@ export function deriveNavigateItems(resolveResourceHref: (resource: string) => s
       labelSource: 'nav', isWorkspaceless: !isResource,
     };
   });
+  // story #4274(PO · 유나 실측 «메뉴 목적지 전부») — 앵커(스프린트 · 에픽 · 회고 · 목록 · 가설)도 프로젝트 자원이라 다른 resource 항목과 같이
+  // `/{ws}/{proj}/{자원}` 직접 주소로. 예전엔 flat `/sprints`(+`?p=`)라 proxy 307 동안 로딩 경계가 설 자리가 없었다.
   const fromAnchors: DerivedNavItem[] = GUARD_ANCHOR_ITEMS.map((anchor) => ({
-    id: anchor.id, icon: anchor.icon, labelKey: anchor.labelKey, href: anchor.href,
-    labelSource: 'anchor', isWorkspaceless: true,
+    id: anchor.id, icon: anchor.icon, labelKey: anchor.labelKey, href: resolveResourceHref(anchor.href.replace(/^\//, '')),
+    labelSource: 'anchor', isWorkspaceless: false,
   }));
   return [...fromNav, ...fromAnchors];
 }
@@ -154,6 +164,7 @@ export interface CommandPaletteProps {
 
 export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }: CommandPaletteProps) {
   const router = useRouter();
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const locale = useLocale();
   const t = useTranslations('commandPalette');
   const tNav = useTranslations('nav');
@@ -165,8 +176,9 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }
   const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
+  // story #4231 다음 조각 — 사이드바 · 탭바와 같은 헬퍼(slug 모름 폴백도 현재 p를 싣는다 · 사본 조립 0).
   function resourceHref(resource: string): string {
-    return orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
+    return scopedResourceHref(resource, orgSlug, currentProjectSlug, flatHref);
   }
   const docsHref = resourceHref('docs');
   // story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/board` 라우트가 삭제되고
@@ -177,7 +189,8 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   // deriveNavigateItems()도 'board' id에 이 식과 동일한 조립(resourceHref('flow')+
   // '?view=list')을 쓴다(그 함수 안 주석 참고) — actionItems는 팔레트 navigate 목록 밖
   // 별도 소비처라 이 변수를 그대로 유지한다(사본 아님, 서로 다른 소비처의 같은 상수).
-  const boardHref = `${resourceHref('flow')}?view=list`;
+  // story #4231 다음 조각 — 쿼리는 감싸기 **전에** 붙인다(폴백이 `?p=`를 실으면 뒤에 `?view=`를 이으면 `?`가 둘이 된다).
+  const boardHref = resourceHref('flow?view=list');
   // story #3698(IA·후속, PO 確定 2026-09-08) — navigate 목적지를 NAV_GROUPS(+CHAT_CENTER_
   // ITEM)에서 파생한다(하드코딩 7→전수 25). 라벨·경로는 nav-config.ts 단일 정본 재사용
   // (사본 0) — 사이드바에 있는 목적지는 전부 ⌘K로도 도달한다(S4 AC2 실충족). go-sprints·
@@ -197,18 +210,19 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
       group: 'navigate' as const,
       icon: item.icon,
       label: item.labelSource === 'anchor' ? t(item.labelKey) : goDestinationLabel(tNav(item.labelKey)),
-      href: item.href,
+      // story #4231 — 워크스페이스 없는(flat) 목적지는 사이드바·더보기와 같이 현재 프로젝트(`?p=`)를 싣는다.
+      href: item.isWorkspaceless ? flatHref(item.href) : item.href,
       shortcut: NAV_ITEM_SHORTCUTS[item.id],
     }));
     // resourceHref는 orgSlug·currentProjectSlug의 순수 파생(그 값들이 이미 deps에 있음) —
     // 함수 참조 자체를 deps에 넣으면 매 렌더 새로 만들어져 메모가 무의미해진다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgSlug, currentProjectSlug, t, tNav, locale]);
+  }, [orgSlug, currentProjectSlug, t, tNav, locale, flatHref]);
   const [query, setQuery] = useState('');
-  const [activeIndex, setActiveIndex] = useState(0);
+  // story #4380 — 켜진 항목 = Base UI Autocomplete가 알려 주는 값(키보드 · 포인터 둘 다). 명령 영향 줄(ActionGroup)과 aria-selected가 이걸 본다.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [docResults, setDocResults] = useState<DocResult[]>([]);
   const [contextStory, setContextStory] = useState<StoryTitleResult | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // context 스토리 제목 lazy 조회 — 열릴 때만, contextStoryId 있을 때만(1콜).
@@ -227,7 +241,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }, [open, contextStoryId]);
 
   const actionItems = useMemo(
-    () => buildActionCommands(t, contextStory ? { storyId: contextStory.id, storyTitle: contextStory.title, boardHref } : undefined),
+    () => buildActionCommands(t, flatHref, contextStory ? { storyId: contextStory.id, storyTitle: contextStory.title, boardHref } : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t는 로케일 불변 함수
     [contextStory, boardHref],
   );
@@ -274,25 +288,19 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
 
   // 그룹 순서 — story context 있으면 "이 스토리 명령"이 위로 랭크(doc §3): action 그룹이
   // navigate 위로. context 없으면 기존 순서 그대로(회귀 0).
-  const sections = useMemo(() => {
-    const groups: Array<{ key: 'navigate' | 'action' | 'doc'; items: CommandItem[] | ActionCommand[] | DocResult[] }> = contextStory
-      ? [{ key: 'action', items: filteredActions }, { key: 'navigate', items: filteredNavigate }, { key: 'doc', items: displayedDocResults }]
-      : [{ key: 'navigate', items: filteredNavigate }, { key: 'action', items: filteredActions }, { key: 'doc', items: displayedDocResults }];
-    let offset = 0;
-    return groups.map((g) => {
-      const start = offset;
-      offset += g.items.length;
-      return { ...g, start };
-    });
+  // story #4380 — 묶음 · 항목을 Base UI Autocomplete에 그대로 넘긴다(묶음 → Group · 항목 → Item). 거르기는 위(앱) · Autocomplete는 mode="none".
+  const groups = useMemo<PaletteGroup[]>(() => {
+    const navigate: PaletteGroup = { key: 'navigate', label: t('navigate'), items: filteredNavigate.map((item) => ({ kind: 'navigate', id: item.id, label: item.label, item })) };
+    const action: PaletteGroup = { key: 'action', label: t('actions'), items: filteredActions.map((item) => ({ kind: 'action', id: item.id, label: item.label, item })) };
+    const doc: PaletteGroup = { key: 'doc', label: t('documents'), items: displayedDocResults.map((item) => ({ kind: 'doc', id: `doc:${item.id}`, label: item.title, item })) };
+    return (contextStory ? [action, navigate, doc] : [navigate, action, doc]).filter((g) => g.items.length > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t는 로케일 불변 함수
   }, [contextStory, filteredActions, filteredNavigate, displayedDocResults]);
-
-  const totalCount = sections.reduce((sum, s) => sum + s.items.length, 0);
-  const clampedActiveIndex = totalCount === 0 ? 0 : Math.min(Math.max(activeIndex, 0), totalCount - 1);
 
   function handleOpenChange(next: boolean) {
     if (!next) {
       setQuery('');
-      setActiveIndex(0);
+      setHighlightedId(null);
       setDocResults([]);
     }
     onOpenChange(next);
@@ -313,29 +321,14 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
     handleOpenChange(false);
   }
 
-  function selectAtIndex(index: number) {
-    const section = sections.find((s) => index >= s.start && index < s.start + s.items.length);
-    if (!section) return;
-    const localIndex = index - section.start;
-    if (section.key === 'navigate') handleSelectNav(section.items[localIndex] as CommandItem);
-    else if (section.key === 'action') handleSelectAction(section.items[localIndex] as ActionCommand);
-    else handleSelectDoc(section.items[localIndex] as DocResult);
+  // 누르기 · Enter 한 길 — Autocomplete는 Enter를 켜진 항목의 click()으로 보낸다.
+  function handleSelect(entry: PaletteEntry) {
+    if (entry.kind === 'navigate') handleSelectNav(entry.item);
+    else if (entry.kind === 'action') handleSelectAction(entry.item);
+    else handleSelectDoc(entry.item);
   }
 
-  function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setActiveIndex(Math.min(totalCount - 1, clampedActiveIndex + 1));
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setActiveIndex(Math.max(0, clampedActiveIndex - 1));
-    } else if (event.key === 'Enter') {
-      event.preventDefault();
-      selectAtIndex(clampedActiveIndex);
-    }
-  }
-
-  const hasResults = totalCount > 0;
+  const hasResults = groups.length > 0;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
@@ -343,7 +336,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
         <DialogPrimitive.Backdrop
           className="fixed inset-0 z-50 bg-black/20 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
         />
-        <DialogPrimitive.Popup
+        <DialogPrimitive.Popup data-modal-popup=""
           className={cn(
             'fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2',
             // story #3007(로드맵 P2·PR-E, L1) — cmd palette 다이얼로그는 floating이라 --elev-overlay.
@@ -355,235 +348,178 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
         >
           <DialogPrimitive.Title className="sr-only">{t('title')}</DialogPrimitive.Title>
 
-          <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2.5">
-            <Search className="size-4 shrink-0 text-muted-foreground" />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={t('placeholder')}
-              className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-              aria-label={t('placeholder')}
-            />
-            <DialogPrimitive.Close
-              className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label={t('close')}
-            >
-              ESC
-            </DialogPrimitive.Close>
-          </div>
-
-          {contextStory ? (
-            <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
-              <span className="text-info" aria-hidden="true">◆</span>
-              {t('contextChip', { title: contextStory.story_number ? `#${contextStory.story_number} ${contextStory.title}` : contextStory.title })}
+          {/* story #4380 — 입력칸 = combobox · 목록 = listbox · 항목 = option(Base UI Autocomplete · inline이라 팝업 없이 대화상자 안 · 포털 0).
+              초점은 늘 입력칸 · 켜진 항목은 aria-activedescendant. open 제어(없으면 첫 Enter가 목록을 여는 데 쓰임) · 첫 항목은 늘 켜 둠. */}
+          <Autocomplete.Root
+            inline
+            open={open}
+            mode="none"
+            autoHighlight="always"
+            items={groups}
+            value={query}
+            onValueChange={(value) => setQuery(value)}
+            itemToStringValue={(entry: PaletteEntry) => entry.label}
+            onItemHighlighted={(entry: PaletteEntry | undefined) => setHighlightedId(entry?.id ?? null)}
+          >
+            <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2.5">
+              <Search className="size-4 shrink-0 text-muted-foreground" />
+              <Autocomplete.Input
+                autoFocus
+                placeholder={t('placeholder')}
+                className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                aria-label={t('placeholder')}
+                // combobox엔 aria-expanded가 꼭 있어야 한다(ARIA) — inline이면 Base UI가 안 단다. 목록은 항목이 있을 때 펼쳐져 보인다.
+                aria-expanded={hasResults}
+              />
+              <DialogPrimitive.Close
+                className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label={t('close')}
+              >
+                ESC
+              </DialogPrimitive.Close>
             </div>
-          ) : null}
 
-          <div ref={listRef} className="max-h-80 overflow-y-auto p-2">
+            {contextStory ? (
+              <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+                <span className="text-info" aria-hidden="true">◆</span>
+                {t('contextChip', { title: contextStory.story_number ? `#${contextStory.story_number} ${contextStory.title}` : contextStory.title })}
+              </div>
+            ) : null}
+
+            <Autocomplete.List className="max-h-80 overflow-y-auto p-2 empty:hidden">
+              {(group: PaletteGroup) => (
+                <PaletteGroupView
+                  key={group.key}
+                  group={group}
+                  highlightedId={highlightedId}
+                  onSelect={handleSelect}
+                  dangerPillLabel={t('actionDangerPill')}
+                />
+              )}
+            </Autocomplete.List>
             {!hasResults ? (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                 {t('noResults')}
               </div>
-            ) : (
-              sections.map((section) => {
-                if (section.items.length === 0) return null;
-                if (section.key === 'navigate') {
-                  return (
-                    <CommandGroup
-                      key="navigate"
-                      label={t('navigate')}
-                      items={section.items as CommandItem[]}
-                      activeIndex={clampedActiveIndex}
-                      start={section.start}
-                      onSelect={handleSelectNav}
-                    />
-                  );
-                }
-                if (section.key === 'action') {
-                  return (
-                    <ActionGroup
-                      key="action"
-                      label={t('actions')}
-                      items={section.items as ActionCommand[]}
-                      activeIndex={clampedActiveIndex}
-                      start={section.start}
-                      onSelect={handleSelectAction}
-                      dangerPillLabel={t('actionDangerPill')}
-                    />
-                  );
-                }
-                return (
-                  <DocGroup
-                    key="doc"
-                    label={t('documents')}
-                    docs={section.items as DocResult[]}
-                    activeIndexOffset={section.start}
-                    activeIndex={clampedActiveIndex}
-                    onSelect={handleSelectDoc}
-                  />
-                );
-              })
-            )}
-          </div>
+            ) : null}
+          </Autocomplete.Root>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );
 }
 
-interface CommandGroupProps {
+type PaletteEntry =
+  | { kind: 'navigate'; id: string; label: string; item: CommandItem }
+  | { kind: 'action'; id: string; label: string; item: ActionCommand }
+  | { kind: 'doc'; id: string; label: string; item: DocResult };
+
+interface PaletteGroup {
+  key: 'navigate' | 'action' | 'doc';
   label: string;
-  items: CommandItem[];
-  start: number;
-  activeIndex: number;
-  onSelect: (item: CommandItem) => void;
+  items: PaletteEntry[];
 }
 
-function CommandGroup({ label, items, start, activeIndex, onSelect }: CommandGroupProps) {
-  return (
-    <div className="flex flex-col" data-command-group="navigate">
-      <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <ul className="flex flex-col">
-        {items.map((item, i) => {
-          const active = start + i === activeIndex;
-          const Icon = item.icon;
-          return (
-            <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(item)}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors',
-                  active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/60',
-                )}
-                data-active={active || undefined}
-                data-command-id={item.id}
-              >
-                <Icon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{item.label}</span>
-                {item.shortcut ? (
-                  <span className="ml-auto flex items-center gap-1">
-                    {item.shortcut.map((key) => (
-                      <kbd
-                        key={key}
-                        className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
-                      >
-                        {key}
-                      </kbd>
-                    ))}
-                  </span>
-                ) : null}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
+const ITEM_CLASS = 'flex w-full cursor-default items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-foreground transition-colors data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground';
 
-interface ActionGroupProps {
-  label: string;
-  items: ActionCommand[];
-  start: number;
-  activeIndex: number;
-  onSelect: (item: ActionCommand) => void;
+interface PaletteGroupViewProps {
+  group: PaletteGroup;
+  highlightedId: string | null;
+  onSelect: (entry: PaletteEntry) => void;
   dangerPillLabel: string;
 }
 
-/**
- * 명령(action) 그룹(story 4f991165) — route-first: 선택하면 인라인 뮤테이션이 아니라 맥락
- * 세팅된 실존 표면으로 딥링크만 한다. 활성 항목 아래에 영향 범위 프리뷰(약속 언어)를 렌더 —
- * 위험 명령(승인/반려)은 amber pill로만 표시(red는 진짜 kill 전용, learning-signal 규율).
- * 감시 금지: 명령 실행 이력/횟수/최근 사용 시각을 렌더하지 않는다.
- */
-function ActionGroup({ label, items, start, activeIndex, onSelect, dangerPillLabel }: ActionGroupProps) {
+// story #4380 — 묶음 하나(이동 · 명령 · 문서). 항목은 Autocomplete.Item(role="option") — 켜진 항목에 aria-selected="true"
+// (Autocomplete는 고르기 모드가 아니라 aria-selected를 안 단다 · 목록상자 규약대로 켜진 것 = 고른 것).
+function PaletteGroupView({ group, highlightedId, onSelect, dangerPillLabel }: PaletteGroupViewProps) {
   return (
-    <div className="flex flex-col">
-      <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <ul className="flex flex-col">
-        {items.map((item, i) => {
-          const active = start + i === activeIndex;
-          const Icon = ACTION_ICONS[item.labelKey];
+    <Autocomplete.Group items={group.items} className="flex flex-col" data-command-group={group.key === 'navigate' ? 'navigate' : undefined}>
+      <Autocomplete.GroupLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {group.label}
+      </Autocomplete.GroupLabel>
+      <Autocomplete.Collection>
+        {(entry: PaletteEntry) => {
+          const highlighted = entry.id === highlightedId;
           return (
-            <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(item)}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors',
-                  active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/60',
-                )}
-                data-active={active || undefined}
-                data-command-id={item.id}
-              >
-                <Icon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{item.label}</span>
-                {item.danger ? (
-                  // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-                  <span className="ml-auto shrink-0 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[9px] font-semibold text-foreground">
-                    {dangerPillLabel}
-                  </span>
-                ) : null}
-              </button>
-              {active ? (
-                <p className="ml-8 mr-2 border-l-2 border-info/40 py-1 pl-2 text-[11px] leading-snug text-muted-foreground">
-                  {item.impact}
-                </p>
-              ) : null}
-            </li>
+            <Autocomplete.Item
+              key={entry.id}
+              value={entry}
+              onClick={() => onSelect(entry)}
+              aria-selected={highlighted}
+              className={entry.kind === 'action' ? 'flex flex-col' : ITEM_CLASS}
+              data-command-id={entry.kind === 'doc' ? undefined : entry.id}
+            >
+              {entry.kind === 'navigate' ? <NavigateRow item={entry.item} /> : null}
+              {entry.kind === 'action' ? <ActionRow item={entry.item} highlighted={highlighted} dangerPillLabel={dangerPillLabel} /> : null}
+              {entry.kind === 'doc' ? <DocRow doc={entry.item} /> : null}
+            </Autocomplete.Item>
           );
-        })}
-      </ul>
-    </div>
+        }}
+      </Autocomplete.Collection>
+    </Autocomplete.Group>
   );
 }
 
-interface DocGroupProps {
-  label: string;
-  docs: DocResult[];
-  activeIndexOffset: number;
-  activeIndex: number;
-  onSelect: (doc: DocResult) => void;
+function NavigateRow({ item }: { item: CommandItem }) {
+  const Icon = item.icon;
+  return (
+    <>
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="flex-1 truncate">{item.label}</span>
+      {item.shortcut ? (
+        <span className="ml-auto flex items-center gap-1">
+          {item.shortcut.map((key) => (
+            <kbd
+              key={key}
+              className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
+            >
+              {key}
+            </kbd>
+          ))}
+        </span>
+      ) : null}
+    </>
+  );
 }
 
-function DocGroup({ label, docs, activeIndexOffset, activeIndex, onSelect }: DocGroupProps) {
+/**
+ * 명령(action) 줄(story 4f991165) — route-first: 선택하면 인라인 뮤테이션이 아니라 맥락
+ * 세팅된 실존 표면으로 딥링크만 한다. 켜진 항목 아래에 영향 범위 프리뷰(약속 언어)를 렌더 —
+ * 위험 명령(승인/반려)은 amber pill로만 표시(red는 진짜 kill 전용, learning-signal 규율).
+ * 감시 금지: 명령 실행 이력/횟수/최근 사용 시각을 렌더하지 않는다.
+ */
+function ActionRow({ item, highlighted, dangerPillLabel }: { item: ActionCommand; highlighted: boolean; dangerPillLabel: string }) {
+  const Icon = ACTION_ICONS[item.labelKey];
   return (
-    <div className="flex flex-col">
-      <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <ul className="flex flex-col">
-        {docs.map((doc, i) => {
-          const active = activeIndexOffset + i === activeIndex;
-          return (
-            <li key={doc.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(doc)}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors',
-                  active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/60',
-                )}
-                data-active={active || undefined}
-              >
-                <BookOpen className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-                  <span className="truncate">{doc.icon ? `${doc.icon} ` : ''}{doc.title}</span>
-                  {/* story #2167 AC2 — slug로 찾은 결과가 어떤 slug인지 화면에 보여야 한다. */}
-                  <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">{doc.slug}</span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+    <>
+      <span className={cn('flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors', highlighted ? 'bg-accent text-accent-foreground' : 'text-foreground')}>
+        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="flex-1 truncate">{item.label}</span>
+        {item.danger ? (
+          // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+          <span className="ml-auto shrink-0 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[9px] font-semibold text-foreground">
+            {dangerPillLabel}
+          </span>
+        ) : null}
+      </span>
+      {highlighted ? (
+        <span className="ml-8 mr-2 block border-l-2 border-info/40 py-1 pl-2 text-[11px] leading-snug text-muted-foreground">
+          {item.impact}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function DocRow({ doc }: { doc: DocResult }) {
+  return (
+    <>
+      <BookOpen className="size-4 shrink-0 text-muted-foreground" />
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <span className="truncate">{doc.icon ? `${doc.icon} ` : ''}{doc.title}</span>
+        {/* story #2167 AC2 — slug로 찾은 결과가 어떤 slug인지 화면에 보여야 한다. */}
+        <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">{doc.slug}</span>
+      </span>
+    </>
   );
 }

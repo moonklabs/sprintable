@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
+import { withProjectParam } from '@/lib/with-project-param';
 import { useRouter } from 'next/navigation';
 import {
   Bell,
@@ -12,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -55,20 +58,26 @@ export interface EventNotification {
   } | null;
   read_at: string | null;
   created_at: string;
+  // story #4244 — 목록(GET /api/v2/event-notifications) 항목만 싣는다: 대상(source_entity)의 프로젝트와 문서 slug(BE 배치 해소).
+  // `project_id`(events 행)는 수신자 멤버 행의 프로젝트라 링크에 쓰지 않는다. SSE로 막 들어온 항목엔 없다(→ 주소 그대로).
+  target_project_id?: string | null;
+  target_doc_slug?: string | null;
 }
 
 // export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
 // 전체 컴포넌트 마운트 없이 딥링크 판정만 직접 검증.
 export function getEntityHref(
-  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload'>,
+  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload' | 'target_project_id' | 'target_doc_slug'>,
 ): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
+  // story #4244 — 링크는 대상 자기 프로젝트(target_project_id)를 싣는다(모르면 주소 그대로 — 틀린 p를 만들지 않는다).
+  const p = notification.target_project_id ?? null;
   switch (source_entity_type) {
     case 'story':
-      return `/board?story=${source_entity_id}`;
+      return withProjectParam(`/flow?story=${source_entity_id}`, p);
     case 'task':
-      return `/board?task_id=${source_entity_id}`;
+      return withProjectParam(`/flow?task_id=${source_entity_id}`, p);
     case 'epic':
       // ⚠️QA changes(PR#3381, 카디르+codex, 2026-08-23) — 이 딥링크는 story #2956이 지운
       // RENAMED_RESOURCES(epics→goals) 301에 얹혀 살고 있었다: `/epics/{id}`가 bare 승격
@@ -76,15 +85,18 @@ export function getEntityHref(
       // `/{ws}/{proj}/goals/{id}`로 옮겨줬다 — 신 `[ws]/[proj]/epics/`엔 목록(`page.tsx`)만
       // 있고 `[id]` 서브라우트가 없어(#3377 스코프에 상세 페이지 없음), rename 제거로
       // 404가 됐다. Goal=Epic이라 `goals/[id]`가 이미 에픽 상세 정본 — 직접 가리킨다.
-      return `/goals/${source_entity_id}`;
+      return withProjectParam(`/goals/${source_entity_id}`, p);
     case 'sprint':
       // sprints-client.tsx에서 id 파라미터 처리 추가됨
-      return `/sprints?id=${source_entity_id}`;
+      return withProjectParam(`/sprints?id=${source_entity_id}`, p);
     case 'doc': {
-      // docs-shell-client.tsx는 slug 파라미터 사용. payload에 slug가 있으면 deep link
-      const slug = notification.payload?.slug as string | undefined;
-      return slug ? `/docs/${slug}` : `/docs`;
+      // docs-shell-client.tsx는 slug 파라미터 사용. story #4244 — BE가 해소한 slug 우선, 없으면 payload slug(옛 경로).
+      const slug = notification.target_doc_slug ?? (notification.payload?.slug as string | undefined);
+      return withProjectParam(slug ? `/docs/${slug}` : `/docs`, p);
     }
+    // story #4244 — 게이트 알림(approval_delivery의 source_entity_type='gate')도 게이트 상세로 · 게이트 대상의 프로젝트.
+    case 'gate':
+      return withProjectParam(`/gates/${source_entity_id}`, p);
     default:
       return null;
   }
@@ -108,13 +120,31 @@ interface NotificationsPage {
   hasMore: boolean;
 }
 
-async function fetchNotifications(projectId?: string, offset = 0): Promise<NotificationsPage> {
+function notificationsUrl(projectId: string | undefined, offset: number): string {
   const params = new URLSearchParams({ limit: String(NOTIFICATIONS_PAGE_SIZE), offset: String(offset) });
   if (projectId) params.set('project_id', projectId);
+  return `/api/event-notifications?${params.toString()}`;
+}
+
+async function fetchNotifications(projectId?: string, offset = 0): Promise<NotificationsPage> {
   // story #2160 — 401을 조용히 삼키던 폴링을 fetchWithAuth로 전환(세션만료 인지+재로그인 유도).
-  const res = await fetchWithAuth(`/api/event-notifications?${params.toString()}`);
+  const res = await fetchWithAuth(notificationsUrl(projectId, offset));
   if (!res.ok) return { items: [], hasMore: false };
-  const json = (await res.json()) as unknown;
+  return parseNotificationsPage((await res.json()) as unknown);
+}
+
+// story #4295(까디르) — 목록을 서버 값으로 맞출 때 쓰는 조회: 실패(망 오류 · 깨진 JSON · !ok)는 null(던지지 않음 · 빈 목록으로 덮지 않게).
+async function fetchNotificationsOrNull(projectId: string | undefined, offset: number): Promise<NotificationsPage | null> {
+  try {
+    const res = await fetchWithAuth(notificationsUrl(projectId, offset));
+    if (!res.ok) return null;
+    return parseNotificationsPage((await res.json()) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function parseNotificationsPage(json: unknown): NotificationsPage {
   if (Array.isArray(json)) return { items: json as EventNotification[], hasMore: false }; // 옛 raw-array 응답 하위호환
   if (json && typeof json === 'object') {
     const obj = json as Record<string, unknown>;
@@ -147,12 +177,19 @@ function isSyncDegraded(data: SseSyncStatus): boolean {
 // unread-count를 재fetch하면 "채팅 읽자마자 벨이 준다"가 30초 대기 없이 성립한다.
 const BELL_EXTRA_EVENT_NAMES = ['sync_status', 'conversation.read'];
 
-async function fetchUnreadCount(projectId?: string): Promise<number> {
+// story #4295(까디르) — 실패(망 오류 · 깨진 JSON · !ok)는 던지지 않고 null. 부르는 쪽은 값이 있을 때만 배지에 반영한다
+// (예전엔 !ok면 0이라 실패가 «안 읽음 0»으로 보였고, 망 오류는 `.then(setUnreadCount)` 호출처에서 처리 안 된 거부로 샜다).
+async function fetchUnreadCount(projectId?: string): Promise<number | null> {
   const params = projectId ? `?project_id=${projectId}` : '';
-  // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
-  const res = await fetchWithAuth(`/api/event-notifications/unread-count${params}`);
-  if (!res.ok) return 0;
-  const json = (await res.json()) as unknown;
+  let json: unknown;
+  try {
+    // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
+    const res = await fetchWithAuth(`/api/event-notifications/unread-count${params}`);
+    if (!res.ok) return null;
+    json = (await res.json()) as unknown;
+  } catch {
+    return null;
+  }
   if (json && typeof json === 'object') {
     const obj = json as Record<string, unknown>;
     if (typeof obj['count'] === 'number') return obj['count'];
@@ -265,6 +302,7 @@ function NotificationPanel({
           <button
             type="button"
             onClick={() => setShowUnreadOnly((v) => !v)}
+            aria-pressed={showUnreadOnly}
             className={cn(
               // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
               // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).
@@ -320,7 +358,7 @@ function NotificationPanel({
                         !n.read_at && 'font-medium',
                       )}
                     >
-                      {n.payload?.summary ?? getEventTypeCopy(t, n.event_type)}
+                      {plainSummary(n.payload?.summary, getEventTypeCopy(t, n.event_type))}
                     </p>
                     {n.payload?.sender_name ? (
                       <p className="truncate text-xs text-muted-foreground">
@@ -358,6 +396,12 @@ function NotificationPanel({
   );
 }
 
+
+// story #4182 — summary는 서버가 만든 미리보기지만 이미 저장된 옛 행엔 내부 HTML 주석이 남아 있다.
+// 렌더에서도 평문화하고, 비면(주석뿐이던 경우) 이벤트 타입 문구로 폴백한다.
+function plainSummary(summary: string | null | undefined, fallback: string): string {
+  return (summary ? toPlainPreview(summary) : '') || fallback;
+}
 export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
@@ -377,6 +421,10 @@ export function NotificationBell() {
   const [syncDegraded, setSyncDegraded] = useState(false);
   const offsetRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  // story #4349(전수 15번) — 넓은 화면 드롭다운은 셸 스크롤 면(`overflow-y-auto`) 안의 absolute였다(창보다 길면 잘림) → body로 포털.
+  // 포털이라 DOM 순서상 벨 뒤가 아니다 → 벨에서 Tab이면 패널 첫 조작으로 · 끝을 넘거나 Esc면 닫고 벨로(패널형 · 공용 훅).
+  const desktopPanelRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLButtonElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // story #2061 — 모바일 풀스크린 오버레이(< lg)만 손수구현 모달이라 포커스 트랩 배선.
   // 데스크톱 드롭다운(lg+)은 풀스크린이 아니라 대상 밖(범위 밖 판정, AC1 ⓑ). 데스크톱에서는
@@ -406,7 +454,7 @@ export function NotificationBell() {
     // story #3074 — 데스크톱 셸(bridge-init.js가 top-frame+정확 origin에서만 window.__sprintableBridge를
     // 노출)이 있으면 그 경로«만» 쓴다 — 중복/포커스 억제는 네이티브 단독 판정이라 document.hidden
     // 조건 없이 항상 부른다. 브리지가 없을 때(일반 브라우저)만 기존 웹 Notification 경로(회귀 0).
-    const summary = incoming.payload?.summary ?? getEventTypeCopy(t, incoming.event_type);
+    const summary = plainSummary(incoming.payload?.summary, getEventTypeCopy(t, incoming.event_type));
     if (hasDesktopNotifyBridge()) {
       const body = incoming.payload?.sender_name ? `${incoming.payload.sender_name} · ${summary}` : summary;
       void notifyViaDesktopBridge({
@@ -440,7 +488,7 @@ export function NotificationBell() {
       return;
     }
     if (eventName === 'conversation.read') {
-      void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
+      void fetchUnreadCount(projectId ?? undefined).then((count) => { if (count !== null) setUnreadCount(count); });
     }
   }, [projectId]);
 
@@ -456,7 +504,7 @@ export function NotificationBell() {
     let cancelled = false;
     const poll = async () => {
       const count = await fetchUnreadCount(projectId ?? undefined);
-      if (!cancelled) setUnreadCount(count);
+      if (!cancelled && count !== null) setUnreadCount(count);
     };
     void poll();
     intervalRef.current = setInterval(() => { void poll(); }, 30_000);
@@ -511,9 +559,7 @@ export function NotificationBell() {
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (isOutsidePress(containerRef.current, e.target)) setOpen(false); // 포털된 데스크톱 패널은 공용 규칙이 «안»으로 셈
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
@@ -526,9 +572,10 @@ export function NotificationBell() {
       prev ? prev.map((n) => (n.id === id ? { ...n, read_at: readAt } : n)) : prev,
     );
     setUnreadCount((c) => Math.max(0, c - 1));
-    const res = await fetch(`/api/event-notifications/${id}/read`, { method: 'PATCH' });
+    // story #4295 — 망 오류(fetch가 던짐)도 서버 실패와 같게 롤백 · 알림(예전엔 낙관적 «읽음»이 남고 처리 안 된 거부).
+    const ok = await fetch(`/api/event-notifications/${id}/read`, { method: 'PATCH' }).then((res) => res.ok, () => false);
     // 서버 실패 시 롤백
-    if (!res.ok) {
+    if (!ok) {
       // story #3637(유나 silent-failure-sweep-3632) — 안읽음으로 조용히 되돌아가던 자리.
       addToast({ title: t('markReadFailed'), type: 'error' });
       setNotifications((prev) =>
@@ -540,18 +587,63 @@ export function NotificationBell() {
 
   const handleMarkAllRead = useCallback(async () => {
     const readAt = new Date().toISOString();
-    // 낙관적 업데이트
-    setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
+    const countBefore = unreadCount;
+    // 낙관적 업데이트 — 이번 시도가 «읽음»으로 바꾼 행 id를 적어 둔다(되돌림 · 다시 읽음이 이 행들만 만지게 · 복구 도중 SSE로 온
+    // 새 알림은 이 집합에 없어 서버 그대로 안 읽음으로 남는다). updater가 두 번 불려도(StrictMode) 같은 id라 집합은 같다.
+    const changedIds = new Set<string>();
+    setNotifications((prev) => prev ? prev.map((n) => {
+      if (n.read_at) return n;
+      changedIds.add(n.id);
+      return { ...n, read_at: readAt };
+    }) : prev);
     setUnreadCount(0);
     const readAllParams = projectId ? `?project_id=${projectId}` : '';
-    const res = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' });
-    // 서버 실패 시 unread count 재폴링으로 보정
-    if (!res.ok) {
+    // story #4295(까디르 · 유나) — 서버가 답한 실패(!ok)와 답을 못 받은 망 오류는 다르다: 망 오류는 서버가 커밋했을 수도 있다.
+    const outcome: 'ok' | 'serverError' | 'networkError' = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' })
+      .then((res) => (res.ok ? 'ok' : 'serverError'), () => 'networkError');
+    if (outcome === 'ok') return;
+    // 열린 목록 · 개수를 바꾸기 전으로(개별 읽음 롤백과 같은 문법) — 이번에 «읽음»으로 바꾼 행(changedIds)만 되돌린다(원래 읽음이던
+    // 항목은 제 시각 그대로). 아래 재조회가 실패해도 이 상태가 안전판이다.
+    setNotifications((prev) => prev ? prev.map((n) => (changedIds.has(n.id) ? { ...n, read_at: null } : n)) : prev);
+    setUnreadCount(countBefore);
+    // 개수 · 목록 첫 쪽을 패널 열 때와 같은 길로 다시 받아 서버 값으로 맞춘다(둘 다 던지지 않음 · 실패면 null).
+    const [count, page] = await Promise.all([
+      fetchUnreadCount(projectId ?? undefined),
+      fetchNotificationsOrNull(projectId ?? undefined, 0),
+    ]);
+    if (count !== null) setUnreadCount(count);
+    if (page) {
+      setNotifications(page.items);
+      setHasMore(page.hasMore);
+      offsetRef.current = page.items.length;
+    }
+    // 토스트는 재조회 결과로 고른다(목록과 토스트가 다른 말을 하지 않게).
+    if (outcome === 'serverError') {
       // story #3637(유나 silent-failure-sweep-3632) — 배지가 조용히 다시 차오르던 자리.
       addToast({ title: t('markAllReadFailed'), type: 'error' });
-      void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
+      return;
     }
-  }, [projectId, addToast, t]);
+    if (count === null && !page) {
+      // 둘 다 못 받음 — 확정 실패가 아니라 확인이 필요한 상태(유나 판정) · 목록은 되돌린 그대로.
+      addToast({ title: t('markAllReadUnconfirmed'), type: 'warning' });
+      return;
+    }
+    if (count === 0 && !page) {
+      // 개수만 받음 — «안 읽음 0»은 서버가 말한 값이다(PO · 까디르 판정). 목록 재조회가 실패해 되돌린 행이 «안 읽음»으로 남으면
+      // 배지 0과 어긋나므로 이번에 되돌린 행(changedIds)만 서버 값대로 읽음으로 둔다 — 복구 도중 SSE로 온 새 알림은 그 집합에 없어
+      // 안 읽음 그대로(PO 정정 · 까디르 P2: 예전엔 안 읽은 행 전부를 읽음으로 숨겼다). 사용자 입장에선 성공 — 토스트 없음.
+      setNotifications((prev) => prev ? prev.map((n) => (changedIds.has(n.id) && !n.read_at ? { ...n, read_at: readAt } : n)) : prev);
+      return;
+    }
+    if (count === null && page && !page.items.some((n) => !n.read_at)) {
+      // 목록만 받았고 그 쪽은 전부 읽음인데 배지는 서버 값을 못 받았다 — 성공처럼 조용히 두지 않고 «확인 필요».
+      addToast({ title: t('markAllReadUnconfirmed'), type: 'warning' });
+      return;
+    }
+    const stillUnread = (count ?? 0) > 0 || (page?.items.some((n) => !n.read_at) ?? false);
+    // 서버가 전부 읽음으로 처리했다면 사용자 입장에선 성공 — 실패 문장을 띄우지 않는다.
+    if (stillUnread) addToast({ title: t('markAllReadFailed'), type: 'error' });
+  }, [projectId, addToast, t, unreadCount]);
 
   const handleNavigate = useCallback(
     (notification: EventNotification) => {
@@ -564,13 +656,20 @@ export function NotificationBell() {
   );
 
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
+  const closePanel = useCallback(() => setOpen(false), []);
+  const panelKeys = usePortalMenuKeys({ open, onClose: closePanel, popoverRef: desktopPanelRef, triggerRef: bellRef, kind: 'panel' });
 
   return (
     <div ref={containerRef} className="relative">
       {/* 벨 버튼 */}
       <button
+        ref={bellRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={panelKeys.onTriggerKeyDown}
+        aria-expanded={open}
+        // 패널형 ARIA(#4349 공용 훅) — 열렸을 때 보이는 면을 가리킨다(lg 이상 포털 패널 · 그 밑 풀스크린 오버레이).
+        aria-controls={open ? (isDesktopViewport ? panelKeys.id : `${panelKeys.id}-overlay`) : undefined}
         // story #3518(유나 사전 스티어 G, 2026-09-05) — 이름엔 원수(unreadCount)를
         // 쓴다. 배지 표시(badgeLabel)는 '99+' 문자열이라 그대로 넣으면 "알림 99+개"
         // 처럼 문법이 어긋난다 — 100 이상은 전용 문장(bellAriaLabelCountCapped)으로
@@ -580,7 +679,6 @@ export function NotificationBell() {
             ? (unreadCount > 99 ? t('bellAriaLabelCountCapped') : t('bellAriaLabelCount', { count: unreadCount }))
             : t('panelTitle')
         }
-        aria-expanded={open}
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
       >
         <Bell className="size-4" />
@@ -595,7 +693,7 @@ export function NotificationBell() {
       {/* 데스크톱 드롭다운 (lg+) */}
       {open && (
         // story #3007(로드맵 P2·PR-E, L1) — 드롭다운 패널은 floating이라 --elev-overlay.
-        <div className="absolute right-0 top-full z-50 mt-1 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
+        <AnchoredPopover anchorRef={containerRef} popoverRef={desktopPanelRef} align="end" gap={4} onKeyDown={panelKeys.onPopoverKeyDown} {...panelKeys.popoverProps} data-dropdown-panel="notification-bell" className="z-50 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
           <NotificationPanel
             notifications={notifications}
             onMarkAllRead={handleMarkAllRead}
@@ -606,13 +704,14 @@ export function NotificationBell() {
             onLoadMore={() => void handleLoadMore()}
             syncDegraded={syncDegraded}
           />
-        </div>
+        </AnchoredPopover>
       )}
 
       {/* 모바일 풀스크린 오버레이 (< lg) */}
       {open && (
         <div
           ref={mobileOverlayRef}
+          id={`${panelKeys.id}-overlay`}
           tabIndex={-1}
           role="dialog"
           aria-modal="true"

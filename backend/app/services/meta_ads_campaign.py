@@ -24,62 +24,80 @@ _GRAPH_BASE = "https://graph.facebook.com/v21.0"
 class MetaAdsCampaignError(Exception):
     """meta_ads_oauth.py::MetaAdsOAuthError와 동형 — .code/.message 속성."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, partial: dict | None = None):
         self.code = code
         self.message = message
+        # story #4268 — 3단계 생성 중 앞 단계가 이미 만들어진 뒤 실패하면 그 id들(campaign_id · adset_id). 워커가 실행 행에 남겨
+        # 재시도가 이어서 만들게 한다(다시 만들면 고객 광고 계정에 PAUSED 객체가 중복으로 쌓인다).
+        self.partial = dict(partial or {})
         super().__init__(message)
 
 
 async def create_boost_campaign(
     client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, object_story_id: str,
     budget_minor: int, currency: str, starts_at_iso: str, ends_at_iso: str, objective: str,
+    existing: dict | None = None,
 ) -> dict:
     """반환 {"campaign_id","adset_id","ad_id"}(전부 str). 3단계 순차 생성 — 앞 단계가
-    실패하면 뒤 단계를 아예 안 부른다(부분 생성 상태로 남기지 않음, 실패 시 이미 만든
-    객체 롤백은 워커 재시도가 아니라 사람의 재승인 흐름에 맡긴다 — publish_channel_
-    post_draft류 "이미 만든 걸 지우려 하지 않는다" 관례와 동형)."""
-    campaign_resp = await client.post(
-        f"{_GRAPH_BASE}/act_{ad_account_id}/campaigns",
-        params={
-            "access_token": access_token, "name": f"Boost {object_story_id}",
-            "objective": objective, "status": "PAUSED", "special_ad_categories": "[]",
-        },
-    )
-    if campaign_resp.status_code != 200:
-        raise MetaAdsCampaignError("META_ADS_CAMPAIGN_CREATE_FAILED", campaign_resp.text[:500])
-    campaign_id = campaign_resp.json().get("id")
-    if not campaign_id:
-        raise MetaAdsCampaignError("META_ADS_CAMPAIGN_CREATE_MISSING_FIELD", "id missing")
+    실패하면 뒤 단계를 아예 안 부른다(실패 시 이미 만든 객체를 지우려 하지 않는다 — publish_channel_
+    post_draft류 "이미 만든 걸 지우려 하지 않는다" 관례와 동형).
 
-    adset_resp = await client.post(
-        f"{_GRAPH_BASE}/act_{ad_account_id}/adsets",
-        params={
-            "access_token": access_token, "name": f"Boost adset {object_story_id}",
-            "campaign_id": campaign_id, "daily_budget": budget_minor, "billing_event": "IMPRESSIONS",
-            "optimization_goal": "REACH", "start_time": starts_at_iso, "end_time": ends_at_iso,
-            "status": "PAUSED",
-        },
-    )
-    if adset_resp.status_code != 200:
-        raise MetaAdsCampaignError("META_ADS_ADSET_CREATE_FAILED", adset_resp.text[:500])
-    adset_id = adset_resp.json().get("id")
-    if not adset_id:
-        raise MetaAdsCampaignError("META_ADS_ADSET_CREATE_MISSING_FIELD", "id missing")
+    story #4268 — `existing`에 이미 만든 id가 있으면 그 단계는 건너뛰고 이어서 만든다(재시도가 캠페인 · 광고 세트를 또 만들어
+    고객 계정에 PAUSED 객체가 중복으로 쌓이던 결함). 중간에 실패하면 그때까지 만든 id를 `MetaAdsCampaignError.partial`에
+    실어 올린다(워커가 실행 행에 남겨 다음 재시도가 이어 간다)."""
+    ids = {k: v for k, v in (existing or {}).items() if v}
 
-    ad_resp = await client.post(
-        f"{_GRAPH_BASE}/act_{ad_account_id}/ads",
-        params={
-            "access_token": access_token, "name": f"Boost ad {object_story_id}", "adset_id": adset_id,
-            "creative": f'{{"object_story_id":"{object_story_id}"}}', "status": "PAUSED",
-        },
-    )
-    if ad_resp.status_code != 200:
-        raise MetaAdsCampaignError("META_ADS_AD_CREATE_FAILED", ad_resp.text[:500])
-    ad_id = ad_resp.json().get("id")
-    if not ad_id:
-        raise MetaAdsCampaignError("META_ADS_AD_CREATE_MISSING_FIELD", "id missing")
+    def fail(code: str, message: str) -> MetaAdsCampaignError:
+        return MetaAdsCampaignError(code, message, partial=ids)
 
-    return {"campaign_id": str(campaign_id), "adset_id": str(adset_id), "ad_id": str(ad_id)}
+    if not ids.get("campaign_id"):
+        campaign_resp = await client.post(
+            f"{_GRAPH_BASE}/act_{ad_account_id}/campaigns",
+            params={
+                "access_token": access_token, "name": f"Boost {object_story_id}",
+                "objective": objective, "status": "PAUSED", "special_ad_categories": "[]",
+            },
+        )
+        if campaign_resp.status_code != 200:
+            raise fail("META_ADS_CAMPAIGN_CREATE_FAILED", campaign_resp.text[:500])
+        campaign_id = campaign_resp.json().get("id")
+        if not campaign_id:
+            raise fail("META_ADS_CAMPAIGN_CREATE_MISSING_FIELD", "id missing")
+        ids["campaign_id"] = str(campaign_id)
+
+    if not ids.get("adset_id"):
+        adset_resp = await client.post(
+            f"{_GRAPH_BASE}/act_{ad_account_id}/adsets",
+            params={
+                "access_token": access_token, "name": f"Boost adset {object_story_id}",
+                "campaign_id": ids["campaign_id"], "daily_budget": budget_minor, "billing_event": "IMPRESSIONS",
+                "optimization_goal": "REACH", "start_time": starts_at_iso, "end_time": ends_at_iso,
+                "status": "PAUSED",
+            },
+        )
+        if adset_resp.status_code != 200:
+            raise fail("META_ADS_ADSET_CREATE_FAILED", adset_resp.text[:500])
+        adset_id = adset_resp.json().get("id")
+        if not adset_id:
+            raise fail("META_ADS_ADSET_CREATE_MISSING_FIELD", "id missing")
+        ids["adset_id"] = str(adset_id)
+
+    if not ids.get("ad_id"):
+        ad_resp = await client.post(
+            f"{_GRAPH_BASE}/act_{ad_account_id}/ads",
+            params={
+                "access_token": access_token, "name": f"Boost ad {object_story_id}", "adset_id": ids["adset_id"],
+                "creative": f'{{"object_story_id":"{object_story_id}"}}', "status": "PAUSED",
+            },
+        )
+        if ad_resp.status_code != 200:
+            raise fail("META_ADS_AD_CREATE_FAILED", ad_resp.text[:500])
+        ad_id = ad_resp.json().get("id")
+        if not ad_id:
+            raise fail("META_ADS_AD_CREATE_MISSING_FIELD", "id missing")
+        ids["ad_id"] = str(ad_id)
+
+    return {"campaign_id": ids["campaign_id"], "adset_id": ids["adset_id"], "ad_id": ids["ad_id"]}
 
 
 async def set_campaign_status(

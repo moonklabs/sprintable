@@ -27,6 +27,9 @@ class ActivityEvent(Base):
         Index("ix_activity_events_actor_time", "org_id", "actor_id", text("occurred_at DESC")),
         Index("ix_activity_events_object_time", "org_id", "object_type", "object_id", text("occurred_at DESC")),
         Index("ix_activity_events_verb_time", "org_id", "verb", text("occurred_at DESC")),
+        # story #4297(0409) — 최신순 커서(order=desc · before_seq)의 정렬 인덱스.
+        Index("ix_activity_events_org_seq", "org_id", text("activity_seq DESC")),
+        Index("ix_activity_events_project_seq", "org_id", "project_id", text("activity_seq DESC")),
     )
 
     activity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

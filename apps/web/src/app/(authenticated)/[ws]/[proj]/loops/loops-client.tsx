@@ -13,6 +13,7 @@ import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { LoopCreateDialog } from '@/components/loops/loop-create-dialog';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { LoopsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 // story 1eb18bd8(doc resource-view-firsttouch-identity-pattern §2/§4 — 실험실 파일럿): 빈
 // first-touch 정체성 visual = "4노드(가설→실행→검증→학습+↻다음 Loop) 가로 플로우(과설명 금지·
@@ -132,7 +133,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
   if (loading) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+        <TopBarSlot title={<LoopsTopBarTitle />} showContextChip />
         <div className="flex h-64 items-center justify-center">
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
@@ -143,11 +144,13 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
   return (
     <>
       <TopBarSlot
-        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        title={<LoopsTopBarTitle />}
         actions={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          // story #4277(민 기기 #6) — 402폭에서 «새 실행 시작하기» 글자 버튼이 상단 제목을 «실.»로 밀었다. 스프린트 상단바 관례: 폰은 아이콘만 ·
+          // 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
+          <Button size="sm" onClick={() => setCreateOpen(true)} aria-label={t('createLoopCta')}>
             <Plus className="size-3.5" />
-            {t('createLoopCta')}
+            <span className="hidden sm:inline">{t('createLoopCta')}</span>
           </Button>
         }
         showContextChip
@@ -158,8 +161,11 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
         onOpenChange={setCreateOpen}
         onCreated={(loop) => router.push(`/${wsSlug}/${projSlug}/loops/${loop.id}`)}
       />
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="flex shrink-0 flex-wrap gap-1 px-4 pt-3 pb-1">
+      {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          h-full이 더는 정의된 조상 높이를 못 받는다 — 로컬 경계를 걷어내고 필터 행을
+          sticky top-0로 바꿨다(#4125가 이미 증명한 sticky 메커니즘 재사용). */}
+      <div className="flex flex-col">
+        <div className="sticky top-0 z-10 flex flex-wrap gap-1 bg-background px-4 pt-3 pb-1">
           {STATUS_FILTERS.map((s) => (
             <button
               key={s}
@@ -176,7 +182,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="p-4">
           {loops.length === 0 ? (
             <EmptyState
               icon={<Lightbulb className="size-8" />}

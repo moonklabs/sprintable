@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.label import ITEM_TYPES
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 
 class LabelCreate(BaseModel):
@@ -11,7 +12,10 @@ class LabelCreate(BaseModel):
     color: str | None = None
 
 
-class LabelUpdate(BaseModel):
+class LabelUpdate(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"name"})
+
     name: str | None = None
     color: str | None = None
 

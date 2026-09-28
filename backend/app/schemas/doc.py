@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, computed_field
+from app.core.datetime_query import OffsetDatetime
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 
 class DocCreate(BaseModel):
@@ -25,7 +27,10 @@ class DocCreate(BaseModel):
     is_folder: bool = False
 
 
-class DocUpdate(BaseModel):
+class DocUpdate(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"content", "content_format", "doc_type", "sort_order", "tags", "title"})
+
     title: str | None = None
     slug: str | None = None
     # 4dd399c6: True=사용자 명시 고정(URL 다이얼로그). 명시 충돌→409, 자동파생(false/미설정)→무음 -N suffix.
@@ -41,7 +46,7 @@ class DocUpdate(BaseModel):
     # 151e05f1: 낙관적 동시성(문서 동시편집 충돌 보호). expected_updated_at 제공 시 BE가 현재
     # updated_at 과 exact match 검사 → 불일치면 409 DOC_CONFLICT(opt-in·미제공=무체크 하위호환).
     # force_overwrite=True 면 검사 우회(last-write-wins 의도적). ⚠️ 이 2필드는 strip 금지(BE 수용).
-    expected_updated_at: datetime | None = None
+    expected_updated_at: OffsetDatetime | None = None
     force_overwrite: bool | None = None
     # story #2346 AC7 — stories.py와 동형(50% 이상 급감+절대손실 100자 이상이면 기본 거부).
     # 정당한 대규모 축약(예: 낡은 섹션 통째로 제거)은 이 플래그로 명시 승인한다.
@@ -76,6 +81,10 @@ class DocSummaryResponse(BaseModel):
     # 담당자/수정이력 요약 동봉(이중 fetch 제거). additive·nullable(다건 list/tree/search 엔 None). forward-ref.
     assignee: "DocMemberSummary | None" = None
     revisions: "DocRevisionsSummary | None" = None
+    # story #4313 — slug-query 단건 경로에서만: 본문의 위키 링크 후보(«[[slug]]» · «[[slug|글]]» · `data-slug="…"`) 중 같은 프로젝트에
+    # 살아 있는 문서로 풀리는 것의 {적힌 slug → 지금 slug}(살아 있는 slug는 자기 자신 · 옛 slug alias는 지금 slug). FE는 여기 든 것만
+    # 진짜 링크(주소 = 지금 slug) · 나머지는 글자 그대로. 다건 경로엔 None(additive).
+    wiki_link_targets: dict[str, str] | None = None
 
 
 class DocMemberSummary(BaseModel):

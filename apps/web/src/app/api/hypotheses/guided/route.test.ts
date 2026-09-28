@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(), createHypothesisRepository: vi.fn(), createGuided: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, getOrgProjectAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createHypothesisRepository: h.createHypothesisRepository }));
 vi.mock('@/services/hypothesis', async (importActual) => ({
   ...(await importActual<typeof import('@/services/hypothesis')>()),

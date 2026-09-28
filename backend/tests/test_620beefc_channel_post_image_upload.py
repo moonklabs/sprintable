@@ -26,6 +26,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [

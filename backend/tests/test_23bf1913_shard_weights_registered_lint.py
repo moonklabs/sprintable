@@ -7,7 +7,12 @@ tests/test_shard_destructive_tests.py가 고정한다(재검증 안 함, 신규 
 story #2786/#2335 lint 테스트와 동형 관례).
 
 story #3465(2026-09-04) — 두 번째 축(`entries_missing_source()`/`load_raw_entries()`,
-files[] 항목마다 필수가 된 `source` provenance 필드) 정탐/오탐도 이 파일에 추가."""
+files[] 항목마다 필수가 된 `source` provenance 필드) 정탐/오탐도 이 파일에 추가.
+
+story #4159(2026-09-22) — 세 번째 축(`entries_missing_provisional_flag()`) — source에
+잠정/추정/실측 전 문구가 있는데 구조화 `provisional: true`가 없는 항목(#4152 AC4 절대
+가드 제외가 안 걸려 잠정값이 실측치로 오판되는 실사고 클래스, test_4101/PR 4381 shard
+10)의 정탐/오탐/뮤테이션."""
 from __future__ import annotations
 
 import sys
@@ -149,6 +154,66 @@ def test_unweighted_and_missing_source_both_reported_together(monkeypatch, capsy
     assert "test_new.py" in out  # unweighted 축
     assert "source 필드가 비었거나 없는" in out  # source 축
     assert "tests/test_a.py" in out.split("source 필드가")[1]  # source 누락 대상이 정확히 이 파일
+
+
+def test_tentative_source_without_provisional_flag_returns_1(monkeypatch, capsys):
+    """story #4159 — source에 "잠정"/"추정"/"실측 전" 문구가 있는데 provisional:true가
+    없으면 exit 1(test_4101/PR 4381 shard 10 실사고 클래스 재발 방지). 양성대조:
+    unweighted·source 두 축은 green이라 이 신호가 오직 신규 축에서만 왔음을 증명한다."""
+    monkeypatch.setattr(lint_mod, "discover_files", lambda: ["tests/test_a.py"])
+    monkeypatch.setattr(lint_mod, "load_weights", lambda: {"tests/test_a.py": 10.0})
+    monkeypatch.setattr(
+        lint_mod, "load_raw_entries",
+        lambda: [{"file": "tests/test_a.py", "sec": 10.0, "source": "로컬 실측 x3배 추정 — CI 실측 전 잠정값"}],
+    )
+
+    exit_code = lint_mod.main()
+    out = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "잠정/추정 문구가 있는데 provisional:true가 없는" in out
+    assert "::error::잠정 문구인데 provisional:true 누락(story #4159): tests/test_a.py" in out
+
+
+def test_tentative_source_with_provisional_flag_negative_control_returns_0(monkeypatch, capsys):
+    """음성대조 — 같은 잠정 문구라도 provisional:true가 붙어 있으면 통과."""
+    monkeypatch.setattr(lint_mod, "discover_files", lambda: ["tests/test_a.py"])
+    monkeypatch.setattr(lint_mod, "load_weights", lambda: {"tests/test_a.py": 10.0})
+    monkeypatch.setattr(
+        lint_mod, "load_raw_entries",
+        lambda: [{
+            "file": "tests/test_a.py", "sec": 10.0, "provisional": True,
+            "source": "로컬 실측 x3배 추정 — CI 실측 전 잠정값",
+        }],
+    )
+
+    exit_code = lint_mod.main()
+    out = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "잠정 미표시 0건" in out
+
+
+def test_mutation_removing_provisional_flag_reintroduces_false_negative(monkeypatch, capsys):
+    """뮤테이션 — 정상 등재 항목(provisional:true 有)에서 그 키만 되돌리면(개발자가
+    실수로 지운 경우) 이 축이 정확히 RED로 잡아야 한다."""
+    entry_with_flag = {
+        "file": "tests/test_a.py", "sec": 10.0, "provisional": True,
+        "source": "로컬 실측 x3배 추정 — CI 실측 전 잠정값",
+    }
+    monkeypatch.setattr(lint_mod, "discover_files", lambda: ["tests/test_a.py"])
+    monkeypatch.setattr(lint_mod, "load_weights", lambda: {"tests/test_a.py": 10.0})
+    monkeypatch.setattr(lint_mod, "load_raw_entries", lambda: [entry_with_flag])
+    assert lint_mod.main() == 0
+    capsys.readouterr()
+
+    entry_without_flag = {k: v for k, v in entry_with_flag.items() if k != "provisional"}
+    monkeypatch.setattr(lint_mod, "load_raw_entries", lambda: [entry_without_flag])
+    exit_code = lint_mod.main()
+    out = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "tests/test_a.py" in out
 
 
 def test_real_repo_state_smoke(capsys):

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CheckCircle, ChevronDown, ChevronUp, Pencil, XCircle } from 'lucide-react';
-import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
@@ -18,12 +18,17 @@ import { gateApproveLabelKey, sigApproveAndSignLabelKey } from '@/lib/newsletter
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 
-import { fetchWithAuth } from '@/lib/db/client';
+import { INBOX_GATES_HELD_URL, INBOX_GATES_PENDING_URL, takePrefetchedOrFetch, type InboxPrefetchScope } from './inbox-prefetch';
+import { fetchGateById } from '@/lib/fetch-gate';
+import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
@@ -58,11 +63,12 @@ interface FetchGatesResult {
   heldFailed: boolean;
 }
 
-async function fetchGates(): Promise<FetchGatesResult> {
+// story #4276 — inbox/loading.tsx가 먼저 출발시킨 같은 요청이 있으면 그 응답을 한 번 넘겨받는다(규칙은 inbox-prefetch.ts).
+async function fetchGates(scope: InboxPrefetchScope): Promise<FetchGatesResult> {
   const [pendingResult, heldResult] = await Promise.allSettled([
-    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true')
+    takePrefetchedOrFetch(INBOX_GATES_PENDING_URL, scope)
       .then((r) => (r.ok ? r.json() as Promise<GateInboxItem[]> : Promise.reject(new Error(`status ${r.status}`)))),
-    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true')
+    takePrefetchedOrFetch(INBOX_GATES_HELD_URL, scope)
       .then((r) => (r.ok ? r.json() as Promise<GateInboxItem[]> : Promise.reject(new Error(`status ${r.status}`)))),
   ]);
   return {
@@ -137,6 +143,11 @@ function formatUndoRemaining(resolvedAtMs: number, t: ReturnType<typeof useTrans
 }
 
 export function ApprovalsQueue() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
+  // story #4241 — 결재함은 조직 전체 목록이다. 행 링크는 «현재 프로젝트»가 아니라 결재 자신의 프로젝트를 싣는다(다른 프로젝트 결재를 열면
+  // 셸도 그 프로젝트로 — 셸·본문 두 세계 방지). 프로젝트 무관 대상(null)은 지금처럼 현재 프로젝트. flatHref는 이미 실은 p를 보존한다.
+  const gateHref = (gate: GateItem) =>
+    flatHref(gate.project_id ? `/gates/${gate.id}?p=${encodeURIComponent(gate.project_id)}` : `/gates/${gate.id}`);
   const t = useTranslations('cage');
   // story #3565 — ccGateType*/ccGateGeneric 키는 Command Center가 처음 세운
   // 'dashboard' 네임스페이스에 산다(공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는
@@ -146,6 +157,9 @@ export function ApprovalsQueue() {
   // 「결재 카드」 그 자체(이 큐 카드)에 있어야 한다는 실측 지적. formatMinorCurrency
   // (content ns)·formatScheduledAt 재사용 — gate-evidence.tsx와 동일 포맷터.
   const tContent = useTranslations('content');
+  // story #4082(유나 design CHANGES 2026-09-21) — recipe-detail-view.tsx가 쓰는 같은
+  // SSOT(organization 네임스페이스)로 stage/role 낱말을 통일.
+  const tOrg = useTranslations('organization');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
@@ -154,7 +168,12 @@ export function ApprovalsQueue() {
   // 같은 버그클래스: 이 큐는 그 판정을 미리 안 보고 에이전트 계정에도 승인/반려 버튼을
   // 무조건 열었다. Gate와 달리 HitlInboxItem엔 per-item can_approve 필드가 없어(BE 응답
   // shape 차이) 계정 자체의 type(human/agent, DashboardContext #2103 신규)으로 게이팅한다.
-  const { orgMemberships, currentMemberType, currentTeamMemberId } = useDashboardContext();
+  const { orgMemberships, currentMemberType, currentTeamMemberId, projectId } = useDashboardContext();
+  // story #4276 — 선출발 응답을 넘겨받을 때 범위 대조용(loadGates 의존성은 그대로 두려고 ref로).
+  const prefetchScopeRef = useRef<InboxPrefetchScope>({ memberId: currentTeamMemberId, projectId });
+  useEffect(() => {
+    prefetchScopeRef.current = { memberId: currentTeamMemberId, projectId };
+  }, [currentTeamMemberId, projectId]);
   const canResolveHitl = currentMemberType === 'human';
   const [items, setItems] = useState<GateInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -205,7 +224,7 @@ export function ApprovalsQueue() {
     });
   };
 
-  const discuss = async (id: string, reason: string) => {
+  const discuss = async (id: string, reason: string): Promise<boolean> => {
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
@@ -214,13 +233,15 @@ export function ApprovalsQueue() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
-      if (res.ok) { setDiscussTargetId(null); return; }
+      if (res.ok) { setDiscussTargetId(null); return true; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? t('gateTransitionErrorGeneric'));
+      return false;
     } catch {
       // story #2631 — PO 리뷰(PR#3068) 지적: try/finally뿐이면 네트워크 실패 시 무표시+
       // unhandled rejection. 챗 카드(approval-request-card.tsx)와 패리티.
       setDiscussError(t('gateTransitionErrorGeneric'));
+      return false;
     } finally {
       setDiscussSubmitting(false);
     }
@@ -242,7 +263,7 @@ export function ApprovalsQueue() {
     let cancelled = false;
     setLoading(true);
     setLoadFailed(false);
-    void fetchGates()
+    void fetchGates(prefetchScopeRef.current)
       .then((result) => {
         if (cancelled) return;
         setItems(result.items);
@@ -307,9 +328,10 @@ export function ApprovalsQueue() {
       // — fetchGates()가 방금 같은 걸 받아왔거나 중복 이벤트) 지어내지 않고 skip.
       void (async () => {
         try {
-          const res = await fetchWithAuth(`/api/gates/${payload.gate_id}`);
-          if (!res.ok) return;
-          const gate = (await res.json()) as GateItem;
+          if (!payload.gate_id) return;
+          const result = await fetchGateById<GateItem>(payload.gate_id); // story #4253 — 공용(날 GateResponse)
+          if (result.kind !== 'ok') return;
+          const gate = result.gate;
           setItems((prev) => (prev.some((it) => it.id === gate.id) ? prev : [gate, ...prev]));
         } catch { /* fetch 실패 — 무시(다음 하드 리로드가 흡수) */ }
       })();
@@ -330,7 +352,7 @@ export function ApprovalsQueue() {
       const res = await fetch(`/api/v1/hitl-requests/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(buildHitlDecisionBody({ status })),
       });
       if (res.ok) setItems((prev) => prev.filter((it) => it.id !== id));
     } finally {
@@ -338,11 +360,20 @@ export function ApprovalsQueue() {
     }
   };
 
+  // story #4190 — 409 gate_draft_changed 뒤 그 행 하나만 최신으로 바꾼다(목록 전체 재조회 없이 — 다른 행의 오류·완료
+  // 표시를 보존).
+  const refetchGateRow = async (id: string) => {
+    const result = await fetchGateById<GateItem>(id); // story #4253 — 공용(날 GateResponse)
+    if (result.kind !== 'ok') return;
+    const fresh = result.gate;
+    setItems((prev) => prev.map((it) => (it.id === id && !isHitl(it) ? { ...it, ...fresh } : it)));
+  };
+
   // story #1961(P2-S5) — 저위험 gate 원탭 승인/반려, gates/[id]/page.tsx의 transition()과
   // 동일 엔드포인트·body. story 22affaf2 — 고위험 서명 플로우(GateSignatureApproval)도
   // 이제 이 함수를 그대로 쓴다(note=서명 사유) — 별도 함수를 새로 짓지 않는다(canonical
   // 상세의 transition()과 body shape을 1:1로 맞춘 이유이기도 함).
-  const resolveGate = async (id: string, status: 'approved' | 'rejected', note: string | null = null, evidenceViewed?: boolean) => {
+  const resolveGate = async (id: string, status: 'approved' | 'rejected', note: string | null = null, evidenceViewed?: boolean): Promise<boolean | void> => {
     setResolvingIds((prev) => new Set(prev).add(id));
     setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
@@ -357,10 +388,11 @@ export function ApprovalsQueue() {
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
         // 플로우 onApprove에서만 true로 실린다, 아래 GateSignatureApproval 배선 참조).
-        body: JSON.stringify({
-          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
-          reviewed_head_sha: g?.github_check_run_sha ?? null,
-        }),
+        // story #4190 — 레시피 발행 게이트면 서명 모달의 초안 카드가 그린 (draft_id, version)도 같이(없으면 키 없음).
+        body: JSON.stringify(buildGateTransitionBody({
+          status, note, evidenceViewed, reviewedHeadSha: g?.github_check_run_sha ?? null,
+          reviewedDraft: g ? reviewedDraftOf(g) : null,
+        })),
       });
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
@@ -368,15 +400,17 @@ export function ApprovalsQueue() {
         // story 22affaf2 — 서명 모달을 거친 성공이면 그 자리서 닫는다(다른 gate의 모달을
         // 잘못 닫지 않도록 대상 id 일치 확認).
         setSignatureTargetId((cur) => (cur === id ? null : cur));
+        return true;  // story #4370 — 서명 사유 초안을 지우는 신호(finally는 그대로 돈다)
       } else {
         const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string; current_status?: string } } | null;
         const code = body?.error?.code;
+        const errorKind = classifyGateTransitionErrorCode(code);
         // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문·i18n 안 됨)
         // 대신 사람 문구로. gate_already_resolved는 이 시점부터 서버 진실을 아는 것이므로
         // (current_status), 재조회 없이도 즉시 「완료」 카드로 전환할 수 있다(AC1 — 죽은
         // 버튼이 다시 안 뜬다) — approved/rejected만 이 큐의 표시 슬롯이 있고, 그 외
         // (held/voided 등)는 표시할 슬롯이 없어 목록에서만 제거(클릭-스루로 상세에서 확認).
-        if (code === 'gate_already_resolved') {
+        if (errorKind === 'already_resolved') {
           const cur = body?.error?.current_status;
           if (cur === 'approved' || cur === 'rejected') {
             setResolvedGates((prev) => ({ ...prev, [id]: cur }));
@@ -385,10 +419,14 @@ export function ApprovalsQueue() {
           }
           setSignatureTargetId((c) => (c === id ? null : c));
         }
-        const reason = code === 'gate_head_changed' ? t('gateHeadChangedError')
-          : code === 'gate_already_resolved' ? t('gateAlreadyResolvedError')
+        const reason = errorKind === 'head_changed' ? t('gateHeadChangedError')
+          : errorKind === 'draft_changed' ? t('gateDraftChangedError')
+          : errorKind === 'already_resolved' ? t('gateAlreadyResolvedError')
           : (body?.error?.message ?? t('gateTransitionErrorGeneric'));
         setGateErrors((prev) => ({ ...prev, [id]: reason }));
+        // story #4190(유나 자리별 동작) — 그 행을 재조회해 서명 모달의 초안 카드를 최신 버전으로(모달은 열린 채 — 다시 보고
+        // 승인). 문장은 다음 승인·반려까지 남는다(resolveGate 첫 줄이 지운다).
+        if (errorKind === 'draft_changed') void refetchGateRow(id);
       }
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
@@ -540,6 +578,18 @@ export function ApprovalsQueue() {
                 {gate.github_check_run_sha ? ` · ${gate.github_check_run_sha.slice(0, 7)}` : ''}
               </p>
             ) : null}
+            {/* story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — recipe_gate_hooks.py::
+                maybe_create_stage_gate가 denorm한 neutral_facts.stage(+stage_role). 레시피
+                게이트가 아니면(stage 키 자체가 없으면) 이 블록은 안 그려진다 — 비레시피
+                게이트 회귀 0(신규 필드 읽기만, 없는 값은 없다고). 유나 design CHANGES —
+                raw slug 대신 recipe-stage-label.ts/stage-role.ts SSOT(recipe-detail-view.tsx
+                와 동일 낱말표). */}
+            {typeof gate.neutral_facts?.stage === 'string' ? (
+              <p className="text-[11px] text-muted-foreground">
+                {t('gateStageLabel')}: {recipeStageLabel(gate.neutral_facts.stage, tOrg)}
+                {typeof gate.neutral_facts.stage_role === 'string' ? ` (${stageRoleLabel(gate.neutral_facts.stage_role, tOrg)})` : ''}
+              </p>
+            ) : null}
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}
             {diffFacts ? (
               <p className="text-[11px] text-muted-foreground">
@@ -611,7 +661,7 @@ export function ApprovalsQueue() {
               <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
                 <button
                   type="button"
-                  onClick={() => router.push(`/gates/${gate.id}`)}
+                  onClick={() => router.push(gateHref(gate))}
                   className="flex w-full flex-col items-start gap-1 text-left"
                 >
                   {gateBody}
@@ -630,7 +680,7 @@ export function ApprovalsQueue() {
                       {t(resolved === 'approved' ? 'queueResolvedApproved' : 'queueResolvedRejected')}
                     </span>
                   </span>
-                  <Link href={`/gates/${gate.id}`} className="text-xs font-medium text-primary hover:underline">
+                  <Link href={gateHref(gate)} className="text-xs font-medium text-primary hover:underline">
                     {t('queueViewRecord')}
                   </Link>
                 </div>
@@ -667,7 +717,7 @@ export function ApprovalsQueue() {
             <button
               key={gate.id}
               type="button"
-              onClick={() => router.push(`/gates/${gate.id}`)}
+              onClick={() => router.push(gateHref(gate))}
               className="block w-full text-left"
             >
               <ProofCapsule
@@ -701,9 +751,13 @@ export function ApprovalsQueue() {
         // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12) — 같은 판별을
         // gates/[id]/page.tsx·gate-signature-approval.tsx와 공유(newsletter-gate-
         // approve-label.ts 한 곳).
-        const primaryLabel = isSigFlow ? t(sigApproveAndSignLabelKey(gate)) : t(gateApproveLabelKey(gate));
+        // story #4190(유나 «본 버전 대조» 3) — 레시피 발행 게이트의 저위험 원탭은 승인하지 않고 초안 카드가 있는 서명 모달을
+        // 연다 — 이름도 «초안 보고 승인»(누르면 승인된다는 약속과 동작이 갈리지 않게).
+        const opensDraftReview = !isSigFlow && isRecipePublishGate(gate);
+        const primaryLabel = isSigFlow ? t(sigApproveAndSignLabelKey(gate))
+          : opensDraftReview ? t('gateReviewDraftToApprove') : t(gateApproveLabelKey(gate));
         const primaryOnClick = () => {
-          if (isSigFlow) setSignatureTargetId(gate.id);
+          if (isSigFlow || opensDraftReview) setSignatureTargetId(gate.id);
           // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록한다(BE 신규
           // 필드 없이 기존 자유텍스트 필드 재사용 — 결과 조회 시 "어느 안"이었는지 그대로 읽힌다).
           else void resolveGate(gate.id, 'approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption }) : null);
@@ -719,7 +773,7 @@ export function ApprovalsQueue() {
           <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
             <button
               type="button"
-              onClick={() => router.push(`/gates/${gate.id}`)}
+              onClick={() => router.push(gateHref(gate))}
               className="flex w-full flex-col items-start gap-1 text-left"
             >
               {gateBody}
@@ -801,9 +855,10 @@ export function ApprovalsQueue() {
       <GateDiscussDialog
         open={discussTargetId !== null}
         onOpenChange={(open) => { if (!open) setDiscussTargetId(null); }}
-        onSubmit={(reason) => { if (discussTargetId) void discuss(discussTargetId, reason); }}
+        onSubmit={(reason) => (discussTargetId ? discuss(discussTargetId, reason) : Promise.resolve(false))}
         submitting={discussSubmitting}
         error={discussError}
+        targetId={discussTargetId}
       />
       {/* story 22affaf2(유나 design③) — 고위험 인라인 서명 모달. canonical 상세와 동일
           컴포넌트(GateSignatureApproval)를 nav 없이 Dialog로 연다 — 어휘·게이팅(canSign)
@@ -831,13 +886,16 @@ export function ApprovalsQueue() {
           {signatureGate ? (
             // story #2975(유나양 design 판정) 갭 자체발견(#2982 작업 중) — 동형 처방(SHA
             // 변경 시 evidenceViewed/reason 강제 리셋). page.tsx만 #2975에서 고쳐졌었다.
+            // story #4190 — 초안 버전이 바뀌어도(409 뒤 행 재조회) 같은 리셋: 새 버전을 다시 보고 서명하게.
             <GateSignatureApproval
-              key={signatureGate.github_check_run_sha}
+              key={`${signatureGate.id}:${signatureGate.github_check_run_sha ?? ''}:${reviewedDraftOf(signatureGate)?.version ?? ''}`}
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}
-              onApprove={(reason) => void resolveGate(signatureGate.id, 'approved', reason, true)}
-              onReject={(reason) => void resolveGate(signatureGate.id, 'rejected', reason)}
+              onApprove={(reason) => resolveGate(signatureGate.id, 'approved', reason, true)}
+              onReject={(reason) => resolveGate(signatureGate.id, 'rejected', reason)}
+              // story #4370(까디르 P3) — 창을 닫아도(✕ · 바깥 · Esc) 사유 초안은 남는다. 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
+              onCancel={() => setSignatureTargetId(null)}
             />
           ) : null}
         </DialogContent>

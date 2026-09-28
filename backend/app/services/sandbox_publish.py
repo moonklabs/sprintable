@@ -28,18 +28,35 @@
   분류).
 - `[sandbox:expired-token]` — `create_container`가 401로 실패(기존 _classify_threads_
   error가 이미 CHANNEL_TOKEN_EXPIRED로 분류).
-- `[sandbox:revoked]`·`[sandbox:page-unlinked]`·`[sandbox:app-inactive]`(story #3598,
-  3595 표 행 ②③④를 시뮬레이션 가능하게) — 셋 다 `create_container`가 401로 실패하되
-  Graph 표준 오류 envelope(`provider_error_code`/`_subcode`/`_type`)을 함께 실어
-  `classify_graph_oauth_error`가 CHANNEL_CONNECTION_REVOKED로 분류하게 한다. subcode는
-  스토리 본문 確定①에 PO가 못박은 목록(458 앱 권한 없음/460 비번 변경/463 만료/467
-  무효/490 사용자가 앱 권한 취소) 안에서만 고른다 — 3595 표의 3사건과 정확히 1:1
-  대응하는 별도 subcode가 Meta 쪽에 없어(그라운딩 갭, PO 재확認 요망) 의미가 가장
-  가까운 것으로 잠정 배정했다: `revoked`=490(문자 그대로 "권한 취소"), `page-unlinked`
-  =458(페이지에 대한 앱 권한을 잃는 것 — "앱 권한 없음"과 같은 결과), `app-inactive`
-  =467(앱이 꺼지면 그 앱으로 발급된 토큰이 "무효"가 된다는 해석). 셋 다 classify_graph_
-  oauth_error 안에서는 동일하게 "revoked"로 수렴한다(현재 reason 어휘가 expired|
-  revoked|error 3종뿐이라 그 이상 세분화할 자리가 없다 — 어휘가 늘면 재배정).
+- `[sandbox:revoked]`·`[sandbox:page-unlinked]`(story #3598, 3595 표 행 ②③를
+  시뮬레이션 가능하게) — 둘 다 `create_container`가 401로 실패하되 Graph 표준
+  오류 envelope(`provider_error_code`/`_subcode`/`_type`)을 함께 실어
+  `classify_graph_oauth_error`가 CHANNEL_CONNECTION_REVOKED로 분류하게 한다.
+  subcode는 스토리 본문 確定①에 PO가 못박은 목록(458 앱 권한 없음/460 비번
+  변경/463 만료/467 무효/490 사용자가 앱 권한 취소) 안에서만 고른다 — 3595
+  표의 사건과 정확히 1:1 대응하는 별도 subcode가 Meta 쪽에 없어 의미가 가장
+  가까운 것으로 배정했다: `revoked`=490(문자 그대로 "권한 취소"),
+  `page-unlinked`=458(페이지에 대한 앱 권한을 잃는 것 — "앱 권한 없음"과
+  같은 결과). 둘 다 classify_graph_oauth_error 안에서는 동일하게 "revoked"로
+  수렴한다(현재 reason 어휘가 expired|revoked|error 3종뿐이라 그 이상
+  세분화할 자리가 없다 — 어휘가 늘면 재배정).
+- `[sandbox:app-inactive]`(story #3598 신설, story #3951 CHANGES-2로 재배정,
+  3595 표 행 ④ 시뮬레이션) — **"revoked"가 아니라 "error"로 떨어진다.**
+  1차 구현(story #3598)은 467(무효)을 빌려 "revoked"로 떨어뜨렸으나,
+  story #3951의 그라운딩(30분 상한, PO 지시 2026-09-16)이 공식 문서
+  (developers.facebook.com/docs/graph-api/guides/error-handling)로 확定했다:
+  code 190(OAuthException) 아래 문서화된 subcode는 458·459·460·463
+  **4개뿐**이고 전부 「사용자 세션/인증 상태」를 가리킨다 — 앱 자체의
+  비활성/개발자disable/Meta정지를 가리키는 전용 subcode는 존재하지 않는다
+  (모듈 상단 190 밖 family 10·200~299의 fail-closed 판단과 같은 결의
+  사실). 그래서 `provider_error_code=190, provider_error_subcode=None`
+  (신호 없음 그대로)을 싣는다 — `classify_graph_oauth_error`가 미지
+  subcode를 "error"(fail-closed, CHANNEL_CONNECTION_AUTH_ERROR)로 분류한다.
+  467을 계속 빌려 "revoked"로 떨어뜨리면 화면에 `channelReauthError`(④
+  완화 문장)가 영영 안 떠 AC3 라이브 관측(②·③ 같은 문장·④ 다른 문장이
+  기대값)이 불가능해진다 — instagram_sandbox_publish.py/facebook_sandbox_
+  publish.py도 같은 처방(신규 subcode 발명 0, 있는 그대로 "모른다"를
+  표현할 뿐).
 - `[sandbox:permission-error]`(story #3605, 3598 AC6 일반화 시뮬레이션) — `create_
   container`가 401로 실패하되 `provider_error_code=10`(type 없음 — code==10은
   190과 달리 OAuthException 타입 표기 없이도 이 family에 걸린다, 그라운딩:
@@ -63,6 +80,10 @@
   `publish_container`를 거쳐 media_id 문자열 자체에 싣는다(서버 메모리 0, 위 stateless
   계약 그대로) — 지연은 댓글 재수집 5분 rate-limit보다 짧게 잡혀 있어(60초) 처음 refresh
   뒤 rate-limit이 풀리는 시점(5분 뒤)엔 이미 댓글이 사라져 있다.
+- `[sandbox:publish-slow]`(story #4336 AC5, 라이브 런북용) — `create_container`가 `_PUBLISH_SLOW_SECONDS`(90초) 기다린 뒤
+  평소대로 진행한다(실 HTTP 0 · 상태 없음 — 기다림은 이 호출 안에서만). 즉시 발행이 요청 안에서 공급자를 기다리지 않고
+  워커가 돈다는 것(요청은 «발행 중»으로 곧바로 답하고, 90초짜리 호출은 워커 틱 안에서 끝난다)을 dev에서 재는 유일한 긴 발행 대상.
+  BFF 상한(55초)보다 길게 잡았다. 90초는 dev 틱 예산(min(스케줄러 시한 1800, 요청 시한 3600) − 60 = 1740초) 안이다.
 - `[sandbox:insight-drift]`(story #3620 AC5, 라이브 런북용) — ⚠️이 파일이 읽는 마커가
   아니다(카탈로그 완전성을 위해 여기 등재만 함). 실제 소비처는
   `insight_snapshots.py::_fetch_sandbox` — `create_container`의 `text` 인자가 아니라
@@ -100,6 +121,7 @@
 이미지 첨부 초안에서만 의미 있음, 위 참고)."""
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 import uuid
@@ -121,6 +143,9 @@ _MARKER_APP_INACTIVE = "[sandbox:app-inactive]"
 _MARKER_PERMISSION_ERROR = "[sandbox:permission-error]"
 _MARKER_CONTAINER_ERROR = "[sandbox:container-error]"
 _MARKER_CONTAINER_SLOW = "[sandbox:container-slow]"
+# story #4336 AC5 — 공급자 호출이 오래 걸리는 발행(요청 안이면 BFF 55초가 먼저 끊던 모양)을 dev에서 재현.
+_MARKER_PUBLISH_SLOW = "[sandbox:publish-slow]"
+_PUBLISH_SLOW_SECONDS = 90
 # story #3516 AC8(페드루 PO 確定 2026-09-05) — 라이브 런북 재료. 댓글 수집 리컨실
 # (조각①)을 사람이 dev에서 눈으로 재현하려면 "처음엔 2건, 잠시 뒤엔 1건"이 필요한데
 # sandbox_publish.fetch_replies는 media_id만 받아 完全 무상태로 결정적이라(story
@@ -174,6 +199,8 @@ async def create_container(
     client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
     image_url: str | None = None,
 ) -> str:
+    if _MARKER_PUBLISH_SLOW in text:
+        await asyncio.sleep(_PUBLISH_SLOW_SECONDS)
     if _MARKER_429 in text:
         raise ThreadsPublishError("SANDBOX_RATE_LIMITED", "sandbox: [sandbox:429] 마커 시뮬레이션", status_code=429)
     if _MARKER_PROVIDER_ERROR in text:
@@ -195,9 +222,15 @@ async def create_container(
             provider_error_code=190, provider_error_subcode=458, provider_error_type="OAuthException",
         )
     if _MARKER_APP_INACTIVE in text:
+        # story #3951 CHANGES-2(페드루 PO C2, 2026-09-16 13:00Z) — 이 스토리(#3598) 원래
+        # 배정은 467(무효)을 빌려 "revoked"로 떨어뜨렸으나, #3951의 공식 문서 그라운딩이
+        # 「앱 비활성 전용 subcode는 Meta에 없다」를 확定했다 — subcode=None(신호 없음
+        # 그대로)을 실어 classify_graph_error_code가 "error"(fail-closed)로 떨어지게
+        # 정정한다. 467을 계속 빌리면 IG/FB 화면에서 channelReauthError(앱 비활성 완화
+        # 문장)가 영영 안 떠 라이브 검증이 불가능해진다(②·③과 같은 문장으로 뭉개짐).
         raise ThreadsPublishError(
             "SANDBOX_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
-            provider_error_code=190, provider_error_subcode=467, provider_error_type="OAuthException",
+            provider_error_code=190, provider_error_subcode=None, provider_error_type="OAuthException",
         )
     if _MARKER_PERMISSION_ERROR in text:
         raise ThreadsPublishError(

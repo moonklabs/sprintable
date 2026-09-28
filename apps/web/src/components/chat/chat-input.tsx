@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { getFileIcon } from '@/lib/file-icon';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
-import { resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
+import { isSystemPublisher, resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
@@ -33,6 +33,8 @@ import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { memberDisplayLabel, memberRowLabels, type MemberRow } from '@/lib/member-display';
 
 // story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
 // 산다 — 여기선 재-export만 해서 기존 소비부(테스트 등)의 import 경로를 그대로 둔다.
@@ -111,15 +113,11 @@ function applyCommand(name: string): { text: string; caretPos: number } {
   return { text: replacement, caretPos: replacement.length };
 }
 
-interface MentionMember {
-  id: string;
-  name: string;
-  role?: string | null;
-  // story #3770 — 휴먼(org role: owner/admin/member)·에이전트(trust role: implementation
-  // 등) 둘 다 이 목록에 섞여 온다(/api/members). role 낱말 축은 이 둘이 서로 다른 정본을
-  // 쓰므로(orgRoleLabel vs resolveRoleLabel), 어느 쪽인지 판별할 이 필드가 필요하다.
-  type?: string;
-}
+// story #4284 — 예전엔 인라인 `{ name: string }`으로 받아 공용 nullable 계약을 우회했다(이름 없는 구성원 하나면 검색어 입력 때
+// `m.name.toLowerCase()` 예외 → 멘션 목록 전체가 «불러오지 못함» · 검색어 없으면 빈 줄 · 고르면 `@null`). 공용 MemberRow(name nullable).
+// - type: story #3770 — 휴먼(org role)·에이전트(trust role)가 같은 `role` 필드에 섞여 와 어느 쪽인지 가른다.
+// - runtime_type: story #3997 — @멘션 후보에서 「시스템 발행」을 거른다.
+type MentionMember = MemberRow;
 
 // story #3770 — /api/members(backend/app/routers/members.py::MemberResponse)가 휴먼은
 // org_members.role(owner/admin/member), 에이전트는 team_members.role(participation/
@@ -194,6 +192,7 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const tSettings = useTranslations('settings');
@@ -291,9 +290,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       })
       .then((json) => {
         if (cancelled) return;
-        const all: MentionMember[] = (json.data ?? []).map((m: { id: string; name: string; role?: string | null; type?: string }) => ({ id: m.id, name: m.name, role: m.role, type: m.type }));
+        const all: MentionMember[] = (json.data ?? [])
+          .map((m: MemberRow) => ({ id: m.id, name: m.name, role: m.role, type: m.type, runtime_type: m.runtime_type }))
+          .filter((m: MentionMember) => !isSystemPublisher(m.runtime_type));
         const q = mentionQuery.toLowerCase();
-        setMentionMembers(q ? all.filter((m) => m.name.toLowerCase().includes(q)) : all);
+        // 보이는 라벨로 찾는다(이름 없는 구성원 = «이름 없는 구성원» · null에서 toLowerCase 예외 없음).
+        setMentionMembers(q ? all.filter((m) => memberDisplayLabel(m.name, tc).toLowerCase().includes(q)) : all);
         setMentionIndex(0);
         setMentionLoadFailed(false);
       })
@@ -304,7 +306,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         setMentionLoadFailed(true);
       });
     return () => { cancelled = true; };
-  }, [mentionQuery, projectId]);
+  }, [mentionQuery, projectId, tc]);
 
   const adjustHeight = () => {
     const el = textareaRef.current;
@@ -370,7 +372,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const selectMention = (member: MentionMember) => {
     const textarea = textareaRef.current;
     const cursorPos = textarea?.selectionStart ?? text.length;
-    const { text: nextText, caretPos } = applyMention(text, cursorPos, member.name);
+    // story #4284 — 본문에 넣는 `@…`는 표시일 뿐(배달은 id · mentionedIds). 이름 없는 구성원은 라벨(«이름 없는 구성원») — 유나 판정 대기(PR 본문).
+    const { text: nextText, caretPos } = applyMention(text, cursorPos, memberDisplayLabel(member.name, tc));
     setText(nextText);
     setMentionQuery(null);
     setMentionMembers([]);
@@ -692,7 +695,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                     })}
                   </span>
                   <Link
-                    href={`/organization/workforce/${tg.agentId}`}
+                    href={flatHref(`/organization/workforce/${tg.agentId}`)}
                     className="shrink-0 rounded font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {t('commandViewSettings')}
@@ -737,7 +740,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
                 // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일. story
                 // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
-                <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, t, tc)}</option>
+                <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, tc)}</option>
               ))}
             </select>
             <div className="relative min-w-0 flex-1">
@@ -822,7 +825,11 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
           <ul role="listbox" aria-label={t('mentionCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
-            {mentionMembers.map((member, idx) => (
+            {/* story #4284(유나 판정) — 행 라벨: 이름 없는 행이 둘 이상이면 역할 라벨로 갈리지 않을 때 «· ID 앞 8자»(본문 `@…`엔 꼬리 없음). */}
+            {(() => {
+              const rowLabels = memberRowLabels(mentionMembers, tc, (m) => (m.role ? mentionMemberRoleLabel(m, tSettings, tOrg) : ''));
+              return mentionMembers.map((m) => ({ ...m, label: rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc) }));
+            })().map((member, idx) => (
               <li key={member.id}>
                 <button
                   type="button"
@@ -832,7 +839,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   onMouseDown={(e) => { e.preventDefault(); selectMention(member); }}
                   className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
-                  <span className="font-medium text-primary">@</span>{member.name}
+                  <span className="font-medium text-primary">@</span>{member.label}
                   {member.role ? <span className="ml-2 text-xs opacity-60">{mentionMemberRoleLabel(member, tSettings, tOrg)}</span> : null}
                 </button>
               </li>
@@ -988,6 +995,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           className="h-9 w-9 flex-shrink-0 rounded-xl"
           onClick={() => void (steerMode ? handleSendSteer() : handleSend())}
           disabled={steerMode ? !canSteerSend : !canSend}
+          aria-label={t('sendAction')}
         >
           <Send className="h-4 w-4" />
         </Button>

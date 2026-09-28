@@ -47,6 +47,29 @@ class NeedsMeItem(BaseModel):
     # story #3828(UX-v3·대화·BE 1) — 이 work_item을 태그한 가장 최근 대화(있으면).
     # 없으면 null(그 일을 얘기한 대화가 아직 없다는 정직한 사실 — 지어내지 않는다).
     conversation_id: uuid.UUID | None = None
+    # story #4231 — 그 대화의 프로젝트(대화는 work_item과 다른 프로젝트에 있을 수 있다 · FE 딥링크 `?p=`). conversation_id가 null이면 null.
+    conversation_project_id: uuid.UUID | None = None
+    # story #3965(페드루 PO CHANGES 소형, 2026-09-17) — source="workflow_step" 항목만
+    # 채워진다(gate_id는 WorkflowLineStepApproval.gate_id 그대로, S9 parallel gate
+    # 대표 Gate). FE가 이 값 없이는 POST /gates/{id}/approvers/{approval_id}/decision을
+    # 한 콜로 못 부른다(별도 조회 없이 needs_me 응답만으로 액션 완결). gate/hitl 소스는
+    # null(그 개념 자체가 없음 — 지어내지 않는다).
+    gate_id: uuid.UUID | None = None
+    # story #4190(유나 «본 버전 대조» 2) — 레시피 발행 게이트(초안을 보고 승인해야 함). true면 「오늘」이 저위험 일괄
+    # 승인에서 빼고 개별 카드(«초안 보고 승인» → 게이트 상세)로 둔다. gate 소스만 true가 될 수 있다.
+    recipe_publish: bool = False
+    # story #4241 — 이 항목의 프로젝트(gate = work_item 프로젝트 · hitl = 요청 행). 「오늘」은 조직 전체 목록이라 FE 행 링크가
+    # «현재 프로젝트»가 아니라 이 값을 `?p=`로 싣는다. workflow_step은 결재함(조직 단위)으로 가서 null.
+    project_id: uuid.UUID | None = None
+
+
+class AgentRunCancelState(BaseModel):
+    """story #3961 — 「정지」 액션의 화면 상태. state는 순수 파생값(agent_runs.status/
+    cancel_requested_at으로 읽기 시점 계산, agent_runs.py::_effective_cancel_outcome과
+    동일 판정 — 두 곳이 갈리지 않는다). 낱말은 PO 확定: unacknowledged도 실패가 아니다."""
+    requested_at: datetime
+    reason: str | None = None
+    state: str  # "requested" | "acknowledged" | "unacknowledged"
 
 
 class AgentProgressItem(BaseModel):
@@ -58,6 +81,8 @@ class AgentProgressItem(BaseModel):
     started_at: datetime
     # story #3828 — 이 실행을 촉발한 대화(agent_runs.conversation_id). 없으면 null.
     conversation_id: uuid.UUID | None = None
+    # story #3961 — 중단 요청 中/ack/미응답 상태. 요청된 적 없으면 null(지어내지 않는다).
+    cancel: AgentRunCancelState | None = None
 
 
 class CompletedTodayItem(BaseModel):
@@ -101,6 +126,27 @@ class UsageSection(BaseModel):
     ad_spend: AdSpendUsage
 
 
+class LandedToday(BaseModel):
+    """story #3959(3954 그라운딩 doc 처방) — 오늘 done 전이 카운트. story_activities
+    실측(actor_id 있는 전이만 남는 행 — 근사 없음, 그 배제 자체가 계약)."""
+    count: int
+    since: datetime
+
+
+class QaPassedToday(BaseModel):
+    """오늘 승인된 게이트 카운트 — gates.resolved_at 실측(근사 불요)."""
+    count: int
+    since: datetime
+
+
+class OpenDefects(BaseModel):
+    # story #3959 — verdict(source="qa") 테이블은 있으나 이를 채우는 POST /capture-review
+    # 실 호출처가 0(cron·webhook·스크립트 전무) — 지금 count를 내면 거짓 0이 된다.
+    # AdSpendUsage와 동일 관례: measured=False 고정, count=None(가짜 0 금지).
+    count: int | None = None
+    measured: bool = False
+
+
 class TodayResponse(BaseModel):
     needs_me: list[NeedsMeItem]
     needs_me_count: int
@@ -108,6 +154,12 @@ class TodayResponse(BaseModel):
     completed_today: list[CompletedTodayItem]
     published_today: PublishedToday
     usage: UsageSection
+    landed_today: LandedToday
+    qa_passed_today: QaPassedToday
+    open_defects: OpenDefects
+    # story #4351 PR B — 수(published_today · landed_today · qa_passed_today)의 범위. 접근이 제한된 caller면 "accessible_projects"
+    # (접근 가능 프로젝트 몫만) — 화면이 «조직 전체»라고 단정하지 않게. owner/admin은 "org".
+    scope: Literal["org", "accessible_projects"] = "org"
 
 
 @router.get("", response_model=TodayResponse)

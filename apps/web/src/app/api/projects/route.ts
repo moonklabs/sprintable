@@ -1,6 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { ApiErrors, apiSuccess } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 /** GET — 조직 프로젝트 목록 */
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
 /** POST — 프로젝트 생성 (org_id는 auth context에서 자동 주입) */
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;

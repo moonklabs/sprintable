@@ -22,6 +22,8 @@ const { useDashboardContextMock, replaceMock, muxSubscribeMock } = vi.hoisted(()
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
+  // story #4262 — 발송 상태 줄(NewsletterSendStatus)이 연결 화면 링크에 쓴다.
+  useConnectRulesHref: () => '/organization/channels',
 }));
 
 vi.mock('next/navigation', () => ({
@@ -89,7 +91,7 @@ afterEach(async () => {
 
 async function mount(gateFixture: GateItem) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+    if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
     return { ok: true, json: async () => ({ data: [] }) };
   }));
   const { default: GateDetailPage } = await import('./page');
@@ -158,6 +160,101 @@ describe('GateDetailPage — can_approve 게이팅 (story #2091)', () => {
   });
 });
 
+// story #4136(FE)·#4135(BE, 미르코) — 게이트 상세 «제작 산출물» 칸. 라이브 실측(PO 세션,
+// 2026-09-22 00:40Z)에서 지정 결재자가 아니면 이 칸에 안내 문장 한 줄뿐이었고 산출물
+// 링크가 전혀 안 보였다 — 비결재자 뷰가 (a) 결재자 이름 표기 + (b) 산출물 목록을 그대로
+// 함께 보여주는지를 실 마운트로 검증한다(AC2). memberNames 캐시는 /api/team-members를
+// 통해 채워지므로(위 mount()의 fallback은 {data:[]}) 이 describe만 그 엔드포인트를
+// 오버라이드하는 전용 mount를 쓴다.
+describe('GateDetailPage — «제작 산출물» 칸 + 비결재자 이름 표기 (story #4136)', () => {
+  async function mountWithTeamMembers(gateFixture: GateItem, members: { id: string; name: string }[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
+      if (url === '/api/team-members') return { ok: true, json: async () => ({ data: members }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐비결재자 + 이름 조회 성공 — «결재는 {이름}에게 배정돼 있어요» + 산출물 링크가 함께 나타난다(AC2)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'member-1',
+    });
+    await mountWithTeamMembers(
+      gate({
+        can_approve: false, designated_approver_id: 'member-2',
+        linked_evidence: [{ id: 'ev-1', kind: 'concept_brief', ref: 'concept-brief-ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' }],
+      }),
+      [{ id: 'member-2', name: '댄 어윈' }],
+    );
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyDesignatedElsewhereNamed.replace('{name}', '댄 어윈'));
+    expect(container.textContent).not.toContain(koMessages.cage.gateReadonlyDesignatedElsewhere);
+    expect(container.textContent).toContain('컨셉 브리프');
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceSectionTitle);
+  });
+
+  it('이름 조회 실패/지연(빈 team-members 응답)이면 무명 문구로 graceful 폴백(산출물 목록은 그대로)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'member-1',
+    });
+    await mountWithTeamMembers(
+      gate({
+        can_approve: false, designated_approver_id: 'member-2',
+        linked_evidence: [{ id: 'ev-1', kind: 'concept_brief', ref: 'concept-brief-ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' }],
+      }),
+      [],
+    );
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyDesignatedElsewhere);
+    expect(container.textContent).toContain('컨셉 브리프');
+  });
+
+  it('결재자 뷰(can_approve=true)에서도 산출물 목록이 함께 보인다(AC2 — 무변경 확認)', async () => {
+    await mount(gate({
+      can_approve: true,
+      linked_evidence: [{ id: 'ev-1', kind: 'storyboard', ref: 'storyboard-ref-1', reference_token: '[컨셉 보드](entity:artifact:44444444-4444-4444-4444-444444444444)' }],
+    }));
+    expect(container.textContent).toContain('컨셉 보드');
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+  });
+
+  it('⭐산출물 0건이면 결재자 뷰에도 «이 게이트에 등록된 산출물이 없어요»가 나타난다(거짓 참조 0)', async () => {
+    await mount(gate({ can_approve: true, linked_evidence: [], neutral_facts: null }));
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+  });
+});
+
+// story #4139([E-RECIPE-1] Phase3 폴리시, 페드루 PO 確定 2026-09-22) — deferred_to_gate_id가
+// 있으면(레시피 게이트가 대신 결재) can_approve=true여도 액션 버튼을 숨기고 「레시피 게이트에서
+// 함께 결재돼요」+링크를 보인다. unauthorizedExtra(무권한 문구)와 절대 안 섞는다 — 별개 사실.
+describe('GateDetailPage — deferred_to_gate_id(레시피 게이트 대신 결재, story #4139)', () => {
+  it('deferred_to_gate_id가 있으면 can_approve=true여도 승인/반려 버튼이 없고 대신 결재 문구+링크가 뜬다', async () => {
+    await mount(gate({ can_approve: true, deferred_to_gate_id: 'gate-recipe-1' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(false);
+    expect(container.textContent).toContain(koMessages.cage.gateDeferredToRecipeGate);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReadonlyNotAuthorized);
+    const link = container.querySelector('a[href="/gates/gate-recipe-1"]');
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toBe(koMessages.cage.gateDeferredToRecipeGateLink);
+  });
+
+  it('⭐story #4231 — 대신 결재 링크는 이 결재의 프로젝트를 싣는다(현재 p 아님 · 레시피 결재는 같은 작업 항목)', async () => {
+    await mount(gate({ can_approve: true, deferred_to_gate_id: 'gate-recipe-1', project_id: 'proj-of-gate' }));
+    expect(container.querySelector('a[href="/gates/gate-recipe-1?p=proj-of-gate"]')).not.toBeNull();
+  });
+
+  it('deferred_to_gate_id가 없으면(일반 게이트, 회귀 0) 대신 결재 문구가 안 뜨고 기존 동작 그대로', async () => {
+    await mount(gate({ can_approve: false, deferred_to_gate_id: null }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateDeferredToRecipeGate);
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
+  });
+});
+
 // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 「발행」(ESP 캠페인 생성)과
 // 「발송」이 같은 승인 버튼을 공유하면 두 다른 행위가 같은 낱말("승인")로 뭉개진다.
 describe('GateDetailPage — 뉴스레터 승인 버튼 낱말 분리 (story #3813 PR4)', () => {
@@ -221,7 +318,7 @@ describe('GateDetailPage — 재승인 칩 (story #3813 PR4)', () => {
 describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () => {
   it('422 거부 사유(#2027 고위험 승인 사유 필수)가 raw "HTTP 422" 대신 실 메시지로 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low' }) }) };
+      if (url === '/api/gates/gate-1' && !init?.method) return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low' })) };
       if (url === '/api/gates/gate-1/transition') {
         return {
           ok: false,
@@ -248,7 +345,7 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
   // "HTTP {status}"가 아니라 사람말 공통 폴백(gateTransitionErrorGeneric)을 보여준다.
   it('BE가 message를 안 주면(500 등) raw "HTTP 500" 대신 사람말 폴백을 보여준다 (story #2552)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low' }) }) };
+      if (url === '/api/gates/gate-1' && !init?.method) return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low' })) };
       if (url === '/api/gates/gate-1/transition') {
         return { ok: false, status: 500, json: async () => ({ data: null, error: null, meta: null }) };
       }
@@ -273,10 +370,10 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
   it('409 gate_head_changed 거부 시 사유를 보여주고 gate를 재조회한다', async () => {
     let gateFetchCount = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) {
+      if (url === '/api/gates/gate-1' && !init?.method) {
         gateFetchCount += 1;
         const sha = gateFetchCount === 1 ? 'sha-old-reviewed' : 'sha-new-race-landed';
-        return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low', github_check_run_sha: sha }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low', github_check_run_sha: sha })) };
       }
       if (url === '/api/gates/gate-1/transition') {
         return {
@@ -313,10 +410,10 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
   it('409 재조회로 SHA가 바뀌면 근거열람 체크·사유가 리셋돼 재승인 버튼이 다시 비활성화된다', async () => {
     let gateFetchCount = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) {
+      if (url === '/api/gates/gate-1' && !init?.method) {
         gateFetchCount += 1;
         const sha = gateFetchCount === 1 ? 'sha-A-reviewed' : 'sha-B-race-landed';
-        return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'high', github_check_run_sha: sha }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'high', github_check_run_sha: sha })) };
       }
       if (url === '/api/gates/gate-1/transition') {
         return {
@@ -360,6 +457,65 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
   });
 });
 
+// story #4190(PO 판정 2026-09-23 · 유나 자리별 동작) — 레시피 발행 게이트 승인은 이 화면의 초안 카드가 그린 (draft_id,
+// version)을 싣고, 그 사이 새 버전이면 409 gate_draft_changed → 기존 오류 자리 문장 + 자동 재조회(버튼 없음) → 카드가 새
+// 버전을 그리고 열람 체크·사유는 리셋(새 버전을 다시 봐야 재승인).
+describe('GateDetailPage — 본 초안 버전 대조 (story #4190)', () => {
+  function recipeGate(version: number): GateItem {
+    return gate({
+      can_approve: true, risk_grade: 'high', gate_type: 'external_publish', scope_key: '',
+      neutral_facts: { stage: 'pending_approval', triggered_by_event: 'e-1' },
+      linked_site_draft: {
+        draft_id: 'site-d1', version, title: `블로그 제목 v${version}`, body_preview: '본문 앞부분',
+        channel: null, account_id: null, account_label: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      },
+    });
+  }
+
+  it('⭐승인 요청에 카드가 그린 버전을 싣고, 409면 문장+재조회로 카드가 v2가 되고 열람 체크가 리셋된다', async () => {
+    let gateFetchCount = 0;
+    const transitionBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/gates/gate-1' && !init?.method) {
+        gateFetchCount += 1;
+        return { ok: true, status: 200, json: async () => (recipeGate(gateFetchCount === 1 ? 1 : 2)) };
+      }
+      if (url === '/api/gates/gate-1/transition') {
+        transitionBodies.push(JSON.parse(String(init?.body)));
+        return {
+          ok: false, status: 409,
+          json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'draft changed', current_version: 2 }, meta: null }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('블로그 제목 v1');
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => { checkbox.click(); });
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'v1 검토 완료');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const signBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+    await act(async () => { signBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(transitionBodies[0]).toMatchObject({ reviewed_draft_id: 'site-d1', reviewed_draft_version: 1 });
+    expect(container.textContent).toContain(koMessages.cage.gateDraftChangedError);
+    expect(gateFetchCount).toBe(2);
+    expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('블로그 제목 v2');
+    expect(container.querySelector('[data-testid="linked-draft-version"]')?.textContent).toContain('v2');
+    expect((container.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
+  });
+});
+
 // story #2631(FE 계약 doc bb733f26) — 「보류(논의 필요)」+ 오클릭 정정(취소). 저위험 경로
 // 버튼 노출·엔드포인트 배선만 고정한다(다이얼로그·GateUndoButton 자체의 상세 동작은
 // approvals-queue.test.tsx가 이미 실 렌더로 커버 — 공유 컴포넌트 중복 검증 금지, 여기선
@@ -369,7 +525,7 @@ describe('GateDetailPage — 보류(논의 필요)·오클릭 정정 (story #263
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1' && !init?.method) return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/gates/gate-1/discuss') {
         return (extra?.discussOk ?? true)
           ? { ok: true, json: async () => ({ data: gateFixture }) }
@@ -380,7 +536,7 @@ describe('GateDetailPage — 보류(논의 필요)·오클릭 정정 (story #263
           ? { ok: true, json: async () => ({ data: { ...gateFixture, status: 'pending', resolver_id: null, resolved_at: null } }) }
           : { ok: false, status: 403, json: async () => ({ error: { message: '해소자 본인만 취소할 수 있습니다' } }) };
       }
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -449,9 +605,9 @@ describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', (
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1' && !init?.method) return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/gates/gate-1/transition') return { ok: true, json: async () => ({ data: gateFixture }) };
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -530,7 +686,7 @@ describe('GateDetailPage — gate_type 사람 낱말(story #3565)', () => {
 describe('GateDetailPage — 해소자·상태 낱말 원문 노출 금지(story #3806 PR 9)', () => {
   async function mountWithTeamMembers(gateFixture: GateItem, teamMembers: { id: string; name: string }[]) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/team-members') return { ok: true, json: async () => ({ data: teamMembers }) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -582,7 +738,7 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/gates/gate-1') {
         getCount += 1;
-        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -606,7 +762,7 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/gates/gate-1') {
         getCount += 1;
-        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -629,7 +785,7 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/gates/gate-1') {
         getCount += 1;
-        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -650,7 +806,7 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
 
   it('malformed payload는 크래시 없이 무시한다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gate({ status: 'pending' })) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -661,6 +817,105 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
     const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
     const handler = call![1] as (raw: string, eventId?: string) => void;
     expect(() => handler('not-json{')).not.toThrow();
+  });
+});
+
+// story #4027(유나 전수→PO 코드 확認) — 다른 승인자가 먼저 해소·위임하면 이 페이지가 실시간
+// 재조회로 «불러오는 중» 한 줄로 무너졌다 복구되던 결함. 위 #2985 스위트는 "재조회가 되는지"만
+// 봤고 "그 재조회가 로딩 상태를 켜는지"는 안 봤다 — 여기가 그 축.
+describe('GateDetailPage — 실시간 재조회는 로딩을 안 켠다(story #4027)', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  it('AC1 — mux 재조회 中에도 기존 화면(ProofCapsule 본문)이 유지되고 «불러오는 중»이 안 뜬다', async () => {
+    const first = gate({ status: 'pending', can_approve: true });
+    const second = gate({ status: 'approved', resolver_id: 'member-9' });
+    let call = 0;
+    const gateResolvedDeferred = deferred<{ ok: boolean; status: number; json: () => Promise<unknown> }>();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') {
+        call += 1;
+        if (call === 1) return { ok: true, status: 200, json: async () => first };
+        return gateResolvedDeferred.promise; // 두 번째(mux 트리거) 호출은 응답을 붙잡아 둔다.
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain(koMessages.cage.gateInboxLoading);
+    expect(container.textContent).toContain(koMessages.cage.gateReject); // 본문 정상 렌더 확認.
+
+    const muxCall = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    const handler = muxCall![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'gate-1', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    // 재조회가 아직 안 끝난 시점 — 로딩 문구 0, 기존 본문(반려 버튼) 그대로.
+    expect(container.textContent).not.toContain(koMessages.cage.gateInboxLoading);
+    expect(container.textContent).toContain(koMessages.cage.gateReject);
+
+    await act(async () => {
+      gateResolvedDeferred.resolve({ ok: true, status: 200, json: async () => second });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    // 응답 도착 후 — 화면이 해소된 상태로 교체(로딩 문구는 시종 0).
+    expect(container.textContent).not.toContain(koMessages.cage.gateInboxLoading);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReject);
+  });
+
+  it('AC2 — 결정 게이트에서 고르던 선택안이 실시간 재조회 뒤에도 지워지지 않는다', async () => {
+    const decisionGateFixture = gate({
+      gate_type: 'agent_decision_request', can_approve: true, risk_grade: 'low', status: 'pending',
+      neutral_facts: { question: '유형 선택', options: ['A) 안건1', 'B) 안건2'] },
+    });
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') { call += 1; return { ok: true, status: 200, json: async () => (decisionGateFixture) }; }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const radios = container.querySelectorAll('input[type="radio"]');
+    await act(async () => { (radios[1] as HTMLInputElement).click(); });
+    expect((container.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).checked).toBe(true);
+
+    const muxCall = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_delegated');
+    const handler = muxCall![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'gate-1', new_approver_id: 'member-9' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(call).toBe(2); // 재조회는 실제로 일어났다(회귀 아님).
+    expect((container.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).checked).toBe(true); // 선택은 그대로.
+  });
+
+  it('AC1 — 첫 로드(id 변경 포함)는 여전히 «불러오는 중»을 보여준다(첫 로드 회귀 방지)', async () => {
+    const g = gate({ status: 'pending' });
+    const first = deferred<{ ok: boolean; status: number; json: () => Promise<unknown> }>();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return first.promise;
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateInboxLoading);
+
+    await act(async () => {
+      first.resolve({ ok: true, status: 200, json: async () => ({ data: g }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain(koMessages.cage.gateInboxLoading);
   });
 });
 
@@ -705,7 +960,7 @@ describe('GateDetailPage — story #3113 결정 게이트(agent_decision_request
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
       if (url === '/api/gates/gate-1/transition') return { ok: true, json: async () => ({ data: gateFixture }) };
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -779,6 +1034,25 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
     expect(link?.getAttribute('href')).toBe('/artifacts/artifact-42');
   });
 
+  // story #4231 4차 B(PO 08:48Z) — 조직 수준 화면이라 현재 p는 쿠키 프로젝트일 수 있다 → 대상 링크는 게이트 자기 프로젝트.
+  it('⭐다른 프로젝트 게이트의 아티팩트 대상 링크는 게이트 자기 project_id를 싣는다', async () => {
+    await mount(gate({
+      gate_type: 'artifact_canonicalize', work_item_type: 'visual_artifact', work_item_id: 'artifact-42',
+      can_approve: true, risk_grade: 'low', work_item_summary: null, project_id: 'proj-GATE',
+    }));
+    const art = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetArtifact);
+    expect(art?.getAttribute('href')).toBe('/artifacts/artifact-42?p=proj-GATE');
+  });
+
+  it('⭐다른 프로젝트 게이트의 문서 대상 링크도 게이트 자기 project_id', async () => {
+    await mount(gate({
+      gate_type: 'doc_approval', work_item_type: 'doc', can_approve: true, risk_grade: 'low',
+      work_item_summary: { title: '온보딩 재실측', slug: 'onboarding-remeasure' }, project_id: 'proj-GATE',
+    }));
+    const doc = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetDoc);
+    expect(doc?.getAttribute('href')).toBe('/docs/onboarding-remeasure?p=proj-GATE');
+  });
+
   it('doc/artifact가 아닌 다른 gate 유형(merge 등)은 대상 링크를 렌더하지 않는다(엉뚱한 경로 지어내지 않음)', async () => {
     // PO AC 리뷰(PR#3542) 사소 지적 — 'merge'가 실존 gate_type(hitl_config.py GATE_TYPES).
     // 'merge_gate'는 이 파일 기존 기본 픽스처값(line 57)일 뿐 실존 타입 아님 — 내 신규
@@ -798,6 +1072,17 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
     const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetLoop);
     expect(link).toBeTruthy();
     expect(link?.getAttribute('href')).toBe('/loops/loop-7');
+  });
+
+  // story #4231 4차 B(까디르 codex 01a0d3ad ②) — 다른 프로젝트 게이트의 루프 링크는 현재 p가 아니라 게이트 자기 프로젝트(gate.project_id).
+  // 예전 픽스처엔 프로젝트가 없어 폴백만 재서, 루프 링크를 현재 p(flatHref)로 바꿔도 초록이었다.
+  it('⭐다른 프로젝트 loop_decision — /loops/{id}?p=게이트 프로젝트', async () => {
+    await mount(gate({
+      gate_type: 'loop_decision', work_item_type: 'loop', work_item_id: 'loop-8', project_id: 'proj-GATE',
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+    }));
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetLoop);
+    expect(link?.getAttribute('href')).toBe('/loops/loop-8?p=proj-GATE');
   });
 
   it('workflow_config_publish는 이번에도 대상 링크가 없다(실 뷰어 부재 — 억지 진입점 금지, #2118 AC④)', async () => {
@@ -837,7 +1122,7 @@ describe('GateDetailPage — ads_boost 실행 블록은 needsAction/gate.status�
 
   async function mountWithSpend(gateFixture: GateItem, spend: { run_status: string | null }) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url.includes('/ads-boosts/') && url.includes('/spend')) return { ok: true, json: async () => ({ data: spend }) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -871,3 +1156,173 @@ describe('GateDetailPage — ads_boost 실행 블록은 needsAction/gate.status�
     expect(document.body.querySelector('[data-testid="boost-execution-control"]')).toBeNull();
   });
 });
+
+// story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — approvals-queue.tsx 카드와 동일 관례
+// (neutral_facts.stage(+stage_role) denorm, 레시피 게이트가 아니면 무변).
+//
+// ⛔story #4091(유나 design 라이브 관찰, PO 확定 2026-09-21) 재정정 — 이 footer meta 줄과
+// GateEvidence의 RecipeApprovalFactsBlock(사실 블록)이 같은 neutral_facts.stage를 각자
+// 렌더해 화면에 «단계»가 두 번 뜨는 결함이 발견됐다. PO 확定(b안): 사실 블록에 stage_role도
+// 얹어 정보 소실 0으로 만들고, 사실 블록이 뜨는 분기(default fixture가 타는 !canAct
+// 분기 포함)에선 이 meta 줄을 뺀다 — 아래 테스트는 그 새 계약을 pin한다. 역할 표시 자체의
+// 회귀 핀은 gate-evidence.test.tsx 쪽(사실 블록)으로 자리를 옮겼다(핀 폐기 아님).
+describe('GateDetailPage — 단계(역할) 표시(story #4082, #4091로 렌더 위치 재배치)', () => {
+  it('사실 블록이 뜨는 분기(기본 fixture=!canAct)에선 footer meta 줄이 안 뜨고, 사실 블록 쪽 「단계 · X (역할)」만 뜬다(중복 제거)', async () => {
+    await mount(gate({ neutral_facts: { stage: 'concept_confirmed', stage_role: 'Director' } }));
+    expect(container.textContent).not.toContain(`${koMessages.cage.gateStageLabel}:`);
+    expect(container.textContent).toContain(`${koMessages.cage.recipeApprovalStageLabel} · 컨셉 확정 (디렉터)`);
+    expect(container.textContent).not.toContain('concept_confirmed');
+    expect(container.textContent).not.toContain('Director');
+  });
+
+  it('neutral_facts.stage만 있고 stage_role이 없으면(사실 블록) 역할 괄호 없이 단계만 표시한다', async () => {
+    await mount(gate({ neutral_facts: { stage: 'concept_confirmed' } }));
+    expect(container.textContent).toContain(`${koMessages.cage.recipeApprovalStageLabel} · 컨셉 확정`);
+    expect(container.textContent).not.toContain('(디렉터)');
+  });
+
+  it('비레시피 게이트(neutral_facts.stage 없음)는 단계 줄 자체가 안 뜬다(회귀 0)', async () => {
+    await mount(gate({ neutral_facts: null }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateStageLabel);
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalStageLabel);
+  });
+
+  it('서명 플로우 분기(risk_grade=high, 사실 블록 없음)는 footer meta 줄이 그대로 유지된다(중복이 아니므로 유지, story #4091)', async () => {
+    await mount(gate({
+      can_approve: true, risk_grade: 'high',
+      neutral_facts: { stage: 'concept_confirmed', stage_role: 'Director' },
+    }));
+    expect(container.textContent).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정 (디렉터)`);
+  });
+
+  // story #4091 정정(PO 3회째 라이브 재측정, 2026-09-21) — isSigFlowGate는 gate risk level만
+  // 보는 정적 값(라인 212)이라 이미 승인된 고위험 게이트에도 그대로 true다. 최초 처방은 그
+  // 정적 값만으로 meta 줄을 유지시켜, 이미 해소된(status≠pending → needsAction=false →
+  // !needsAction 분기로 GateEvidence/사실 블록이 뜨는) 고위험 게이트에서 meta+사실 블록이
+  // 동시에 떴다(실 external_publish 게이트 451b5813로 재현). 이 테스트가 그 회귀를 pin.
+  it('이미 승인된 고위험 게이트(status=approved, risk_grade=high)는 사실 블록만 뜨고 footer meta 줄은 안 뜬다(회귀 — #4091 재정정)', async () => {
+    await mount(gate({
+      status: 'approved', resolver_id: 'someone', resolved_at: new Date().toISOString(),
+      can_approve: true, risk_grade: 'high',
+      neutral_facts: { stage: 'concept_confirmed', stage_role: 'Director' },
+    }));
+    expect(container.textContent).not.toContain(`${koMessages.cage.gateStageLabel}:`);
+    expect(container.textContent).toContain(`${koMessages.cage.recipeApprovalStageLabel} · 컨셉 확정 (디렉터)`);
+  });
+});
+
+// story #4121(E-RECIPE-1 Phase 3 폴리시, 유나 #4056 v2 제안·PO 확定 2026-09-21) — 게이트
+// 상세 2열+sticky 레이아웃. CSS `lg:` 브레이크포인트만(JS useIsMobile 신규 분기 0 — PO/유나
+// canon: hydration flash·CLS 회피) — jsdom은 CSS 미디어쿼리를 실행하지 않으므로 여기선
+// matchMedia mock이 아니라 「단일열/2열 grid 클래스 존재」+「우 열 lg:sticky 클래스 존재」만
+// 단언한다(AC2 유나 정정). 실 브레이크포인트 전환 시각 검증은 유나 design:pass(픽셀 캡처)의
+// 몫 — 이 테스트는 «올바른 유틸리티 클래스가 배선됐는가»만 고정.
+//
+// ⚠️정정(페드루 PO CHANGES-1, 2026-09-21 18:14Z) — 최초 구현은 2열 grid를 ProofCapsule의
+// footer «안»에 뒀다. ProofCapsule 셸(CutCornerShell, story #2978 사유로 overflow-hidden이
+// 의도된 값)이 CSS 스펙상 sticky의 스크롤 컨테이너가 되어 우 열이 캡슐 박스 기준으로만
+// 붙고 실제 페이지 스크롤엔 안 반응했다(jsdom 클래스 단언으론 못 잡히는 클래스 — dev-app
+// 실측에서만 드러남). grid를 gate-detail-container(페이지 레벨, ProofCapsule 밖)로 끌어올려
+// ProofCapsule과 우 열 액션 카드를 형제로 둔다 — 아래는 그 새 구조에 맞춘 재작성.
+describe('GateDetailPage — 2열+sticky 레이아웃(story #4121)', () => {
+  it('우 열에 액션이 있을 때(needsAction&&canAct, 평문 버튼 갈래)만 컨테이너 자체가 2열 grid다', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'low' }));
+    const outer = container.querySelector('[data-testid="gate-detail-container"]')!;
+    expect(outer.className).toContain('max-w-2xl');
+    expect(outer.className).toContain('lg:max-w-6xl');
+    expect(outer.className).toContain('lg:grid');
+    expect(outer.className).toContain('lg:grid-cols-[minmax(0,1fr)_360px]');
+
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]');
+    expect(actionCol).toBeTruthy();
+    expect(actionCol?.className).toContain('lg:sticky');
+    // 페드루 PO 정정(2026-09-21) — 시안 mock의 top-4가 아니라 셸 상단바(top-bar.tsx h-12)
+    // sticky 선례(docs-client-layout.tsx sticky top-12)와 동형 오프셋.
+    expect(actionCol?.className).toContain('lg:top-12');
+
+    expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeNull();
+  });
+
+  // 페드루 PO CHANGES-1 처방의 핵심 회귀 가드 — 우 열 액션 카드가 ProofCapsule의 자손이면
+  // (즉 그 overflow-hidden 셸 안에 있으면) sticky의 실제 스크롤 컨테이너가 페이지가 아니라
+  // 캡슐 박스가 되어버린다. `.proof-surface`(CutCornerShell 자신의 클래스)의 가장 가까운
+  // 조상이 action-column 자기 자신이어야 한다(=캡슐 밖 형제) — 캡슐 «안»이었다면
+  // closest('.proof-surface')가 캡슐 셸(자기 자신이 아닌 조상)을 잡아 이 단언이 깨진다.
+  it('⭐우 열 액션 카드는 ProofCapsule 셸(.proof-surface, overflow-hidden) 밖의 형제다(CHANGES-1 회귀 가드)', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'low' }));
+    const outer = container.querySelector('[data-testid="gate-detail-container"]')!;
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]')!;
+    // action-column 자신도 재질상 proof-surface지만, 그 "가장 가까운 proof-surface 조상"이
+    // 자기 자신이어야 한다 — 부모 방향으로 올라가며 또 다른 proof-surface(=캡슐 셸)를
+    // 먼저 만나면 안 된다(캡슐 안에 중첩됐다는 뜻).
+    expect(actionCol.closest('.proof-surface')).toBe(actionCol);
+    // 구조적으로도 컨테이너의 직계 자식(그리드 아이템)이어야 한다 — 캡슐 자손이면 중첩
+    // 깊이가 2 이상이라 직계 자식일 수 없다.
+    expect(Array.from(outer.children)).toContain(actionCol);
+  });
+
+  it('서명 플로우 갈래(risk_grade=high)도 같은 형제 카드 구조·sticky 클래스를 쓴다(우 열 콘텐츠만 GateSignatureApproval로 갈림)', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'high' }));
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]');
+    expect(actionCol?.className).toContain('lg:sticky');
+    // 서명 플로우는 evidenceViewed 체크박스가 우 열 안에 있어야 한다(액션 콘텐츠가 실제로 거기).
+    expect(actionCol?.querySelector('input[type="checkbox"]')).toBeTruthy();
+  });
+
+  it('우 열이 빌 자리(무권한, can_approve=false)는 2열 클래스 없이 단일열 그대로다(회귀 0)', async () => {
+    await mount(gate({ can_approve: false }));
+    const outer = container.querySelector('[data-testid="gate-detail-container"]');
+    expect(outer?.className).not.toContain('lg:max-w-6xl');
+    expect(outer?.className).not.toContain('lg:grid');
+    expect(container.querySelector('[data-testid="gate-detail-action-column"]')).toBeNull();
+    expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeTruthy();
+  });
+
+  it('우 열이 빌 자리(이미 해소, status=approved)도 2열 클래스 없이 단일열 그대로다(회귀 0)', async () => {
+    await mount(gate({ status: 'approved', resolver_id: 'someone', resolved_at: new Date().toISOString() }));
+    const outer = container.querySelector('[data-testid="gate-detail-container"]');
+    expect(outer?.className).not.toContain('lg:max-w-6xl');
+    expect(outer?.className).not.toContain('lg:grid');
+    expect(container.querySelector('[data-testid="gate-detail-action-column"]')).toBeNull();
+    expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeTruthy();
+  });
+
+  it('2열일 때 게이트 메타(배지·컨텍스트)는 우 열(sticky 액션 카드)에서만 뜬다', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'low', reapproval_required: true }));
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]')!;
+    expect(actionCol.textContent).toContain(koMessages.cage.gateReapprovalRequiredChip);
+    // ProofCapsule 쪽(캡슐 셸)에는 그 메타가 없어야 한다 — 배지·컨텍스트는 전부 우 열로
+    // 옮겨졌다.
+    const capsuleShell = container.querySelector('.proof-surface:not([data-testid="gate-detail-action-column"])')!;
+    expect(capsuleShell.textContent).not.toContain(koMessages.cage.gateReapprovalRequiredChip);
+  });
+
+  it('단일열(무권한)에서도 평문 승인/거부 버튼이 안 뜨는 대신 무권한 문구는 그대로 뜬다(기존 pin과 정합)', async () => {
+    await mount(gate({ can_approve: false }));
+    const singleCol = container.querySelector('[data-testid="gate-detail-single-col"]')!;
+    expect(singleCol.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
+  });
+});
+
+// story #4370(까디르 P3) — 저위험 게이트 «변경 요청» 패널의 보이는 «취소»는 사유 초안을 버린다(예전엔 패널만 닫고 초안은 남아,
+// 다시 열면 버렸다고 생각한 사유가 돌아왔다).
+describe('GateDetailPage — 저위험 «변경 요청» 패널의 «취소»는 사유 초안을 지운다(story #4370)', () => {
+  it('사유를 쓰고 «취소» → 다시 열면 빈 칸', async () => {
+    window.sessionStorage.clear();
+    await mount(gate({ can_approve: true }));
+    const cage = koMessages.cage as unknown as Record<string, string>;
+    const btn = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === label)!;
+    const reason = () => document.body.querySelector<HTMLTextAreaElement>('#gate-sig-reason');
+    await act(async () => { btn(cage.gateReject).click(); });
+    const el = reason()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, '버릴 사유');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { btn(cage.cancel).click(); });
+    expect(reason()).toBeNull();
+    await act(async () => { btn(cage.gateReject).click(); });
+    expect(reason()!.value).toBe('');
+  });
+});
+

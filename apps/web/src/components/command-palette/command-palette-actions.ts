@@ -38,7 +38,10 @@ export interface ActionCommand {
  * context 없이는 지어내지 않고 생략한다(no-fiction) — context 있으면 맨 앞에 랭크.
  * 나머지 2개(게이트 결재·에이전트 모집)는 프로젝트 범위 명령이라 항상 실존.
  */
-export function buildActionCommands(t: ActionCommandTranslator, context?: StoryContext): ActionCommand[] {
+/** withProject — flat 목적지에 프로젝트(`?p=`)를 싣는 함수(story #4231 3차 · 필수: 빠뜨리면 tsc가 막는다). 호출처는 useFlatHref()를 넘긴다. */
+export function buildActionCommands(
+  t: ActionCommandTranslator, withProject: (href: string) => string, context?: StoryContext,
+): ActionCommand[] {
   const items: ActionCommand[] = [];
   if (context) {
     items.push({
@@ -56,7 +59,7 @@ export function buildActionCommands(t: ActionCommandTranslator, context?: StoryC
     group: 'action',
     labelKey: 'actionGateDecision',
     label: t('actionGateDecision'),
-    targetRoute: '/inbox?tab=gates',
+    targetRoute: withProject('/inbox?tab=gates'),
     impact: t('actionGateDecisionImpact'),
     danger: true,
   });
@@ -65,7 +68,7 @@ export function buildActionCommands(t: ActionCommandTranslator, context?: StoryC
     group: 'action',
     labelKey: 'actionRecruitAgent',
     label: t('actionRecruitAgent'),
-    targetRoute: '/organization/workforce/recruiter',
+    targetRoute: withProject('/organization/workforce/recruiter'),
     impact: t('actionRecruitAgentImpact'),
     danger: false,
   });

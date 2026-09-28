@@ -39,6 +39,7 @@ const ABSORB_TARGET_LABEL_KEYS: Record<string, string> = {
 
 function fakeNavConfigModule(includeMutable: boolean, mutableTarget: string = 'work') {
   const items = includeMutable ? [STABLE_ITEM, { ...MUTABLE_ITEM, absorbTarget: mutableTarget }] : [STABLE_ITEM];
+  const chatCenterItem = { id: 'chats', labelKey: 'chats', descriptionKey: 'descChats', icon: FAKE_ICON, kind: 'static' as const, path: '/chats' };
   return {
     NAV_GROUPS: [],
     MOBILE_HUB_GROUP_ORDER: [],
@@ -51,7 +52,11 @@ function fakeNavConfigModule(includeMutable: boolean, mutableTarget: string = 'w
         items: items.filter((i) => i.absorbTarget === target),
       }))
       .filter((g) => g.items.length > 0),
-    CHAT_CENTER_ITEM: { id: 'chats', labelKey: 'chats', descriptionKey: 'descChats', icon: FAKE_ICON, kind: 'static' as const, path: '/chats' },
+    CHAT_CENTER_ITEM: chatCenterItem,
+    // story #4003 — 이 테스트는 LEGACY_NAV_ITEMS 그룹핑만 다뤄 v3 플래그 무관(항상 OFF
+    // 동형) — NAV_GROUPS가 빈 배열이라 resolveNavGroups도 빈 배열 그대로 통과.
+    resolveNavGroups: () => [],
+    resolveChatCenterItem: () => chatCenterItem,
   };
 }
 

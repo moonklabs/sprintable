@@ -23,11 +23,12 @@ from app.schemas.hitl_config import (
 )
 from app.services.disposition_advisor import DEFAULT_MIN_VERDICTS, get_disposition_recommendation
 from app.services.gate_resolver import resolve_disposition
+from app.services.i18n_catalog import t
 
 router = APIRouter(prefix="/api/v2/gate-config", tags=["gate-config", "Trust"])
 
 
-async def _is_eligible_merge_gate_default_approver(
+async def _is_eligible_gate_default_approver_member(
     session: AsyncSession, org_id: uuid.UUID, member_id: uuid.UUID,
 ) -> bool:
     """story #3319 — merge_gate_default_approver_member_id 값 검증. is_org_owner_or_admin
@@ -89,7 +90,7 @@ async def upsert_org_policy(
     # story #3319 — 값이 있으면(지우는 게 아니라 채우는 PUT) 사람 owner/admin 멤버인지 검증.
     # None(미설정 또는 명시 해제)은 검증 대상 없음 — 현행 무변경(회귀 0)으로 그대로 통과.
     if body.merge_gate_default_approver_member_id is not None and not (
-        await _is_eligible_merge_gate_default_approver(
+        await _is_eligible_gate_default_approver_member(
             session, org_id, body.merge_gate_default_approver_member_id,
         )
     ):
@@ -100,6 +101,17 @@ async def upsert_org_policy(
                 "합니다(에이전트는 requires_human 게이트에 서명할 수 없습니다)."
             ),
         )
+    # story #4083 — recipe_gate_default_approver_member_id도 같은 불변식(사람 owner/admin,
+    # 에이전트 불가)이라 같은 검증 함수를 재사용한다(새 검증 로직 발명 0).
+    if body.recipe_gate_default_approver_member_id is not None and not (
+        await _is_eligible_gate_default_approver_member(
+            session, org_id, body.recipe_gate_default_approver_member_id,
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=t("gates.recipe_default_approver_invalid_member", "ko"),
+        )
     r = await session.execute(
         select(OrgGatePolicy).where(OrgGatePolicy.org_id == org_id).limit(1)
     )
@@ -108,11 +120,13 @@ async def upsert_org_policy(
         policy = OrgGatePolicy(
             id=uuid.uuid4(), org_id=org_id, posture=body.posture,
             merge_gate_default_approver_member_id=body.merge_gate_default_approver_member_id,
+            recipe_gate_default_approver_member_id=body.recipe_gate_default_approver_member_id,
         )
         session.add(policy)
     else:
         policy.posture = body.posture
         policy.merge_gate_default_approver_member_id = body.merge_gate_default_approver_member_id
+        policy.recipe_gate_default_approver_member_id = body.recipe_gate_default_approver_member_id
     await session.flush()
     await session.refresh(policy)
     return OrgGatePolicyResponse.model_validate(policy)

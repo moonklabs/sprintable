@@ -1,16 +1,42 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronUp, Circle, CircleCheck, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { inActivationScope, writeActivationCollapsed, writeActivationHint } from '@/lib/activation-hint';
 import { useActivationStatus, type ActivationState } from '@/hooks/use-activation-status';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
+
+// story #4032(실측 — Lighthouse CI 인증화면 6곳 전부 CLS>0.1, layout-shift-elements 감사
+// 상위 기여요소가 6곳 모두 이 배너 바로 아래 그리드였다) — 진짜 원인은 `useActivationStatus`
+// 의 `state`가 마운트 직후 항상 `null`로 시작해(hooks/use-activation-status.ts) 이
+// 컴포넌트가 그 순간 `null`을 반환, 부모 `<div className="px-3 pt-3 empty:hidden">`가
+// 빈 채로 0높이로 접혀 있다가 `useEffect`의 비동기 fetch가 끝나 `state`가 채워지는
+// 순간 실 배너가 나타나며 그 아래 전체(모든 페이지 공통 그리드)를 밀어낸다 — 화면마다
+// 다른 원인이 아니라 이 배너 하나가 공통 뿌리(6곳 전부에서 거의 동일한 CLS 기여값
+// 0.134로 재현). 처방: "아직 모른다"와 "완주해서 필요 없다"를 더 이상 같은 null로
+// 뭉치지 않고, 전자는 실 배너와 같은 Alert 박스(테두리·패딩 동일)에 스켈레톤을 채워
+// 자리를 미리 잡는다 — 그 자리가 실 콘텐츠와 같은 박스라 나타날 때 높이가 안 바뀐다.
+//
+// CHANGES-1(PO 지적) — 위 스켈레톤만으로는 "완주했지만 이 브라우저는 모른다"(새 기기·
+// 시크릿 창·저장소 삭제) 사용자에게 **없던 흔들림을 새로 만든다**: localStorage 플래그가
+// 없어 스켈레톤이 먼저 뜨고, fetch가 완주를 확認하는 순간 스켈레톤째 접힌다(이전엔
+// null→null이라 흔들림이 0이었다). 처방: `useDashboardContext().initialActivationComplete`
+// (서버가 org 컨텍스트 확定 뒤 이미 조회해 둔 값, dashboard-shell.tsx 참고)를
+// `useActivationStatus`에 시드값으로 넘긴다 — true면 클라이언트 fetch 자체를 스킵해
+// 스켈레톤도 안 거치고 처음부터 미노출이다. JWT app_metadata 빌더(`_build_app_metadata`,
+// org/project 해소 이력 사고가 반복된 자리)에 새 클레임을 얹는 대신 레이아웃의 기존
+// 서버조회 패턴(이미 me/memberships/organizations를 이렇게 조회한다)에 1개를 더하는
+// 쪽을 골랐다 — 이 카드 목적(CLS 폴리시)에 비해 그 빌더의 블래스트 반경이 과도하다.
 
 /**
  * story #3159(retention·최소층) — 가입 후 남은 activation 단계를 상시 노출(완주 유도).
@@ -21,25 +47,111 @@ import { cn } from '@/lib/utils';
  * activation-status.ts)로 분리했다 — support-widget-launcher.tsx의 온보딩 단계 게이팅과
  * 같은 조회를 공유한다(두 벌 판별자·중복 네트워크 호출 금지, AC①).
  */
-const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
 
 export function ActivationChecklistBanner() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('activation');
   const router = useRouter();
-  const { projectId } = useDashboardContext();
-  const { state, allComplete } = useActivationStatus();
+  const {
+    projectId, orgId, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed,
+  } = useDashboardContext();
+  // 서버 시드·힌트 시드는 레이아웃이 조회한 org(activationOrgId)의 것 — 지금 org와 다르면(flat 경로·org 전환) 훅이 버리고 이 org를
+  // 새로 조회한다(inActivationScope · A의 «완주»가 B 배너를 숨기던 자리).
+  const { state, stateOrgId, allComplete } = useActivationStatus(initialActivationComplete, {
+    verifyInBackground: activationSeedFromHint, orgId, seedOrgId: activationOrgId,
+  });
+  // story #4219 F1 — 받은 결과를 다음 문서 요청의 표시용 힌트로(레이아웃이 체크리스트를 임계 경로에서 기다리지 않게).
+  // **결과가 판정된 org로만** 기록한다(PO 리뷰: 예전엔 캐시된 옛 org 결과를 현재 org로 기록해 섞였다).
+  // - 클라 결과: stateOrgId(요청 org) · scope_is_requested_org === false면 다른 org 판정이라 안 남김.
+  // - 서버 시드: 레이아웃이 조회한 org(activationOrgId = pathOrgId ?? me.org_id)로 — 다음 문서가 같은 식으로 읽는다.
+  useEffect(() => {
+    if (state && stateOrgId && inActivationScope(stateOrgId, orgId)) {
+      if (state.scope_is_requested_org !== false) writeActivationHint(stateOrgId, state.all_complete);
+    } else if (!state && initialActivationComplete === true && !activationSeedFromHint && activationOrgId && inActivationScope(activationOrgId, orgId)) {
+      writeActivationHint(activationOrgId, true); // 서버가 이번 요청에 확인한 완주(지금 org일 때만)
+    }
+  }, [state, stateOrgId, orgId, initialActivationComplete, activationSeedFromHint, activationOrgId]);
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return window.sessionStorage.getItem(COLLAPSE_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
+  // story #4219 F1(PO 리뷰 CLS) — 접힘 상태는 서버도 아는 세션 쿠키(lib/activation-hint)가 정본 — 자리 표시(스켈레톤)를 접힌 칩과
+  // 같은 크기로 그리려면 서버가 알아야 한다. 서버·클라가 같은 값이라 하이드레이션 차이도 0.
+  // 접힘도 org 범위: 사용자가 이 탭에서 토글한 값은 org별로 기억하고, 없으면 서버가 준 초기값(그 org가 지금 org일 때만).
+  // org가 바뀌면(router.refresh 전 창 포함) 옛 org 값은 범위 밖이라 자연히 펼침으로.
+  const [collapsedByOrg, setCollapsedByOrg] = useState<Record<string, boolean>>({});
+  const collapsed = orgId && orgId in collapsedByOrg
+    ? collapsedByOrg[orgId] === true
+    : inActivationScope(activationOrgId, orgId) && initialActivationCollapsed === true;
 
-  if (allComplete || !state) return null;
+  // story #3196 ④ — BE steps는 5개(signed_up 포함)인데 이 목록은 4개만 그려 "4/5 완료"
+  // 진행률과 눈에 보이는 항목 수가 안 맞았다(5번째가 뭔지 화면이 말 안 함). signed_up은
+  // 이 배너에 도달했다는 사실 자체가 이미 참(비인터랙티브 li로만 — 첫 지시 항목과 달리
+  // 딥링크 대상이 없다, 이미 지난 단계).
+  // story #4032 — 로딩 스켈레톤(아래)이 이 배열의 길이(5)로 자리를 잡아야 실 콘텐츠가
+  // 도착했을 때 행 수가 안 바뀐다 — state 유무와 무관해 가드보다 앞으로 옮겼다(단일
+  // 출처, 매직넘버 방지).
+  const stepItems: { key: keyof ActivationState['steps']; label: string }[] = [
+    { key: 'signed_up', label: t('stepSignedUp') },
+    { key: 'email_verified', label: t('stepEmailVerified') },
+    { key: 'org_created', label: t('stepOrgCreated') },
+    { key: 'agent_connected', label: t('stepAgentConnected') },
+    { key: 'first_roundtrip', label: t('stepFirstRoundtrip') },
+  ];
+
+  if (allComplete) return null;
+  // story #4032 — "완주해서 필요 없다"(위 allComplete)와 "아직 모른다"(여기, fetch
+  // 미완료)를 더 이상 같은 null로 뭉치지 않는다. 실 배너와 같은 Alert 박스에 스켈레톤을
+  // 채워 자리를 미리 잡아 두면, fetch가 끝나 실 콘텐츠로 바뀔 때 박스 높이가 그대로라
+  // 그 아래(모든 페이지 공통 그리드)가 밀리지 않는다.
+  if (!state) {
+    // story #4219 F1 — 접어 둔 사용자에겐 접힌 칩과 같은 박스(테두리·패딩·글자 높이)로 자리를 잡는다(펼친 스켈레톤 → 칩으로 줄던
+    // 흔들림 0).
+    if (collapsed) {
+      return (
+        <div
+          aria-busy="true"
+          data-testid="activation-skeleton-collapsed"
+          // 접힌 칩(아래 button)과 **같은 className** — 박스가 정의상 같다(CLS 0).
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+        >
+          <Skeleton variant="text" className="h-4 w-40" />
+          <Skeleton variant="circle" className="size-3.5 shrink-0" />
+        </div>
+      );
+    }
+    return (
+      <Alert variant="info" className="relative" aria-busy="true" data-testid="activation-skeleton-expanded">
+        {/* story #4032 — 높이는 실 텍스트의 line-height에 맞춘다(폭은 CLS에 안 실린다):
+            AlertTitle은 leading-5(20px), AlertDescription은 text-xs leading-relaxed
+            (~19.5px→h-5로 근사), li 텍스트는 text-sm 기본 line-height(20px, story #3939가
+            5행 전부를 이 box로 통일해 둔 것과 동형) — 전부 h-5로 맞추면 실 콘텐츠 교체
+            시 박스 높이가 유지된다. */}
+        {/* story #4219 F1 — AlertTitle·AlertDescription은 <p>라 그 안의 <div> 스켈레톤을 파서가 밖으로 쪼개 줄 상자가 실 배너와
+            달랐다(실측: 스켈레톤 226px vs 배너 221.5px). span 막대 + 폭 0 글자(​)로 실 글자와 같은 줄 상자(20px · 19.5px)를 만든다. */}
+        <AlertTitle>
+          <span className="flex items-center" data-testid="activation-skeleton-title">
+            <Skeleton as="span" variant="text" className="h-3 w-32" />
+            {'\u200b'}
+          </span>
+        </AlertTitle>
+        <AlertDescription>
+          {/* story #4219 F1(유나 실측) — 예전 `mt-1 h-5`(24px)가 실 설명 줄(text-xs leading-relaxed ≈19.5px)보다 4.5px 커서
+              스켈레톤 → 배너에서 줄었다. 폭 0 글자(​)로 실 설명과 같은 줄 상자를 만들고 그 안에 막대를 세워 높이를 정의상 맞춘다. */}
+          <span className="flex items-center" data-testid="activation-skeleton-desc">
+            <Skeleton as="span" variant="text" className="h-3 w-48" />
+            {'\u200b'}
+          </span>
+        </AlertDescription>
+        <ul className="col-start-2 mt-2 space-y-1.5">
+          {stepItems.map(({ key }) => (
+            <li key={key} className="flex items-center gap-1.5 rounded px-1 py-0.5">
+              <Skeleton variant="circle" className="size-3.5 shrink-0" />
+              <Skeleton variant="text" className="h-5 w-24" />
+            </li>
+          ))}
+        </ul>
+      </Alert>
+    );
+  }
   // story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — orgId(계정 기본
   // org, me.org_id)와 비교하던 최초판을 폐기 — BE가 이미 "요청 org(X-Org-Id)==판정
   // org"를 판정해 낸 불리언을 그대로 쓴다(다른 프레임 값 2개를 FE가 다시 맞대지
@@ -48,13 +160,10 @@ export function ActivationChecklistBanner() {
   if (state.scope_is_requested_org === false) return null;
 
   const toggleCollapse = () => {
+    if (!orgId) return;
     const next = !collapsed;
-    setCollapsed(next);
-    try {
-      window.sessionStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
-    } catch {
-      // 영속 실패해도 이번 렌더는 토글 반영
-    }
+    setCollapsedByOrg((prev) => ({ ...prev, [orgId]: next }));
+    writeActivationCollapsed(orgId, next);
   };
 
   // story #3201(AC2) — "첫 지시…" 항목만 클릭 가능(전 항목 클릭화는 범위 밖·#3196 잔존分
@@ -63,7 +172,11 @@ export function ActivationChecklistBanner() {
   const handleFirstInstructionClick = async () => {
     if (navigatingToInstruction) return;
     if (state?.first_instruction_conversation_id) {
-      router.push(`/chats/${state.first_instruction_conversation_id}`);
+      // story #4231 — 그 대화는 BE가 조직 전체에서 고른다 → 대화 자기 프로젝트(`first_instruction_conversation_project_id`).
+      router.push(state.first_instruction_conversation_project_id
+        ? withProjectParam(`/chats/${state.first_instruction_conversation_id}`, state.first_instruction_conversation_project_id)
+        // 대상-프로젝트: 옛 응답(필드 없음)일 때만 현재 p로 폴백.
+        : flatHref(`/chats/${state.first_instruction_conversation_id}`));
       return;
     }
     if (!projectId) return;
@@ -75,24 +188,13 @@ export function ActivationChecklistBanner() {
       // 아무 일도 없었던 것처럼 보임). connect-step.tsx의 같은 호출은 null을 «건너뛰고
       // 진행»으로 의도적으로 쓰지만(범위 밖, 그쪽은 그대로 둠), 이 배너는 그 클릭 자체가
       // 유일한 목적이라 실패를 알려야 한다.
-      if (convId) router.push(`/chats/${convId}`);
+      // story #4231 — 방금 이 프로젝트(projectId)에 만든 대화라 그 프로젝트를 싣는다.
+      if (convId) router.push(withProjectParam(`/chats/${convId}`, projectId));
       else setInstructionStartError(true);
     } finally {
       setNavigatingToInstruction(false);
     }
   };
-
-  // story #3196 ④ — BE steps는 5개(signed_up 포함)인데 이 목록은 4개만 그려 "4/5 완료"
-  // 진행률과 눈에 보이는 항목 수가 안 맞았다(5번째가 뭔지 화면이 말 안 함). signed_up은
-  // 이 배너에 도달했다는 사실 자체가 이미 참(비인터랙티브 li로만 — 첫 지시 항목과 달리
-  // 딥링크 대상이 없다, 이미 지난 단계).
-  const stepItems: { key: keyof ActivationState['steps']; label: string }[] = [
-    { key: 'signed_up', label: t('stepSignedUp') },
-    { key: 'email_verified', label: t('stepEmailVerified') },
-    { key: 'org_created', label: t('stepOrgCreated') },
-    { key: 'agent_connected', label: t('stepAgentConnected') },
-    { key: 'first_roundtrip', label: t('stepFirstRoundtrip') },
-  ];
 
   if (collapsed) {
     return (
@@ -101,6 +203,7 @@ export function ActivationChecklistBanner() {
         onClick={toggleCollapse}
         aria-expanded={false}
         aria-label={t('expandAria')}
+        data-testid="activation-chip"
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
       >
         <span>{t('collapsedChip', { completed: state.completed, total: state.total })}</span>
@@ -110,7 +213,7 @@ export function ActivationChecklistBanner() {
   }
 
   return (
-    <Alert variant="info" className="relative">
+    <Alert variant="info" className="relative" data-testid="activation-banner">
       <AlertTitle>{t('bannerTitle')}</AlertTitle>
       <AlertDescription>{t('bannerProgress', { completed: state.completed, total: state.total })}</AlertDescription>
 
@@ -167,7 +270,7 @@ export function ActivationChecklistBanner() {
             return (
               <li key={key}>
                 <Link
-                  href="/organization/workforce"
+                  href={flatHref('/organization/workforce')}
                   className={cn(
                     'flex h-auto w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline',
                     // story #3839 — 위 first_roundtrip 분기와 동일 처방(색 통일, 아이콘이 met 전달).

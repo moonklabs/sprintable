@@ -47,6 +47,11 @@ const { useChatSseMock } = vi.hoisted(() => ({
 vi.mock('@/hooks/use-chat-sse', () => ({
   useChatSse: (opts: unknown) => useChatSseMock(opts),
 }));
+// story #4263 — SSE 생존 판정(mux.isAlive) 목. 기본 false = 예전 동작(포커스 재조회) 그대로라 기존 테스트는 무변.
+const { muxAliveState } = vi.hoisted(() => ({ muxAliveState: { alive: false } }));
+vi.mock('@/components/realtime-provider', () => ({
+  useSseMultiplexerContext: () => ({ isAlive: () => muxAliveState.alive, subscribe: () => () => {}, subscribeMessage: () => () => {}, subscribeReconnect: () => () => {}, connected: true }),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -440,6 +445,40 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
   });
 });
 
+// story #3949(E-UX-OVERHAUL·customer-zero·§①) — 이벤트가 아닌 «보통» 메시지가 마크다운
+// 링크/entity 참조 토큰을 담고 있으면(예: 사람이 채팅에 산출물 참조를 붙여 보냄) 이 자리는
+// 본문 칩 렌더러를 안 거쳐 원문 그대로 샜다. 실 레코드 fixture = PO 라이브 실측(b676dc29·
+// 대화 6a584f3e) 원문 형태 재현.
+describe('ChatListView — story #3949 미리보기 평문화(entity 토큰·마크다운 링크)', () => {
+  it('⭐entity 참조 토큰이 든 메시지는 라벨만 뜬다(원문 대괄호·href 노출 0)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-entity-1', type: 'dm', title: '테스트 대화',
+      latest_message: {
+        content: '[PO 픽스처 2·삭제예정] 같은 org 산출물 참조 [\\[PO 픽스처 산출물…\\]]'
+          + '(entity:artifact:c92d9614-1111-2222-3333-444455556666)',
+        created_at: '2026-09-16T11:10:00Z', event: null,
+      },
+      updated_at: '2026-09-16T11:10:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('[PO 픽스처 산출물…]');
+    expect(container.textContent).not.toContain('entity:artifact:');
+    expect(container.textContent).not.toContain('](');
+  });
+
+  // 무관 PR no-op — 3888 eventCard 경로(event 필드 有)는 이 헬퍼를 안 거친다(이미 위
+  // describe가 검증). event==null인 일반 메시지에 마크다운 문법이 아예 없으면 무변.
+  it('음성대조 — 마크다운 문법이 없는 평범한 메시지는 무변', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-plain-2', type: 'dm', title: '평범한 대화',
+      latest_message: { content: '오늘 배포 몇 시예요?', created_at: '2026-09-16T11:10:00Z', event: null },
+      updated_at: '2026-09-16T11:10:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('오늘 배포 몇 시예요?');
+  });
+});
+
 // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
 // ConversationRow(행) 안에서 부르면 행 개수만큼 같은 domain-labels 요청이 중복 발사된다
 // (훅 자체엔 캐시·dedupe가 없다, use-org-domain-labels.ts 그라운딩). ChatListView가 1회만
@@ -568,6 +607,23 @@ describe('ChatListView — window.focus 강제 재fetch·중복 coalescing (stor
     await act(async () => { await Promise.resolve(); });
 
     expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount + 1);
+  });
+
+  // story #4263 AC2 — SSE가 살아 있으면(4252와 같은 판정) 백그라운드 동안에도 message_created가 목록을 따라갔으니 포커스 · 복귀 재조회 생략.
+  it('⭐SSE가 살아 있으면 window.focus · visibilitychange 재fetch 0', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+    muxAliveState.alive = true;
+    try {
+      await act(async () => { window.dispatchEvent(new Event('focus')); });
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      await act(async () => { await Promise.resolve(); });
+      expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount);
+    } finally {
+      muxAliveState.alive = false;
+    }
   });
 
   it('SSE onReconnect와 focus가 근접 시점에 겹치면 재fetch가 1회로 coalesce된다', async () => {
@@ -1184,6 +1240,20 @@ describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·
     }));
     await mount();
     expect(replaceMock).toHaveBeenCalledWith('/chats/conv-recent?compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘'));
+  });
+
+  it('story #4231 — compose 경유 이동도 현재 프로젝트(`?p=`)를 싣는다', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'member', projectId: 'proj-A' });
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/conversations?')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'conv-recent', type: 'dm', title: null, latest_message: null, updated_at: '2026-09-13T00:00:00Z', unread_count: 0 }], total: 1 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-recent?compose=' + encodeURIComponent('지시') + '&p=proj-A');
   });
 
   it('compose 없이 마운트되면 리다이렉트가 전혀 안 일어난다(회귀 0)', async () => {

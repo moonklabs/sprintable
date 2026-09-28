@@ -44,6 +44,52 @@ describe('verify-cross-element-tint-text (story #2590 A — 교차-요소 정적
     expect(count(`<span className="bg-info-tint text-xs text-info">x</span>`)).toBe(0);
   });
 
+  // ── story #4102(#4100 유나 定 A안) — brand·primary 텍스트 축(#4048 text-brand on
+  // bg-info-tint 실사고 재현). 조상 pale-bg는 여전히 기존 4계열, 새로 잡는 건 그 위에
+  // 놓이는 글자색이 brand/primary인 자리(cross-family — ancestor.some(strong)이 계열
+  // 무관이라 자동으로 켜짐). ──
+  it('flags text-brand small text under a strong-tint ancestor of another family (#4048형 양성대조)', () => {
+    expect(count(`<div className="bg-info-tint"><span className="text-xs text-brand">라벨</span></div>`)).toBe(1);
+  });
+  it('flags text-primary small text under a strong-tint ancestor of another family', () => {
+    expect(count(`<div className="bg-success-tint"><span className="text-xs text-primary">라벨</span></div>`)).toBe(1);
+  });
+  it('does NOT flag text-foreground under the same ancestor (음성대조)', () => {
+    expect(count(`<div className="bg-info-tint"><span className="text-xs text-foreground">라벨</span></div>`)).toBe(0);
+  });
+
+  // ── story #4126(PO 실측, 2026-09-21) — classStringsFromExpr가 템플릿 리터럴 `${}`
+  // 안 삼항과 cn() 안 삼항/템플릿을 재귀 안 해 거짓 PASS를 내던 자리. 3케이스 전부
+  // «수정 前엔 0(놓침)·수정 後엔 1(잡힘)»을 못 틀리는 대조로 요구한다. ──
+  it('(a) flags a text-family class inside a template literal `${ternary}` slot', () => {
+    const jsx = '<div className="bg-info-tint"><span className={`text-xs ${cond ? "text-info" : "text-foreground"}`}>정보</span></div>';
+    expect(count(jsx)).toBe(1);
+  });
+  it('(b) flags a text-family class inside a cn() ternary argument', () => {
+    const jsx = `<div className="bg-info-tint"><span className={cn('text-xs', ok ? 'text-info' : 'text-foreground')}>정보</span></div>`;
+    expect(count(jsx)).toBe(1);
+  });
+  it('(c) flags a text-family class inside a nested cn(`…${ternary}…`) argument', () => {
+    const jsx = '<div className="bg-info-tint"><span className={cn(`text-xs ${ok ? "text-info" : "text-foreground"}`)}>정보</span></div>';
+    expect(count(jsx)).toBe(1);
+  });
+
+  // ── story #4126 CHANGES(PO 확定) — 자기 불투명 중립 배경(bg-background 등 5종)이
+  // 조상 pale-bg를 서브트리에서 리셋한다(doc-status-rail.tsx 실사례: 경고색 아이콘이
+  // bg-background 원 위에 있어 조상 bg-warning-tint와 실제로 안 겹침). ──
+  it('does NOT flag warning icon nested inside an opaque bg-background wrapper on a pale ancestor', () => {
+    const jsx = '<div className="bg-warning-tint"><span className="grid size-8 bg-background"><Icon className="size-4 text-warning" /></span></div>';
+    expect(count(jsx)).toBe(0);
+  });
+  it('음성대조 — 같은 픽스처에서 bg-background를 빼면 다시 잡힌다(리셋 로직 자체를 증명)', () => {
+    const jsx = '<div className="bg-warning-tint"><span className="grid size-8"><Icon className="size-4 text-warning" /></span></div>';
+    expect(count(jsx)).toBe(1);
+  });
+  it('반투명(bg-background/50)은 리셋 자격이 없다(불투명만 조상을 가린다)', () => {
+    const jsx = '<div className="bg-warning-tint"><span className="grid size-8 bg-background/50"><Icon className="size-4 text-warning" /></span></div>';
+    expect(count(jsx)).toBe(1);
+  });
+
   // ── auditable suppress — 이유 있으면 통과, 이유 없으면 여전히 실패 ──
   it('suppresses with a reason (// tint-guard-ok: <reason>)', () => {
     const jsx = `<div className="bg-warning-tint">\n  {/* tint-guard-ok: 색이 데이터·PO 승인 #123 */}\n  <p className="text-xs text-warning">경고</p>\n</div>`;

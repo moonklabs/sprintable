@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { stageRoleLabel } from '@/lib/stage-role';
+import { presetAction, presetDescription, presetName } from '@/lib/platform-preset-copy';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 /** BE _GA4_SUPPORTED_METRICS(backend/app/schemas/story.py)와 동기 — 모르는 지표는 BE가 422. */
 const GA4_METRICS = ['activeUsers', 'newUsers', 'sessions', 'conversions', 'eventCount', 'screenPageViews'] as const;
@@ -51,8 +53,23 @@ export interface EventDefinitionResponse {
     role?: string;
     action?: string;
     gate?: { type?: string; approver?: string };
-    capability?: { kind?: string; connector_key?: string };
+    // story #4090(alembic 0385)/#4101(alembic 0391) — target은 닫힌 어휘(event_
+    // definition_registry.py::_CAPABILITY_TARGETS), 생략 시 "agent"(기존 계약 그대로).
+    // "channel_connection"·"generation_connector"인 stage만 적용 다이얼로그가 각각
+    // 채널-연결/연산-커넥터 select로 분기한다 — kind는 여전히 열린 값이라 target을
+    // 거기서 유도하지 않는다(events.py::apply_recipe_role_bindings 주석 참고).
+    // story #4239 — 허용 채널 종류(target="channel_connection"일 때만 · BE `validate_stage_metadata`가 강제). 적용
+    // 다이얼로그가 채널 선택지를 이 목록으로 거른다(적용 API도 밖이면 422).
+    capability?: { kind?: string; connector_key?: string; target?: 'agent' | 'channel_connection' | 'generation_connector'; channels?: string[] };
+    // story #4174 후속(alembic 0401) — 승인이 이 stage 밖(결재함의 초안 게이트)이라는 선언. 닫힌 어휘(BE
+    // event_definition_registry.py::_APPROVAL_SURFACES). 적용 다이얼로그가 사람 역할의 이 stage를 읽기 전용 자리로 그린다.
+    // story #4243 D3 — `doc_approval`: 승인이 결재함의 문서 결재에서(loop_agency «브리프»).
+    approval?: { surface?: 'draft_gate' | 'doc_approval' };
   }>;
+  // story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — 정의가 자기 role 어휘로
+  // 선언하는 옵션 사전({role명: "human"|"agent"}). 선언 없으면 undefined/null("모름") —
+  // recipe-role-slots.ts::roleActorKind가 이 선언을 읽는다.
+  role_actor_kinds?: Record<string, 'human' | 'agent' | 'either'> | null;
   enabled: boolean;
 }
 
@@ -76,6 +93,15 @@ export function isCyclicDefinition(def: EventDefinitionResponse): boolean {
  * 확정은 항상 유저의 "Loop 생성" 클릭. gen-LLM 미가용/실패는 BE가 deterministic 템플릿으로
  * graceful fallback(S15 #1847)하므로 이 버튼은 실패해도 폼을 막지 않는다(선택 기능).
  */
+interface LoopCreateDraft {
+  title: string; mode: Mode; statement: string; metric: MetricDefinition; measureAfter: string; tags: string;
+  linkedId: string | null; recipeSlug: string; drafted: boolean;
+}
+/** 루프 만들기 폼의 빈 값(안정 참조 — 같으면 초안 없음). */
+const EMPTY_LOOP_FORM: LoopCreateDraft = {
+  title: '', mode: 'new', statement: '', metric: EMPTY_METRIC, measureAfter: '', tags: '', linkedId: null, recipeSlug: '', drafted: false,
+};
+
 export function LoopCreateDialog({
   projectId,
   open,
@@ -91,6 +117,7 @@ export function LoopCreateDialog({
   const tc = useTranslations('common');
   const th = useTranslations('hypotheses');
   const tf = useTranslations('flow');
+  const tPreset = useTranslations('recipePreset');
   // story #3773 — stageRoleLabel 정본 키가 organization ns에 있다(trustRoleLabel*와 같은
   // 집, 유나 定 — 워크플로 단계 role 어휘를 org/trust 역할 어휘 옆에 둔다).
   const to = useTranslations('organization');
@@ -103,12 +130,22 @@ export function LoopCreateDialog({
     return th(labelKey);
   };
 
-  const [title, setTitle] = useState('');
-  const [mode, setMode] = useState<Mode>('new');
-  const [statement, setStatement] = useState('');
-  const [metric, setMetric] = useState<MetricDefinition>(EMPTY_METRIC);
-  const [measureAfter, setMeasureAfter] = useState('');
-  const [tags, setTags] = useState('');
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(가설 문장)이 든 폼이라 폼 전체(제목 · 방식 · 문장 · 지표 · 측정일 · 태그 · 연결 가설 ·
+  // 레시피)가 프로젝트별 초안 하나: 창이 ✕ · 바깥 · Esc로 닫혀도 남고 만들기 성공에서만 지운다(이 창엔 «취소» 버튼이 없다).
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<LoopCreateDraft>(
+    { surface: 'loop-create', targetId: projectId, field: 'form' }, EMPTY_LOOP_FORM,
+  );
+  const { title, mode, statement, metric, measureAfter, tags, linkedId, recipeSlug, drafted } = form;
+  const setTitle = (v: string) => setForm((f) => ({ ...f, title: v }));
+  const setMode = (v: Mode) => setForm((f) => ({ ...f, mode: v }));
+  const setStatement = (v: string) => setForm((f) => ({ ...f, statement: v }));
+  const setMetric = (v: MetricDefinition | ((m: MetricDefinition) => MetricDefinition)) =>
+    setForm((f) => ({ ...f, metric: typeof v === 'function' ? v(f.metric) : v }));
+  const setMeasureAfter = (v: string) => setForm((f) => ({ ...f, measureAfter: v }));
+  const setTags = (v: string) => setForm((f) => ({ ...f, tags: v }));
+  const setLinkedId = (v: string | null) => setForm((f) => ({ ...f, linkedId: v }));
+  const setRecipeSlug = (v: string) => setForm((f) => ({ ...f, recipeSlug: v }));
+  const setDrafted = (v: boolean) => setForm((f) => ({ ...f, drafted: v }));
 
   const [hypotheses, setHypotheses] = useState<Hypothesis[] | null>(null);
   // story #3637(유나 silent-failure-sweep-3632) — 조회 실패를 setHypotheses([])로
@@ -117,30 +154,19 @@ export function LoopCreateDialog({
   // (모름) 유지, 실패는 이 플래그로만.
   const [hypothesesFailed, setHypothesesFailed] = useState(false);
   const [hypothesisSearch, setHypothesisSearch] = useState('');
-  const [linkedId, setLinkedId] = useState<string | null>(null);
 
   const [definitions, setDefinitions] = useState<EventDefinitionResponse[] | null>(null);
   const [recipesFailed, setRecipesFailed] = useState(false);
-  const [recipeSlug, setRecipeSlug] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [drafting, setDrafting] = useState(false);
-  const [drafted, setDrafted] = useState(false);
 
+  // 닫힘 · 성공 때 비우는 건 화면 상태뿐(검색 · 오류 · 조회 실패 표시) — 폼 글은 초안(story #4370: 닫힘엔 남고 성공에서만 지움).
   const reset = useCallback(() => {
-    setTitle('');
-    setMode('new');
-    setStatement('');
-    setMetric(EMPTY_METRIC);
-    setMeasureAfter('');
-    setTags('');
-    setLinkedId(null);
     setHypothesisSearch('');
     setError(null);
-    setDrafted(false);
-    setRecipeSlug('');
     setRecipesFailed(false);
     setHypothesesFailed(false);
   }, []);
@@ -161,8 +187,8 @@ export function LoopCreateDialog({
       if (res.ok) {
         const json = (await res.json()) as { data?: HypothesisDraft };
         if (json.data?.statement) {
-          setStatement(json.data.statement);
-          setDrafted(true);
+          const draftedStatement = json.data.statement;
+          setForm((f) => ({ ...f, statement: draftedStatement, drafted: true }));
         }
       }
     } catch {
@@ -170,7 +196,7 @@ export function LoopCreateDialog({
     } finally {
       setDrafting(false);
     }
-  }, [projectId, title]);
+  }, [projectId, title, setForm]);
 
   useEffect(() => {
     if (!open) return;
@@ -246,6 +272,7 @@ export function LoopCreateDialog({
       });
       if (res.ok) {
         const loop = (await res.json()) as { id: string };
+        clearFormDraft();
         reset();
         onOpenChange(false);
         onCreated(loop);
@@ -273,7 +300,7 @@ export function LoopCreateDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, projectId, title, tags, mode, linkedId, statement, isGa4, metric, measureAfter, recipeSlug, reset, onOpenChange, onCreated, t]);
+  }, [canSubmit, projectId, title, tags, mode, linkedId, statement, isGa4, metric, measureAfter, recipeSlug, reset, onOpenChange, onCreated, t, clearFormDraft]);
 
   const filteredHypotheses = (hypotheses ?? []).filter((h) =>
     h.statement.toLowerCase().includes(hypothesisSearch.trim().toLowerCase()),
@@ -318,18 +345,18 @@ export function LoopCreateDialog({
               >
                 <option value="">{t('createLoopRecipeNone')}</option>
                 {definitions.map((d) => (
-                  <option key={d.key} value={d.key}>{d.name}</option>
+                  <option key={d.key} value={d.key}>{presetName(d, tPreset)}</option>
                 ))}
               </select>
               {selectedRecipe ? (
                 <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-[10.5px] text-muted-foreground">
-                  {selectedRecipe.description ? <p>{selectedRecipe.description}</p> : null}
+                  {presetDescription(selectedRecipe, tPreset) ? <p>{presetDescription(selectedRecipe, tPreset)}</p> : null}
                   <ol className="list-decimal space-y-0.5 pl-4">
                     {cyclicStages(selectedRecipe).map((stage) => {
                       const meta = selectedRecipe.stage_metadata[stage];
                       return (
                         <li key={stage} className="break-words">
-                          <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
+                          <span className="font-medium text-foreground">{presetAction(selectedRecipe, stage, meta?.action, tPreset)}</span>
                           {meta?.role ? <> ({stageRoleLabel(meta.role, to)})</> : null}
                         </li>
                       );
@@ -554,9 +581,15 @@ export function LoopCreateDialog({
           <span className={cn('text-[11px] font-medium', goalComplete ? 'text-success' : 'text-muted-foreground')}>
             {goalComplete ? t('createLoopGoalComplete') : t('createLoopValidationHint')}
           </span>
-          <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-            {submitting ? tc('creating') : t('createLoopSubmit')}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* story #4370(까디르 P3) — 폼 초안을 버릴 길: 보이는 «취소»(✕ · 바깥 · Esc 닫힘은 초안을 남긴다). */}
+            <Button variant="ghost" onClick={() => { clearFormDraft(); reset(); onOpenChange(false); }} disabled={submitting}>
+              {tc('cancel')}
+            </Button>
+            <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
+              {submitting ? tc('creating') : t('createLoopSubmit')}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

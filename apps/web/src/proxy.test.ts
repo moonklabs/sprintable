@@ -3,14 +3,16 @@ import { NextRequest } from 'next/server';
 import { SignJWT } from 'jose';
 
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// story #4320 — route-resolve가 backendFetch(본문을 다 읽는다)를 거친다 — 맨 객체 목을 진짜 Response로.
+vi.stubGlobal('fetch', stubFetch(mockFetch));
 
 vi.mock('jose', async (importOriginal) => {
   const actual = await importOriginal<typeof import('jose')>();
   return actual;
 });
 
-import { proxy as middleware } from './proxy';
+import { proxy as middleware, RENAMED_RESOURCES, RETIRED_RESOURCES } from './proxy';
+import { stubFetch } from '@/test-utils/as-fetch-response';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 
@@ -398,8 +400,8 @@ describe('proxy', () => {
     });
     // sp_at은 서명 자체가 무효(claims 검증 실패) — verifyAccessToken이 null을 반환하는 경로.
     const response = await middleware(makeRequest('/board', { sp_at: 'not.a.valid.jwt', sp_rt: 'old-rt' }));
-    expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/board');
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
     expect(response.headers.get('set-cookie')).toContain('sp_at=');
   });
 
@@ -422,8 +424,8 @@ describe('proxy', () => {
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/board', { sp_rt: 'valid-rt' }));
-    expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/board');
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
   });
 });
 
@@ -480,7 +482,9 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
       json: async () => ({ org_id: 'org-1', org_slug: 'new-moonklabs', org_role: 'admin', redirect: { workspace: 'new-moonklabs' } }),
     });
     const response = await middleware(makeRequest('/old-moonklabs/board', { sp_at: token }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
+    // story #4170 AC4b — 옛 slug는 재점유될 수 있어 캐시 금지(307 + no-store).
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('location')).toBe('https://app.example.com/new-moonklabs/board');
   });
 
@@ -512,8 +516,114 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
       'http://localhost:8000/api/v2/resolve?workspace=moonklabs&project=%EC%9E%A5%EC%82%AC%EC%99%95',
       expect.any(Object),
     );
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
+    // story #4170 AC4b — 옛 slug는 재점유될 수 있어 캐시 금지(307 + no-store).
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/project-307152f3/goals');
+  });
+
+  it('story #4219 D1 — resolve한 org·project slug를 레이아웃행 헤더로(인코딩) 넘긴다', async () => {
+    const token = await makeAccessToken();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-1', project_slug: '장부' }),
+    });
+    const response = await middleware(makeRequest('/moonklabs/%EC%9E%A5%EB%B6%80/goals', { sp_at: token }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-request-x-resolved-project-id')).toBe('proj-1');
+    expect(response.headers.get('x-middleware-request-x-resolved-org-slug')).toBe('moonklabs');
+    expect(decodeURIComponent(response.headers.get('x-middleware-request-x-resolved-project-slug') ?? '')).toBe('장부');
+  });
+
+  // ⭐story #4219 D1(PO 리뷰) — 위조 x-resolved-*는 입구에서 한 번 지우고, 모든 갈래가 그 헤더만 넘긴다. 갈래별로 위조 헤더가
+  // 아래로 0인지 + 원래 넘기던 다른 헤더(쿠키 등)를 잃지 않는지.
+  function spoofed(path: string, cookies: Record<string, string>): NextRequest {
+    const base = makeRequest(path, cookies);
+    return new NextRequest(base.url, {
+      headers: new Headers({
+        cookie: base.headers.get('cookie') ?? '',
+        'x-custom-keep': 'kept',
+        'x-resolved-project-id': 'evil-project',
+        'X-Resolved-Org-Id': 'evil-org',
+      }),
+    });
+  }
+  function expectNoSpoof(response: Response) {
+    for (const name of ['x-resolved-project-id', 'x-resolved-org-id']) {
+      expect(response.headers.get(`x-middleware-request-${name}`) ?? '', name).not.toMatch(/evil/);
+    }
+    expect(response.headers.get('x-middleware-request-x-custom-keep')).toBe('kept');
+  }
+
+  it.each([
+    ['기본 resolve 갈래(flat 페이지)', '/inbox', 'token'],
+    ['공개 경로 통과', '/refund-policy', 'none'],
+    ['API 통과(토큰 없음)', '/api/whatever', 'none'],
+    ['토큰 갱신 뒤 API', '/api/whatever', 'refresh'],
+    // 갱신 뒤 페이지 두 갈래(:591 resolve · :592 새 토큰 검증 실패) 중 :592는 refreshMatchesActive가 먼저 막아 도달 불가 —
+    // 둘 다 같은 입구 정제 요청의 헤더(buildRefreshedHeaders)라 :591로 잰다.
+    ['토큰 갱신 뒤 페이지', '/inbox', 'refresh'],
+  ] as const)('⭐위조 x-resolved-* 차단 — %s', async (_n, path, auth) => {
+    const cookies: Record<string, string> = {};
+    if (auth === 'token') cookies['sp_at'] = await makeAccessToken();
+    if (auth === 'refresh') {
+      cookies['sp_rt'] = 'valid-rt';
+      const newAt = await makeAccessToken({ exp: Math.floor(Date.now() / 1000) + 900 });
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { access_token: newAt, refresh_token: 'new-rt' } }) });
+    }
+    const response = await middleware(spoofed(path, cookies));
+    expect(response.status).toBe(200);
+    expectNoSpoof(response);
+    if (auth === 'token') expect(response.headers.get('x-middleware-request-cookie')).toContain('sp_at=');
+  });
+
+  it('⭐위조 x-resolved-* 차단 — connect-guide rewrite 갈래', async () => {
+    const response = await middleware(spoofed('/connect-guide.txt', {}));
+    expect(response.headers.get('x-middleware-rewrite')).toMatch(/connect-guide\.(ko|en)\.txt/);
+    expectNoSpoof(response);
+  });
+
+  // story #4299 — dev 전용 미들웨어 시작 시각(route handler의 bff_pre). 켜져 있을 때만 모든 갈래가 새 값을 넘기고(클라이언트가
+  // 같은 이름으로 보낸 값은 덮음), 꺼져 있으면 붙이지 않는다.
+  describe('미들웨어 시작 시각(story #4299 · SERVER_TIMING_MARKERS)', () => {
+    afterEach(() => { delete process.env['SERVER_TIMING_MARKERS']; });
+
+    function clientStamped(path: string, cookies: Record<string, string>, extra: Record<string, string> = {}): NextRequest {
+      const base = makeRequest(path, cookies);
+      return new NextRequest(base.url, {
+        headers: new Headers({ cookie: base.headers.get('cookie') ?? '', 'x-sp-mw-t0': '1', ...extra }),
+      });
+    }
+
+    it.each([
+      ['기본 resolve 갈래(flat 페이지)', '/inbox', 'token'],
+      ['공개 경로 통과', '/refund-policy', 'none'],
+      ['API 통과(토큰 없음)', '/api/whatever', 'none'],
+      ['API 키(Bearer)', '/api/labels', 'key'],
+      ['토큰 갱신 뒤 API', '/api/whatever', 'refresh'],
+      ['토큰 갱신 뒤 페이지', '/inbox', 'refresh'],
+      ['connect-guide rewrite', '/connect-guide.txt', 'none'],
+    ] as const)('켜면 %s 갈래에 새 시각이 실리고 클라이언트 값은 덮인다', async (_n, path, auth) => {
+      process.env['SERVER_TIMING_MARKERS'] = 'true';
+      const cookies: Record<string, string> = {};
+      if (auth === 'token') cookies['sp_at'] = await makeAccessToken();
+      if (auth === 'refresh') {
+        cookies['sp_rt'] = 'valid-rt';
+        const newAt = await makeAccessToken({ exp: Math.floor(Date.now() / 1000) + 900 });
+        mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { access_token: newAt, refresh_token: 'new-rt' } }) });
+      }
+      const before = Date.now();
+      const response = await middleware(clientStamped(path, cookies, auth === 'key' ? { Authorization: 'Bearer sk_agent_key' } : {}));
+      const stamp = Number(response.headers.get('x-middleware-request-x-sp-mw-t0'));
+      expect(stamp).toBeGreaterThanOrEqual(before);
+      expect(stamp).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('꺼져 있으면(기본) 새 시각을 붙이지 않는다', async () => {
+      const response = await middleware(makeRequest('/api/whatever'));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-middleware-request-x-sp-mw-t0')).toBeNull();
+    });
   });
 
   it('캐시 hit(유효 sp_resolve_cache 쿠키+동일 slug) → resolve fetch 생략', async () => {
@@ -583,7 +693,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     const response = await middleware(makeRequest('/docs/my-doc', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
   });
 
@@ -602,7 +712,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/docs', { sp_at: token, sprintable_current_project_id: 'proj-1' }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs');
   });
 
@@ -626,6 +736,25 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     expect(response.status).toBe(302);
     // _prRetry=1 — 프로젝트를 골라도 또 실패하면(아래 되돌이 방지 테스트) 다시 안 튕기기 위한 내부 마커.
     expect(response.headers.get('location')).toBe('https://app.example.com/org-briefing?next=%2Fdocs%2Fmy-doc%3F_prRetry%3D1');
+  });
+
+  // story #4017(PO 확定 2026-09-17) AC3 — 플래그 ON 도착 주소 단언(딥링크 next= 보존 포함).
+  it('⭐TODAY_V3_ENABLED=true — 같은 상황에서 /today?next=...로 302(딥링크 next는 그대로 보존)', async () => {
+    process.env['TODAY_V3_ENABLED'] = 'true';
+    try {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/v2/me')) {
+          return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+      const response = await middleware(makeRequest('/docs/my-doc', { sp_at: token }));
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('https://app.example.com/today?next=%2Fdocs%2Fmy-doc%3F_prRetry%3D1');
+    } finally {
+      delete process.env['TODAY_V3_ENABLED'];
+    }
   });
 
   it('org/project는 확定됐는데 BE 단건 조회만 실패(예: 삭제됨)해도 404 대신 /org-briefing?next=<원경로+되돌이방지마커>로 302(story #2212)', async () => {
@@ -670,7 +799,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     const response = await middleware(makeRequest('/docs/my-doc', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
   });
 
@@ -726,7 +855,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     const response = await middleware(makeRequest('/docs/my-doc', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/liveorg/sprintable/docs/my-doc');
     expect(mockFetch.mock.calls.some((args: unknown[]) => (args[0] as string).includes('/api/v2/organizations/jwt-org-stale'))).toBe(false);
   });
@@ -754,7 +883,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     const response = await middleware(makeRequest('/docs/my-doc?_prRetry=1', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
   });
 
@@ -798,8 +927,11 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       const response = await middleware(makeRequest(`/${resource}`, {
         sp_at: token, sprintable_current_project_id: 'proj-1',
       }));
-      expect(response.status).toBe(301);
-      expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/${resource}`);
+      expect(response.status).toBe(307);
+      // story #4170 — 이름이 바뀐(RENAMED)·은퇴한(RETIRED) 리소스는 이 301에서 최종 이름까지 한 번에 간다
+      // (예전엔 옛 이름으로 한 번 더 301). 나머지는 이름 그대로.
+      const finalName = RENAMED_RESOURCES[resource] ?? RETIRED_RESOURCES[resource] ?? resource;
+      expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/${finalName}`);
     },
   );
 
@@ -819,8 +951,8 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     });
     // 쿠키 없이 sp_at만 — 온보딩/switch-project를 거치지 않은 순수 로그인 세션 재현.
     const response = await middleware(makeRequest('/board?story=abc', { sp_at: token }));
-    expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/board?story=abc');
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow?story=abc');
   });
 
   // story #2227(2026-08-27, 판정: 「board와 같은 표·같은 제네릭 코드경로」라는 아키텍처
@@ -843,8 +975,147 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/glance?story=abc', { sp_at: token }));
-    expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/glance?story=abc');
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow?story=abc');
+  });
+
+  // story #4170(E-MOBILE-SPEED) — 로그인 상태 셸 진입 `/glance`가 예전엔 `/{ws}/{proj}/glance`(301) →
+  // `/{ws}/{proj}/flow`(301) 두 홉이었다(dev 요청 로그: 홉 사이 왕복 0.3~0.45초). 이제 한 홉에 최종 목적지.
+  // story #4219 G2(PO 판정) — /glance 307에 그 목적지 `/{org}/{project}`의 sp_resolve_cache(서명·50초)를 심어, 이어지는 문서
+  // 요청의 /resolve 왕복(dev 콜드 ≈50ms)을 건너뛴다. 조건: 역할을 알 때만(단건 org 조회의 가산 필드) · 다른 목적지엔 안 맞음.
+  describe('story #4219 G2 — /glance 307이 목적지 resolve 캐시를 심는다', () => {
+    function mockLegacy(orgBody: Record<string, unknown>) {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+        if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => orgBody });
+        if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+    }
+    const cacheCookie = (res: Response) => (res.headers.get('set-cookie') ?? '').match(/sp_resolve_cache=([^;]+)/)?.[1];
+
+    it('⭐역할을 알면 307과 함께 캐시를 심고 → 그 쿠키로 목적지 문서를 열면 /resolve 호출 0', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockLegacy({ id: 'org-1', slug: 'moonklabs', role: 'admin' });
+      const first = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(first.status).toBe(307);
+      expect(first.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+      const cache = cacheCookie(first);
+      expect(cache).toBeTruthy();
+
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValue({ ok: false, status: 500 });
+      const next = await middleware(makeRequest('/moonklabs/sprintable/flow', { sp_at: token, sp_resolve_cache: cache! }));
+      expect(next.status).toBe(200);
+      expect(mockFetch.mock.calls.filter(([u]) => String(u).includes('/api/v2/resolve'))).toEqual([]);
+      expect(next.headers.get('x-middleware-request-x-resolved-project-id')).toBe('proj-1');
+      expect(next.headers.get('x-middleware-request-x-resolved-org-id')).toBe('org-1');
+    });
+
+    it('다른 org/project 문서엔 그 캐시가 안 맞는다(slug 불일치 = /resolve 호출)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockLegacy({ id: 'org-1', slug: 'moonklabs', role: 'admin' });
+      const cache = cacheCookie(await middleware(makeRequest('/glance', { sp_at: token })))!;
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-2', project_slug: 'other' }) });
+      await middleware(makeRequest('/moonklabs/other/flow', { sp_at: token, sp_resolve_cache: cache }));
+      expect(mockFetch.mock.calls.some(([u]) => String(u).includes('/api/v2/resolve'))).toBe(true);
+    });
+
+    it('⭐project를 read replica 목록 폴백으로 찾았으면 리다이렉트는 하되 캐시는 안 심는다(까디르 P2)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+        if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs', role: 'admin' }) });
+        if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: false, status: 404 });
+        if (url.endsWith('/api/v2/projects')) return Promise.resolve({ ok: true, json: async () => [{ id: 'proj-1', slug: 'sprintable' }] });
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+      expect(mockFetch.mock.calls.some(([u]) => String(u).endsWith('/api/v2/projects'))).toBe(true);
+      expect(cacheCookie(res)).toBeUndefined();
+    });
+
+    it('역할을 모르면(옛 백엔드 응답) 캐시를 안 심는다', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockLegacy({ id: 'org-1', slug: 'moonklabs' });
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(res.status).toBe(307);
+      expect(cacheCookie(res)).toBeUndefined();
+    });
+
+    it('프로젝트를 못 정해 선택 화면으로 가는 갈래엔 캐시를 안 심는다', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      mockLegacy({ id: 'org-1', slug: 'moonklabs', role: 'admin' });
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(res.headers.get('location') ?? '').not.toContain('/moonklabs/');
+      expect(cacheCookie(res)).toBeUndefined();
+    });
+  });
+
+  describe('story #4170 — 옛 flat 리소스는 한 홉에 최종 목적지', () => {
+    function mockResolve() {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+        if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+        if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+    }
+
+    it('/glance → 307 /{ws}/{proj}/flow, 그 목적지는 더 이상 리다이렉트되지 않는다(홉 1)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockResolve();
+      const first = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(first.status).toBe(307);
+      const location = first.headers.get('location')!;
+      expect(location).toBe('https://app.example.com/moonklabs/sprintable/flow');
+      const second = await middleware(makeRequest(new URL(location).pathname, { sp_at: token }));
+      expect([301, 302, 307, 308]).not.toContain(second.status);
+    });
+
+    // story #4170 AC4(PO 리뷰) — 세션(현재 org·project)으로 목적지가 정해지는 flat 주소는 캐시되면 안 된다
+    // (301+캐시 헤더 없음 → 크롬 디스크 캐시로 2회차부터 서버에 안 물어 프로젝트·계정을 바꿔도 옛 목적지).
+    it('세션 의존 flat 리다이렉트는 307 + Cache-Control: no-store', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockResolve();
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(res.status).toBe(307);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    });
+
+    it('경로만으로 정해지는 이름 바꿈(/{ws}/{proj}/board → /flow)은 301 그대로(no-store 없음)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockResolve();
+      const res = await middleware(makeRequest('/moonklabs/sprintable/board', { sp_at: token }));
+      expect(res.status).toBe(301);
+      expect(res.headers.get('cache-control')).not.toBe('no-store');
+    });
+
+    it('이름 바뀐 리소스는 하위 경로(id)를 들고 가고, 은퇴한 리소스는 버린다(두 번째 홉이 하던 규칙 그대로)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockResolve();
+      const renamed = await middleware(makeRequest('/board/story-123', { sp_at: token }));
+      expect(renamed.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow/story-123');
+      const retired = await middleware(makeRequest('/mockups/m-9', { sp_at: token }));
+      expect(retired.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
+    });
+
+    it('옛 두 홉의 최종 목적지와 새 한 홉의 목적지가 같다(목적지 무변)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      for (const path of ['/glance?story=abc', '/board', '/standup', '/mockups/x']) {
+        mockResolve();
+        const hop = await middleware(makeRequest(path, { sp_at: token }));
+        const loc = new URL(hop.headers.get('location')!);
+        // 옛 두 번째 홉(/{ws}/{proj}/{옛 이름})을 거쳤다면 도착했을 곳 — 같은 middleware로 재현.
+        const legacyName = path.split('?')[0]!.split('/')[1]!;
+        const oldIntermediate = `/moonklabs/sprintable/${legacyName}${path.slice(1 + legacyName.length)}`;
+        const oldSecond = await middleware(makeRequest(oldIntermediate, { sp_at: token }));
+        expect(loc.pathname + loc.search).toBe(new URL(oldSecond.headers.get('location')!).pathname + new URL(oldSecond.headers.get('location')!).search);
+      }
+    });
   });
 
   it('story #1999: 쿠키와 JWT project_id가 다르면 쿠키 우선(명시 switch-project 결과 존중)', async () => {
@@ -862,8 +1133,8 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/board', { sp_at: token, sprintable_current_project_id: 'proj-new' }));
-    expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/newer-project/board');
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/newer-project/flow');
   });
 
   it('이관 안 된 리소스(예: /meetings — dead feature, S-route-project 스코프 밖)는 개입 없이 통과 — MIGRATED_RESOURCES 밖', async () => {
@@ -875,6 +1146,68 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     }));
     expect(response.status).toBe(200);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// story #4253(유나 4608 실측 · PO 코드 확認) — 옛 flat 자원 리다이렉트가 링크의 `?p=`를 안 읽어, 다른 프로젝트 문서 · 스토리 링크가 쿠키
+// 프로젝트 셸로 착지했다. `?p=`를 먼저 시도(접근은 resolveLegacyResourcePath의 GET /projects/{id} · has_project_access) → 실패하면 쿠키 → JWT.
+describe('proxy — 옛 자원 리다이렉트가 링크의 ?p=를 먼저 읽는다(story #4253)', () => {
+  const PROJ_C = '0c0c0c0c-0000-4000-8000-00000000000c';
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  function stubBackend({ cAccessible }: { cAccessible: boolean }) {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      if (url.includes(`/api/v2/projects/${PROJ_C}`)) {
+        return Promise.resolve(cAccessible
+          ? { ok: true, json: async () => ({ id: PROJ_C, slug: 'charlie' }) }
+          : { ok: false, status: 404, json: async () => ({}) });
+      }
+      if (url.includes('/api/v2/projects/proj-b')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-b', slug: 'beta' }) });
+      // 목록 폴백 — 접근 못 하는 C는 목록에도 없다(가시성 필터).
+      if (url.endsWith('/api/v2/projects')) return Promise.resolve({ ok: true, json: async () => [{ id: 'proj-b', slug: 'beta' }] });
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+  }
+
+  it('⭐쿠키 B여도 /docs?id=X&p=C → C의 scoped 경로(셸 = C) · 착지 URL에서 p는 뗀다', async () => {
+    stubBackend({ cAccessible: true });
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest(`/docs?id=doc-x&p=${PROJ_C}`, { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/charlie/docs?id=doc-x');
+  });
+
+  it('⭐쿠키 B여도 /board?story=Y&p=C → C의 flow(이름 바꿈까지 한 홉)', async () => {
+    stubBackend({ cAccessible: true });
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest(`/board?story=s-y&p=${PROJ_C}`, { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/charlie/flow?story=s-y');
+  });
+
+  it('⭐p가 접근 못 하는 프로젝트면(404 · 목록에도 없음) 지금처럼 쿠키 B로 — p로 남의 프로젝트를 열 수 없다', async () => {
+    stubBackend({ cAccessible: false });
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest(`/docs?id=doc-x&p=${PROJ_C}`, { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/beta/docs?id=doc-x');
+  });
+
+  it('p가 UUID 모양이 아니면 조회 없이 쿠키 B로 · p 없으면 지금과 같음', async () => {
+    stubBackend({ cAccessible: true });
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const bad = await middleware(makeRequest('/docs?p=not-a-uuid', { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(bad.headers.get('location')).toBe('https://app.example.com/moonklabs/beta/docs');
+    expect(mockFetch.mock.calls.some(([u]) => String(u).includes('/api/v2/projects/not-a-uuid'))).toBe(false);
+    const none = await middleware(makeRequest('/board?story=s-z', { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(none.headers.get('location')).toBe('https://app.example.com/moonklabs/beta/flow?story=s-z');
   });
 });
 
@@ -910,7 +1243,7 @@ describe('proxy — bare /artifacts/{id}는 «현재 project 추측»이 아니�
     const response = await middleware(makeRequest(`/artifacts/${ARTIFACT_ID}`, {
       sp_at: token, sprintable_current_project_id: 'proj-zerogo',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/artifacts/${ARTIFACT_ID}`);
     // «현재» project(zerogo)를 조회하는 일반 경로(projects/proj-zerogo)는 안 탔어야 한다.
     expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining('/projects/proj-zerogo'), expect.anything());
@@ -936,7 +1269,7 @@ describe('proxy — bare /artifacts/{id}는 «현재 project 추측»이 아니�
     const response = await middleware(makeRequest(`/artifacts/${ARTIFACT_ID}`, {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/artifacts/${ARTIFACT_ID}`);
   });
 
@@ -955,7 +1288,7 @@ describe('proxy — bare /artifacts/{id}는 «현재 project 추측»이 아니�
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/artifacts', { sp_at: token }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
     expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining('/visual-artifacts/preview'), expect.anything());
   });
@@ -1099,6 +1432,14 @@ describe('proxy — story #2595 connect-guide locale rewrite', () => {
     req.headers.set('accept-language', 'ko-KR,ko;q=0.9');
     const response = await middleware(req);
     expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-rewrite')).toContain('/connect-guide.ko.txt');
+  });
+
+  // story #4289 — Korean first, English second (a common Chrome value) → Korean. The old copy (supported-list order, en first · includes) gave English.
+  it('⭐rewrites to Korean for "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7" (header order + q, not substring)', async () => {
+    const req = makeRequest('/connect-guide.txt');
+    req.headers.set('accept-language', 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7');
+    const response = await middleware(req);
     expect(response.headers.get('x-middleware-rewrite')).toContain('/connect-guide.ko.txt');
   });
 

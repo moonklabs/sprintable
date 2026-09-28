@@ -4,11 +4,13 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import { hasNoVisibleText, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
 import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { commandArgs, commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
+import { copyTextSafely } from '@/lib/clipboard';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { resolveEmbedDecision } from '@/components/chat/embed-renderer';
@@ -36,11 +38,14 @@ import { EmbedGroup } from './embed-group';
 import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 import { ReportMessageSummary } from './report-message-summary';
 import { ServerCommandResultCard } from './server-command-result-card';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ChatBubbleProps {
   message: ChatMessage;
   isMine: boolean;
   isGrouped?: boolean;
+  /** [SID:4311 PR 3] 목록이 actorRowLabels로 지은 발신자 라벨(같은 이름 둘이면 «· ID 앞 8자») — 머리글자 · 아바타는 원래 이름. */
+  senderLabel?: string;
   onOpenThread?: (message: ChatMessage) => void;
   onDelete?: (messageId: string) => void;
   /** story #2349 — 생략하면(undefined) 컨텍스트 메뉴에 「사용자 차단」 항목 자체가 안 뜬다
@@ -131,19 +136,22 @@ function prepareMentions(content: string): string {
 // (className에 language- 없음 + 개행 없음 = inline) — 팀 컨벤션 재사용.
 function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean; className: string }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패를 삼키고 피드백 자체가
+  // 없었다(성공 표시는 안 됐지만 "왜 안 됐는지"도 안 보였다). 코드 자체는
+  // <code>에 이미 선택 가능하게 떠 있어 별도 노출 블록은 불요.
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const handleCopy = useCallback(() => {
     void (async () => {
-      try {
-        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(raw);
-        } else {
-          return;
-        }
-      } catch {
-        return; // 클립보드 권한거부/미지원 — 조용히 무시(피드백 미표시로 실패가 드러남)
+      const result = await copyTextSafely(raw);
+      if (!result.ok) {
+        setCopyFailed(true);
+        window.setTimeout(() => setCopyFailed(false), 3000);
+        return;
       }
+      setCopyFailed(false);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     })();
@@ -151,17 +159,25 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
   if (inline) {
     return (
-      <code
-        role="button"
-        tabIndex={0}
-        onClick={handleCopy}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
-        title={copied ? t('copied') : t('clickToCopy')}
-        className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
-      >
-        {raw}
-        {copied && <Check className="ml-0.5 inline size-3 align-text-top" aria-hidden />}
-      </code>
+      <>
+        <code
+          role="button"
+          tabIndex={0}
+          onClick={handleCopy}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
+          title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('clickToCopy')}
+          className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
+        >
+          {raw}
+          {copied && <Check className="ml-0.5 inline size-3 align-text-top" aria-hidden />}
+        </code>
+        {/* story #3986 CHANGES(페드루 PO C3) — title만 바뀌면 터치 기기·hover 없이는
+            실패가 안 보였다. 눈에 보이는 3초짜리 알림을 별도로 낸다(<code> 자체는
+            이미 선택 가능한 원문이라 여기선 문구만). */}
+        {copyFailed && (
+          <span role="alert" className="ml-1 text-xs text-destructive">{tc('copyFailedSelectManually')}</span>
+        )}
+      </>
     );
   }
 
@@ -171,11 +187,11 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
       <button
         type="button"
         onClick={handleCopy}
-        aria-label={copied ? t('copied') : t('copyCode')}
-        title={copied ? t('copied') : t('copyCode')}
+        aria-label={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
+        title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
         className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-black/10 group-hover/code:opacity-100 dark:hover:bg-white/10"
       >
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        {copied ? <Check className="size-3.5" /> : <Copy className={copyFailed ? 'size-3.5 text-destructive' : 'size-3.5'} />}
       </button>
     </span>
   );
@@ -183,7 +199,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
 // story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
 // 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
-export function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
+export function ChatMarkdown({ content: rawContent, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
@@ -191,6 +207,7 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
    * 사본 분화 금지 재사용)로 뜰 때 그 컴포넌트가 요구하는 카탈로그를 그대로 물려준다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   // story #2921 S4(유나 확定) — 「내 메시지=blue-soft」로 바뀌며 isMine 버블도 밝은 배경이
   // 됐다(옛 solid bg-primary 위 흰 글자 전제가 깨졌다). 이제 양쪽 다 밝은 무채/blue-soft
   // 패널 위 어두운 ink라 isMine으로 갈릴 이유가 없다 — Proof Capsule(proof-capsule.tsx)도
@@ -200,8 +217,19 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
   const codeBg = 'bg-muted text-foreground';
   const border = 'border-border';
 
+  // story #4197 — 내부 HTML 주석(`<!-- linear-comment-id … -->`). 마크다운·코드 문법이 하나라도 있으면(들여쓰기 코드 포함)
+  // 마크다운 경로에서 remarkStripHtmlComments가 AST의 주석 노드만 뺀다(코드 안 `<!--`는 안 건드림). 문법이 전혀 없는
+  // 평문이면 평문 경로(pre-wrap) 그대로 두고 주석을 줄 단위로 걷는다 — 주석 뺀 같은 메시지와 줄 수가 같게(유나 design).
+  const hasComment = rawContent.includes('<!--');
+  // 판정만 주석을 뺀 글로 한다(`-->`의 `>`가 인용 문법으로 잡혀 평문 메시지가 마크다운 경로로 새지 않게) — 렌더엔 안 쓴다.
+  const detectionText = hasComment ? rawContent.replace(/<!--[\s\S]*?(?:-->|$)/g, '') : rawContent;
+  // 주석이 있던 메시지는 예전엔 `-->` 때문에 늘 마크다운 경로였다 — 목록·들여쓰기 코드 구조가 평문으로 깨지지 않게
+  // 그 둘도 마크다운 표지로 친다(주석 없는 메시지의 판정은 그대로).
+  const markdownish = /[*_`#\[\]>~]|entity:/.test(detectionText)
+    || (hasComment && (/^(?: {4}|\t)/m.test(rawContent) || /^\s*(?:[-*+]|\d+[.)])\s/m.test(detectionText)));
+  const content = hasComment && !markdownish ? stripHtmlCommentsFromPlainText(rawContent) : rawContent;
   const hasMention = /@[\w가-힣]+/.test(content);
-  const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
+  const hasMarkdown = markdownish;
 
   // story #2021: react-markdown이 리졸브한 컴포넌트 함수 참조를 그대로 React 엘리먼트 type으로
   // 쓴다(hast-util-to-jsx-runtime `state.components[name]`). 이 객체를 매 렌더 인라인으로 새로
@@ -253,7 +281,8 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
     strong: ({ children }: { children?: React.ReactNode }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
     em: ({ children }: { children?: React.ReactNode }) => <em className={`italic ${text}`}>{children}</em>,
     code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
-      const raw = String(children).replace(/\n$/, '');
+      // story #4197 AC1d — 빈 코드 블록(```` ```\n``` ````·`~~~`)이면 children이 없어 String()이 «undefined»를 냈다.
+      const raw = String(children ?? '').replace(/\n$/, '');
       const inline = !className?.includes('language-') && !raw.includes('\n');
       return (
         <CopyableCode
@@ -313,7 +342,8 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
               entityType={ref.entityType}
               entityId={ref.entityId}
               label={String(children)}
-              href={getEntityHref(ref.entityType, ref.entityId)}
+              // 대상-프로젝트: 메시지 참조 토큰엔 type · id뿐이라 대상 프로젝트를 모른다 — 칩을 열면 미리보기가 응답의 자기 프로젝트로 «전체 보기»를 싣는다(#4253).
+              href={getEntityHref(ref.entityType, ref.entityId, flatHref)}
               ghost={decision.ghost}
               referenceMeta={decision.referenceMeta}
               entityStatus={entityStatusByKey?.[`${ref.entityType.toLowerCase()}:${ref.entityId.toLowerCase()}`]}
@@ -323,7 +353,7 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey]);
+  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
 
   if (!hasMarkdown && !hasMention) {
     return (
@@ -356,7 +386,7 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
         ) : (
           <ReactMarkdown
             key={idx}
-            remarkPlugins={[remarkGfm, remarkBreaks]}
+            remarkPlugins={[remarkGfm, remarkBreaks, remarkStripHtmlComments]}
             urlTransform={(url) =>
               url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
             }
@@ -373,11 +403,12 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
 const LONG_PRESS_MS = 500;
 
 export function ChatBubble({
-  message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
+  message, isMine, isGrouped = false, senderLabel, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
   hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const isAgent = message.sender_type === 'agent';
   // story #2319 — tombstone. content는 서버가 이미 ""로 스크럽했다(오발송 대응 목적).
   const isDeleted = Boolean(message.deleted_at);
@@ -406,9 +437,15 @@ export function ChatBubble({
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
   const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
+  // story #4197·#4200(유나 결정) — 보여 줄 글자 0(빈 문자열·공백뿐·주석뿐, 단일 술어 hasNoVisibleText)이면 기본 텍스트
+  // 말풍선 자리에서: 첨부가 있으면 말풍선을 생략하고 첨부만, 첨부가 없으면 «표시할 내용이 없는 메시지예요».
+  // references 메타는 조건에 없다 — 참조 카드는 본문 안 entity 토큰이 있어야 그려지고, 토큰이 있으면 글자가 0이 아니다.
+  // 삭제·차단·승인·이벤트·서버 커맨드·HITL·커맨드 분기가 먼저 이긴다(그 메시지는 본문이 비어도 카드로 그려진다).
+  const noVisibleText = hasNoVisibleText(displayContent);
+  const hasAttachments = (message.attachments?.length ?? 0) > 0;
   const cmdName = isCmd ? commandName(message.content) : null;
   const args = isCmd ? commandArgs(message.content) : '';
-  const displayName = isMine ? t('you') : (message.sender_name || t('team'));
+  const displayName = isMine ? t('you') : (senderLabel || message.sender_name || t('team'));
   const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.created_at));
   const replyCount = message.reply_count ?? 0;
   const lastReplyAt = message.last_reply_at;
@@ -481,8 +518,16 @@ export function ChatBubble({
     }
   }, []);
 
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 결과를 아예 안 봤다(성공
+  // 표시도 원래 없었으니 그 자리는 그대로 두되, 실패는 이제 알려야 한다).
+  const [copyMessageFailed, setCopyMessageFailed] = useState(false);
   const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(message.content);
+    void copyTextSafely(message.content).then((result) => {
+      if (!result.ok) {
+        setCopyMessageFailed(true);
+        setTimeout(() => setCopyMessageFailed(false), 3000);
+      }
+    });
   }, [message.content]);
 
   const handleDelete = useCallback(() => {
@@ -605,6 +650,7 @@ export function ChatBubble({
               template={eventBlockTemplate}
               payload={eventTarget.payload}
               refs={eventTarget.refs}
+              definition={eventDefinitionsByKey?.[eventTarget.event_key] ?? null}
             />
           ) : serverCommand ? (
             <ServerCommandResultCard
@@ -643,12 +689,22 @@ export function ChatBubble({
                 </div>
               )}
             </div>
+          ) : noVisibleText ? (
+            hasAttachments ? null : (
+              // story #4197·#4200(유나 확정) — 보여 줄 글자도 첨부도 없는 메시지. 빈 말풍선 대신 «삭제된 메시지»와
+              // 같은 틀(italic muted·bg-muted/50·경고색·펼치기 없음).
+              <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
+                isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
+              }`} data-testid="chat-bubble-empty-placeholder">
+                {t('emptyMessagePlaceholder')}
+              </div>
+            )
           ) : (
             /* story #2921 S4(유나 확定) — 버블=무채 panel(내 메시지=blue-soft). 옛
                bg-primary(solid 채색)+text-primary-foreground(흰 글자)를 proof-blue-soft
                (밝은 틴트)+text-foreground(어두운 ink)로 — Proof Capsule과 같은 어휘(옅은
                배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
-            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
+            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
               isMine
                 ? 'rounded-tr-sm bg-proof-blue-soft'
                 : 'rounded-tl-sm bg-proof-panel'
@@ -774,6 +830,14 @@ export function ChatBubble({
           )}
         </div>
       </div>
+
+      {/* story #3986(클래스 «거짓 성공 표시») — 컨텍스트 메뉴 「복사」 실패 안내
+          (메시지 내용 자체는 위 버블에 이미 선택 가능하게 떠 있다). */}
+      {copyMessageFailed ? (
+        <p role="alert" className={`mt-0.5 text-xs text-destructive ${isMine ? 'text-right' : 'text-left'}`}>
+          {tc('copyFailedSelectManually')}
+        </p>
+      ) : null}
 
       {/* AC1/AC2: 컨텍스트 메뉴 */}
       {contextMenu && (

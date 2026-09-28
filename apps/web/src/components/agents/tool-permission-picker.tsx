@@ -243,7 +243,7 @@ export function ToolPermissionPicker({ value, onChange, disabled }: ToolPermissi
           <span className="text-xs text-muted-foreground">{t('toolPermissions.selectedSummary')}</span>
           <Badge variant="secondary" className="text-muted-foreground">{label('core')}</Badge>
           {normalGroups.filter((g) => selected.has(g.key)).map((g) => (
-            <Badge key={g.key} className="bg-brand/15 text-brand">{label(g.key)}</Badge>
+            <Badge key={g.key} className="bg-brand/15 text-brand-text">{label(g.key)}</Badge>
           ))}
           {selected.has(ADMIN_SCOPE) && (
             <Badge className="border-destructive text-destructive" variant="outline">{label('admin')}</Badge>

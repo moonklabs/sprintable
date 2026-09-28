@@ -170,11 +170,40 @@ async def test_second_approval_reuses_existing_dm_not_new_room():
         await engine.dispose()
 
 
+def _break_create_conversation_record(monkeypatch, *, only_for_member_ids=None):
+    """story #4157 — `nonexistent_approver = uuid.uuid4()`("team_members에 없음 → FK 위반
+    유도") 기법은 conversation_participants.member_id FK가 실제로 사라지면서(AC1 실측:
+    0092부터 prod에도 이미 없었다) 더 이상 아무 예외도 안 낸다. 대체 실측(페드루 PO
+    確定 2026-09-22): `_create_conversation_record`(약속된 conv.id는 매번 flush 직후
+    fresh UUID라 `uq_conversation_participant`가 이 호출경로에선 애초에 닿지 않고,
+    `uq_conversations_dm_pair`는 0111이 이미 DROP — 이 함수 안에서 개별 승인자 실패를
+    **실 DB 제약**으로 재현할 자리가 구조상 없다)를 monkeypatch해 SAVEPOINT
+    (`db.begin_nested()`) 안에서 **진짜 DB 예외**(`SELECT 1/0` → asyncpg
+    DivisionByZeroError → SQLAlchemy DataError, Python 레벨 raise가 아니라 실 DB가
+    던지는 예외라야 #4156 AC2의 "세션 poison 없음"이 진짜 대조가 된다)를 트리거한다.
+    `only_for_member_ids`가 주어지면 그 id가 `member_ids`에 있을 때만 실패(1명만 실패
+    시나리오), None이면 매 호출 무조건 실패(전멸 시나리오)."""
+    import app.routers.conversations as conversations_module
+    from sqlalchemy import text
+
+    original = conversations_module._create_conversation_record
+
+    async def _patched(db, *, org_id, project_id, member_ids, conv_type, title, created_by):
+        if only_for_member_ids is None or (only_for_member_ids & member_ids):
+            await db.execute(text("SELECT 1/0"))
+        return await original(
+            db, org_id=org_id, project_id=project_id, member_ids=member_ids,
+            conv_type=conv_type, title=title, created_by=created_by,
+        )
+
+    monkeypatch.setattr(conversations_module, "_create_conversation_record", _patched)
+
+
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_one_approver_failure_does_not_poison_session_for_others():
-    """승인자 1명(존재하지 않는 member_id — FK 위반 유도)의 카드 배달이 실패해도, 세션이
-    poison되지 않고 나머지 승인자 배달 + 이 함수를 부르는 트랜잭션의 후속 write가 그대로
+async def test_one_approver_failure_does_not_poison_session_for_others(monkeypatch):
+    """승인자 1명(대화 생성 중 실 DB 예외 주입)의 카드 배달이 실패해도, 세션이 poison
+    되지 않고 나머지 승인자 배달 + 이 함수를 부르는 트랜잭션의 후속 write가 그대로
     성공해야 한다(SAVEPOINT 격리 검증 — begin_nested 없으면 여기서 PendingRollbackError)."""
     from app.services.approval_delivery import dispatch_approval_request_cards
     from app.models.conversation import Conversation, ConversationMessage
@@ -185,7 +214,8 @@ async def test_one_approver_failure_does_not_poison_session_for_others():
             org_id, project_id = await _seed_org_project(s)
             requester_id = await _seed_human(s, org_id, project_id)
             good_approver = await _seed_human(s, org_id, project_id)
-            nonexistent_approver = uuid.uuid4()  # team_members에 없음 → FK 위반 유도
+            nonexistent_approver = uuid.uuid4()
+            _break_create_conversation_record(monkeypatch, only_for_member_ids={nonexistent_approver})
             doc = await _seed_doc(s, org_id, project_id)
 
             await dispatch_approval_request_cards(
@@ -214,7 +244,7 @@ async def test_one_approver_failure_does_not_poison_session_for_others():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_all_approvers_failing_logs_zero_delivery_warning(caplog):
+async def test_all_approvers_failing_logs_zero_delivery_warning(caplog, monkeypatch):
     """story #d9c09f4b(2026-08-27, customer-zero) — recipients가 비지 않았는데도(위
     test_no_approvers_no_dm_created과 구분) 개별 승인자 전원이 실패하면, 지금까지는 각자
     "카드 배달 실패" WARNING만 나고 "그래서 결국 0건 착지했다"는 어디에도 안 남았다
@@ -229,9 +259,10 @@ async def test_all_approvers_failing_logs_zero_delivery_warning(caplog):
             org_id, project_id = await _seed_org_project(s)
             requester_id = await _seed_human(s, org_id, project_id)
             doc = await _seed_doc(s, org_id, project_id)
-            # 둘 다 team_members에 없음 → 둘 다 FK 위반으로 실패(test_one_approver_failure의
-            # nonexistent_approver 관례 재사용, 신규 실패유도 메커니즘 발명 0).
+            # story #4157 — 둘 다 무조건 실 DB 예외(SELECT 1/0)로 실패(위
+            # _break_create_conversation_record, only_for_member_ids=None=매 호출 실패).
             nonexistent_1, nonexistent_2 = uuid.uuid4(), uuid.uuid4()
+            _break_create_conversation_record(monkeypatch, only_for_member_ids=None)
 
             with caplog.at_level(logging.WARNING, logger=_logger.name):
                 await dispatch_approval_request_cards(

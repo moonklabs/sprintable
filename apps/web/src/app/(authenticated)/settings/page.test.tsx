@@ -247,6 +247,47 @@ describe('SettingsPage — story #3762: adminChecked 로딩 vs 권한없음 분�
 // 읽다 실패하면 이유 없이 조용히 사라졌다(3762·3768이 만든 결함이 아니라 드러낸 자리).
 // 탭 한 자리(배너 1개)에서 사유+재시도를 말하고, 재시도가 섹션 넷을 다시 fetch하게
 // 하는지 검증한다.
+// story #4184(배포 18 라이브 PO CDP) — 하드 로드에서 첫 /api/me 응답이 끝난 **뒤에** 설정 청크가 /api/me를 한 번 더
+// 불렀다(«진행 중 공유»만으론 합칠 요청이 없다). jsdom은 절들이 첫 응답 전에 한꺼번에 마운트해 그 순서를 못 만든다 —
+// 그래서 «첫 응답이 다 끝난 뒤 같은 문서에서 설정 화면이 다시 마운트되는» 순서(뒤늦은 절 마운트 · SPA로 돌아옴)로 잰다.
+// 결과 재사용이면 두 번째 마운트는 네트워크 0 → 합계 1회.
+describe('SettingsPage — story #4184: 첫 응답 뒤 다시 마운트해도 /api/me 네트워크 1회', () => {
+  it.each(['profile', 'org-members'])('%s 탭', async (tab) => {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams(`tab=${tab}`),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 'm-1', user_id: 'u-1', name: '테스트', email: 't@moonklabs.com', type: 'human', role: 'admin',
+              has_password: true, linked_providers: [], totp_enabled: false,
+            },
+          }),
+        });
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+    await mount(<SettingsPage />);
+    await settle();
+    const meCalls = () => fetchWithAuthMock.mock.calls.filter((c) => c[0] === '/api/me').length;
+    expect(meCalls()).toBe(1);
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount(<SettingsPage />);
+    await settle();
+    expect(meCalls()).toBe(1);
+  });
+});
+
 describe('SettingsPage — story #3772: 프로필 탭 /api/me 실패 배너', () => {
   it('⭐/api/me가 reject하면 상단 배너 1개(사유+재시도) · 섹션마다 중복 배너 0', async () => {
     vi.doMock('next/navigation', () => ({
@@ -523,5 +564,69 @@ describe('SettingsPage — story #3789: 조직 탭·삭제 다이얼로그 i18n 
     const strongEls = Array.from(container.querySelectorAll('strong'));
     expect(strongEls.some((el) => el.textContent === '에이전트 관리')).toBe(true);
     expect(container.textContent).toContain(koMessages.settings.agentManagementCta);
+  });
+});
+
+// story #4231 3차 · 까디르 QA(ccef5258a [P2]) — api-keys 탭의 자동 이동은 탭이 이유이고 프로젝트는 싣는 값일 뿐이다. 프로젝트가
+// «모름 → A → 대기 B → A»로 바뀌는 동안에도 이동은 1번(여러 번이면 Next가 앞 이동을 버리는 경로 — 4231이 막으려던 부류).
+describe('SettingsPage — api-keys 자동 이동은 프로젝트가 정해지는 동안 1번(story #4231)', () => {
+  it('⭐프로젝트 «모름 → A → 대기 B → A» — router.push 1번, 발사 시점의 프로젝트(모름 → p 없음)', async () => {
+    const pushMock = vi.fn();
+    const router = { replace: vi.fn(), refresh: vi.fn(), push: pushMock, prefetch: vi.fn() };
+    const stableParams = new URLSearchParams('tab=api-keys');
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => router,
+      useSearchParams: () => stableParams,
+      usePathname: () => '/settings',
+    }));
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn(async () => ({ ok: false, json: async () => ({ data: null }) })) }));
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1', orgMemberships: [], projectId: undefined });
+    const { default: SettingsPage } = await import('./page');
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    await mount(<SettingsPage />);
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1', orgMemberships: [], projectId: 'proj-A' });
+    await mount(<SettingsPage />);
+    await act(async () => { setPendingProjectTarget('proj-B'); });
+    await act(async () => { setPendingProjectTarget(null); });
+    await act(async () => { await Promise.resolve(); });
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledWith('/organization/workforce');
+  });
+});
+
+// story #4184(E-MOBILE-SPEED) AC1 — /settings 한 번 진입에 /api/me가 7회(dev·prod 라이브) 나갔다
+// (페이지 loadContext + 프로필 탭 섹션들 + 알림 채널 + 구성원 절이 각자 fetch). 요청 공유
+// (lib/me-client.ts) 뒤엔 같은 화면이 네트워크 요청 1회를 나눠 쓴다.
+describe('SettingsPage — story #4184: /api/me 요청 공유', () => {
+  it('⭐프로필 탭 진입 — 모든 절이 뜨는데 /api/me 네트워크 호출은 정확히 1회', async () => {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=profile'),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 'm-1', user_id: 'u-1', name: '테스트', email: 't@moonklabs.com', type: 'human', role: 'admin',
+              has_password: true, linked_providers: [], totp_enabled: false,
+            },
+          }),
+        });
+      }
+      if (url.startsWith('/api/team-members/')) return Promise.resolve({ ok: true, json: async () => ({ data: { avatar_url: null } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    // 프로필 탭 절들이 실제로 떴는지(요청을 아꼈다고 화면이 빈 게 아닌지) 먼저 확認.
+    expect(container.textContent).toContain('테스트');
+    expect(container.textContent).not.toContain(koMessages.settings.accountInfoLoadError);
+    expect(fetchWithAuthMock.mock.calls.filter((c) => c[0] === '/api/me')).toHaveLength(1);
   });
 });

@@ -14,7 +14,8 @@ import { SectionCardBody } from '@/components/ui/section-card';
 import { Card } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelConnectionIdentityLabel, channelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
+import { copyTextSafely } from '@/lib/clipboard';
+import { channelConnectionIdentityLabel, useChannelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { formatCount } from '@/components/content/generation-budget-indicator';
@@ -23,10 +24,11 @@ import { deriveChannelConnectionStatus, worstChannelConnectionStatus } from '@/c
 import { AppCredentialsCard } from '@/components/channel-connect/app-credentials-card';
 import { PastedSecretConnectCard } from '@/components/channel-connect/pasted-secret-connect-card';
 import { ReplaceCredentialCard } from '@/components/channel-connect/replace-credential-card';
-import { connectErrorLabelKey } from '@/components/channel-connect/connect-error';
+import { OAuthResultBanner } from '@/components/channel-connect/oauth-result-banner';
 import { FacebookPageSelectCard, type SelectCandidate } from '@/components/channel-connect/facebook-page-select-card';
 import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 import { AgentSetupSection } from '@/components/channel-connect/agent-setup-section';
+import { ExternalPublishPauseCard } from '@/components/channel-connect/external-publish-pause-card';
 
 /**
  * story #3376(Phase1·마케팅운영) — 소셜 채널 OAuth 연결 화면. org-connectors(/organization/
@@ -80,7 +82,11 @@ interface Ga4Property {
 // 인라인 패널을 연다. 재발급(rotate)·설치 검증 UI는 4180f67f 잔여(이 스토리 스코프
 // 밖) — 여기는 「받아서 심는다」까지만.
 function BeaconKeyPanel({ publicKey, t }: { publicKey: string; t: ReturnType<typeof useTranslations> }) {
+  const tc = useTranslations('common');
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 catch에서 아무것도 안 하고도
+  // setCopied(true)를 무조건 실행했다(try 밖).
+  const [copyFailed, setCopyFailed] = useState(false);
   // 페드루 PO REQUIRED①(2026-09-06, #3896 리뷰) — window.location.origin은 이
   // 대시보드(FE) 호스트다. 고객이 그대로 복사하면 없는 경로로 beacon을 쏜다 —
   // 정본은 sprintable-landing의 view-beacon.tsx가 실제로 쓰는 BE 베이스
@@ -90,11 +96,12 @@ function BeaconKeyPanel({ publicKey, t }: { publicKey: string; t: ReturnType<typ
   const snippet = `fetch('${backendBase}/api/v2/public/pageview', {\n  method: 'POST',\n  keepalive: true,\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    public_key: '${publicKey}',\n    path: location.pathname,\n    referrer: document.referrer || null,\n    utm_source: new URLSearchParams(location.search).get('utm_source'),\n    utm_medium: new URLSearchParams(location.search).get('utm_medium'),\n    utm_campaign: new URLSearchParams(location.search).get('utm_campaign'),\n    utm_content: new URLSearchParams(location.search).get('utm_content'),\n  }),\n});`;
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(publicKey);
-    } catch {
-      // clipboard 실패는 조용히 무시(복사 버튼 재클릭으로 재시도 가능).
+    const result = await copyTextSafely(publicKey);
+    if (!result.ok) {
+      setCopyFailed(true);
+      return;
     }
+    setCopyFailed(false);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -109,6 +116,9 @@ function BeaconKeyPanel({ publicKey, t }: { publicKey: string; t: ReturnType<typ
             {copied ? t('measurementBeaconKeyCopied') : t('measurementBeaconKeyCopyAction')}
           </Button>
         </div>
+        {/* story #3986 — publicKey는 위 <code>에 이미 선택 가능하게 떠 있어
+            별도 노출 블록은 불요, 실패 문구만. */}
+        {copyFailed ? <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p> : null}
       </div>
       <div className="space-y-1">
         <p className="text-xs font-medium text-muted-foreground">{t('measurementBeaconSnippetLabel')}</p>
@@ -594,6 +604,7 @@ function ConnectionRow({
   const [testing, setTesting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  const channelLabel = useChannelLabel();
 
   const handleTest = useCallback(async () => {
     setTesting(true);
@@ -636,7 +647,7 @@ function ConnectionRow({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-1.5 truncate text-sm font-medium text-foreground">
-            {channelConnectionIdentityLabel(conn, t)}
+            {channelConnectionIdentityLabel(conn, channelLabel)}
             {/* story f30da19a AC4③(유나 확定) — 연결 카드는 「테스트용 연결」(글 목록/
                 캘린더의 「테스트」와 다른 정본 — 여기는 "이 연결 자체가 테스트"라는 뜻).
                 story #3523(PO 실측(3523 그라운딩·page.tsx:239)·確定 2026-09-06) — channel===
@@ -709,7 +720,7 @@ function ConnectionRow({
             aria-hidden="true"
           />
           {testResult.ok
-            ? t('channelTestOk', { account: String(testResult.account?.['username'] ?? channelConnectionIdentityLabel(conn, t)) })
+            ? t('channelTestOk', { account: String(testResult.account?.['username'] ?? channelConnectionIdentityLabel(conn, channelLabel)) })
             : t('channelTestFailed', { error: testResult.error ?? '' })}
         </p>
       ) : null}
@@ -740,7 +751,7 @@ function ConnectionRow({
         {derived.status === 'reauth_required' ? (
           conn.credential_kind === 'none' ? (
             <p className="text-xs text-muted-foreground" data-testid="channel-sandbox-reauth-unavailable">
-              {t('channelSandboxReauthUnavailableNote', { channel: channelLabel(conn.channel, t) })}
+              {t('channelSandboxReauthUnavailableNote', { channel: channelLabel(conn.channel) })}
             </p>
           ) : conn.credential_kind === 'oauth' ? (
             isOwnerStrict ? (
@@ -821,6 +832,7 @@ function ChannelSection({
   const { channel, credential_kind } = item;
   const locale = useLocale();
   const tc = useTranslations('common');
+  const channelLabel = useChannelLabel();
   const displayTimezone = resolveDisplayTimezone().tz;
   const rowStatuses = connections.map((c) =>
     deriveChannelConnectionStatus({
@@ -910,7 +922,7 @@ function ChannelSection({
     if (single && singleDerived) {
       if (singleDerived.status === 'reauth_required' || singleDerived.status === 'provider_error') {
         return single.credential_kind === 'none'
-          ? t('channelSandboxReauthUnavailableNote', { channel: channelLabel(channel, t) })
+          ? t('channelSandboxReauthUnavailableNote', { channel: channelLabel(channel) })
           : reauthSubtitleText(singleDerived.reauthReason, t, single.last_error_code);
       }
       // story #3808 — 위 ConnectionRow 부제와 동형: status가 아니라 isAutoRefreshInfo
@@ -918,7 +930,7 @@ function ChannelSection({
       if (singleDerived.isAutoRefreshInfo !== undefined) {
         return expiringSoonSubtitleText({ isAutoRefreshInfo: singleDerived.isAutoRefreshInfo, tokenExpiresAt: single.token_expires_at, t });
       }
-      return `${channelConnectionIdentityLabel(single, t)} · ${t('channelConnectedBy', { time: formatRelativeTime(single.created_at, locale, displayTimezone) })}`;
+      return `${channelConnectionIdentityLabel(single, channelLabel)} · ${t('channelConnectedBy', { time: formatRelativeTime(single.created_at, locale, displayTimezone) })}`;
     }
     return undefined;
   })();
@@ -938,15 +950,15 @@ function ChannelSection({
         if (effectiveSource === 'none') {
           return isOwnerStrict ? { label: t('appCredentialsRegisterAction'), onClick: onExpand, testId: 'channel-row-primary-register' } : null;
         }
-        return isOwnerStrict ? { label: t('channelConnectAction', { channel: channelLabel(channel, t) }), href: connectHref, testId: 'channel-row-primary-connect' } : null;
+        return isOwnerStrict ? { label: t('channelConnectAction', { channel: channelLabel(channel) }), href: connectHref, testId: 'channel-row-primary-connect' } : null;
       }
       if (credential_kind === 'none') {
         return isOwnerOrAdmin
-          ? { label: creatingSandbox ? tc('creating') : t('channelConnectSandboxAction', { channel: channelLabel(channel, t) }), onClick: () => void handleCreateSandbox(), disabled: creatingSandbox, testId: 'channel-connect-sandbox-button' }
+          ? { label: creatingSandbox ? tc('creating') : t('channelConnectSandboxAction', { channel: channelLabel(channel) }), onClick: () => void handleCreateSandbox(), disabled: creatingSandbox, testId: 'channel-connect-sandbox-button' }
           : null;
       }
       if (credential_kind === 'pasted_secret') {
-        return isOwnerOrAdmin ? { label: t('channelConnectAction', { channel: channelLabel(channel, t) }), onClick: onExpand, testId: 'channel-row-primary-connect' } : null;
+        return isOwnerOrAdmin ? { label: t('channelConnectAction', { channel: channelLabel(channel) }), onClick: onExpand, testId: 'channel-row-primary-connect' } : null;
       }
       return null;
     }
@@ -992,10 +1004,10 @@ function ChannelSection({
     menuItems.push({ key: 'manage', label: t('channelManageConnectionsAction'), onClick: onExpand });
   }
   if (credential_kind === 'oauth' && effectiveSource !== 'none') {
-    menuItems.push({ key: 'app-credentials', label: t('appCredentialsTitle', { channel: channelLabel(channel, t) }), onClick: onExpand });
+    menuItems.push({ key: 'app-credentials', label: t('appCredentialsTitle', { channel: channelLabel(channel) }), onClick: onExpand });
   }
   if (canStartConnect && connections.length >= 1 && credential_kind !== 'none' && isOwnerOrAdmin) {
-    menuItems.push({ key: 'add-another', label: t('channelConnectAnotherAction', { channel: channelLabel(channel, t) }), onClick: onExpand });
+    menuItems.push({ key: 'add-another', label: t('channelConnectAnotherAction', { channel: channelLabel(channel) }), onClick: onExpand });
   }
 
   return (
@@ -1004,7 +1016,7 @@ function ChannelSection({
         <ListRow
           className="p-0"
           mark={<ListRowMark label={channelMarkInitials(channel)} color={channelMarkColor(channel)} />}
-          title={channelLabel(channel, t)}
+          title={channelLabel(channel)}
           subtitle={subtitle}
           status={(
             <ChannelStatusChip
@@ -1036,7 +1048,7 @@ function ChannelSection({
           menu={menuItems.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger
-                aria-label={t('channelRowMoreActionsAriaLabel', { channel: channelLabel(channel, t) })}
+                aria-label={t('channelRowMoreActionsAriaLabel', { channel: channelLabel(channel) })}
                 data-testid="channel-row-more-actions"
                 className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               >
@@ -1058,13 +1070,13 @@ function ChannelSection({
           </p>
         ) : null}
         {credential_kind === 'oauth' && !isOwnerStrict && connections.length === 0 && effectiveSource !== 'none' ? (
-          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel) })}</p>
         ) : null}
         {credential_kind === 'none' && !isOwnerOrAdmin && connections.length === 0 ? (
           <p className="mt-1 text-xs text-muted-foreground">{t('channelOwnerOrAdminOnlyReason')}</p>
         ) : null}
         {credential_kind === 'pasted_secret' && !isOwnerOrAdmin && connections.length === 0 ? (
-          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOrAdminOnlyReason', { channel: channelLabel(channel, t) })}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('channelConnectOwnerOrAdminOnlyReason', { channel: channelLabel(channel) })}</p>
         ) : null}
         {credential_kind === 'none' && sandboxError ? (
           <p className="mt-1 text-xs text-destructive" data-testid="channel-connect-sandbox-error">{sandboxError}</p>
@@ -1118,12 +1130,12 @@ function ChannelSection({
           {credential_kind === 'oauth' && canStartConnect && connections.length >= 1 ? (
             isOwnerStrict ? (
               <Button asChild size="sm">
-                <a href={connectHref}>{t('channelConnectAnotherAction', { channel: channelLabel(channel, t) })}</a>
+                <a href={connectHref}>{t('channelConnectAnotherAction', { channel: channelLabel(channel) })}</a>
               </Button>
             ) : (
               // story #3436 묶음10(§5) — 「또 다른 계정 연결」도 owner 전용(같은
               // authorize_channel_connection 경로) — 버튼 대신 사유 한 줄.
-              <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>
+              <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel) })}</p>
             )
           ) : null}
         </SectionCardBody>
@@ -1142,6 +1154,7 @@ export default function OrganizationChannelsPage() {
   const isOwnerStrict = currentRole === 'owner';
   const isOwnerOrAdmin = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('channelConnect');
+  const channelLabel = useChannelLabel();
   const searchParams = useSearchParams();
 
   const [availableChannels, setAvailableChannels] = useState<AvailableChannelItem[]>([]);
@@ -1258,30 +1271,10 @@ export default function OrganizationChannelsPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- 위 load()와 같은 관례
   useEffect(() => { void loadMeasurement(); }, [loadMeasurement]);
 
-  const connected = searchParams.get('connected');
-  const connectError = searchParams.get('connect_error');
-  // story #3672(2026-09-07, 3663 실사고) — BE unhandled_exception_handler가 실어 준
-  // error_id를 BFF(authorize/callback route.ts)가 그대로 릴레이한다(AC4). 있을 때만
-  // 표시(AC5) — 없으면 지금 문구 그대로, 복사 가능한 일반 텍스트(select-text).
-  // 페드루 PO 권고②(#4025 리뷰) — 쿼리는 조작 가능한 입력이라, uuid 형식이 아니면
-  // (손상된 URL·수동 조작) «오류 번호» 자리에 임의 문자열을 그대로 띄우지 않는다.
-  const rawConnectErrorId = searchParams.get('error_id');
-  const connectErrorId = rawConnectErrorId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawConnectErrorId)
-    ? rawConnectErrorId
-    : null;
-  // story #3650(PO Test Org 실측 2026-09-07) — 재연결 대상 행과 콜백이 실제로 갱신한
-  // 행이 다를 때(다른 계정을 승인) BFF가 함께 싣는 두 id. 라벨은 이 화면이 이미
-  // 불러온 connections에서 붙인다(콜백 라우트는 opaque 릴레이 그대로 유지).
-  const mismatchTargetId = searchParams.get('mismatch');
-  const mismatchUpdatedId = searchParams.get('updated');
-  const mismatchTargetConn = connections.find((c) => c.id === mismatchTargetId);
-  const mismatchUpdatedConn = connections.find((c) => c.id === mismatchUpdatedId);
-  // story #3661(유나 판정 정정) — mismatch 파라미터가 있으면 이미 「불일치 재연결」로
-  // 확定된 것(plain 성공 배너 대상이 아니다). 목록이 아직 안 불렸으면(connections=[])
-  // find()가 둘 다 undefined라 아래 렌더 조건이 자연히 막는다 — 대상 연결을 못
-  // 찾은 채로(로드 前이든 삭제된 뒤든) raw UUID로 Alert를 그리는 대신 조용히
-  // 건너뛴다(«모르는 것을 UUID로 단정» 금지).
-  const isMismatchCase = Boolean(connected && mismatchTargetId && mismatchUpdatedId);
+  // story #4019(PO 確定 2026-09-17) — connected·connect_error·error_id·mismatch·
+  // updated 파생+렌더는 OAuthResultBanner(channel-connect/oauth-result-banner.tsx)
+  // 로 이관 — v3 connect-rules-v3-channels.tsx와 바이트 동일 문구·판정을 보장한다
+  // (재파생만 공유하면 두 화면이 갈릴 수 있어 컴포넌트 자체를 공유).
 
   // story #3549(§13-8②, 3547 계약) — 콜백 BFF(api/oauth-channel/callback/[channel])가
   // 2개 이상 페이지를 찾으면 `?select_pending={channel}&pending_id=...&candidates=...`
@@ -1328,7 +1321,7 @@ export default function OrganizationChannelsPage() {
               <DropdownMenuContent align="end">
                 {unregisteredOauthChannels.map((it) => (
                   <DropdownMenuItem key={it.channel} onClick={() => goToChannel(it.channel)}>
-                    {channelLabel(it.channel, t)}
+                    {channelLabel(it.channel)}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -1336,6 +1329,10 @@ export default function OrganizationChannelsPage() {
           )
         }
       />
+
+      {/* story #3953(블루프린트 §1-5) — 조직 전체 외부 발행 일시 중지 스위치.
+          owner만 조작·member 이상 열람(GET이 비밀 아님). */}
+      {orgId ? <ExternalPublishPauseCard orgId={orgId} isOwnerStrict={isOwnerStrict} /> : null}
 
       {/* story #3743(시안 그대로, 비-소유자 판) — 권한(할 수 없다)은 안 그림+사유
           한 줄(3733 키 재사용, 새 낱말 0). */}
@@ -1345,39 +1342,7 @@ export default function OrganizationChannelsPage() {
         </div>
       ) : null}
 
-      {isMismatchCase && mismatchTargetConn && mismatchUpdatedConn ? (
-        <Alert variant="info" role="status" aria-live="polite" aria-atomic="true" data-testid="channel-reauth-mismatch-note">
-          <AlertDescription>
-            {t('channelReauthMismatchNote', {
-              updated: channelConnectionIdentityLabel(mismatchUpdatedConn, t),
-              intended: channelConnectionIdentityLabel(mismatchTargetConn, t),
-            })}
-          </AlertDescription>
-        </Alert>
-      ) : connected && !isMismatchCase ? (
-        <Alert variant="success" role="status" aria-live="polite" aria-atomic="true">
-          <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected, t) })}</AlertDescription>
-        </Alert>
-      ) : null}
-      {connectError ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          {/* story #3504 — CHANNEL_APP_CREDENTIALS_MISSING의 "누구에게 요청하나" 분기는
-              app-credentials 등록 자격(owner 전용, 앱 자격 저장과 같은 폭)을 묻는다 —
-              owner|admin 폭인 isOwnerOrAdmin이 아니라 isOwnerStrict가 맞다. */}
-          <AlertDescription>
-            {t(connectErrorLabelKey(connectError, isOwnerStrict))}
-            {connectErrorId ? (
-              // 유나 라이브 픽셀 실측(#4025 리뷰, 2026-09-07) — AlertDescription 자체가
-              // opacity-90이라 그 안에서 text-muted-foreground는 0.9와 합성돼 라이트
-              // 4.150(하한 4.5 미달)로 떨어진다. text-foreground(12.597/12.592)로 —
-              // opacity 층은 자식에 opacity-100을 줘도 상쇄 안 된다(부모 합성 자체).
-              <span className="mt-1 block select-text text-xs text-foreground">
-                {t('channelConnectErrorId', { errorId: connectErrorId })}
-              </span>
-            ) : null}
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <OAuthResultBanner connections={connections} isOwnerStrict={isOwnerStrict} />
       {loadState === 'error' ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
           <AlertDescription>{t('channelLoadFailed')}</AlertDescription>

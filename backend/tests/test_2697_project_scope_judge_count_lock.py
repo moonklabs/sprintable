@@ -48,6 +48,12 @@ _KNOWN_HITS = {
     "app/routers/activity_logs.py::list_activity_logs",
     "app/routers/activity_stream.py::get_activity_stream",
     "app/routers/agent_runs.py::create_agent_run",
+    # story #3961(2026-09-16) — 신설 POST /agent-runs/{id}/cancel. PATCH(형제 update_agent_run)
+    # ·GET(형제 get_agent_run)과 완전 동일 인가축(org 검증 후 has_project_access) — 그 위에
+    # 얹는 추가 판정(org owner/admin·story 담당자·caller.type==human)은 이 라우터 고유의
+    # 새 인가 계층이라 require_project_access(순수 project-scope SSOT)가 대신할 수 없다.
+    # require_project_access로 아직 수렴 안 한 정당한 신규 잔존(형제 함수들과 동형 패턴).
+    "app/routers/agent_runs.py::cancel_agent_run",
     # story #4725d9c0(2026-09-08) — 신설 GET /agent-runs/{id}. PATCH(형제 update_agent_run)와
     # 동일 인가축(org 검증 후 has_project_access) — 존재/타org/무접근권 전부 404 비노출.
     # require_project_access로 아직 수렴 안 한 정당한 신규 잔존(형제 함수들과 동형 패턴).
@@ -112,7 +118,7 @@ _KNOWN_HITS = {
 # 값이 정확히 되돌아감). story #4725d9c0(2026-09-08) — agent_runs.py::get_agent_run 신설로
 # +1(59→60, 위 _KNOWN_HITS 항목 참조). story #3722(2026-09-09) — 형제 list_agent_run_tool_calls
 # 신설로 +1(60→61).
-_RAW_INLINE_RAISE_BASELINE = 61
+_RAW_INLINE_RAISE_BASELINE = 62  # story #3961 — cancel_agent_run 신설 1건 추가(61→62).
 
 
 def _qualname_of(node: ast.AST, parents: dict[int, ast.AST]) -> str:

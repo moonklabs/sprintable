@@ -1,8 +1,10 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { whenFirstScreenQuiet } from '@/lib/first-screen-quiet';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -10,18 +12,25 @@ const TABS = [
   // 순서는 「목록·보드·타임라인·스프린트·회고」, 목록이 첫 탭·기본 보기). 「타임라인」은 이
   // 카드 스코프 밖(별 라우트·데이터 0 — 지어내지 않는다, 별 카드 필요). 처음엔 06:28Z
   // 지시대로 배열 끝에 얹었다가 이 재대조로 앞으로 옮겼다.
-  { key: 'workList', path: 'work-list' },
-  { key: 'board', path: 'flow' },
-  { key: 'sprints', path: 'sprints' },
-  { key: 'epic', path: 'epics' },
+  { key: 'workList', labelKey: 'workList', path: 'work-list' },
+  // story #4278 — 라벨은 labelKey로 읽는다(key와 같은 값). t(tab.key)만으론 죽은 키 가드가 nav.board 소비를 못 봤다(예전엔 «전체» 메뉴
+  // 머리 문장의 t('board')가 대신 세어 줬는데 그 문장이 탭 이름만 쓰게 바뀌었다).
+  { key: 'board', labelKey: 'board', path: 'flow' },
+  { key: 'sprints', labelKey: 'sprints', path: 'sprints' },
+  { key: 'epic', labelKey: 'epic', path: 'epics' },
   // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §③ⓑ 2026-09-14) — 「일감」 흡수 지도
   // (doc a699be00 §②)의 「회고」 탭. board/sprints/epic과 동형(실 라우트 /retro 보존,
   // 이 프레임은 그 위에 얹힌 얕은 nav일 뿐 — WorkspaceFrameTabs 파일 상단 주석 참고).
   // labelKey 'retro'는 nav-config.ts::LEGACY_NAV_ITEMS가 이미 쓰던 값 재사용(사본 0).
-  { key: 'retro', path: 'retro' },
+  { key: 'retro', labelKey: 'retro', path: 'retro' },
+  // story #3989(「일감」 흡수 3/N, PO 확定 — worklist-6item-absorption doc §②-1) — 전수
+  // 가설 집. 다른 탭과 동형(실 라우트 /hypotheses 보존, 이 프레임은 얕은 nav일 뿐).
+  // labelKey 'hypothesis'는 flow.ladderName_earth와 같은 낱말(「가설」)이라 값만 맞추고
+  // 키는 새로 둔다(namespace가 다름 — 사본이 아니라 같은 사실·다른 화면).
+  { key: 'hypothesis', labelKey: 'hypothesis', path: 'hypotheses' },
 ] as const;
 
-type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
+export type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
 
 // story #3844(PO 지적 2026-09-14 07:53Z, 캡처 3 라이브 눈확認로 발견) — app-sidebar.tsx의
 // 「일감」 1차 메뉴(id 'board')가 resourceLink('flow') 단일 경로만 활성 판정해 /work-list·
@@ -30,6 +39,8 @@ type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
 // (app-sidebar.tsx가 TABS를 직접 import하지 않는 건 'use client' 순환 없이 얇은 경로
 // 목록만 필요해서 — 경로 문자열만 뽑아 재수출한다).
 export const WORKSPACE_FRAME_TAB_PATHS: readonly string[] = TABS.map((tab) => tab.path);
+// story #4274 — 여섯 경로의 loading.tsx가 탭 줄을 품는지 가드가 키 · 경로 짝으로 대조한다(loading-coverage.guard.test.ts).
+export const WORKSPACE_FRAME_TABS: ReadonlyArray<{ key: WorkspaceFrameTabKey; path: string }> = TABS;
 
 /**
  * story #2930(P0-G) I3(doc ia-4zone-redesign-2930, PO 스코프 확定 ①=ⓒ 2026-08-22) — nav에서
@@ -45,14 +56,30 @@ export const WORKSPACE_FRAME_TAB_PATHS: readonly string[] = TABS.map((tab) => ta
  * (epic-swimlane-board.tsx, /epics)으로 실체가 생겨 3번째 탭으로 합류한다.
  */
 export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey }) {
+  // story #4277(유나 판단 ① 필수) — 줄이 가로 스크롤이 되면서 켜진 탭이 화면 밖일 수 있다(«가설»로 들어온 경우 등) — 그릴 때 · 탭이 바뀔 때
+  // 켜진 탭을 줄 안으로(block/inline 'nearest' — 이미 보이면 안 움직인다 · 페이지 세로 스크롤은 건드리지 않는다).
+  const activeRef = useRef<HTMLAnchorElement | null>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
   const t = useTranslations('nav');
-  const router = useRouter();
   const params = useParams<{ ws: string; proj: string }>();
+  const router = useRouter();
+  const hrefOf = (path: string) => `/${params.ws}/${params.proj}/${path}`;
+  // [SID:4299] 탭 프리패치는 첫 화면 뒤로 — 기본 prefetch Link 여섯은 보이자마자 경로마다 tree + data 둘씩 나가, 기기 콜드에서 물결 뒤 정착을
+  // +300ms 밀고 서버 RSC 렌더를 콜드마다 +11 늘렸다(AC3 판 2026-09-28). 4291의 뜻(형제 탭 전환 무반응 없앰)은 지킨다:
+  // 첫 화면이 조용해지면 지금 탭 이웃 둘만 미리 받고, 나머지는 누르려는 기색(pointerenter · focus · touchstart) 때 받는다.
+  const activeIndex = TABS.findIndex((tab) => tab.key === active);
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    const neighbors = [TABS[activeIndex - 1], TABS[activeIndex + 1]].filter((tab) => tab !== undefined);
+    return whenFirstScreenQuiet(() => { for (const tab of neighbors) router.prefetch(hrefOf(tab.path)); });
+    // router · hrefOf는 매 렌더 새 참조 — 지금 탭 · 주소 조각이 바뀔 때만 다시 건다.
+  }, [activeIndex, params.ws, params.proj]); // eslint-disable-line react-hooks/exhaustive-deps
   // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — "「지금」 탭을 열 때 여기가 보드인 것이
   // 즉시 읽히게" 시각 위계 승격. PR#3358(유나 QA)이 세운 「상위 프레임=underline·내부 뷰
   // 탭=rounded pill」구분 자체는 유효한 규율이라 유지(pill로 갈아타지 않음 — 재규격이 아니라
   // <lg에서만 이 underline 계열 안에서 텍스트·인디케이터 두께를 키운다).
-  const isMobile = useIsMobile();
 
   return (
     // 유나 QA 블로커(PR#3358, 2026-08-22) — flow-client 내부 3탭(가설/갈래/칸반)과 스타일이
@@ -60,24 +87,43 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
     // 위계 구분이 안 됐다. 처방(유나 확定): 상위 프레임은 text-sm+하단 인디케이터(underline)로
     // — 페이지-크롬(notification-bell.tsx 필터 탭과 동형 패턴, 신규 발명 아님). 내부 뷰 탭의
     // rounded pill과 kind 자체가 달라 한눈에 "이건 다른 층"으로 읽힌다.
-    <div className="flex items-center gap-4 border-b border-border" role="tablist" aria-label={t('workspace')}>
-      {TABS.map((tab) => (
-        <button
-          key={tab.key}
-          type="button"
-          role="tab"
-          aria-selected={active === tab.key}
-          onClick={() => router.push(`/${params.ws}/${params.proj}/${tab.path}`)}
-          className={cn(
-            'font-semibold transition',
-            isMobile
-              ? `-mb-px border-b-[3px] px-1 pb-2.5 text-base ${active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`
-              : `-mb-px border-b-2 px-1 pb-2 text-sm ${active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`,
-          )}
-        >
-          {t(tab.key)}
-        </button>
-      ))}
+    // story #4277 — 402폭에서 상위 프레임 탭(보드 · 목록 · 스프린트 · 에픽 · 회고 · 가설 · text-base)이 줄 폭(370)을 넘어 셸 스크롤러가 가로로
+    // 넘쳤다(423/402). 줄 자체를 가로 스크롤(스크롤바 숨김)로 — 탭은 줄바꿈 · 축소 없이 제 폭. overflow-y-hidden은 버튼의 -mb-px(아래 선과 겹침)가
+    // 1px 세로 스크롤을 만들지 않게.
+    // 아래 선은 바깥 래퍼에 둔다(유나 관찰 · PO 4639) — 오른쪽 끝 흐림 mask가 줄 요소 전체(테두리 포함)에 걸려 선도 오른쪽 24px에서 옅어졌다.
+    // 켜진 탭 밑줄은 전과 같다: 스크롤러의 overflow 클립은 안쪽 경계라 버튼의 -mb-px 1px은 예전에도 잘려 밑줄이 선 바로 위에서 끝났다.
+    <div className="border-b border-border" data-testid="workspace-frame-tabs-rule">
+      <div
+        className="focus-inset flex items-center gap-4 overflow-x-auto overflow-y-hidden pr-6 [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        role="tablist"
+        aria-label={t('workspace')}
+      >
+        {TABS.map((tab) => (
+          // story #4291 — 탭 = 프리패치되는 <Link>(예전 router.push 버튼은 프리패치가 없어 형제 탭 이동이 응답까지 ~600ms 무반응).
+          // [SID:4299] 보일 때 자동 프리패치는 끄고(prefetch={false}) 위 훅(이웃 둘 · 첫 화면 뒤)과 누르려는 기색 때 router.prefetch로.
+          // 탭 줄은 이제 `[ws]/[proj]` 레이아웃(WorkTabsFrame)에 살아 전환 때 다시 그려지지 않는다 — 두 가지는 한 묶음이다(카드 처방).
+          <Link
+            key={tab.key}
+            ref={active === tab.key ? activeRef : undefined}
+            href={hrefOf(tab.path)}
+            prefetch={false}
+            onPointerEnter={() => router.prefetch(hrefOf(tab.path))}
+            onFocus={() => router.prefetch(hrefOf(tab.path))}
+            onTouchStart={() => router.prefetch(hrefOf(tab.path))}
+            role="tab"
+            aria-selected={active === tab.key}
+            className={cn(
+              'shrink-0 whitespace-nowrap font-semibold transition',
+              // story #4222 — 예전엔 useIsMobile()로 클래스를 갈라 서버·첫 렌더(=데스크톱 클래스 · 30px)와 하이드레이션 뒤(모바일 · 37px)
+              // 높이가 달라 390에서 밀렸다. 모바일 기본 + lg:(훅의 1024) 덮어쓰기로 서버 출력이 곧 최종.
+              '-mb-px border-b-[3px] px-1 pb-2.5 text-base lg:border-b-2 lg:pb-2 lg:text-sm',
+              active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t(tab.labelKey)}
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

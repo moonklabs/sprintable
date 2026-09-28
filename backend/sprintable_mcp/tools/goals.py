@@ -75,7 +75,7 @@ async def list_goals(args: ListGoalsInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_goals")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def add_goal(args: AddGoalInput) -> list[TextContent]:
@@ -92,7 +92,7 @@ async def add_goal(args: AddGoalInput) -> list[TextContent]:
             body["target_sp"] = args.target_sp
         return ok(await client.post("/api/v2/goals", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_goal(args: UpdateGoalInput) -> list[TextContent]:
@@ -116,7 +116,7 @@ async def update_goal(args: UpdateGoalInput) -> list[TextContent]:
     try:
         return ok(await client.patch(f"/api/v2/goals/{args.goal_id}", json=updates))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 class TransitionGoalInput(SprintableInput):
@@ -151,4 +151,4 @@ async def transition_goal(args: TransitionGoalInput) -> list[TextContent]:
             })
         return ok({**resp, "transitioned": True}) if isinstance(resp, dict) else ok(resp)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

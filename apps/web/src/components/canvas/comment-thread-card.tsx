@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { actorRowLabels, memberLookup } from '@/lib/member-display';
 import { cn } from '@/lib/utils';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import { AnchorPin } from './anchor-pin';
@@ -35,6 +36,13 @@ export function CommentThreadCard({
   thread, memberMap = {}, active, onSelectPin, onResolve, onReply, className,
 }: CommentThreadCardProps) {
   const t = useTranslations('canvas');
+  // story #4284 — 이름 없는 구성원 표시(common.memberUnnamed).
+  const tc = useTranslations('common');
+  // [SID:4286 · 까디르 P1/P4] 작성자 · 처리자 이름 칸의 «—» 폴백 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
+  const baseNameOf = (id: string) => memberLookup(memberMap, id, tc)!.label;
+  // [SID:4311 PR 3] 댓글 줄 작성자 — 같은 이름 서로 다른 작성자 둘이면 «· ID 앞 8자»(작성자 id마다 한 번). 해결한 사람 문장도 같은 표(한 카드 안에서 같은 사람 = 같은 글자).
+  const authorLabels = actorRowLabels(thread.comments.map((c) => ({ id: c.author_id, label: baseNameOf(c.author_id) })));
+  const nameOf = (id: string) => authorLabels.get(id) ?? baseNameOf(id);
   const [replyDraft, setReplyDraft] = useState('');
   const resolved = thread.rollup === 'resolved';
   // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
@@ -67,7 +75,7 @@ export function CommentThreadCard({
         {thread.comments.map((c) => (
           <div key={c.id}>
             <p className="text-[11px] text-muted-foreground">
-              <strong className="text-foreground">{memberMap[c.author_id]?.name ?? '—'}</strong>
+              <strong className="text-foreground">{nameOf(c.author_id)}</strong>
             </p>
             <p className="mt-0.5 text-xs leading-relaxed text-foreground">{c.body}</p>
           </div>
@@ -78,7 +86,7 @@ export function CommentThreadCard({
         ) : null}
 
         {resolved && thread.resolved_by ? (
-          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—', josa: pickIGaJosa(memberMap[thread.resolved_by]?.name ?? '—') })}</p>
+          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: nameOf(thread.resolved_by), josa: pickIGaJosa(nameOf(thread.resolved_by)) })}</p>
         ) : null}
 
         {!resolved ? (

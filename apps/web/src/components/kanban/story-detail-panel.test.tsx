@@ -14,6 +14,8 @@ import type { KanbanStory } from './types';
 import koMessages from '../../../messages/ko.json';
 import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
+import { ORG_NAMES_URL, resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
+import { HOVER_REVEAL } from '@/lib/hover-reveal';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -808,6 +810,33 @@ describe('StoryDetailPanel — Workcell Conversation 구획 대화근거 요약 
     await mountWithReferences({ data: [] });
     expect(container.textContent).toContain('연결된 대화 없음');
   });
+  // story #4231 3차(b) — 4595 보강: 대화 근거 링크는 목적지만 state에 담고 href는 useMemo로 만든다(프로젝트가 바뀌어도 references를
+  // 다시 받지 않는다). 4595 병합 코드에 빠져 있던 «재fetch 0» 테스트.
+  it('⭐프로젝트 전환(전환 대기 목표 변경)에 references를 다시 받지 않고, 링크만 새 목표 프로젝트를 싣는다', async () => {
+    await mountWithReferences({
+      data: [{
+        id: 'ref-1', created_at: '2026-08-20T00:00:00Z', form: 'proof', target_type: 'chat_message', still_exists: true,
+        proof_payload: {
+          conversation_id: 'conv-1', start_message_id: 'msg-1',
+          snapshot: [{ message_id: 'msg-1', author_id: 'a1', content: 'hi', created_at: '2026-08-20T00:00:00Z' }],
+        },
+      }],
+    });
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const refCalls = () => fetchMock.mock.calls.filter(([u]) => typeof u === 'string' && u.includes('/references?direction=outgoing')).length;
+    const before = refCalls();
+    expect(before).toBeGreaterThan(0);
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    try {
+      await act(async () => { setPendingProjectTarget('proj-B'); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(refCalls()).toBe(before);
+      const link = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('대화 근거 1건 보기'));
+      expect(link?.getAttribute('href')).toBe('/chats/conv-1?messageId=msg-1&p=proj-B');
+    } finally {
+      await act(async () => { setPendingProjectTarget(null); });
+    }
+  });
 });
 
 // story #3169(P2·prod 실사용·선생님 제보) — prod 실사고 재현: DELETE 200(성공) 4초 뒤 같은
@@ -1148,5 +1177,414 @@ describe('StoryDetailPanel — 의존성 추가 422 cycle/self-reference 판정(
     await openAddDepAndClickCandidate();
     expect(container.textContent).toContain(koMessages.board.dep.invalidSelf);
     expect(container.textContent).not.toContain(koMessages.board.dep.cycleDetected);
+  });
+});
+
+// story #3997 CHANGES(자체 그라운딩 확장 + 카디르 「고르는 자리」 전수, 페드루 확定
+// 2026-09-17) — 담당자 배정 토글 피커(members prop, kanban-board.tsx의 /api/members
+// fetch로 채워짐)가 「시스템 발행」을 못 걸렀다.
+describe('StoryDetailPanel — 담당자 배정 토글 시스템 발행 제외(story #3997 CHANGES)', () => {
+  it('⭐담당자 편집 후보에 「시스템 발행」이 안 뜨고 실 멤버는 그대로 뜬다', async () => {
+    stubFetch();
+    const members = [
+      { id: 'm1', name: '유나', type: 'human' },
+      { id: 'sp1', name: '시스템 발행', type: 'agent', runtime_type: 'system-publisher' },
+      { id: 'a1', name: '점검봇', type: 'agent', runtime_type: 'claude-code' },
+    ];
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} projectId="proj-1" members={members} />,
+      ));
+    });
+    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.board.edit));
+    expect(editBtn).not.toBeUndefined();
+    await act(async () => { editBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const candidateBtns = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '');
+    expect(candidateBtns.some((t) => t.includes('시스템 발행'))).toBe(false);
+    expect(candidateBtns.some((t) => t.includes('유나'))).toBe(true);
+    expect(candidateBtns.some((t) => t.includes('점검봇'))).toBe(true);
+  });
+});
+
+// story #4284(유나 판정) — 담당자 고르기 목록에는 사람 · 에이전트가 섞인다. 이름 없는 구성원의 머리글자 자리는 타입대로(에이전트 Bot · 사람 User).
+describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 구성원 아이콘(story #4284)', () => {
+  it('⭐이름 없는 에이전트는 Bot · 이름 없는 사람은 User', async () => {
+    stubFetch();
+    const members = [
+      { id: 'a-unnamed', name: null, type: 'agent' },
+      { id: 'h-unnamed', name: null, type: 'human' },
+    ];
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} members={members} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const edit = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith("✎"));
+    expect(edit, '담당자 편집 버튼').toBeTruthy();
+    await act(async () => { edit!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const rows = [...container.querySelectorAll('button')].filter((b) => b.textContent?.includes(koMessages.common.memberUnnamed));
+    expect(rows).toHaveLength(2);
+    const iconOf = (i: number) => rows[i]!.querySelector('svg')?.getAttribute('class') ?? '';
+    expect(iconOf(0)).toContain('lucide-bot');
+    expect(iconOf(1)).toMatch(/lucide-user(?![-\w])/);
+  });
+});
+
+describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 행 가르기(story #4284 유나 판정)', () => {
+  async function openPicker(members: Array<{ id: string; name: string | null; type: string }>) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} members={members} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const edit = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith('✎'));
+    await act(async () => { edit!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    return [...container.querySelectorAll('button')].filter((b) => b.textContent?.includes(koMessages.common.memberUnnamed)).map((b) => b.textContent?.trim() ?? '');
+  }
+
+  it('⭐이름 없는 구성원 둘 → 행 라벨이 id 꼬리로 서로 다르다', async () => {
+    const rows = await openPicker([
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'agent' },
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('a1000000');
+    expect(rows[1]).toContain('b2000000');
+  });
+
+  it('이름 없는 구성원이 하나면 꼬리 없음', async () => {
+    const rows = await openPicker([
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'm-named', name: 'Pedro', type: 'human' },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toContain('a1000000');
+  });
+});
+
+// story #4284(까디르 CHANGES) — 워크셀 메시지 작성자: 목록에 없는 작성자는 id 통째가 아니라 «알 수 없는 구성원».
+describe('StoryDetailPanel — 워크셀 메시지의 모르는 작성자(story #4284)', () => {
+  it('⭐목록에 없는 작성자 → «알 수 없는 구성원» · 작성자 id는 화면에 없음', async () => {
+    const UNKNOWN = 'f00dcafe-0000-4000-8000-00000000abcd';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'c1', story_id: 's1', content: '모르는 작성자 댓글', created_by: UNKNOWN, created_at: '2026-09-25T00:00:00Z' }], meta: {} }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({ status: 'in-progress' })} tasks={[]} onClose={() => {}} memberMap={{}} />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('모르는 작성자 댓글');
+    expect(container.textContent).toContain(koMessages.common.memberUnknown);
+    expect(container.textContent).not.toContain(UNKNOWN);
+  });
+});
+
+// story #4302(유나 판정) — 댓글 탭 수는 불러온 쪽(20건씩)의 수다: 다음 커서가 있으면 «댓글 (20+)» · 없으면 맨 수.
+describe('StoryDetailPanel — 댓글 탭 수 한계 표기(story #4302)', () => {
+  const comment = (i: number) => ({ id: `c${i}`, story_id: 's1', content: `댓글 ${i}`, created_by: 'm1', created_at: '2026-09-25T00:00:00Z' });
+  async function mountWith(nextCursor: string | null) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: Array.from({ length: 20 }, (_, i) => comment(i)), meta: { next_cursor: nextCursor, has_more: nextCursor !== null } }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    return [...container.querySelectorAll('[role="tab"]')].map((el) => el.textContent ?? '');
+  }
+
+  it('⭐다음 커서가 있으면 «댓글 (20+)»', async () => {
+    expect(await mountWith('2026-09-24T00:00:00Z')).toContain('댓글 (20+)');
+  });
+
+  it('⭐«댓글 (20+)» → 댓글 탭 «더 보기»로 마지막 쪽(5건 · 커서 없음) → «댓글 (25)»(까디르 델타 · 전환)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20&cursor=')) {
+        return { ok: true, json: async () => ({ data: Array.from({ length: 5 }, (_, i) => comment(100 + i)), meta: { next_cursor: null, has_more: false } }) };
+      }
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: Array.from({ length: 20 }, (_, i) => comment(i)), meta: { next_cursor: 'cur-1', has_more: true } }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const commentsTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('댓글'))! as HTMLElement;
+    expect(commentsTab.textContent).toBe('댓글 (20+)');
+    await act(async () => { commentsTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); commentsTab.click(); });
+    await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+    const more = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.board.loadMore)!;
+    expect(more, '댓글 더 보기').toBeTruthy();
+    await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const after = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('댓글'))!;
+    expect(after.textContent).toBe('댓글 (25)');
+  });
+
+  it('다 불러왔으면 «댓글 (20)»', async () => {
+    const tabs = await mountWith(null);
+    expect(tabs).toContain('댓글 (20)');
+    expect(tabs.some((t) => t.includes('20+'))).toBe(false);
+  });
+});
+
+// [SID:4286 · 유나 06:48Z] 스토리 패널 작업 셀 — 이름 없는 에이전트의 읽는 글자는 «이름 없는 구성원»(4646 모양 · 타입은 Bot 아이콘이 가른다).
+// «이름 없는 에이전트»는 대화 미연결 배너 한 자리 전용.
+describe('StoryDetailPanel — 이름 없는 에이전트 라벨([SID:4286])', () => {
+  it('실행 칸에 «실행 이름 없는 구성원» · «이름 없는 에이전트» 0', async () => {
+    const AGENT_ID = 'agent-noname';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/api/gates?work_item_id=')) {
+        return { ok: true, json: async () => [{ id: 'gate-1', gate_type: 'merge', status: 'pending', neutral_facts: { ci_result: 'pass' } }] };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-review', assignee_id: AGENT_ID, assignee_ids: [AGENT_ID], trust_stage: 'claimed_done', self_reported: true })}
+          tasks={[]} onClose={() => {}} memberMap={{ [AGENT_ID]: { id: AGENT_ID, name: null as unknown as string, type: 'agent' } }}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('실행 이름 없는 구성원');
+    expect(container.textContent).not.toContain('이름 없는 에이전트');
+  });
+});
+
+// [SID:4300] 이름표 = 넘겨받은 프로젝트 범위 + 패널에 보이는 id가 거기 없을 때만 조직 범위(ORG_NAMES_URL · 비활성 포함).
+// 보드로 열든 흐름 그래프로 열든 같은 표(프로젝트 범위)를 넘기므로, 권한이 회수된 검증자도 두 진입 모두 이름으로 선다.
+describe('StoryDetailPanel — 이름표 조직 범위 보충([SID:4300])', () => {
+  const VERIFIER = 'om-revoked';
+  const OWNER = 'om-a';
+  const projectMap = { [OWNER]: { id: OWNER, name: '안나', type: 'human' } };
+  const verifiedStory = { human_verified: true, human_verified_by: VERIFIER, human_verified_at: '2026-08-20T00:00:00Z', status: 'in-review', trust_stage: 'claimed_done', assignee_id: OWNER, assignee_ids: [OWNER] } as const;
+
+  let membersCalls = 0;
+  let orgResponse: () => Promise<unknown>;
+  beforeEach(() => {
+    resetOrgMembersCacheForTests();
+    membersCalls = 0;
+    orgResponse = async () => ({ ok: true, json: async () => ({ data: [{ id: VERIFIER, name: '권회수', type: 'human' }] }) });
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human', orgId: 'org-1' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { membersCalls += 1; return orgResponse(); }
+      if (typeof url === 'string' && url.includes('/api/gates?work_item_id=')) {
+        return { ok: true, json: async () => [{ id: 'gate-1', gate_type: 'merge', status: 'approved', neutral_facts: {} }] };
+      }
+      return { ok: false, json: async () => null };
+    }));
+  });
+
+  async function mount(story: Record<string, unknown>, extra: { memberMap?: Record<string, { id: string; name: string; type: string }>; memberMapLoaded?: boolean } = {}) {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory(story as Partial<KanbanStory>)} tasks={[]} onClose={() => {}} memberMap={extra.memberMap ?? projectMap} memberMapLoaded={extra.memberMapLoaded} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('프로젝트 표에 없는 검증자(권한 회수) → 조직 표로 이름 «권회수 검증» · 조직 목록 요청 1', async () => {
+    await mount(verifiedStory);
+    expect(container.textContent).toContain('권회수 검증');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    expect(membersCalls).toBe(1);
+  });
+
+  it('보이는 id가 전부 프로젝트 표에 있으면 조직 목록 요청 0', async () => {
+    await mount({ ...verifiedStory, human_verified_by: OWNER });
+    expect(container.textContent).toContain('안나 검증');
+    expect(membersCalls).toBe(0);
+  });
+
+  it('조직 표를 받는 동안엔 검증 봉인을 미룬다 — «알 수 없는 구성원 검증»이 먼저 서지 않는다', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    orgResponse = async () => { await gate; return { ok: true, json: async () => ({ data: [{ id: VERIFIER, name: '권회수', type: 'human' }] }) }; };
+    await mount(verifiedStory);
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    expect(container.textContent).not.toContain('검증 대기');
+    expect(container.textContent).not.toContain('권회수');
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('권회수 검증');
+  });
+
+  it('주장(self_reported)도 있는 스토리 — 조직 표를 받는 동안 «주장만» 봉인(검증 대기)이 먼저 서지 않는다', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    orgResponse = async () => { await gate; return { ok: true, json: async () => ({ data: [{ id: VERIFIER, name: '권회수', type: 'human' }] }) }; };
+    await mount({ ...verifiedStory, self_reported: true });
+    expect(container.textContent).not.toContain(koMessages.verify.trustSealAwaitingVerification);
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('권회수 검증');
+  });
+
+  it('조직 표에도 없으면(떠난 사람 · 비활성 에이전트 — BE 원천 대기) «알 수 없는 구성원 검증»', async () => {
+    orgResponse = async () => ({ ok: true, json: async () => ({ data: [] }) });
+    await mount(verifiedStory);
+    expect(container.textContent).toContain('알 수 없는 구성원 검증');
+  });
+
+  it('프로젝트 표를 아직 받는 중이면(memberMapLoaded=false) 조직 목록을 안 부른다', async () => {
+    await mount(verifiedStory, { memberMap: {}, memberMapLoaded: false });
+    expect(membersCalls).toBe(0);
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    // [PO 14:30Z] 담당 칸은 이름이 줄의 유일한 내용 — 빈 동안에도 한 줄 높이(min-h-5).
+    expect([...container.querySelectorAll('p.min-h-5')].some((p) => p.textContent === ''), '빈 담당 칸(한 줄 높이)').toBe(true);
+  });
+
+  // [SID:4300 · 4651 위 재기반 손질] 4651이 memberLookup(…)!.label로 바꾼 자리(댓글 작성자 · 활동 행위자 · 활동의 담당 전/후)도
+  // 조직 표를 받는 동안엔 빈 글자, 받은 뒤엔 이름 — 활동의 담당 전/후 id도 조직 보충 대상.
+  it('댓글 작성자 · 활동 행위자 · 활동 담당 — 조직 표 받는 동안 «알 수 없는 구성원» 0 → 받은 뒤 조직 이름', async () => {
+    const ORG_ONLY = 'om-org-only';
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { membersCalls += 1; await gate; return { ok: true, json: async () => ({ data: [{ id: ORG_ONLY, name: '조직사람', type: 'human' }] }) }; }
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'c1', story_id: 's1', content: '조직 사람 댓글', created_by: ORG_ONLY, created_at: '2026-09-25T00:00:00Z' }], meta: { next_cursor: null, has_more: false } }) };
+      }
+      if (typeof url === 'string' && url.includes('/activities?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', activity_type: 'assignee_changed', old_value: OWNER, new_value: ORG_ONLY, created_by: ORG_ONLY, created_at: '2026-09-25T00:00:00Z' }] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount({ status: 'in-progress', assignee_id: OWNER, assignee_ids: [OWNER] });
+    const tab = (label: string) => [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes(label)) as HTMLElement;
+    for (const label of ['댓글', koMessages.board.activityTab]) {
+      await act(async () => { tab(label).dispatchEvent(new MouseEvent('click', { bubbles: true })); tab(label).click(); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(container.textContent, `${label} 탭 — 받는 동안`).not.toContain('알 수 없는 구성원');
+      expect(container.textContent).not.toContain(ORG_ONLY);
+    }
+    // [PO 14:30Z] 활동의 담당 알약 — 빈 동안에도 채워진 알약과 같은 높이(min-h-5), 폭만 이름만큼 자란다.
+    expect([...container.querySelectorAll('span.min-h-5.rounded')].some((s) => s.textContent === ''), '빈 담당 알약(한 줄 높이)').toBe(true);
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('조직사람');
+    expect(container.textContent).toContain('안나');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    expect(membersCalls).toBe(1);
+  });
+
+  it('다른 id가 전부 프로젝트 표에 있어도 활동의 담당 전/후 id가 없으면 조직 표를 받아 이름(«알 수 없는 구성원» 0)', async () => {
+    const ORG_ONLY = 'om-org-only';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { membersCalls += 1; return { ok: true, json: async () => ({ data: [{ id: ORG_ONLY, name: '조직사람', type: 'human' }] }) }; }
+      if (typeof url === 'string' && url.includes('/activities?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', activity_type: 'assignee_changed', old_value: OWNER, new_value: ORG_ONLY, created_by: OWNER, created_at: '2026-09-25T00:00:00Z' }] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount({ status: 'in-progress', assignee_id: OWNER, assignee_ids: [OWNER] });
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes(koMessages.board.activityTab)) as HTMLElement;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); tab.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(membersCalls).toBe(1);
+    expect(container.textContent).toContain('조직사람');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+  });
+});
+
+// [SID:4311 PR 2] 댓글 · 활동 줄의 작성자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(목록마다 작성자 id 한 번 셈 · 같은 사람 여러 줄은 겹침 아님).
+describe('StoryDetailPanel — 댓글 · 활동 작성자 동명이인([SID:4311 PR 2])', () => {
+  const SONG1 = 'e75ca548-1';
+  const SONG2 = '2fd14616-2';
+  const ANNA = 'm-anna';
+  const memberMap = {
+    [SONG1]: { id: SONG1, name: '송윤재', type: 'human' },
+    [SONG2]: { id: SONG2, name: '송윤재', type: 'human' },
+    [ANNA]: { id: ANNA, name: '안나', type: 'human' },
+  };
+  const comment = (id: string, by: string) => ({ id, story_id: 's1', content: `댓글 ${id}`, created_by: by, created_at: '2026-09-25T00:00:00Z' });
+  const activity = (id: string, by: string) => ({ id, activity_type: 'status_changed', old_value: 'todo', new_value: 'in-progress', created_by: by, created_at: '2026-09-25T00:00:00Z' });
+
+  beforeEach(() => {
+    resetOrgMembersCacheForTests();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: [comment('c1', SONG1), comment('c2', SONG2), comment('c3', ANNA), comment('c4', ANNA)], meta: {} }) };
+      }
+      if (typeof url === 'string' && url.includes('/activities?limit=20')) {
+        return { ok: true, json: async () => ({ data: [activity('a1', SONG1), activity('a2', SONG2), activity('a3', ANNA), activity('a4', SONG1)], meta: {} }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+  });
+
+  async function openTab(match: (text: string) => boolean) {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={memberMap} memberMapLoaded />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((el) => match(el.textContent ?? '')) as HTMLElement;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); tab.click(); });
+    await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+  }
+
+  it('댓글 줄: «송윤재» 둘 = 두 줄에 id 앞 8자 · 안나 두 줄 = 꼬리 없음', async () => {
+    await openTab((text) => text.startsWith('댓글'));
+    const authors = [...container.querySelectorAll('li div.mt-2 > span:first-child')].map((el) => el.textContent);
+    expect(authors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나']);
+    // 워크셀 대화(같은 댓글 목록)도 같은 표.
+    const workcell = [...container.querySelectorAll('span.whitespace-nowrap.font-semibold.text-proof-ink')].map((el) => el.textContent);
+    expect(workcell).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나']);
+  });
+
+  it('활동 줄: «송윤재» 둘 = id 앞 8자(같은 사람 두 줄은 같은 꼬리) · 안나 = 꼬리 없음', async () => {
+    await openTab((text) => text === koMessages.board.activityTab);
+    const actors = [...container.querySelectorAll('li div.mt-1 > span:first-child')].map((el) => el.textContent);
+    expect(actors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '송윤재 · e75ca548']);
+  });
+});
+
+// [SID:4345] 의존 행의 «차단/의존 전환» · «의존 관계 제거»는 `hidden group-hover:block`이었다 — display:none이라 터치에서 늘 없고,
+// 키보드 탭 순서에서도 빠졌다. 이제 HOVER_REVEAL(호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점에서) 모양이고 늘 DOM · 탭 순서에 있다.
+// jsdom은 CSS를 안 입혀서 보임 여부는 클래스 모양으로 핀한다(실제 계산 값은 PR 본문 실브라우저 판 · 유나 실측).
+describe('StoryDetailPanel — 의존 행 조작 버튼이 호버 전용이 아님([SID:4345])', () => {
+  it('네 갈래 의존 행(막힘 · 막음 · 의존 · 의존받음)의 전환 · 제거 8개 = HOVER_REVEAL · 숨김 토큰 0 · 탭 순서 안', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/dependencies?')) {
+        return { ok: true, json: async () => [
+          { id: 'e1', from_id: 'x1', to_id: 's1', dep_type: 'blocks' },
+          { id: 'e2', from_id: 's1', to_id: 'x2', dep_type: 'blocks' },
+          { id: 'e3', from_id: 's1', to_id: 'x3', dep_type: 'depends_on' },
+          { id: 'e4', from_id: 'x4', to_id: 's1', dep_type: 'depends_on' },
+        ] };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} projectId="proj-1" />));
+    });
+    await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+    const byLabel = (label: string) => [...container.querySelectorAll('button')].filter((b) => b.getAttribute('aria-label') === label);
+    const removes = byLabel(koMessages.board.dep.remove);
+    const toggles = byLabel(koMessages.board.dep.toggleType);
+    expect(removes).toHaveLength(4);
+    expect(toggles).toHaveLength(4);
+    for (const el of [...removes, ...toggles]) {
+      const tokens = el.className.split(/\s+/);
+      for (const t of HOVER_REVEAL.split(' ')) expect(tokens, `${el.getAttribute('aria-label')} · ${t}`).toContain(t);
+      expect(tokens).not.toContain('hidden');
+      expect(tokens.filter((t) => /(^|:)group-hover:(block|flex)$/.test(t))).toEqual([]);
+      expect(tokens).not.toContain('opacity-0');
+      // 누르는 자리 24×24(PO · 유나 10:01Z) — 디자인 Button의 min-h-0 줄임을 걷고 상수로 · 행 높이는 -my-1로 무변
+      expect(tokens).toEqual(expect.arrayContaining(['min-h-6', 'min-w-6', '-my-1', 'p-1.5']));
+      expect(tokens).not.toContain('min-h-0');
+      expect(el.tabIndex).toBe(0);
+    }
   });
 });

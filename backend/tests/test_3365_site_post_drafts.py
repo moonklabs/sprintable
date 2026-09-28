@@ -23,6 +23,8 @@ import uuid
 
 import pytest
 
+from tests.conftest import grant_org_projects
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -80,16 +82,18 @@ async def _seed_org(session, *, slug=None):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+async def _seed_agent(session, org_id, project_id, *, name="담롱", grant: bool = False):
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, agent_member_id=m.id)
     return m.id
 
 
-async def _seed_human(session, org_id, *, role="member"):
+async def _seed_human(session, org_id, *, role="member", grant: bool = False):
     from app.models.project import OrgMember
     from app.models.user import User
 
@@ -99,6 +103,8 @@ async def _seed_human(session, org_id, *, role="member"):
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
     session.add(om)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, user_id=user.id)
     return user.id
 
 
@@ -193,8 +199,8 @@ async def test_human_edit_creates_new_version_and_preserves_original():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
-            human_id = await _seed_human(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
+            human_id = await _seed_human(s, org_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
@@ -287,8 +293,8 @@ async def test_list_drafts_scoped_to_org_and_ordered_by_latest_activity():
         async with Session() as s:
             org_a_id, project_a_id = await _seed_org(s, slug="org-a")
             org_b_id, project_b_id = await _seed_org(s, slug="org-b")
-            agent_a_id = await _seed_agent(s, org_a_id, project_a_id)
-            agent_b_id = await _seed_agent(s, org_b_id, project_b_id)
+            agent_a_id = await _seed_agent(s, org_a_id, project_a_id, grant=True)
+            agent_b_id = await _seed_agent(s, org_b_id, project_b_id, grant=True)
             story_a1 = await _seed_story(s, org_a_id, project_a_id, title="A-1호 글")
             story_a2 = await _seed_story(s, org_a_id, project_a_id, title="A-2호 글")
             story_b1 = await _seed_story(s, org_b_id, project_b_id, title="B-1호 글")

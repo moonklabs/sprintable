@@ -6,6 +6,7 @@ retro.stage*/retro.votes 값과 이 dict 값이 갈리면 RED. 화면 쪽 낱말
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -70,6 +71,9 @@ class TestVotesLabel:
     def test_ko_en_forms(self) -> None:
         assert votes_label(3, "ko") == "3표"
         assert votes_label(3, "en") == "3 votes"
+        # story #4223 — en은 1만 단수(«1 votes» 금지)
+        assert votes_label(1, "en") == "1 vote"
+        assert votes_label(0, "en") == "0 votes"
 
     def test_zero_votes(self) -> None:
         assert votes_label(0, "ko") == "0표"
@@ -127,10 +131,36 @@ def test_phase_label_matches_fe_catalog_en(phase: str, stage_key: str) -> None:
     assert RETRO_PHASE_LABEL[phase]["en"] == en[f"retro.{stage_key}"]
 
 
-def test_votes_label_matches_fe_catalog_shape() -> None:
-    """정확한 문자열 비교는 {count} 보간이 있어 값 하나로는 안 되므로, count=1로
-    두 정본이 같은 표현을 내는지로 대조한다."""
+_ICU_PLURAL = re.compile(r"^\{count, plural,((?:\s*(?:=\d+|zero|one|two|few|many|other)\s*\{[^{}]*\})+)\s*\}$")
+_ICU_BRANCH = re.compile(r"(=\d+|zero|one|two|few|many|other)\s*\{([^{}]*)\}")
+
+
+def _render_catalog_count(template: str, count: int, locale: str) -> str:
+    """FE 카탈로그 값을 count로 렌더(next-intl과 같은 결과) — 단순 `{count}` 치환과 ICU plural 두 모양만.
+    story #4223: en retro.votes가 ICU 복수형이 되며 옛 `.replace("{count}", …)` 대조가 plural 블록을 못 봤다.
+    plural 범주는 이 카탈로그가 쓰는 로케일(ko: 늘 other · en: 1만 one)만 지원 — 다른 모양이면 실패로 드러낸다."""
+    m = _ICU_PLURAL.match(template)
+    if m is None:
+        assert "plural" not in template, f"지원하지 않는 ICU 모양: {template!r}"
+        return template.replace("{count}", str(count))
+    branches = dict(_ICU_BRANCH.findall(m.group(1)))
+    category = "one" if (locale == "en" and count == 1) else "other"
+    body = branches.get(f"={count}", branches.get(category, branches["other"]))
+    return body.replace("#", str(count))
+
+
+@pytest.mark.parametrize("count", [0, 1, 2, 5])
+def test_votes_label_matches_fe_catalog_shape(count: int) -> None:
+    """FE 정본(retro.votes)을 count별로 렌더해 백엔드 복제와 같은지 대조 — ICU plural이면 갈래까지(0·1·N)."""
     ko = _flat_messages(_KO_MESSAGES)
     en = _flat_messages(_EN_MESSAGES)
-    assert votes_label(1, "ko") == str(ko["retro.votes"]).replace("{count}", "1")
-    assert votes_label(1, "en") == str(en["retro.votes"]).replace("{count}", "1")
+    assert votes_label(count, "ko") == _render_catalog_count(str(ko["retro.votes"]), count, "ko")
+    assert votes_label(count, "en") == _render_catalog_count(str(en["retro.votes"]), count, "en")
+
+
+def test_catalog_renderer_sees_icu_plural_branches() -> None:
+    """렌더러 자체 양성대조 — plural 블록을 통째 문자열로 흘리면(옛 replace 방식) 이 단언이 깨진다."""
+    tpl = "{count, plural, one {# vote} other {# votes}}"
+    assert _render_catalog_count(tpl, 1, "en") == "1 vote"
+    assert _render_catalog_count(tpl, 2, "en") == "2 votes"
+    assert _render_catalog_count("{count}표", 1, "ko") == "1표"

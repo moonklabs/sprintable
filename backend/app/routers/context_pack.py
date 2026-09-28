@@ -20,6 +20,8 @@ A2("pgvector 우선·임계치 계산해 전용 벡터DB 분리 시기 추론")�
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import time
 import uuid
@@ -54,7 +56,8 @@ async def search_context_pack(
         )
 
     from app.services.embedding_client import embed_text
-    vector = embed_text(query)
+    # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+    vector = await asyncio.to_thread(embed_text, query)
     if vector is None:
         raise HTTPException(
             status_code=503,

@@ -159,6 +159,50 @@ describe('useUnifiedSwitcher — 전환 시 쿼리파라미터 화이트리스�
     expect(q.has('assignee_id')).toBe(false);
   });
 
+  it('⭐story #4226 — switchProject·switchOrgAndProject는 이동 시작 때 «대기 중 목표»를 적는다(커밋 전 탭 링크가 옛 프로젝트를 박지 않게)', async () => {
+    const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    setPendingProjectTarget(null);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    const pendingAtPush: (string | null)[] = [];
+    routerPushMock.mockImplementation(() => { pendingAtPush.push(getPendingProjectTarget()); });
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchProject('proj-sprintable'); });
+    await act(async () => { await result?.switchOrgAndProject('org-dogfood', 'proj-dogfood'); });
+    expect(pendingAtPush).toEqual(['proj-sprintable', 'proj-dogfood']);
+    routerPushMock.mockReset();
+    setPendingProjectTarget(null);
+  });
+
+  it('⭐story #4226 — 대기 중 목표는 전환 이동의 transition이 끝나면 해제(주소가 안 바뀌어도 — 같은 URL 이동이 밀어낸 경우)', async () => {
+    const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    setPendingProjectTarget(null);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    routerPushMock.mockImplementation(() => {}); // 커밋 신호 없음 = 주소 그대로(밀린 이동과 같은 모양)
+    try {
+      await act(async () => { root.render(<TestComp />); });
+      await act(async () => { await result?.switchProject('proj-sprintable'); });
+      expect(getPendingProjectTarget()).toBeNull();
+    } finally {
+      routerPushMock.mockReset();
+    }
+  });
+
+  it('⭐story #4226 — router.push가 던지면 대기 중 목표를 그 자리서 해제(전역 목표가 남지 않음)', async () => {
+    const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    setPendingProjectTarget(null);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    routerPushMock.mockImplementation(() => { throw new Error('push failed'); });
+    try {
+      await act(async () => { root.render(<TestComp />); });
+      let caught: unknown = null;
+      await act(async () => { await result?.switchProject('proj-sprintable').catch((e: unknown) => { caught = e; }); });
+      expect((caught as Error | null)?.message).toBe('push failed'); // 호출부로 전파(develop과 같음)
+      expect(getPendingProjectTarget()).toBeNull();
+    } finally {
+      routerPushMock.mockReset();
+    }
+  });
+
   it('project-agnostic 파라미터가 아예 없으면 p만 실린다(빈 값 오염 없음)', async () => {
     searchParamsValueRef.current = 'story=story-1&epic_id=epic-1';
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
@@ -370,5 +414,47 @@ describe('useUnifiedSwitcher — story #3147 검색 state(신규)', () => {
     await act(async () => { result?.setSearchQuery('landing'); });
     await act(async () => { result?.setOpen(true); });
     expect(result?.searchQuery).toBe('landing');
+  });
+});
+
+// story #4370(유나 판정 (가)) — 새 프로젝트 폼(이름 · 설명 — 설명이 여러 줄 칸)은 조직별 초안: 전환기가 다시 마운트돼도(페이지 이동 ·
+// 새로 열기) 남고, 보이는 «취소»(clearNewProjectDraft)와 만들기 성공에서만 지운다. 예전엔 훅 상태라 언마운트면 사라졌다.
+describe('useUnifiedSwitcher — 새 프로젝트 폼 초안 (story #4370)', () => {
+  async function remount() {
+    await act(async () => { root.render(<></>); });
+    await act(async () => { root.render(<TestComp />); });
+  }
+
+  it('다시 마운트돼도 이름 · 설명이 남고 · clearNewProjectDraft는 지운다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setNewProjectName('결제 개편'); });
+    await act(async () => { result!.setNewProjectDesc('카드 · 계좌 흐름 정리\n3분기 목표'); });
+    await remount();
+    expect(result!.newProjectName).toBe('결제 개편');
+    expect(result!.newProjectDesc).toBe('카드 · 계좌 흐름 정리\n3분기 목표');
+    await act(async () => { result!.clearNewProjectDraft(); });
+    await remount();
+    expect(result!.newProjectName).toBe('');
+    expect(result!.newProjectDesc).toBe('');
+  });
+
+  it('만들기 실패는 남기고 · 성공은 지운다', async () => {
+    let ok = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects' && init?.method === 'POST') return ok ? { ok: true, json: async () => ({ id: 'proj-new' }) } : { ok: false, status: 403, json: async () => ({}) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setNewProjectName('결제 개편'); });
+    await act(async () => { result!.setNewProjectDesc('설명'); });
+    await act(async () => { await result!.createProject(result!.newProjectName, result!.newProjectDesc); });
+    await remount();
+    expect(result!.newProjectDesc).toBe('설명');
+    ok = true;
+    await act(async () => { await result!.createProject(result!.newProjectName, result!.newProjectDesc); });
+    await remount();
+    expect(result!.newProjectName).toBe('');
+    expect(result!.newProjectDesc).toBe('');
   });
 });

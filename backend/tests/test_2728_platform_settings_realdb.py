@@ -152,7 +152,7 @@ async def test_checkout_rejected_403_when_disabled_real_db():
         try:
             resp = await client.post(
                 "/api/v2/org-subscriptions/checkout",
-                json={"auth_key": "fake-not-a-real-toss-key", "tier": "team", "billing_cycle": "monthly"},
+                json={"attempt_id": str(uuid.uuid4()), "auth_key": "fake-not-a-real-toss-key", "tier": "team", "billing_cycle": "monthly"},
             )
             assert resp.status_code == 403, resp.text
             # PO 확定(2026-08-24) — prod 실측(페드루 curl)이 잡은 그대로: 앱 전역
@@ -201,7 +201,7 @@ async def test_change_tier_also_rejected_with_same_structured_code():
         try:
             resp = await client.post(
                 "/api/v2/org-subscriptions/change-tier",
-                json={"new_tier": "business"},
+                json={"attempt_id": str(uuid.uuid4()), "new_tier": "business"},
             )
             assert resp.status_code == 403, resp.text
             assert resp.json()["error"]["code"] == "BILLING_NOT_LIVE", resp.text

@@ -92,7 +92,7 @@ async def test_tie_break_page_boundary_no_drop_or_duplicate_realdb():
             async with Session() as s:
                 repo = NotificationRepository(s, ORG)
                 page = await list_notifications(
-                    unread=None, is_read=None, limit=1, before=cursor,
+                    unread=None, is_read=None, limit=1, before=cursor, type_filter=None,  # story #4329 신규 Query
                     db=s, auth=_auth(), repo=repo,
                 )
             assert len(page["data"]) == 1
@@ -192,7 +192,8 @@ async def test_no_tie_normal_data_page_result_unaffected_realdb():
         async with Session() as s:
             repo = NotificationRepository(s, ORG)
             page = await list_notifications(
-                unread=None, is_read=None, limit=10, before=None, db=s, auth=_auth(), repo=repo,
+                unread=None, is_read=None, limit=10, before=None, type_filter=None,  # story #4329 신규 Query
+                db=s, auth=_auth(), repo=repo,
             )
         got_ids = [d.id for d in page["data"]]
         assert got_ids == newest_first

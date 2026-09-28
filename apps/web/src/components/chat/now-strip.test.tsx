@@ -144,13 +144,13 @@ describe('NowStrip — AC2 SID 3150 회귀 금지(no-fiction, entity_id 없는 �
 });
 
 describe('NowStrip — AC4 원탭 도달(카드는 실 href를 가진 링크)', () => {
-  it('agent_stuck(entity_type=story) 카드는 /board?story=로 향한다', async () => {
+  it('agent_stuck(entity_type=story) 카드는 /flow?story=로 향한다', async () => {
     mockAttention([AGENT_STUCK]);
     await act(async () => { root.render(wrap(<NowStrip />)); });
     await flush();
     const header = container.querySelector('button[aria-expanded]')!;
     await act(async () => { header.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const link = container.querySelector('a[href="/board?story=s-1"]');
+    const link = container.querySelector('a[href="/flow?story=s-1"]');
     expect(link).toBeTruthy();
   });
 });
@@ -215,7 +215,7 @@ describe('NowStrip — story #3182 그룹별 expand cap(2차 조항, S2c 선례 
     const header = container.querySelector('button[aria-expanded]')!;
     await act(async () => { header.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    const cards = container.querySelectorAll('a[href^="/board?story="]');
+    const cards = container.querySelectorAll('a[href^="/flow?story="]');
     expect(cards.length).toBe(3);
     expect(container.textContent).toContain('+35 더보기');
   });
@@ -230,10 +230,10 @@ describe('NowStrip — story #3182 그룹별 expand cap(2차 조항, S2c 선례 
     const moreBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '+35 더보기')!;
     await act(async () => { moreBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    const cards = container.querySelectorAll('a[href^="/board?story="]');
+    const cards = container.querySelectorAll('a[href^="/flow?story="]');
     expect(cards.length).toBe(38);
-    expect(container.querySelector('a[href="/board?story=s-0"]')).toBeTruthy();
-    expect(container.querySelector('a[href="/board?story=s-37"]')).toBeTruthy();
+    expect(container.querySelector('a[href="/flow?story=s-0"]')).toBeTruthy();
+    expect(container.querySelector('a[href="/flow?story=s-37"]')).toBeTruthy();
   });
 
   it('회귀(AC3) — 소량(그룹당 3건 이하)에서는 「더보기」가 안 뜬다(불필요 UI 0)', async () => {
@@ -243,7 +243,7 @@ describe('NowStrip — story #3182 그룹별 expand cap(2차 조항, S2c 선례 
     const header = container.querySelector('button[aria-expanded]')!;
     await act(async () => { header.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(container.querySelectorAll('a[href^="/board?story="]').length).toBe(3);
+    expect(container.querySelectorAll('a[href^="/flow?story="]').length).toBe(3);
     expect(container.textContent).not.toContain('더보기');
   });
 
@@ -259,6 +259,6 @@ describe('NowStrip — story #3182 그룹별 expand cap(2차 조항, S2c 선례 
     await act(async () => { header.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(container.textContent).toContain('+7 더보기'); // danger 10건 → 3+더보기7
-    expect(container.querySelector('a[href="/board?story=s-1"]')).toBeTruthy(); // warn 1건은 cap 미적용(3건 미만)
+    expect(container.querySelector('a[href="/flow?story=s-1"]')).toBeTruthy(); // warn 1건은 cap 미적용(3건 미만)
   });
 });

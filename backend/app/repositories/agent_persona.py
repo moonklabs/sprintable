@@ -123,7 +123,7 @@ class AgentPersonaRepository:
             AgentPersona.project_id == project_id,
             AgentPersona.agent_id == agent_id,
             AgentPersona.deleted_at.is_(None),
-        ).order_by(AgentPersona.is_default.desc(), AgentPersona.created_at.asc())
+        ).order_by(AgentPersona.is_default.desc(), AgentPersona.created_at.asc(), AgentPersona.id)
         if not include_builtin:
             q = q.where(AgentPersona.is_builtin.is_(False))
         r = await self.session.execute(q)
@@ -143,6 +143,19 @@ class AgentPersonaRepository:
         if persona is None:
             return None
         return await self._decorate(persona)
+
+    async def get_agent_id(self, persona_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID) -> uuid.UUID | None:
+        """story #4000 — update/delete가 assert_agent_owner를 걸려면 대상 agent_id가
+        먼저 필요하다(라우트는 persona_id만 받는다). decorate 없이 컬럼 하나만 조회."""
+        r = await self.session.execute(
+            select(AgentPersona.agent_id).where(
+                AgentPersona.id == persona_id,
+                AgentPersona.org_id == org_id,
+                AgentPersona.project_id == project_id,
+                AgentPersona.deleted_at.is_(None),
+            )
+        )
+        return r.scalar_one_or_none()
 
     async def get_recruited(
         self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID

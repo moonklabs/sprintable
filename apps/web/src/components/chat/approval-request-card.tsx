@@ -4,12 +4,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, FileText, Forward, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
-import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
+import { buildGateTransitionBody } from '@/lib/gate-decision-payload';
+import { memberLookup } from '@/lib/member-display';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { EntityPreviewModal, canPreviewEntity, getEntityHref } from '@/components/chat/embed-card';
 import { useReadingPanel } from '@/components/chat/reading-panel-context';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -22,9 +26,14 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { escapeMarkdownLinkText } from '@/components/chat/chat-input-entity-tokens';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { fetchWithAuth } from '@/lib/db/client';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
+import { fetchGateById } from '@/lib/fetch-gate';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useToast } from '@/components/ui/toast';
 import { TossSheet } from '@/components/chat/toss-sheet';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -117,6 +126,7 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  * 건드리지 않는다(AC③, 언마운트 없음).
  */
 export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }: ApprovalRequestCardProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   const t = useTranslations('chats');
   // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①) — 아래 stateLabel 유도가
   // deriveGateProofState()의 통일 키(gateStatus*)를 쓴다 — 그 키들은 'cage' 네임스페이스.
@@ -136,17 +146,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const { addToast } = useToast();
 
   const fetchGate = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth(`/api/gates/${target.gate_id}`);
-      if (res.status === 404) { setState({ kind: 'not-found' }); return; }
-      if (!res.ok) { setState({ kind: 'error' }); return; }
-      const json = await res.json().catch(() => null) as { data?: GateItem } | GateItem | null;
-      const gate = (json && 'data' in json ? json.data : json) as GateItem | undefined;
-      if (!gate) { setState({ kind: 'error' }); return; }
-      setState({ kind: 'ready', gate });
-    } catch {
-      setState({ kind: 'error' });
-    }
+    // story #4253 — 공용 fetchGateById(날 GateResponse 한 모양 · 404 = not-found · 그 밖 = error).
+    const result = await fetchGateById<GateItem>(target.gate_id);
+    setState(result.kind === 'ok' ? { kind: 'ready', gate: result.gate } : { kind: result.kind });
   }, [target.gate_id]);
 
   // story #5ace2e84(2026-08-28 라이브 재측 후속) — gateByKey «맵 객체 자체»가 정의돼 있으면
@@ -210,11 +212,11 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
     return unsub;
   }, [mux, target.gate_id, fetchGate]);
 
-  const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
+  const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean): Promise<boolean | void> => {
     setResolving(true);
     setTransitionError(null);
     try {
-      const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
@@ -223,22 +225,25 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
         // page.tsx만 #2975에서 고쳐지고 이 챗 카드는 빠져 있었다). known SHA 있는 merge
         // 게이트를 이 카드에서 승인하면 #3410 착지 後 항상 409(gate_head_changed)로
         // 거부되는 라이브 회귀 — state.gate(fetchGate 실측)에서 채운다.
-        body: JSON.stringify({
-          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
-          reviewed_head_sha: state.kind === 'ready' ? (state.gate.github_check_run_sha ?? null) : null,
-        }),
+        // story #4190 — 레시피 발행 게이트면 서명 패널의 초안 카드가 그린 (draft_id, version)도(없으면 키 없음).
+        body: JSON.stringify(buildGateTransitionBody({
+          status, note, evidenceViewed,
+          reviewedHeadSha: state.kind === 'ready' ? (state.gate.github_check_run_sha ?? null) : null,
+          reviewedDraft: state.kind === 'ready' ? reviewedDraftOf(state.gate) : null,
+        })),
       });
-      if (res.ok) { await fetchGate(); return; }
+      if (res.ok) { await fetchGate(); return true; }  // story #4370 — 서명 사유 초안을 지우는 신호
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
       const code = body?.error?.code;
       // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문) 대신 사람
       // 문구로 매핑(gates/[id]/page.tsx와 동형). 둘 다 "화면이 아는 상태가 서버와
       // 어긋났다"는 뜻이라 재조회로 실제 현재 상태를 반영(AC1 — 죽은 버튼이 다시 안 뜬다).
-      if (code === 'gate_head_changed' || code === 'gate_already_resolved') {
+      if (code === 'gate_head_changed' || code === 'gate_draft_changed' || code === 'gate_already_resolved') {
         await fetchGate();
       }
       setTransitionError(
         code === 'gate_head_changed' ? tCage('gateHeadChangedError')
+          : code === 'gate_draft_changed' ? tCage('gateDraftChangedError')
           : code === 'gate_already_resolved' ? tCage('gateAlreadyResolvedError')
           : (body?.error?.message ?? `HTTP ${res.status}`)
       );
@@ -255,7 +260,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const [discussDialogOpen, setDiscussDialogOpen] = useState(false);
   const [discussSubmitting, setDiscussSubmitting] = useState(false);
   const [discussError, setDiscussError] = useState<string | null>(null);
-  const discuss = async (reason: string) => {
+  const discuss = async (reason: string): Promise<boolean> => {
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
@@ -272,12 +277,14 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
         // 3연발 재현 — 눌러도 반응이 안 보여 반복 클릭). 즉시 토스트로 "보냈다"는 사실 자체를
         // 확인시킨다 — 지속 신호(누가 봐도 남는 배너)는 아래 discussion_requested 렌더가 맡는다.
         addToast({ type: 'success', title: t('approvalRequestDiscussSuccessToast') });
-        return;
+        return true;
       }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? `HTTP ${res.status}`);
+      return false;
     } catch {
       setDiscussError(t('hitlSendFailed'));
+      return false;
     } finally {
       setDiscussSubmitting(false);
     }
@@ -330,6 +337,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
     return null;
   })();
 
+  // story #4253(까디르 codex · PO 09:45Z) — 채팅의 승인 요청 카드는 조직 전체가 보는 자리라 작업 항목 링크는 게이트 자기 프로젝트(gate.project_id)
+  // · 모를 때만 현재 p.
+  const gateProjectHref = gate.project_id ? (h: string) => withProjectParam(h, gate.project_id ?? null) : flatHref;
   return (
     <>
       <ProofCapsule
@@ -342,7 +352,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           if (readingPanel) {
             readingPanel.open({
               kind: 'entity', entityType: previewEntityType, entityId: gate.work_item_id,
-              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id),
+              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id, gateProjectHref),
             });
             return;
           }
@@ -354,8 +364,8 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
             gate={gate}
             resolving={resolving}
             transitionError={transitionError}
-            onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
-            onReject={(reason) => void transition('rejected', reason)}
+            onApprove={(reason, evidenceViewed) => transition('approved', reason, evidenceViewed)}
+            onReject={(reason) => transition('rejected', reason)}
             onDiscuss={(reason) => void discuss(reason)}
             onDiscussClick={() => setDiscussDialogOpen(true)}
             onUndone={() => void fetchGate()}
@@ -367,9 +377,10 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
       <GateDiscussDialog
         open={discussDialogOpen}
         onOpenChange={setDiscussDialogOpen}
-        onSubmit={(reason) => void discuss(reason)}
+        onSubmit={discuss}
         submitting={discussSubmitting}
         error={discussError}
+        targetId={target.gate_id}
       />
       {!readingPanel && showPreview && (
         <EntityPreviewModal
@@ -377,7 +388,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           entityId={gate.work_item_id}
           title={title}
           status={null}
-          href={getEntityHref(previewEntityType, gate.work_item_id)}
+          href={getEntityHref(previewEntityType, gate.work_item_id, gateProjectHref)}
           onClose={() => setShowPreview(false)}
         />
       )}
@@ -392,8 +403,8 @@ function ApprovalRequestBody({
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
-  onApprove: (reason?: string, evidenceViewed?: boolean) => void;
-  onReject: (reason?: string) => void;
+  onApprove: (reason?: string, evidenceViewed?: boolean) => void | Promise<boolean | void>;
+  onReject: (reason?: string) => void | Promise<boolean | void>;
   /** story #2631 — 고위험(서명) 플로우가 이미 가진 사유 필드를 그대로 재사용해 직접 제출. */
   onDiscuss: (reason: string) => void;
   /** story #2631 — 저위험 플로우엔 사유 입력창이 없어 별도 다이얼로그를 연다. */
@@ -403,10 +414,14 @@ function ApprovalRequestBody({
   /** story #3084(층3) — 토스 성공/409 안내 토스트(카드 인스턴스가 소유한 useToast, 부모가 전달). */
   addToast: (toast: { type?: 'info' | 'warning' | 'success' | 'error'; title: string; body?: string }) => void;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서 · flat)은 현재 프로젝트를 싣는다
+  // story #4253(까디르 codex 01a0d316) — 풀린 템플릿의 대상 칩은 게이트 자기 프로젝트 · 모를 때만 현재 p.
+  const gateProjectHref = gate.project_id ? (h: string) => withProjectParam(h, gate.project_id ?? null) : flatHref;
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
+  const tc = useTranslations('common');
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
   const { currentTeamMemberId, projectId } = useDashboardContext();
@@ -417,6 +432,8 @@ function ApprovalRequestBody({
   // gates/[id]/page.tsx의 fetchedResolverIdRef 관례와 동형으로 지연 조회한다(카드마다 독립
   // — DelegateApprovalControl의 openPicker on-demand 조회와 같은 결).
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  // [SID:4286] 이름 표를 다 불러왔는지(성공 · 실패 모두 끝) — 불러오는 중에는 «알 수 없음»을 먼저 띄우지 않는다.
+  const [memberNamesLoaded, setMemberNamesLoaded] = useState(false);
   const fetchedNameIdsRef = useRef<string | null>(null);
   const requesterId = (() => {
     const raw = gate.neutral_facts?.['requested_by_member_id'];
@@ -452,7 +469,8 @@ function ApprovalRequestBody({
     const idsKey = `${needsDesignatedName ? gate.designated_approver_id : ''}|${needsResolverName ? gate.resolver_id : ''}|${needsRequesterName ? requesterId : ''}|${needsDiscussRequesterName ? discussionRequested?.requestedByMemberId : ''}`;
     if (idsKey === '|||' || fetchedNameIdsRef.current === idsKey) return;
     fetchedNameIdsRef.current = idsKey;
-    void fetchWithAuth('/api/team-members')
+    // [SID:4300] 이름만 쓰는 표 — 비활성 에이전트도 «목록이 거른 것»이라 비활성까지 싣는 조직 원천(떠난 사람은 BE 4303 대기).
+    void fetchWithAuth(ORG_NAMES_URL)
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { id: string; name: string }[] } | null) => {
         if (!json?.data) return;
@@ -460,11 +478,15 @@ function ApprovalRequestBody({
         for (const m of json.data) names[m.id] = m.name;
         setMemberNames((prev) => ({ ...prev, ...names }));
       })
-      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+      .catch(() => { /* non-critical — 표에 없으면 «알 수 없는 구성원»(id 조각 0 · story #4286) */ })
+      .finally(() => setMemberNamesLoaded(true));
   }, [needsDesignatedName, needsResolverName, needsRequesterName, needsDiscussRequesterName, gate.designated_approver_id, gate.resolver_id, requesterId, discussionRequested?.requestedByMemberId]);
-  const designatedApproverName = gate.designated_approver_id
-    ? memberNames[gate.designated_approver_id] ?? gate.designated_approver_id.slice(0, 8)
+  // [SID:4286] id 조각(앞 8자)을 이름 칸에 싣지 않는다 — memberLookup(표에 없음 → «알 수 없는 구성원» · 불러오는 중 → null).
+  // fallback이면(이름 없음 · 알 수 없음) «님» 없는 문장 키로 간다(유나 결정 4).
+  const designatedApprover = gate.designated_approver_id
+    ? memberLookup(memberNames, gate.designated_approver_id, tc, { loaded: memberNamesLoaded })
     : null;
+  const designatedApproverName = designatedApprover?.label ?? null;
 
   // story #3084 층3 — 토스 시트 open state. 진입점은 아래 canToss 게이트(designated 본인
   // ⋯ 오버플로 / requester 본인 "다른 방에도 보내기" 버튼) 둘 다 공유.
@@ -539,6 +561,8 @@ function ApprovalRequestBody({
   // gate.id는 이 카드 인스턴스의 수명 동안 고정(target.gate_id로 매 폴링/재조회를 같은
   // 게이트에 거는 구조라 다른 게이트로 안 바뀐다) — 리셋 이펙트 불요.
   const [rejectPanelOpen, setRejectPanelOpen] = useState(false);
+  // story #4190 — 레시피 발행 게이트의 «초안 보고 승인»이 여는 같은 서명 패널(초안 카드 포함).
+  const [signPanelOpen, setSignPanelOpen] = useState(false);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
   // story #3001 — 지정이 걸린 게이트인데 지금 이 카드를 보는 나는 더 이상 그 지정자가
   // 아니다(위임됨). 미지정(broadcast) 게이트는 gate.designated_approver_id가 애초 null이라
@@ -560,7 +584,13 @@ function ApprovalRequestBody({
     ? (gate.neutral_facts['options'] as unknown[]).filter((o): o is string => typeof o === 'string') : [];
   const decisionAssumption = isDecisionGate && typeof gate.neutral_facts?.['assumption'] === 'string'
     ? (gate.neutral_facts['assumption'] as string) : null;
-  const requesterName = requesterId ? (memberNames[requesterId] ?? requesterId.slice(0, 8)) : null;
+  const requester = requesterId ? memberLookup(memberNames, requesterId, tc, { loaded: memberNamesLoaded }) : null;
+  const discussRequester = discussionRequested?.requestedByMemberId
+    ? memberLookup(memberNames, discussionRequested.requestedByMemberId, tc, { loaded: memberNamesLoaded })
+    : null;
+  const resolver = gate.resolver_id ? memberLookup(memberNames, gate.resolver_id, tc, { loaded: memberNamesLoaded }) : null;
+  // [SID:4286 · 유나 결정 3] 이름이 줄을 만드는 자리(요청자 · 처리자 줄)는 불러오는 중에도 줄을 그리고 이름만 자리표시(아래가 밀리지 않게).
+  const nameSkeleton = <Skeleton as="span" variant="text" className="h-3 w-20 align-middle" aria-hidden />;
   // story #3258(customer-zero 2차) AC1 — doc 결재 카드도 결정 재료(요약)를 body에 실어야
   // «채팅 밖으로 안 나가고 결정 끝나는» 계약을 만족한다(decisionQuestion과 동일 원칙,
   // doc.py transition_doc()이 심은 gate.neutral_facts.doc_summary 그대로 no-fiction 렌더).
@@ -638,8 +668,8 @@ function ApprovalRequestBody({
           {decisionAssumption ? (
             <p className="text-[11px] text-muted-foreground">{t('approvalRequestAssumption', { assumption: decisionAssumption })}</p>
           ) : null}
-          {requesterName ? (
-            <p className="text-[11px] text-muted-foreground">{t('approvalRequestRequestedBy', { name: requesterName })}</p>
+          {requesterId ? (
+            <p className="text-[11px] text-muted-foreground">{requester ? t('approvalRequestRequestedBy', { name: requester.label }) : nameSkeleton}</p>
           ) : null}
         </div>
       ) : null}
@@ -650,9 +680,11 @@ function ApprovalRequestBody({
       {gate.status === 'pending' && discussionRequested ? (
         <div className="min-w-0 rounded-lg border border-warning/30 bg-warning/8 p-2 [overflow-wrap:anywhere]">
           <p className="text-[11px] font-medium text-warning-strong">
-            {needsDiscussRequesterName
-              ? t('approvalRequestDiscussionRequestedBy', {
-                name: memberNames[discussionRequested.requestedByMemberId!] ?? discussionRequested.requestedByMemberId!.slice(0, 8),
+            {/* [SID:4286] 요청자 이름을 불러오는 중이면 이름 없는 배너 문구로 선다(id 조각 0). */}
+            {needsDiscussRequesterName && discussRequester !== null
+              ? t(discussRequester.fallback ? 'approvalRequestDiscussionRequestedByFallback' : 'approvalRequestDiscussionRequestedBy', {
+                name: discussRequester.label,
+                josa: pickIGaJosa(discussRequester.label),
                 reason: discussionRequested.reason,
               })
               : t('approvalRequestDiscussionRequestedBanner', { reason: discussionRequested.reason })}
@@ -670,9 +702,10 @@ function ApprovalRequestBody({
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
                 {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i))}
+                {/* story #4253(까디르 codex 01a0d316) — 풀린 템플릿의 엔티티 칩(work_item_target = 게이트 대상 작업 항목)도 게이트 자기 프로젝트 */}
+                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
               </div>
-              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i))}
+              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
             </div>
           ) : (
             <div className="space-y-1">
@@ -693,10 +726,13 @@ function ApprovalRequestBody({
                   동일 어휘, DS 원칙 — 새 키 안 만듦). */}
               {gate.resolver_id && gate.resolver_id !== currentTeamMemberId ? (
                 <p className="text-[11px] text-muted-foreground">
-                  {tCage('gateDetailResolvedByStatus', {
-                    name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8),
-                    status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
-                  })}
+                  {resolver
+                    ? tCage(resolver.fallback ? 'gateDetailResolvedByStatusFallback' : 'gateDetailResolvedByStatus', {
+                      name: resolver.label,
+                      josa: pickIGaJosa(resolver.label),
+                      status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
+                    })
+                    : nameSkeleton}
                 </p>
               ) : null}
               {gate.resolution_note ? (
@@ -718,7 +754,10 @@ function ApprovalRequestBody({
         <>
           <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
-            {t('approvalRequestWaitingOn', { name: designatedApproverName ?? '' })}
+            {/* [SID:4286] 지정 승인자 이름을 불러오는 중엔 문장 대신 글자 없는 자리표시(«님의 결재를…» 빈칸 방지). */}
+            {designatedApprover === null
+              ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
+              : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label })}
           </div>
           <Button type="button" size="sm" variant="secondary" onClick={() => setTossOpen(true)} className="w-full">
             {t('approvalRequestTossTrigger')}
@@ -730,7 +769,9 @@ function ApprovalRequestBody({
         // "위임됨" 문구는 부정확해 안 쓴다).
         <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
-          {t('approvalRequestWaitingOn', { name: designatedApproverName ?? '' })}
+          {designatedApprover === null
+            ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
+            : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label })}
         </div>
       ) : isDelegatedAway ? (
         // story #3001(선생님 정책 확定) — 이 카드의 원 수신자(=지금 보고 있는 나)가 위임으로
@@ -747,14 +788,15 @@ function ApprovalRequestBody({
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
         // "액션 불가" 사유는 무권한뿐이다.
         <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
-      ) : needsFullFlow || rejectPanelOpen ? (
+      ) : needsFullFlow || rejectPanelOpen || signPanelOpen ? (
         // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
         // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx
         // 에만 적용되고 이 챗 카드는 빠져 있었다. 같은 컴포넌트·같은 취약(SHA 바뀐 뒤에도
         // 열람체크가 살아있어 재확認 없이 재승인 가능)이라 동형 처방.
         <div className="space-y-1.5">
           <GateSignatureApproval
-            key={gate.github_check_run_sha}
+            // story #4190 — 409 뒤 재조회로 초안 버전이 바뀌어도 같은 리셋(새 버전을 다시 보고 서명).
+            key={`${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
             gate={gate}
             resolving={resolving}
             error={transitionError}
@@ -764,16 +806,11 @@ function ApprovalRequestBody({
             onReject={onReject}
             onDiscuss={onDiscuss}
             compact
+            // story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래 근거열람+사유 요구가 없는 등급) — 잘못
+            // 눌렀을 때 원탭 승인 화면으로 되돌아갈 길. 고위험(needsFullFlow)은 이 패널이 유일한 경로라 취소 없음.
+            // story #4370 — 취소는 컴포넌트 안에서 사유 초안도 지운다.
+            onCancel={!needsFullFlow ? () => { setRejectPanelOpen(false); setSignPanelOpen(false); } : undefined}
           />
-          {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래
-              근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈
-              길을 남긴다. 고위험(needsFullFlow) 게이트는 이 패널이 유일한 경로라 취소
-              버튼이 무의미(숨김). */}
-          {!needsFullFlow ? (
-            <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
-              {tCage('cancel')}
-            </Button>
-          ) : null}
         </div>
       ) : (
         <>
@@ -782,11 +819,20 @@ function ApprovalRequestBody({
               {tCage('gateTransitionError', { reason: transitionError })}
             </p>
           ) : null}
-          <div className="flex gap-1.5">
-            <Button type="button" size="sm" onClick={() => onApprove()} disabled={resolving} className="flex-1">
-              <Check className="h-3.5 w-3.5" aria-hidden />
-              {tCage('gateApprove')}
-            </Button>
+          <div className="flex flex-wrap gap-1.5">
+            {/* story #4190(유나 «본 버전 대조» 3) — 레시피 발행 게이트는 원탭으로 승인하지 않고 초안 카드가 있는 서명 패널을
+                연다 — 이름도 «초안 보고 승인». en 라벨이 길어 390에서 줄이 넘치면 flex-wrap으로 다음 줄로. */}
+            {isRecipePublishGate(gate) ? (
+              <Button type="button" size="sm" onClick={() => setSignPanelOpen(true)} disabled={resolving} className="flex-1">
+                <Check className="h-3.5 w-3.5" aria-hidden />
+                {tCage('gateReviewDraftToApprove')}
+              </Button>
+            ) : (
+              <Button type="button" size="sm" onClick={() => onApprove()} disabled={resolving} className="flex-1">
+                <Check className="h-3.5 w-3.5" aria-hidden />
+                {tCage('gateApprove')}
+              </Button>
+            )}
             <Button type="button" size="sm" variant="destructive" onClick={() => setRejectPanelOpen(true)} disabled={resolving} className="flex-1">
               <X className="h-3.5 w-3.5" aria-hidden />
               {tCage('gateReject')}
@@ -820,6 +866,7 @@ function ApprovalRequestBody({
           currentTeamMemberId={currentTeamMemberId ?? ''}
           designatedApproverId={gate.designated_approver_id ?? ''}
           designatedApproverName={designatedApproverName}
+          designatedApproverFallback={designatedApprover?.fallback ?? false}
           onTossed={(conversationTitle, inserted) => {
             addToast({
               type: 'info',
@@ -841,6 +888,7 @@ function ApprovalRequestBody({
 
 function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDelegated: () => void }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const { currentTeamMemberId } = useDashboardContext();
   const [open, setOpen] = useState(false);
   const [members, setMembers] = useState<SelectOption[]>([]);
@@ -875,7 +923,7 @@ function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDe
       // 줄인다(지어낸 자격 판단이 아니라 BE와 같은 규칙 재사용 — org-members-section.tsx와 동형).
       // story #3040 v3 — label 산출(이메일 병기)·동명 경고 판정은 doc-gate-section.tsx와
       // 동일 소스(buildApproverPickerOptions)로 통일 — 지정 표면 두 곳이 갈리지 않게.
-      const { options, hasDuplicateNames: dup } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId);
+      const { options, hasDuplicateNames: dup } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId, { unnamed: tc('memberUnnamed') });
       setMembers(options);
       setHasDuplicateNames(dup);
     } catch {

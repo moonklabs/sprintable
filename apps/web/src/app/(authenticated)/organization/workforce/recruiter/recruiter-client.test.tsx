@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename, resolveVerifyGuideKey } from './recruiter-client';
+import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename, resolveVerifyGuideKey, resolveMcpConfigFilename, buildMcpConfigText } from './recruiter-client';
 import type { McpConfigBundle, RuntimeCapabilityItem, RoleTemplateSummary } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, KIT_FILENAME } from '@/services/recruit';
 import enMessages from '../../../../../../messages/en.json';
@@ -243,6 +243,16 @@ describe('recruiter.kitOrientingTitle — story #2377 A-1(수 하드코딩 금�
 // STEP4는 순수 함수로 안 빠져 있으므로 «소스 텍스트» 수준에서 잰다(verify-no-alpha-focus-ring.ts
 // 류의 정적 스캔과 같은 성질 — 렌더된 DOM이 아니라 「그 문자열이 소스에 있는가」). 이것으로
 // «렌더된다»까지 증명되진 않는다 — 그건 AC4가 요구하는 라이브 재확認의 몫이다.
+// story #3994(«거짓 경고» 클래스, PO 확定) — 기존 에이전트에 채용 역할을 붙이는
+// select는 「시스템 발행」을 골라도 의미가 없다(연결 대상이 아닌 내부 멤버) — 제외.
+describe('recruiter-client existingAgents — 시스템 발행 제외(story #3994) 소스 회귀가드', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('isSystemPublisher로 걸러낸 뒤에만 setExistingAgents에 넣는다', () => {
+    expect(source).toContain('!isSystemPublisher(m.runtime_type)');
+  });
+});
+
 describe('recruiter-client STEP4 — story #2377 §2(단계 셋)·§4(발견 가능성 링크) 소스 회귀가드', () => {
   const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
 
@@ -283,6 +293,63 @@ describe('resolveVerifyGuideKey — story #2792 (STEP5 안내문도 showVerifyEx
     const ko = (koMessages as { recruiter: Record<string, string> }).recruiter.verifyGuideMcpStdio;
     expect(en).toBeTruthy();
     expect(ko).toBeTruthy();
+  });
+});
+
+// story #4180(E-PROD-ESC·온보딩) — Codex는 .mcp.json을 읽지 않는다(.codex/config.toml, TOML).
+// resolveMcpConfigFilename은 그 런타임별 분기 — 다른 런타임은 기존 '.mcp.json' 그대로(무회귀),
+// 이 함수 자체가 사라지거나 codex를 걸러내지 못하면(뮤테이션) 아래 두 번째 테스트가 RED.
+describe('resolveMcpConfigFilename — story #4180(Codex는 .mcp.json을 안 읽는다)', () => {
+  it('codex → config.toml', () => {
+    expect(resolveMcpConfigFilename('codex')).toBe('config.toml');
+  });
+
+  it('그 외 런타임(claude-code·gemini·cursor 등)은 .mcp.json 그대로(무회귀)', () => {
+    for (const rt of ['claude-code', 'gemini', 'cursor', 'hermes', 'connector']) {
+      expect(resolveMcpConfigFilename(rt)).toBe('.mcp.json');
+    }
+  });
+
+  it('두 로케일 모두 codexConfigTomlPathNote·파라미터화된 kitOrientingConnectBodyMcp/keyOnceBody를 갖는다', () => {
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter;
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter;
+    expect(en.codexConfigTomlPathNote).toContain('{path}');
+    expect(ko.codexConfigTomlPathNote).toContain('{path}');
+    // 유나 design·PO 처방(PR 4542) — 덮어쓰기 대신 추가·전역 경로(에이전트 전용 키 누출 위험)
+    // 금지·신뢰는 버튼명(버전마다 다름) 대신 행동으로.
+    for (const v of [en.codexConfigTomlPathNote, ko.codexConfigTomlPathNote]) {
+      expect(v).not.toContain('{globalPath}');
+      expect(v).not.toMatch(/Trust and continue|Yes, continue/);
+    }
+    expect(ko.codexConfigTomlPathNote).toContain('추가하세요');
+    expect(ko.codexConfigTomlPathNote).not.toContain('저장하세요');
+    expect(ko.codexConfigTomlPathNote).toContain('신뢰');
+    expect(en.codexConfigTomlPathNote).toContain('trust');
+    expect(en.kitOrientingConnectBodyMcp).toContain('{filename}');
+    expect(ko.kitOrientingConnectBodyMcp).toContain('{filename}');
+    expect(en.keyOnceBody).toContain('{filename}');
+    expect(ko.keyOnceBody).toContain('{filename}');
+  });
+});
+
+// story #4180 AC1/AC2 — STEP4 화면이 실제로 렌더할 텍스트(mcpConfigText가 쓰는 값)를 직접
+// 검증. 파일명 분기(resolveMcpConfigFilename)와 본문 포맷 분기(buildMcpConfigText)가 같은
+// runtime==='codex' 가드를 각자 갖고 있어 한쪽만 깨지는 회귀(파일명은 바뀌었는데 본문은 여전히
+// JSON 등)를 별도로 잡는다.
+describe('buildMcpConfigText — story #4180(runtime===codex면 TOML, 그 외는 기존 JSON 무변)', () => {
+  const bundle = {
+    mcpServers: { 'sprintable-mcp': { type: 'stdio' as const, command: 'uvx', args: ['sprintable'], env: { AGENT_API_KEY: 'sk_live_x' } } },
+  };
+
+  it('codex → 실 파서(smol-toml)로 파싱되는 config.toml 조각(JSON 키 이름 잔존 없음)', () => {
+    const text = buildMcpConfigText(bundle, 'codex');
+    expect(text).toContain('[mcp_servers.sprintable-mcp]');
+    expect(text).toContain('[mcp_servers.sprintable-mcp.env]');
+    expect(text).not.toContain('mcpServers'); // JSON 키 이름 잔존 금지(재조립 확인)
+  });
+
+  it('claude-code(그 외 런타임) → 기존 JSON.stringify와 byte-identical(무회귀)', () => {
+    expect(buildMcpConfigText(bundle, 'claude-code')).toBe(JSON.stringify(bundle, null, 2));
   });
 });
 
@@ -462,5 +529,14 @@ describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽"
         expect(en[key]).not.toContain('fakechat');
       }
     }
+  });
+});
+
+// story #4372 — 같은 훅(useVerificationRail)의 copyVerifyPromptFailed를 이 표면만 안 읽어 복사가 실패해도 버튼이 «복사» 그대로였다(무표시).
+// 이 위저드는 STEP5까지 마운트가 불가해(위 #4cdad425 관례) 소스로 pin — 패널의 실제 렌더는 verify-prompt-copy-failed-panel.test.tsx가 DOM으로 덮는다.
+describe('recruiter-client — 검증 프롬프트 복사 실패 패널(story #4372)', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+  it('⭐복사 버튼 아래에 connect-step과 같은 실패 패널을 훅 값으로 그린다', () => {
+    expect(source).toMatch(/data-testid="recruiter-verify-prompt-copy"[\s\S]{0,600}<VerifyPromptCopyFailedPanel\s+failed=\{rail\.copyVerifyPromptFailed\}\s+onDismiss=\{rail\.dismissCopyVerifyPromptFailed\}/);
   });
 });

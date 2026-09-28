@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publication_body, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_620beefc_channel_post_image_upload import (
     _client_for,
     _create_draft,
@@ -496,17 +498,18 @@ async def test_publish_endpoint_dispatches_to_carousel_for_two_plus_images_insta
             # channel_posts.py 오케스트레이션이 "이미지 있으면 1틱은 무조건 반환"이라
             # 실제로 2번 불러야 한다 — test_620beefc_channel_post_image_upload.py::
             # test_image_publish_finished_tick_completes와 동형 계약).
-            r_publish_1 = await client.post(
+            r_publish_1 = await publish_and_run_worker(client, Session,
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
             )
             assert r_publish_1.status_code == 200, r_publish_1.text
             assert r_publish_1.json()["processing"] is True
 
-            r_publish_2 = await client.post(
+            r_publish_2 = await publish_and_run_worker(client, Session,
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
             )
         assert r_publish_2.status_code == 200, r_publish_2.text
-        body = r_publish_2.json()
+        # story #4336 — 요청은 «발행 중»(대기열), 결과는 워커 한 틱 뒤 발행 행에.
+        body = await publication_body(Session, draft_id)
         assert body["processing"] is False
         assert body["external_id"] is not None and body["external_id"].startswith("sandbox-ig-media-")
     finally:

@@ -255,7 +255,8 @@ async def test_comment_not_found_exposes_dead_letter_status():
                 select(PublicationCommand).where(PublicationCommand.gate_id == reply.gate_id)
             )).scalar_one()
             assert command.status == "dead_letter"
-            assert command.failure_kind == "needs_check"
+            # story #4264 — 대상 댓글 행이 없으면 HTTP 호출 전이라 «확실히 안 나감»(not_sent) · 곧바로 dead_letter는 그대로.
+            assert command.failure_kind == "not_sent"
             assert command.next_attempt_at is None
             assert command.reason_code == "COMMENT_NOT_FOUND"
     finally:

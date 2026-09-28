@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChatProofEmbed } from './chat-proof-embed';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 
 interface ProofSnapshotMessage {
   message_id: string;
@@ -17,6 +19,8 @@ export interface StoryProofReference {
   createdAt: string;
   stillExists: boolean | null;
   conversationId: string;
+  // story #4231 — 증거 대화의 프로젝트(BE `conversation_project_id`) · 스토리와 다를 수 있다. 옛 응답이면 null.
+  conversationProjectId: string | null;
   startMessageId: string;
   snapshot: ProofSnapshotMessage[];
 }
@@ -79,7 +83,8 @@ export function parseStoryProofReferences(json: unknown): ParsedStoryProofRefere
       continue;
     }
     const stillExists = typeof row['still_exists'] === 'boolean' ? row['still_exists'] : null;
-    items.push({ id, createdAt, stillExists, conversationId, startMessageId, snapshot });
+    const conversationProjectId = typeof row['conversation_project_id'] === 'string' ? row['conversation_project_id'] : null;
+    items.push({ id, createdAt, stillExists, conversationId, conversationProjectId, startMessageId, snapshot });
   }
   return { items, skippedIds };
 }
@@ -103,6 +108,7 @@ interface ChatProofSectionProps {
  * 쪽을 택했다(없는 것을 지어내지 않음). 후속 슬라이스에서 memberMap을 받아 채운다.
  */
 export function ChatProofSection({ storyId }: ChatProofSectionProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('verify');
   const [refs, setRefs] = useState<StoryProofReference[] | null>(null);
   const [skippedCount, setSkippedCount] = useState(0);
@@ -170,7 +176,11 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
         <ChatProofEmbed
           key={ref.id}
           sourceLabel={`${t('chatProofSectionTitle')} · ${formatCitationDate(ref.createdAt)}`}
-          conversationHref={`/chats/${ref.conversationId}?messageId=${ref.startMessageId}`}
+          // story #4231 — 증거 대화는 스토리와 다른 프로젝트일 수 있다 → 대화 자기 프로젝트.
+          conversationHref={ref.conversationProjectId
+            ? withProjectParam(`/chats/${ref.conversationId}?messageId=${ref.startMessageId}`, ref.conversationProjectId)
+            // 대상-프로젝트: 옛 응답(conversation_project_id 없음)일 때만 현재 p로 폴백.
+            : flatHref(`/chats/${ref.conversationId}?messageId=${ref.startMessageId}`)}
           quotedAt={formatCitationDate(ref.createdAt)}
           status={ref.stillExists === false ? 'deleted' : 'normal'}
           messages={ref.snapshot.map((m) => ({ id: m.message_id, senderName: '', content: m.content }))}

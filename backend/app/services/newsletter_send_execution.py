@@ -4,6 +4,7 @@ newsletter_send는 pause/resume 같은 토글이 없는 1회성 명령(OP_BOOST_
 동형, toggle_seq는 항상 0)."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -14,7 +15,10 @@ from app.models.channel_connection import ChannelConnection
 from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate
 from app.models.publication_command import PublicationCommand
+from app.services.provider_call_mark import provider_client
 from app.services.publication_command import create_or_get_publication_command
+
+logger = logging.getLogger(__name__)
 
 _NEWSLETTER_SEND_GATE_TYPE = "newsletter_send"
 _NEWSLETTER_SEND_CONTENT_KIND = "newsletter_send"
@@ -176,6 +180,14 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
         )
         command.status = STATUS_BLOCKED_UNAPPROVED
         command.last_error = str(exc)[:2000]
+        # story #4262 — 사유를 코드로 남긴다(예전엔 last_error 문자열에만). 게이트 화면이 연결 문제면 «연결 문제로 멈춤» +
+        # 사람 재시도를 연다(retry_dead_letter_command가 뉴스레터의 blocked_unapproved를 받는다).
+        command.reason_code = exc.code
+        # story #4262 AC2(PO 14:13Z) — 연결 사유면 사람이 재시도할 수 있는 멈춤이라 전이와 같은 커밋에 통지 표식(4621 표식
+        # 규칙 · 판정 `awaits_stop_notice`가 사유 코드까지 본다 — 게이트 미승인 · 캠페인 없음은 표식 없음).
+        from app.services.publication_command import mark_stop_notice
+
+        mark_stop_notice(command)
         return
 
     gate, publication, conn = ctx["gate"], ctx["publication"], ctx["connection"]
@@ -236,6 +248,7 @@ async def _process_sandbox_send(db: AsyncSession, command: PublicationCommand, *
         context={"recipient_count": result["recipient_count"], "segment_name": result["segment_name_confirmed"]},
     )
     await _schedule_snapshots(db, command=command, gate=gate, publication=publication, channel="stibee_sandbox", now=now)
+    await _emit_recipe_next_stage_after_send(db, command=command, gate=gate)
 
 
 async def _process_real_send(
@@ -266,9 +279,8 @@ async def _process_real_send(
         return
 
     try:
-        import httpx
 
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with provider_client(timeout=20) as client:
             await reserve_email(
                 client, api_key=access_token, email_id=int(publication.external_id),
                 scheduled_at_utc=gate.sealed_newsletter_scheduled_at,
@@ -305,6 +317,7 @@ async def _process_real_send(
         context={"recipient_count": None, "segment_name": gate.sealed_newsletter_segment_name},
     )
     await _schedule_snapshots(db, command=command, gate=gate, publication=publication, channel="stibee", now=now)
+    await _emit_recipe_next_stage_after_send(db, command=command, gate=gate)
 
 
 async def _schedule_snapshots(
@@ -323,4 +336,61 @@ async def _schedule_snapshots(
         db, org_id=command.org_id, work_item_id=gate.work_item_id, publication_id=publication.id,
         publication_kind="channel_publication", channel=channel,
         external_id=publication.external_id, anchor_at=now,
+    )
+
+
+async def _resolve_recipe_next_stage(db: AsyncSession, *, org_id: uuid.UUID, facts: dict) -> tuple[str, str] | None:
+    """story #4214 — 이 발송 게이트가 레시피 회차에서 온 것이면 (정의 key, 다음 stage). 레시피 경로 게이트는
+    `neutral_facts.triggered_by_event`(정의 key)·`stage`(발송 요청 단계)를 싣는다(recipe_gate_hooks.
+    _build_approval_neutral_facts, #4191). 사람이 발송 요청 API로 연 게이트(레시피 무관)는 그 둘이 없어 None.
+    정의 조회는 channel_posts.resolve_recipe_context_for_scheduled_publication과 같은 모양(org 정의 우선 ·
+    플랫폼 프리셋 폴백 · enabled만) — 그 파일은 4192(site 발행)가 넓히는 중이라 이 카드는 건드리지 않는다(PO 분리 근거)."""
+    from sqlalchemy import or_
+
+    from app.models.event_definition import EventDefinition
+    from app.routers.events import _next_recipe_stage
+
+    definition_key, gate_stage = facts.get("triggered_by_event"), facts.get("stage")
+    if not definition_key or not gate_stage:
+        return None
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.key == definition_key, EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        ).order_by(EventDefinition.org_id.is_(None)).limit(1)
+    )).scalars().first()
+    if definition is None:
+        return None
+    next_stage = _next_recipe_stage(definition, gate_stage)
+    if next_stage is None:
+        return None
+    return definition.key, next_stage
+
+
+async def _emit_recipe_next_stage_after_send(db: AsyncSession, *, command: PublicationCommand, gate: Gate) -> None:
+    """story #4214(4192에서 분리) — 크론 발송 실행이 **성공**으로 끝난 뒤, 레시피 회차에서 온 발송이면 레시피 다음
+    단계(뉴스레터 프리셋은 «발송 결과 확인» send_checked) 이벤트를 1회. 예전엔 activity log만 남겨 레시피가 발송
+    완료를 자동으로 몰랐다(4191 그라운딩). channel post 예약 발행(publication_command.py 성공 분기)과 같은 모양:
+    - 성공 분기에서만 부른다(실패·차단 분기엔 호출 자체가 없다).
+    - 멱등은 `emit_recipe_published_stage_event`의 «이 work item에 이 stage가 이미 발행됐으면 스킵»(#4093 SSOT) —
+      재시도·겹친 틱이 다시 와도 이벤트는 1.
+
+    **트랜잭션 경계**(PR #4573 PO 수정 2회): 외부 발송(스티비 reserve·샌드박스 send)은 이미 일어났다. 그 기록(command
+    completed·attempt·activity·스냅샷 예약)을 워커 세션에서 **먼저 커밋**하고, 레시피 이벤트는 **별도 세션**
+    (`run_side_effect_in_own_session`)에서 돈다. 같은 트랜잭션이면 이벤트 쪽 SQL 오류가 트랜잭션을 aborted로 만들어 워커 커밋이
+    조용히 ROLLBACK → completed 미저장 → 다음 틱 재발송(수신자 이중 발송)이었고, 워커 세션에서 롤백하면 워커의 ORM 객체가 만료돼
+    같은 배치의 나머지 명령이 in_progress로 영구 정체였다. 워커 세션은 발송 기록 커밋까지만 책임진다."""
+    from app.services.channel_posts import emit_recipe_published_stage_event
+
+    # 새 세션은 워커 세션의 ORM 객체를 공유하지 않는다 — 필요한 값을 먼저 잡아 둔다.
+    org_id, work_item_type, work_item_id, gate_id = gate.org_id, gate.work_item_type, gate.work_item_id, gate.id
+    facts = dict(gate.neutral_facts or {})
+    await db.commit()  # 발송 성공 기록 확정 — 아래 이벤트가 어떻게 실패해도 이것을 되돌릴 수 없게.
+
+    # story #4192(통합) — 레시피 단계 이벤트의 유일한 입구. 격리 세션·advisory lock·멱등은 그 함수가 진다(여기서 세션을 따로
+    # 열지 않는다). 다음 단계 판정(정의 읽기)도 그 격리 세션 안에서(`resolve`).
+    await emit_recipe_published_stage_event(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+        resolve=lambda side: _resolve_recipe_next_stage(side, org_id=org_id, facts=facts),
+        trigger_gate_id=gate_id,  # story #4255 — 발송을 촉발한 발송 게이트(추측 없이)
     )

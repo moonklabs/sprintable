@@ -5,15 +5,16 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from jose import jwt as jose_jwt
 import re
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
@@ -53,7 +54,7 @@ from app.core.security import (
     create_refresh_token,
 )
 from app.core.rate_limit import limiter, resend_verification_limiter
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, resolve_request_org_id
 from app.services.project_auth import (
     accessible_project_ids_in_org, first_accessible_project_id, has_project_access,
 )
@@ -93,10 +94,11 @@ def _ok(data: object, status_code: int = 200) -> JSONResponse:
     return JSONResponse({"data": data, "error": None, "meta": None}, status_code=status_code)
 
 
-def _err(code: str, message: str, status_code: int = 400) -> JSONResponse:
+def _err(code: str, message: str, status_code: int = 400, *, headers: dict[str, str] | None = None) -> JSONResponse:
     return JSONResponse(
         {"data": None, "error": {"code": code, "message": message}, "meta": None},
         status_code=status_code,
+        headers=headers,
     )
 
 
@@ -503,7 +505,7 @@ async def _build_app_metadata(
         )
         if org_id is not None:
             q = q.where(TeamMember.org_id == org_id)
-        member = (await session.execute(q.limit(1))).scalar_one_or_none()
+        member = (await session.execute(q.order_by(TeamMember.id).limit(1))).scalar_one_or_none()
 
     if not member and not settings.build_app_metadata_defallback:
         # fallback: 가장 오래된 team_member (ASC) — 최초 가입 project 우선.
@@ -517,7 +519,7 @@ async def _build_app_metadata(
         )
         if org_id is not None:
             q = q.where(TeamMember.org_id == org_id)
-        member = (await session.execute(q.order_by(TeamMember.created_at.asc()).limit(1))).scalar_one_or_none()
+        member = (await session.execute(q.order_by(TeamMember.created_at.asc(), TeamMember.id).limit(1))).scalar_one_or_none()
 
     # 0746: org_id 지정 + 그 org에 team_member 없음(grant-only/0-project/owner-admin) →
     # cross-org invite/Path4 폴백 금지. 그 org의 first_accessible(없으면 null)로 스코프 해소.
@@ -562,7 +564,7 @@ async def _build_app_metadata(
                 OrgInvite.email == user.email.lower(),
                 OrgInvite.status == "pending",
                 OrgInvite.expires_at > now,
-            ).order_by(OrgInvite.created_at.asc()).limit(1)
+            ).order_by(OrgInvite.created_at.asc(), OrgInvite.id).limit(1)
         )
         org_inv = org_inv_result.scalar_one_or_none()
         if org_inv:
@@ -587,7 +589,7 @@ async def _build_app_metadata(
         org_member_result = await session.execute(
             select(OrgMember)
             .where(OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None))
-            .order_by(OrgMember.created_at.asc())
+            .order_by(OrgMember.created_at.asc(), OrgMember.id)
             .limit(1)
         )
         org_member = org_member_result.scalar_one_or_none()
@@ -983,14 +985,51 @@ async def refresh_token(
             # 있으면 user_id를 읽기만(best-effort, 인가 판정에 영향 0 — 이미 위에서 거부 확定
             # 後의 순수 로깅 조회) 해 로그에 싣는다. 새 규칙 발명 0 — window_reuse가 이미
             # 로깅하는 user_id 축을 실패 로그에도 동일하게 확장하는 것뿐.
-            _diag_user_id = (await session.execute(
-                select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash)
-            )).scalar_one_or_none()
+            #
+            # story #2449 AC1(계측 전환, 페드루 PO 지시 2026-09-16 — AC0 실측이 N=1이라
+            # 처방 A(탭 락, 동시요청 경합 전제)를 그 표본이 지지 못함 확認. 다음 사건이
+            # «동시경합 straggler» vs «같은 브라우저가 이미 회전된 RT를 오래 들고 있었다»
+            # (Set-Cookie 미반영류) 어느 클래스인지 자동으로 가르도록 3필드 추가):
+            # delta_since_revoke_s(제시된 RT가 이미 폐기/회전됐다면 그 시각부터 지금까지
+            # 경과초 — #2449 AC0가 실측한 「직전 성공 회전과의 Δ」를 매 사건마다 로그
+            # 하나로 즉시 구한다) · successor_used(그 회전의 후속 RT, replaced_by가
+            # 이후 실제로 또 회전됐는지 — True면 «정상 소유 탭이 이미 새 토큰을 정상
+            # 사용 중」이라 이 실패는 순수 straggler, False/None이면 후속 토큰 자체가
+            # 아직 한 번도 안 쓰였다는 뜻이라 다른 클래스를 시사) · ua(User-Agent, 같은
+            # UA 반복이면 다중기기 아닌 단일 브라우저 장시간 유휴 가설 지지). PII 0 —
+            # 셋 다 이미 관측 가능한 시스템 사실(시각차·불리언·UA 문자열)이지 개인식별
+            # 정보가 아니다.
+            _diag_row = (await session.execute(
+                select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.replaced_by)
+                .where(RefreshToken.token_hash == token_hash)
+            )).first()
+            _diag_user_id = _diag_row.user_id if _diag_row else None
+            _diag_delta_since_revoke_s: float | None = None
+            _diag_successor_used: bool | None = None
+            if _diag_row is not None and _diag_row.revoked_at is not None:
+                _diag_delta_since_revoke_s = (
+                    datetime.now(timezone.utc) - _diag_row.revoked_at
+                ).total_seconds()
+                if _diag_row.replaced_by is not None:
+                    _successor_revoked_at = (await session.execute(
+                        select(RefreshToken.revoked_at).where(RefreshToken.id == _diag_row.replaced_by)
+                    )).scalar_one_or_none()
+                    _diag_successor_used = _successor_revoked_at is not None
+            _diag_ua = request.headers.get("user-agent", "")[:200]
             logger.warning(
-                "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s user_id=%s",
-                correlation_key, _diag_user_id,
+                "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s user_id=%s "
+                "delta_since_revoke_s=%s successor_used=%s ua=%r",
+                correlation_key, _diag_user_id, _diag_delta_since_revoke_s, _diag_successor_used, _diag_ua,
             )
-            return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
+            # story #2449 CHANGES(카디르 codex 읽기 검수, 페드루 PO 채택 2026-09-16
+            # 13:28Z) — 이 로그의 correlation_key(위 #2449 계측 3필드와 같은 값)가
+            # BFF(route.ts) warn 로그엔 안 실려 두 로그 줄을 자동으로 못 짝지었다.
+            # 비밀값 아님(token_hash[:12], 원본 토큰 복원 불가) — 응답 헤더로 얹어
+            # BFF가 그대로 읽어 자기 로그에 반영하게 한다.
+            return _err(
+                "TOKEN_REVOKED", "Refresh token revoked or expired", 401,
+                headers={"X-Auth-Correlation": correlation_key},
+            )
         logger.info(
             "auth.refresh chain_resolve_window_reuse key=%s user_id=%s "
             "reason=multi_instance_race_loser_fork_rotation",
@@ -2180,6 +2219,25 @@ class AuthMeResponse(BaseModel):
     # 이 신호가 필요했다. api_key 컨텍스트(에이전트)는 User 행이 없어 None(무의미 — 온보딩 게이트
     # 자체가 인간 전용이라 agent 소비처는 이 필드를 참조하지 않는다).
     email_verified: bool | None = None
+    # story #4178(산티아고 prod 에스컬레이션 1d522e6d) — 사람(JWT) 세션의 `member_id`는
+    # `auth.user_id`(=users.id) 그대로라 `/api/v2/events/stream`의 `resolve_member_identity`
+    # (TeamMember.id/OrgMember.id만 허용)로 검증하면 404가 난다. `member_id` 자체의 의미는
+    # 바꾸지 않는다 — onboarding-form.tsx/verify-email 두 FE 소비처가 "org 유무와 무관하게
+    # 항상 200"이라는 그 필드의 기존 계약(`test_3195_me_email_verified.py`가 핀)에 기대고
+    # 있어, 그 값을 org_member.id로 바꾸면 org 미가입 사용자의 온보딩이 깨진다(그라운딩
+    # 실측). 대신 additive 신규 필드 — 사람 세션 + org 해소 가능일 때만 org_member.id,
+    # 그 외(에이전트 세션·org 미해소)는 email_verified와 같은 안전판으로 None(예외 없음).
+    org_member_id: str | None = Field(
+        default=None,
+        description=(
+            "Current-org member id for human (JWT) sessions. Pass this as `member_id` to "
+            "GET /api/v2/events/stream — the `member_id` field here is users.id and returns 404 "
+            "there. The org is resolved with the same rule as the stream: the X-Org-Id header if "
+            "sent (you must be a member, else 403), otherwise the session's org; `org_id` in this "
+            "response is that same org. Send the same X-Org-Id to both endpoints. Null for agent "
+            "(API key) sessions or when no org is resolved."
+        ),
+    )
 
 
 async def _resolve_project_default(
@@ -2208,25 +2266,34 @@ async def _resolve_project_default(
 async def get_auth_me(
     auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    x_org_id: Annotated[str | None, Header(alias="X-Org-Id")] = None,
+    request: Request = None,
 ) -> AuthMeResponse:
     """API Key Bearer 인증으로 바인딩된 member_id, org_id, project_id 반환.
 
     E-MCP-OPT: agent API 키(멀티프로젝트 가능)에 한해 resolved_default_project_id/
-    is_project_ambiguous/accessible_project_ids를 근본 판정(§1)해 추가 — human JWT 경로는
-    무변경(기본값 그대로, 이 스토리 스코프 밖)."""
+    is_project_ambiguous/accessible_project_ids를 근본 판정(§1)해 추가. story #4178: human
+    세션은 org를 resolve_request_org_id(스트림과 같은 규칙)로 정하고 org_member_id를 싣는다."""
     meta = auth.claims.get("app_metadata", {})
     resolved: str | None = None
     ambiguous = False
     accessible_ids: list[str] = []
     email_verified: bool | None = None
+    org_member_id: str | None = None
+    org_id_raw = auth.org_id or meta.get("org_id")
     if meta.get("api_key_id"):
         try:
             member_id = uuid.UUID(auth.user_id)
-            org_id = uuid.UUID(str(auth.org_id or meta.get("org_id")))
+            org_id = uuid.UUID(str(org_id_raw))
             resolved, ambiguous, accessible_ids = await _resolve_project_default(db, member_id, org_id)
         except Exception:
             logger.warning("get_auth_me: 신규 project default 판정 실패 — 레거시 필드만 반환", exc_info=True)
     else:
+        # story #4178(PO CHANGES) — 사람 세션의 org는 /events/stream과 같은 규칙(공유 함수):
+        # X-Org-Id(가입 확인·아니면 403) → JWT org → 없으면 None(무 org여도 200 계약 유지).
+        # 응답 org_id도 이 org로 — 한 응답 안에서 org가 섞이지 않게. 에이전트 분기는 무변(AC3).
+        resolved_org = await resolve_request_org_id(auth, x_org_id, request)
+        org_id_raw = str(resolved_org) if resolved_org is not None else None
         # story #3195 — human JWT 세션(auth.user_id == User.id)에 한해서만 조회. api_key
         # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
         try:
@@ -2235,14 +2302,28 @@ async def get_auth_me(
             ).scalar_one_or_none()
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
+        # story #4178 — org 미해소(org 없음·OrgMember 행 없음)는 예외가 아니라 None.
+        if resolved_org is not None:
+            try:
+                row = (await db.execute(
+                    select(OrgMember.id).where(
+                        OrgMember.org_id == resolved_org,
+                        OrgMember.user_id == uuid.UUID(auth.user_id),
+                        OrgMember.deleted_at.is_(None),
+                    )
+                )).scalar_one_or_none()
+                org_member_id = str(row) if row is not None else None
+            except Exception:
+                logger.warning("get_auth_me: org_member_id 조회 실패 — None으로 반환", exc_info=True)
     return AuthMeResponse(
         member_id=auth.user_id,
-        org_id=auth.org_id or meta.get("org_id"),
+        org_id=org_id_raw,
         project_id=meta.get("project_id"),
         resolved_default_project_id=resolved,
         is_project_ambiguous=ambiguous,
         accessible_project_ids=accessible_ids,
         email_verified=email_verified,
+        org_member_id=org_member_id,
     )
 
 

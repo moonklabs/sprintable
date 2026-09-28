@@ -68,7 +68,7 @@ async def test_work_item_id_narrows_to_that_story_blog_and_social_only():
                 s, org_id=org_id, gate_id=gate_b.id, channel="threads", published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", work_item_id=story_a)
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", work_item_id=story_a)
 
         ids = {r["publication_id"] for r in result["rows"]}
         assert ids == {sp_a.id, cp_a.id}, f"story_a의 blog+social만 와야 하는데: {ids}"
@@ -100,7 +100,7 @@ async def test_no_work_item_id_param_keeps_org_wide_behavior_unchanged():
                 published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         ids = {r["publication_id"] for r in result["rows"]}
         assert ids == {sp_a.id, sp_b.id}
@@ -137,7 +137,7 @@ async def test_social_crowd_out_does_not_hide_blog_row():
                     published_at=now - timedelta(days=i),  # 전부 blog보다 최신(0~50일 전)
                 )
 
-            result = await list_insights_board(s, org_id=org_id, window="90d", work_item_id=story_a)
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="90d", work_item_id=story_a)
 
         ids = {r["publication_id"] for r in result["rows"]}
         assert sp.id in ids, "blog 1건이 social 51건에 밀려 사라졌다 — crowd-out 회귀"
@@ -175,7 +175,7 @@ async def test_work_item_scoped_no_truncation_reports_has_more_false():
                 s, org_id=org_id, gate_id=gate.id, channel="threads", published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="90d", work_item_id=story_a)
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="90d", work_item_id=story_a)
 
         ids = {r["publication_id"] for r in result["rows"]}
         assert ids == {sp.id, cp.id}
@@ -208,7 +208,7 @@ async def test_work_item_id_combines_with_channel_filter():
             )
 
             result = await list_insights_board(
-                s, org_id=org_id, window="30d", work_item_id=story_a, channel="hosted_site",
+                s, viewer_is_human=True, org_id=org_id, window="30d", work_item_id=story_a, channel="hosted_site",
             )
 
         assert [r["publication_id"] for r in result["rows"]] == [sp.id]

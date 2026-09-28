@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ALLOWLIST, computeNewViolations, computeStaleBaseline, loadBaseline, refKey, scanContent, scanRepo } from './verify-no-raw-ascii-jsx-attr';
+import { measureFsReads } from './test-utils/fs-work';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const BASELINE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'raw-ascii-jsx-attr-baseline.json');
@@ -129,11 +130,12 @@ describe('실 파일 뮤테이션 — workcell.tsx(title 되돌리기)', () => {
 // 있어야만 GREEN이라는 것(baseline에서 빼면 RED)을 직접 확인 — CHANGES① 전에는
 // JsxExpression 감쌈이 아니라 직접 속성값이라 원래도 잡혔어야 하나, 구두점(…) 때문에
 // 옛 ASCII_WORD_RE는 놓쳤을 자리(3876 가드와 동형 사고).
-describe('실 파일 실측 양성대조 — page-embed-node.tsx(placeholder, 구두점 섞인 자리)', () => {
+// story #4359 — 이 자리(page-embed-node.tsx placeholder)는 i18n으로 고쳐져 실 파일에서 사라졌다(baseline에서도 빠짐). 구두점(…) 섞인
+// 속성값을 잡는지의 양성 대조는 그대로 두되, 표본을 **고치기 전 그 줄**을 담은 픽스처로 옮긴다(실 파일 의존 → 고치면 테스트가 깨지는 모양 해소).
+describe('양성대조 — 구두점 섞인 placeholder(옛 page-embed-node.tsx 줄 · story #4359에서 i18n으로 고침)', () => {
   const REL_FILE = 'components/docs/extensions/page-embed-node.tsx';
-  const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
-  const original = readFileSync(ABS_FILE, 'utf8');
-  const baseline = loadBaseline(BASELINE_PATH);
+  const original = '<input type="text" placeholder="Enter document slug or ID…" className="flex-1" />';
+  const baseline = new Set([...loadBaseline(BASELINE_PATH), `${REL_FILE}::placeholder::Enter document slug or ID…`]);
 
   it('원본 실측 — placeholder="Enter document slug or ID…"가 이 가드에 걸린다', () => {
     const refs = scanContent(original, REL_FILE);
@@ -149,14 +151,16 @@ describe('실 파일 실측 양성대조 — page-embed-node.tsx(placeholder, �
 });
 
 describe('scanRepo — story #3880(실 트리 실행)', () => {
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-  // 재현 5회 = 659·786·779·655·766ms 중 최댓값 786ms → ×3 ≈ 2358ms → 2500ms로 반올림).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실 트리(apps/web/src) — ALLOWLIST+baseline과 정확히 일치(신규 0·stale 0)', () => {
-    const refs = scanRepo(SRC_ROOT);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(SRC_ROOT));
+    const refs = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     const baseline = loadBaseline(BASELINE_PATH);
     const newViolations = computeNewViolations(refs, ALLOWLIST, baseline);
     const staleBaseline = computeStaleBaseline(refs.filter((r) => !ALLOWLIST.has(refKey(r))), baseline);
     expect(newViolations).toEqual([]);
     expect(staleBaseline).toEqual([]);
-  }, 2500);
+  });
 });

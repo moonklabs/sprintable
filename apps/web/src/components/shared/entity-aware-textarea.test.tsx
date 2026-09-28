@@ -3,6 +3,7 @@
 // story #2264(C-6) — EntityAwareTextarea가 참조 코어(chat-input-entity-tokens.ts +
 // use-entity-picker.ts)를 그대로 재사용해 `#` 피커가 실제로 동작하는지 확인한다. 채팅
 // (chat-input.test.tsx)과 같은 검색 fetch·토큰조립을 story 본문 자리에서도 그대로 검증.
+// story #4349 — 후보 목록은 body로 포털된다(스크롤 면 밖) → 목록 안을 보는 단언은 container가 아니라 document에서(뜻 그대로).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -57,7 +58,7 @@ describe('EntityAwareTextarea — story #2264', () => {
       el.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
-    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
   });
 
   it('projectId가 있으면 `#` 후보 검색이 뜨고 선택하면 escape된 토큰이 삽입된다(채팅 applyEntity와 동일 규칙)', async () => {
@@ -83,7 +84,7 @@ describe('EntityAwareTextarea — story #2264', () => {
     });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
 
-    const option = container.querySelector('[role="option"]') as HTMLButtonElement;
+    const option = document.querySelector('[role="option"]') as HTMLButtonElement;
     expect(option).not.toBeNull();
     await act(async () => {
       option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -110,7 +111,7 @@ describe('EntityAwareTextarea — story #2264', () => {
     });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
 
-    const listbox = container.querySelector('[role="listbox"]');
+    const listbox = document.querySelector('[role="listbox"]');
     expect(listbox).not.toBeNull();
     expect(listbox!.className).toContain('focus-inset');
   });
@@ -133,8 +134,8 @@ describe('EntityAwareTextarea — story #2264', () => {
     });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
 
-    expect(container.textContent).toContain('검토 중');
-    expect(container.textContent).not.toContain('in-review');
+    expect(document.body.textContent).toContain('검토 중');
+    expect(document.body.textContent).not.toContain('in-review');
   });
 });
 
@@ -157,7 +158,7 @@ describe('EntityAwareTextarea — org 엔티티명 라벨 오버라이드(story 
       el.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
-    expect(container.textContent).toContain('스토리');
+    expect(document.body.textContent).toContain('스토리');
   });
 
   it('getEntityTypeLabel이 값을 돌려주면 그룹 헤더가 그 오버라이드로 바뀐다', async () => {
@@ -182,8 +183,8 @@ describe('EntityAwareTextarea — org 엔티티명 라벨 오버라이드(story 
       el.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
-    expect(container.textContent).toContain('작업건');
-    expect(container.textContent).not.toContain('스토리');
+    expect(document.body.textContent).toContain('작업건');
+    expect(document.body.textContent).not.toContain('스토리');
   });
 });
 
@@ -205,8 +206,34 @@ describe('EntityAwareTextarea — 로드맵 P2·PR-E L1(리스트박스 elevatio
     });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
 
-    const listbox = container.querySelector('[role="listbox"]');
+    const listbox = document.querySelector('[role="listbox"]');
     expect(listbox?.className).toContain('shadow-[var(--elev-overlay)]');
     expect(listbox?.className).not.toMatch(/(^|\s)shadow-md(\s|$)/);
+  });
+});
+
+// [SID:4367] 한 Esc = 한 층 — 후보가 열린 채 Esc는 후보만 닫고 preventDefault로 «썼다»고 표시한다(스토리 패널 window Esc가 이 표시를 보고
+// 편집 취소를 건너뛴다). 후보가 없을 때 Esc는 표시하지 않고 그대로 지나간다(바깥이 편집 취소 · 설계대로).
+describe('EntityAwareTextarea — 후보 Esc는 «썼다» 표시([SID:4367])', () => {
+  it('후보 열림 → Esc: 후보 닫힘 · defaultPrevented 참 / 후보 없음 → Esc: defaultPrevented 거짓', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 'x1', title: '회의록 정리', status: null }] }))));
+    await act(async () => { root.render(<ControlledHarness initial="" projectId="p1" onValueChange={() => {}} />); });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#회');
+      el.selectionStart = 2;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    expect(document.querySelector('[data-dropdown-panel="entity-candidates"]')).not.toBeNull();
+    const esc = () => new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    const first = esc();
+    await act(async () => { el.dispatchEvent(first); });
+    expect(first.defaultPrevented).toBe(true);
+    expect(document.querySelector('[data-dropdown-panel="entity-candidates"]')).toBeNull();
+    const second = esc();
+    await act(async () => { el.dispatchEvent(second); });
+    expect(second.defaultPrevented).toBe(false);
   });
 });

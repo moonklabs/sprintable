@@ -1,14 +1,42 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { keepHref } from '@/lib/with-project-param';
 import { useTranslations } from 'next-intl';
-import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
+import { CircleDot, Inbox, MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
+import {
+  DEFAULT_NAV_V3_FLAGS,
+  resolveNavV3Destinations,
+  scopedResourceHref,
+  type NavV3Destination,
+  type NavV3Destinations,
+  type NavV3Flags,
+} from '@/lib/nav-v3-destinations';
+
+// story #4016 — resource kind는 org/project 접두가 필요한 조각이다. static kind는 이미 완성 경로라 그대로 쓴다.
+// story #4211 — 예전엔 이 탭 바가 접두 컨텍스트를 안 받아 bare `/flow`만 썼다(세션 의존 리다이렉트를 매 탭 한 홉 ·
+// 4557 전 301을 캐시한 기기는 탭을 눌러도 옛 프로젝트로 감). 이제 사이드바와 같은 scopedResourceHref로 현재
+// 작업공간·프로젝트 경로를 직접 가리킨다(slug를 모르는 찰나만 bare — 미들웨어 안전망).
+// TABS/V3_TABS의 `href` 필드는 slug 없이 구운 값(기존 단위테스트 계약) — 실제 렌더 href는 MobileTabBar가
+// resolveTabHref(tab, dest, scope)로 매 렌더 다시 구한다.
+export function destHref(destination: NavV3Destination, scope: TabHrefScope, withProject: (href: string) => string): string {
+  // story #4231 다음 조각 — static 목적지도, resource 목적지의 slug 모름 폴백도 필수 withProject로 감싼다(호출처가 따로 감싸다 빠뜨리는 자리 0).
+  return destination.kind === 'resource'
+    ? scopedResourceHref(destination.path, scope.orgSlug, scope.projectSlug, withProject)
+    : withProject(destination.path);
+}
+
+export interface TabHrefScope { orgSlug?: string; projectSlug?: string }
 
 // story #1958(P2-S2, mobile-p2-p1a-story-breakdown SSOT) — 모바일 4탭 셸. <1024(lg 미만)에서만
 // 렌더되고 데스크톱 GNB(AppSidebar)를 대체한다(P2-S1의 lg:1024 SSOT와 동일 경계 — route 내
@@ -38,19 +66,82 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 라벨을 그 목적지의 실제 이름(zoneDev)으로 맞춘다 — prod(main)는 이미 라벨이 「지금」
 // (mobileTabBar.now, 목적지와 이름이 어긋나지 않는 옛 낱말)이라 이 수정이 오히려 3824
 // 이전 prod와도, 사이드바 실목적지와도 동시에 맞아떨어진다.
+// story #4016(페드루 PO 確定 2026-09-17) — href를 더는 손으로 안 박는다. 4386의
+// resolveNavV3Destinations가 「일감」(now 탭)·「대화」(chat 탭)의 플래그별 목적지를
+// 이미 결정하고 있었는데 여기가 그걸 안 물어서 사이드바만 바뀌고 좁은 폭은 레거시로
+// 남았다(이 카드의 근거 버그). 「결재」·「전체」는 애초에 그 모듈에 플래그가 없던
+// 항목이라 results와 동형인 고정 키 2개를 새로 추가해 여기 4탭 전부가 한 소스를
+// 쓴다(AC1). destKey가 그 모듈의 어느 항목에 매이는지를 표시 — labelKey 공유(위
+// #3824)와는 별개 축이다(now 탭 labelKey는 위 #4020 정정대로 zoneDev지만 destKey는
+// today가 아니라 work — AC2 "플래그 OFF 바이트 동일"을 만족하는 쪽은 work뿐, 페드루
+// 확認 2026-09-17 14:34Z). href 필드는 DEFAULT_NAV_V3_FLAGS(전부 OFF)로 미리 구운
+// 값이라 기존 테스트(TABS.find(...).href 직접 대조)가 손 안 대고 그대로 GREEN —
+// 플래그 ON의 실제 렌더 href는 MobileTabBar 컴포넌트 안에서 resolveTabHref(tab, dest, scope)로
+// 매 렌더 다시 구한다.
+const DEFAULT_DEST = resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS);
+
 export const TABS = [
-  { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
+  { key: 'now', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work, {}, keepHref), icon: CircleDot, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
   // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
   // 있던 것 — 이름=가는 곳=세는 것 셋을 한 줄로 맞춘다. #2164가 세운 "진입점 라벨은 착지
   // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
   // "알림" 탭은 안 없어진다 — /inbox 페이지 내부 탭 스위처로 한 번 더 탭하면 그대로 있다.
-  { key: 'approvals', href: '/inbox?tab=gates', icon: Inbox, labelKey: 'approvals' as const, namespace: 'mobileTabBar' as const },
-  { key: 'chat', href: '/chats', icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
+  { key: 'approvals', destKey: 'approvals' as const, href: destHref(DEFAULT_DEST.approvals, {}, keepHref), icon: Inbox, labelKey: 'approvals' as const, namespace: 'mobileTabBar' as const },
+  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats, {}, keepHref), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
   // "전체"는 시안상 정식 목록화 대상(S9/#1965) — 기존 모바일 GNB Sheet(햄버거) 재사용은
   // blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다(오르테가군 확定). 이 스토리
   // 에서는 최소 스텁 라우트로만 연결 — S9가 정식 목록으로 교체.
-  { key: 'more', href: '/more', icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
+  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more, {}, keepHref), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
 ] as const;
+
+// story #4006(critical, 5pt) AC8(§2, doc 5bc82986) — v3 플래그 중 하나라도 ON이면
+// (nav-v3-destinations.ts의 anyV3Enabled와 동일 신호, resolveNavV3Destinations.work
+// 참고) 하단 탭이 이 4탭으로 바뀐다: 오늘·대화·일감·더보기. 「승인」은 별 탭 없이
+// 「오늘」의 결정 큐로 흡수(PO 確定 — today_service의 `_needs_me_from_gate_inbox`가
+// ApprovalsQueue와 같은 `list_gate_inbox(status=pending, sort=urgency,
+// assigned_to_me=True)`·limit 없음이라 누락 0 — 그래서 badge도 아래 렌더에서 기존
+// pendingCount를 그대로 「오늘」 탭에 옮겨 붙인다, 새 API 0). 「결과·연결·규칙」은 이
+// 4탭엔 없고 `/more` 목록에서 진입(AC8, 이 모듈 스코프 밖).
+export const V3_TABS = [
+  { key: 'today', destKey: 'today' as const, href: destHref(DEFAULT_DEST.today, {}, keepHref), icon: Newspaper, labelKey: 'zoneNow' as const, namespace: 'nav' as const },
+  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats, {}, keepHref), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
+  { key: 'work', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work, {}, keepHref), icon: Workflow, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
+  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more, {}, keepHref), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
+] as const;
+
+export type TabConfig = typeof TABS | typeof V3_TABS;
+export type TabDef = (typeof TABS)[number] | (typeof V3_TABS)[number];
+
+/** flags 중 v3 하나라도 ON이면 V3_TABS, 전부 OFF면 기존 TABS(AC8 "플래그 OFF 탭 4칸 바이트 무변"). */
+export function resolveTabsForFlags(navV3Flags: NavV3Flags): TabConfig {
+  const anyV3Enabled = navV3Flags.todayV3Enabled || navV3Flags.chatV3Enabled || navV3Flags.connectRulesV3Enabled;
+  return anyV3Enabled ? V3_TABS : TABS;
+}
+
+// story #4278(유나 결정 ①) — 탭 목적지(destKey) → 메뉴 항목 id. «전체» 메뉴는 «지금 그려진 탭»이 가는 곳만 뺀다(같은 출처 —
+// 예전 MOBILE_HUB_EXCLUDE_IDS는 플래그와 무관해 ON에서 결재함이 어디에도 없었다). «전체»(more)는 자기 자신이라 대응 없음.
+const TAB_DEST_NAV_ITEM_ID: Record<TabDef['destKey'], string | null> = {
+  work: 'board', approvals: 'inbox', chats: 'chats', today: 'org-briefing', more: null,
+};
+
+export function tabDestinationNavIds(navV3Flags: NavV3Flags): Set<string> {
+  return new Set(
+    resolveTabsForFlags(navV3Flags)
+      .map((tab) => TAB_DEST_NAV_ITEM_ID[tab.destKey])
+      .filter((id): id is string => id !== null),
+  );
+}
+
+/** story #4278 — 탭바가 지금 그리는 탭(«전체» 빼고 · 탭바 순서)의 라벨 키. «전체» 메뉴 머리 안내가 이 이름을 그대로 쓴다. */
+export function visibleTabLabels(navV3Flags: NavV3Flags): Array<{ namespace: 'nav' | 'mobileTabBar'; labelKey: string }> {
+  return resolveTabsForFlags(navV3Flags)
+    .filter((tab) => tab.key !== 'more')
+    .map((tab) => ({ namespace: tab.namespace, labelKey: tab.labelKey }));
+}
+
+export function resolveTabHref(tab: TabDef, dest: NavV3Destinations, scope: TabHrefScope, withProject: (href: string) => string): string {
+  return destHref(dest[tab.destKey], scope, withProject);
+}
 
 // story #1991(navigate 불안정 1차 근원 B, 유나 UX 감사): 기존 isTabActive는 4탭 href 자체와
 // 정확일치/그 직계 하위 경로만 인식해, gate/doc/story 상세(canonical 라우트가 탭 href 트리
@@ -64,31 +155,97 @@ export const TABS = [
 // 세그먼트)뿐 아니라 TABS의 `now.href` 자체가 «bare» `/flow`라 그 형태도 인식해야 한다
 // (선생님 실측 2026-07-30 — 탭을 누른 그 순간의 pathname은 bare, proxy.ts 301이 실 slug로
 // 착지시키기 «전»의 찰나에 하이라이트가 꺼졌다). `/glance`(옛 라우트)의 bare 인식과 대칭.
-function isFlowPath(pathname: string): boolean {
-  if (pathname === '/flow' || pathname.startsWith('/flow/')) return true;
+// story #4016 — 'flow'가 더 이상 유일한 값이 아니다(v3 ON이면 dest.work.path='work-list')라
+// 판정 대상 조각을 인자로 받는다(하드코딩 제거, AC1 "활성 판정도 같은 목적지 값 기준").
+function isResourcePath(pathname: string, resourceFragment: string): boolean {
+  if (pathname === `/${resourceFragment}` || pathname.startsWith(`/${resourceFragment}/`)) return true;
   const segments = pathname.split('/').filter(Boolean);
-  return segments[2] === 'flow';
+  return segments[2] === resourceFragment;
+}
+
+// static kind 목적지의 쿼리 부분을 뗀다 — usePathname()은 쿼리스트링을 안 싣는다.
+function staticPathOnly(staticPath: string): string {
+  return staticPath.split('?')[0]!;
+}
+
+// dest.chats.path(예 '/chats')처럼 정확일치+하위 경로(/chats/{id})까지 인식해야 하는 값.
+function isStaticPathOrChild(pathname: string, staticPath: string): boolean {
+  const pathOnly = staticPathOnly(staticPath);
+  return pathname === pathOnly || pathname.startsWith(`${pathOnly}/`);
+}
+
+// story #4016 CHANGES(페드루 PO 지적, 2026-09-17 14:46Z) — dest.approvals.path(예
+// '/inbox?tab=gates')는 옛 코드부터 «정확일치만»이었다(/inbox/x는 "결재"가 아니라
+// "전체" — 알림 상세 등 /inbox 하위 라우트가 생기면 그건 더보기 소관). 위
+// isStaticPathOrChild처럼 하위 경로까지 인식하면 실질 영향은 지금 0(하위 라우트가
+// 아직 없음)이지만 AC2 "플래그 OFF 바이트 동일" 계약과 어긋나 정확일치로 좁힌다.
+function isStaticPathExact(pathname: string, staticPath: string): boolean {
+  return pathname === staticPathOnly(staticPath);
 }
 
 // 판정 순서(구체적인 것부터, 마지막이 fallback):
-//  ① `/{ws}/{proj}/flow`(+하위) 또는 `/glance`(+하위, 옛 라우트 — 리다이렉트 경유로 도착할
-//     수 있어 계속 인식) — "지금" 탭 자기 자신.
-//  ② /inbox(정확일치) 또는 /gates/* — "결재함". gate 상세는 #1951에서 parentTab=/inbox로
-//     이미 확定(gates/[id]/page.tsx의 useSyntheticParentTabHistory('/inbox') 그대로).
-//  ③ /chats(+하위) — "채팅".
+//  ① `/{ws}/{proj}/{dest.work.path}`(+하위) 또는 `/glance`(+하위, 옛 라우트 — 리다이렉트
+//     경유로 도착할 수 있어 계속 인식) — "지금" 탭 자기 자신.
+//  ② dest.approvals.path(쿼리 뗀 경로, 정확일치) 또는 /gates/* — "결재함". gate 상세는
+//     #1951에서 parentTab=/inbox로 이미 확定(gates/[id]/page.tsx의
+//     useSyntheticParentTabHistory('/inbox') 그대로).
+//  ③ dest.chats.path(+하위) — "채팅".
 //  ④ 그 외 전부 — "전체"(more). doc 상세(parentTab=/more)·story 상세(parentTab=/more)·
 //     board/goals/loops/sprints/standup/retro/organization/settings/... 는 애초에 4탭
 //     밖의 프로젝트/org 영역이라 more 페이지 자체가 이들의 진입점(ITEMS 목록, #1958 확定)
 //     — "전체"가 이 전부의 소속 탭이라는 게 이미 그 스텁 페이지 설계로 확定돼 있다.
-export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] {
-  if (isFlowPath(pathname) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
-  if (pathname === '/inbox' || pathname.startsWith('/gates/')) return 'approvals';
-  if (pathname === '/chats' || pathname.startsWith('/chats/')) return 'chat';
+// navV3Flags 생략 시 DEFAULT_NAV_V3_FLAGS(전부 OFF)로 판정 — 기존 1-인자 호출부(테스트
+// 포함)와 바이트 동일 동작(AC2).
+// story #4006 AC8 — v3(anyV3Enabled) 판정 分岐 추가: 「오늘」이 자기 목적지(dest.today.path)
+// 뿐 아니라 옛 「결재」 경로(gates/*·inbox?tab=gates)까지 흡수한다(승인 탭 폐지, §2).
+// 「일감」은 이제 key가 'now'가 아니라 'work'(V3_TABS와 정합). 플래그 전부 OFF면 기존
+// 판정 그대로(AC8 "플래그 OFF 바이트 무변").
+// story #4278(민 기기 점검 4번) — 「일감」 위 줄(WorkspaceFrameTabs: 목록 · 보드 · 스프린트 · 에픽 · 회고 · 가설)의 나머지 다섯
+// 화면에서 탭바가 «전체»를 켰다(보드만 «일감»). 사이드바는 #3844에서 같은 결함을 WORKSPACE_FRAME_TAB_PATHS(SSOT)로 고쳤는데
+// 탭바는 dest.work.path 한 조각만 봤다 — 같은 목록을 읽어 두 곳이 한 판정을 쓴다(탭을 늘리면 둘 다 자동으로 따라감).
+function isWorkPath(pathname: string, workPath: string): boolean {
+  return [workPath, ...WORKSPACE_FRAME_TAB_PATHS].some((p) => isResourcePath(pathname, p));
+}
+
+export function getActiveTabKey(
+  pathname: string,
+  navV3Flags: NavV3Flags = DEFAULT_NAV_V3_FLAGS,
+): TabDef['key'] {
+  const dest = resolveNavV3Destinations(navV3Flags);
+  const anyV3Enabled = navV3Flags.todayV3Enabled || navV3Flags.chatV3Enabled || navV3Flags.connectRulesV3Enabled;
+  if (anyV3Enabled) {
+    if (isStaticPathOrChild(pathname, dest.today.path)) return 'today';
+    if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'today';
+    if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
+    if (isWorkPath(pathname, dest.work.path)) return 'work';
+    return 'more';
+  }
+  if (isWorkPath(pathname, dest.work.path) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
+  if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'approvals';
+  if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
   return 'more';
 }
 
-export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
+export function MobileTabBar({
+  chatUnreadTotal,
+  navV3Flags = DEFAULT_NAV_V3_FLAGS,
+}: {
+  chatUnreadTotal: number;
+  navV3Flags?: NavV3Flags;
+}) {
   const t = useTranslations('mobileTabBar');
+  // story #4016 — app-sidebar.tsx(4386)와 동일하게 플래그별 목적지를 이 모듈에서 재계산
+  // (복붙 규칙 0, AC2).
+  const dest = useMemo(() => resolveNavV3Destinations(navV3Flags), [navV3Flags]);
+  // story #4211 — 사이드바(app-sidebar resourceLink)와 같은 소스(대시보드 컨텍스트의 현재 org slug·project slug)로
+  // resource 탭을 /{ws}/{proj}/{resource} 직접 경로로. 컨텍스트 밖이거나 slug를 모르면 bare(안전망).
+  const { orgId, orgMemberships, currentProjectSlug, projectPathUnresolved } = useDashboardContext();
+  // story #4226 — flat(static kind) 탭 링크는 처음부터 `?p=`(전환 대기 중 목표 → 유효 프로젝트 순 · use-flat-href). scoped 탭은 경로가 프로젝트.
+  const flatHref = useFlatHref();
+  const scope = useMemo<TabHrefScope>(() => ({
+    orgSlug: orgMemberships.find((o) => o.orgId === orgId)?.orgSlug,
+    projectSlug: currentProjectSlug,
+  }), [orgMemberships, orgId, currentProjectSlug]);
   // story #3824 CHANGES②(페드루 PO 確定) — "now"·"chat" 탭은 nav 네임스페이스의 zoneNow·
   // chats 키를 그대로 공유(같은 labelKey — 위 TABS 주석 참고).
   const tNav = useTranslations('nav');
@@ -108,6 +265,16 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
   // FastAPI가 미인식 쿼리파라미터를 무시하므로 안전한 no-op(기존과 동일 org-wide 동작) — 배포되면
   // 자동으로 개인화 적용.
   const [pendingCount, setPendingCount] = useState(0);
+  const mux = useSseMultiplexerContext();
+  const muxRef = useRef(mux);
+  useEffect(() => { muxRef.current = mux; }, [mux]);
+
+  // story #4263 AC2 — 사이드바와 같은 라이브 갱신(게이트 SSE 이벤트 · #4245 워터마크 판정 공유). 이 구독이 있으니 SSE가 살아 있는 동안엔
+  // 창 포커스 재조회가 필요 없다(아래 loadPendingCount가 생략). 데스크톱(탭바 숨김)에선 구독도 안 한다(아래 effect와 같은 폭 판정).
+  useEffect(() => {
+    if (!mux || typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
+    return subscribeDesignatedPendingCount(mux, setPendingCount);
+  }, [mux]);
 
   useEffect(() => {
     // 유나 가디언 지적(#2249 병합 처리) — 탭바 자체는 `lg:hidden`(CSS 시각 게이팅)이지만
@@ -128,38 +295,57 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
         // story #3084(2026-08-25 층1, PO 확定) — assigned_to_me(넓은 project-access 질문)를
         // designated-pending-count(순수 "내가 지정 결재자인 미해소 건", room 추론 0)로 교체
         // — app-sidebar.tsx와 동일 SSOT 전환(그 파일 주석 참고).
-        const res = await fetchWithAuth('/api/gates/designated-pending-count');
-        if (!res.ok) return;
-        const json = (await res.json()) as { count?: number };
-        if (!cancelled) setPendingCount(typeof json.count === 'number' ? json.count : 0);
+        // story #4171 — 사이드바와 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거).
+        const count = await fetchDesignatedPendingCount();
+        if (count !== null && !cancelled) setPendingCount(count);
       } catch {
         // 배지 카운트 실패는 치명적이지 않음 — 숫자 없이 탭만 정상 동작.
       }
     }
 
     void loadPendingCount();
-    window.addEventListener('focus', loadPendingCount);
+    // story #4263 AC2 — SSE가 살아 있으면(mux.isAlive · 4252와 같은 판정) 위 구독이 수를 따라가고 있어 포커스 재조회를 생략한다.
+    // 죽었거나 끊겼던 뒤엔 재조회(정확성 우선).
+    const handleFocus = () => {
+      if (muxRef.current?.isAlive()) return;
+      void loadPendingCount();
+    };
+    window.addEventListener('focus', handleFocus);
     return () => {
       cancelled = true;
-      window.removeEventListener('focus', loadPendingCount);
+      window.removeEventListener('focus', handleFocus);
     };
   }, []);
 
-  const activeKey = getActiveTabKey(pathname);
+  // story #4217 — 못 푼 프로젝트 경로(오류 상태)에선 어느 탭도 활성 아님(링크는 bare라 그 경로를 가리키지 않는다).
+  const activeKey = projectPathUnresolved ? null : getActiveTabKey(pathname, navV3Flags);
+  // story #4006 AC8 — v3(anyV3Enabled)면 4탭이 V3_TABS로 바뀐다(플래그 OFF는 기존 TABS
+  // 그대로, 바이트 무변).
+  const tabs = resolveTabsForFlags(navV3Flags);
 
   return (
     <nav
       aria-label={t('navLabel')}
+      data-testid="mobile-tab-bar"
       // story #3756 — 탭 바 높이는 이제 globals.css `.dashboard-shell-root`가 소유한
       // `--mobile-tab-bar-h`(4rem, 기존 h-16과 동일값) 토큰을 참조한다(두 벌 상수 금지 —
       // 이 값을 바꾸려면 globals.css 그 한 줄만 고치면 우하단 fixed 요소들의 인셋도 함께 맞다).
       className="flex h-[var(--mobile-tab-bar-h)] shrink-0 border-t border-border bg-card lg:hidden"
     >
-      {TABS.map(({ key, href, icon: Icon, labelKey, namespace }) => {
+      {tabs.map((tab) => {
+        const { key, icon: Icon, labelKey, namespace } = tab;
+        const href = resolveTabHref(tab, dest, scope, flatHref);
         const active = key === activeKey;
+        // story #4226 — 지금 보는 바로 그 페이지를 가리키는 탭은 프리패치하지 않는다(로컬 prod 빌드 실측: 착지 ≈1.4초 뒤
+        // 현재 페이지 RSC 데이터 프리패치 1건 — 이미 떠 있는 화면이라 쓸 곳이 없다). «활성»이 아니라 «경로 일치»로 가른다 —
+        // 채팅 탭은 대화 상세(/chats/{id})에서도 활성이지만 거기선 /chats 프리패치가 목록 복귀를 빠르게 한다.
+        const isCurrentPage = staticPathOnly(href) === pathname;
         // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
         // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
-        const badge = key === 'approvals' && pendingCount > 0
+        // story #4006 AC8 — v3 4탭엔 「승인」이 없다. 같은 pendingCount를 「오늘」 탭
+        // 배지로 그대로 옮겨 붙인다(승인 큐가 「오늘」의 결정 큐로 흡수됐다는 뜻 —
+        // PO 確定, 위 V3_TABS 주석 참고. 새 fetch 0).
+        const badge = (key === 'approvals' || key === 'today') && pendingCount > 0
           ? pendingCount
           : key === 'chat' && chatUnreadTotal > 0
             ? chatUnreadTotal
@@ -182,6 +368,7 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
           <Link
             key={key}
             href={href}
+            prefetch={isCurrentPage ? false : undefined}
             aria-current={active ? 'page' : undefined}
             className={cn(
               'relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]',

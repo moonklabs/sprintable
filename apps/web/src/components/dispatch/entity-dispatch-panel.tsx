@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -8,12 +8,18 @@ import { useToast } from '@/components/ui/toast';
 import { normalizeAssigneePatch } from '@/components/kanban/types';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { memberRowLabels } from '@/lib/member-display';
+import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 interface TeamMember {
   id: string;
   name: string;
   type: 'human' | 'agent';
   is_active: boolean;
+  // story #3997 CHANGES(페드루 PO 지적 2026-09-17) — 이 자리가 실은 진짜 "담당자
+  // 선택"(스토리·doc·에픽 배정+디스패치)이라 「시스템 발행」을 걸러야 한다.
+  runtime_type?: string | null;
 }
 
 interface EntityDispatchPanelProps {
@@ -34,14 +40,30 @@ export function EntityDispatchPanel({
   mobileMode,
 }: EntityDispatchPanelProps) {
   const [members, setMembers] = useState<TeamMember[]>([]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const tc = useTranslations('common');
+  const rowLabels = useMemo(() => memberRowLabels(members, tc, () => ''), [members, tc]);
+
   const [assigneeId, setAssigneeId] = useState<string>(currentAssigneeId ?? '');
   const [dispatching, setDispatching] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  // story #4349(전수 8번) — «더 보기» 메뉴는 스토리 상세 스크롤 면(`overflow-y-auto`) 안이라 면 아래 끝에서 잘린 채였다 → body로 포털
+  // (AnchoredPopover · 아래 모자라면 위로 · 가로는 4342 클램프 그대로). 포털이라 바깥 클릭 판정에 메뉴도 «안»으로 센다.
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  // 포털이라 DOM 순서상 «더 보기» 뒤가 아니다 → 열면 항목에 초점 · Tab 넘김/Esc = 닫고 «더 보기»로(공용 훅).
+  const closeMore = useCallback(() => setMoreOpen(false), []);
+  const moreKeys = usePortalMenuKeys({ open: moreOpen, onClose: closeMore, popoverRef: moreMenuRef, triggerRef: moreBtnRef, kind: 'menu' });
   const { addToast } = useToast();
   const t = useTranslations('board');
-  // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
-  const dispatchTitle = !assigneeId ? t('dispatchNeedsAssignee') : t('dispatchTooltip');
+  // story #4357(유나 공통 모양 · 4348과 같은 결) — 담당자가 없어 꺼진 까닭은 title(호버)이 아니라 **보이는 한 줄**. 버튼은
+  // aria-disabled(탭 순서에 남아 초점 · 화면 읽기가 닿음) + aria-describedby로 그 줄을 가리키고, 누름은 handleDispatch 첫 줄이 막는다.
+  // 전달 중(dispatching)은 잠깐 꺼지는 것이라 까닭 줄 없이 네이티브 disabled. 켜져 있을 때 title은 «무엇을 하나» 설명(f5ae74e4 · Kickoff와 구분).
+  // 까디르(4761 비차단 ①) — 전달 중에 고르개를 비우면 네이티브 disabled(바쁨)와 까닭 줄이 같이 섰다. 바쁨이 이긴다(«busy 줄 없음»).
+  const needsAssignee = !assigneeId && !dispatching;
+  const reasonId = useId();
+  const menuReasonId = useId();
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 아래
   // members 로드 effect가 재요청되게 얹는다(다른 opt-in 컴포넌트와 동일 패턴).
   const orgSyncVersion = useOrgSyncVersion();
@@ -55,9 +77,8 @@ export function EntityDispatchPanel({
   useEffect(() => {
     if (!moreOpen) return;
     const handler = (e: MouseEvent | TouchEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
-        setMoreOpen(false);
-      }
+      // 포털된 메뉴(moreMenuRef)는 body 직속 — 공용 규칙이 포털 팝오버 안을 «안»으로 센다.
+      if (isOutsidePress(moreRef.current, e.target)) setMoreOpen(false);
     };
     document.addEventListener('mousedown', handler as EventListener);
     document.addEventListener('touchstart', handler as EventListener);
@@ -72,7 +93,7 @@ export function EntityDispatchPanel({
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((json) => {
         const data = (json?.data ?? json) as TeamMember[];
-        setMembers(data.filter((m) => m.is_active));
+        setMembers(data.filter((m) => m.is_active && !isSystemPublisher(m.runtime_type)));
       })
       .catch(() => {});
   }, [projectId, orgSyncVersion]);
@@ -129,66 +150,88 @@ export function EntityDispatchPanel({
   }, [assigneeId, dispatching, entityType, entityId, projectId, onAssigneePatched, addToast, t]);
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <select
-        value={assigneeId}
-        onChange={(e) => setAssigneeId(e.target.value)}
-        className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-      >
-        <option value="">{t('assigneeSelectPlaceholder')}</option>
-        {members.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        disabled={!assigneeId || dispatching}
-        onClick={() => void handleDispatch()}
-        title={dispatchTitle}
-        className={cn(
-          'shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
-          mobileMode === 'assignee-only' ? 'hidden md:flex' : 'flex',
-          assigneeId && !dispatching
-            ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-            : 'cursor-not-allowed bg-muted text-muted-foreground',
-        )}
-      >
-        <Zap className="size-3.5" />
-        {dispatching ? t('dispatching') : t('dispatch')}
-      </button>
-      {mobileMode === 'assignee-only' && (
-        <div ref={moreRef} className="relative md:hidden">
-          <button
-            type="button"
-            onClick={() => setMoreOpen((o) => !o)}
-            className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
-            aria-label={t('moreOptionsAria')}
-          >
-            <MoreHorizontal className="size-4" />
-          </button>
-          {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
-          {moreOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
-              <button
-                type="button"
-                disabled={!assigneeId || dispatching}
-                onClick={() => { void handleDispatch(); setMoreOpen(false); }}
-                title={dispatchTitle}
-                className={cn(
-                  'flex w-full items-center gap-1.5 px-3 py-2 text-sm transition',
-                  assigneeId && !dispatching
-                    ? 'text-foreground hover:bg-muted'
-                    : 'cursor-not-allowed text-muted-foreground',
-                )}
-              >
-                <Zap className="size-3.5" />
-                {dispatching ? t('dispatching') : t('dispatch')}
-              </button>
-            </div>
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={assigneeId}
+          onChange={(e) => setAssigneeId(e.target.value)}
+          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="">{t('assigneeSelectPlaceholder')}</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {rowLabels.get(m.id)}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          disabled={dispatching}
+          aria-disabled={needsAssignee || undefined}
+          aria-describedby={needsAssignee ? reasonId : undefined}
+          onClick={() => void handleDispatch()}
+          title={needsAssignee ? undefined : t('dispatchTooltip')}
+          className={cn(
+            'shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
+            mobileMode === 'assignee-only' ? 'hidden md:flex' : 'flex',
+            assigneeId && !dispatching
+              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+              : 'cursor-not-allowed bg-muted text-muted-foreground',
           )}
-        </div>
+        >
+          <Zap className="size-3.5" />
+          {dispatching ? t('dispatching') : t('dispatch')}
+        </button>
+        {mobileMode === 'assignee-only' && (
+          <div ref={moreRef} className="relative md:hidden">
+            <button
+              ref={moreBtnRef}
+              {...moreKeys.triggerProps}
+              type="button"
+              onClick={() => setMoreOpen((o) => !o)}
+              // story #4355 — 열린 채 초점이 트리거에 남아도(포인터로 연 뒤 등) Esc로 닫힘 · Tab은 메뉴로(공용 훅).
+              onKeyDown={moreKeys.onTriggerKeyDown}
+              className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
+              aria-label={t('moreOptionsAria')}
+            >
+              <MoreHorizontal className="size-4" />
+            </button>
+            {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
+            {moreOpen && (
+              <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={dispatching}
+                  aria-disabled={needsAssignee || undefined}
+                  aria-describedby={needsAssignee ? menuReasonId : undefined}
+                  // 꺼진 채 누르면 메뉴를 닫지 않는다 — 까닭 줄을 읽을 수 있게(4348 메뉴 항목과 같게).
+                  onClick={() => { if (needsAssignee) return; void handleDispatch(); setMoreOpen(false); }}
+                  title={needsAssignee ? undefined : t('dispatchTooltip')}
+                  className={cn(
+                    'flex w-full items-center gap-1.5 px-3 py-2 text-sm transition',
+                    assigneeId && !dispatching
+                      ? 'text-foreground hover:bg-muted'
+                      : 'cursor-not-allowed text-muted-foreground',
+                  )}
+                >
+                  <Zap className="size-3.5" />
+                  {dispatching ? t('dispatching') : t('dispatch')}
+                </button>
+                {needsAssignee && (
+                  // 까디르(4761 비차단 ②) — role=menu 안의 자식은 menuitem · group · separator뿐 → 까닭 줄은 role="none"(읽기는 describedby로).
+                  <p id={menuReasonId} role="none" className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
+                )}
+              </AnchoredPopover>
+            )}
+          </div>
+        )}
+      </div>
+      {/* 고르개+버튼 줄 아래 한 줄 · 꺼져 있는 동안만. «담당자만» 모드의 좁은 화면은 버튼이 숨고 «더 보기» 메뉴 안 줄이 대신한다. */}
+      {needsAssignee && (
+        <p id={reasonId} className={cn('mt-1 break-keep text-xs text-muted-foreground', mobileMode === 'assignee-only' && 'hidden md:block')}>
+          {t('dispatchNeedsAssignee')}
+        </p>
       )}
     </div>
   );

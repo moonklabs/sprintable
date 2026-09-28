@@ -6,6 +6,7 @@
  * (가설 반증 · 스토리 정체)만 클러스터로 묶는다. buildNowFace는 이 두 타입을 더는 flat 행으로
  * 안 올린다(중복 표시 방지).
  */
+import { withProjectParam } from '@/lib/with-project-param';
 import type { RawAttentionItem } from './derive-now-face';
 
 export interface FalsifiedClusterItem {
@@ -58,9 +59,13 @@ export interface ViewerContext {
 
 // story #2858 — loop-measure-due 큐 페이지도 동일 cross-project 규율을 승계한다(AC5).
 // export해 derive-loop-queue.ts에서 재사용 — href 조립·병기 판정 로직 이원화 방지.
-export function projectHref(viewer: ViewerContext | undefined, projectSlug: string | null, path: string): string {
+// story #4231 4차 — slug를 모르면(뷰어 · 맵 밖) 예전엔 bare path였다. 그 항목의 project_id를 알면 `?p=`로 싣는다(옛 자원 경로는 proxy가
+// p로 scoped 경로를 정한다 · #4253) — 둘 다 모르면 주소 그대로(지어내지 않음). 래칫은 이 함수를 «프로젝트를 싣는 함수»로 센다.
+export function projectHref(
+  viewer: ViewerContext | undefined, projectSlug: string | null, path: string, projectId: string | null = null,
+): string {
   if (viewer?.orgSlug && projectSlug) return `/${viewer.orgSlug}/${projectSlug}${path}`;
-  return path;
+  return withProjectParam(path, projectId);
 }
 
 export function crossProjectLabel(viewer: ViewerContext | undefined, itemProjectId: string | null, projectSlug: string | null): string | null {
@@ -134,7 +139,7 @@ export function deriveAttentionClusters(
           kind: 'overdueHypothesis',
           title: a.statement ?? t('clusterUnclosedOverdueHypothesisTitle'),
           days: a.overdue_days,
-          href: projectHref(viewer, a.project_slug, a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow'),
+          href: projectHref(viewer, a.project_slug, a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow', a.project_id),
           crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
         },
         days: a.overdue_days,
@@ -151,7 +156,7 @@ export function deriveAttentionClusters(
           // 조용히 드롭된다(NextMakerScreen이 view==='flow'일 때만 소비). 정본 경로
           // handleNavigateToGoal(flow-client.tsx)이 이미 view=flow를 명시 세팅하는 것과 동형으로
           // 딥링크도 명시한다.
-          href: projectHref(viewer, a.project_slug, a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow'),
+          href: projectHref(viewer, a.project_slug, a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow', a.project_id),
           crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
         },
         days: a.overdue_days,
@@ -168,7 +173,7 @@ export function deriveAttentionClusters(
           // 조용히 드롭된다(NextMakerScreen이 view==='flow'일 때만 소비). 정본 경로
           // handleNavigateToGoal(flow-client.tsx)이 이미 view=flow를 명시 세팅하는 것과 동형으로
           // 딥링크도 명시한다.
-          href: projectHref(viewer, a.project_slug, a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow'),
+          href: projectHref(viewer, a.project_slug, a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow', a.project_id),
           crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
         },
         days: a.done_days,
@@ -185,7 +190,7 @@ export function deriveAttentionClusters(
           actual,
           hasOutcome: actual !== null && target !== null,
           supersededId: a.superseded_by_hypothesis_id,
-          href: projectHref(viewer, a.project_slug, a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow'),
+          href: projectHref(viewer, a.project_slug, a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow', a.project_id),
           crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
         },
         days: a.falsified_days,

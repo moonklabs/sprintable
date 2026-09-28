@@ -1,11 +1,14 @@
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
+import { ACTIVATION_COLLAPSED_COOKIE, ACTIVATION_HINT_COOKIE, isActivationCollapsed, parseActivationHint } from '@/lib/activation-hint';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { logServerTiming, withServerTiming } from '@/lib/server-timing';
 
 interface MemberContext {
   id: string;
@@ -32,7 +35,7 @@ interface OrgMembership {
   timezone?: string | null;
 }
 
-export default async function AuthenticatedLayout({
+async function AuthenticatedLayoutBody({
   children,
 }: {
   children: React.ReactNode;
@@ -46,9 +49,17 @@ export default async function AuthenticatedLayout({
   // ("화면이 그리는 컨텍스트의 정본은 URL" — 유나양 규격 §2093).
   const pathOrgId = hdrs.get('x-resolved-org-id') ?? undefined;
   const pathProjectId = hdrs.get('x-resolved-project-id') ?? undefined;
+  // story #4219 D1 — proxy가 resolve한 project slug(인코딩돼 옴). 있으면 slug만 알려고 /projects/{id}를 다시 부르지 않는다.
+  const pathProjectSlug = decodeHeaderValue(hdrs.get('x-resolved-project-slug'));
+
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
+  // readNavV3FlagsFromEnv() 한 곳(nav-v3-flags-server.ts)으로 — 이 함수 안에서 세
+  // env 이름을 따로 또 읽지 않는다. 아래 buildLoginRedirect 호출(session 없음/401)의
+  // 기본 착지도 이 값으로 정렬하려 원래 자리(§148 근방)보다 앞으로 당겼다.
+  const navV3Flags = readNavV3FlagsFromEnv();
 
   const session = await getServerSession();
-  if (!session) redirect(buildLoginRedirect(currentPath));
+  if (!session) redirect(buildLoginRedirect(currentPath, navV3Flags));
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const authHeader = { Authorization: `Bearer ${session.access_token}` };
@@ -60,7 +71,7 @@ export default async function AuthenticatedLayout({
   ]);
 
   // 401(인증 만료)만 /login 리다이렉트, 다른 에러(500 등)는 children 렌더링 유지
-  if (!meRes || meRes.status === 401) redirect(buildLoginRedirect(currentPath));
+  if (!meRes || meRes.status === 401) redirect(buildLoginRedirect(currentPath, navV3Flags));
 
   // 🔴 org 없는 유저(신규 OAuth 가입자 등 — team_member 미생성 시 /me 404) → 온보딩으로.
   // auth/callback이 is_new_user 무관 /inbox 리다이렉트하는 결함을 layout에서 OAuth+email/pw 공통 커버
@@ -76,8 +87,8 @@ export default async function AuthenticatedLayout({
 
   const me = (await meRes.json()) as MemberContext | null;
   if (!me?.org_id) redirect('/onboarding');
-  const memberships: { projectId: string; projectName: string }[] =
-    membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string }[]) : [];
+  const memberships: { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[] =
+    membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[]) : [];
   // story #2885 — sentinel(0-프로젝트 org) 오염 가드, 근거는 resolve-project-memberships.ts 참고.
   let projectMemberships = resolveProjectMemberships(memberships, me);
 
@@ -106,36 +117,67 @@ export default async function AuthenticatedLayout({
   // bare-link 결함의 진짜 근본원인.
   const projectAuthHeader = { ...authHeader, 'X-Org-Id': pathOrgId ?? me?.org_id ?? '' };
   const projectInfoTargetId = pathProjectId ?? me?.project_id;
-  const projectInfo = projectInfoTargetId
-    ? await fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: projectAuthHeader, cache: 'no-store' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((json: { name?: string; slug?: string | null } | null) => json)
-        .catch(() => null)
-    : null;
+  // story #4032(CLS 처방 CHANGES-1, PO 지적) — activation 완주 여부를 서버가 org 컨텍스트가
+  // 확定된 이 시점에 조회해 둔다(신규 왕복 1개, projectInfo와 병렬). JWT app_metadata
+  // 빌더에 새 클레임을 얹는 대신(org/project 해소 이력 사고가 반복된 자리, 블래스트 반경
+  // 과다) 이 레이아웃이 이미 하는 서버조회 패턴을 그대로 재사용한다 — 실패/불명이면
+  // undefined로 흘려보내 클라이언트가 기존처럼 알아낸다(과다신뢰 없음).
+  // story #4219 F1 — 체크리스트를 첫 문서 임계 경로에서 뺀다(표시용 힌트 쿠키 · lib/activation-hint 참고). 힌트가
+  // 이 org의 것이면 서버 조회를 생략: complete → 배너 0(클라가 임계 경로 밖에서 한 번 다시 확인) · incomplete → 배너가
+  // 자기 스켈레톤(같은 크기)으로 자리를 잡고 클라 조회로 채움. 힌트가 없을 때만 예전처럼 서버에서 기다린다.
+  const cookieStore = await cookies();
+  const activationOrgId = pathOrgId ?? me?.org_id;
+  const activationHint = parseActivationHint(decodeHeaderValue(cookieStore.get(ACTIVATION_HINT_COOKIE)?.value), activationOrgId);
+  const activationCollapsed = isActivationCollapsed(decodeHeaderValue(cookieStore.get(ACTIVATION_COLLAPSED_COOKIE)?.value), activationOrgId);
+  // story #4219 D1 — 경로 프로젝트의 slug는 proxy resolve가 이미 줬고 이름은 멤버십에 있으면 단건 조회 불요.
+  const needProjectInfo = Boolean(projectInfoTargetId)
+    && !(pathProjectId && pathProjectSlug && projectMemberships.some((m) => m.projectId === pathProjectId));
+  const [projectInfo, serverActivationComplete] = await Promise.all([
+    needProjectInfo && projectInfoTargetId
+      ? fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: projectAuthHeader, cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((json: { name?: string; slug?: string | null } | null) => json)
+          .catch(() => null)
+      : Promise.resolve(null),
+    activationHint
+      ? Promise.resolve(undefined)
+      : fetch(`${fastapiUrl}/api/v2/activation/checklist`, { headers: projectAuthHeader, cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((json: { all_complete?: boolean } | null) => json?.all_complete)
+          .catch(() => undefined),
+  ]);
+  const activationChecklist = activationHint === 'complete' ? true : activationHint === 'incomplete' ? undefined : serverActivationComplete;
   // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 위 단건조회
   // (GET /projects/{id})가 정상 프로젝트(slug 有)인데도 이따금 slug 없이/실패 응답해 사이드바가
   // slug 없는 bare 링크만 만들었다(근본원인=위 X-Org-Id 누락). 리스트 엔드포인트(GET /projects)는
   // 같은 프로젝트를 직접 대조로 항상 정확히 낸다는 걸 확認했다 — 단건조회가 비면 그 자리에서
   // 포기하지 않고 리스트에서 한 번 더 찾는다.
-  const projectInfoFallback = projectInfoTargetId && !projectInfo?.slug
+  const projectInfoFallback = needProjectInfo && projectInfoTargetId && !projectInfo?.slug
     ? await fetch(`${fastapiUrl}/api/v2/projects`, { headers: projectAuthHeader, cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((list: Array<{ id?: string; name?: string; slug?: string | null }> | null) =>
           list?.find((p) => p.id === projectInfoTargetId) ?? null)
         .catch(() => null)
     : null;
-  const currentProjectSlug = projectInfo?.slug ?? projectInfoFallback?.slug ?? undefined;
+  const currentProjectSlug = (pathProjectId ? pathProjectSlug : undefined) ?? projectInfo?.slug ?? projectInfoFallback?.slug ?? undefined;
   const projectInfoName = projectInfo?.name ?? projectInfoFallback?.name;
 
   const pathProjectKnown = pathProjectId ? projectMemberships.some((m) => m.projectId === pathProjectId) : true;
   if (pathProjectId && !pathProjectKnown && projectInfoName) {
-    projectMemberships = [...projectMemberships, { projectId: pathProjectId, projectName: projectInfoName }];
+    projectMemberships = [...projectMemberships, { projectId: pathProjectId, projectName: projectInfoName, projectSlug: currentProjectSlug, orgId: pathOrgId ?? me?.org_id ?? null }];
   }
   // PO 리뷰(§확認①) — 위 조회가 실패하면(네트워크·403 등) projectMemberships에 pathProjectId가
   // 안 들어간다. dashboard-shell.tsx가 이 경우 계정 상태의 옛 project_name으로 조용히
   // 폴백하지 않도록 `projectName` prop 자체를 pathProjectId 미스매치 시 넘기지 않는다 —
   // 틀린 이름을 보여주느니 이름을 비워 칩이 org만 보여주게 한다(유나양 §1-1: 모르면
   // 단정하지 않는다).
+  // story #4003(E-UX-OVERHAUL·셸 통합 2/N) — v3 3화면(오늘·대화·연결·규칙) 자신의
+  // `isTodayV3Enabled()` 등(today-v3.ts 등)과 동일한 env 게이트를 이 서버 레이아웃이
+  // 유일하게 읽어 DashboardShell→AppSidebar/MobileTabBar로 값만 내려보낸다(그 화면
+  // 파일들은 아직 develop에 없다 — 미착지 PR 4365/4370/4376에만 존재, 착지 뒤 3/N에서
+  // 이 직접 읽기를 그 헬퍼 import로 교체 예정). 레거시 sidebar(client component)는
+  // process.env를 못 읽어(non-NEXT_PUBLIC_) 이 서버 레이아웃이 유일한 읽기 지점 —
+  // 위 §56에서 이미 읽은 navV3Flags를 그대로 재사용(재읽기 없음, story #4017 CHANGES 2).
   const projectNameForDisplay = (!pathProjectId || pathProjectId === me?.project_id)
     ? (me?.project_name ?? undefined)
     : undefined;
@@ -168,10 +210,32 @@ export default async function AuthenticatedLayout({
       orgMemberships={orgMemberships}
       pathOrgId={pathOrgId}
       pathProjectId={pathProjectId}
+      serverResolvedPath={pathProjectId ? currentPath : undefined}
+      navV3Flags={navV3Flags}
+      initialActivationComplete={activationChecklist}
+      activationSeedFromHint={activationHint === 'complete'}
+      activationOrgId={activationOrgId}
+      initialActivationCollapsed={activationCollapsed}
     >
       <StorageCapacityToastProvider>
         <CrossProjectToastProvider>{children}</CrossProjectToastProvider>
       </StorageCapacityToastProvider>
     </DashboardShell>
   );
+}
+
+/**
+ * story #4219 C1 — dev 전용 서버 구간 마커(SERVER_TIMING_MARKERS=true일 때만): 이 레이아웃이 SSR 동안 낸 백엔드 호출별
+ * 시작·시간·연결 재사용 여부를 로그 한 줄로(서버 컴포넌트는 응답 헤더를 못 단다). 이름·시간만. 꺼져 있으면 그대로 통과.
+ */
+export default async function AuthenticatedLayout(props: Parameters<typeof AuthenticatedLayoutBody>[0]) {
+  const { value, spans, totalMs } = await withServerTiming(() => AuthenticatedLayoutBody(props));
+  if (spans.length > 0) logServerTiming('layout', 'ssr', totalMs, spans);
+  return value;
+}
+
+/** proxy가 인코딩해 실은 헤더·쿠키 값 풀기(잘못된 인코딩이면 없는 것으로). */
+function decodeHeaderValue(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  try { return decodeURIComponent(value); } catch { return undefined; }
 }

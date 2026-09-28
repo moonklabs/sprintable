@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -123,6 +124,22 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
     await mount();
     expect(container.querySelector('button[aria-label="목표 삭제"]')).toBeNull();
   });
+
+  // [SID:4345] 목표 삭제는 `hidden group-hover:flex`였다 — display:none이라 터치에선 늘 없고 키보드 탭 순서에서도 빠졌다.
+  // 이제 HOVER_REVEAL(호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점) + 초점 링. jsdom은 CSS를 안 입혀서 클래스 모양으로 핀한다.
+  it('human 삭제 트리거 = HOVER_REVEAL · 초점 링 · hidden 0 · 탭 순서 안([SID:4345])', async () => {
+    stubFetch([{ id: 'e1', title: 'E-CANVAS', status: 'active', story_count: 3, is_ai_generated: false }]);
+    await mount();
+    const del = container.querySelector<HTMLButtonElement>('button[aria-label="목표 삭제"]')!;
+    const tokens = del.className.split(/\s+/);
+    for (const t of [...HOVER_REVEAL.split(' '), ...HOVER_REVEAL_FOCUS_RING.split(' ')]) expect(tokens, t).toContain(t);
+    expect(tokens).not.toContain('hidden');
+    expect(tokens).not.toContain('group-hover:flex');
+    expect(tokens).toEqual(expect.arrayContaining(['min-h-6', 'min-w-6'])); // 누르는 자리 24×24(PO · 유나 10:01Z)
+    expect(tokens).toContain('-my-1'); // 24는 줄 높이에 안 얹는다 — 전엔 숨김이라 0 기여(까디르 4718)
+    expect(del.tabIndex).toBe(0);
+    expect(del.closest('.group')).not.toBeNull();
+  });
 });
 
 // story #2958(doc goals-outcome-ledger-redesign-handoff §2/§3) — 진척바 → 이중 신호(작업
@@ -136,7 +153,9 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
       { id: 'e2', title: '목표B', status: 'done', total_stories: 4, done_stories: 4 },
     ]);
     await mount();
-    expect(container.textContent).toContain('OUTCOMES');
+    // [SID:4282 · 유나 결정] ko 머리는 «목표 · 결과»(화면 이름 먼저 · 영어 대문자 0).
+    expect(container.textContent).toContain('목표 · 결과');
+    expect(container.textContent).not.toContain('OUTCOMES');
     expect(container.querySelector('h1')?.textContent).toBe('목표');
     expect(container.textContent).toContain('활성 1');
     expect(container.textContent).toContain('완료 1');
@@ -335,5 +354,43 @@ describe('GoalsClient — 로드맵 P2·PR-C L1(에픽 카드 elevation 토큰, 
     const row = [...container.querySelectorAll('div')].find((d) => d.className.includes('shadow-[var(--elev-card)]'));
     expect(row).toBeTruthy();
     expect(container.querySelector('.shadow-lg')).toBeNull();
+  });
+});
+
+// story #3945(#3942 배포 92 디자인 감사) — TopBarSlot 브레드크럼 라벨이 본문 마스트헤드와
+// 같이 <h1>이라 페이지에 h1이 2개(개념적으로 다른 두 제목)였다(헤딩 위계 위반). TopBarSlot은
+// 위에서 <div>로만 목업하므로(title을 그대로 렌더) 이 테스트가 실제로 그 중복 클래스를
+// 재현·고정한다.
+//
+// ⚠️jsdom은 CSS를 계산하지 않는다 — listPanel(본문 마스트헤드 h1을 담은 블록)이 데스크톱
+// (`hidden … lg:flex`)·모바일(`… lg:hidden`) 두 반응형 래퍼에 각각 렌더돼(오직 한 뷰포트만
+// 실제로 보이는, 실 브라우저에선 display:none이 접근성 트리에서 자동 제외되는 정당한 패턴)
+// 원문 h1이 정확히 2개(같은 문구) 나온다 — 이 자체는 이 스토리의 결함이 아니다(뷰포트마다
+// 실제로 보이는 h1은 1개). 이 카드가 고친 것은 «TopBarSlot이 3번째(다른 문구의) h1을
+// 추가로 얹던» 자리이므로, 테스트는 "h1이 정확히 2개(반응형 쌍)·전부 같은 본문 제목"으로
+// TopBarSlot의 기여분이 0임을 확認한다.
+describe('GoalsClient — 페이지 h1 1개 원칙(story #3945)', () => {
+  it('⭐TopBarSlot 브레드크럼은 h1을 안 만든다 — 남은 h1은 반응형 쌍(데스크톱+모바일)뿐, 전부 같은 본문 제목', async () => {
+    stubFetch([{ id: 'e1', title: '목표A', status: 'active', total_stories: 2, done_stories: 1 }]);
+    await mount();
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(2);
+    expect(new Set(h1s.map((h) => h.textContent))).toEqual(new Set(['목표']));
+    // TopBarSlot 라벨 특유의 className(text-sm font-medium)을 가진 h1은 0개여야 한다
+    // (TopBarSlot이 <p>로 낮아졌다면 이 클래스 조합의 h1 자체가 존재할 수 없다).
+    expect(h1s.some((h) => h.className.includes('text-sm font-medium'))).toBe(false);
+  });
+
+  // story #3946(유나 확認·페드루 정정) — 로디드 스냅샷만 재면 로딩 분기(본문 마스트헤드가
+  // 아직 안 그려진 순간)에서 h1이 0개가 되는 gap을 못 잡는다. fetch를 고의로 pending
+  // 상태로 묶어 두고 «첫 렌더 직후(아직 응답 전)»를 그대로 잰다.
+  it('⭐로딩 상태에도 h1이 정확히 1개다(sr-only 자리표시자)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-1" />)); });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+    expect(h1s[0]!.textContent).toBe('목표');
   });
 });

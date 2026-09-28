@@ -566,3 +566,113 @@ def test_stage_metadata_accepts_well_formed_values():
     validate_stage_metadata(
         _SCHEMA_2STAGE, {"kickoff": {"role": "PO", "action": "명세 작성"}, "qa_review": {"role": "QA", "action": "검증"}},
     )
+
+
+# ─── story #4092(§b) — validate_role_actor_kinds ────────────────────────────
+
+
+_STAGE_METADATA_2ROLE = {
+    "kickoff": {"role": "PO", "action": "명세 작성"},
+    "qa_review": {"role": "QA", "action": "검증"},
+}
+
+
+def test_role_actor_kinds_none_or_empty_always_passes():
+    """선택 필드 — 선언 없으면("모름") 검증 대상 자체가 없어 항상 통과."""
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, None)
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {})
+
+
+def test_role_actor_kinds_accepts_well_formed_declaration():
+    """양성대조 — 실재하는 role명 + 닫힌 어휘 값은 통과."""
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "human", "QA": "agent"})
+
+
+def test_role_actor_kinds_accepts_either():
+    """story #4243 — 세 번째 값 `either`(사람도 에이전트도 맡는 자리)."""
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "either", "QA": "agent"})
+
+
+def test_role_actor_kinds_rejects_value_outside_closed_vocabulary():
+    """⭐AC1 핵심 — role 이름 자체는 자유 문자열이라 안 막지만, kind 값은 {"human","agent"}
+    로 닫혀 있다(PO 확定: "닫힌 어휘는 값이지 role 이름이 아니다")."""
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "Human"})  # 대소문자 다름
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "bot"})  # 닫힌 어휘 밖
+
+
+def test_role_actor_kinds_rejects_role_name_not_present_in_stage_metadata():
+    """⭐AC1 — 오타 role명이 조용히 죽는 클래스 차단(validate_stage_metadata의 stage-key
+    부분집합 검증과 동일 정신). "Product Owner"는 이 정의 어디에도 없는 role."""
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"Product Owner": "human"})
+
+
+def test_role_actor_kinds_rejects_non_dict_value():
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, "human")  # dict 아님
+
+
+@pytest.mark.parametrize("value", [[], "", 0, False])
+def test_role_actor_kinds_rejects_falsy_non_dict_values(value):
+    """까디르 4606 P2 — «없음»은 None과 빈 dict뿐. falsy라도 모양이 틀린 값은 «없음»으로 통과시키지 않고 거부한다.
+    뮤테이션: 첫 가드를 `if not role_actor_kinds: return`으로 되돌리면 넷 다 RED."""
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, value)
+
+
+def test_role_actor_kinds_none_and_empty_dict_mean_unknown():
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, None)
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {})
+
+
+def test_role_actor_kinds_error_messages_route_through_i18n_catalog_not_raw_hardcoded():
+    """⭐페드루 PO CHANGES(2026-09-21, PR #4467) 핵심 pin — 정의 저자에게 닿는 이 3개
+    거부 사유는 raw f-string이 아니라 i18n_catalog(해요체)에서 온다. 뮤테이션 셀프체크:
+    i18n_catalog.py에서 이 3개 키를 지우면 이 테스트가 UnknownMessageKeyError로 RED가
+    된다(raw 문자열로 되돌아가면 애초에 이 assert 자체가 무의미해지므로 그 반대 방향
+    회귀도 이 테스트가 못 잡는다는 뜻 — 실제로는 이 3건이 baseline에 남아있지 않은지를
+    korean_user_strings_baseline.txt 자체가 §CI 스텝으로 대신 지킨다)."""
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError) as ei:
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, "human")
+    assert str(ei.value) == "role_actor_kinds는 role명과 human/agent/either 값으로 이루어진 객체여야 해요 — 받은 타입: str"
+
+    with pytest.raises(InvalidRoleActorKindsError) as ei:
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "bot"})
+    assert str(ei.value) == "role_actor_kinds[PO]의 값이 닫힌 어휘(human/agent/either) 밖이에요 — 받은 값: bot"
+
+    with pytest.raises(InvalidRoleActorKindsError) as ei:
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"Product Owner": "human"})
+    assert str(ei.value) == (
+        "role_actor_kinds에 선언한 role명이 stage_metadata 어디에도 없어요(오타로 의심돼요) — "
+        "선언한 role: Product Owner · 실재하는 role: ['PO', 'QA']"
+    )

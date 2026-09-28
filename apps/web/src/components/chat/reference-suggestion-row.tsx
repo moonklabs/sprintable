@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Link2, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { findReferenceCandidates, isCandidateRejected, rejectCandidate, type ReferenceCandidate } from '@/lib/reference-candidates';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 
 interface ReferenceSuggestionRowProps {
   messageId: string;
@@ -163,7 +164,10 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
             ) : (
               <>
                 <span className="flex-1">
-                  {t(c.kind === 'number' ? 'referenceCandidatePromptStory' : 'referenceCandidatePromptDoc', { token: c.raw })}
+                  {/* story #4120 — c.raw는 "#2249"류(숫자 kind) 또는 "#slug-v1"류(slug
+                      kind) — 항상 비한글 끝이라 hasBatchim의 숫자 읽기 표가 실제로 갈리는
+                      자리다(조사를 문자열에 고정하지 않는다). */}
+                  {t(c.kind === 'number' ? 'referenceCandidatePromptStory' : 'referenceCandidatePromptDoc', { token: c.raw, josa: pickEulReulJosa(c.raw) })}
                 </span>
                 <button
                   type="button"

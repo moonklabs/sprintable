@@ -1,6 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string; pinId: string }> };
@@ -9,7 +9,7 @@ type RouteParams = { params: Promise<{ id: string; pinId: string }> };
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const { id, pinId } = await params;
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     const _r = await proxyToFastapi(request, `/api/v2/visual-artifacts/${id}/pins/${pinId}`);
     if (!_r.ok) return _r;
@@ -21,7 +21,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { id, pinId } = await params;
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     const _r = await proxyToFastapi(request, `/api/v2/visual-artifacts/${id}/pins/${pinId}`);
     if (!_r.ok) return _r;

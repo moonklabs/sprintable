@@ -30,7 +30,9 @@ vi.mock('@/components/docs/use-recent-docs', () => ({
 vi.mock('@/components/docs/use-tree-expanded', () => ({
   useTreeExpanded: () => ({ isExpanded: () => false, toggleExpanded: vi.fn(), expandFolder: vi.fn() }),
 }));
-vi.mock('@/lib/use-swipe-drawer', () => ({
+// [SID:4288] closedDrawerProps(닫힌 서랍 속성)는 실제 것을 쓴다 — 훅만 닫힌 상태로 고정.
+vi.mock('@/lib/use-swipe-drawer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/use-swipe-drawer')>()),
   useSwipeDrawer: () => ({ progress: 0, dragging: false }),
 }));
 vi.mock('@/hooks/use-focus-trap', () => ({ useFocusTrap: () => ({ current: null }) }));
@@ -368,6 +370,27 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     expect(container.textContent).toContain('불러오지 못했어요');
   });
 
+  // story #4310 AC3 — 트리 요청이 응답 없이 걸려도 fetchWithAuth 시간 제한(30s) 뒤 실패 문구 + 다시 시도(망 오류와 같은 갈래).
+  // 예전엔 «불러오는 중»이 CF 524(~100초)까지 그대로였다. 실제 fetch처럼 신호가 끊겨야만 reject한다.
+  it('⭐트리 요청이 응답 없이 걸려도 30s 뒤 «불러오지 못했어요» + 다시 시도(그 전엔 불러오는 중)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+      })));
+      await mountWithIndex();
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+      expect(container.textContent).not.toContain('불러오지 못했어요');
+      expect(container.textContent).toContain('불러오는 중');
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(container.textContent).toContain('불러오지 못했어요');
+      expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+      expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes('다시 시도'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // story #3784(카디르 QA·페드루 재현, 10:02Z) — 실패 뒤 「다시 시도」를 누른 순간부터 그
   // 재시도가 응답하기 전까지, fetchTree()가 loading을 다시 켜지 않으면
   // loading=false·loadError=false·tree=[]인 순간이 생겨 두 페인이 또 "없어요"를 단정한다
@@ -424,4 +447,59 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     expect(container.textContent).not.toContain('문서를 선택하세요');
     expect(container.textContent).toContain('아직 쌓인 문서가 없어요');
   });
+
+  // story #3945(#3942 배포 92 디자인 감사) — TopBarSlot 브레드크럼 라벨이 DocsIndex의
+  // 마스트헤드 h1과 같이 <h1>이라 페이지에 h1이 2개(개념적으로 다른 문구: "문서" vs
+  // 실 목록 제목)였다(헤딩 위계 위반). TopBarSlot을 실 자식(DocsIndex)과 함께 마운트해
+  // 실 페이지 조합 그대로 재현·고정한다 — DocsIndex는 goals-client와 달리 마스트헤드를
+  // 반응형으로 이중 렌더하지 않아(단일 wrapper) 정확히 1개가 정답.
+  it('⭐문서 목록 화면은 h1이 정확히 1개다(TopBarSlot 라벨은 비-헤딩, DocsIndex 마스트헤드만 h1)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) })));
+    await mountWithIndex();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.className).not.toContain('text-sm font-medium');
+  });
+
+  // story #3946(유나 확認·페드루 정정) — 로디드 스냅샷만 재면 트리 fetch가 아직 안 풀린
+  // 순간(DocsIndex가 `return null`)엔 h1이 0개가 되는 gap을 못 잡는다. fetch를 고의로
+  // pending으로 묶어 «첫 렌더 직후(아직 응답 전)»를 그대로 잰다.
+  it('⭐트리 fetch가 아직 안 풀린 로딩 상태에도 h1이 정확히 1개다(sr-only 자리표시자)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await act(async () => {
+      root.render(wrap(
+        <DocsClientLayout wsSlug="ws1" projSlug="proj1" projectId="proj-1"><DocsIndex /></DocsClientLayout>,
+      ));
+    });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+  });
 });
+
+// [SID:4288] 닫힌 모바일 트리 서랍 — aria-hidden만이 아니라 inert(초점 · 클릭에서 빠짐)까지 실제 DOM에 붙는다. 안의 닫기 · 문서 버튼이
+// Tab 순서에서 빠져 보이지 않는 곳에 초점이 가지 않는다(라이브 axe · Tab 순회는 배포 뒤 PO 판).
+describe('DocsClientLayout — 닫힌 트리 서랍은 inert([SID:4288])', () => {
+  it('닫힘(progress 0) → 서랍에 inert · aria-hidden, 안에 버튼은 있음(숨은 초점 후보를 inert가 덮는다)', async () => {
+    await mount();
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'));
+    expect(drawer).toBeTruthy();
+    expect(drawer!.hasAttribute('inert')).toBe(true);
+    expect(drawer!.getAttribute('aria-hidden')).toBe('true');
+    expect(drawer!.querySelectorAll('button').length).toBeGreaterThan(0);
+  });
+
+  // 유나 design 4653 회귀 — 여는 렌더에선 isOpen이 참인데 progress는 아직 0(이 테스트의 훅 mock이 그 상태로 고정)이다. 그때 inert가
+  // 남으면 초점 가두기의 focus()가 실패해 초점이 여는 버튼에 머문다(실 브라우저 · jsdom은 inert를 구현하지 않아 activeElement로는 못 잰다).
+  it('여는 렌더(isOpen 참 · progress 0)에는 inert · aria-hidden이 없다 — 초점 가두기가 서랍 안으로 초점을 옮길 수 있다', async () => {
+    await mount();
+    const opener = container.querySelector(`button[aria-label="${koMessages.docs.openDocTree}"]`) as HTMLButtonElement | null;
+    expect(opener).not.toBeNull();
+    await act(async () => { opener!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'));
+    expect(drawer!.hasAttribute('inert')).toBe(false);
+    expect(drawer!.getAttribute('aria-hidden')).toBe('false');
+  });
+});
+

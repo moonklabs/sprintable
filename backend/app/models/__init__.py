@@ -19,8 +19,10 @@ from app.models.embedding import Embedding
 from app.models.evidence import Evidence
 from app.models.event import Event
 from app.models.event_outbox import EventOutbox
+from app.models.background_job import BackgroundJob
 from app.models.delivery_job import DeliveryJob
 from app.models.channel_connection import ChannelConnection
+from app.models.org_generation_connector import OrgGenerationConnector
 from app.models.channel_app_credential import ChannelAppCredentials
 from app.models.channel_oauth_pending_selection import ChannelOAuthPendingSelection
 from app.models.ga4_connection import GA4Connection
@@ -39,6 +41,7 @@ from app.models.human_api_key import HumanApiKey
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.offering_version import OfferingVersion
+from app.models.operator_alert import OperatorAlert
 from app.models.grandfather_policy import GrandfatherPolicy
 from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.plan_tier_limit import PlanTierLimit
@@ -115,6 +118,7 @@ from app.models.workflow_trigger_type import WorkflowTriggerType
 # 결함 클래스가 그 사이 독립적으로 5번 더 재발한 것). 가드가 스스로를 증명한 사례라 여기서
 # 같이 정리한다(발견 즉시 수정) — FK 의존 없음(전수 확認), 등재 저위험.
 from app.models.billing_order import BillingOrder
+from app.models.billing_payment_attempt import BillingPaymentAttempt
 from app.models.connector_registry import OrgConnectorRegistry
 from app.models.domain_label import OrgDomainLabel
 from app.models.org_billing_key import OrgBillingKey
@@ -155,6 +159,8 @@ from app.models.publication_attempt import PublicationAttempt
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
 from app.models.ads_boost_run import AdsBoostRun
+from app.models.material_lineage import MaterialLineage
+from app.models.external_publish_pause_audit_log import ExternalPublishPauseAuditLog
 
 __all__ = [
     "RoleTemplate",
@@ -187,6 +193,7 @@ __all__ = [
     "BridgeUserMapping",
     "Embedding",
     "EventOutbox",
+    "BackgroundJob",
     "DeliveryJob",
     "Gate",
     "GateGithubCheckEvent",
@@ -203,6 +210,7 @@ __all__ = [
     "UsageMeter",
     "ApiKey",
     "OrgSubscription",
+    "OperatorAlert",
     "PricingVersion",
     "OfferingVersion",
     "GrandfatherPolicy",
@@ -272,6 +280,7 @@ __all__ = [
     "WorkflowTemplate",
     "WorkflowTriggerType",
     "BillingOrder",
+    "BillingPaymentAttempt",
     "OrgDomainLabel",
     "OrgConnectorRegistry",
     "OrgBillingKey",

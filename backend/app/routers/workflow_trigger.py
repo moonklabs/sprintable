@@ -80,7 +80,7 @@ async def trigger_workflow(
             WorkflowExecutionLog.project_id == body.project_id,
             WorkflowExecutionLog.trigger_type_slug == body.trigger_type_slug,
         )
-        .order_by(WorkflowExecutionLog.created_at.desc())
+        .order_by(WorkflowExecutionLog.created_at.desc(), WorkflowExecutionLog.id.desc())
         .limit(1)
     )
     log = last_log.scalar_one_or_none()

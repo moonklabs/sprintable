@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -36,10 +36,11 @@ from app.services.org_time import org_midnight_utc
 # #3821 카드) — 지어내지 않고 이 목록에 없는 채널은 usage.platform에서 빠진다.
 _QUOTA_CHANNELS = frozenset({"youtube", "youtube_sandbox"})
 
-# story #3821 그라운딩 — AgentRun.status(agent_runs.py::_AGENT_RUN_STATUS_VALUES
-# SSOT: queued|held|running|hitl_pending|completed|failed|abandoned)의 "진행 中"
-# 부분집합 = 아직 끝나지 않은 전부(completed/failed/abandoned만 종결).
-_AGENT_RUN_IN_PROGRESS_STATUSES = frozenset({"queued", "held", "running", "hitl_pending"})
+# story #3821 그라운딩(story #3961이 cancel_requested 추가) — AgentRun.status(agent_runs.py::
+# _AGENT_RUN_STATUS_VALUES SSOT)의 "진행 中" 부분집합 = 아직 끝나지 않은 전부. cancel_requested는
+# 아직 종결이 아니다(ack/타임아웃 대기 中 — 중단 요청 자체가 "진행을 멈춘다"는 사실은 아니다,
+# 그래서 agent_progress에 계속 보이되 cancel 필드로 그 사실을 얹는다).
+_AGENT_RUN_IN_PROGRESS_STATUSES = frozenset({"queued", "held", "running", "hitl_pending", "cancel_requested"})
 
 # story #3833 — agent_runs.py::_TERMINAL_STATUSES와 같은 값(SSOT는 그 파일).
 # "오늘 끝난 위임"의 「끝남」 = 이 세 상태로의 전이(그 라우터가 finished_at을
@@ -84,7 +85,7 @@ async def _needs_me_from_gate_inbox(
     list_gates·gate 승인 집행과 동일 패턴).
     """
     from app.routers.gates import list_gate_inbox  # 순환 최소화 위해 지역 import(established 관례).
-    from app.services.gate_service import derive_risk_grade, get_org_posture
+    from app.services.gate_service import _is_recipe_external_publish_gate, derive_risk_grade, get_org_posture
 
     rows = await list_gate_inbox(
         status="pending", sort="urgency", assigned_to_me=True,
@@ -110,6 +111,11 @@ async def _needs_me_from_gate_inbox(
                 "reason": None,
                 "created_at": r.created_at,
                 "actions": ["approve", "request_changes", "hold"],
+                # story #4190(유나 «본 버전 대조» 2) — 레시피 발행 게이트는 초안을 보고 승인해야 해 「오늘」 저위험 일괄에서
+                # 빠진다(FE가 이 값으로 가른다 — 판정은 봉인과 같은 BE 함수 하나).
+                "recipe_publish": _is_recipe_external_publish_gate(r),
+                # story #4241 — 행 링크(`/gates/{id}`)가 «현재 프로젝트»가 아니라 이 결재의 프로젝트를 싣게(list_gates 배치 해소값).
+                "project_id": r.project_id,
             })
         else:  # r.source == "hitl"
             # HitlRequest.work_item_id는 실무상 항상 Story(gates.py 기존 주석 근거).
@@ -131,6 +137,7 @@ async def _needs_me_from_gate_inbox(
                 "reason": r.prompt,
                 "created_at": r.created_at,
                 "actions": ["answer"],
+                "project_id": r.project_id,  # story #4241 — HitlRequest 행의 프로젝트.
             })
     return items
 
@@ -168,13 +175,17 @@ async def _needs_me_from_workflow_steps(
             "requested_by_member_id": a.requested_by_member_id,
             "reason": None,
             "created_at": a.created_at,
+            # story #3965 — approver row의 대표 Gate(S9 parallel gate). 페드루 PO
+            # CHANGES(2026-09-17): 이 값이 없으면 FE가 POST /gates/{id}/approvers/
+            # {approval_id}/decision을 needs_me 응답만으로 못 부른다.
+            "gate_id": a.gate_id,
             "actions": ["approve", "request_changes", "hold"],
         })
     return items
 
 
 async def _resolve_needs_me(
-    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext,
+    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> tuple[list[dict[str, Any]], int]:
     member = await resolve_member(auth, org_id, session)
     raw = (
@@ -195,6 +206,19 @@ async def _resolve_needs_me(
             collapsed[key] = it
 
     items = list(collapsed.values())
+    if restricted_project_ids is not None and items:
+        # story #4351 PR B(까디르 C) — 결재 · 워크플로 항목은 스토리 제목을 싣는다: 접근 불가 프로젝트로 풀리는 항목은 뺀다(게이트 목록과
+        # 같은 규칙 — 어느 프로젝트로도 안 풀리면 org 수준이라 둔다).
+        from app.services.gate_service import resolve_work_item_project_ids_batch
+
+        owner = await resolve_work_item_project_ids_batch(
+            session, org_id, [(it["work_item_type"], it["work_item_id"]) for it in items],
+        )
+        allowed = set(restricted_project_ids)
+        items = [
+            it for it in items
+            if (p := owner.get((it["work_item_type"], it["work_item_id"]))) is None or p in allowed
+        ]
 
     # title 배치 채움(N+1 0) — story #3821 그라운딩 AC4: merge gate 등 work_item_
     # summary가 안 채워진 항목은 story 제목을 별도 배치 조회로 채운다(gates.py의
@@ -232,10 +256,17 @@ async def _resolve_needs_me(
     # story #3860 — 이 배치 파생은 이제 work_item_conversation.py의 SSOT 함수다
     # (gates.py/hitl.py의 conversation_id enrich도 같은 함수를 쓴다 — 로직 복제 0).
     work_item_pairs = {(it["work_item_type"], it["work_item_id"]) for it in items}
-    from app.services.work_item_conversation import derive_conversation_ids_for_tagged_work_items
+    from app.services.work_item_conversation import (
+        conversation_project_ids,
+        derive_conversation_ids_for_tagged_work_items,
+    )
 
     conversation_by_work_item = await derive_conversation_ids_for_tagged_work_items(
         session, org_id=org_id, member_id=member.id, work_item_pairs=work_item_pairs,
+    )
+    # story #4231 — 태그된 대화는 work_item과 다른 프로젝트에 있을 수 있다 → 대화 자기 프로젝트를 같이(FE `?p=`).
+    project_by_conversation = await conversation_project_ids(
+        session, conversation_ids=set(conversation_by_work_item.values()),
     )
 
     for it in items:
@@ -248,6 +279,7 @@ async def _resolve_needs_me(
         else:
             it.setdefault("requested_by", None)
         it["conversation_id"] = conversation_by_work_item.get((it["work_item_type"], it["work_item_id"]))
+        it["conversation_project_id"] = project_by_conversation.get(it["conversation_id"]) if it["conversation_id"] else None
         # TodayResponse 계약(story #3823 카드) — work_item은 중첩 객체다. 내부적으로는
         # 평평한 키(work_item_type/id/gate_type/title)로 dedupe·enrich하는 편이
         # 간단해 여기서만 마지막에 조립한다.
@@ -259,7 +291,7 @@ async def _resolve_needs_me(
 
 
 async def _resolve_agent_progress(
-    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext,
+    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> list[dict[str, Any]]:
     """story #3821 AC5 — 「위임/참여」는 Story.assignee_id(위임 대상 — human/agent
     혼용 컬럼)==caller 또는 Story.human_owner_member_id(위임한 사람)==caller로
@@ -273,6 +305,13 @@ async def _resolve_agent_progress(
         .join(Story, Story.id == AgentRun.story_id, isouter=True)
         .where(
             AgentRun.org_id == org_id,
+            # story #4351 PR B(까디르 C · P2) — 참여 술어(담당/위임)만으론 접근 잃은 프로젝트 스토리 제목이 보였다 → 접근 가능 프로젝트만.
+            # 표시하는 건 JOIN한 스토리 제목이라 거르는 축도 그 스토리의 프로젝트(run의 project_id가 아니라 — POST /agent-runs가 story 소속을
+            # 확인하지 않아 A 프로젝트 run에 B 스토리를 달 수 있다). 스토리 없는 run만 run의 프로젝트로.
+            *([] if restricted_project_ids is None else [or_(
+                and_(Story.id.isnot(None), Story.project_id.in_(restricted_project_ids)),
+                and_(Story.id.is_(None), AgentRun.project_id.in_(restricted_project_ids)),
+            )]),
             AgentRun.status.in_(_AGENT_RUN_IN_PROGRESS_STATUSES),
             (Story.assignee_id == member.id) | (Story.human_owner_member_id == member.id),
         )
@@ -308,13 +347,28 @@ async def _resolve_agent_progress(
             select(AgentRunToolCall.run_id, AgentRunToolCall.tool)
             .distinct(AgentRunToolCall.run_id)
             .where(AgentRunToolCall.run_id.in_(run_ids))
-            .order_by(AgentRunToolCall.run_id, AgentRunToolCall.started_at.desc())
+            .order_by(AgentRunToolCall.run_id, AgentRunToolCall.started_at.desc(), AgentRunToolCall.id.desc())
         )).all()
         current_steps = {rid: tool for rid, tool in last_call_rows}
+
+    # story #3961 — cancel 상태는 순수 읽기 시점 계산(agent_runs.py::_effective_cancel_outcome
+    # 과 동일 판정 기준 공유, 새 쿼리 0 — 이미 위에서 가져온 run 행 그대로 씀·N+1 0). 이미
+    # 만료됐는데 아직 DB가 안 (lazy) 확定됐으면(단건 엔드포인트가 아직 안 읽힘) 여기 목록에서는
+    # "진행 中"이 아니라고 표시한다(정직 — 다음 단건 GET/PATCH가 그 DB 확定을 마무리한다).
+    from app.routers.agent_runs import _effective_cancel_outcome
 
     items: list[dict[str, Any]] = []
     for run, story_id, story_title in rows:
         agent = agents.get(run.agent_id)
+        _outcome = _effective_cancel_outcome(run.status, run.cancel_requested_at)
+        if _outcome == "unacknowledged":
+            continue  # 실질 종결(lazy 확定 대기 中) — "진행 中" 목록에서 뺀다.
+        cancel = None
+        if run.status == "cancel_requested":
+            cancel = {
+                "requested_at": run.cancel_requested_at, "reason": run.cancel_reason,
+                "state": _outcome or "requested",
+            }
         items.append({
             "run_id": run.id,
             "agent": {"id": run.agent_id, "name": agent.name if agent and agent.name else ""},
@@ -330,12 +384,13 @@ async def _resolve_agent_progress(
             # 0374). 캐폴러가 그 대화의 실제 참여자일 때만 노출(위 참여 검증) —
             # 연결 자체가 없거나 캐폴러가 참여자가 아니면 null(지어내지 않는다).
             "conversation_id": run.conversation_id if run.conversation_id in participant_conv_ids else None,
+            "cancel": cancel,
         })
     return items
 
 
 async def _resolve_completed_today(
-    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, tz: str,
+    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, tz: str, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> list[dict[str, Any]]:
     """story #3833 AC2/AC3 — 오늘(tz 자정 이후) 종료된 run 중 호출자가 위임/참여한
     것(_resolve_agent_progress와 **같은** 참여 술어 — Story.assignee_id 또는
@@ -353,12 +408,19 @@ async def _resolve_completed_today(
         .join(Story, Story.id == AgentRun.story_id, isouter=True)
         .where(
             AgentRun.org_id == org_id,
+            # story #4351 PR B(까디르 C · P2) — 참여 술어(담당/위임)만으론 접근 잃은 프로젝트 스토리 제목이 보였다 → 접근 가능 프로젝트만.
+            # 표시하는 건 JOIN한 스토리 제목이라 거르는 축도 그 스토리의 프로젝트(run의 project_id가 아니라 — POST /agent-runs가 story 소속을
+            # 확인하지 않아 A 프로젝트 run에 B 스토리를 달 수 있다). 스토리 없는 run만 run의 프로젝트로.
+            *([] if restricted_project_ids is None else [or_(
+                and_(Story.id.isnot(None), Story.project_id.in_(restricted_project_ids)),
+                and_(Story.id.is_(None), AgentRun.project_id.in_(restricted_project_ids)),
+            )]),
             AgentRun.status.in_(_TERMINAL_STATUSES),
             AgentRun.finished_at.isnot(None),
             AgentRun.finished_at >= since,
             (Story.assignee_id == member.id) | (Story.human_owner_member_id == member.id),
         )
-        .order_by(AgentRun.finished_at.desc())
+        .order_by(AgentRun.finished_at.desc(), AgentRun.id.desc())
         .limit(_COMPLETED_TODAY_LIMIT)
     )).all()
 
@@ -390,15 +452,19 @@ async def _resolve_completed_today(
     return items
 
 
-async def _resolve_published_today(
-    session: AsyncSession, org_id: uuid.UUID, tz: str,
+async def resolve_published_since(
+    session: AsyncSession, org_id: uuid.UUID, since: datetime, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> dict[str, Any]:
-    """story #3821 AC6 — org_time.py::org_midnight_utc 재사용(query param tz를
-    그대로 「경계 시간대」로 사용 — org 설정이 아니라 요청 tz, 카드 규격 그대로).
-    PublicationCommand엔 완료 시각 컬럼이 없어(status만 'completed') updated_at을
-    "완료된 시각"으로 쓴다 — completed로의 전이가 그 행의 마지막 갱신이라는
-    전제(재시도 워커의 흔한 관례, apply_command_failure류와 동일 갱신축)."""
-    since = org_midnight_utc(tz)
+    """story #3978 — `_resolve_published_today`(story #3821 AC6)에서 추출한 공용
+    판정. PublicationCommand엔 완료 시각 컬럼이 없어(status만 'completed')
+    updated_at을 "완료된 시각"으로 쓴다 — completed로의 전이가 그 행의 마지막
+    갱신이라는 전제(재시도 워커의 흔한 관례, apply_command_failure류와 동일
+    갱신축). 「오늘」(자정 경계)·「결과」(기간 경계) 둘 다 같은 이 함수로 세서
+    두 화면 숫자가 다른 판정식이 되지 않게 한다(페드루 PO 確定 2026-09-17,
+    3977 그라운딩 갭 #1 처방)."""
+    from app.models.gate import Gate
+    from app.services.gate_service import gate_in_inaccessible_project_clause
+
     rows = (await session.execute(
         select(ChannelConnection.channel, func.count(PublicationCommand.id))
         .join(ChannelConnection, ChannelConnection.id == PublicationCommand.destination)
@@ -406,12 +472,48 @@ async def _resolve_published_today(
             PublicationCommand.org_id == org_id,
             PublicationCommand.status == _PUBLISHED_STATUS,
             PublicationCommand.updated_at >= since,
+            # story #4351 PR B(수 · PO 2026-09-26) — 연결은 org 수준이어도 합산에 접근 불가 프로젝트 발행이 섞이면 안 된다. 발행 명령은
+            # 항상 게이트에 매인다(gate_id NOT NULL) → 게이트 목록과 같은 규칙(org 수준 게이트는 센다). None = 전체 접근.
+            *([] if restricted_project_ids is None else [
+                PublicationCommand.gate_id.in_(
+                    select(Gate.id).where(Gate.org_id == org_id, ~gate_in_inaccessible_project_clause(restricted_project_ids))
+                )
+            ]),
         )
         .group_by(ChannelConnection.channel)
     )).all()
     by_channel = [{"channel_kind": kind, "count": cnt} for kind, cnt in rows]
     total = sum(c["count"] for c in by_channel)
     return {"count": total, "by_channel": by_channel, "since": since}
+
+
+async def resolve_published_in_window(
+    session: AsyncSession, org_id: uuid.UUID, since: datetime, *, restricted_project_ids: list[uuid.UUID] | None,
+) -> dict[str, Any] | None:
+    """story #3978(「결과」 §7 갭 #1 처방) — `resolve_published_since`에 "채널 연결
+    자체가 0"이면 null을 내는 계약을 얹은 래퍼. org_cost_summary.py::
+    get_org_ads_cost_summary의 "0건은 지어낸 게 아니라 더할 게 없다는 사실"
+    원칙과 동형 — 연결이 하나라도 있으면 발행 0건도 실 0(미측정 아님), 연결
+    자체가 없으면 "발행이라는 개념 자체가 아직 없다"는 뜻이라 null(0 아님).
+    「오늘」 쪽(`_resolve_published_today`)은 이 null 판정을 안 한다(그 화면은
+    항상 실 값 0으로 충분·byte 계약 무변, 이 래퍼는 「결과」 전용 신규 소비처)."""
+    has_connection = (await session.execute(
+        select(ChannelConnection.id).where(ChannelConnection.org_id == org_id).limit(1)
+    )).first()
+    if has_connection is None:
+        return None
+    return await resolve_published_since(session, org_id, since, restricted_project_ids=restricted_project_ids)
+
+
+async def _resolve_published_today(
+    session: AsyncSession, org_id: uuid.UUID, tz: str, *, restricted_project_ids: list[uuid.UUID] | None,
+) -> dict[str, Any]:
+    """story #3821 AC6 — org_time.py::org_midnight_utc 재사용(query param tz를
+    그대로 「경계 시간대」로 사용 — org 설정이 아니라 요청 tz, 카드 규격 그대로).
+    story #3978부터는 공용 `resolve_published_since`에 위임(판정식 자체는
+    무변경, 응답 byte 무변 — 기존 today 테스트 그대로 GREEN이어야 한다)."""
+    since = org_midnight_utc(tz)
+    return await resolve_published_since(session, org_id, since, restricted_project_ids=restricted_project_ids)
 
 
 async def _resolve_usage(session: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
@@ -449,14 +551,82 @@ async def _resolve_usage(session: AsyncSession, org_id: uuid.UUID) -> dict[str, 
     return {"platform": platform_items, "ad_spend": {"measured": False}}
 
 
+async def _resolve_today_results(
+    session: AsyncSession, org_id: uuid.UUID, tz: str, *, restricted_project_ids: list[uuid.UUID] | None,
+) -> dict[str, Any]:
+    """story #3959(3954 그라운딩 doc 처방 그대로) — 「오늘 결과」 집계 3(4번째
+    read-model). 전부 org_midnight_utc(tz) 경계·집계 쿼리 1개씩(루프 0, N+1 0).
+
+    landed_today: story_activities(activity_type="status_changed", new_value="done")
+    실측 카운트. 이 행은 story_status_events.py::emit_story_status_changed()가
+    ``if actor_id:`` 조건에서만 남긴다 — board PATCH·gate-merge-approve 두 실
+    경로 다 actor_id를 갖고 호출하므로, actor 없는 자동 전이는 구조적으로 이
+    카운트에 안 잡힌다(근사 0 — PO 確認 2026-09-16, 배제 자체가 계약이라
+    approx 플래그를 두지 않는다. 이 배제를 테스트로 고정한다).
+
+    qa_passed_today: gates.status="approved" AND resolved_at 실측 —
+    gate_service.py가 상태 전이 시 ``datetime.now(utc)``로 정확히 세팅해
+    근사가 불요하다.
+
+    open_defects: verdict(source="qa", result="fail") 테이블은 스키마는 있으나
+    이를 채우는 유일한 통로 POST /capture-review(verdict_capture.py)의 실
+    호출처가 레포 전체 0(cron·webhook·스크립트 없음, 테스트만 참조) — 지금
+    count를 내면 실제 결함이 있어도 거짓 0이 나온다. PO 確定(2026-09-16):
+    measured=False 고정·count=None(usage.ad_spend와 동일 관례, 가짜 0 금지).
+    """
+    from app.models.gate import Gate
+    from app.models.pm import Story, StoryActivity
+    from app.services.gate_service import gate_in_inaccessible_project_clause
+
+    since = org_midnight_utc(tz)
+
+    # story #4351 PR B(수 · SEC-S8) — 제한된 caller(restricted_project_ids가 목록)는 접근 가능 프로젝트의 것만 센다(수로 존재가 새지
+    # 않게). 게이트는 목록 · 인박스와 같은 규칙(org 수준 게이트는 센다). None = 전체 접근 = 옛 동작.
+    landed_scope = [] if restricted_project_ids is None else [
+        StoryActivity.story_id.in_(select(Story.id).where(Story.project_id.in_(restricted_project_ids)))
+    ]
+    gate_scope = [] if restricted_project_ids is None else [~gate_in_inaccessible_project_clause(restricted_project_ids)]
+
+    landed_today_count = await session.scalar(
+        select(func.count(StoryActivity.id)).where(
+            StoryActivity.org_id == org_id,
+            StoryActivity.activity_type == "status_changed",
+            StoryActivity.new_value == "done",
+            StoryActivity.created_at >= since,
+            *landed_scope,
+        )
+    )
+
+    qa_passed_today_count = await session.scalar(
+        select(func.count(Gate.id)).where(
+            Gate.org_id == org_id,
+            Gate.status == "approved",
+            Gate.resolved_at.isnot(None),
+            Gate.resolved_at >= since,
+            *gate_scope,
+        )
+    )
+
+    return {
+        "landed_today": {"count": landed_today_count or 0, "since": since},
+        "qa_passed_today": {"count": qa_passed_today_count or 0, "since": since},
+        "open_defects": {"count": None, "measured": False},
+    }
+
+
 async def build_today_snapshot(
     session: AsyncSession, *, org_id: uuid.UUID, auth: AuthContext, tz: str,
 ) -> dict[str, Any]:
-    needs_me, needs_me_count = await _resolve_needs_me(session, org_id, auth)
-    agent_progress = await _resolve_agent_progress(session, org_id, auth)
-    completed_today = await _resolve_completed_today(session, org_id, auth, tz)
-    published_today = await _resolve_published_today(session, org_id, tz)
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    # story #4351 PR B — 접근이 제한된 caller면 접근 가능 프로젝트 목록(owner/admin = None = 옛 동작). 이 화면의 모든 칸이 같은 값을 쓴다.
+    restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(auth.user_id)), org_id)
+    needs_me, needs_me_count = await _resolve_needs_me(session, org_id, auth, restricted_project_ids=restricted)
+    agent_progress = await _resolve_agent_progress(session, org_id, auth, restricted_project_ids=restricted)
+    completed_today = await _resolve_completed_today(session, org_id, auth, tz, restricted_project_ids=restricted)
+    published_today = await _resolve_published_today(session, org_id, tz, restricted_project_ids=restricted)
     usage = await _resolve_usage(session, org_id)
+    today_results = await _resolve_today_results(session, org_id, tz, restricted_project_ids=restricted)
     return {
         "needs_me": needs_me,
         "needs_me_count": needs_me_count,
@@ -464,4 +634,6 @@ async def build_today_snapshot(
         "completed_today": completed_today,
         "published_today": published_today,
         "usage": usage,
+        **today_results,
+        "scope": "org" if restricted is None else "accessible_projects",
     }

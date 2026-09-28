@@ -54,8 +54,16 @@
     opacity: 1;
   }
 }
-.animate-slide-in {
-  animation: slide-in 0.3s ease-out;
+/* story #4125(라이브 실측, 페드루 PO 2026-09-21 19:59Z) — Tailwind v4 `@import "tailwindcss"`는
+   `@layer theme, base, components, utilities`를 선언한다. 레이어 밖(최상위) 규칙은 명시도·
+   소스 순서와 무관하게 모든 레이어를 항상 이긴다(Cascade Layers 스펙) — 이 파일의 `.animate-*`
+   류가 최상위(레이어 밖)에 있어 같은 요소에 걸리는 유틸리티(예: 다른 `animation-*` 유틸)를
+   무조건 이겨왔다. `@layer components`로 감싸면 유틸리티 레이어가 정상적으로 더 우선하게
+   된다(선언 내용은 무변경 — 감싸는 레이어만 추가). */
+@layer components {
+  .animate-slide-in {
+    animation: slide-in 0.3s ease-out;
+  }
 }
 
 /* Multica icon: entrance spin animation */
@@ -64,16 +72,20 @@
   50% { opacity: 1; }
   100% { transform: rotate(360deg); opacity: 1; }
 }
-.animate-entrance-spin {
-  animation: entrance-spin 0.6s ease-out forwards;
+@layer components {
+  .animate-entrance-spin {
+    animation: entrance-spin 0.6s ease-out forwards;
+  }
 }
 
 /* Onboarding: step entry */
 @keyframes onboarding-enter {
   from { opacity: 0; transform: translateY(4px); }
 }
-.animate-onboarding-enter {
-  animation: onboarding-enter 0.4s ease both;
+@layer components {
+  .animate-onboarding-enter {
+    animation: onboarding-enter 0.4s ease both;
+  }
 }
 
 /* DS-S11: Skeleton shimmer */
@@ -88,8 +100,10 @@
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(360%); }
 }
-.animate-ai-loading-indeterminate {
-  animation: ai-loading-indeterminate 1.5s ease-in-out infinite;
+@layer components {
+  .animate-ai-loading-indeterminate {
+    animation: ai-loading-indeterminate 1.5s ease-in-out infinite;
+  }
 }
 
 /* E-UI-DAEGBYEON P0: Proof Capsule 모션(FE 스펙 §6) — 실행 중 1.8s 호흡(citron pulse)·
@@ -99,24 +113,30 @@
   0%, 100% { opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--proof-citron) 30%, transparent); }
   50% { opacity: 0.55; box-shadow: 0 0 0 5px color-mix(in srgb, var(--proof-citron) 15%, transparent); }
 }
-.animate-proof-pulse {
-  animation: proof-pulse 1.8s ease-in-out infinite;
+@layer components {
+  .animate-proof-pulse {
+    animation: proof-pulse 1.8s ease-in-out infinite;
+  }
 }
 @keyframes proof-sweep {
   0% { transform: translateY(-100%); opacity: 0; }
   40% { opacity: 1; }
   100% { transform: translateY(100%); opacity: 0; }
 }
-.animate-proof-sweep {
-  animation: proof-sweep 0.6s ease-out 1;
+@layer components {
+  .animate-proof-sweep {
+    animation: proof-sweep 0.6s ease-out 1;
+  }
 }
 @keyframes proof-check-in {
   0% { opacity: 0; transform: scale(0.6); }
   60% { opacity: 1; transform: scale(1.08); }
   100% { opacity: 1; transform: scale(1); }
 }
-.animate-proof-check-in {
-  animation: proof-check-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 1 both;
+@layer components {
+  .animate-proof-check-in {
+    animation: proof-check-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 1 both;
+  }
 }
 
 @theme inline {
@@ -187,6 +207,9 @@
   --color-brand-soft: var(--brand-soft);
   --color-brand-strong: var(--brand-strong);
   --color-brand-contrast: var(--brand-contrast);
+  /* story #4315 — 브랜드색 **글자**(링크 · 활성 칩 글자 · 아이콘). brand-soft는 옅은 틴트용이라 밝은 테마 글자로 1.25:1이었다
+     (문서 본문 링크 · 공개 공유 · 약관). 테마별로 읽히는 쪽을 고른다 — 밝은 = brand-strong(7.05) · 어두운 = brand-soft(10.48). */
+  --color-brand-text: var(--brand-text);
   --color-info-foreground: var(--info-foreground);
   --color-primary-tint: var(--primary-tint);
   --color-priority: var(--priority);
@@ -359,6 +382,25 @@
   --info-foreground: oklch(0.985 0 0);
   --priority: oklch(0.65 0.18 50);
 
+  /* story #4067(유나 design-QA, 2026-09-19) — 역할(role) categorical 팔레트. cost_tier
+     (#4438/#4433)와 동일 원칙: role은 상태(좋음/주의/kill)가 아니니 --success/--warning/
+     --destructive 재사용 금지 — 역할이 그 상태색으로 오독된다(예: Publisher가 --success를
+     받으면 "좋음"으로 읽힘). CVD-safe 순서(유나 검증) — 상태연상 적은 hue(blue/orange/
+     purple/cyan)를 앞에 둬 역할 4종(Creator/Director/Compute/Publisher, role-accent.ts
+     ORDER)이 green/amber/red를 안 물게 한다. lib/role-accent.ts가 role KEY→변수명을
+     positional 아니게 안정 매핑.
+     카디르 재QA(2026-09-19) — 최초 PR의 대비 수치(4.72~9.84)가 독립재계산과 안 맞아
+     scripts/verify-muted-foreground-contrast.ts와 동일 검증된 oklch→sRGB 유틸(oklch-
+     contrast.ts+color-contrast.ts)로 --background 위 직접 재계산: 라이트 3.48~7.86,
+     다크 5.22~10.86 — 6개 전부 비텍스트 UI 3:1 문턱 통과(가장 낮은 라이트 accent-2/4가
+     3.48/3.50로 근소하지만 통과). */
+  --role-accent-1: oklch(0.50 0.13 255); /* blue */
+  --role-accent-2: oklch(0.62 0.13 60);  /* orange */
+  --role-accent-3: oklch(0.44 0.16 320); /* purple */
+  --role-accent-4: oklch(0.60 0.10 195); /* cyan */
+  --role-accent-5: oklch(0.54 0.13 150); /* green */
+  --role-accent-6: oklch(0.52 0.17 25);  /* red */
+
   /* Scrollbar — story #2601: 10%/18% 알파는 실측(Chromium canvas 2d fillRect+getImageData,
      color-contrast.test.ts와 동일 규격) 대비 1.26:1(WCAG 비텍스트 UI 컴포넌트 3:1 문턱의
      절반 이하)이라 사실상 안 보였다. 45%로 올려 3.36:1 확보 — 회귀 가드는
@@ -372,6 +414,7 @@
 
   --brand-soft: oklch(0.90 0.06 258);
   --brand-strong: oklch(0.45 0.20 258);
+  --brand-text: var(--brand-strong); /* story #4315 — 밝은 테마 브랜드 글자(배경 7.05 · 흰 패널 7.62 · brand/14 틴트 6.32) */
   --brand-contrast: oklch(0.96 0.03 258);
 
   /* DS-S13: Extended semantic tokens */
@@ -527,32 +570,61 @@
   --glass-overlay-bg: rgba(252, 251, 247, .62);
 }
 
+/* story #4128 — 유나 canon 정식 결정(2026-09-21): 폼 컨트롤(checkbox/radio) accent-color를
+   전역 토큰화한다. 근거 = 네이티브 a11y·키보드 동작 유지(appearance-none 커스텀 컨트롤보다
+   우선)·브랜드 정합·체크 상태가 토큰 시스템 안으로 들어와 측정 가능해짐(이전엔 UA 기본색이라
+   verify-nontext-icon-contrast.ts의 폼 컨트롤 축이 «존재-검사»만 하고 수치는 못 쟀다).
+   실측 접지(현 --primary 토큰): 채움 vs 페이지 배경 라이트 6.02 / 다크 6.09 · UA 흰 체크 on
+   채움 라이트 6.51 / 다크 3.21(둘 다 3:1 이상). `:root` 한 선언으로 라이트·다크 전부 커버되는
+   것은 `.dark`가 --primary를 재정의하고 accent-color가 상속되기 때문(별도 `.dark` 선언 불요).
+   `@layer base`에 넣는 이유 — 커스텀 프로퍼티 블록(위 `:root { --var: ... }`, 레이어 밖)에
+   같이 넣으면 이 선언도 레이어 밖이 되어 story #4125/#4127과 같은 이유로 Tailwind의
+   `accent-*` 유틸리티(있다면)를 항상 이겨버린다. 미체크 박스 테두리 3:1은 이 결정 밖(네이티브
+   UA 회색 테두리 — 실측 실패 테마가 나오면 그때 별도 카드로 appearance-none 커스텀 컨트롤).
+   `.tiptap … input[type="checkbox"] { accent-color: var(--tiptap-link) }`(에디터 스코프
+   override, story #4127 그룹 A 허용)는 특이도가 더 높아 그대로 우선한다. */
+@layer base {
+  :root {
+    accent-color: var(--primary);
+  }
+}
+
 /* story #7d7634ee — `.proof-surface`가 재질 지오메트리 유일 정본(구 `.proof-cut` 계승,
    doc ea94dac4 유나 확定: "컷 소멸이라 재질명으로 리네임"). 그레인은 `::before`로 얹는다 —
    `border-radius: inherit`가 배경을 부모 라운드 안에 자동으로 가둬 별도 overflow-hidden
    불요(배경은 기본 border-box에서 클립된다). 깊이 방향은 합성 모디파이어로 분리:
    `proof-surface-lift`(뜬 표면)·`proof-surface-press`(눌린 표면) 중 하나를 반드시 곁들인다
    (`className="proof-surface proof-surface-lift"` 관례, 구 `-sm`/`-xs` 합성과 동형). */
-.proof-surface {
-  position: relative;
-  border-radius: var(--proof-radius-soft);
-}
-.proof-surface::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background-image: var(--paper-grain);
-  background-repeat: repeat;
-  opacity: var(--paper-grain-opacity);
-  mix-blend-mode: var(--paper-grain-blend);
-  pointer-events: none;
-}
-.proof-surface-lift {
-  box-shadow: var(--elev-lift);
-}
-.proof-surface-press {
-  box-shadow: var(--emboss-press);
+/* story #4125(라이브 실측, 페드루 PO 2026-09-21 19:59Z) — #4121이 이 표면 위에 `lg:sticky`
+   유틸리티를 얹었는데 라이브에서 computed position이 relative로 고정됐다. 근본은 위
+   `.animate-*` 자리와 동일: 이 네 규칙이 최상위(레이어 밖)이라 Tailwind utilities 레이어의
+   `position`(sticky/absolute/fixed 등)·`border-radius`(rounded-*)·`box-shadow`(shadow-*)
+   유틸리티를 명시도·순서 무관하게 항상 이겼다(Cascade Layers 스펙 — 레이어 밖은 항상
+   레이어 안을 이긴다). PR #4498의 overflow-hidden 제거는 sticky의 스크롤 컨테이너 문제를
+   고쳤을 뿐 이 캐스케이드 문제는 그대로 남아 있었다. `@layer components`로 감싸 유틸리티가
+   정상적으로 이기게 한다(선언 내용은 무변경). */
+@layer components {
+  .proof-surface {
+    position: relative;
+    border-radius: var(--proof-radius-soft);
+  }
+  .proof-surface::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-image: var(--paper-grain);
+    background-repeat: repeat;
+    opacity: var(--paper-grain-opacity);
+    mix-blend-mode: var(--paper-grain-blend);
+    pointer-events: none;
+  }
+  .proof-surface-lift {
+    box-shadow: var(--elev-lift);
+  }
+  .proof-surface-press {
+    box-shadow: var(--emboss-press);
+  }
 }
 
 /* ─── Dark Mode (OKLCH zinc) ─── */
@@ -618,6 +690,14 @@
   --info-foreground: oklch(0.16 0.038 250);
   --priority: oklch(0.70 0.18 50);
 
+  /* story #4067 — 라이트 쪽 주석 근거 그대로. 다크 재계산치 5.22~10.86, 전부 ≥3:1. */
+  --role-accent-1: oklch(0.70 0.12 255); /* blue */
+  --role-accent-2: oklch(0.80 0.13 60);  /* orange */
+  --role-accent-3: oklch(0.63 0.15 320); /* purple */
+  --role-accent-4: oklch(0.80 0.09 195); /* cyan */
+  --role-accent-5: oklch(0.73 0.13 150); /* green */
+  --role-accent-6: oklch(0.67 0.16 25);  /* red */
+
   /* Scrollbar — story #2601, 라이트 쪽 주석 근거 그대로. 원래 8% 알파는 실측 대비 1.22:1 —
      --background(다크)이 실측 rgb(17,17,20)로 거의 순흑에 가까워 흰 알파가 라이트보다도
      헤드룸이 넉넉하다(65%에서 대비 8.31:1 — 직관과 달리 라이트보다 여유 있게 통과).
@@ -628,6 +708,7 @@
 
   --brand-soft: oklch(0.80 0.10 258);
   --brand-strong: oklch(0.55 0.22 258);
+  --brand-text: var(--brand-soft); /* story #4315 — 어두운 테마 브랜드 글자(배경 10.48 · 패널 9.42 · brand/14 틴트 7.87 · brand-strong은 3.92라 아님) */
   --brand-contrast: oklch(0.22 0.05 258);
 
   /* DS-S13: Extended semantic tokens */
@@ -722,10 +803,17 @@
   --paper-grain-blend: screen;
 }
 
-/* Sidebar: open triggers get active background */
-[data-sidebar="menu-button"][data-popup-open] {
-  background-color: var(--sidebar-accent);
-  color: var(--sidebar-accent-foreground);
+/* Sidebar: open triggers get active background.
+   story #4127 — sidebar.tsx:585의 `sidebar:"menu-button"` variant가 실제로 이 data attribute를
+   렌더된 요소에 붙이고, 같은 컴포넌트의 Tailwind 클래스(sidebar.tsx:539)에 같은 CSS 변수를
+   가리키는 `data-open:hover:bg-sidebar-accent` 유틸리티가 공존한다 — 값이 같아 지금은 시각
+   차이가 없지만(우연히 안전), 유틸리티와 실제로 경쟁 가능한 유일한 depth-0 복합 선택자라
+   예방적으로 @layer components 안으로 이관한다(선언 무변경). */
+@layer components {
+  [data-sidebar="menu-button"][data-popup-open] {
+    background-color: var(--sidebar-accent);
+    color: var(--sidebar-accent-foreground);
+  }
 }
 
 /* Sonner toast: align icon to first line */
@@ -895,7 +983,7 @@
 .tiptap-content .tiptap th { border: 1px solid var(--tiptap-table-border); padding: 6px 8px; }
 .tiptap-content .tiptap th { background: var(--tiptap-th-bg); font-weight: 600; }
 .tiptap-content .tiptap hr { border-color: var(--tiptap-hr-border); margin: 16px 0; }
-.tiptap-content .tiptap .is-editor-empty.is-empty::before { content: attr(data-placeholder); color: var(--tiptap-placeholder); pointer-events: none; float: left; height: 0; }
+.tiptap-content .tiptap .is-editor-empty.is-empty::before { content: attr(data-placeholder); color: var(--tiptap-placeholder); pointer-events: none; float: left; height: 0; word-break: keep-all; } /* story #4363 — 안내 문구만(본문 줄바꿈은 그대로) */
 .tiptap-content .tiptap .ProseMirror-selectednode { outline: 2px solid var(--tiptap-selection); border-radius: 4px; }
 .tiptap-content .tiptap a { color: var(--tiptap-link); text-decoration: underline; }
 /* story #3866 — entity: 링크(story-mention.tsx EntityLinkExtension)는 위 규칙보다 선택자
@@ -914,8 +1002,16 @@
 /* ─── Column layout ─── */
 [data-type="columnsBlock"] > [data-type="columnBlock"],
 .tiptap [data-type="columnsBlock"] > .contents > [data-type="columnBlock"] { min-width: 0; }
+/* story #4339 — 편집기에선 격자(ColumnsBlockView `.grid`)와 두 열 사이에 NodeViewContent 두 겹이 끼인다: `.contents[data-node-view-content]`와
+   Tiptap이 만드는 `[data-node-view-content-react]`(display 기본값). 뒤 겹이 격자의 유일한 칸이 돼 두 열이 첫 칸에 위아래로 쌓였다 —
+   그 겹도 격자에서 빠지게(display: contents) 해 두 열이 격자 칸이 되게 한다. 대상은 Tiptap이 만든 겹(유틸리티 클래스 없음)이라 층 안에 둔다. */
+@layer components {
+  .tiptap .node-columnsBlock .grid > [data-node-view-content] > [data-node-view-content-react] { display: contents; }
+  .tiptap .node-columnsBlock .grid > [data-node-view-content] > [data-node-view-content-react] > [data-type="columnBlock"] { min-width: 0; }
+}
 [data-type="columnBlock"] { min-width: 0; padding: 0.5rem; border-radius: 0.5rem; border: 1px solid transparent; }
-[data-type="columnBlock"]:focus-within { border-color: hsl(var(--border)); }
+/* story #4325 — --border는 완성된 색(var(--proof-line))이라 hsl()로 감싸면 선언 전체가 무효였다(테두리가 글자색으로). */
+[data-type="columnBlock"]:focus-within { border-color: var(--border); }
 /* Viewer grid (no NodeViewContent wrapper) */
 [data-type="columnsBlock"] { display: grid; gap: 1rem; }
 [data-type="columnsBlock"][data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
@@ -926,7 +1022,7 @@
 [data-type="toggleBlock"][data-open="false"] > [data-type="toggleContent"],
 .tiptap [data-type="toggleBlock"][data-open="false"] > [data-type="toggleContent"] { display: none; }
 [data-type="toggleContent"],
-.tiptap [data-type="toggleContent"] { padding-left: 1.25rem; margin-left: 0.875rem; border-left: 2px solid hsl(var(--border)); margin-top: 0.25rem; }
+.tiptap [data-type="toggleContent"] { padding-left: 1.25rem; margin-left: 0.875rem; border-left: 2px solid var(--border); margin-top: 0.25rem; } /* story #4325 — hsl() 감쌈 제거(무효 선언) */
 [data-type="toggleSummary"],
 .tiptap [data-type="toggleSummary"] { cursor: pointer; }
 
@@ -939,14 +1035,59 @@
    형태로만 참조한다(숫자 재추측 금지).
    --mobile-tab-bar-h는 탭 바 자기 자신의 실 높이(`h-[var(--mobile-tab-bar-h)]`,
    mobile-tab-bar.tsx)와 같은 값을 가리키는 단일 토큰 — 탭 바 높이가 바뀌면 이
-   한 줄만 고치면 인셋도 함께 맞다(두 벌 상수 금지). */
-.dashboard-shell-root {
-  --mobile-tab-bar-h: 4rem;
-  --bottom-dock-inset: env(safe-area-inset-bottom);
+   한 줄만 고치면 인셋도 함께 맞다(두 벌 상수 금지).
+   story #4006(critical, 5pt) AC8(PO CHANGES-1 ③) — v3 3화면(오늘·대화·연결·규칙)은
+   `(authenticated)` 밖 별도 라우트 그룹이라 `.dashboard-shell-root` 조상이 없어
+   이 변수가 undefined였다(MobileTabBar 자기 높이가 auto로 무너짐). `.v3-shell-root`
+   (각 v3 화면의 최상위 div, data-testid="*-v3-screen"과 같은 자리)를 같은 선언에
+   더해 값은 그대로 공유(두 벌 상수 금지 원칙 유지 — 리터럴 재선언 0, 선택자만 추가).
+   `@layer components` 안에 두는 이유(story #4131 페드루 PO 선례 그대로) — story
+   #4125/#4127 트립와이어 ALLOWLIST는 "이유 있는 기존 비레이어"만 남기는 자리라 새로
+   손댄 규칙은 늘리지 않는다. 커스텀 프로퍼티만 선언해 유틸리티와 다툴 실제 CSS
+   프로퍼티가 0이라 @layer 안에 있어도 결과는 완전히 같다. */
+@layer components {
+  .dashboard-shell-root,
+  .v3-shell-root {
+    --mobile-tab-bar-h: 4rem;
+    --bottom-dock-inset: env(safe-area-inset-bottom);
+  }
+
+  @media (max-width: 1023px) {
+    .dashboard-shell-root,
+    .v3-shell-root {
+      --bottom-dock-inset: calc(var(--mobile-tab-bar-h) + env(safe-area-inset-bottom));
+    }
+  }
 }
 
-@media (max-width: 1023px) {
+/* story #4131 — #4130이 split-pane 5곳(goals·sprints·settings·inbox·docs 레이아웃)의 로컬
+   뷰포트 앵커에 `h-[calc(100svh-3rem)]`를 하드코딩했다. `3rem`은 TopBar(h-12) 높이뿐이라
+   ① TopBar가 안 그려지는 라우트(`/settings`, dashboard-shell.tsx의 showTopBar=false)에서는
+   그만큼 콘텐츠 영역이 작게 잡히고(붕괴는 아님·하단 48px 낭비) ② lg 미만(<1024px)에서는
+   하단 고정 탭바(`--mobile-tab-bar-h`, 위에서 이미 SSOT) 높이만큼 앵커가 뷰포트를 넘친다.
+   이 변수가 그 둘을 한 곳에서 합성한다 — 앵커는 전부 `h-[calc(100svh-var(--shell-chrome-h))]`
+   로 이 변수만 참조(각자 3rem·탭바 높이를 다시 계산하지 않는다).
+   TopBar 표시 여부는 JS 불리언(showTopBar)이라 CSS 미디어 쿼리로 못 읽는다 — dashboard-
+   shell.tsx가 SidebarProvider(=.dashboard-shell-root)에 `data-topbar-hidden`을 얹어
+   다리를 놓는다(JS는 그 data 속성 하나만 설정, 실제 높이 계산은 전부 CSS).
+   `@layer components` 안에 두는 이유(페드루 PO, 2026-09-22) — story #4125/#4127 트립와이어
+   ALLOWLIST는 "이유 있는 기존 비레이어"만 남기는 자리라 새 규칙을 늘리지 않는다. 이 3벌은
+   커스텀 프로퍼티만 세워 유틸리티와 다툴 실제 CSS 프로퍼티가 0이므로(위 `.dashboard-shell-
+   root` 기존 블록과 같은 이유) @layer 안에 있어도 결과는 완전히 같다 — #4127 그룹 D
+   (`[data-sidebar="menu-button"][data-popup-open]` 예방적 이관)와 같은 길을 그대로 따른다. */
+@layer components {
   .dashboard-shell-root {
-    --bottom-dock-inset: calc(var(--mobile-tab-bar-h) + env(safe-area-inset-bottom));
+    --shell-chrome-h: 3rem;
+  }
+  .dashboard-shell-root[data-topbar-hidden] {
+    --shell-chrome-h: 0rem;
+  }
+  @media (max-width: 1023px) {
+    .dashboard-shell-root {
+      --shell-chrome-h: calc(3rem + var(--mobile-tab-bar-h));
+    }
+    .dashboard-shell-root[data-topbar-hidden] {
+      --shell-chrome-h: var(--mobile-tab-bar-h);
+    }
   }
 }

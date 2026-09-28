@@ -10,6 +10,7 @@ cancel/verify_webhook)는 후속 스토리(C2~C4) 대상으로 `NotImplementedEr
 토큰)를 발급받는다."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -60,11 +61,13 @@ class TossAdapter(PaymentProvider):
         """공용 POST 왕복 — create_billing_key/charge/refund가 공유하는 에러 처리(⛔응답
         바디를 그대로 로깅하지 않는다 — Toss 에러 응답이 요청 파라미터를 echo하는 경우가
         있어 customerKey 등 민감정보 유출 표면을 늘릴 수 있다. code/status만 남긴다).
-        idempotency_key가 있으면 `Idempotent-Key` 헤더로 전송(공식 문서 확認, 2026-08-07 —
-        재시도가 같은 취소/승인을 중복 처리하지 않게 하는 Toss 측 멱등키)."""
+        idempotency_key가 있으면 `Idempotency-Key` 헤더로 전송 — Toss 측 멱등키(재시도가 같은 취소/승인을 중복 처리하지 않게).
+        story #4335(까디르 ③ · PO가 공식 문서 docs.tosspayments.com 인증 페이지에서 확인: «요청 헤더에 Idempotency-Key를 추가하면
+        멱등한 요청을 보낼 수 있습니다») — 예전 `Idempotent-Key`(철자 틀림 · «2026-08-07 공식 문서 확認»은 틀린 기록)는 Toss가
+        모르는 헤더라 멱등이 실제로는 한 번도 걸린 적이 없다. 테스트는 실제로 나가는 HTTP 헤더 이름을 전송층에서 단언한다."""
         headers = self._auth_header()
         if idempotency_key is not None:
-            headers["Idempotent-Key"] = idempotency_key
+            headers["Idempotency-Key"] = idempotency_key
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(f"{_API_BASE}{path}", headers=headers, json=json)
@@ -185,7 +188,7 @@ class TossAdapter(PaymentProvider):
         confirm 못 받고 영구 pending). 호출부(billing_charge_amount.py)에서도 고쳤지만,
         이 어댑터가 PG로 나가는 «최종 경계»이므로 여기서도 한 번 더 강제 변환한다 —
         미래의 다른 호출부가 같은 계약을 또 어겨도 이 함수를 지나는 순간 사고가 죽는다."""
-        return await self._post(
+        result = await self._post(
             f"/v1/billing/{billing_key}",
             json={
                 "customerKey": customer_key,
@@ -196,6 +199,11 @@ class TossAdapter(PaymentProvider):
             timeout=65,  # Toss 문서: 최대 60초 소요 가능 — 여유 5초.
             op_label="charge",
         )
+        # story #4335 AC4 — dev 전용 지연 주입(청구는 이미 끝났고 응답만 늦다). prod에선 설정값과 무관하게 0.
+        if not settings.is_prod_deploy and (delay := settings.toss_test_charge_response_delay_seconds) > 0:
+            logger.warning("Toss charge response delayed %.0fs for live verification (non-prod only)", delay)
+            await asyncio.sleep(delay)
+        return result
 
     async def get_payment_by_order_id(self, *, order_id: str, quiet_codes: frozenset[str] = frozenset()) -> dict:
         """GET /v1/payments/orders/{orderId} — PaymentProvider 8메서드 밖의 보조 조회

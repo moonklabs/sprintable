@@ -64,3 +64,30 @@ describe('CommentThreadCard', () => {
     expect(markup).not.toMatch(/shadow-sm["\s]/);
   });
 });
+
+// [SID:4311 PR 3] 댓글 줄 작성자 — 같은 이름 서로 다른 작성자 둘이면 «· ID 앞 8자»(작성자 id마다 한 번) · 해결한 사람 문장도 같은 표.
+describe('CommentThreadCard — 작성자 동명이인([SID:4311 PR 3])', () => {
+  const members = {
+    'e75ca548-1': { id: 'e75ca548-1', name: '송윤재' },
+    '2fd14616-2': { id: '2fd14616-2', name: '송윤재' },
+    'm-anna': { id: 'm-anna', name: '안나' },
+  };
+  const base = MOCK_THREADS.find((t) => t.rollup === 'resolved')!;
+  const thread = {
+    ...base,
+    comments: [
+      { id: 'x1', author_id: 'e75ca548-1', body: '첫 댓글', created_at: '2026-09-25T00:00:00Z' },
+      { id: 'x2', author_id: '2fd14616-2', body: '둘째 댓글', created_at: '2026-09-25T00:01:00Z' },
+      { id: 'x3', author_id: 'm-anna', body: '셋째 댓글', created_at: '2026-09-25T00:02:00Z' },
+      { id: 'x4', author_id: 'e75ca548-1', body: '넷째 댓글', created_at: '2026-09-25T00:03:00Z' },
+    ],
+    resolved_by: '2fd14616-2',
+  };
+  it('«송윤재» 둘 = 줄마다 id 앞 8자 · 같은 사람 두 줄 = 같은 꼬리 · 안나 = 꼬리 없음 · 해결 문장도 같은 표(조사는 최종 라벨 끝소리)', () => {
+    const markup = renderToStaticMarkup(wrap(<CommentThreadCard thread={thread} memberMap={members} />));
+    const authors = [...markup.matchAll(/<strong[^>]*>([^<]*)<\/strong>/g)].map((m) => m[1]);
+    expect(authors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '송윤재 · e75ca548']);
+    expect(markup).toContain('송윤재 · 2fd14616이 해결함');
+  });
+});
+

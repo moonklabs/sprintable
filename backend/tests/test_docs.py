@@ -23,6 +23,7 @@ def _mock_doc() -> MagicMock:
     d.superseded_by = None  # E-DG S28: 신규 superseded_by(동일 패턴·MagicMock None 명시)
     d.assignee = None  # doc-payload enrich: 신규 응답필드(MagicMock→DocResponse 검증 실패 방지·동일 패턴)
     d.revisions = None  # doc-payload enrich: 신규 응답필드(동일 패턴)
+    d.wiki_link_targets = None  # story #4313: 신규 응답필드(slug 단건 경로만 채움 · MagicMock→dict 검증 실패 방지 · 동일 패턴)
     d.title = "Getting Started"
     d.slug = "getting-started"
     d.canonical_slug = "getting-started"  # 4dd399c6: property on real Doc; mock 명시 필수
@@ -80,6 +81,8 @@ async def test_list_docs_200():
         # project_id query → get_project_scoped_org_id 의 project→org 조회. 실제 불변식
         # (project 는 스코프 org 소속)을 반영: 같은 org 여야 cross-org 가드(c6b82459) 통과.
         mock_result.scalar_one_or_none.return_value = ORG_ID
+        # story #4299: project org 조회 · 접근 판정이 한 SQL(project_org_and_access) — 한 행 (org, 접근 여부).
+        mock_result.one.return_value = (ORG_ID, True)
         session.execute = AsyncMock(return_value=mock_result)
 
         # story #2459: get_project_scoped_org_id가 이제 요청-수명 get_db 대신 전용 단명
@@ -292,6 +295,8 @@ async def test_list_docs_with_parent_id_200():
         mock_result.scalars.return_value.all.return_value = [child_doc]
         # project→org 조회가 스코프 org 와 일치하도록(c6b82459 cross-org 가드)
         mock_result.scalar_one_or_none.return_value = ORG_ID
+        # story #4299: project org 조회 · 접근 판정이 한 SQL(project_org_and_access) — 한 행 (org, 접근 여부).
+        mock_result.one.return_value = (ORG_ID, True)
         session.execute = AsyncMock(return_value=mock_result)
 
         from app.dependencies import auth as auth_module

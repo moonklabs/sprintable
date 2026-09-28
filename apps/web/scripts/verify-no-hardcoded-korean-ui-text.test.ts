@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { measureFsReads } from './test-utils/fs-work';
 import {
   computeDeadExemptFiles, computeNewViolations, computeStaleBaseline, EXEMPT_FILES, loadBaseline,
   scanContent, scanRepo, violationKey,
@@ -294,34 +295,35 @@ describe('computeNewViolations', () => {
 //   아니라 scanRepo가 실제로 한글을 재는지(계약)만 확認하므로 baseline 소진과 완전히
 //   독립적이고, 앞으로 다시는 옮길 필요가 없다.
 describe('창건 사례 — scanRepo가 실제로 한글 위반을 재는지(합성 표본, 실 파일 소진과 독립)', () => {
-  // scanRepo는 MIN_EXPECTED_FILES(400) 미만이면 "잘못된 srcRoot" 자가진단으로 throw한다
-  // (운영 오용 방지 안전장치) — 격리된 임시 디렉터리(파일 1개)로는 이 안전장치 자체에
-  // 걸려 scanRepo를 못 부른다. 그래서 진짜 src 트리 안에 합성 파일 하나를 잠깐 심어
-  // 실 전수 스캔(파일 수 조건 자동 충족)이 그 파일을 실제로 잡는지 본다 — 레포의 기존
-  // 위반 중 어느 하나가 살아있는지에는 완전히 무관(finally에서 항상 걷어낸다).
-  it('한글 JsxText가 있는 합성 파일은 scanRepo가 실제로 잡는다(실 src 트리에 임시 파일)', () => {
-    const srcRoot = path.resolve(__dirname, '../src');
+  // story #4333 — 예전엔 실 src 트리에 합성 파일을 잠깐 심었다(최소 파일 수 안전장치 때문) → 같은 전체 판의 다른 실 트리 스캐너가
+  // 그 임시 파일을 세어 까닭 없이 RED. 이제 os.tmpdir() 아래 격리 루트(파일 1개)에 쓰고 최소 파일 수를 그 루트에 맞춘다
+  // (운영 호출의 안전장치 기본값은 그대로 — 아래 «잘못된 srcRoot» 테스트가 고정).
+  it('한글 JsxText가 있는 합성 파일은 scanRepo가 실제로 잡는다(격리 루트)', () => {
+    const srcRoot = mkdtempSync(path.join(os.tmpdir(), 'korean-ui-founding-'));
     const relPath = '__founding-case-temp__.tsx';
-    const abs = path.join(srcRoot, relPath);
-    writeFileSync(abs, "export function C() { return <p>합성 창건 사례 문구</p>; }");
+    writeFileSync(path.join(srcRoot, relPath), "export function C() { return <p>합성 창건 사례 문구</p>; }");
     try {
-      const violations = scanRepo(srcRoot);
+      const violations = scanRepo(srcRoot, { minExpectedFiles: 1 });
       const hit = violations.find((v) => v.file === relPath && v.text === '합성 창건 사례 문구');
       expect(hit).toBeDefined();
+      expect(() => scanRepo(srcRoot), '운영 기본값은 그대로 — 파일 1개 루트는 거부').toThrow(/검사 대상 파일이 1개뿐/);
     } finally {
-      rmSync(abs, { force: true });
+      rmSync(srcRoot, { recursive: true, force: true });
     }
-  }, 3500);
+  });
 });
 
 describe('EXEMPT_FILES — 내부 도그푸드·약관(스토리 明示 ④)', () => {
-  // story #3902 — 635·850·728·851·686ms 중 최댓값 851ms → ×3 ≈ 2553ms → 3000ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('exempt로 등재된 파일은 위반이 있어도 스캔에서 완전히 제외된다', () => {
-    const violations = scanRepo(path.resolve(__dirname, '../src'));
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(path.resolve(__dirname, '../src')));
+    const violations = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     for (const exempt of EXEMPT_FILES) {
       expect(violations.some((v) => v.file === exempt)).toBe(false);
     }
-  }, 3000);
+  });
 });
 
 // story #3776(유나 지적 06:09Z) — EXEMPT_FILES는 baseline stale 검사와 달리 자가만료가

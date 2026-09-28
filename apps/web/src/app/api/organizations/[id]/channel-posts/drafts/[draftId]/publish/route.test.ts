@@ -4,6 +4,7 @@ const { proxyToFastapiWithParams } = vi.hoisted(() => ({ proxyToFastapiWithParam
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapiWithParams }));
 
 import { POST } from './route';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 describe('/api/organizations/[id]/channel-posts/drafts/[draftId]/publish (story #3402)', () => {
   it('POST — FastAPI publish 엔드포인트로 draftId를 그대로 위임', async () => {
@@ -17,6 +18,8 @@ describe('/api/organizations/[id]/channel-posts/drafts/[draftId]/publish (story 
 
     expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
       request, '/api/v2/organizations/[id]/channel-posts/drafts/[draftId]/publish', { id: 'org-1', draftId: 'd1' },
+      // story #4320 — 긴 라우트 시한은 표 한 곳(bff-route-timeouts).
+      expect.objectContaining({ timeoutMs: LONG_ROUTES.channelPublishNow.bffMs }),
     );
     expect(resp.status).toBe(200);
   });

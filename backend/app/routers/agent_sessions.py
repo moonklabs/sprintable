@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.dependencies.ownership import assert_agent_owner
 from app.repositories.agent_session import AgentSessionError, AgentSessionRepository
 from app.schemas.agent_session import TransitionSessionRequest
 
@@ -58,6 +59,12 @@ async def transition_session(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #4000(보안 감사) — PATCH는 org/project 스코프만 보고 소유권 검사가 없어, 남의
+    # agent 세션 상태(paused/active 등)를 임의로 전이시킬 수 있었다.
+    existing = await repo.get(id, org_id, project_id)
+    if existing is None:
+        return _err("SESSION_NOT_FOUND", "Session not found", 404)
+    await assert_agent_owner(existing.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     try:
         session = await repo.transition(
             session_id=id,

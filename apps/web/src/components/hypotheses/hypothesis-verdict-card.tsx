@@ -39,8 +39,9 @@ export function HypothesisVerdictCard({
     | null;
   // story #2036 AC3 — 사람이 닫았으면 closed_by='human'이 outcome_result에 실린다(BE 컬럼
   // 없음·JSONB 자체 적재). 없으면 cron 자동 채점(hypothesis_scorer.py)이 닫은 것.
+  // [SID:4286] resolveName이 없을 때 id 전체를 이름으로 쓰지 않는다(빈 칸).
   const closedByLabel = result?.closed_by === 'human'
-    ? t('closedByHuman', { name: result.closed_by_member_id ? (resolveName?.(result.closed_by_member_id) ?? result.closed_by_member_id) : t('owner') })
+    ? t('closedByHuman', { name: result.closed_by_member_id ? (resolveName?.(result.closed_by_member_id) ?? '') : t('owner') })
     : result?.scored_at ? t('closedByAuto') : null;
 
   return (
@@ -52,6 +53,7 @@ export function HypothesisVerdictCard({
       )}
     >
       <div className="flex items-center justify-between gap-2">
+        {/* tint-guard-ok: same-family verdict tint, AA 양테마 success 4.56/6.54·info 5.54/4.81 — 색=검증 semantic(PO §12.1). success 라이트 4.56 = AA 마진 +0.06 — --proof-green 밝힐 때 이 자리 재측 필수 */}
         <span className={cn('flex items-center gap-1.5 text-sm font-semibold', isVerified ? 'text-success' : 'text-info')}>
           <span aria-hidden>{isVerified ? '✓' : '⊘'}</span>
           {isVerified ? t('statusVerified') : t('statusFalsified')}
@@ -71,6 +73,7 @@ export function HypothesisVerdictCard({
             </span>
             <span className="tabular-nums text-muted-foreground">
               {t('actual')}{' '}
+              {/* tint-guard-ok: same-family success on success-tint, AA 양테마 4.56/6.54(위와 같은 근거·마진 주의) */}
               <span className={cn('font-semibold', isVerified ? 'text-success' : 'text-foreground')}>{fmt(result.actual)}</span>
             </span>
           </div>

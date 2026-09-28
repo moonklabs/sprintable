@@ -3,6 +3,9 @@ import type { SendAttachment } from '@/hooks/use-chat-sse';
 
 export interface KanbanStory {
   id: string;
+  // story #4345(까디르 4718) — 서버가 늘 싣는 판 표지(BE StoryResponse.updated_at · 갱신마다 단조 증가 — models/pm.py MONOTONIC_UPDATED_AT_ONUPDATE).
+  // 스토리 상세 패널이 «부모가 넘긴 story가 마지막 서버 목록보다 옛것인가»를 가르는 데 쓴다. 테스트 픽스처엔 없을 수 있어 선택.
+  updated_at?: string;
   // story 9ac9b80f: 프로젝트 내 사람-읽는 순차 #N. 서버 채번, 백필 전 구스토리는 null 가능.
   story_number?: number | null;
   title: string;
@@ -56,9 +59,15 @@ export interface GateItem {
   // story #1960(P2-S4): 결재함 통합 큐가 org 이름 표시에 사용(BE GateResponse엔 항상 존재하는
   // 필드인데 이 타입에 이제껏 누락돼 있었음 — additive, 기존 소비부 무영향).
   org_id?: string;
+  // story #4241 — 결재 대상(work_item)의 프로젝트(BE list_gates 배치 해소 · 프로젝트 무관 대상은 null). 결재함은 조직 전체 목록이라
+  // 행 링크는 «현재 프로젝트»가 아니라 이 값을 `?p=`로 싣는다.
+  project_id?: string | null;
   work_item_id: string;
   work_item_type: string;
   gate_type: string;
+  // story #4098 — "레시피 unscoped external_publish(scope_key="")인지" 판별(linked_
+  // channel_draft/_pending의 "값 없음"과 "이 카드 대상 자체가 아님"을 가른다).
+  scope_key?: string | null;
   status: string;
   resolver_id: string | null;
   // story #3001(선생님 정책 확定 2026-08-24) — 결재선(수신자) 지정+위임. resolver_id의
@@ -67,6 +76,42 @@ export interface GateItem {
   designated_approver_id?: string | null;
   resolved_at: string | null;
   resolution_note: string | null;
+  // story #4090([E-RECIPE-1] Publisher 슬롯) AC2, migration 0388 — 레시피 자동발행
+  // 훅의 기계 소유 결과(스킵 사유|"published"|"scheduled"). resolution_note(승인자
+  // 본인 문장)와 절대 안 섞는다(BE 페드루 PO 確定). external_publish(scope_key="")
+  // 게이트가 아니면 항상 null.
+  publish_outcome?: string | null;
+  // story #4098([E-RECIPE-1], 2026-09-21) — 레시피 unscoped external_publish 게이트
+  // (scope_key="")를 승인하면 #4090 AC2가 자동발행하는 그 채널 초안의 실물(본문·이미지·
+  // 영상·목적지·예약 시각). 다른 gate_type·scoped 게이트는 항상 null.
+  linked_channel_draft?: {
+    // story #4190 — 카드가 그린 버전(«본 버전»). 승인 요청이 reviewed_draft_version으로 돌려보낸다.
+    draft_id: string; version: number; channel: string; account_id: string; account_label: string | null;
+    text: string | null; image_urls: string[]; video_url: string | null;
+    scoped_gate_status: string; sealed_scheduled_at: string | null;
+  } | null;
+  // linked_channel_draft가 null인 이유 구분 — true면 "제출은 됐지만 scoped 게이트가
+  // 아직 pending"(이 게이트 승인과 함께 승계-승인됨), false/undefined면 "제출된 초안
+  // 자체가 없음".
+  linked_channel_draft_pending?: boolean;
+  // story #4190(PO 판정 2026-09-23 · 유나 site 초안 카드) — 레시피 게이트가 보여 주는 초안이 블로그(site)일 때의 카드.
+  // linked_channel_draft와 둘 중 하나만 채워진다(어느 카드인지 BE가 가른다). channel·account_*는 외부 블로그일 때만.
+  // body_preview는 BE가 마크다운 기호를 걷은 평문(300자 안쪽) — FE는 파싱하지 않는다.
+  linked_site_draft?: {
+    draft_id: string; version: number; title: string; body_preview: string;
+    channel: string | null; account_id: string | null; account_label: string | null;
+    scoped_gate_status: string; sealed_scheduled_at: string | null;
+  } | null;
+  linked_site_draft_pending?: boolean;
+  // story #4190(PO 12:16Z) — 레시피 정의 capability로 BE가 판별한 이 레시피의 초안 종류. **빈 상태 문구 고르기에만**
+  // 쓴다(카드 분기는 linked_*_draft). null = 모르는 레시피(중립 문구).
+  linked_draft_kind?: 'channel_post' | 'site_post' | null;
+  // story #4139([E-RECIPE-1] Phase3 폴리시) — 이 게이트(draft-scoped external_publish)가
+  // 레시피 unscoped 게이트에 「대신 결재」되는 대상이면 그 레시피 게이트 id(파생값, BE
+  // `_enrich_deferred_to_gate_id`가 매 응답마다 계산·저장 컬럼 0). 있으면 액션 버튼을
+  // 숨기고 「레시피 게이트에서 함께 결재돼요」+링크를 보인다 — 직접 transition은 안 막는다
+  // (멱등, BE가 이미 처리). null/undefined면 이 게이트는 평소처럼 사람이 직접 결재한다.
+  deferred_to_gate_id?: string | null;
   held_until?: string | null; // E-DG S31: 보류(hold) 만료(무기한=null·시한부=ISO). 디디 BE 병렬·additive.
   // E-DG S33: owner 결재 강제(override) 메타(gate_overridden 이벤트 enrich·S32 reassign 패턴 동형). 디디 BE #1645 design-first·additive·머지 후 정합.
   overridden_by_member_id?: string | null;
@@ -127,6 +172,12 @@ export interface GateItem {
   sealed_content_version?: number | null;
   sealed_content_sha256?: string | null;
   sealed_content_body?: string | null;
+  // story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — external_publish 예약
+  // 발행 두 번째 봉인 축(sealed_content_*와 동일 선례). story #4073(카디르 #4450 QA④
+  // 실측) — BE GateResponse에 이 필드가 아예 없어 승인카드에서 예약시각이 항상 안
+  // 보였다(sealed_ads_*/sealed_newsletter_*/sealed_estimated_cost_minor에 이어 4번째
+  // 재발 — #4073으로 클래스 완전 봉인). 다른 gate_type은 전부 undefined/null.
+  sealed_scheduled_at?: string | null;
   // 승인 뒤 편집으로 pending 재오픈된 게이트인지(사람이 처음 상신한 pending과 구분) — S4가
   // "재승인 필요" 배지·재상신 대기 카드를 그릴 신호. 다른 gate_type은 항상 false.
   reapproval_required?: boolean;
@@ -169,6 +220,56 @@ export interface GateItem {
   // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12) — 봉인 축 아님(gate
   // ORM 컬럼 아님), publication의 최신 channel_payload.subject를 「지금」 값으로 읽음.
   newsletter_subject?: string | null;
+  // story #4262 — 발송 게이트의 발송 명령(가장 최근 1) 요약. 단건 `GET /gates/{id}`만 채우고 목록 · 다른 gate_type은 null.
+  // dead_letter · 연결 blocked면 게이트 화면이 사람 재시도 자리를 연다(공용 publication-commands retry).
+  newsletter_send_command?: {
+    id: string;
+    status: string;
+    failure_kind: string | null;
+    reason_code: string | null;
+    next_attempt_at: string | null;
+    reason_reset_at: string | null;
+    /** story #4290 — 사람이 지금 이 발송 명령을 «다시 시도»할 수 있는가(서버 한 판정 `human_retryable` · 재시도 엔드포인트와 같은 값). */
+    command_retryable?: boolean;
+  } | null;
+  // story #4336 AC4 — 외부 발행(external_publish) 게이트의 발행 명령(가장 최근 1) 요약. 단건 `GET /gates/{id}`만 채운다(목록 · 다른 gate_type null).
+  // processing_kind = 채널 초안 목록 · 상세와 같은 BE 한 판정(`derive_processing_kind`) — 화면이 같은 deriveFailureAction으로 «발행 중»을 고른다.
+  publish_command?: {
+    id: string;
+    status: string;
+    failure_kind: string | null;
+    reason_code: string | null;
+    next_attempt_at: string | null;
+    reason_reset_at: string | null;
+    command_retryable?: boolean;
+    processing_kind?: string | null;
+  } | null;
+  // story #4044(0333)/#4072(BE 응답스키마 누락 fix, 페드루 PO 確定 2026-09-19) —
+  // generation_budget 전용 sealing(sealed_ads_*/sealed_newsletter_*와 동일 선례).
+  // 다른 gate_type은 전부 undefined/null. #4072 前엔 BE GateResponse에 이 필드가
+  // 아예 없어 API가 항상 None을 냈다(sealed_ads_* PR2 재발 클래스 3번째).
+  sealed_estimated_cost_minor?: number | null;
+  // story #4136(FE)·#4135(BE, 미르코) — 게이트 상세 «제작 산출물» 칸. 이 단계에 연결된
+  // evidence 레코드 전부(neutral_facts.draft_doc_reference_token은 초안 1개만 가리키는
+  // 단수 필드라 다건 목록이 필요했다 — #4041/#4056 제작 작업대가 stage당 여러 산출물을
+  // 남기는 것과 대칭). shape는 미르코군과 1:1 합의(2026-09-22 01:14Z, BE 구현 그대로) —
+  // 최초 내 제안("doc"|"artifact"|"evidence" kind)은 미르코군이 정정: kind는 evidence.
+  // payload.kind(예: "concept_brief"/"animatic"/"storyboard" — production-workbench-
+  // evidence.tsx의 ProductionWorkbenchKind와 같은 어휘, "이게 뭔지"의 사람이 읽는 라벨이지
+  // doc/artifact 판별자가 아니다). doc/artifact 판별은 reference_token을
+  // parseReferenceToken()으로 파싱한 entityType에서 나온다(같은 정보를 두 곳에 실어
+  // 드리프트를 만들지 않는다는 미르코군 판단). reference_token은 **nullable** — evidence는
+  // 있는데 doc/artifact 어느 쪽으로도 못 풀리면(payload 형식 불일치 등) null이지만 항목
+  // 자체는 남는다("확定 대상은 맞는데 실물을 아직 못 찾음"이라는 정직한 신호 — 조용히
+  // 빼면 "그 산출물이 아예 없다"로 오독될 수 있다, FE 렌더가 null도 다뤄야 한다는 미르코군
+  // 지시). ref(evidence.ref, 자유문자열)는 이 카드가 아직 안 씀(참고 데이터로만 실림).
+  // BE 미착지 구버전 응답은 undefined — 항상 optional.
+  linked_evidence?: Array<{
+    id: string;
+    kind: string;
+    ref: string;
+    reference_token: string | null;
+  }>;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE
@@ -186,6 +287,8 @@ export interface HitlInboxItem {
   work_type: string | null;
   created_at: string;
   expires_at: string | null;
+  // story #4241 — GateItem.project_id와 짝(이 요청의 프로젝트).
+  project_id?: string | null;
 }
 
 export type GateInboxItem = GateItem | HitlInboxItem;
@@ -317,8 +420,15 @@ export interface KanbanSprint {
 
 export interface KanbanMember {
   id: string;
-  name: string;
+  // story #4284 — BE `team_members.name`은 nullable(story #3758: 표시 이름 없는 휴먼은 이메일로 지어내지 않고 NULL을 정직하게 저장).
+  // 예전 `name: string`은 거짓 계약이라 tsc가 null 소비를 못 잡았다(보드 담당자 필터 `m.name.toLowerCase()` → 보드 전체 오류 화면).
+  name: string | null;
   type: string;
+  // story #3997 CHANGES(자체 그라운딩 확장, 2026-09-17) — story-detail-panel.tsx의 담당자
+  // 토글 피커가 이 목록을 그대로 쓴다. memberMap(기존 배정 표시 해소)은 이 필드로 안
+  // 거른다 — 거르면 이미 배정된 값의 표시가 깨진다(3107 "생략 대신 표기"와 동형 원칙),
+  // 오직 «고르는 자리»(토글 후보 목록)에서만 isSystemPublisher로 제외한다.
+  runtime_type?: string | null;
 }
 
 import { VALID_STORY_TRANSITIONS } from '@sprintable/shared';

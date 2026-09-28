@@ -54,7 +54,7 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         return list(result.scalars().all())
 
     async def list_org_human_members(
-        self, user_id: uuid.UUID | None = None
+        self, user_id: uuid.UUID | None = None, *, include_departed: bool = False
     ) -> list[dict[str, Any]]:
         """org-level 휴먼 로스터 = **org_members SSOT 직접 해소** (S:166051f0).
 
@@ -72,21 +72,42 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         None 정직). `test_standup_org_roster_166051f0.py`의 noacc@ pin이 이 자리의 예전(email
         폴백) 동작을 pin하던 것이라 이 fix로 함께 뒤집힘(PO 決 2026-09-09).
         """
+        # story #4303 — include_departed면 조직을 떠난 사람(org_members soft delete)도 싣는다. 옛 기록의 작성 · 담당 · 승인
+        # 칸이 이름을 풀 수 있게(감사 흔적 · PO 개인정보 판단: 이름만). 떠난 행은 `departed`로 표시해 응답에서 이름 외를 비운다.
         sql = (
             "SELECT om.id AS id, om.user_id AS user_id, om.role AS role, om.created_at AS created_at, "
-            "       COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name, m.avatar_url AS avatar_url "
+            "       COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name, m.avatar_url AS avatar_url, "
+            "       (om.deleted_at IS NOT NULL) AS departed "
             "FROM org_members om "
             "JOIN users u ON u.id = om.user_id "
             "LEFT JOIN members m ON m.org_id = om.org_id AND m.user_id = om.user_id "
             "                   AND m.type = 'human' AND m.deleted_at IS NULL "
-            "WHERE om.org_id = :org AND om.deleted_at IS NULL"
+            "WHERE om.org_id = :org"
         )
+        if not include_departed:
+            sql += " AND om.deleted_at IS NULL"
         params: dict[str, Any] = {"org": self.org_id}
         # asyncpg 함정 회피: ':uid IS NULL' 분기 대신 Python 조건부로 필터를 붙인다
         # (feedback_asyncpg_text_traps — IS NULL 바인딩 AmbiguousParameterError).
         if user_id is not None:
             sql += " AND om.user_id = :uid"
             params["uid"] = user_id
+        elif include_departed:
+            # story #4303(C안) — 0075가 빠뜨린 떠난 사람의 이름 행(마이그 0414: user_id NULL · deleted_at 있음 · id = 옛 legacy id).
+            # 옛 기록이 그 id를 담고 있어 여기서 같은 id로 이름을 싣는다. org_members 행이 없거나 떠난 뒤라 위 갈래엔 안 잡힌다.
+            # 까디르 codex · PO 04:03Z — 모양만 보면 계정 삭제 뒤 users가 지워진 행(name에 이메일 · uuid 가능)도 잡힌다 → **옛 사람 id**인
+            # 행만(0414 업 · 다운 술어와 같은 출처 · resolver의 legacy_human_member_ids와 같은 기준). 옛 테이블이 없는 DB(create_all)는 이 갈래 없음.
+            from app.services.member_resolver import LEGACY_HUMAN_TABLE, legacy_table_exists
+
+            if await legacy_table_exists(self.session):
+                sql += (
+                    " UNION ALL "
+                    "SELECT m.id AS id, NULL::uuid AS user_id, 'member' AS role, m.created_at AS created_at, "
+                    "       NULLIF(m.name, '') AS name, NULL AS avatar_url, true AS departed "
+                    "FROM members m "
+                    "WHERE m.org_id = :org AND m.type = 'human' AND m.user_id IS NULL AND m.deleted_at IS NOT NULL "
+                    f"  AND EXISTS (SELECT 1 FROM {LEGACY_HUMAN_TABLE} tl WHERE tl.id = m.id AND tl.type = 'human')"
+                )
         sql += " ORDER BY name"
         rows = await self.session.execute(text(sql), params)
         return [dict(row._mapping) for row in rows]
@@ -104,6 +125,10 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         # (예: 레거시 'manager')이 들어오면 0122 CHECK 위반(500) → clamp 로 정규화.
         if "role" in a_set:
             from app.services.project_auth import clamp_project_role
+            # story #4340 — clamp는 레거시 **비-enum 문자열**(예 'manager') 방어용이다. None이 여기 오면 예전엔 'member'로 조용한 강등이었다 —
+            # 스키마가 명시 null을 422로 막고(TeamMemberUpdate.NOT_NULL_FIELDS), 내부 호출이 None을 넘기면 강등 대신 멈춘다(fail-closed).
+            if a_set["role"] is None:
+                raise ValueError("team member role cannot be None — omit it to leave the role unchanged")
             a_set["role"] = clamp_project_role(a_set["role"])
         if m_set:
             await self.session.execute(

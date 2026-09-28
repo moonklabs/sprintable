@@ -33,6 +33,8 @@ interface DocDetail {
   updated_at?: string;
   assignee?: { id: string; name: string } | null;
   revisions?: { count: number; latest_at: string | null } | null;
+  // story #4313 — 본문 위키 링크 {적힌 slug → 지금 slug}(BE slug 단건 경로 · BFF getBySlug가 실어 옴). 여기 든 것만 링크 · 주소는 지금 slug.
+  wiki_link_targets?: Record<string, string> | null;
 }
 
 // null = 로딩 중, false = not found, DocDetail = 로드 완료
@@ -95,9 +97,14 @@ export default function DocViewPage() {
     return parent?.title ?? null;
   }, [doc, tree]);
 
+  // story #3946(유나 확認·페드루 정정) — doc이 아직 안 왔거나(null) 못 찾았을 때(false)
+  // 본문 마스트헤드(:150의 doc.title h1)가 안 그려져 페이지 h1이 0개가 되던 gap. 시각은
+  // 무변(sr-only) — docs-index.tsx와 같은 원칙, 같은 정본 키(docs.title)를 쓴다(doc
+  // 자체 제목은 이 시점에 아직 모른다 — 지어내지 않는다).
   if (doc === null) {
     return (
       <div className="flex h-full items-center justify-center">
+        <h1 className="sr-only">{t('title')}</h1>
         <p className="text-sm text-muted-foreground">{t('loading')}</p>
       </div>
     );
@@ -106,6 +113,7 @@ export default function DocViewPage() {
   if (doc === false) {
     return (
       <div className="flex h-full items-center justify-center">
+        <h1 className="sr-only">{t('title')}</h1>
         <p className="text-sm text-muted-foreground">{t('notFound')}</p>
       </div>
     );
@@ -120,10 +128,14 @@ export default function DocViewPage() {
           mono 문법은 라틴 고정폭 전제라 한글엔 안 맞음). meta-caps는 라틴 전용으로 한정하고
           한글 경로는 sans 본문체로 — 위계는 크기/weight/citron rule로만 낸다. */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-2.5 text-[12px] text-muted-foreground lg:px-8">
-        <Link href={docsListUrl(wsSlug, projSlug)} className="hover:text-foreground hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
-        {categoryLabel ? (<><span className="text-muted-foreground">/</span><span>{categoryLabel}</span></>) : null}
-        <span className="text-muted-foreground">/</span>
-        <span className="truncate text-foreground">{doc.title}</span>
+        {/* [SID:4356] 좁은 폭(390/360)에서 이 줄이 nowrap flex라 «지식»이 한 글자 폭(10~12px)까지 줄어 «지 / 식»으로 꺾였다(한글 최소 폭 = 한 글자).
+            뿌리 «지식» · 구분 «/»는 줄지 않고 안 꺾임 · 분류 · 제목은 한 줄로 줄되 말줄임(낱말 중간에서 안 꺾임). 넓으면 예전과 같다.
+            유나 CR(PR 4747) — 분류 · 제목이 같은 규칙(바탕 = 글자 폭)이면 글자 폭 비례로 줄어 짧은 분류(«기획»)가 5.8~10.6px로 눌려
+            «기»만 남고 «…»도 안 보였다 → 제목은 남는 자리만(flex-1 · 바탕 0 · 바닥 3rem), 분류는 제 폭을 먼저 받고 모자랄 때만 말줄임. */}
+        <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-foreground hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
+        {categoryLabel ? (<><span className="shrink-0 text-muted-foreground">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
+        <span className="shrink-0 text-muted-foreground">/</span>
+        <span className="min-w-[3rem] flex-1 truncate text-foreground">{doc.title}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1">
           <DocToc headings={headings} onHeadingClick={scrollToHeading} />
           <Button asChild size="sm" variant="ghost">
@@ -167,13 +179,18 @@ export default function DocViewPage() {
                 contentRef={contentRef}
                 codeCopyLabel={t('codeCopy')}
                 codeCopiedLabel={t('codeCopied')}
+                codeCopyFailedLabel={t('codeCopyFailed')}
                 assetImageErrorLabel={t('attachImageUnavailable')}
                 untitledEmbedLabel={t('newDocDefaultTitle')}
+                unsafeLinkLabel={t('embedLinkBlocked')}
+                unsafeFileLabel={t('attachFileBlocked')}
+                embedNotFoundLabel={t('notFound')}
                 mermaidRenderFailedLabel={t('mermaidRenderFailed')}
                 mermaidRenderingLabel={t('mermaidRendering')}
                 mathRenderFailedLabel={t('mathRenderFailed')}
                 suppressLeadingTitle={doc.title}
                 bodyEmphasis="full"
+                wikiLinkTargets={doc.wiki_link_targets}
               />
             </div>
             {/* 두 번째 backlinks 자리(첫 자리: story-detail-panel, story #2299) — 컴포넌트

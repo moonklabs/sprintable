@@ -18,6 +18,6 @@ class AuditLogRepository:
         if cursor:
             from sqlalchemy import and_
             q = q.where(AuditLog.created_at < cursor)
-        q = q.order_by(AuditLog.created_at.desc()).limit(min(limit, 200))
+        q = q.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(min(limit, 200))
         result = await self.session.execute(q)
         return list(result.scalars().all())

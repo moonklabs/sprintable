@@ -10,7 +10,19 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
 import ChatsLayout from './layout';
+import ChatsPage from './page';
 import { useChatRail } from './chat-rail-context';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
+
+// story #3945 — 실 <TopBar/>는 NotificationBell·PresenceToggleButton 등 이 테스트와 무관한
+// 무거운 트리(각자 useRouter 등 별도 배선 필요)를 끌고 온다. TopBarSlot이 context에 심은
+// title이 실제로 DOM에 어떤 태그로 나타나는지만 재는 게 목적이라, top-bar.tsx의
+// `{title}` 렌더 한 줄만 그대로 재현하는 얇은 소비처를 쓴다(goals/docs 테스트의
+// `<div>{title}</div>` TopBarSlot 목업과 같은 원칙 — 무관 트리는 걷어낸다).
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div>{title}</div>;
+}
 
 const useDashboardContextMock = vi.fn();
 vi.mock('../../dashboard/dashboard-shell', () => ({
@@ -280,5 +292,28 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     const rail = container.querySelector('[data-testid="chat-rail"]');
     expect(rail?.className).toContain('shadow-[var(--elev-overlay)]');
     expect(rail?.className).not.toMatch(/(^|\s)shadow-xl(\s|$)/);
+  });
+});
+
+// story #3945 CHANGES1(카디르 실측) — layout.tsx의 진짜 h1(#chat-rail-heading)과
+// page.tsx의 TopBarSlot h1이 App Router에서 항상 동시 마운트(layout+page는 goals/retro/
+// loops의 loading/loaded 분기와 달리 상호배타가 아니다)라 세 번째 h1이었다. 실 TopBar
+// 소비처까지 포함해 마운트해야 TopBarSlot이 context에 심은 title이 실제로 DOM에
+// 나타난다(layout.tsx 자체는 TopBarSlot을 소비하지 않는다).
+describe('ChatsLayout+ChatsPage — 페이지 h1 1개 원칙(story #3945)', () => {
+  it('⭐/chats는 h1이 정확히 1개다(레일 제목 #chat-rail-heading) — TopBarSlot은 비-헤딩', async () => {
+    usePathnameMock.mockReturnValue('/chats');
+    await act(async () => {
+      root.render(wrap(
+        <TopBarProvider>
+          <TopBarTitleProbe />
+          <ChatsLayout><ChatsPage /></ChatsLayout>
+        </TopBarProvider>,
+      ));
+    });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.id).toBe('chat-rail-heading');
+    expect(h1s.some((h) => h.className.includes('text-sm font-medium') && h.id !== 'chat-rail-heading')).toBe(false);
   });
 });

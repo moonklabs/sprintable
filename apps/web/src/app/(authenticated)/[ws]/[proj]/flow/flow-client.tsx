@@ -10,13 +10,12 @@ import { ExceptionStream } from '@/components/glance/exception-stream';
 import { toExceptionQueueItems, type BeAttentionSignal, type ExceptionLabels } from '@/components/glance/derive-exception-signals';
 import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance-data';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
 import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
 import { ScaleLadder } from '@/components/flow/scale-ladder';
-import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -87,6 +86,7 @@ function parseView(raw: string | null, hasHypothesisParam: boolean): FlowView {
  * 이름만 "막힘"과 안 겹치게 갈고, «수»(N)는 라벨에서 뺀다(영역은 남고 수만 안 보인다).
  */
 export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPageClientProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('flow');
   const tGlance = useTranslations('glance');
   const router = useRouter();
@@ -95,13 +95,14 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   // 탭이 그 자리를 대신함). CSS로 숨기면 DOM에 둘 다 남아 스크린리더·탭 순서가 겹친다(#2225
   // AC3와 같은 규율) — useIsMobile로 렌더 자체를 가른다. `?view=`는 모바일에서도 URL 정본
   // 그대로라 세그가 없어도 주소로 칸반 진입은 가능하다.
-  const isMobile = useIsMobile();
   // story #3101 — 기본값(파라미터 없음)이 이제 데스크톱/모바일 무관 'list' 하나로 고정돼
   // parseView가 isMobile을 더는 받지 않는다(#2531 시절의 기기별 분기 fix는 여기서 소멸 —
   // 애초에 「기본값이 기기마다 다르다」는 전제가 이번 정합으로 사라졌다). hasHypothesisParam은
   // 카디르 재QA 비차단②(S3) — 모바일에서 `?hypothesis=`만 있는 공유링크/새로고침이 패널을
   // 못 열던 것 fix, 이건 그대로 유지.
   const view = parseView(searchParams.get('view'), searchParams.get('hypothesis') !== null);
+  // story #4171 — org 전체 팀원 목록(memberMap)은 흐름 화면만 쓴다(목록 보기 첫 화면에선 안 부른다).
+  const needsMembers = view === 'flow';
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -116,7 +117,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     setLoading(true);
     void (async () => {
       try {
-        const result = await loadGlanceData(projectId);
+        const result = await loadGlanceData(projectId, { includeMembers: needsMembers });
         if (cancelledRef.cancelled) return;
         setData(result);
       } catch {
@@ -126,7 +127,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         if (!cancelledRef.cancelled) setLoading(false);
       }
     })();
-  }, [projectId]);
+  }, [projectId, needsMembers]);
 
   // story #2545(카디르 라이브 재QA 4단계) — org 불일치 자동교정(switch-org)이 이 fetch *後*
   // 성공하면 projectId는 안 바뀌므로 재요청 트리거가 없었다. 다른 opt-in 컴포넌트들
@@ -206,8 +207,8 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         merge_ready: tGlance('exceptionActionMergeReady'),
       },
     };
-    return toExceptionQueueItems(data.attentionSignals as BeAttentionSignal[], labels);
-  }, [data, tGlance]);
+    return toExceptionQueueItems(data.attentionSignals as BeAttentionSignal[], labels, flatHref);
+  }, [data, tGlance, flatHref]);
 
   // story #2354 후속(2026-07-31) — 예전엔 view를 'list'로 함께 갈아 끼워 KanbanBoard(그
   // 안의 StoryDetailPanel)를 마운트시켰는데, 그 view 전환 자체가 «갈래 캔버스를
@@ -235,7 +236,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
             sprints 진입점을 메우는 얕은 프레임(WorkspaceFrameTabs). 아래 ScaleLadder와 다른
             층 — 그건 안 건드린다(E-FLOW-V4 기 확定). */}
-        <WorkspaceFrameTabs active="board" />
 
         {/* story #3112(Board IA·D0(a), 선생님 승인 2026-08-26·카드 520beb8b) — 옛 3칸 렌즈
             세그(가설|갈래|칸반, story #2531/#3043)를 여기서 제거했다. ScaleLadder가 «축척
@@ -249,7 +249,17 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. story #3112 — 클릭
             배선(렌즈 전환·목표 이동·작업 비활성)은 컴포넌트 자체가 갖는다(scale-ladder.tsx). */}
         {view !== 'hypothesis' ? (
-          <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} compact={isMobile} />
+          // story #4222 — `compact={isMobile}`는 useIsMobile()이 서버·첫 렌더에서 false라 390에서 서버가 전체판(120.5px)을 그리고
+          // 하이드레이션 뒤 칩열(34.5px)로 줄어 그 아래가 밀렸다(배너 0에서 CLS 0.36). 두 판을 다 그리고 CSS 중단점(lg = 훅의 1024)으로
+          // 가른다 — 서버 출력이 곧 최종 높이. 숨은 판은 display:none이라 포커스·스크린리더에서 빠지고, 래더는 데이터 요청이 없다.
+          <>
+            <div className="lg:hidden" data-testid="scale-ladder-compact-slot">
+              <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} compact />
+            </div>
+            <div className="hidden lg:block" data-testid="scale-ladder-full-slot">
+              <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} />
+            </div>
+          </>
         ) : null}
 
         {view === 'hypothesis' ? (
@@ -261,7 +271,13 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 중(단순 표라면 드래그로 상태를 바꾸는 길이 사라지는지라 다르다). 답 오기 前엔
           // 되돌리기 쉬운 쪽(칸반 그대로 임베드)으로 가정한다 — kanban-board.tsx를 새로 그리지
           // 않고 그대로 마운트, `?view=kanban`(레거시)도 이 칸으로 들어온다.
-          <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
+          // story #4277(PO 4639 변경 요청) — KanbanBoard 뿌리는 h-full(부모 높이의 100%)이라 여기(일감 뿌리 안)서는 뿌리의 안쪽 높이를 통째로
+          // 먹고, 위 탭 줄 · 아래 «승인 흐름에서 멈춘 것» 상자가 뿌리 밖으로 넘쳤다(402 실측: 뿌리 804 · 보드 772 = 804−p-4×2). 이 화면에서 보드에
+          // 명시 높이(보이는 영역 = 100svh − 셸 크롬 · 문서 · 스프린트 화면과 같은 앵커)를 주면 보드는 제 높이만 쓰고 뿌리가 내용만큼 자란다(넘침 0 ·
+          // 뿌리 p-4 아래 여백이 그대로 틈). 보드 칸 안 세로 스크롤(칸마다 overflow-y-auto)은 무변.
+          <div className="h-[calc(100svh-var(--shell-chrome-h))]" data-testid="flow-board-frame">
+            <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
+          </div>
         ) : (
           // 「갈래」보기 — story #2224 AC1(2026-07-31) 멀티레인 본체. 30일 안 변화 있는 목표
           // «전부»를 레인으로 동시에 그린다(목표 하나를 고르던 이전 판을 대체 — 그 판이

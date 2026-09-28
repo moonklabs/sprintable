@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MessageSquare, Users } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -23,7 +25,9 @@ import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-conte
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { composeEventPreviewLine } from './event-block-card';
+import { toPlainPreview } from './entity-ref';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface Participant {
   member_id: string;
@@ -109,10 +113,10 @@ function formatParticipantNames(
   // 식별자를 아예 안 실어 보내게 고쳤으니 FE 폴백도 그 계약과 짝을 맞춘다). story #3758
   // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
   // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
-  if (type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc);
+  if (type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc);
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
-  const visible = others.slice(0, MAX).map((p) => participantDisplayLabel(p, t, tc)).join(', ');
+  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, tc)).join(', ');
+  const visible = others.slice(0, MAX).map((p) => participantDisplayLabel(p, tc)).join(', ');
   return `${visible} ${t('participantsOthers', { count: others.length - MAX })}`;
 }
 
@@ -166,7 +170,11 @@ function ConversationRow({
     { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels },
     conv.latest_message?.event?.refs,
   );
-  const preview = eventPreview ?? conv.latest_message?.content ?? t('noMessages');
+  // story #3949 — 이벤트 조립이 없으면(위 null 폴백) 남는 건 «보통» 메시지 원문 —
+  // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview)한다.
+  const preview = eventPreview
+    ?? (conv.latest_message?.content ? toPlainPreview(conv.latest_message.content) : null)
+    ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
 
@@ -192,7 +200,7 @@ function ConversationRow({
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
           {/* story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와
               동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트. */}
-          {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc)}
+          {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc)}
         </span>
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
@@ -210,7 +218,8 @@ function ConversationRow({
               key={p.member_id}
               className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background"
             >
-              {p.name?.slice(0, 1) ?? '?'}
+              {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 에이전트 Bot · 사람 User). */}
+              {p.name ? p.name.slice(0, 1) : <UnnamedMemberIcon type={p.type} className="h-3 w-3" aria-hidden />}
               {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
               {p.type === 'agent' && (
                 <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
@@ -226,7 +235,7 @@ function ConversationRow({
         <span className="truncate">
           {isAgentInConv && agentCount > 0
             ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, t, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
+            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
           }
         </span>
       </div>
@@ -358,6 +367,7 @@ function applyConversationMessageUpdate(
 const PAGE_LIMIT = 30;
 
 export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
   const tc = useTranslations('common');
@@ -527,8 +537,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // `pn`(대상 프로젝트명)은 실패 화면(권한 회수 등)에서 dashboardContext.projectMemberships가
     // 이미 그 프로젝트를 못 가진 상태일 수 있어(바로 그게 실패 사유) 클릭 시점 값을 실어 보낸다.
     const params = new URLSearchParams({ p: conv.project_id, from: projectId, pn: conv.project_name });
-    router.push(`/chats/${conv.id}?${params.toString()}`);
-  }, [t, router, projectId]);
+    // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
+    router.push(flatHref(`/chats/${conv.id}?${params.toString()}`));
+  }, [t, router, projectId, flatHref]);
 
   // 카디르 QA(#4142) 뒤 페드루 그라운딩(2026-09-10 12:34Z) — 에이전트 탭의 project-switch
   // 효과(아래)와 같은 형을 my 탭에도 미러. 예전엔 `fetchConversations`만 재호출해 새 응답이
@@ -550,11 +561,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     consumedComposeRef.current = true;
     if (conversations.length > 0) {
       const mostRecent = conversations.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
-      router.replace(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`);
+      // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
+      router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`));
     } else {
       setShowModal(true);
     }
-  }, [composeParam, loading, conversations, router, setShowModal]);
+  }, [composeParam, loading, conversations, router, setShowModal, flatHref]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
@@ -645,9 +657,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // use-chat-unread-total.ts와 동일 패턴(document.visibilitychange, !document.hidden에서만).
   // story #3081 — 데스크톱 셸(창은 계속 visible)에서 OS 포커스만 잃었다 되찾는 경우
   // visibilitychange는 안 fire하므로 window.focus를 같은 핸들러에 추가 배선한다.
+  // story #4263 AC2 — 단, SSE가 살아 있으면(mux.isAlive · 4252와 같은 판정 · 백그라운드 동안에도 message_created가 들어와 목록을 따라갔다)
+  // 포커스 재조회를 생략한다. 죽었거나 끊겼던 뒤엔 재조회(정확성 우선 · 재연결은 onReconnect가 따로 백필).
+  const mux = useSseMultiplexerContext();
+  const muxRef = useRef(mux);
+  useEffect(() => { muxRef.current = mux; }, [mux]);
   useEffect(() => {
     const handleVisibility = () => {
-      if (!document.hidden) handleReconnect();
+      if (document.hidden) return;
+      if (muxRef.current?.isAlive()) return;
+      handleReconnect();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleVisibility);
@@ -666,7 +685,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // story #3831 — 「오늘」에서 넘어온 지시 한 줄이 있으면(0건 대화라 새 대화 모달을
     // 거친 경우) 그 새 대화의 컴포저에도 같은 기전으로 싣는다.
     router.push(
-      composeParam ? `/chats/${conversationId}?compose=${encodeURIComponent(composeParam)}` : `/chats/${conversationId}`,
+      // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
+      composeParam ? flatHref(`/chats/${conversationId}?compose=${encodeURIComponent(composeParam)}`) : flatHref(`/chats/${conversationId}`),
     );
     void fetchConversations(0, false);
   };
@@ -758,7 +778,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
           ))}
         </div>
       )}
@@ -768,7 +788,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
           ))}
         </div>
       )}
@@ -842,7 +862,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
       ))}
       {allConversations.length < agentTotal && (
         <Button

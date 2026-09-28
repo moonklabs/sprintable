@@ -173,7 +173,7 @@ class HitlRepository:
         )
         if status:
             stmt = stmt.where(HitlRequest.status == status)
-        stmt = stmt.order_by(HitlRequest.created_at.desc())
+        stmt = stmt.order_by(HitlRequest.created_at.desc(), HitlRequest.id.desc())
 
         result = await self.session.execute(stmt)
         rows = result.scalars().all()

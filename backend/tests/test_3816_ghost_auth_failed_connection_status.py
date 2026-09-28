@@ -180,7 +180,7 @@ async def test_ghost_sandbox_auth_failed_marker_promotes_connection_to_error_not
 @pytest.mark.anyio
 async def test_ghost_sandbox_provider_error_marker_still_leaves_connection_active_no_regression():
     """양성대조(회귀 0) — 같은 ghost_sandbox 파이프라인에서 5xx([sandbox:provider-
-    error])는 transient(CHANNEL_PUBLISH_PROVIDER_ERROR)라 connection.status가
+    error])는 연결 부류가 아니라(4264 뒤: 글 쓰기 실패 = «나갔을 수 있음» SITE_POST_PROVIDER_ERROR · needs_check) connection.status가
     active 그대로 무변경이어야 한다(GHOST_AUTH_FAILED 매핑 추가가 다른 코드축을
     안 건드린다는 증거)."""
     from app.services.gate_service import transition_gate
@@ -227,7 +227,10 @@ async def test_ghost_sandbox_provider_error_marker_still_leaves_connection_activ
             cmd = (await s.execute(
                 select(PublicationCommand).where(PublicationCommand.gate_id == gate_id)
             )).scalar_one()
-            assert cmd.failure_kind == "transient", cmd.failure_kind
+            # story #4264(까디르 codex P1 · PO 17:33Z) — 블로그 글 쓰기 호출의 non-2xx는 글이 이미 생겼을 수 있어 «나갔을 수 있음»
+            # (`SITE_POST_PROVIDER_ERROR` · needs_check)이다(예전: transient = 자동 재시도 = 이중 게시). 이 테스트의 요지 — 연결을
+            # 승격하지 않는다(active 유지) — 는 그대로.
+            assert (cmd.failure_kind, cmd.reason_code) == ("needs_check", "SITE_POST_PROVIDER_ERROR"), (cmd.failure_kind, cmd.reason_code)
 
             connection = await s.get(ChannelConnection, connection_id)
             assert connection.status == "active", connection.status

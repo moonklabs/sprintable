@@ -4,12 +4,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
+import { memberLookup } from '@/lib/member-display';
+import { useChannelLabel } from '@/lib/channel-label';
 import {
   deriveContentPostStatus,
   type ContentPostStatusInput,
@@ -21,17 +24,19 @@ import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 // story #3483(BE 3482 계약, 3472 2부/§16-7과 동형) — 원문(site_post) 초안의 규칙
 // 위반. field는 title|summary|body_md(channel_post의 text|link_url과 다른 축이라
 // 컴포넌트는 field를 모른다 — 호출부가 이미 걸러 넘긴다).
 import {
   ContentRuleViolationList, ContentRuleSubmitBlockedReason, type ContentRuleViolation,
 } from '@/components/content/content-rule-violation';
-import { deriveFailureAction, type CommandStatus, type FailureKind } from '@/components/content/failure-action';
+import { blockedByConnection, deriveFailureAction, type CommandStatus, type FailureKind } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -141,6 +146,8 @@ interface PublicationCommandView {
   dead_letter_at: string | null;
   command_reason_code: string | null;
   last_error: string | null;
+  /** story #4290 — 사람이 지금 이 명령을 «다시 시도»할 수 있는가(서버 한 판정 · 재시도 엔드포인트와 같은 값). */
+  command_retryable?: boolean;
 }
 
 interface SitePostPublicationInfo {
@@ -209,10 +216,14 @@ function toGateStatus(status: string | undefined): ContentPostStatusInput['gateS
 }
 
 export default function ContentPostEditPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { draftId } = useParams<{ draftId: string }>();
   const { orgId, role } = useDashboardContext();
   const t = useTranslations('content');
+  // story #4304 — 연결 사유로 멈춘 배지의 «연결 확인» 목적지(댓글 답변 · 채널 글 상세와 같은 훅).
+  const connectRulesHref = useConnectRulesHref('/organization/channels');
   const tc = useTranslations('common');
+  const channelLabel = useChannelLabel();
 
   const [versions, setVersions] = useState<SitePostVersion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -295,6 +306,8 @@ export default function ContentPostEditPage() {
   // 폴백) 그대로 재사용한다 — publication 계약을 늘리지 않는다(이름 필드를 새로 추가하지
   // 않는다).
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  // [SID:4286] 이름 표를 다 불러왔는지(성공 · 실패 모두 끝) — 불러오는 중에는 발행자 칸을 비워 둔다.
+  const [memberNamesLoaded, setMemberNamesLoaded] = useState(false);
   const [unpublishing, setUnpublishing] = useState(false);
   const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
   const [unpublishResult, setUnpublishResult] = useState<
@@ -308,6 +321,8 @@ export default function ContentPostEditPage() {
   // 이식한다 — 「밖에 나갔는지 모르는 실패」를 곧바로 재시도로 넘기지 않고, 채널에서
   // 확認했다는 체크가 끝나야 확認 버튼이 열린다(recheckGate 이 화면에서 켬).
   const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+  // story #4266 — 재시도 결과 줄(예전엔 없어서 실패가 조용했다).
+  const [retryResult, setRetryResult] = useState<PublicationRetryResult | null>(null);
   const [retryChecklistConfirmed, setRetryChecklistConfirmed] = useState(false);
 
   // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결 목록·이미 만든 변형
@@ -504,7 +519,7 @@ export default function ContentPostEditPage() {
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as { data?: { draft_id: string } } | null;
         if (json?.data?.draft_id) {
-          router.push(`/content/channel-posts/${json.data.draft_id}`);
+          router.push(flatHref(`/content/channel-posts/${json.data.draft_id}`));
           return;
         }
       }
@@ -520,7 +535,7 @@ export default function ContentPostEditPage() {
     } finally {
       setCreatingVariant(false);
     }
-  }, [orgId, workItemId, selectedConnectionId, latest, variantText, publication, draftId, router, t]);
+  }, [orgId, workItemId, selectedConnectionId, latest, variantText, publication, draftId, router, t, flatHref]);
 
   // 유나 정적 판정·PO 확認(2026-09-04 17:50Z) — 처음엔 site-posts 저장 POST(새
   // 버전 생성)로 campaign_id를 실었으나, 그 경로는 _reseal_gate_on_new_version이
@@ -681,6 +696,23 @@ export default function ContentPostEditPage() {
     }
   }, [orgId, draftId]);
 
+  // 까디르 codex 4634 P2② — 재시도 뒤 다시 읽기 전용: 실패하면 이전 발행 정보를 **지우지 않고** false(첫 로드 loadPublication은 그대로 —
+  // 실패면 null로 두는 첫 로드 동작 회귀 0). 지우면 외부 발행 카드와 결과 줄이 통째로 사라졌다.
+  // story #4290 — 다시 읽은 발행 명령의 서버 판정도 돌려줘 404 뒤 결과 줄을 그 값으로 고른다(withReload).
+  const refreshPublicationAfterRetry = useCallback(async (): Promise<ReloadOutcome> => {
+    if (!orgId) return false;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publication`);
+      if (!res.ok) return false;
+      const json = (await res.json().catch(() => null)) as { data?: SitePostPublicationInfo } | null;
+      if (!json?.data) return false;
+      setPublication(json.data);
+      return { retryable: json.data.command?.command_retryable === true };
+    } catch {
+      return false;
+    }
+  }, [orgId, draftId]);
+
   useEffect(() => {
     void loadGate();
     void loadPublication();
@@ -694,7 +726,8 @@ export default function ContentPostEditPage() {
     const id = publication?.published_by_member_id;
     if (!id || fetchedPublisherIdRef.current === id) return;
     fetchedPublisherIdRef.current = id;
-    void fetchWithAuth('/api/team-members')
+    // [SID:4300] 이름만 쓰는 표 — 비활성 에이전트도 «목록이 거른 것»이라 비활성까지 싣는 조직 원천(떠난 사람은 BE 4303 대기).
+    void fetchWithAuth(ORG_NAMES_URL)
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { id: string; name: string }[] } | null) => {
         if (!json?.data) return;
@@ -702,7 +735,8 @@ export default function ContentPostEditPage() {
         for (const m of json.data) names[m.id] = m.name;
         setMemberNames((prev) => ({ ...prev, ...names }));
       })
-      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+      .catch(() => { /* non-critical — 표에 없으면 «알 수 없는 구성원»(id 조각 0 · story #4286) */ })
+      .finally(() => setMemberNamesLoaded(true));
   }, [publication?.published_by_member_id]);
 
   // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 잔량은
@@ -996,21 +1030,18 @@ export default function ContentPostEditPage() {
     }
   };
 
-  // story #3479(BE #3476) — 외부 목적지 발행 실패 재시도. 성공하면 publication을
-  // 다시 읽어(loadPublication, handleUnpublish와 동형) command_status가 즉시
-  // 반영되게 한다.
+  // story #3479(BE #3476) — 외부 목적지 발행 실패 재시도. 성공하면 publication을 다시 읽어(loadPublication) command_status가 즉시 반영되게.
+  // story #4266 — 예전엔 실패면 아무것도 안 보이고 확인 창만 열린 채 남았다(조용한 실패 · 네트워크 실패는 잡지도 않음). 이제 채널 포스트
+  // 상세와 같은 공용 규칙: 결과가 무엇이든 창을 닫고 결과 줄 · 404는 다시 읽고 로케일 문장 · 그 밖의 실패도 로케일 문장.
   const handleRetryPublicationCommand = async (commandId: string) => {
     if (!orgId || retryingCommand) return;
     setRetryingCommand(true);
+    setRetryResult(null);
     try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${commandId}/retry`, { method: 'POST' });
-      if (res.ok) {
-        // story #3369 — channel_posts 상세 handleRetry와 동형(성공 시 다이얼로그 닫고
-        // 체크 상태 리셋).
-        setRetryConfirmOpen(false);
-        setRetryChecklistConfirmed(false);
-        void loadPublication();
-      }
+      const result = await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${commandId}/retry`);
+      setRetryConfirmOpen(false);
+      setRetryChecklistConfirmed(false);
+      setRetryResult(await withReload(result, refreshPublicationAfterRetry));
     } finally {
       setRetryingCommand(false);
     }
@@ -1039,7 +1070,7 @@ export default function ContentPostEditPage() {
         {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
             읽은 사용자에게 «나가는 길» 하나(막다른 길 클래스, 3650과 같은 결).
             새 낱말 0 — channel-posts/calendar 페이지가 이미 쓰는 키 재사용. */}
-        <Link href="/content" className="text-sm font-medium text-primary underline">
+        <Link href={flatHref('/content')} className="text-sm font-medium text-primary underline">
           {t('channelPostsCalendarBackToListCta')}
         </Link>
       </div>
@@ -1051,7 +1082,7 @@ export default function ContentPostEditPage() {
         <Alert variant="destructive">
           <AlertDescription>{t('editForbidden')}</AlertDescription>
         </Alert>
-        <Link href="/content" className="text-sm font-medium text-primary underline">
+        <Link href={flatHref('/content')} className="text-sm font-medium text-primary underline">
           {t('channelPostsCalendarBackToListCta')}
         </Link>
       </div>
@@ -1075,8 +1106,9 @@ export default function ContentPostEditPage() {
   // 안내가 아니다 — settings/page.tsx:330·org-members-section.tsx:343와 같은 role 소스
   // (useDashboardContext().role)를 재사용한다, 새 조회를 만들지 않는다.
   const canUnpublish = role === 'owner' || role === 'admin';
+  // [SID:4286] id 조각(앞 8자)을 발행자 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → null(자리표시).
   const publisherName = publication?.published_by_member_id
-    ? memberNames[publication.published_by_member_id] ?? publication.published_by_member_id.slice(0, 8)
+    ? (memberLookup(memberNames, publication.published_by_member_id, tc, { loaded: memberNamesLoaded })?.label ?? null)
     : '—';
   // story #3479 — undefined면 "보일 실패가 없다"는 뜻(예: command_status='completed').
   // FailureActionBadge 자체를 안 그린다(가짜 상태를 지어내지 않는다).
@@ -1086,6 +1118,7 @@ export default function ContentPostEditPage() {
         failureKind: publication.command.failure_kind,
         nextRetryAt: publication.command.next_retry_at,
         reasonCode: publication.command.command_reason_code,
+        retryable: publication.command.command_retryable ?? null,
       })
     : undefined;
   // story #3369(channel_posts 상세 isNeedsCheckGate와 동형) — dead_letter 안에서도
@@ -1117,7 +1150,7 @@ export default function ContentPostEditPage() {
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="content-campaign-current">
           <span>
             {t('campaignCurrentLabel')}{' '}
-            <Link href={`/campaigns/${latest.campaign_id}`} className="underline">
+            <Link href={flatHref(`/campaigns/${latest.campaign_id}`)} className="underline">
               {/* N1(페드루 PO) — campaign_name이 없을 때 UUID를 사람 문장에 그대로
                   보여주지 않는다(지어내지도, 식별자를 문장으로 위장하지도 않는다). */}
               {latest.campaign_name ?? t('campaignNameUnknown')}
@@ -1243,7 +1276,7 @@ export default function ContentPostEditPage() {
           </div>
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoByLabel')}</span>{' '}
-            {publisherName}
+            {publisherName === null ? <Skeleton as="span" variant="text" className="h-3 w-20 align-middle" aria-hidden /> : publisherName}
           </div>
           <Button
             type="button"
@@ -1270,7 +1303,7 @@ export default function ContentPostEditPage() {
         >
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationDestinationLabel')}</span>{' '}
-            {channelLabel(publication.destination, t)}
+            {channelLabel(publication.destination)}
           </div>
           {publication.channel_publication ? (
             <>
@@ -1314,7 +1347,11 @@ export default function ContentPostEditPage() {
               // 확認버튼 disabled)을 제공한다 — recheckGate=true라 needsRecheck
               // 문면이 「약속을 지키는」 곳(channel_posts 상세와 동형).
               recheckGate
-              onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
+              // story #4290 — 버튼은 서버 판정(`command_retryable`)이 참일 때만.
+              onRetryClick={publication.command.command_retryable
+                ? () => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }
+                : undefined}
+              connectionHref={blockedByConnection(publication.command.command_status, publication.command.failure_kind) ? connectRulesHref : undefined}
             />
           ) : null}
           <ConfirmDialog
@@ -1345,6 +1382,7 @@ export default function ContentPostEditPage() {
             destructive={false}
             onConfirm={() => void handleRetryPublicationCommand(publication.command!.id)}
           />
+          <PublicationRetryResultLine result={retryResult} testId="content-retry-result" />
         </div>
       ) : null}
 
@@ -1374,7 +1412,7 @@ export default function ContentPostEditPage() {
               <option value="">{t('channelPostsCreateVariantSelectPlaceholder')}</option>
               {activeConnections.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {channelLabel(c.channel, t)}
+                  {channelLabel(c.channel)}
                   {c.account_label ? ` · ${c.account_label}` : ''}
                 </option>
               ))}
@@ -1422,8 +1460,8 @@ export default function ContentPostEditPage() {
               const accountLabel = activeConnections.find((c) => c.id === v.connection_id)?.account_label;
               return (
                 <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="content-variants-list-item">
-                  <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
-                    {channelLabel(v.channel, t)}
+                  <Link href={flatHref(`/content/channel-posts/${v.draft_id}`)} className="underline">
+                    {channelLabel(v.channel)}
                     {accountLabel ? ` · ${accountLabel}` : ''}
                   </Link>
                   <span className="flex items-center gap-2">
@@ -1498,12 +1536,13 @@ export default function ContentPostEditPage() {
             {submitResult.type === 'success' ? (
               <>
                 {t('submitSuccess')}{' '}
-                <Link href={`/gates/${submitResult.gateId}`} className="underline">{t('submitGateLink')}</Link>
+                {/* 대상-프로젝트: 제출 응답은 게이트 id만 준다(콘텐츠 초안은 조직 단위 · 게이트 상세가 자기 프로젝트로 연다). */}
+                <Link href={flatHref(`/gates/${submitResult.gateId}`)} className="underline">{t('submitGateLink')}</Link>
               </>
             ) : submitResult.heldByDraftId ? (
               <>
                 {submitResult.text}{' '}
-                <Link href={`/content/${submitResult.heldByDraftId}`} className="underline">
+                <Link href={flatHref(`/content/${submitResult.heldByDraftId}`)} className="underline">
                   {t('errorGateAlreadyHeldLink')}
                 </Link>
               </>

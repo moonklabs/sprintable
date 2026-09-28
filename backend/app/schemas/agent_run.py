@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+from app.core.datetime_query import OffsetDatetime
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 
 class CreateAgentRun(BaseModel):
@@ -41,11 +43,14 @@ class CreateAgentRun(BaseModel):
     # DB server_default(started_at=now())/NULL(finished_at)을 그대로 두도록 명시 제공 시에만
     # repo.create()에 넘긴다(생략과 명시 null을 가른다 — UpdateAgentRun의 exclude_unset과 동형
     # 원칙을 create 경로에도 적용).
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    started_at: OffsetDatetime | None = None
+    finished_at: OffsetDatetime | None = None
 
 
-class UpdateAgentRun(BaseModel):
+class UpdateAgentRun(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"started_at"})
+
     status: str
     result_summary: str | None = None
     # story #3707 — CreateAgentRun과 동형 갭(위 코멘트 참조).
@@ -58,13 +63,13 @@ class UpdateAgentRun(BaseModel):
     # story #3727 — MCP update_run_status가 이미 보낼 준비가 돼 있었으나(sprintable_mcp/
     # tools/agent_runs.py UPDATE_RUN_STATUS_FORWARD_FIELDS) 이 스키마에 없어 조용히
     # 버려지고 있었다(2161이 finished_at만 닫고 started_at은 놓침 — 3707류 6번째 인스턴스).
-    started_at: datetime | None = None
+    started_at: OffsetDatetime | None = None
     # story #2161: MCP update_run_status는 이미 finished_at을 보낼 준비가 돼 있었으나(
     # sprintable_mcp/tools/agent_runs.py) 이 스키마에 필드가 없어 조용히 버려지고 있었다 —
     # 정상 종료조차 duration_ms(GENERATED, started/finished_at 파생)가 영구 NULL이던 근본.
     # 생략 시 라우터가 status가 종단 상태(completed/failed/abandoned)면 now()로 채운다(server-
     # authority, 클라 미제공을 신뢰하지 않는 기존 관례 — S7 attachments와 동형).
-    finished_at: datetime | None = None
+    finished_at: OffsetDatetime | None = None
     # story #3828 — CreateAgentRun과 동형(생성 시점에 아직 conversation이 안 정해졌다가
     # 나중에 붙는 경로 대비). exclude_unset=True 계약 그대로(생략=무변, 명시 null=비움).
     conversation_id: uuid.UUID | None = None
@@ -119,3 +124,16 @@ class AgentRunResponse(BaseModel):
     finished_at: datetime | None = None
     deadline_at: datetime | None = None
     created_at: datetime
+    # story #3961(「정지」 액션) — additive(from_attributes로 ORM 컬럼 그대로, 값 없으면
+    # null·지어내지 않는다). cancel_outcome이 "acknowledged"|"unacknowledged"로 채워지면
+    # status 자체도 이미 cancelled|cancelled_unacknowledged로 종결돼 있다(agent_runs.py
+    # SSOT) — 이 4필드는 "언제·누가·왜"만 더한다.
+    cancel_requested_by: uuid.UUID | None = None
+    cancel_requested_at: datetime | None = None
+    cancel_reason: str | None = None
+    cancel_ack_at: datetime | None = None
+    cancel_outcome: str | None = None
+
+
+class CancelAgentRun(BaseModel):
+    reason: str | None = None

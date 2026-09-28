@@ -277,7 +277,7 @@ async def test_rejected_gate_reaches_work_item_assignee_with_reason_and_next_act
             # ("approve stage 이벤트를 다시 발행하세요")는 gate_type=merge 등 external_publish
             # 이외 전용으로 갈라졌다(test_gate_type_outside_verdict_capture_mapping_still_notifies
             # 가 그쪽을 그대로 pin) — 여기는 external_publish 신 문구를 pin한다.
-            assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다." in content
+            assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정해요." in content
             assert "approve stage 이벤트를 다시 발행하세요" not in content
     finally:
         await engine.dispose()
@@ -396,5 +396,149 @@ async def test_system_auto_transition_without_resolver_does_not_notify():
 
             content = await _latest_message_content_for(s, executor_id, org_id)
             assert content is None
+    finally:
+        await engine.dispose()
+
+
+# ─── story #4076 ④ — 비-external_publish approved 판정의 구체 발행 예시 ──────────────
+
+_RECIPE_CYCLE_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["stage", "work_item_type", "work_item_id"],
+    "properties": {
+        "stage": {"type": "string", "enum": ["draft", "review", "publish"]},
+        "work_item_type": {"type": "string"},
+        "work_item_id": {"type": "string", "format": "uuid"},
+    },
+}
+_RECIPE_CYCLE_ROUTING = {
+    "escalation": {"kind": "server_derived", "target": "none"},
+    "broadcast": {"kind": "server_derived", "target": "none"},
+}
+
+
+async def _seed_recipe_cycle_definition(session, org_id, *, slug):
+    """story #4076 — `_render_gate_verdict_message`가 `gate_row.neutral_facts
+    ["triggered_by_event"]`로 재조회할 원 recipe 정의. "review" stage에 gate 선언을
+    둬(다음 원소 "publish") `_next_recipe_stage`가 실제로 다음 단계를 찾게 한다."""
+    from app.models.event_definition import EventDefinition
+
+    d = EventDefinition(
+        id=uuid.uuid4(), key=f"org.{slug}.recipe_cycle", org_id=org_id, name="테스트 레시피",
+        payload_schema=_RECIPE_CYCLE_SCHEMA, routing=_RECIPE_CYCLE_ROUTING,
+        stage_metadata={
+            "draft": {"role": "Writer", "action": "초안"},
+            "review": {
+                "role": "Reviewer", "action": "검토",
+                "gate": {"type": "checkpoint", "approver": "org_owner"},
+            },
+            "publish": {"role": "Publisher", "action": "게시"},
+        },
+    )
+    session.add(d)
+    await session.commit()
+    return d.key
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_approved_non_external_publish_verdict_gives_concrete_publish_example():
+    """⭐story #4076 ④ — approved(비-external_publish) 판정이 gate_row.neutral_facts의
+    triggered_by_event(원 recipe 정의 key)·stage(승인된 stage)로 그 정의를 재조회해
+    definition_key+payload 구체 예시를 준다(옛 제네릭 "다음 stage 이벤트를 발행하세요"만
+    있던 자리). 뮤테이션 셀프체크 대상: events.py의 `triggered_by_event_key = facts.get(...)`
+    캡처를 지우면 이 테스트가 옛 제네릭 문구로 돌아가 RED."""
+    from app.services.gate_service import transition_gate
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_with_owner(s, slug="e3330e")
+            await _seed_preset_gate_verdict_definition(s)
+            await _seed_system_publisher(s, org_id, project_id)
+            executor_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id, assignee_id=executor_id)
+            recipe_key = await _seed_recipe_cycle_definition(s, org_id, slug="e3330e")
+            gate = await _seed_gate(
+                s, org_id, work_item_id=story_id, gate_type="checkpoint",
+                neutral_facts={"triggered_by_event": recipe_key, "stage": "review"},
+            )
+
+            await transition_gate(s, org_id, gate.id, "approved", resolver_id=owner_id)
+            await s.commit()
+
+            content = await _latest_message_content_for(s, executor_id, org_id)
+            assert content is not None
+            assert f'"definition_key": "{recipe_key}"' in content
+            assert '"stage": "publish"' in content
+            assert f'"work_item_id": "{story_id}"' in content
+            assert "publish_event(" in content
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_approved_verdict_without_triggered_by_event_has_no_next_action_line():
+    """⭐story #4076 — triggered_by_event 키가 없는 옛 게이트 row(이 필드가 생기기 前에 만들어진 shape)는 크래시하지 않는다.
+    story #4265(유나 확정 · PO 14:28Z) 개정 — 예전엔 제네릭 레시피 문구로 폴백했지만, 정의를 모르는 행은 «다음 행동» 줄을 싣지 않는다
+    (모르는 것을 지어내지 않음)."""
+    from app.services.gate_service import transition_gate
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_with_owner(s, slug="e3330f")
+            await _seed_preset_gate_verdict_definition(s)
+            await _seed_system_publisher(s, org_id, project_id)
+            executor_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id, assignee_id=executor_id)
+            gate = await _seed_gate(
+                s, org_id, work_item_id=story_id, gate_type="checkpoint",
+                neutral_facts={"stage": "review"},  # triggered_by_event 없음(옛 row 재현)
+            )
+
+            await transition_gate(s, org_id, gate.id, "approved", resolver_id=owner_id)
+            await s.commit()
+
+            content = await _latest_message_content_for(s, executor_id, org_id)
+            assert content is not None
+            assert "다음 stage 이벤트를 발행하세요" not in content
+            assert "다음 행동" not in content
+            assert "publish_event(" not in content
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_approved_verdict_on_recipe_last_stage_says_no_next_stage():
+    """⭐story #4265(유나 확정) — 레시피 게이트인데 다음 stage가 없음(마지막 단계) → «다음 행동: 할 일 없음 — 레시피의 마지막 단계라 더 낼
+    단계가 없어요.» 끝났다고 하지 않는다. 레시피 폴백(«다음 stage 이벤트를 발행하세요») 0."""
+    from app.services.gate_service import transition_gate
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_with_owner(s, slug="e4265a")
+            await _seed_preset_gate_verdict_definition(s)
+            await _seed_system_publisher(s, org_id, project_id)
+            executor_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id, assignee_id=executor_id)
+            recipe_key = await _seed_recipe_cycle_definition(s, org_id, slug="e4265a")
+            gate = await _seed_gate(
+                s, org_id, work_item_id=story_id, gate_type="checkpoint",
+                neutral_facts={"triggered_by_event": recipe_key, "stage": "publish"},  # 마지막 enum
+            )
+
+            await transition_gate(s, org_id, gate.id, "approved", resolver_id=owner_id)
+            await s.commit()
+
+            content = await _latest_message_content_for(s, executor_id, org_id)
+            assert content is not None
+            assert t("events.gate_verdict_next_action_recipe_last_stage", "ko") in content
+            assert "다음 stage 이벤트를 발행하세요" not in content
+            assert "publish_event(" not in content
     finally:
         await engine.dispose()

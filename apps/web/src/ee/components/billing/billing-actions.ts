@@ -5,6 +5,7 @@
  * 없다 — 단순 fetch로 완결.
  */
 import { fetchWithAuth } from '@/lib/db/client';
+import { postAttempt, type AttemptResult } from './payment-attempt';
 import type { TierId } from './pricing-data';
 
 export interface ChangeTierResult {
@@ -24,8 +25,9 @@ export type ChangeTierOutcome =
   | { kind: 'declined'; result: ChangeTierResult }
   | { kind: 'error'; status: number };
 
-async function postBillingAction(path: string, body?: object): Promise<ChangeTierOutcome> {
+async function postBillingAction(path: string, body?: object, timeoutMs?: number): Promise<ChangeTierOutcome> {
   const res = await fetchWithAuth(path, {
+    ...(timeoutMs ? { timeoutMs } : {}),
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -39,9 +41,12 @@ async function postBillingAction(path: string, body?: object): Promise<ChangeTie
   return result.status === 'active' ? { kind: 'active', result } : { kind: 'declined', result };
 }
 
-/** 유료→유료 상향 — 신 offering 전액 즉시 청구(기존 billing_key 재사용, authKey 불요). */
-export async function changeTier(newTier: Exclude<TierId, 'free'>): Promise<ChangeTierOutcome> {
-  return postBillingAction('/api/billing/change-tier', { new_tier: newTier });
+/**
+ * 유료→유료 상향 — 신 offering 전액 즉시 청구(기존 billing_key 재사용, authKey 불요). story #4335부터 결제 시도로:
+ * 서버는 곧바로 시도 상태를 돌려주고 결과는 `fetchAttempt`로 확정한다(`attemptId`는 누르는 순간 만든 id).
+ */
+export async function changeTier(newTier: Exclude<TierId, 'free'>, attemptId: string): Promise<AttemptResult> {
+  return postAttempt('/api/billing/change-tier', { attempt_id: attemptId, new_tier: newTier });
 }
 
 /** 하향 예약 — 다음 갱신일부터 적용(즉시 전이 없음, 부분 환불 없음). */

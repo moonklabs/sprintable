@@ -1,0 +1,1 @@
+{"file": "tests/test_4249_complete_stage_realdb.py", "sec": 14.1, "source": "story-4249 — 신규 파일 실측(로컬 pg16, pytest 직접 1회 실행, 5건 wall time 약 14.1s — test_4214 등재 선례와 동일 방법론)"}

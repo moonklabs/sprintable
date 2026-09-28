@@ -421,9 +421,13 @@ def test_delete_by_user_locks_organization_row_for_update_in_source():
 
 
 def test_checkout_subscription_locks_organization_row_for_update_in_source():
-    """#2092 TOCTOU-fix(3차) — checkout_subscription도 같은 org 행을 FOR UPDATE로
-    잠근다(claim UPSERT 前) — organizations.py delete_by_user와 대칭."""
+    """#2092 TOCTOU-fix(3차) — checkout도 같은 org 행을 FOR UPDATE로
+    잠근다(claim UPSERT 前) — organizations.py delete_by_user와 대칭.
+    story #4335 — 그 잠금 · claim은 `claim_checkout_slot` 한 곳(동기 checkout과 결제 시도가 같이 부른다)."""
     import inspect
-    from app.services.org_subscription_checkout import checkout_subscription
-    source = inspect.getsource(checkout_subscription)
-    assert "FOR UPDATE" in source
+    from app.services import billing_payment_attempt
+    from app.services.org_subscription_checkout import checkout_subscription, claim_checkout_slot
+    source = inspect.getsource(claim_checkout_slot)
+    assert "FOR UPDATE" in source and source.index("FOR UPDATE") < source.index("pg_insert(OrgSubscription)")
+    assert "claim_checkout_slot(" in inspect.getsource(checkout_subscription)
+    assert "claim_checkout_slot(" in inspect.getsource(billing_payment_attempt.start_checkout_attempt)

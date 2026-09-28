@@ -3,6 +3,8 @@ import { Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { ThemeProvider } from '@/components/providers/theme-provider';
+import { ContentPaintedSignal } from '@/components/providers/content-painted-signal';
+import { FetchGateInstaller } from '@/components/providers/fetch-gate-installer';
 import { GoogleAnalytics } from '@/components/google-analytics';
 import { resolveAppUrl } from '@/services/app-url';
 import "./globals.css";
@@ -81,6 +83,8 @@ export default async function RootLayout({
       </head>
       <body className="h-full">
         <GoogleAnalytics />
+        <FetchGateInstaller />
+        <ContentPaintedSignal />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

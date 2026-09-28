@@ -28,7 +28,7 @@ class ApiKeyRepository:
         result = await self.session.execute(
             select(ApiKey)
             .where(ApiKey.team_member_id == team_member_id)
-            .order_by(ApiKey.created_at.desc())
+            .order_by(ApiKey.created_at.desc(), ApiKey.id.desc())
         )
         return list(result.scalars().all())
 

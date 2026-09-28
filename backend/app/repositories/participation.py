@@ -16,7 +16,7 @@ class ParticipationRoleRepository(BaseRepository[ParticipationRole]):
             select(ParticipationRole).where(
                 ParticipationRole.org_id == self.org_id,
                 ParticipationRole.is_default.is_(True),
-            ).limit(1)
+            ).order_by(ParticipationRole.created_at, ParticipationRole.id).limit(1)
         )
         return result.scalar_one_or_none()
 

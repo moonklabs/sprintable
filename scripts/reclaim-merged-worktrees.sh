@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# story #4137(2026-09-22) — launchd plist가 `/bin/bash`(macOS 시스템 bash, 3.2)로 이 스크립트를
+# 돌려 80행 `declare -A`에서 매일 04:30 exit 2로 조용히 죽어 있었다(cron/reclaim.log 실측).
+# bash 3.2는 `[[`·배열 인덱싱은 지원하니 이 가드 자체는 3.2에서도 안전하게 실행된다 — 아래
+# `declare -A`(bash 4+ 전용)에 닿기 전에 "원인 한 줄 + exit 65"로 먼저 죽는다(원인불명 exit 2
+# 대신). plist 배선(어느 bash를 쓰는지) 자체는 PO 소관 — 이 가드는 스크립트가 잘못된 bash로
+# 실행됐을 때 스스로 진단하는 방어선.
+[[ ${BASH_VERSINFO[0]} -ge 4 ]] || { echo "bash 4+ 필요(현재 $BASH_VERSION) — /opt/homebrew/bin/bash로 실행" >&2; exit 65; }
+#
 # story #2659(2026-08-14) — 2026-08-14 fleet 전면 장애(공유 Data 볼륨 926Gi 100%) 사후 처방.
 #
 # 원인: 각 에이전트가 스토리마다 `git worktree add`로 격리 작업공간을 만들고(feedback-fresh
@@ -109,6 +117,21 @@ is_ancestor_of_base() {
   git merge-base --is-ancestor "$sha" "origin/$BASE_BRANCH" 2>/dev/null
 }
 
+# story #4137(PO 실측 2026-09-22 01:01~01:12Z) — 커밋 0인 새 브랜치(방금 `git worktree add
+# -b <branch> <base>`로 뜬 작업 시작 前 워크트리)의 HEAD는 그 자체가 origin/$BASE_BRANCH의
+# 커밋이라 is_ancestor_of_base가 자명하게 참이 된다 — «머지 확定»과 «아직 아무 일도 안 함»을
+# 그 검사 하나로는 못 가른다. ahead-count(origin/$BASE_BRANCH..sha)가 0이면 이 브랜치가
+# base에 보탠 커밋이 없다는 뜻 — ancestor-check와 짝지어야만 «진짜 머지」를 뜻한다.
+# ⚠️squash-merge 케이스는 이 가드의 대상이 아니다(원 브랜치가 애초에 origin/$BASE_BRANCH의
+# 조상이 되는 일이 없다, 위 squash-merge 함정 주석 참고) — 그쪽은 always is_pr_merged가
+# 판정하므로 이 ahead-count 게이트가 그 경로를 막지 않는다(OR 조건 그대로 유지).
+is_ahead_of_base() {
+  local sha="$1"
+  local count
+  count="$(git rev-list --count "origin/$BASE_BRANCH..$sha" 2>/dev/null || echo 0)"
+  [ "${count:-0}" -gt 0 ]
+}
+
 is_worktree_clean() {
   local path="$1"
   [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ]
@@ -160,14 +183,30 @@ process_worktree_record() {
 
   local merged=false
   local merge_reason=""
-  if is_ancestor_of_base "$wt_sha"; then
+  local is_ancestor=false
+  is_ancestor_of_base "$wt_sha" && is_ancestor=true
+  if [ "$is_ancestor" = true ] && is_ahead_of_base "$wt_sha"; then
     merged=true; merge_reason="origin/$BASE_BRANCH 조상"
   elif is_pr_merged "$branch"; then
     merged=true; merge_reason="gh pr merged(squash 포함)"
   fi
 
   if [ "$merged" != true ]; then
-    KEPT+=("$wt_path|미머지([$branch] ancestor 아님 + gh merged 아님)")
+    if [ "$is_ancestor" = true ]; then
+      # story #4137 — ancestor-check는 참인데 ahead 0(base에 보탠 커밋 없음)·gh도 모름 =
+      # 작업 시작 前 워크트리(방금 뜬 브랜치). "미머지"가 아니라 정확한 사유로 KEEP.
+      # story #4137 CHANGES-1(PO 확定, 2026-09-22) — 이 분기는 두 경우를 그래프 위상만으로는
+      # 못 가른다: ①방금 뜬 커밋 0 브랜치(이 카드가 막으려는 버그) ②GitHub PR 없이 로컬
+      # no-ff 머지 후 push된 브랜치(이 조직 워크플로우가 금지하는 경로 — PR→리뷰→QA→머지
+      # 규율, «PR머지 권한=명시 문구만»). 실 머지는 전부 gh PR squash로 잡혀(is_pr_merged가
+      # 그 경로를 담당) 이 분기에 안 걸린다 — ②가 이 분기에 실제로 떨어지는 일은 이 조직
+      # 관행상 없다. 회수 스크립트는 과다회수보다 과소회수가 안전한 도구라, 판별 불가 시
+      # KEEP으로 보수적으로 도는 게 정공법(PO 판단) — marker 파일 등 git 밖 상태는 드리프트
+      # 원인이고 워크트리 생성 경로가 액터마다 여러 곳이라 강제할 수 없어 채택 안 함.
+      KEPT+=("$wt_path|머지 확定 불가: 조상이나 ahead 0·머지 PR 없음")
+    else
+      KEPT+=("$wt_path|미머지([$branch] ancestor 아님 + gh merged 아님)")
+    fi
     return
   fi
 

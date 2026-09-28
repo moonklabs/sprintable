@@ -1,37 +1,21 @@
 'use client';
 
-import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEffect, useCallback, useId, useRef, useState } from 'react';
 import React, { type RefObject } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { usePortalMenuKeys } from '@/components/shared/anchored-popover';
 import { BubbleMenu } from '@tiptap/react/menus';
-import StarterKit from '@tiptap/starter-kit';
-import { CustomImageNode } from './extensions/image-node';
-import { ImageUploadExtension, registerDocIdProvider } from './extensions/image-upload';
-import Highlight from '@tiptap/extension-highlight';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
-import { Table } from '@tiptap/extension-table';
-import TableRow from '@tiptap/extension-table-row';
-import TableCell from '@tiptap/extension-table-cell';
-import TableHeader from '@tiptap/extension-table-header';
-import Placeholder from '@tiptap/extension-placeholder';
+import { registerDocIdProvider } from './extensions/image-upload';
 import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, PanelLeft, Plus, ImageIcon, Paperclip } from 'lucide-react';
 import { pickAndUpload } from './extensions/slash-command';
-import { CalloutNode } from './extensions/callout-node';
-import { createSlashCommandExtension, type SlashMenuStrings } from './extensions/slash-command';
-import { PageEmbedExtension } from './extensions/page-embed-node';
-import { CodeBlockWithCopy } from './extensions/code-block-copy';
-import { ToggleBlock, ToggleSummary, ToggleContent } from './extensions/toggle-block';
-import { FileAttachmentNode } from './extensions/file-node';
-import { EmbedBlock } from './extensions/embed-node';
-import { MathBlockNode, MathInlineNode } from './extensions/math-node';
-import { ColumnsBlock, ColumnBlock } from './extensions/column-layout';
-import { WikiLinkNode, createWikiLinkSuggestion } from './extensions/wiki-link';
-import { StoryMentionExtension, EntityLinkExtension } from './extensions/story-mention';
+import { type SlashMenuStrings } from './extensions/slash-command';
 import { DocToc } from './doc-toc';
-import { type DocHeading, slugifyHeading } from './doc-heading-utils';
+import { type DocHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
-import { MobileSelectionMenu, isMobileDevice } from './mobile-selection-menu';
+import { createDocEditorExtensions } from './doc-editor-extensions';
+import { computeHeadingAnchors } from './extensions/heading-ids';
+import { MobileSelectionMenu } from './mobile-selection-menu';
+import { shouldShowDesktopBubbleMenu } from './bubble-menu-visibility';
 import { useTranslations } from 'next-intl';
 
 type ContentFormat = 'markdown' | 'html';
@@ -46,6 +30,7 @@ export function DocEditor({
   onFileError,
   projectId,
   onChange,
+  onNormalize,
   onSave,
   isDirty = false,
   autosave = true,
@@ -71,6 +56,9 @@ export function DocEditor({
   onFileError?: (message: string) => void;
   projectId?: string;
   onChange: (value: string) => void;
+  /** story #4339(AC7) — 편집 없이 편집기가 값을 다듬은 결과(열 때 · 불러온 뒤 · 플러그인 정규화). 사용자 편집이 아니다 — 받는 쪽은
+   *  이 값을 «깨끗한 기준»으로 삼는다(쓰기 없이). 없으면 무시. */
+  onNormalize?: (value: string) => void;
   onContentFormatChange?: (format: ContentFormat) => void;
   onSave?: () => Promise<boolean>;
   isDirty?: boolean;
@@ -131,6 +119,29 @@ export function DocEditor({
       media: tSlash('categories.media'),
       advanced: tSlash('categories.advanced'),
     },
+    // story #4377 — 제목도 로케일(예전엔 slash-command.tsx 영어 리터럴).
+    titles: {
+      heading1: tSlash('items.heading1.title'),
+      heading2: tSlash('items.heading2.title'),
+      heading3: tSlash('items.heading3.title'),
+      bulletList: tSlash('items.bulletList.title'),
+      orderedList: tSlash('items.orderedList.title'),
+      checklist: tSlash('items.checklist.title'),
+      codeBlock: tSlash('items.codeBlock.title'),
+      blockquote: tSlash('items.blockquote.title'),
+      callout: tSlash('items.callout.title'),
+      table: tSlash('items.table.title'),
+      image: tSlash('items.image.title'),
+      file: tSlash('items.file.title'),
+      embed: tSlash('items.embed.title'),
+      mermaidDiagram: tSlash('items.mermaidDiagram.title'),
+      columns: tSlash('items.columns.title'),
+      mathBlock: tSlash('items.mathBlock.title'),
+      mathInline: tSlash('items.mathInline.title'),
+      toggle: tSlash('items.toggle.title'),
+      pageEmbed: tSlash('items.pageEmbed.title'),
+      horizontalRule: tSlash('items.horizontalRule.title'),
+    },
     items: {
       heading1: tSlash('items.heading1.description'),
       heading2: tSlash('items.heading2.description'),
@@ -156,8 +167,14 @@ export function DocEditor({
     embedPrompt: tSlash('embedPrompt'),
     mermaidDefault: { start: tSlash('mermaidDefault.start'), end: tSlash('mermaidDefault.end') },
     toggleDefaultTitle: tSlash('toggleDefaultTitle'),
+    columnsSearchAlias: tSlash('items.columns.searchAlias'),
+    listLabel: tSlash('listLabel'),
   };
   const suppressUpdateRef = useRef(false);
+  // 편집기 콜백은 처음 만든 때의 prop을 붙잡으므로 최신 값은 ref로 읽는다.
+  const onNormalizeRef = useRef(onNormalize);
+  useEffect(() => { onNormalizeRef.current = onNormalize; }, [onNormalize]);
+  const serialize = useCallback((html: string) => (contentFormat === 'markdown' ? htmlToMarkdown(html) : html), [contentFormat]);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [tocHeadings, setTocHeadings] = useState<DocHeading[]>([]);
   const [isFocused, setIsFocused] = useState(false);
@@ -165,6 +182,13 @@ export function DocEditor({
   // S4 첨부 진입: gutter "+" 위치 / DnD active-zone.
   const [gutterTop, setGutterTop] = useState<number | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
+  // story #4364 AC3 — 삽입 메뉴도 코드 블록 언어 목록과 같은 공용 훅(4349): Esc = 닫고 «+» 트리거로 · 열면 첫 항목 초점 · ↑↓ · ARIA.
+  const insertTriggerRef = useRef<HTMLButtonElement>(null);
+  const insertMenuRef = useRef<HTMLDivElement>(null);
+  const closeInsertMenu = useCallback(() => setInsertMenuOpen(false), [setInsertMenuOpen]);
+  const insertKeys = usePortalMenuKeys({
+    open: insertMenuOpen, onClose: closeInsertMenu, popoverRef: insertMenuRef, triggerRef: insertTriggerRef, kind: 'menu',
+  });
   const [isDragging, setIsDragging] = useState(false);
   const dragDepthRef = useRef(0);
 
@@ -180,54 +204,28 @@ export function DocEditor({
 
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({ codeBlock: false }),
-      CodeBlockWithCopy,
-      // story #3866 — entity:story: 프로토콜 허용+isAllowedUri 검증+칩 스타일까지 포함한
-      // Link 확장(상세는 story-mention.tsx 주석). 재구현 0 — 그 파일 하나에 설정을 모은다.
-      EntityLinkExtension,
-      CustomImageNode,
-      ImageUploadExtension,
-      Highlight,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Table.configure({ resizable: true }),
-      TableRow,
-      TableCell,
-      TableHeader,
-      Placeholder.configure({
-        placeholder: labels.placeholder,
-        showOnlyCurrent: false,
-        includeChildren: true,
-      }),
-      CalloutNode,
-      ToggleBlock,
-      ToggleSummary,
-      ToggleContent,
-      FileAttachmentNode,
-      EmbedBlock,
-      MathBlockNode,
-      MathInlineNode,
-      ColumnsBlock,
-      ColumnBlock,
-      WikiLinkNode.configure({
-        projectId,
-        onNavigate,
-        suggestion: createWikiLinkSuggestion(projectId, tEditor('notFound')),
-      }),
-      // story #3866 — 문서에 스토리를 "붙이는" `#` 트리거(wikiLink의 `[[`와 동형 패턴).
-      // 새 Node가 아니라 위 Link mark로 진짜 앵커를 삽입(3858 파서 요구 형식).
-      StoryMentionExtension.configure({
-        projectId,
-        emptyLabel: tCanvas('storyPickerEmpty'),
-      }),
-      createSlashCommandExtension(slashMenuStrings),
-      PageEmbedExtension.configure({ currentDocId, onNavigate }),
-    ],
+    // story #4339 — 확장 목록은 한 곳(doc-editor-extensions.ts) — 왕복 테스트가 같은 목록으로 연다.
+    extensions: createDocEditorExtensions({
+      placeholder: labels.placeholder,
+      projectId,
+      currentDocId,
+      onNavigate,
+      wikiLinkNotFoundLabel: tEditor('notFound'),
+      storyPickerEmptyLabel: tCanvas('storyPickerEmpty'),
+      slashMenuStrings,
+    }),
     editable,
     content: contentFormat === 'markdown' ? markdownToHtml(value) : value,
-    onUpdate: ({ editor: e }) => {
+    onUpdate: ({ editor: e, transaction }) => {
       if (suppressUpdateRef.current) return;
+      // story #4339(AC7) — 편집 없이 연 문서는 onChange를 내지 않는다. tiptap은 문서를 바꾸지 않은 거래에도 update를 낸다:
+      // `setEditable`(빈 거래) · BubbleMenu의 옵션 갱신(meta만)에 플러그인 appendTransaction(끝 빈 문단 · 표 보정)이 붙어 정규화된 값이
+      // 사용자 편집처럼 나갔다 → 저장 표시 «변경사항 있음» · 자동 저장. 실제 편집(입력 · 붙여넣기 · 업로드 교체)은 뿌리 거래가 문서를 바꾼다.
+      if (!transaction.docChanged) {
+        // 정규화만 한 거래(끝 빈 문단 등) — 편집이 아니라 기준을 다듬은 것이라 onNormalize로(쓰기 없이 깨끗한 기준 갱신).
+        onNormalizeRef.current?.(contentFormat === 'markdown' ? htmlToMarkdown(e.getHTML()) : e.getHTML());
+        return;
+      }
       const html = e.getHTML();
       if (contentFormat === 'markdown') {
         onChange(htmlToMarkdown(html));
@@ -235,9 +233,29 @@ export function DocEditor({
         onChange(html);
       }
     },
+    onCreate: ({ editor: e }) => {
+      onNormalizeRef.current?.(contentFormat === 'markdown' ? htmlToMarkdown(e.getHTML()) : e.getHTML());
+    },
     onFocus: () => setIsFocused(true),
     onBlur: () => setIsFocused(false),
   });
+
+  // story #4380(PO) — 편집기(tiptap role="textbox")에 이름이 없었다(axe aria-input-field-name). 제목 칸에 글자가 있으면 그 칸을
+  // 이름으로(aria-labelledby — 제목을 고치면 따라감), 제목이 비었거나 제목 칸이 없으면 로케일 이름(빈 labelledby는 이름 0이 된다).
+  const titleId = useId();
+  const hasTitleName = title !== undefined && title.trim() !== '';
+  const bodyLabel = tEditor('editorBodyLabel');
+  useEffect(() => {
+    const el = editor?.view.dom;
+    if (!el) return;
+    if (hasTitleName) {
+      el.setAttribute('aria-labelledby', titleId);
+      el.removeAttribute('aria-label');
+    } else {
+      el.setAttribute('aria-label', bodyLabel);
+      el.removeAttribute('aria-labelledby');
+    }
+  }, [editor, hasTitleName, titleId, bodyLabel]);
 
   useEffect(() => {
     if (!editor) return;
@@ -308,44 +326,13 @@ export function DocEditor({
     setIsDragging(false);
   }, [setIsDragging]);
 
-  // Extract TOC headings from editor + assign IDs to heading DOM elements
+  // Extract TOC headings from editor. 앵커 id는 HeadingIds 확장이 decoration으로 그린다 — story #4339: 예전엔 여기서 편집기 DOM의 h1~h3에
+  // `el.id`를 직접 써서 ProseMirror가 그 변경을 사용자 편집으로 다시 읽었고, 제목 바로 뒤 수식 글이 비워져 자동 저장됐다.
   useEffect(() => {
     if (!editor) return;
-
     const update = () => {
-      const counts = new Map<string, number>();
-      const headings: DocHeading[] = [];
-
-      editor.state.doc.descendants((node) => {
-        if (node.type.name === 'heading') {
-          const text = node.textContent.trim();
-          if (!text) return true;
-          const baseId = slugifyHeading(text);
-          const seen = counts.get(baseId) ?? 0;
-          counts.set(baseId, seen + 1);
-          headings.push({
-            level: node.attrs.level as 1 | 2 | 3,
-            text,
-            id: seen === 0 ? baseId : `${baseId}-${seen + 1}`,
-          });
-        }
-        return true;
-      });
-
-      setTocHeadings(headings);
-
-      // Assign IDs to heading DOM elements
-      const root = editorContentRef.current;
-      if (!root) return;
-      const idCounts = new Map<string, number>();
-      root.querySelectorAll<HTMLElement>('h1, h2, h3').forEach((el) => {
-        const baseId = slugifyHeading(el.textContent ?? '');
-        const seen2 = idCounts.get(baseId) ?? 0;
-        idCounts.set(baseId, seen2 + 1);
-        el.id = seen2 === 0 ? baseId : `${baseId}-${seen2 + 1}`;
-      });
+      setTocHeadings(computeHeadingAnchors(editor.state.doc).map(({ level, text, id }) => ({ level: level as DocHeading['level'], text, id })));
     };
-
     update();
     editor.on('update', update);
     return () => { editor.off('update', update); };
@@ -364,7 +351,9 @@ export function DocEditor({
     suppressUpdateRef.current = true;
     editor.commands.setContent(incomingHtml, { emitUpdate: false });
     suppressUpdateRef.current = false;
-  }, [editor, value, contentFormat]);
+    // 불러온 값을 편집기가 다듬은 모양 — 깨끗한 기준(story #4339 AC7).
+    onNormalizeRef.current?.(serialize(editor.getHTML()));
+  }, [editor, value, contentFormat, serialize]);
 
   const rawMarkdown = contentFormat === 'markdown' ? value : htmlToMarkdown(value);
 
@@ -388,9 +377,9 @@ export function DocEditor({
 
   const addLink = useCallback(() => {
     if (!editor) return;
-    const url = window.prompt('URL:');
+    const url = window.prompt(tEditor('linkUrlPrompt'));
     if (url) editor.chain().focus().setLink({ href: url }).run();
-  }, [editor]);
+  }, [editor, tEditor]);
 
   // addImage/insertTable: 데스크 영구 툴바 제거로 dead code화 — 이미지/표는 slash command(/)으로 도달(기능 보존).
 
@@ -427,6 +416,7 @@ export function DocEditor({
           /* 인라인 제목 1줄(editable textarea·whitespace-nowrap·flex-1 min-w-0·편집 기능 보존) */
           <textarea
             ref={titleRef}
+            id={titleId}
             value={title}
             onChange={(e) => {
               onTitleChange?.(e.target.value);
@@ -440,7 +430,10 @@ export function DocEditor({
         ) : null}
         {metaSlot ? <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline-flex">{metaSlot}</span> : null}
         {urlSlot ? <div className="hidden shrink-0 lg:block">{urlSlot}</div> : null}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {/* story #4361(유나 실측 390/360) — 헤더는 이미 flex-wrap이라 이 무리는 새 줄로 내려가지만, 무리 자체(456px)가 한 줄 폭보다 넓어
+            카드(overflow-hidden) 밖으로 잘렸다. `lg` 미만에서는 무리가 카드 폭을 넘지 않고(max-w-full) 안에서 줄을 바꾼다(flex-wrap) —
+            조작을 더 숨기지 않고 전부 카드 안 · 누를 수 있게(가로 스크롤 줄 아님). `lg` 이상은 예전 한 줄 그대로. */}
+        <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5 lg:max-w-none lg:flex-nowrap" data-testid="doc-editor-toolbar-actions">
           {/* compact 탭 세그먼트 */}
           <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
             {(['preview', 'markdown'] as const).map((mode) => (
@@ -509,7 +502,10 @@ export function DocEditor({
         <>
         <BubbleMenu
           editor={editor}
-          shouldShow={() => !isMobileDevice()}
+          // story #4368 — 렌더마다 새 함수(예전 `() => !isMobileDevice()`와 같은 모양)를 유지한다: BubbleMenu가 렌더마다 옵션을 갱신하며
+          // 내는 meta 거래가 지금 «깨끗한 기준»의 끝 빈 문단 정규화를 우연히 태운다(story #4339 AC7 · 실측) — 안정 참조로 바꾸면 첫 입력이
+          // 그 정규화를 끌고 들어와 저장이 난다. 그 의존은 별도 기록(4368 PR), 이 줄은 판정만 바꾼다.
+          shouldShow={(args) => shouldShowDesktopBubbleMenu(args)}
           className="flex items-center gap-0.5 rounded-lg border border-border bg-background p-1"
         >
           <BubbleButton
@@ -547,7 +543,7 @@ export function DocEditor({
               if (editor.isActive('link')) {
                 editor.chain().focus().unsetLink().run();
               } else {
-                const url = window.prompt('URL:');
+                const url = window.prompt(tEditor('linkUrlPrompt'));
                 if (url) editor.chain().focus().setLink({ href: url }).run();
               }
             }}
@@ -630,10 +626,11 @@ export function DocEditor({
                 onMouseDown={(e) => e.preventDefault()}
               >
                 <button
+                  ref={insertTriggerRef}
                   type="button"
                   aria-label={tEditor('attachInsertMenu')}
-                  aria-haspopup="menu"
-                  aria-expanded={insertMenuOpen}
+                  {...insertKeys.triggerProps}
+                  onKeyDown={insertKeys.onTriggerKeyDown}
                   onClick={(e) => { e.stopPropagation(); setInsertMenuOpen((v) => !v); }}
                   className="flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
@@ -641,7 +638,9 @@ export function DocEditor({
                 </button>
                 {insertMenuOpen ? (
                   <div
-                    role="menu"
+                    ref={insertMenuRef}
+                    {...insertKeys.popoverProps}
+                    onKeyDown={insertKeys.onPopoverKeyDown}
                     onClick={(e) => e.stopPropagation()}
                     // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.
                     className="absolute left-7 top-0 w-36 overflow-hidden rounded-lg border border-border bg-card p-1 shadow-[var(--elev-overlay)]"
@@ -681,8 +680,8 @@ export function DocEditor({
               <span className="flex size-9 items-center justify-center rounded-full bg-info/10 text-info">
                 <Plus className="size-4" />
               </span>
-              <span className="text-sm font-semibold text-foreground">{tEditor('attachDropTitle')}</span>
-              <span className="text-xs text-muted-foreground">{tEditor('attachDropHint')}</span>
+              <span className="break-keep text-sm font-semibold text-foreground">{tEditor('attachDropTitle')}</span>
+              <span className="break-keep text-xs text-muted-foreground">{tEditor('attachDropHint')}</span>
             </div>
           ) : null}
         </div>
@@ -697,12 +696,12 @@ export function DocEditor({
           role="toolbar"
           aria-label={labels.toolbar}
           className={`fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm transition-transform duration-200 md:hidden ${
-            isFocused ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+            // [SID:4288] 편집기 초점이 빠진 뒤 Tab이 이 도구막대로 들어오면 숨은 채 초점을 받던 것 — 안에 초점이 있으면 보인다.
+            isFocused ? 'translate-y-0' : 'translate-y-full pointer-events-none focus-within:translate-y-0 focus-within:pointer-events-auto'
           }`}
         >
           <div className="flex overflow-x-auto items-center gap-1 px-2 py-2" onMouseDown={(e) => e.preventDefault()}>
             <ToolbarButton
-              active={false}
               disabled={!editor.can().undo()}
               ariaLabel={labels.undo}
               onClick={() => editor.chain().focus().undo().run()}
@@ -710,7 +709,6 @@ export function DocEditor({
               <Undo2 className="size-3.5" />
             </ToolbarButton>
             <ToolbarButton
-              active={false}
               disabled={!editor.can().redo()}
               ariaLabel={labels.redo}
               onClick={() => editor.chain().focus().redo().run()}
@@ -763,7 +761,7 @@ export function DocEditor({
               {labels.code}
             </ToolbarButton>
             <Sep />
-            <ToolbarButton active={false} onClick={addLink}>
+            <ToolbarButton onClick={addLink}>
               {labels.link}
             </ToolbarButton>
           </div>
@@ -773,7 +771,8 @@ export function DocEditor({
   );
 }
 
-function BubbleButton({
+// [SID:4379] 눌림 상태(aria-pressed)를 부품 테스트로 잠그려 내보낸다.
+export function BubbleButton({
   active,
   onClick,
   title,
@@ -789,6 +788,8 @@ function BubbleButton({
       type="button"
       onClick={onClick}
       title={title}
+      // [SID:4379] 서식은 켜고 끄는 것 — 켜짐을 색으로만 보이던 것을 보조기기에도(눌림 상태).
+      aria-pressed={active}
       className={`rounded-md p-1.5 transition-colors ${
         active
           ? 'bg-primary/14 text-primary'
@@ -800,14 +801,15 @@ function BubbleButton({
   );
 }
 
-function ToolbarButton({
+export function ToolbarButton({
   active,
   onClick,
   disabled,
   ariaLabel,
   children,
 }: {
-  active: boolean;
+  /** [SID:4379] 켜고 끄는 서식이면 켜짐 여부 — 동작 단추(실행 취소 · 다시 실행 · 링크 넣기)는 생략(눌림 상태를 안 알림). */
+  active?: boolean;
   onClick: () => void;
   disabled?: boolean;
   ariaLabel?: string;
@@ -819,6 +821,7 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-pressed={active}
       className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
         disabled
           ? 'cursor-not-allowed border-border/40 bg-card text-muted-foreground opacity-50'

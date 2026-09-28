@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # 스파이크(2026-08-19) 실 2.0.0 소스 대조 확認: private 내부(fn_metadata.arg_model·_tool_manager·
 # add_tool 반환값 None·구성시점 핸들러 바인딩) 전부 등가 재현 가능 — 이 파일의 로직 자체는 무변경,
 # import 경로만 이동.
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.tools.base import Tool as _FastMCPTool
 from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
@@ -33,6 +33,8 @@ from .api_client import (
     set_tool_name_override,
 )
 from .config import settings
+from .datetime_params import offset_required_note
+from .removed_args import removed_arg_hints
 from .response import ok
 from .schemas import SprintableInput
 from .tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
@@ -159,11 +161,41 @@ from .tools.webhooks import (
 )
 
 
-async def _heartbeat_fire_forget() -> None:
-    """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음."""
+async def _heartbeat_fire_forget(ctx: Context | None = None) -> None:
+    """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음.
+
+    story #4129: ctx가 있으면 MCP clientInfo(name/version)·plugin-version 헤더(HTTP 전송만)를
+    실어 워크포스 "재기동 필요" 판단 근거를 team-members로 흘린다. 둘 다 best-effort(개별
+    실패해도 나머지·heartbeat 본체엔 영향 0) — presence_status 시맨틱(last_seen_at/
+    agent_status)은 무변, 순수 additive.
+
+    session_started_at은 여기서 안 보낸다(story #4129 CHANGES-1, PO 리뷰 PR#4507) — 처음엔
+    "이 서버 프로세스가 ctx.session 객체를 처음 본 시각"으로 계산했으나, 호스팅 MCP가
+    재배포될 때마다(세션 객체가 전부 새로 생김) 모든 에이전트의 값이 리셋되는 오정보였다.
+    "재기동"의 진짜 신호는 신원(client_name/version/plugin_version) 변경이나 idle 문턱
+    넘는 공백이지 서버 쪽 세션 객체 교체가 아니다 — 그 판정은 BE(sync_agent_profile_
+    presence, 이전 저장값과 비교 가능한 유일한 지점)가 전담한다.
+    """
     try:
-        if client.member_id:
-            await client.patch(f"/api/v2/team-members/{client.member_id}/heartbeat")
+        if not client.member_id:
+            return
+        body: dict = {}
+        if ctx is not None:
+            try:
+                client_params = ctx.session.client_params
+            except Exception:
+                client_params = None
+            if client_params is not None and client_params.client_info is not None:
+                body["client_name"] = client_params.client_info.name
+                body["client_version"] = client_params.client_info.version
+            try:
+                headers = ctx.headers  # None on stdio(문서화된 계약) — HTTP 전송만 값 有
+                plugin_version = headers.get("x-sprintable-plugin-version") if headers else None
+            except Exception:
+                plugin_version = None
+            if plugin_version:
+                body["plugin_version"] = plugin_version
+        await client.patch(f"/api/v2/team-members/{client.member_id}/heartbeat", json=body or None)
     except Exception as exc:
         logger.warning("heartbeat failed (ignored): %s", exc)
 
@@ -259,7 +291,27 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     # 파라미터를 앞으로 안정 정렬(MCP 는 keyword 호출이라 순서 변경 무해).
     params.sort(key=lambda p: p.default is not inspect.Parameter.empty)
 
-    async def wrapper(**kwargs):
+    async def wrapper(*, ctx: Context | None = None, **kwargs):
+        # story #4129: Context 타입 파라미터는 mcp SDK가 find_context_parameter()(typing
+        # 어노테이션 기반, __signature__ 오버라이드와 무관하게 __annotations__를 직접 읽음)로
+        # 자동감지→공개 스키마에서 자동제외→호출 시 자동주입한다(공식 지원 패턴, SDK
+        # tools/base.py Tool.run()의 context_kwarg 처리 실측 확認 — `Context | None` 유니온도
+        # context_injection.py::find_context_parameter가 get_args()로 명시 지원하는 형태라
+        # Optional화가 이 자동감지 자체를 깨지 않음, SDK 소스 재확認). 아래 wrapper.__signature__는
+        # 여전히 input_cls 필드만으로 만든다 — ctx는 실제 파이썬 함수 파라미터(호출 시 진짜
+        # 바인딩)일 뿐 그 시그니처엔 안 실어, 118개 도구 공개 스키마에 ctx가 새는 걸 원천 차단.
+        #
+        # story #4129 CI RED(PO 리뷰, 2026-09-22, run 35671061008 까디르 진단) — ctx를
+        # 필수(기본값 없음)로 뒀더니 test_3722_mcp_tool_run_id_headers.py::test_flat_wrapper_
+        # sets_and_resets_tool_name_override(SDK를 거치지 않고 `await w(x=1)`로 wrapper를
+        # 직접 부르는, "SDK 우회 직접 호출" 계약 — 이 파일이 전제하는 실 호출자 클래스가
+        # MCP 프로토콜 경유 하나뿐이 아님을 증명하는 기존 테스트)가 TypeError로 깨졌다.
+        # 처방은 증상(그 테스트만 고침)이 아니라 계약으로 — ctx가 없어도 wrapper는 도구를
+        # 그대로 통과시킨다(런타임 신원 기록만 생략, _heartbeat_fire_forget(None)이 이미
+        # 그 경로를 지원 — ctx=None이면 client_name/session_started_at/plugin_version을
+        # 안 싣고 presence-only heartbeat만 보냄). tool_name override set/reset(바로 아래
+        # set_tool_name_override/reset_tool_name_override)은 ctx 유무와 무관하게 항상 돈다
+        # — 이 테스트가 실제로 검증하는 계약은 그쪽이지 ctx 주입이 아니다.
         # E-MCP S2: call-time enforcement — 키 허용 밖 도구는 호출 차단(403-shape).
         # E-MCP-HTTP S1: effective 키(http=per-request bearer override·stdio=env 단일키)별 scope 로드
         # (per-key bounded 캐시). 멀티테넌트서 키마다 다른 scope 정확 적용.
@@ -280,7 +332,7 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         finally:
             reset_project_override(_tok)
             reset_tool_name_override(_tool_tok)
-        asyncio.create_task(_heartbeat_fire_forget())
+        asyncio.create_task(_heartbeat_fire_forget(ctx))
         return result
 
     wrapper.__name__ = name
@@ -372,6 +424,8 @@ def _lock_down_extra_args(tool: _FastMCPTool) -> None:
             if unknown:
                 raise ValueError(
                     f"{tool_name}: unexpected argument(s) {unknown} — accepted arguments: {allowed}"
+                    # story #4329 — 뺀 인자면 이유와 대안까지(에이전트가 오류만 보고 스스로 고치게).
+                    + removed_arg_hints(tool_name, unknown)
                 )
         return data
 
@@ -433,15 +487,25 @@ mcp = SprintableMCPServer(
     name="sprintable-mcp-python",
     instructions=(
         "Sprintable Python MCP server. "
-        f"Backend: {settings.sprintable_api_url}"
+        f"Backend: {settings.sprintable_api_url} "
+        # story #3933(AC4) — 도구 오류 응답은 1행 "Error: {code}: {message}"(하위호환) 뒤에
+        # {"code","message","hint"?,"detail"?} JSON 블록이 붙는다. code로 분기하거나
+        # detail(BE 원문 보존)을 참고할 것 — 1행 텍스트만 파싱해도 무방(회귀 없음).
+        "Tool error responses: line 1 is 'Error: {code}: {message}' (back-compat), "
+        "followed by a JSON block {code, message, hint?, detail?} — branch on code or "
+        "read detail (raw BE body) if needed; parsing line 1 alone still works."
     ),
 )
 
 
 @mcp.tool()
-async def ping() -> list[TextContent]:
-    """서버 생존 확인용 smoke tool."""
-    asyncio.create_task(_heartbeat_fire_forget())
+async def ping(ctx: Context | None = None) -> list[TextContent]:
+    """서버 생존 확인용 smoke tool.
+
+    story #4129 CI RED(PO 리뷰, 2026-09-22) — `_flat()` wrapper와 같은 이유로 ctx를
+    Optional화(SDK 우회 직접 호출자와의 계약 — ctx 없이도 이 도구는 정상 동작, 런타임
+    신원 기록만 생략)."""
+    asyncio.create_task(_heartbeat_fire_forget(ctx))
     return ok({"status": "pong"})
 
 
@@ -474,7 +538,9 @@ _TOOL_DEFS: list[tuple] = [
      "「통지 수신자 0」 warning이 실립니다.",
      AddStoryInput, add_story),
     ("sprintable_update_story",
-     "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일.",
+     "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      UpdateStoryInput, update_story),
     # E-SECURITY SEC-S1: sprintable_delete_story 의도적 제거(에이전트 hard-delete 차단).
     ("sprintable_assign_story_to_sprint",
@@ -518,7 +584,9 @@ _TOOL_DEFS: list[tuple] = [
      "([제목](entity:epic:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      AddGoalInput, add_goal),
     ("sprintable_update_goal",
-     "[일감] 목표 수정. 응답 reference_token은 sprintable_add_goal과 동일.",
+     "[일감] 목표 수정. 응답 reference_token은 sprintable_add_goal과 동일."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      UpdateGoalInput, update_goal),
     # story #2010: 목표 lifecycle 전이 전용 도구(rename B1 이후 신설이라 구 _epic 별칭 없음 —
     # update_goal의 status 필드는 백엔드가 422로 거부해 이 도구만이 유일한 전이 경로).
@@ -537,7 +605,9 @@ _TOOL_DEFS: list[tuple] = [
      "[일감] [DEPRECATED→sprintable_add_goal] 에픽 생성.",
      AddGoalInput, add_goal),
     ("sprintable_update_epic",
-     "[일감] [DEPRECATED→sprintable_update_goal] 에픽 수정.",
+     "[일감] [DEPRECATED→sprintable_update_goal] 에픽 수정."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      UpdateGoalInput, update_goal),
     # Hypotheses (6)
     ("sprintable_list_hypotheses",
@@ -554,10 +624,14 @@ _TOOL_DEFS: list[tuple] = [
      "source='ga4'이면 추가 필수: property_id, ga4_metric(enum: activeUsers|newUsers|sessions|"
      "conversions|eventCount|screenPageViews), date_range_days(양의 정수).\n"
      "owner_member_id: agent 호출은 휴먼 멤버 owner_member_id를 반드시 명시해야 한다"
-     "(미지정 시 백엔드가 400 HUMAN_OWNER_REQUIRED 반환). list_team_members로 휴먼 멤버 id 조회.",
+     "(미지정 시 백엔드가 400 HUMAN_OWNER_REQUIRED 반환). list_team_members로 휴먼 멤버 id 조회."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      CreateHypothesisInput, create_hypothesis),
     ("sprintable_update_hypothesis",
-     "[일감] 가설 수정 (문장/지표/측정일/owner). 상태 전이는 confirm으로.",
+     "[일감] 가설 수정 (문장/지표/측정일/owner). 상태 전이는 confirm으로."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      UpdateHypothesisInput, update_hypothesis),
     ("sprintable_link_hypothesis",
      "[일감] 가설을 epic/story에 연결/재연결.",
@@ -611,7 +685,9 @@ _TOOL_DEFS: list[tuple] = [
      CreateDocInput, create_doc),
     ("sprintable_update_doc",
      "[지식] 문서 수정. 응답 reference_token은 sprintable_create_doc과 동일. next_action"
-     " 동봉 규칙도 동일.",
+     " 동봉 규칙도 동일."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("expected_updated_at"),
      UpdateDocInput, update_doc),
     ("sprintable_submit_for_approval",
      "[지식] 문서를 결재 상신한다(draft→pending, 승인 게이트 생성) — 문서 결재 상신은 이"
@@ -737,7 +813,9 @@ _TOOL_DEFS: list[tuple] = [
      "세션 시작 컨텍스트 — 내 stories/tasks + 거기 붙은 판단/정정 + (since를 주면) 그 뒤"
      " 최근 활동을 한 호출로 준다. since에 직전 세션 종료 시각(ISO 8601)을 주면 그 뒤"
      " 활동만 옴 — 안 주면 recent_activity는 null(모름, 빈 목록 아님). progress.txt 같은"
-     " 제품 밖 파일 대신 이 도구가 그 자리를 대신한다.",
+     " 제품 밖 파일 대신 이 도구가 그 자리를 대신한다."
+     # story #4294 AC3 — 서버 422 규칙을 에이전트가 보는 도구 목록에 싣는다(docstring · 필드 주석은 목록에 안 닿음).
+     + offset_required_note("since"),
      SessionContextInput, get_session_context),
     # Visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
@@ -882,16 +960,22 @@ _TOOL_DEFS: list[tuple] = [
      GetChatMessageInput, get_chat_message),
     # Meetings (6)
     ("sprintable_list_meetings",
-     "[일감] 프로젝트 미팅 목록 조회.",
+     "[일감] 프로젝트 미팅 목록 조회."
+     # story #4329 — 서버가 date_from · date_to를 읽게 되며 4294 오프셋 규칙이 붙었다.
+     + offset_required_note("date_from", "date_to"),
      ListMeetingsInput, list_meetings),
     ("sprintable_get_meeting",
      "[일감] 미팅 상세 조회.",
      MeetingIdInput, get_meeting),
     ("sprintable_create_meeting",
-     "[일감] 미팅 생성.",
+     "[일감] 미팅 생성."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("date"),
      CreateMeetingInput, create_meeting),
     ("sprintable_update_meeting",
-     "[일감] 미팅 수정 (raw_transcript/ai_summary/decisions/action_items 포함).",
+     "[일감] 미팅 수정 (raw_transcript/ai_summary/decisions/action_items 포함)."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("date"),
      UpdateMeetingInput, update_meeting),
     ("sprintable_delete_meeting",
      "[일감] 미팅 소프트 삭제.",
@@ -932,7 +1016,7 @@ _TOOL_DEFS: list[tuple] = [
      "[일감] 레트로 세션 생성.",
      CreateRetroSessionInput, create_retro_session),
     ("sprintable_vote_retro_item",
-     "[일감] 레트로 아이템 투표.",
+     "[일감] 레트로 아이템 투표 — 투표자는 호출자 자신(서버가 인증에서 정한다 · 대리 투표 없음).",
      VoteRetroItemInput, vote_retro_item),
     ("sprintable_add_retro_action",
      "[일감] 레트로 액션 아이템 추가.",
@@ -948,13 +1032,13 @@ _TOOL_DEFS: list[tuple] = [
      ExportRetroInput, export_retro),
     # Rewards (3)
     ("sprintable_get_wallet",
-     "[조직] 팀원 보상 잔액 조회.",
+     "[조직] 팀원 보상 잔액 조회 — member_id의 이 프로젝트 잔액(balance). 본인 또는 조직 관리자만.",
      GetWalletInput, get_wallet),
     ("sprintable_give_reward",
      "[조직] 팀원 보상/패널티 지급.",
      GiveRewardInput, give_reward),
     ("sprintable_get_leaderboard_v2",
-     "[조직] 보상 리더보드 조회.",
+     "[조직] 보상 리더보드 조회 — 이 프로젝트 순위. period(all · daily · weekly · monthly, 기본 all) · limit(1~100, 기본 50).",
      GetLeaderboardInput, get_leaderboard_v2),
     # Notifications (3)
     ("sprintable_check_notifications",
@@ -972,10 +1056,14 @@ _TOOL_DEFS: list[tuple] = [
      ListAuditLogsInput, list_audit_logs),
     # Agent Runs (3)
     ("sprintable_emit_event",
-     "[일감] 에이전트 런 이벤트 발행.",
+     "[일감] 에이전트 런 이벤트 발행."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("finished_at", "started_at"),
      EmitEventInput, emit_event),
     ("sprintable_update_run_status",
-     "[일감] 에이전트 런 상태 업데이트.",
+     "[일감] 에이전트 런 상태 업데이트."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("finished_at", "started_at"),
      UpdateRunStatusInput, update_run_status),
     ("sprintable_poll_events",
      "에이전트 수신 대기 이벤트 폴링.",
@@ -1003,7 +1091,8 @@ _TOOL_DEFS: list[tuple] = [
     # admin 그룹(등록=org 관리 행위, toolset.py 키워드 참조).
     ("sprintable_register_event_definition",
      "[조직] org 커스텀 이벤트 정의 등록(admin/owner 전용). key 네임스페이스·payload_schema "
-     "additionalProperties 게이트·routing(payload_field 또는 target=none만)을 강제한다.",
+     "additionalProperties 게이트·routing(payload_field 또는 target=none만)을 강제한다. "
+     "name(사람이 보는 이름 · 필수 · key와 달라야 함)과 description(선택)을 함께 보낸다.",
      RegisterEventDefinitionInput, register_event_definition),
     ("sprintable_update_event_definition",
      "[조직] org 커스텀 이벤트 정의 수정/비활성화(admin/owner 전용). enabled=false가 삭제 "

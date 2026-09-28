@@ -52,6 +52,7 @@ def _story(assignee_id=None, position=None, **overrides):
         acceptance_criteria=None, position=position, success_hypothesis=None, metric_definition=None,
         measure_after=None, outcome_status="n_a", outcome_result=None, is_excluded=False,
         created_at=now, updated_at=now,
+        deleted_at=None,  # story #4299: trust 수집이 읽은 Story 행의 삭제 여부를 본다(실 Story 행과 같은 모양).
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -73,6 +74,7 @@ def _mock_db(story_by_id: dict):
 
 def _patch_common(monkeypatch):
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "app.services.project_auth.has_project_access", AsyncMock(return_value=True)

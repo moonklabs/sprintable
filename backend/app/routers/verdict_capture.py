@@ -28,6 +28,7 @@ from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
 from app.services.merge_verdict_gate import reconcile_merge_gate_with_real_evidence
 from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr, upsert_link
+from app.services.pr_verdict_comment_parser import parse_verdict_comment
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
     capture_review_verdict,
@@ -35,6 +36,7 @@ from app.services.verdict_capture import (
     fetch_pr_changed_files,
     fetch_status_check_rollup,
     parse_story_id,
+    parse_story_number,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,12 +96,22 @@ async def capture_pr_verdict(
 
 # ── QA·디자인 게이트 verdict 캡처 ─────────────────────────────────────────────
 
-_VALID_REVIEW_ROLES = frozenset({"qa", "design"})
+# story #3963(PO 확定 2026-09-16 16:08Z) — "po" 추가: PO(페드루)의 PR review PASS/CHANGES
+# 코멘트도 QA codex verdict와 별개 축으로 원장에 남긴다("누가 낸 CHANGES인지" 구분 가능하게).
+# open_defects 정의(3959)는 qa∪po 둘 다 "마지막 판정"으로 센다 — role 자체는 구분해 두되
+# 집계 쪽에서 합친다(3959 후속 PR의 몫, 이 파일은 role 어휘만 넓힌다).
+_VALID_REVIEW_ROLES = frozenset({"qa", "design", "po"})
 
 
 class CaptureReviewBody(BaseModel):
-    story_id: uuid.UUID
-    role: str                # 'qa' | 'design'
+    # story #3963 — CRON_SECRET 호출자(GitHub Action)는 org 컨텍스트가 없어 story_id(UUID)를
+    # 미리 못 구한다(우리 팀 실 PR 관례가 `[SID:정수]` story_number라 parse_story_id의 UUID
+    # 파싱과 안 맞음, capture-pr과 동일 구조적 제약). story_id 직접 지정(기존 호출자 무회귀)
+    # 또는 (org_id, story_number) 조합 중 하나만 필요 — 둘 다 없으면 422.
+    story_id: uuid.UUID | None = None
+    org_id: uuid.UUID | None = None
+    story_number: int | None = None
+    role: str                # 'qa' | 'design' | 'po'
     member_id: uuid.UUID
     result: str | None = None  # 'pass' | 'fail' | None
     rounds: int | None = None
@@ -122,11 +134,22 @@ async def capture_review(
     if body.role not in _VALID_REVIEW_ROLES:
         return _err("INVALID_ROLE", f"role must be one of {sorted(_VALID_REVIEW_ROLES)}", 422)
 
-    # story 조회 → org_id 획득
-    story_r = await session.execute(
-        select(Story).where(Story.id == body.story_id, Story.deleted_at.is_(None))
-    )
-    story = story_r.scalar_one_or_none()
+    if body.story_id is not None:
+        story_r = await session.execute(
+            select(Story).where(Story.id == body.story_id, Story.deleted_at.is_(None))
+        )
+        story = story_r.scalar_one_or_none()
+    elif body.org_id is not None and body.story_number is not None:
+        # story #3963 — capture-pr류 UUID SID와 달리, GitHub Action 호출자는 story_number
+        # (팀 실 관례)만 갖고 있다. resolve_story_for_pr과 동일 SSOT 헬퍼 재사용(0건/2건+
+        # ambiguous는 None — 추측 없이 skip, 그 파일의 close-on-merge 규율과 동형).
+        from app.services.pr_story_link import _scoped_story_by_number
+
+        story = await _scoped_story_by_number(session, body.org_id, body.story_number)
+    else:
+        return _err(
+            "INVALID_STORY_REF", "either story_id or (org_id and story_number) is required", 422,
+        )
     if story is None:
         return _ok({"skipped_reason": "story_not_found", "recorded": False})
 
@@ -134,7 +157,7 @@ async def capture_review(
         result = await capture_review_verdict(
             session=session,
             org_id=story.org_id,
-            story_id=body.story_id,
+            story_id=story.id,
             role_key=body.role,
             member_id=body.member_id,
             result=body.result,
@@ -312,6 +335,95 @@ async def _resolve_legacy_org_by_repo_owner(
     return rows[0], "org_resolved_via_repo_owner"
 
 
+_TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+async def _handle_issue_comment_event(
+    session: AsyncSession, source: str, payload: dict, installation_id: int | None,
+) -> tuple[dict, str]:
+    """story #3963(적어둠 — verdict 원장 배선, PO 확定 2026-09-16 16:34Z) — PR 코멘트
+    3형(codex QA verdict·PO review/리뷰·명시적 비-verdict) → capture_review_verdict.
+
+    독립 분기(그라운딩·PO 판정): `issue_comment`는 pull_request/status와 payload 모양이
+    완전히 달라(`issue`+`comment`, `pull_request` 최상위 객체 없음) 기존 `resolve_story_for_pr`/
+    `_candidate_texts`(PR 라이프사이클 전용, 수년째 실사고로 다듬어진 로직) 재사용을 시도하지
+    않는다 — org 해소(app installation·legacy repo-owner)만 그 두 경로와 동형으로 재현하고,
+    story 해소는 `_scoped_story_by_number`(팀 실 SID 관례, story #3963 그라운딩)로 독립 처리.
+
+    member_id(PO 확定): 새 대리 멤버 신설 0 — `events.py::_get_or_create_system_publisher`
+    (org당 1·이미 「시스템 발행」으로 존재하는 anchor)를 그대로 participation의 member로
+    재사용한다. 「누가」는 role(qa/po)+source(github_comment)가 말하고, 실제 GitHub 계정
+    (author_login)은 이번 스코프에서 원장에 안 싣는다(Verdict 모델에 meta/note 컬럼 0,
+    신설 안 함 — PO 지시, 적기만).
+
+    author_association ∉ {OWNER, MEMBER, COLLABORATOR}면 skip — PASS/approved 낱말을 흉내
+    낸 임의 GitHub 계정의 코멘트가 verdict로 기록되는 스푸핑 방지(PO 지시)."""
+    if payload.get("action") != "created":
+        return {"skipped_reason": "not_created_action", "recorded": []}, "ignored"
+
+    issue = payload.get("issue") or {}
+    if not issue.get("pull_request"):
+        return {"skipped_reason": "not_a_pull_request_comment", "recorded": []}, "ignored"
+
+    comment = payload.get("comment") or {}
+    author_association = comment.get("author_association")
+    if author_association not in _TRUSTED_AUTHOR_ASSOCIATIONS:
+        return {"skipped_reason": "untrusted_author_association", "recorded": []}, "ignored"
+
+    body = comment.get("body") or ""
+    verdict = parse_verdict_comment(body)
+    if verdict is None:
+        return {"skipped_reason": "not_a_verdict_comment", "recorded": []}, "ignored"
+
+    story_number = parse_story_number(issue.get("title") or "") or parse_story_number(issue.get("body") or "")
+    if story_number is None:
+        return {"skipped_reason": "no_sid_tag", "recorded": []}, "ignored"
+
+    repo = (payload.get("repository") or {}).get("full_name") or ""
+    org_id: uuid.UUID | None = None
+    if source == "app":
+        if installation_id is None:
+            return {"skipped_reason": "no_installation_id", "recorded": []}, "ignored"
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.installation_id == installation_id,
+                    GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return {"skipped_reason": "installation_not_registered_or_suspended", "recorded": []}, "ignored"
+        org_id = installation.org_id
+    else:  # source == "legacy"
+        org_id, reason = await _resolve_legacy_org_by_repo_owner(session, repo)
+        if org_id is None:
+            return {"skipped_reason": reason, "recorded": []}, "ignored"
+
+    from app.services.pr_story_link import _scoped_story_by_number
+
+    story = await _scoped_story_by_number(session, org_id, story_number)
+    if story is None:
+        return {"skipped_reason": "story_not_found", "recorded": []}, "ignored"
+
+    from app.routers.events import _get_or_create_system_publisher
+
+    system_member = await _get_or_create_system_publisher(session, org_id)
+
+    result = await capture_review_verdict(
+        session=session,
+        org_id=org_id,
+        story_id=story.id,
+        role_key=verdict["role"],
+        member_id=system_member.id,
+        result=verdict["result"],
+        source="github_comment",
+    )
+    if not result.get("recorded"):
+        return result, "ignored"
+    return result, "processed"
+
+
 async def _process_webhook_event(
     session: AsyncSession, source: str, event: str, payload: dict, installation_id: int | None,
     delivery: GithubWebhookDelivery,
@@ -342,6 +454,9 @@ async def _process_webhook_event(
     가 실제로 SHA 재-pending을 발생시킨 경우에만(단순 재확인·SHA 일치는 대상 아님) qa:pass/
     design:pass 라벨 제거 요청을 append — 마찬가지로 commit 後 background_tasks로 발행.
     """
+    if event == "issue_comment":
+        return await _handle_issue_comment_event(session, source, payload, installation_id)
+
     texts = _candidate_texts(payload)
     repo = (payload.get("repository") or {}).get("full_name") or ""
     pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(event, payload)

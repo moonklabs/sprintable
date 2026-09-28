@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 import koMessages from '../../../../../../messages/ko.json';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
@@ -15,12 +16,29 @@ const { useParamsMock } = vi.hoisted(() => ({ useParamsMock: vi.fn() }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
+  // story #4017 — OFF 상태 테스트라 레거시 값 그대로(실 훅의 navV3Flags undefined 분기와 동형).
+  useChatsHref: () => '/chats',
+  useConnectRulesHref: (fallback: string) => fallback,
 }));
+// story #4336 PR2 — 영상 확정 작업 기다리기: 이 파일은 고정 횟수 flush(마이크로태스크)로 진행을 맞춘다 → 타이머(매크로태스크) 없이 작업 상태를
+// 곧바로 한 번 묻는 대역(같은 주소 · 같은 목 응답). 폴링 간격 · 멈춤 규칙은 lib/background-job.test.ts가 따로 본다.
+vi.mock('@/lib/background-job', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/background-job')>();
+  return {
+    ...actual,
+    waitForBackgroundJob: async (orgId: string, jobId: string) => {
+      const res = await fetch(`/api/organizations/${orgId}/background-jobs/${jobId}`);
+      const json = (await res.json()) as { data?: unknown };
+      return json.data ?? null;
+    },
+  };
+});
 vi.mock('next/navigation', () => ({
   useParams: () => useParamsMock(),
 }));
 
 import ChannelPostEditPage from './page';
+import type { CommandStatus, FailureKind } from '@/components/content/failure-action';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -129,7 +147,7 @@ function stubFetch(opts: {
   // story #3808(Phase3·3-3 PR5a) — genBudgetOk와 동형(별도 지갑, x/x_sandbox
   // 채널 draft에서만 실제로 호출됨).
   apiUsageBudgetOk?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } | false;
-  draftDetail?: Partial<typeof DRAFT_DETAIL>;
+  draftDetail?: Partial<typeof DRAFT_DETAIL> & { command_retryable?: boolean; command_failure_detail?: Record<string, unknown> | null };
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
   onPublish?: () => { status: number; body: unknown };
@@ -182,6 +200,10 @@ function stubFetch(opts: {
   // command_status='pending').
   onRetry?: (commandId: string) => { status: number; body?: unknown };
   draftAfterRetry?: Record<string, unknown>;
+  // story #4290 — 재시도가 거절(404)됐을 때 서버의 지금 상태(그 사이 다른 시도가 명령을 움직였다). 없으면 거절 전 그대로.
+  draftAfterRejectedRetry?: Record<string, unknown>;
+  // story #4290 — 답변 재시도 뒤 다시 읽는 댓글 목록(없으면 처음 목록 그대로).
+  commentsAfterReplyRetry?: Parameters<typeof stubFetch>[0]['commentsResponse'];
   // story #3499 — /publications/{id}/insights 응답. 넘기지 않으면(대부분 테스트가
   // publication_id 자체가 null이라 이 fetch를 아예 안 탄다) 빈 배열.
   insightSnapshots?: unknown[];
@@ -195,7 +217,7 @@ function stubFetch(opts: {
       reply?: {
         id: string; status: string; external_reply_url: string | null; command_id: string | null;
         command_status: string | null; failure_kind: string | null;
-        next_attempt_at: string | null; reason_code: string | null;
+        next_attempt_at: string | null; reason_code: string | null; command_retryable?: boolean;
       } | null;
       // story #3596(BE additive) — 「이어서 답변」 3갈래 판정에 쓴다(옵션, 대부분
       // 시나리오는 생략 — 없으면 open_reply_draft=null·sent_replies_count=0 폴백).
@@ -240,6 +262,8 @@ function stubFetch(opts: {
   videoCodecs?: string[];
   onVideoUploadUrl?: (body: unknown) => { status: number; body: unknown };
   onVideoConfirm?: (body: unknown) => { status: number; body: unknown };
+  /** story #4336 PR2 — 영상 확정 작업 상태 보기를 이 약속이 풀릴 때까지 붙잡는다(느린 작업 흉내). */
+  videoJobGate?: Promise<void>;
   // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 이어쓰기
   // 상한(image_max_count와 동형 관례). 기본값 0=미지원(기존 시나리오 전부 회귀
   // 0 — 목록 UI 자체가 안 뜬다).
@@ -248,6 +272,11 @@ function stubFetch(opts: {
   // 재사용, threadMaxSegments>0일 때만 발동)가 반영할 서버 값 — draftAfterRetry와
   // 동형 관례. thread_segments 배열의 실측 갱신을 재현하는 용도.
   draftAfterPublish?: Record<string, unknown>;
+  // story #4336 — 발행이 «발행 중»으로 답한 뒤 초안 다시 읽기마다 차례로 덮을 서버 값(워커가 끝낸 상태 재현).
+  detailAfterPublishSequence?: Record<string, unknown>[];
+  // story #4336 — 발행 취소(워커 예산 밖) 응답 · 성공 뒤 서버 값.
+  onCancelPublish?: () => { status: number; body: unknown };
+  draftAfterCancelPublish?: Record<string, unknown>;
   // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube 능력 플래그 3종
   // (thread_max_segments와 동형 관례, 기본값은 기존 시나리오 전부 회귀 0이 되도록
   // false/미지원).
@@ -259,8 +288,12 @@ function stubFetch(opts: {
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
   if (opts.omitGateStatusKey) delete draftDetail.gate_status;
   let currentDraftDetail = draftDetail;
+  let published = false;
+  const detailSequence = [...(opts.detailAfterPublishSequence ?? [])];
   let rejectNextDraftRefetch = false;
+  let commentReplyRetried = false;
   let currentImages = opts.initialImages ?? [];
+  const confirmedVideoJobs = new Map<string, unknown>();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -271,7 +304,16 @@ function stubFetch(opts: {
         // 「다음」 이 URL 호출(=재조회)만 네트워크단 reject한다(최초 페이지 로드
         // 호출은 그대로 성공).
         if (rejectNextDraftRefetch) { rejectNextDraftRefetch = false; throw new Error('network down'); }
-        return { ok: true, status: 200, json: async () => ({ data: currentDraftDetail, error: null, meta: null }) };
+        if (published && detailSequence.length) currentDraftDetail = { ...currentDraftDetail, ...detailSequence.shift() };
+        // story #4290 — 서버처럼 command_retryable을 싣는다(사람이 볼 때 `viewer_can_retry`: dead_letter · blocked(일시정지 제외) → 참).
+        // 테스트가 값을 직접 주면 그 값.
+        const served = 'command_retryable' in currentDraftDetail ? currentDraftDetail
+          : {
+            ...currentDraftDetail,
+            command_retryable: currentDraftDetail.command_status === 'dead_letter'
+              || (currentDraftDetail.command_status === 'blocked' && currentDraftDetail.failure_kind !== 'paused'),
+          };
+        return { ok: true, status: 200, json: async () => ({ data: served, error: null, meta: null }) };
       }
       // story #3402·PR#3767 — GATE_ALREADY_HELD best-effort 상대 초안 단건 조회. 테스트의
       // holding_draft_id는 항상 'd9'(현재 편집 중인 DRAFT_ID와 다른 값)로 고정한다.
@@ -427,8 +469,20 @@ function stubFetch(opts: {
         if (ok) {
           const confirmed = result.body as { version?: number; video_url?: string | null };
           currentDraftDetail = { ...currentDraftDetail, current_version: confirmed.version, video_url: confirmed.video_url };
+          // story #4336 PR2 — 영상 확정은 작업화: 202 + 작업. 끝난 작업(아래 GET)이 이 영상을 결과로 돌려준다.
+          confirmedVideoJobs.set('job-video-1', result.body);
+          return { ok: true, status: 202, json: async () => ({ data: { id: 'job-video-1', kind: 'channel_video_confirm', status: 'pending', result: null, error: null }, error: null, meta: null }) };
         }
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      const jobMatch = url.match(new RegExp(`^/api/organizations/${ORG_ID}/background-jobs/([^/]+)$`));
+      if (jobMatch && (!init || init.method === undefined || init.method === 'GET')) {
+        if (opts.videoJobGate) await opts.videoJobGate;
+        const video = confirmedVideoJobs.get(jobMatch[1] as string);
+        return {
+          ok: true, status: 200,
+          json: async () => ({ data: { id: jobMatch[1], kind: 'channel_video_confirm', status: 'completed', result: { video }, error: null }, error: null, meta: null }),
+        };
       }
       const assetsListMatch = url.match(/\/versions\/([^/]+)\/assets$/);
       if (assetsListMatch && (!init || init.method === undefined || init.method === 'GET')) {
@@ -475,6 +529,13 @@ function stubFetch(opts: {
         };
         const ok = result.status < 400;
         if (opts.draftAfterPublish) currentDraftDetail = { ...currentDraftDetail, ...opts.draftAfterPublish };
+        published = true;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/cancel-publish` && init?.method === 'POST') {
+        const result = opts.onCancelPublish?.() ?? { status: 200, body: { command_id: 'cmd-1', status: 'cancelled', reason_code: 'CANCELLED_BY_HUMAN' } };
+        const ok = result.status < 400;
+        if (ok || result.status === 409) currentDraftDetail = { ...currentDraftDetail, ...opts.draftAfterCancelPublish };
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/cancel-scheduled` && init?.method === 'POST') {
@@ -498,6 +559,7 @@ function stubFetch(opts: {
         const result = opts.onRetry?.(commandId) ?? { status: 200, body: { id: commandId, status: 'pending' } };
         const ok = result.status < 400;
         if (ok) currentDraftDetail = { ...currentDraftDetail, command_status: 'pending', ...opts.draftAfterRetry };
+        else if (opts.draftAfterRejectedRetry) currentDraftDetail = { ...currentDraftDetail, ...opts.draftAfterRejectedRetry };
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/insights')) {
@@ -519,7 +581,15 @@ function stubFetch(opts: {
         if (opts.commentsStatus && opts.commentsStatus >= 400) {
           return { ok: false, status: opts.commentsStatus, json: async () => ({ detail: 'boom' }) };
         }
-        const data = opts.commentsResponse ?? { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 };
+        const raw = (commentReplyRetried && opts.commentsAfterReplyRetry) || opts.commentsResponse
+          || { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 };
+        // story #4290 — 답변 명령도 서버처럼 command_retryable(dead_letter · blocked → 참) · 테스트가 직접 주면 그 값.
+        const data = {
+          ...raw,
+          comments: raw.comments.map((c) => (c.reply && !('command_retryable' in c.reply)
+            ? { ...c, reply: { ...c.reply, command_retryable: c.reply.command_status === 'dead_letter' || c.reply.command_status === 'blocked' } }
+            : c)),
+        };
         return { ok: true, status: 200, json: async () => ({ data, error: null, meta: null }) };
       }
       // story #3517(BE #3867 조각②) — 댓글 「작업으로 전환」·「답변」.
@@ -556,6 +626,7 @@ function stubFetch(opts: {
       // publication-commands/{id}/retry, channel-posts/publication-commands 쪽과
       // 다른 URL — handleRetryReply 전용 자리).
       if (url.match(/\/organizations\/[^/]+\/publication-commands\/[^/]+\/retry$/) && init?.method === 'POST') {
+        commentReplyRetried = true;
         const result = opts.onCommentReplyRetry?.() ?? { status: 200, body: { id: 'cmd-1', status: 'pending' } };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
@@ -1221,6 +1292,89 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
   });
 
+  // ===== story #4015 — publicationFailed 알림: 실패 신호 정확히 1개(§③ 색↔사람 할 일) =====
+  const FAILED = { gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'failed' as const };
+
+  // AC4(CHANGES 1) — 조합을 손으로 적지 않는다. CommandStatus·FailureKind 값을 «완전 열거»
+  // Record로 받아(값이 늘면 이 Record가 컴파일 실패 → 조합을 반드시 추가하게) ×
+  // processing_kind × canPublish 곱으로 전수. publication_status='failed'인 모든 조합에서
+  // 실패 신호(배지 · publicationFailed 알림 · 컨테이너 대기 알림)가 «정확히 1개»여야 한다.
+  // (일부 조합 — 예: dead_letter+awaiting_container — 은 서버가 dead_letter 전이 시
+  // processing_kind를 null로 되돌려 «서버상 도달 불가»다. 방어로 전수에 그대로 포함해,
+  // 그런 조합이 혹시 와도 신호가 1개로 유지됨을 보장한다.)
+  const COMMAND_STATUS_ALL: Record<CommandStatus, true> = {
+    pending: true, in_progress: true, completed: true, blocked: true, dead_letter: true, voided: true, cancelled: true,
+    blocked_unapproved: true, // story #4264 ④
+  };
+  // story #4262 — `not_sent`(확실히 안 나감) 추가. 전수 곱에 그대로 들어간다.
+  // story #4305 — `paused`(조직 외부 발행 일시 중지) 추가.
+  const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true, not_sent: true, paused: true };
+  const CS_VALUES: (CommandStatus | null)[] = [null, ...(Object.keys(COMMAND_STATUS_ALL) as CommandStatus[])];
+  const FK_VALUES: (FailureKind | 'unknown_kind_zzz' | null)[] = [null, ...(Object.keys(FAILURE_KIND_ALL) as FailureKind[]), 'unknown_kind_zzz'];
+  const PK_VALUES: (string | null)[] = [null, 'awaiting_container'];
+  const CP_VALUES = [true, false]; // canPublish: 해시 일치/불일치
+  const SIGNAL_PRODUCT = CS_VALUES.flatMap((cs) =>
+    FK_VALUES.flatMap((fk) => PK_VALUES.flatMap((pk) => CP_VALUES.map((cp) => ({ cs, fk, pk, cp })))),
+  );
+
+  it.each(SIGNAL_PRODUCT)(
+    'AC4 실패 신호 정확히 1개 — command_status=$cs · failure_kind=$fk · processing_kind=$pk · canPublish=$cp',
+    async ({ cs, fk, pk, cp }) => {
+      stubFetch({
+        draftDetail: { ...FAILED, body_sha256: cp ? 'h1' : 'h2', command_status: cs, failure_kind: fk, processing_kind: pk },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const signals = [
+        container.querySelector('[data-testid="channel-post-failure-badge"]'),
+        container.querySelector('[data-testid="channel-post-publication-failed-notice"]'),
+        container.querySelector('[data-testid="channel-post-awaiting-container-notice"]'),
+      ].filter(Boolean);
+      expect(signals.length).toBe(1);
+    },
+  );
+
+  // AC3 — 배지 없는 조합의 «참인» 문장(자동 약속은 pending에만·중립 role=status).
+  it.each([
+    { over: { command_status: 'cancelled' }, key: 'channelPostsPublicationFailedCancelledNotice' },
+    { over: { command_status: 'pending' }, key: 'channelPostsPublicationFailedPendingRetryNotice' },
+    { over: { command_status: 'in_progress' }, key: 'channelPostsPublicationFailedInProgressNotice' },
+    { over: { command_status: 'completed' }, key: 'channelPostsPublicationFailedNotice' }, // 도달 불가 폴백
+  ])('AC3 배지 없는 조합 문장 — command_status=$over.command_status', async ({ over, key }) => {
+    stubFetch({ draftDetail: { ...FAILED, ...over } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const notice = container.querySelector('[data-testid="channel-post-publication-failed-notice"]');
+    expect(notice?.getAttribute('role')).toBe('status'); // 경고색 아님
+    expect(notice?.textContent).toBe((koMessages.content as Record<string, string>)[key]);
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+  });
+
+  // CHANGES 2 — null·canPublish 안내는 «없는 「다시 발행」»을 지어내지 않고 실제 발행 버튼과
+  // 같은 키로 이름을 끼운다. 두 갈래(isRepublish false/true)에서 «안내 속 이름 == 버튼 텍스트».
+  const republishTemplate = koMessages.content.channelPostsPublicationFailedRepublishNotice;
+  it.each([
+    { name: 'isRepublish=false(발행)', over: { body_sha256: 'h1', command_status: null }, label: koMessages.content.publishCta },
+    { name: 'isRepublish=true(재발행)', over: { body_sha256: 'h1', command_status: null, published_at: '2026-09-10T00:00:00Z', published_body_sha256: 'hp' }, label: koMessages.content.publishRepublishCta },
+  ])('CHANGES 2 안내 속 이름 == 발행 버튼 텍스트 — $name', async ({ over, label }) => {
+    stubFetch({ draftDetail: { ...FAILED, ...over } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const button = container.querySelector('[data-testid="channel-post-publish-button"]');
+    const notice = container.querySelector('[data-testid="channel-post-publication-failed-notice"]');
+    expect(button?.textContent).toBe(label); // 두 갈래에서 실제 버튼 라벨이 갈린다
+    expect(notice?.textContent).toBe(republishTemplate.replace('{action}', label)); // 안내 이름 == 버튼 텍스트
+  });
+
+  it('양성대조 — 어느 조합에서도 옛 blanket 「이어서 처리」 문구는 화면에 0', async () => {
+    stubFetch({ draftDetail: { ...FAILED, command_status: 'dead_letter' } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    // dead_letter는 배지 조합 → 알림 없음. 옛 분기로 되돌리면 여기 알림이 다시 떠 RED.
+    expect(container.querySelector('[data-testid="channel-post-publication-failed-notice"]')).toBeNull();
+    expect(container.textContent ?? '').not.toContain('이어서 처리');
+  });
+
   // story #3402 PR2 ②-a(AC5·doc §5) — 발행/발행 취소 버튼 게이팅(API 배선은 ②-b, 이
   // 조각에선 버튼이 실제 호출을 하지 않는다 — onClick 미배선).
   it('⭐canPublish=true(승인+해시일치) — 발행 버튼이 활성화되고 비활성 사유가 안 보인다', async () => {
@@ -1735,7 +1889,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // channelLabel('threads', t) 보간을 거친 값 — 템플릿 그대로가 아니다(아래
     // sandbox 표본 테스트가 그 차이를 실제로 가른다).
     expect(what?.textContent).toBe(
-      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.content.channelThreads),
+      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.channelConnect.channelThreads),
     );
     expect(reversible?.textContent).toBe(koMessages.content.channelPostsUnpublishConfirmReversible);
     expect(what).not.toBe(reversible);
@@ -1753,7 +1907,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // 같은 모양으로 맞춘다: publication_status='unpublished'·published_at=null·permalink=null.
     // 리로드 없이 「회수됨」 오버레이가 뜨고, 발행됨 정보 카드·회수 버튼은 사라진다.
     expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')?.textContent)
-      .toBe(koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.content.channelThreads));
+      .toBe(koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.channelConnect.channelThreads));
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
   });
@@ -1785,9 +1939,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     const what = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-what"]');
     expect(what?.textContent).toBe(
-      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.content.channelLabelSandbox),
+      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.channelConnect.channelLabelSandbox),
     );
-    expect(what?.textContent).not.toContain(koMessages.content.channelThreads);
+    expect(what?.textContent).not.toContain(koMessages.channelConnect.channelThreads);
   });
 
   // 페드루 PO nit(2026-09-04 09:07Z) — 이전 판 테스트명이 "서버 문구가 보인다"였지만
@@ -1894,6 +2048,37 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
   });
 
+  // story #4264(까디르 codex P1 · PO 17:33Z) — 게시는 됐는데 permalink 조회가 실패하면 BE는 게시 성공 · id 보존 ·
+  // permalink만 비워 준다. 성공 문장이 나오고 발행됨 정보는 서되 깨진 링크(빈 href)는 없다. 뮤테이션: 성공 조건을 예전
+  // `permalink && published_at`로 되돌리면 «발행 실패»로 RED.
+  it('⭐발행 성공인데 permalink가 비었다 — 성공 문장 · 발행됨 정보 · URL 줄은 «가져오지 못했어요»(«발행 실패» 아님)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 200, body: { permalink: null, external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1', publication_id: 'pub-1' } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    const result = container.querySelector('[data-testid="channel-post-publish-result"]');
+    expect(result?.textContent).toContain(koMessages.content.publishSuccess.replace('{time}', '').split('{')[0]);
+    expect(result?.textContent).not.toContain(koMessages.content.publishFailed);
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
+    // 유나 디자인 확정 — 줄은 남기고 값은 «가져오지 못했어요»(깨진 링크 · 빈 href 0).
+    expect(container.querySelector('[data-testid="channel-post-published-url-unavailable"]')?.textContent)
+      .toBe(koMessages.content.publishedInfoUrlUnavailable);
+    expect([...container.querySelectorAll('a')].some((a) => !a.getAttribute('href'))).toBe(false);
+    // PO 17:38Z — 이미 나간 글을 사람이 다시 올리지 못하게 발행 버튼은 막힌다(예전: «발행 실패» + 버튼 살아 있음 = 이중 게시 길).
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement | null)?.disabled ?? true).toBe(true);
+  });
+
   // story #3539(PO 確定 2026-09-06) — IG처럼 IMAGE 컨테이너가 비동기인 채널은 즉시
   // 발행 요청도 응답 시점엔 안 끝나 있을 수 있다(processing:true, permalink 등
   // 전부 null — 이게 «정상»이다·실패가 아니다). 예전엔 이 응답이 permalink&&
@@ -1912,7 +2097,99 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.querySelector('[data-testid="channel-post-publish-result"]')).toBeNull();
     expect(container.textContent).not.toContain(koMessages.content.publishFailed);
-    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).not.toBeNull();
+    // story #4336 — 즉시 발행은 이제 워커가 돌린다: processing 응답은 «발행하고 있어요»(유나) 한 줄.
+    expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')?.textContent).toBe(koMessages.content.channelPostsPublishingNotice);
+  });
+
+  it('⭐#4336 — «발행 중»이면 초안을 다시 읽어(5초) 워커가 끝낸 결과로 넘어간다', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      stubFetch({
+        draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+        onPublish: () => ({ status: 200, body: { version_id: 'v1', scheduled: false, processing: true } }),
+        detailAfterPublishSequence: [
+          { processing_kind: 'publishing', command_status: 'pending' },
+          { processing_kind: null, command_status: 'completed', publication_status: 'published', published_at: '2026-09-26T00:00:00Z', external_id: 'media-1', permalink: 'https://threads.net/@x/1', publication_id: 'pub-1' },
+        ],
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      await act(async () => { (container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).click(); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull(); // #4336 AC4 — 알림 하나(배지 중복 0)
+      // #4336 M11(까디르) — 정상 진행 줄엔 발행 취소 버튼이 없다(취소는 워커 예산 밖으로 멈춘 줄에만).
+      expect(container.querySelector('[data-testid="channel-post-cancel-publish-button"]')).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      await flush();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐#4336 — 워커 예산 밖(WORKER_TICK_BUDGET_TOO_SMALL)이면 «발행 중» 대신 사유 줄(경고) + 발행 취소 · 발행 버튼 잠김', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL', processing_kind: null,
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const notice = container.querySelector('[data-testid="channel-post-worker-budget-notice"]');
+    expect(notice?.textContent).toContain(koMessages.content.channelPostsPublishStuckNotice);
+    expect(notice?.className).toContain('warning');
+    expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).toBeNull();
+    expect(notice?.querySelector('[data-testid="channel-post-cancel-publish-button"]')?.textContent).toBe(koMessages.content.channelPostsCancelPublishCta);
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+    // #4336 AC4 — 목록용 배지(같은 문장)는 여기서 또 그리지 않는다(알림 하나).
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+  });
+
+  it.each([
+    [200, 'success', 'channelPostsCancelPublishSuccess'],
+    [409, 'too_late', 'channelPostsCancelPublishTooLate'],
+  ] as const)('⭐#4336 — 발행 취소 %s → %s 줄(정보) · 경고 줄 대신', async (status, result, key) => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL',
+      },
+      onCancelPublish: () => (status === 200
+        ? { status, body: { command_id: 'cmd-1', status: 'cancelled', reason_code: 'CANCELLED_BY_HUMAN' } }
+        : { status, body: { detail: { code: 'PUBLICATION_ALREADY_STARTED', current_status: 'in_progress' } } }),
+      draftAfterCancelPublish: status === 200
+        ? { command_status: 'cancelled', command_reason_code: 'CANCELLED_BY_HUMAN' }
+        : { command_status: 'in_progress', command_reason_code: null, processing_kind: 'publishing' },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-cancel-publish-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const line = container.querySelector('[data-testid="channel-post-cancel-publish-result"]');
+    expect(line?.getAttribute('data-result')).toBe(result);
+    expect(line?.textContent).toBe(koMessages.content[key]);
+    expect(container.querySelector('[data-testid="channel-post-worker-budget-notice"]')).toBeNull();
+  });
+
+  it('⭐#4336 — 발행 취소가 그 밖 실패면 경고 줄은 그대로 · «취소를 하지 못했어요» 한 줄 더', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL',
+      },
+      onCancelPublish: () => ({ status: 500, body: { detail: 'boom' } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-cancel-publish-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const notice = container.querySelector('[data-testid="channel-post-worker-budget-notice"]');
+    expect(notice).not.toBeNull();
+    expect(notice?.querySelector('[data-testid="channel-post-cancel-publish-failed"]')?.textContent).toBe(koMessages.content.channelPostsCancelPublishFailed);
   });
 
   it('⭐#3539 — processing:true 뒤 발행 버튼이 비활성으로 바뀐다(오버레이 규칙대로·다시 눌러 CHANNEL_PUBLISH_IN_PROGRESS로 꼬이는 것 방지)', async () => {
@@ -2279,11 +2556,34 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // mount 안 돼 있던 갭(#3422 AC3). 표본 5종이 상세에서 실제로 「보인다」를 pin한다.
   describe('⭐B3 — 실패 배지 5종이 상세에서 보인다', () => {
     it('blocked', async () => {
-      stubFetch({ draftDetail: { command_status: 'blocked' } });
+      // story #4290(까디르 QA ①) — 서버가 사람 재시도를 받는 blocked(연결을 고친 뒤)면 «다시 시도»도 — 예전엔 command_retryable=true인데 버튼이 없었다.
+      stubFetch({ draftDetail: { command_status: 'blocked', failure_kind: 'connection' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const badge = container.querySelector('[data-testid="channel-post-failure-badge"]');
+      expect(badge?.textContent).toContain(koMessages.content.channelPostsFailureBlocked);
+      // story #4304 — 연결 사유면 머리 줄에 «연결 확인»(연결 화면) — 버튼보다 앞.
+      const link = badge?.querySelector('[data-testid="channel-post-failure-connection-link"]');
+      expect(link?.getAttribute('href')).toBe('/organization/channels');
+      const retry = badge?.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+      expect(retry?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
+      expect(retry?.disabled).toBe(false);
+    });
+
+    it('blocked — 조직 «외부 발행 일시 중지»로 멈춤(재시도 불가): 일시 중지 문장 · 버튼 0 · 연결 문구 0(story #4305)', async () => {
+      stubFetch({ draftDetail: { command_status: 'blocked', failure_kind: 'paused', command_retryable: false } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
-        .toBe(koMessages.content.channelPostsFailureBlocked);
+        .toBe(`${koMessages.content.channelPostsFailurePaused} — ${koMessages.content.channelPostsFailurePausedResumes}`);
+      // 발행 사유줄도 연결이 아니라 일시 중지 문장(연결 화면 링크 0).
+      const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
+      expect(reason?.textContent).toBe(koMessages.content.errorExternalPublishPaused);
+      expect(reason?.querySelector('a')).toBeNull();
+      expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureBlocked);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+      // story #4304 — 일시정지는 연결 사유가 아니라 «연결 확인»도 없다.
+      expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();
     });
 
     it('needs_check', async () => {
@@ -2387,7 +2687,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(koMessages.content.channelPostsRetrySuccess).toContain('그래도 실패하면');
     });
 
-    it('AC1 — 403(HUMAN_ONLY)은 서버 문장을 그대로 보인다(삼키지 않음)', async () => {
+    it('AC1 — 403(HUMAN_ONLY)은 서버 원문 대신 로케일 문장(기존 매핑 · story #4266)', async () => {
       stubFetch({
         draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
         onRetry: () => ({ status: 403, body: { detail: { code: 'CHANNEL_POST_PUBLISH_HUMAN_ONLY', message: '채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).' } } }),
@@ -2408,9 +2708,143 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         .toBe(koMessages.content.errorChannelPublishHumanOnly);
     });
 
+    // story #4266 — 재시도 실패면 확인 창을 닫고 결과 줄(예전엔 창이 열린 채 · 오류 줄이 오버레이 뒤). 404는 다시 읽고 유나 문장.
+    async function openAndConfirmRetry() {
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')).not.toBeNull();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction);
+      expect(confirmBtn).toBeDefined();
+      await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+    }
+    const draftGets = () => (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(([u, init]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}` && !(init as RequestInit | undefined)?.method).length;
+
+    it('⭐#4266 AC1 — 재시도 500 → 확인 창이 닫히고 결과 줄이 보인다 · 서버 원문 0(로케일 문장)', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 500, body: { detail: '내부 서버 원문 문장' } }),
+      });
+      await openAndConfirmRetry();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')).toBeNull();
+      const line = container.querySelector('[data-testid="channel-post-retry-result"] p');
+      expect(line?.textContent).toBe(koMessages.content.channelPostsRetryFailed);
+      expect(line?.textContent).not.toContain('내부 서버 원문');
+    });
+
+    it('⭐#4266 AC2 — 재시도 404 → 창 닫힘 · 상태를 다시 읽고 유나 문장 · 서버 원문 0', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }),
+        // 그 사이 다른 시도가 명령을 pending으로 돌렸다(서버: 지금 재시도 불가).
+        draftAfterRejectedRetry: { command_status: 'pending', failure_kind: null },
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const before = draftGets();
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction);
+      await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-retry-result"] p')?.textContent)
+        .toBe(koMessages.content.publicationRetryNotRetryableReloaded);
+      expect(document.body.textContent).not.toContain('command를 찾을 수 없거나');
+      expect(draftGets()).toBe(before + 1); // 상태를 다시 읽었다
+    });
+
+    // story #4290 — 낡은 화면: 다른 시도가 먼저 받아 내 재시도는 404인데, 그 사이 워커가 또 멈춰 같은 명령이 새 dead_letter(서버
+    // command_retryable=true). 결과 줄은 «그 사이 다시 시도됐고…» · 버튼은 켜진 채(같은 사실). 뮤테이션: withReload가 다시 읽은 판정을
+    // 무시하면 «지금은 다시 시도할 수 없는 상태예요»로 RED.
+    it('⭐#4290 AC3 — 404 + 다시 읽은 글이 새 멈춤 → «그 사이 다시 시도됐고…» · 버튼 켜짐', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 404, body: { detail: 'x' } }),
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      const checklist = document.body.querySelector('[data-testid="channel-post-retry-confirm-checklist"]') as HTMLInputElement;
+      await act(async () => { checklist.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction);
+      await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-retry-result"] p')?.textContent)
+        .toBe(koMessages.content.publicationRetryStoppedAgainReloaded);
+      expect((container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    // story #4290 AC2 — 버튼은 서버 판정(command_retryable)만 본다. 화면이 상태로 따로 가르던 틈(pending + needs_check → 버튼 켜짐 · 서버
+    // 404)과, 서버가 거짓이라고 한 dead_letter 모두 버튼 없음. 뮤테이션: 배지에 늘 onRetryClick을 넘기면 두 줄 다 RED.
+    it.each([
+      ['pending ∧ needs_check(예전 화면 판정 틈)', { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-9' }],
+      ['dead_letter인데 서버 판정 false', { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-9', command_retryable: false }],
+    ])('⭐#4290 AC2 — %s → 다시 시도 버튼이 눌리지 않는다', async (_label, detail) => {
+      stubFetch({ draftDetail: detail as Record<string, unknown> });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+      expect(btn === null || btn.disabled).toBe(true);
+    });
+
+    // 까디르 codex 4634 P2① — 재시도 뒤 다시 읽기가 실패하면 «다시 불러왔어요»라고 말하지 않고 이전 상태(배지)를 그대로 둔다.
+    function failDraftReloadAfterRetry() {
+      const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+      let retried = false;
+      vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+        if (String(u).endsWith('/retry') && i?.method === 'POST') { retried = true; return base(u, i); }
+        if (retried && String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}` && !i?.method) {
+          return { ok: false, status: 500, json: async () => ({ detail: 'x' }) };
+        }
+        return base(u, i);
+      }));
+    }
+
+    it('⭐#4634 P2① — 404 + 다시 읽기 실패 → «지금은 다시 시도할 수 없는 상태예요.» + «최신 상태는 불러오지 못했어요 …» · «다시 불러왔어요» 0 · 배지 그대로', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }),
+      });
+      failDraftReloadAfterRetry();
+      await openAndConfirmRetry();
+      const texts = [...container.querySelectorAll('[data-testid="channel-post-retry-result"] p')].map((e) => e.textContent);
+      expect(texts).toEqual([koMessages.content.publicationRetryNotRetryable, koMessages.content.publicationRetryReloadFailed]);
+      expect(container.textContent).not.toContain(koMessages.content.publicationRetryNotRetryableReloaded);
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull(); // 이전 상태 유지
+    });
+
+    it('#4634 P2① — 성공 + 다시 읽기 실패 → 성공 문장 뒤 «최신 상태는 불러오지 못했어요 …» · 배지 그대로(낡은 표시임을 말함)', async () => {
+      stubFetch({ draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' } });
+      failDraftReloadAfterRetry();
+      await openAndConfirmRetry();
+      const texts = [...container.querySelectorAll('[data-testid="channel-post-retry-result"] p')].map((e) => e.textContent);
+      expect(texts).toEqual([koMessages.content.channelPostsRetrySuccess, koMessages.content.publicationRetryReloadFailed]);
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
+    });
+
+    it('#4266 — 네트워크 실패 → 창 닫힘 · «다시 시도하지 못했어요.»', async () => {
+      stubFetch({ draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' } });
+      const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+      vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+        if (String(u).endsWith('/retry') && i?.method === 'POST') throw new TypeError('network');
+        return base(u, i);
+      }));
+      await openAndConfirmRetry();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-retry-result"] p')?.textContent).toBe(koMessages.content.channelPostsRetryFailed);
+    });
+
     // AC2 — needs_check 2단계: 체크 前 확認 버튼 비활성, 체크 後 활성.
     it('⭐AC2 — needs_check는 체크리스트가 뜨고, 체크 前엔 다이얼로그 확認 버튼이 비활성이다', async () => {
-      stubFetch({ draftDetail: { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-2' } });
+      stubFetch({ draftDetail: { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-2' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
@@ -2428,7 +2862,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
 
     it('AC2 — needs_check 확認 문구는 dead_letter와 다르다', async () => {
-      stubFetch({ draftDetail: { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-2' } });
+      stubFetch({ draftDetail: { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-2' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
@@ -2477,6 +2911,26 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // 상신을 막는다(이미 진행 중이거나 고쳐야 할 게 따로 있음). dead_letter는 예외
   // (f061c1a3 前까지 발행이 유일한 수동 재시도 경로) — 아래에서 활성 그대로임을 pin한다.
   describe('⭐B4 — command_status가 pending/blocked면 발행·예약 상신을 막는다(dead_letter는 예외)', () => {
+    // story #78ecd9e5(2026-09-20, [절대일시리터럴=자정RED] 클래스) — 아래 두 테스트
+    // (미래/과거 대칭 쌍)가 예전엔 '2026-09-20T00:00:00Z'를 "항상 미래"로 하드코드
+    // 했는데, 실제 벽시계가 그 시각을 지나는 순간(오늘 UTC 자정) "과거"로 뒤집혀
+    // develop CI가 영구 red가 됐다(use-reset-passed.ts의 `Date.now()` 비교가 실제
+    // 시계를 쓰므로). `Date.now()`를 고정 시각으로 스텁해 벽시계와 완전히 무관하게
+    // 만들고, 두 리터럴도 그 고정 시각 기준 상대 계산(±1일)으로 바꿔 대칭을 유지한다
+    // — "더 먼 미래 리터럴"은 그 미래가 지나면 또 재발하는 시한폭탄이라 채택 안 함.
+    const FIXED_NOW = new Date('2026-06-01T00:00:00Z').getTime();
+    const RELATIVE_FUTURE = new Date(FIXED_NOW + 24 * 60 * 60 * 1000).toISOString();
+    const RELATIVE_PAST = new Date(FIXED_NOW - 24 * 60 * 60 * 1000).toISOString();
+    let dateNowSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
+    });
+
+    afterEach(() => {
+      dateNowSpy.mockRestore();
+    });
+
     // story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定 — 「누가 정한
     // 시각인가」 축) — pending 하나로는 예약(사람이 정한 시각)인지 backoff(시스템이
     // 정한 시각)인지 구별이 안 된다. scheduled_at 유무로 갈라 각각 pin한다.
@@ -2500,7 +2954,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       stubFetch({
         draftDetail: {
           gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
-          command_status: 'pending', scheduled_at: '2026-09-20T00:00:00Z',
+          command_status: 'pending', scheduled_at: RELATIVE_FUTURE,
         },
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2522,7 +2976,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       stubFetch({
         draftDetail: {
           gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
-          command_status: 'pending', scheduled_at: '2020-01-01T00:00:00Z',
+          command_status: 'pending', scheduled_at: RELATIVE_PAST,
         },
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2537,8 +2991,20 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
     // 지시가 된다. blocked 전용 문구("연결 문제")가 예약 전용 문구("예약이 서버에...")와
     // 다른 것을 pin한다.
+    it('blocked + 사유 모름 — 발행 영역 줄은 빼지 않고 중립 문장(연결 · 일시 중지 문장 0 · 링크 0 · story #4305)', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked', failure_kind: null } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
+      expect(reason?.textContent).toBe(koMessages.content.channelPostsCommandInFlightReasonBlockedUnknown);
+      expect(reason?.querySelector('a')).toBeNull();
+      // 까디르 — 배지 머리도 호출 자리에서 사유를 지어내지 않는다(중립).
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toContain(koMessages.content.channelPostsFailureBlockedUnknown);
+    });
+
     it('blocked — 발행·예약 상신 버튼이 비활성화되고 blocked 전용 사유가 예약 전용과 다르다', async () => {
-      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked' } });
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked', failure_kind: 'connection' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
@@ -2563,7 +3029,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         draftDetail: {
           gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
           publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
-          command_status: 'blocked',
+          command_status: 'blocked', failure_kind: 'connection',
         },
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -2896,6 +3362,7 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(container.querySelector('[data-testid="channel-post-image-upload-error"] p')?.classList.contains('break-keep')).toBe(true); // 유나 CHANGES(PR 4773)
     expect(errorText).toContain('image/gif');
     expect(errorText).toContain('image/jpeg');
     expect(container.querySelector('[data-testid="channel-post-image-attachment-preview"]')).toBeNull();
@@ -3656,9 +4123,9 @@ describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순
 
     const notice = container.querySelector('[data-testid="channel-post-unpublished-notice"]');
     expect(notice?.textContent).toBe(
-      koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.content.channelLabelSandbox),
+      koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.channelConnect.channelLabelSandbox),
     );
-    expect(notice?.textContent).not.toContain(koMessages.content.channelThreads);
+    expect(notice?.textContent).not.toContain(koMessages.channelConnect.channelThreads);
   });
 });
 
@@ -4235,7 +4702,7 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     await flush();
     expect(captured).toMatchObject({ title: expect.stringContaining('[댓글]') });
-    expect(document.querySelector('[data-testid="comments-convert-success-link"]')?.getAttribute('href')).toBe('/board?story=story-42');
+    expect(document.querySelector('[data-testid="comments-convert-success-link"]')?.getAttribute('href')).toBe('/flow?story=story-42');
   });
 
   // story #3517(PO 정정 2026-09-05) — postTitle 1순위는 draft.source_title(원문에서
@@ -4645,7 +5112,105 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
   // HUMAN_SAFE_ERROR_MESSAGE_CODES에 못 올린다 — 이 code일 땐 항상 제네릭으로
   // 떨어지는 게 맞다(이전 버전은 code 없이 message만 봐 이 실 BE 문장도 우연히
   // 통과시켰다 — 안전 쪽으로 조인 결과지 회귀 아님).
-  it('「다시 보내기」(dead_letter) 실패 — 404(NOT_FOUND, allowlist 밖)는 제네릭 문구', async () => {
+  // story #4266 — 발행 재시도 확인 창들과 같은 공용 규칙으로: 404(재시도 대상 아님)는 제네릭 대신 목록을 다시 읽고 유나 문장(서버 원문 0은 그대로).
+  it('「다시 보내기」(dead_letter) 실패 — 404(재시도 대상 아님)는 목록을 다시 읽고 유나 문장 · 서버 원문 0', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null,
+          },
+        }],
+      },
+      // 그 사이 명령이 다른 길로 끝났다 — 전제가 바뀌어 voided(서버: 지금 재시도 불가 · 답변은 여전히 실패라 줄이 보인다).
+      commentsAfterReplyRetry: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'voided', failure_kind: null, next_attempt_at: null, reason_code: 'CONTENT_CHANGED',
+          },
+        }],
+      },
+      onCommentReplyRetry: () => ({ status: 404, body: { data: null, error: { code: 'NOT_FOUND', message: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' }, meta: null } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const retryBtn = container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement;
+    expect(retryBtn).not.toBeNull();
+    await act(async () => { retryBtn.click(); });
+    await flush();
+    // story #4290 — 다시 읽은 답변이 더 이상 다시 시도할 멈춤이 아니면(여기선 voided) 그 줄이 새 상태를 말한다 — 낡은 «다시 시도» 버튼 ·
+    // «지금은 다시 시도할 수 없어요» 오류 줄은 남지 않는다(다시 시도 가능한 새 멈춤이면 아래 #4290 테스트의 문장).
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-button"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('재시도 대상이 아닙니다');
+    const commentGets = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(([u, i]) => String(u).includes('/comments') && !String(u).endsWith('/refresh') && !(i as RequestInit | undefined)?.method).length;
+    expect(commentGets).toBeGreaterThanOrEqual(2); // 첫 로드 + 404 뒤 다시 읽기
+  });
+
+  // story #4290(유나 03:29Z) — 404 뒤 다시 읽은 답변 명령이 다시 시도 가능한 새 멈춤(서버 command_retryable=true)이면 «그 사이 다시
+  // 시도됐고…» · 글 상세와 같은 키. 뮤테이션: withReload가 다시 읽은 판정을 무시하면 «지금은 다시 시도할 수 없어요»로 RED.
+  // story #4290 AC2 — 답변 «다시 보내기» 버튼도 서버 판정(command_retryable)만 본다. 뮤테이션: comments-section이 command_id만 보고
+  // 버튼을 켜면 RED.
+  it('⭐#4290 AC2 — 서버가 다시 시도 불가라고 한 실패 답변엔 «다시 보내기» 버튼이 없다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null,
+            command_retryable: false,
+          },
+        }],
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement | null;
+    expect(btn === null || btn.disabled).toBe(true);
+  });
+
+  it('⭐#4290 — 「다시 보내기」 404 + 다시 읽은 답변이 새 멈춤 → «그 사이 다시 시도됐고…» · 버튼 켜짐', async () => {
+    const stopped = {
+      last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+      comments: [{
+        id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+        external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+        reply: {
+          id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+          command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null,
+        },
+      }],
+    };
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: stopped,
+      onCommentReplyRetry: () => ({ status: 404, body: { data: null, error: { code: 'NOT_FOUND', message: 'x' }, meta: null } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-error"]')?.textContent)
+      .toBe(koMessages.content.publicationRetryStoppedAgainReloaded);
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-button"]')).not.toBeNull();
+  });
+
+  // 까디르 codex 4634 P2 — 목록 다시 읽기가 실패하면 목록은 그대로(오류 면으로 안 바꿈) · «다시 불러왔어요» 대신 «불러오지 못했어요».
+  it('⭐#4634 — 「다시 보내기」 404 + 목록 다시 읽기 실패 → 목록 그대로 · 두 문장 · «다시 불러왔어요» 0', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
       commentsResponse: {
@@ -4661,14 +5226,23 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
       },
       onCommentReplyRetry: () => ({ status: 404, body: { data: null, error: { code: 'NOT_FOUND', message: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' }, meta: null } }),
     });
+    const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+    let retried = false;
+    vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+      if (String(u).endsWith('/retry') && i?.method === 'POST') { retried = true; return base(u, i); }
+      if (retried && String(u).endsWith('/comments') && !i?.method) return { ok: false, status: 500, json: async () => ({}) };
+      return base(u, i);
+    }));
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     const retryBtn = container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement;
     expect(retryBtn).not.toBeNull();
     await act(async () => { retryBtn.click(); });
     await flush();
-    expect(document.body.textContent).toContain('요청을 처리하지 못했어요.');
-    expect(document.body.textContent).not.toContain('재시도 대상이 아닙니다');
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-error"]')?.textContent)
+      .toBe(`${koMessages.content.publicationRetryNotRetryable} ${koMessages.content.publicationRetryReloadFailed}`);
+    expect(container.textContent).not.toContain(koMessages.content.publicationRetryNotRetryableReloaded);
+    expect(container.textContent).toContain('언제 되나요?'); // 목록 그대로(오류 면으로 안 바뀜)
   });
 
   // story #3517(BE #3865 조각①) — 수동 재수집. 429/422/403 문장을 서버 응답 그대로
@@ -4881,6 +5455,89 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
     await flush();
 
     expect((submittedBody as { estimated_cost_minor?: number } | null)?.estimated_cost_minor).toBe(500);
+  });
+
+  it('⭐#4336 조건 2 — 워커가 남긴 오류 본문(command_failure_detail)이면 즉시 발행 422와 같은 예산 배너(4값)가 선다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'blocked_unapproved', command_reason_code: 'GENERATION_BUDGET_EXCEEDED',
+        command_failure_detail: { code: 'GENERATION_BUDGET_EXCEEDED', limit_minor: 100000, spent_minor: 90000, estimated_cost_minor: 20000, remaining_minor: 10000 },
+      },
+      genBudgetOk: { limit_minor: 100000, spent_minor: 90000, remaining_minor: 10000, currency: 'KRW', period: 'month' },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const banner = container.querySelector('[data-testid="generation-budget-exceeded-banner"]');
+    expect(banner?.textContent).toContain(koMessages.content.generationBudgetExceededFact);
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-limit"]')?.textContent).toBe('100,000원');
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-remaining"]')?.textContent).toBe('10,000원');
+  });
+
+  // story #4336(PO P2) — 워커가 남긴 본문은 **종류 전수**(봉인 · 승인 · 일시 중지 · 연결 · 재승인 · 메타데이터 · 이어쓰기 · 초안 없음)가
+  // 같은 본문을 즉시 발행 4xx로 받았을 때와 글자까지 같은 줄(이유 + 외부 영향)을 그린다. 입력 검사 부류는 «안 나감».
+  // 뮤테이션: 저장본 효과를 끄면 저장본 쪽이 비어 RED · 새 코드 표를 빼면 이어쓰기 · 초안 없음이 «나갔는지 모름»으로 RED.
+  const P2_BODIES: Array<[number, Record<string, unknown>, 'not_sent' | 'unknown']> = [
+    [409, { code: 'SITE_POST_SEAL_MISSING', message: 'seal missing' }, 'not_sent'],
+    [409, { code: 'SITE_POST_REAPPROVAL_REQUIRED', message: 'content changed' }, 'not_sent'],
+    [403, { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: 'approval required' }, 'not_sent'],
+    [423, { code: 'EXTERNAL_PUBLISH_PAUSED', message: 'EXTERNAL_PUBLISH_PAUSED' }, 'not_sent'],
+    [409, { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: 'inactive' }, 'not_sent'],
+    [422, { code: 'YOUTUBE_METADATA_INVALID', message: 'YouTube 제목·태그·카테고리·공개 범위 값을 확인해 주세요.', field: 'title', reason: 'empty' }, 'not_sent'],
+    [422, { code: 'CHANNEL_THREAD_UNSUPPORTED', message: '이 채널은 이어쓰기를 지원하지 않아요.', channel: 'threads' }, 'not_sent'],
+    [422, { code: 'CHANNEL_THREAD_SEGMENT_LIMIT_EXCEEDED', message: '이 채널은 이어쓰기를 최대 10건까지 지원해요.', max_segments: 10, current_count: 11 }, 'not_sent'],
+    [422, { code: 'CHANNEL_THREAD_SEGMENT_TOO_LONG', message: '2번째 이어쓰기가 280자 한도를 넘어요(지금 300자).', segment_number: 2, max_length: 280, current_length: 300 }, 'not_sent'],
+    [404, { code: 'CHANNEL_POST_DRAFT_NOT_FOUND', message: 'draft missing' }, 'not_sent'],
+  ];
+  it.each(P2_BODIES)('⭐#4336 P2 — 저장본 %#(%s) = 즉시 발행 4xx와 같은 줄', async (status, body, impact) => {
+    const readLine = () => ({
+      reason: container.querySelector('[data-testid="channel-post-publish-error-reason"]')?.textContent ?? null,
+      impact: container.querySelector('[data-testid="channel-post-publish-external-impact"]')?.textContent ?? null,
+    });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'dead_letter', failure_kind: 'not_sent', command_reason_code: String(body.code),
+        command_failure_detail: body,
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const fromStored = readLine();
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status, body: { detail: body } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const fromRequest = readLine();
+
+    expect(fromStored.reason).toBeTruthy();
+    expect(fromStored).toEqual(fromRequest);
+    expect(fromStored.impact).toBe(impact === 'not_sent'
+      ? koMessages.content.channelPostsExternalImpactNotSent : koMessages.content.channelPostsExternalImpactUnknown);
+    if (String(body.code).startsWith('CHANNEL_THREAD_') || body.code === 'YOUTUBE_METADATA_INVALID') expect(fromStored.reason).toBe(body.message);
+    if (body.code === 'CHANNEL_POST_DRAFT_NOT_FOUND') expect(fromStored.reason).toBe(koMessages.content.editNotFound);
+  });
+
+  it('⭐#4336 조건 2 — 워커가 남긴 글자 수 초과 본문도 422와 같은 보간 문장', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'dead_letter', failure_kind: 'needs_check', command_reason_code: 'CHANNEL_TEXT_TOO_LONG',
+        command_failure_detail: { code: 'CHANNEL_TEXT_TOO_LONG', message: 'too long', max_length: 500, current_length: 517 },
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.textContent).toContain(
+      koMessages.content.channelPostsTextTooLong.replace('{max}', '500').replace('{current}', '517'),
+    );
   });
 
   it('⭐422 GENERATION_BUDGET_EXCEEDED — 전역 배너에 4값이 보간되고 입력값은 지워지지 않는다', async () => {
@@ -5162,6 +5819,45 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     expect(container.querySelector('[data-testid="channel-post-image-attach"] span')?.textContent).toBe('이미지 첨부');
   });
 
+  // story #4336 PR2(PO 05:22Z · 유나) — 영상 확정 작업을 10초 넘게 기다리면 같은 진행 줄에 «시간이 걸리고 있어요 — 창을 닫아도 계속 처리돼요».
+  it('⭐영상 확인을 10초 넘게 기다리면 같은 줄에 «창을 닫아도 계속 처리돼요» · 10초 전엔 없음 · 끝나면 줄째 사라짐', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let release: () => void = () => {};
+      const videoJobGate = new Promise<void>((resolve) => { release = resolve; });
+      stubXhrForVideoUpload();
+      stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1, videoJobGate });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+      Object.defineProperty(input, 'files', { value: [new File(['x'], 'a.mp4', { type: 'video/mp4' })] });
+      const timerSpy = vi.spyOn(globalThis, 'setTimeout');
+      await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+      await flush();
+      // story #4336 PR2 ②(까디르 codex) — 영상 확정 요청은 자기 표 줄(channelVideoConfirm)의 브라우저 시한을 쓴다(이미지 40초 예산 아님).
+      const timerDelays = timerSpy.mock.calls.map((call) => call[1]);
+      timerSpy.mockRestore();
+      expect(timerDelays).toContain(LONG_ROUTES.channelVideoConfirm.browserMs);
+      expect(timerDelays).not.toContain(LONG_ROUTES.channelAssetConfirm.browserMs);
+      const K = koMessages.content as Record<string, string>;
+      const line = () => container.querySelector('[data-testid="channel-post-video-upload-progress"]')?.textContent ?? null;
+      expect(line()).toBe(K.channelPostsImageConfirming);
+      await act(async () => { vi.advanceTimersByTime(9_000); });
+      expect(line()).toBe(K.channelPostsImageConfirming);
+      await act(async () => { vi.advanceTimersByTime(1_500); });
+      expect(line()).toBe(`${K.channelPostsImageConfirming} ${(koMessages.common as Record<string, string>).backgroundJobSlow}`);
+      // 유나 CHANGES(PR 4773) — 360에서 «…계속 처리돼 / 요»로 끊기지 않게.
+      expect(container.querySelector('[data-testid="channel-post-video-upload-progress"]')?.classList.contains('break-keep')).toBe(true);
+      await act(async () => { release(); });
+      await flush();
+      await flush();
+      expect(line()).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-video-preview"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('⭐업로드 왕복 — requesting_url→uploading(%)→confirming→성공, video 상태 반영+커버 라벨 전환', async () => {
     stubXhrForVideoUpload();
     stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1 });
@@ -5384,6 +6080,8 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    // 유나 CHANGES(PR 4773 · 5865894914) — 오류 문장이 낱말 가운데서 끊기지 않게.
+    expect(container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.classList.contains('break-keep')).toBe(true);
     expect(errorText).toBe('비율이 9:16을 벗어납니다(서버 메시지 예시)');
   });
 
@@ -5978,5 +6676,92 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
 
       expect(container.querySelector('[data-testid="channel-post-youtube-published-private-badge"]')).not.toBeNull();
     });
+  });
+});
+
+// story #4264(유나 4632 CHANGES) — needs_check(«나갔는지 모름»)면 «발행» 버튼이 확인 없이 다시 보내는 문이 된다(`POST …/publish` → 기존
+// command → 어댑터 재호출). 발행 버튼을 잠그고 버튼 밖에 사유 문장(배지의 «확인했어요 · 다시 시도»로 안내) · not_sent는 그대로 열림.
+// 뮤테이션: 발행 disabled에서 `isNeedsCheckGate`를 빼면 첫 테스트 RED.
+describe('발행 버튼 — needs_check면 잠금(story #4264 · 유나)', () => {
+  // 승인 · 봉인 일치(발행 가능) 초안 — 잠금 사유가 needs_check 하나뿐이게.
+  const PUBLISHABLE = { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' };
+  // story #4290 — 잠금 줄은 배지 재시도를 지금 누를 수 있을 때(서버 command_retryable)만 그 버튼을 가리킨다. pending ∧ needs_check는
+  // 서버가 재시도 불가라 버튼을 가리키지 않는 문장.
+  const lockedWithButton = koMessages.content.channelPostsPublishLockedNeedsCheck.replace('{cta}', koMessages.content.channelPostsFailureCheckedRetryCta);
+  it.each([
+    ['dead_letter ∧ needs_check', { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-nc' }, lockedWithButton],
+    ['pending ∧ needs_check', { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-nc' }, koMessages.content.channelPostsPublishLockedNeedsCheckNoRetry],
+  ])('⭐%s — 발행 버튼 비활성 · 사유 문장(재시도 가능하면 배지 버튼을 가리킴)', async (_label, detail, expected) => {
+    stubFetch({ draftDetail: { ...PUBLISHABLE, ...detail } as Record<string, unknown> });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const publish = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publish.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent).toBe(expected);
+  });
+
+  // story #4290(유나 05:16Z) — 서버가 지금 재시도 불가(command_retryable=false)라고 하면 배지는 끝난 «곧 열려요» 대신 «지금은 다시 시도할
+  // 수 없어요 — 새로고침…», 잠금 줄은 못 누르는 버튼을 가리키지 않는 문장. 뮤테이션: 잠금 줄이 command_retryable을 안 보면 RED.
+  it('⭐#4290 — needs_check인데 서버가 재시도 불가 → 배지 사유 «지금은 다시 시도할 수 없어요…» · 잠금 줄은 버튼을 가리키지 않음', async () => {
+    stubFetch({ draftDetail: { ...PUBLISHABLE, command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-nc', command_retryable: false } as Record<string, unknown> });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureRetryUnavailable);
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent)
+      .toBe(koMessages.content.channelPostsPublishLockedNeedsCheckNoRetry);
+  });
+
+  it('not_sent(«안 나감»)는 잠그지 않는다 · 사유 문장 없음', async () => {
+    stubFetch({ draftDetail: { ...PUBLISHABLE, command_status: 'dead_letter', failure_kind: 'not_sent', command_id: 'cmd-ns' } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const publish = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publish.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')).toBeNull();
+  });
+
+  it('⭐서버가 409 CHANNEL_POST_NEEDS_CHECK로 거절해도 같은 문장 · 버튼이 곧바로 잠긴다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHABLE,
+      onPublish: () => ({ status: 409, body: { detail: {
+        code: 'CHANNEL_POST_NEEDS_CHECK', message: 'server', command_id: 'cmd-nc', failure_kind: 'needs_check', command_status: 'dead_letter',
+        command_retryable: true,
+      } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const publish = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publish.disabled).toBe(false);
+    await act(async () => { publish.click(); });
+    await flush();
+    // 유나 재검(02:05Z) — 빨간 알림 = 일어난 일(«다시 보내지 않았어요» · BE 409 문장) · 외부 영향 줄 0(어댑터를 안 불렀다) · 회색 잠금
+    // 줄은 상태로 그대로. 한 화면에 같은 잠금 문장이 두 번 쌓이지 않는다.
+    const cta = koMessages.content.channelPostsFailureCheckedRetryCta;
+    const refused = koMessages.content.channelPostsPublishRefusedNeedsCheck.replace('{cta}', cta);
+    const locked = koMessages.content.channelPostsPublishLockedNeedsCheck.replace('{cta}', cta);
+    expect(container.querySelector('[data-testid="channel-post-publish-error-reason"]')?.textContent).toBe(refused);
+    expect(container.querySelector('[data-testid="channel-post-publish-external-impact"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent).toBe(locked);
+    expect(container.textContent?.split(locked).length).toBe(2);
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('⭐409가 pending + needs_check(서버 재시도 불가)면 그 사실 그대로 — 재시도 가능을 지어내지 않는다(까디르 QA ②)', async () => {
+    stubFetch({
+      draftDetail: PUBLISHABLE,
+      onPublish: () => ({ status: 409, body: { detail: {
+        code: 'CHANNEL_POST_NEEDS_CHECK', message: 'server', command_id: 'cmd-nc', failure_kind: 'needs_check', command_status: 'pending',
+        command_retryable: false,
+      } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const retry = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+    expect(retry?.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent)
+      .toBe(koMessages.content.channelPostsPublishLockedNeedsCheckNoRetry);
   });
 });

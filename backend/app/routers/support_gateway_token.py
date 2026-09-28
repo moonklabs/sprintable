@@ -190,6 +190,8 @@ async def receive_escalation_event(
         "reason": claims.reason,
         "detail": claims.detail,
         "conversation_summary": claims.conversation_summary,
+        # story #4241 — 조직 전체 결재함 행 링크가 이 에스컬레이션의 프로젝트를 싣도록(Gate엔 project_id 컬럼이 없다 · agent_decision과 같은 자리).
+        "project_id": str(project.id),
     }
     gate = await create_gate(
         session=session,

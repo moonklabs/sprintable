@@ -10,11 +10,17 @@ import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
-import { isCommentReplyGate } from '@/components/cage/gate-risk';
+import { isCommentReplyGate, isRecipePublishGate } from '@/components/cage/gate-risk';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
-import { channelLabel } from '@/lib/channel-label';
-import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { useChannelLabel } from '@/lib/channel-label';
+import { formatMinorCurrency, formatCount, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { stageRoleLabel } from '@/lib/stage-role';
+import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/services/verify';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { keepHref } from '@/lib/with-project-param';
+import { actorRowLabels } from '@/lib/member-display';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -140,7 +146,9 @@ interface ParsedReferenceToken {
 // chat-report-density.ts에만 있던 규칙을 헬퍼로 승격)로 원복하지 않으면 실 제목(예: 이 팀
 // 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려 반영)")이 칩에 `\[...\] ... v2\(...\)`
 // 문자 그대로 새어 나간다 — 초기 구현이 이스케이프 없는 픽스처로만 테스트해 못 잡았던 자리.
-function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
+/** withProject — 문서 링크(flat)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 게이트 화면은 useFlatHref()(= 게이트의 프로젝트, 4241), 링크를
+ * 쓰지 않는 판정은 keepHref. */
+export function parseReferenceToken(v: unknown, withProject: (href: string) => string): ParsedReferenceToken | null {
   const s = realString(v);
   if (!s) return null;
   const m = s.match(/^\[(.*)\]\((.*)\)$/);
@@ -148,7 +156,7 @@ function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
   const [, rawLabel, href] = m;
   const ref = parseEntityRef(href);
   if (!ref) return null;
-  return { ...ref, label: unescapeReferenceLabel(rawLabel), href: getEntityHref(ref.entityType, ref.entityId) };
+  return { ...ref, label: unescapeReferenceLabel(rawLabel), href: getEntityHref(ref.entityType, ref.entityId, withProject) };
 }
 
 interface RecipeApprovalFacts {
@@ -157,6 +165,10 @@ interface RecipeApprovalFacts {
   draftDocSummary: string | null;
   channel: string | null;
   stage: string | null;
+  // story #4091(#4082 팔로우업, PO 확定 2026-09-21 — «사실 블록에 역할까지 얹고, 사실
+  // 블록이 뜨는 분기에서만 meta 줄을 뺀다») — gates/[id]/page.tsx footer meta 줄이
+  // neutral_facts.stage_role까지 같이 보여주던 걸 이 블록으로 옮긴다(정보 소실 0).
+  stageRole: string | null;
   // story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §4-3③·§6-3) —
   // 글 관리 화면의 승인 요청이 채우는 필드. draft_doc_summary(300자 截단, doc 기반 채널용)
   // 와 별개 — 이쪽은 "전문"이라 접힘 없이 항상 펼쳐 보인다(§6-3 "요약 → 전문" 확장 그대로).
@@ -166,6 +178,10 @@ interface RecipeApprovalFacts {
   contentBody: string | null;
   contentVersion: number | null;
   contentSha256: string | null;
+  // story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04)/#4073(카디르 QA④ 실측,
+  // 2026-09-19) — external_publish 예약 발행 봉인 축(contentBody 등과 동일 선례). #4073
+  // 前엔 BE GateResponse에 이 필드가 없어 승인카드에서 예약시각이 항상 null이었다.
+  scheduledAt: string | null;
   // §3-1-2(페드루 PO 정정 2026-09-03 06:42Z) — 승인 뒤 편집으로 pending 재오픈된 게이트인지.
   // true면 이 카드는 "승인 가능한 카드"가 아니라 "재상신 대기" 카드로 그린다(§3-1-2-1).
   reapprovalRequired: boolean;
@@ -206,9 +222,16 @@ interface RecipeApprovalFacts {
   // story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — destinationConnectionId
   // 원문(uuid)을 승인자에게 그대로 보이면 확認 불가능한 값으로 서명을 요구하는
   // 결함이 된다. 그 연결의 channel(BE list_gates() 배치 enrich)을 channelLabel()
-  // (lib/channel-label.ts, 집안 정본)로 표시명을 낸다 — destinationConnectionId가
-  // null(hosted_site)이면 이 필드는 무의미(항상 null, 아래 렌더가 안 읽는다).
+  // (lib/channel-label.ts, 집안 정본)로 표시명을 낸다.
   destinationChannel: string | null;
+  // story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — "호스팅 블로그"인지를
+  // destinationConnectionId===null로 *추정*하던 결함(채널 초안 게이트도 이 컬럼을
+  // 안 채우던 시절엔 연결 id가 null이라 우연히 같은 값이었지만, 그건 "site 게이트라서
+  // null"이 아니라 "이 write-path가 아예 안 채워서 null"이었다 — 두 세계가 우연히
+  // 같은 값을 내던 것뿐). neutral_facts.destination(BE site_posts.py/channel_posts.py
+  // 둘 다 상신 시점에 채우는 원문 목적지 채널 코드, "hosted_site"|실 채널명)이 이제
+  // «site 게이트인가»의 진짜 SSOT다 — 이 값과 직접 비교한다(추정 0).
+  destinationIsHostedSite: boolean;
   // story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — sealed_content_*/
   // sealed_doc_*와 동일 선례(다른 gate_type은 전부 null). 통화·기간·목표는 §1 표
   // 그대로(총예산은 adsBudgetMinor+adsCurrency 조합으로 formatMinorCurrency 재사용).
@@ -228,9 +251,32 @@ interface RecipeApprovalFacts {
   // 「무엇을」 보내는지 없이 승인하던 결함. estimatedRecipientCount와 동형(봉인값
   // 아님, 어댑터/버전 조회).
   newsletterSubject: string | null;
+  // story #4072(E-RECIPE-1, 페드루 PO 確定 2026-09-19·카디르 QA③ CHANGES) —
+  // generation_budget(ⓒ 실탄 게이트) 전용 sealing. adsBudgetMinor와 동일 선례.
+  // 통화는 sealed 컬럼이 아니라 neutral_facts.currency에서 온다(recipe_gate_hooks.py
+  // 가 org content_rules.generation_budget.currency를 그대로 echo, KRW|USD만
+  // 존재 — 그 필드가 없으면(구버전 gate 등) 지어내지 않고 null, formatMinorCurrency
+  // 안 씀·최소단위 원값만).
+  estimatedCostMinor: number | null;
+  estimatedCostCurrency: 'KRW' | 'USD' | null;
+  // story #4085 AC4-B(3호 라이브 실측 2026-09-22 · 페드루 PO 처방) — org 생성 예산 규칙이
+  // 있을 때만 recipe_gate_hooks.py가 같은 if-블록 안에서 이 셋과 currency를 함께
+  // neutral_facts에 싣는다(위 currency와 동일 존재 보증 — 규칙 없으면 셋 다 null이고
+  // «통화 미확인» 표기만 그대로, 이 줄 자체를 안 그린다).
+  budgetLimitMinor: number | null;
+  budgetSpentMinor: number | null;
+  budgetRemainingMinor: number | null;
+  // story #4090([E-RECIPE-1] Publisher 슬롯) AC2·AC3(2026-09-21) — 레시피 자동발행
+  // 훅의 기계 소유 결과(gate.publish_outcome, sealed 계열과 달리 승인 *후* 갱신될
+  // 수 있는 값 — 그래도 이 카드가 승인자가 자동발행 여부를 보는 유일한 자리라
+  // 여기 싣는다). external_publish(scope_key="") 게이트가 아니면 항상 null.
+  publishOutcome: string | null;
+  // story #4264(유나 조건 · PO 23:40Z) — needs_check 라벨은 «확인했어요 · 다시 시도»가 있는 글 화면으로 한 번에 가는 길이 있을 때만
+  // 짧은 형. 레시피가 쥔 채널 초안(BE `linked_channel_draft`)이 있으면 그 글 화면 링크, 없으면 null(긴 형 문장).
+  publishOutcomeDraftHref: string | null;
 }
 
-function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
+function recipeApprovalFacts(gate: GateItem, withProject: (href: string) => string): RecipeApprovalFacts | null {
   const f = gate.neutral_facts;
   const contentBody = realString(gate.sealed_content_body);
   const contentVersion = typeof gate.sealed_content_version === 'number' ? gate.sealed_content_version : null;
@@ -243,18 +289,20 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     ? {
         entityType: 'doc', entityId: sealedDocId,
         label: realString(gate.sealed_doc_title) ?? sealedDocId.slice(0, 8),
-        href: getEntityHref('doc', sealedDocId),
+        href: getEntityHref('doc', sealedDocId, withProject),
       }
     : null;
   const facts: RecipeApprovalFacts = {
-    workItemRef: parseReferenceToken(f?.['work_item_reference_token']),
-    draftDocRef: parseReferenceToken(f?.['draft_doc_reference_token']),
+    workItemRef: parseReferenceToken(f?.['work_item_reference_token'], withProject),
+    draftDocRef: parseReferenceToken(f?.['draft_doc_reference_token'], withProject),
     draftDocSummary: realString(f?.['draft_doc_summary']),
     channel: realString(f?.['channel']),
     stage: realString(f?.['stage']),
+    stageRole: realString(f?.['stage_role']),
     contentBody,
     contentVersion,
     contentSha256,
+    scheduledAt: realString(gate.sealed_scheduled_at),
     reapprovalRequired: gate.reapproval_required === true,
     targetExternalCommentId: isCommentReply ? realString(f?.['target_external_comment_id']) : null,
     targetText: isCommentReply ? realString(f?.['target_text']) : null,
@@ -272,6 +320,7 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
       ? gate.latest_author_kind : null,
     destinationConnectionId: realString(gate.sealed_destination_connection_id) ?? null,
     destinationChannel: realString(gate.sealed_destination_channel) ?? null,
+    destinationIsHostedSite: f?.['destination'] === 'hosted_site',
     adsBudgetMinor: typeof gate.sealed_ads_budget_minor === 'number' ? gate.sealed_ads_budget_minor : null,
     adsCurrency: realString(gate.sealed_ads_currency),
     adsStartsAt: realString(gate.sealed_ads_starts_at),
@@ -282,12 +331,23 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     newsletterEstimatedRecipientCount:
       typeof gate.estimated_recipient_count === 'number' ? gate.estimated_recipient_count : null,
     newsletterSubject: realString(gate.newsletter_subject),
+    estimatedCostMinor:
+      typeof gate.sealed_estimated_cost_minor === 'number' ? gate.sealed_estimated_cost_minor : null,
+    estimatedCostCurrency: f?.['currency'] === 'KRW' || f?.['currency'] === 'USD' ? f['currency'] : null,
+    budgetLimitMinor: typeof f?.['budget_limit_minor'] === 'number' ? f['budget_limit_minor'] : null,
+    budgetSpentMinor: typeof f?.['budget_spent_minor'] === 'number' ? f['budget_spent_minor'] : null,
+    budgetRemainingMinor: typeof f?.['budget_remaining_minor'] === 'number' ? f['budget_remaining_minor'] : null,
+    publishOutcome: realString(gate.publish_outcome),
+    publishOutcomeDraftHref: gate.linked_channel_draft?.draft_id
+      ? withProject(`/content/channel-posts/${gate.linked_channel_draft.draft_id}`)
+      : null,
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
-    facts.contentBody || facts.contentVersion !== null || facts.contentSha256 ||
+    facts.contentBody || facts.contentVersion !== null || facts.contentSha256 || facts.scheduledAt !== null ||
     facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null ||
-    facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null;
+    facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null ||
+    facts.estimatedCostMinor !== null || facts.publishOutcome;
   return hasAny ? facts : null;
 }
 
@@ -310,7 +370,7 @@ export function gateHasEvidence(gate: GateItem): boolean {
   // story #3328 — 레시피 approve 게이트의 승인 대상 실물(work item·draft doc·channel)도
   // 실 증거다(같은 이유 — 안 그러면 external_publish 게이트가 State A로 가라앉아 승인자가
   // 뭘 승인하는지 dialog 안에서 전혀 못 본다).
-  const hasRecipeApproval = recipeApprovalFacts(gate) !== null;
+  const hasRecipeApproval = recipeApprovalFacts(gate, keepHref) !== null; // 있는지 판정만(링크 안 씀)
   return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck || hasDraft || hasRecipeApproval;
 }
 
@@ -505,6 +565,9 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   ads_boost_started: 'gateActivityActionAdsBoostStarted',
   ads_boost_paused: 'gateActivityActionAdsBoostPaused',
   ads_boost_resumed: 'gateActivityActionAdsBoostResumed',
+  // story #4262(유나 표) — newsletter_send_execution.py `_ACTIVITY_ACTION_SEND_*`가 남기는 액션. 원시 문자열이 그대로 보였다.
+  newsletter_send_succeeded: 'gateActivityActionNewsletterSendSucceeded',
+  newsletter_send_failed: 'gateActivityActionNewsletterSendFailed',
 };
 
 // story #3806(Phase3·3-2 PR 14) — ads_boost_paused 한 action이 두 얼굴이다: 사람이
@@ -556,6 +619,10 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
   }, [gateId, refreshKey]);
 
   if (items === null) return null;
+  // [SID:4311 PR 3] 활동 줄의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 줄 안에서만).
+  // 이름 빔은 기존 폴백 그대로(story #2975) — 이 응답은 떠난 사람과 이름 없는 사람을 둘 다 null로 싣어(gates.py actor_name_map) 가를 수 없다.
+  const actorLabel = (item: GateActivityLogItem) => item.actor_name || t('gateActivityActorFallback');
+  const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? actorLabel(item) : null })));
 
   return (
     <div>
@@ -570,7 +637,7 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
             const adsBoostLabel = adsBoostActivityLabel(item, t);
             return (
               <li key={item.id} className="text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">{item.actor_name ?? t('gateActivityActorFallback')}</span>
+                <span className="font-medium text-foreground">{(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? actorLabel(item)}</span>
                 {' · '}
                 {adsBoostLabel ?? (labelKey ? t(labelKey) : item.action)}
                 {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
@@ -648,12 +715,218 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
  * vs 기존 text-muted-foreground 5.1~5.9:1(AA 4.5:1은 이미 통과하던 값이라 접근성 위반은
  * 아니었으나, 값과 라벨의 시각적 위계가 안 갈렸다 — #2420과 동형 근거로 값을 승격).
  */
+// story #4090 AC3 정정(story #3779 BE 한글 사용자 문장 가드, 2026-09-21) — BE
+// gate.publish_outcome은 닫힌 어휘 코드(no_channel_binding|no_submitted_draft|
+// no_resolver|published|scheduled|publish_failed:*)를 저장한다(한글 완성 문장 아님,
+// channel_posts.py 주석과 동일 규율) — 이 함수가 코드→locale 문구로 번역한다.
+function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>): string {
+  if (code === 'published') return t('publishOutcomePublished');
+  // story #4142(페드루 PO 처방, 2026-09-22) — 비동기 컨테이너(REELS 등)가 아직 완결
+  // 안 됐을 때의 비최종 상태. "발행됨"과 명확히 갈라야 한다(이 카드가 «발행됨»을
+  // 거짓으로 보여주던 실사고의 직접 처방).
+  if (code === 'publishing') return t('publishOutcomePublishing');
+  if (code === 'scheduled') return t('publishOutcomeScheduled');
+  if (code === 'no_channel_binding') return t('publishOutcomeNoChannel');
+  if (code === 'no_submitted_draft') return t('publishOutcomeNoDraft');
+  if (code === 'no_resolver') return t('publishOutcomeNoResolver');
+  if (code.startsWith('publish_failed:')) {
+    // story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — 꼬리(연결 원인)도 닫힌
+    // 어휘(connector_error|rate_limited|auth_expired, channel_posts.py::classify_
+    // publish_failure_outcome)라 그 코드도 각자 번역한다(커넥터 원문 미노출).
+    const failureCode = code.slice('publish_failed:'.length);
+    if (failureCode === 'auth_expired') return t('publishOutcomeFailedAuthExpired');
+    if (failureCode === 'rate_limited') return t('publishOutcomeFailedRateLimited');
+    // story #4264 — 앞 시도가 «나갔는지 모름»으로 멈춰 자동 발행이 다시 쏘지 않았다(generic «연결 확인»은 틀린 안내).
+    if (failureCode === 'needs_check') return t('publishOutcomeFailedNeedsCheck');
+    return t('publishOutcomeFailedGeneric');
+  }
+  // 미지 코드(구버전 응답 등) — 지어내지 않고 원문 코드 그대로(사람이 읽기엔 어색해도
+  // 침묵보다 낫다, «모른다≠다르다» 규율).
+  return code;
+}
+
+/**
+ * story #4098([E-RECIPE-1], 페드루 PO 確定 2026-09-21) — 레시피 unscoped external_
+ * publish 게이트(scope_key="") 상세에 "이 승인으로 발행될 채널 초안" 실물 카드.
+ * #4090 AC2로 이 게이트 승인=자동발행인데, 승인자가 실물(본문·이미지·영상·목적지·
+ * 예약)을 안 보고 딸깍하던 자리를 해소한다. BE `linked_channel_draft`(null이면
+ * `linked_channel_draft_pending`으로 이유를 가른다)만 읽는다 — FE가 값을 계산하지
+ * 않는다(선택 규칙은 BE 한 곳, channel_posts.py::find_ready_recipe_channel_drafts).
+ *
+ * ⛔페드루 PO 지적(PR #4475 리뷰, 2026-09-21) — 그 시점엔 `draft.scoped_gate_status`가
+ * `linked_channel_draft` non-null인 이상 항상 "approved"뿐이라 "pending" 분기가 죽은
+ * 코드였다(제거, linkedChannelDraftScopedPending 키도 같이).
+ *
+ * story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 채널 초안의 scoped
+ * external_publish 게이트(이 카드가 쥔 그 초안 자신) 상세·인박스에서 영상 0건·
+ * 이미지 0건으로 보이던 결함. BE가 이제 scoped 게이트 응답에도 같은 `linked_
+ * channel_draft`(BE `_enrich_scoped_channel_draft_media`, #4098과 동일 직렬화
+ * 재사용)를 싣는다 — 이 컴포넌트를 scoped 게이트에도 그대로 재사용한다(두 번째
+ * 렌더러 0). 「제출 없음/초안 승인 대기」 두 문구(아래)는 **레시피 게이트 전용**
+ * (이 승인이 다른 게이트의 승계를 기다린다는 뜻)이라 scoped 게이트엔 의미가 안
+ * 맞는다 — scoped 게이트는 `isRecipeGate=false`로 그 분기를 건너뛴다(그 문구를
+ * 고치는 게 아니라 애초에 그 게이트 종류에 안 나오게 — 안 나오는 문장을 고치면
+ * 헛손질이라는 페드루 PO 지적 그대로).
+ *
+ * ⚠️정정(story #4139, 페드루 PO 確定 2026-09-22) — find_ready_recipe_channel_drafts가
+ * 이제 단일-목적지 pending scoped 게이트도 ready에 넣는다(레시피 게이트 승인 즉시
+ * #4069/#4139 캐스케이드로 자동 승계-승인될 대상이라 승인자가 미리 실물을 볼 자격이
+ * 있다 — 「승인해도 발행되지 않아요」거짓 경고 제거). 그래서 `scoped_gate_status`가
+ * "pending"인 채로도 이 카드가 뜰 수 있다 — 이 컴포넌트는 그 값 자체를 안 읽으므로
+ * (draft가 non-null이면 무조건 미리보기 렌더) 새 분기가 불필요하다, 위 문단만 사실
+ * 정정용으로 남긴다.
+ */
+function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isRecipeGate: boolean }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
+  const t = useTranslations('cage');
+  const draft = gate.linked_channel_draft;
+
+  if (!draft) {
+    if (!isRecipeGate) {
+      // scoped 게이트: 드물게 draft_id가 유실됐거나(구버전 데이터) 초안이 지워진
+      // 경우 — 지어낼 실물이 없다. 위 목적지 줄(RecipeApprovalFactsBlock)이 이미
+      // 텍스트 메타는 보여주므로 이 카드는 조용히 생략한다(«모른다≠다르다» — 없는
+      // 걸 있다고 안 하되, 레시피 전용 "승인해도 발행 안 됨" 문구를 억지로 빌리지도
+      // 않는다).
+      return null;
+    }
+    // story #4105(#4098 잔여, 페드루 PO 실측 2026-09-21) — find_ready_recipe_channel_
+    // drafts는 «scoped 승인 済·미발행» 초안만 ready에 담는다(#4090 자동발행 대상
+    // 정의) — 이미 승인돼 발행이 끝난 게이트에서도 항상 빈 목록이라 linked_channel_
+    // draft가 null이 된다. status를 안 보면 "승인해도 발행되지 않아요"가 이미 발행된
+    // 게이트에도 뜨는(다른 세계의 문장) 그 결함. pending일 때만 이 두 문구(제출 없음/
+    // scoped 게이트 대기)가 유효하다.
+    //
+    // ⛔페드루 PO CHANGES(PR #4481 리뷰) — 비-pending 게이트에서 publish_outcome
+    // 라벨을 여기서 또 그리면 같은 화면의 RecipeApprovalFactsBlock(facts.publishOutcome,
+    // 아래 913행)이 이미 «발행 결과 · {라벨}»로 그린 것과 완전히 같은 값이 한 줄 더
+    // 뜬다(같은 원천, gate.publish_outcome을 두 컴포넌트가 각자 렌더) — facts 블록이
+    // 정본이라 이 카드는 비-pending이면 아무것도 안 그린다(중복 제거, 지어내지 않는다
+    // 원칙의 반대급부 — "같은 사실을 두 번 말하지 않는다"도 같은 원칙).
+    if (gate.status !== 'pending') {
+      return null;
+    }
+    // story #4190(유나 빈 상태 절 · PO 12:17Z) — 대기 문구는 채널·블로그 공용(기존 키 재사용). «없음» 문구는 BE
+    // `linked_draft_kind`(레시피 정의 capability 판별)로만 고른다 — 모르는 레시피(null)는 중립 문구.
+    const pending = gate.linked_channel_draft_pending || gate.linked_site_draft_pending;
+    return (
+      <p className="mt-1.5 text-[11.5px] text-muted-foreground">
+        {pending ? t('linkedChannelDraftPending')
+          : gate.linked_draft_kind === 'channel_post' ? t('linkedChannelDraftNone')
+          : gate.linked_draft_kind === 'site_post' ? t('linkedSiteDraftNone')
+          : t('linkedDraftNone')}
+      </p>
+    );
+  }
+
+  const destinationLabel = draft.account_label || `${draft.channel}(${draft.account_id})`;
+
+  return (
+    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-[11.5px]">
+      <p className="text-muted-foreground">
+        {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>
+      </p>
+      {draft.sealed_scheduled_at ? (
+        <p className="text-muted-foreground">
+          {t('linkedChannelDraftScheduledLabel')} ·{' '}
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+        </p>
+      ) : null}
+      <LinkedDraftVersionLine version={draft.version} />
+      {draft.video_url ? (
+        // 유나 design:CHANGES(PR #4475 리뷰, PO 確定) — object-cover가 9:16 릴스의 상·하
+        // ~22%(훅·CTA)를 잘라 이 카드의 목적(실물 보고 승인)과 어긋났다. 채널 영상 aspect가
+        // 혼재(릴스 9:16·피드 1:1/4:5/16:9)라 세로 고정 대신 object-contain(레터박스 면은
+        // bg-muted)으로 크롭 0.
+        <video
+          controls preload="metadata" src={draft.video_url}
+          className="max-h-64 w-auto max-w-full rounded bg-muted object-contain" data-testid="linked-channel-draft-video"
+        />
+      ) : draft.image_urls.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {draft.image_urls.map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element -- content/[draftId] 동형 관례(외부 GCS URL).
+            <img key={i} src={url} alt={t('linkedChannelDraftImageAlt')} className="h-20 w-20 rounded object-cover" />
+          ))}
+        </div>
+      ) : null}
+      {draft.text ? (
+        <p className="whitespace-pre-wrap text-foreground">{draft.text}</p>
+      ) : null}
+      <a
+        href={flatHref(`/content/channel-posts/${draft.draft_id}`)}
+        className="inline-block text-[11px] text-primary underline underline-offset-2"
+      >
+        {t('linkedChannelDraftOpenLink')}
+      </a>
+    </div>
+  );
+}
+
+/** story #4190(유나 site 초안 카드) — «버전 · v{n}». 채널·블로그 카드가 같이 그린다 — 이 카드가 그린 버전이 «본 버전»이고
+ * 승인 요청이 그대로 돌려보낸다(gate-risk.ts reviewedDraftOf). 409 뒤 재조회하면 번호가 바뀌는 걸 눈으로 확인한다. */
+function LinkedDraftVersionLine({ version }: { version: number }) {
+  const t = useTranslations('cage');
+  return (
+    <p className="text-muted-foreground" data-testid="linked-draft-version">
+      {t('linkedDraftVersionLabel')} · <span className="text-foreground">{t('productionWorkbenchVersionRef', { v: version })}</span>
+    </p>
+  );
+}
+
+/**
+ * story #4190(PO 판정 2026-09-23 12:03Z · 유나 site 초안 카드) — `LinkedChannelDraftCard`의 블로그(site) 형제. 같은 틀·
+ * 크기·링크, 레시피 게이트에만. BE `linked_site_draft`만 읽는다(어느 카드인지 BE가 가른다 — FE는 목적지 문자열로 추정하지
+ * 않는다). 목적지 줄은 외부 블로그일 때만(자사 블로그는 위 레시피 사실 블록이 이미 말한다). 본문은 BE가 마크다운 기호를
+ * 걷은 평문 앞부분 — FE는 파싱하지 않는다. 요약·태그·언어는 넣지 않는다(«초안 열기»에서 본다).
+ * 초안이 없을 때의 빈 상태는 채널 카드가 그린다(레시피 게이트엔 두 카드 중 하나만 그려진다).
+ */
+function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
+  const t = useTranslations('cage');
+  const flatHref = useFlatHref(); // story #4226 — flat 링크 `?p=`
+  const draft = gate.linked_site_draft;
+  if (!draft) return null;
+  const destinationLabel = draft.channel
+    ? draft.account_label || `${draft.channel}(${draft.account_id ?? ''})`
+    : null;
+  return (
+    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-[11.5px]" data-testid="linked-site-draft">
+      {destinationLabel ? (
+        <p className="text-muted-foreground">
+          {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>
+        </p>
+      ) : null}
+      {draft.sealed_scheduled_at ? (
+        <p className="text-muted-foreground">
+          {t('linkedChannelDraftScheduledLabel')} ·{' '}
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+        </p>
+      ) : null}
+      <LinkedDraftVersionLine version={draft.version} />
+      <p className="break-keep text-xs font-semibold text-foreground">{draft.title}</p>
+      {draft.body_preview ? (
+        <p className="line-clamp-4 min-w-0 break-words text-foreground">{draft.body_preview}</p>
+      ) : null}
+      <a
+        href={flatHref(`/content/${draft.draft_id}`)}
+        className="inline-block text-[11px] text-primary underline underline-offset-2"
+      >
+        {t('linkedChannelDraftOpenLink')}
+      </a>
+    </div>
+  );
+}
+
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const t = useTranslations('cage');
-  // story #3367(유나 CHANGES 2026-09-10) — channelLabel()의 표시명 키(channelLabel
-  // HostedSite/Wordpress 등)는 content ns에 산다(content/[draftId]/page.tsx 기존
-  // 소비처와 동일 배선) — cage ns의 이 컴포넌트가 별도로 바인딩한다.
   const tContent = useTranslations('content');
+  // story #4082(유나 design CHANGES 2026-09-21) — approvals-queue.tsx·gates/[id]/page.tsx와
+  // 동일 SSOT(organization 네임스페이스)로 stage 낱말을 통일(raw slug 노출 0).
+  const tOrg = useTranslations('organization');
+  // story #3742(디디, 근본 처방) — channelLabel()의 표시명 키는 channelConnect
+  // 네임스페이스 하나가 정본(useChannelLabel 훅이 내부에서 고정) — 예전엔 content ns에
+  // 복제해 두고 cage가 tContent를 넘겨 그 복제분을 썼다(#3367 주석 정정).
+  const channelLabel = useChannelLabel();
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [expanded, setExpanded] = useState(false);
@@ -696,6 +969,47 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           ) : null}
         </div>
       ) : null}
+      {/* story #4072(E-RECIPE-1, 페드루 PO 確定 2026-09-19·카디르 QA③ CHANGES) —
+          generation_budget 전용 sealing. ads_boost 블록과 동일 선례(이 gate_type이
+          아니면 estimatedCostMinor는 항상 null). 통화는 neutral_facts.currency가
+          실 있을 때만 formatMinorCurrency로 라벨(위 facts 타입 주석).
+          story #4138(페드루 PO, 2026-09-22 01:14Z 실측 — 2호 게이트 3에 currency 키
+          자체가 없어(댄의 structure_passed 발행 페이로드 미포함) 「4000」이 통화·천 단위
+          구분·소수 표기 0으로 그대로 찍혔다) — currency가 없으면 원값(minor 그대로, 손
+          구현 콤마 금지, formatMinorCurrency의 자매 함수 formatCount로 천 단위 구분만)
+          + «통화 미확인» 보조 표기(거짓 단위 0 — KRW/USD로 지어내지 않는다). */}
+      {facts.estimatedCostMinor !== null ? (
+        <div className="space-y-0.5">
+          <p>
+            <span className="text-muted-foreground">{t('generationBudgetSealedCostLabel')} · </span>
+            <span className="text-foreground font-medium">
+              {facts.estimatedCostCurrency
+                ? formatMinorCurrency(facts.estimatedCostMinor, facts.estimatedCostCurrency, locale, tContent)
+                : formatCount(facts.estimatedCostMinor, locale)}
+            </span>
+            {!facts.estimatedCostCurrency && (
+              <span className="text-muted-foreground"> · {t('generationBudgetSealedCostCurrencyUnknown')}</span>
+            )}
+          </p>
+          {/* story #4085 AC4-B(3호 라이브 실측 2026-09-22, 페드루 PO 처방) — 스모크
+              #4167에서 «예상 비용»까지는 통화가 뜨는데 org 예산 한도/사용/잔여가
+              FE 어디에도 안 그려짐(grep 0)이 실측됨. 셋이 다 있을 때만 한 줄
+              추가(currency도 같은 if-블록에서 함께 실려 항상 같이 있음 — 위
+              estimatedCostCurrency 재사용, 새 null 처리 축 0). 셋 중 하나라도
+              없으면(구버전 게이트·org 예산 규칙 미등록) 이 줄 자체를 안 그려
+              기존 «통화 미확인» 표기만 무변으로 남긴다. */}
+          {facts.budgetLimitMinor !== null && facts.budgetSpentMinor !== null && facts.budgetRemainingMinor !== null
+            && facts.estimatedCostCurrency ? (
+            <p className="text-muted-foreground">
+              {t('generationBudgetStatusLine', {
+                limit: formatMinorCurrency(facts.budgetLimitMinor, facts.estimatedCostCurrency, locale, tContent),
+                spent: formatMinorCurrency(facts.budgetSpentMinor, facts.estimatedCostCurrency, locale, tContent),
+                remaining: formatMinorCurrency(facts.budgetRemainingMinor, facts.estimatedCostCurrency, locale, tContent),
+              })}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용
           sealing. ads_boost 블록과 동일 선례 — 이 gate_type이 아니면 두 필드 다 null이라
           블록 자체가 안 그려진다. 「예상 수신」은 봉인값이 아니라 어댑터 조회(위 facts
@@ -733,7 +1047,8 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
                     // 그대로 grep한다, 이 주석 자체가 그 예시였다 — 재발 방지로 그
                     // 메서드명을 여기 다시 안 적는다). formatMinorCurrency와 동일
                     // 정본(Intl.NumberFormat 직접)으로 정정.
-                    count: new Intl.NumberFormat(locale).format(facts.newsletterEstimatedRecipientCount),
+                    // story #4223 — en 복수형(ICU plural)은 숫자 값이어야 한다(문자열이면 형식 오류). 자리 구분은 ICU `#`가 로케일로 한다.
+                    count: facts.newsletterEstimatedRecipientCount,
                   })
                 : t('newsletterRecipientUnknown')}
             </span>
@@ -743,7 +1058,32 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.stage ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalStageLabel')} · </span>
-          <span className="text-foreground">{facts.stage}</span>
+          <span className="text-foreground">
+            {recipeStageLabel(facts.stage, tOrg)}
+            {facts.stageRole ? ` (${stageRoleLabel(facts.stageRole, tOrg)})` : ''}
+          </span>
+        </p>
+      ) : null}
+      {facts.publishOutcome ? (
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalPublishOutcomeLabel')} · </span>
+          {facts.publishOutcome === 'publish_failed:needs_check' && !facts.publishOutcomeDraftHref ? (
+            <span className="text-foreground">{t('publishOutcomeFailedNeedsCheckNoLink')}</span>
+          ) : (
+            <span className="text-foreground">{publishOutcomeLabel(facts.publishOutcome, t)}</span>
+          )}
+          {facts.publishOutcome === 'publish_failed:needs_check' && facts.publishOutcomeDraftHref ? (
+            <>
+              {' · '}
+              <a
+                href={facts.publishOutcomeDraftHref}
+                className="text-primary underline underline-offset-2"
+                data-testid="recipe-publish-outcome-needs-check-draft-link"
+              >
+                {t('linkedChannelDraftOpenLink')}
+              </a>
+            </>
+          ) : null}
         </p>
       ) : null}
       {facts.workItemRef ? (
@@ -808,27 +1148,43 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           {facts.contentSha256 ? `${t('recipeApprovalSealedHashLabel')} ${facts.contentSha256.slice(0, 12)}…` : null}
         </p>
       ) : null}
+      {/* story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04)/#4073(카디르 #4450
+          QA④ 실측, 페드루 PO 確定 2026-09-19) — external_publish 예약 발행 봉인 축
+          (contentVersion/contentSha256과 같은 선례 — 예약 없는 다른 gate_type은
+          항상 null이라 이 줄 자체가 안 그려진다). newsletter_send의 동형 필드
+          (newsletterSendScheduleLabel)는 이미 승인카드에 떴는데 external_publish만
+          #4073 前엔 BE 응답스키마에 이 필드가 없어 항상 null이었다. */}
+      {facts.scheduledAt ? (
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalScheduledAtLabel')} · </span>
+          <span className="text-foreground">{formatScheduledAt(facts.scheduledAt, displayTimezone).display}</span>
+        </p>
+      ) : null}
       {/* story #3367(3자기점검, 페드루 지적 2026-09-10·유나 CHANGES 정정) — AC7
           ("마지막 수정 주체·목적지를 확認할 수 있고"). 위 버전/해시 줄과 같은
-          site_posts 식별 조건(contentVersion/contentSha256)에 묶는다 — 다른
-          gate_type엔 이 축 자체가 없다(«모른다≠다르다», sealed_destination_
-          connection_id는 Gate 실 컬럼이라 항상 present라 이 조건 없이는 다른
-          gate_type에도 "호스팅 블로그"가 새 나갈 뻔했다). 목적지가 커넥션(WordPress/
-          webhook)이면 uuid 원문을 승인자에게 보이지 않고 channelLabel()(집안 정본)
-          로 표시명을 낸다 — 표시명을 지어내지 않는다는 원칙은 이 헬퍼 자신이 이미
-          지킨다(모르는 채널은 원문 그대로 폴백, uuid는 노출 안 함). */}
+          봉인 조건(contentVersion/contentSha256, site_posts·channel_posts 둘 다
+          이 축을 채운다 — story #4143 재확認)에 묶는다 — 다른 gate_type엔 이 축
+          자체가 없다(«모른다≠다르다»). 목적지가 커넥션(WordPress/webhook/채널
+          연결)이면 uuid 원문을 승인자에게 보이지 않고 channelLabel()(집안 정본)로
+          표시명을 낸다 — 표시명을 지어내지 않는다는 원칙은 이 헬퍼 자신이 이미
+          지킨다(모르는 채널은 원문 그대로 폴백, uuid는 노출 안 함).
+          ⛔story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — destination
+          ConnectionId===null을 "호스팅 블로그"로 *추정*하던 결함(채널 초안 게이트도
+          이 컬럼이 안 채워지던 시절엔 우연히 같은 값이었다). destinationIsHostedSite
+          (neutral_facts.destination==="hosted_site", BE SSOT 직접 대조)로 정정. */}
       {facts.contentVersion !== null || facts.contentSha256 ? (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground">
           <span>
-            <span>{t('recipeApprovalLatestAuthorLabel')} · </span>
+            {/* story #4336(유나 05:01Z) — «마지막 수정 주체» → «마지막 수정»(배지가 누구인지 말함) · 같은 뜻 기존 낱말 재사용. */}
+            <span>{tContent('columnLastModified')} · </span>
             <AuthorKindBadge kind={facts.latestAuthorKind} />
           </span>
           <span>
             {t('recipeApprovalDestinationLabel')} ·{' '}
-            {facts.destinationConnectionId === null
+            {facts.destinationIsHostedSite
               ? t('recipeApprovalDestinationHostedSite')
               : facts.destinationChannel
-                ? channelLabel(facts.destinationChannel, tContent)
+                ? channelLabel(facts.destinationChannel)
                 // 연결이 삭제됐거나(드묾) enrich가 못 채운 예외 — uuid를 보이지
                 // 않는다(유나 CHANGES 원칙), 표시명도 지어내지 않는다. "—"는 순수
                 // 구두점(글자·숫자 0개, content.originAuthorUnknown과 동형 관례)이라
@@ -893,6 +1249,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
 }
 
 export function GateEvidence({ gate, className }: { gate: GateItem; className?: string }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 문서 근거 링크는 게이트의 프로젝트(현재 p)를 싣는다
   const t = useTranslations('cage');
   const decision = gateDecision(gate);
   const ci = ciResult(gate);
@@ -915,7 +1272,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   // State B(부분증거)로 떨어진다 — rich(State C) 분기엔 안 걸리므로 거기는 안 건드린다.
   const draft = hypothesisOutcomeDraft(gate);
   // story #3328 — 레시피 approve 게이트도 동형(ci/trust/cold_start_seed 없음) — State B로.
-  const recipeFacts = recipeApprovalFacts(gate);
+  const recipeFacts = recipeApprovalFacts(gate, flatHref);
 
   const DecisionMark = decision ? DECISION_META[decision].mark : null;
   const decisionBadge = decision ? (
@@ -997,9 +1354,149 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
       {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
       {draft ? <HypothesisOutcomeDraft draft={draft} /> : null}
       {recipeFacts ? <RecipeApprovalFactsBlock facts={recipeFacts} /> : null}
+      {/* 페드루 PO REQUIRED(PR #4475 리뷰) — BE와 같은 전제(레시피 게이트, neutral_
+          facts.stage 실림 — BE 가드는 stage·triggered_by_event 둘 다 보지만 FE엔
+          stage만 노출돼 있고 둘은 _build_approval_neutral_facts에서 항상 같이
+          찍힌다)로 좁힌다. recipeFacts !== null만으로는 부족(sealed_content_* 등
+          다른 축으로도 non-null이 될 수 있다 — 뮤테이션 실측으로 확認) — 비레시피
+          unscoped external_publish 게이트에도 "승인해도 발행되지 않아요" 카드가
+          새 다른 세계의 문장이 붙는다. BE가 두 필드를 기본값(null/false)으로 둘
+          때 FE도 렌더 자체를 0으로.
+          story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — scoped 채널 초안
+          게이트(scope_key≠"")도 이 카드를 탄다(BE가 이제 그쪽에도 linked_channel_
+          draft를 싣는다, AC2 "편입 영상은 <video controls>") — isRecipeGate로
+          레시피 전용 빈-상태 문구 분기만 가른다. */}
+      {/* story #4190 — 레시피 게이트 판정은 gate-risk.ts isRecipePublishGate 하나(작업 목록·오늘 v3·원탭과 공유). 두 카드 중
+          BE가 채운 하나만 그린다 — 블로그 카드가 있으면 채널 카드(빈 상태 문구 포함)는 그리지 않는다. */}
+      {isRecipePublishGate(gate) ? (
+        gate.linked_site_draft ? <LinkedSiteDraftCard gate={gate} /> : <LinkedChannelDraftCard gate={gate} isRecipeGate />
+      ) : gate.gate_type === 'external_publish' && (gate.scope_key ?? '') !== '' ? (
+        <LinkedChannelDraftCard gate={gate} isRecipeGate={false} />
+      ) : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * story #4136(FE)·#4135(BE, 미르코) — 게이트 상세 «제작 산출물» 칸. 라이브 실측(2호 게이트
+ * 1(concept_approval)·PO 세션, 2026-09-22 00:40Z)에서 지정 결재자가 아니면 이 칸에
+ * gateReadonlyDesignatedElsewhere 한 줄뿐이었다 — 컨셉 브리프 doc·컨셉 보드 artifact·게이트
+ * evidence 전부 카드 어디에도 안 보였다. 원인: 기존 productionWorkbenchSectionTitle 패널
+ * (production-workbench-evidence.tsx)은 work-item 범위 훅(useWorkItemProductionEvidence)이
+ * 0건이면 **조용히 null**을 반환한다(「없으면 비운다」 규율 — #4057 자체 설계 의도, 이 카드가
+ * 건드리지 않는다). 이 컴포넌트는 그와 별개로 **게이트 자신의** neutral_facts.draft_doc_
+ * reference_token + gate.linked_evidence[](#4135 신설, gate-scoped라 work-item 범위 오매칭
+ * 문제가 구조적으로 없다)를 직접 렌더한다 — canAct/needsAction과 무관하게 항상 그려진다
+ * (모든 열람자, 이 카드 AC1). 0건이면 명시적으로 «이 게이트에 등록된 산출물이 없어요»(거짓
+ * 참조 0 — #3937 규율 그대로, 조용한 null 금지).
+ *
+ * ⚠️CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"과 "모름"을 가른다. BE가
+ * linked_evidence 필드 자체를 아직 안 보내면(#4135 미배포·구버전 응답) "이 게이트에
+ * 산출물이 없다"를 말할 근거가 없다 — 라이브 2호 게이트 1처럼 evidence·doc·artifact가
+ * 실재하는데도 그 문장을 쓰면 거짓이 된다(#4055류와 같은 급의 "모르면 안다고 안 한다"
+ * 규율). `Array.isArray(gate.linked_evidence)`가 참일 때만(BE가 `[]`든 항목이든 "답을
+ * 한" 때만) 0건 claim 자격이 생긴다 — 배열 자체가 없고 draft_doc도 없으면 이 섹션은
+ * **아예 안 그려진다**(과거 이 칸이 없던 것과 동형, #4135 배포 순서와 무관하게 안전).
+ *
+ * shape는 미르코군과 1:1 합의(2026-09-22 01:14Z) — kanban/types.ts GateItem.linked_evidence
+ * 주석 참고. 핵심: linked_evidence[].kind는 doc/artifact 판별자가 아니라 evidence.payload.kind
+ * (예: "concept_brief") — doc/artifact 판별은 reference_token을 parseReferenceToken()으로
+ * 파싱한 entityType에서 나온다. reference_token은 nullable — null이면 "이 evidence는 확定
+ * 대상이지만 실물 참조를 아직 못 찾음"이라는 정직한 신호라 항목 자체는 유지하되(조용히 빼면
+ * "산출물이 아예 없다"로 오독) 클릭 불가한 kind 배지로만 표시한다(EntityChip이 아니라
+ * Badge — 진짜로 갈 곳이 없다).
+ *
+ * ⚠️CHANGES-2(유나 design-pass, 2026-09-22 01:56Z, PR#4511 issuecomment-5770100618) — kind는
+ * evidence.payload.kind **원문 snake_case enum**이지("concept_brief"가 사람이 읽는 한글 라벨
+ * 이라는 위 문단의 원래 설명은 유나군 정정으로 틀렸다 확認 — 그건 enum이지 라벨이 아니다),
+ * 그대로 배지에 찍으면 고객 대면 화면에 내부어가 샌다(더구나 resolved 칩은 토큰 라벨이
+ * 한글인데 unresolved 배지만 영어 enum — 같은 종류가 표기가 갈림). KIND_LABEL_KEY(아래)로
+ * t() 라벨화 — production-workbench-evidence.tsx의 KIND_TITLE_KEY와 다른 어휘(유나군이 이
+ * 화면 전용으로 명시한 5개 문구, "컨셉 브리프" 등 — 그 파일의 "컨셉" 같은 축약형이 아니다)라
+ * 새 map을 둔다. 미지 kind(#4042 서버 방어선 밖의 5종 이외)는 raw를 그대로 안 내고 중립
+ * «산출물»로 폴백(enum이 UI에 안 닿는다). 배지 형태·클릭불가·honest 의미는 그대로.
+ */
+const KIND_LABEL_KEY: Record<ProductionWorkbenchKind, string> = {
+  material_collection_sheet: 'gateLinkedEvidenceKindMaterialCollectionSheet',
+  concept_brief: 'gateLinkedEvidenceKindConceptBrief',
+  storyboard: 'gateLinkedEvidenceKindStoryboard',
+  animatic: 'gateLinkedEvidenceKindAnimatic',
+  verification_sheet: 'gateLinkedEvidenceKindVerificationSheet',
+};
+export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 문서 근거 링크는 게이트의 프로젝트(현재 p)를 싣는다
+  const t = useTranslations('cage');
+  const seen = new Set<string>();
+  const resolved: (ParsedReferenceToken & { key: string })[] = [];
+  const unresolvedKinds: { key: string; kind: string }[] = [];
+
+  // story #4136 CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"과 "모름"을 가른다.
+  // BE가 linked_evidence 필드 자체를 아직 안 보내면(#4135 미배포·구버전 응답) 이 게이트에
+  // 정말 산출물이 없는지 우리는 **모른다** — 라이브 2호 게이트 1처럼 evidence·doc·artifact가
+  // 실재하는데도 «없어요»라고 말하면 거짓이 된다. `Array.isArray`가 참일 때만(BE가 `[]`든
+  // 항목이든 "답을 한" 때만) "없어요"를 말할 자격이 생긴다 — 배열 자체가 없으면 그 claim을
+  // 아예 안 한다("모르면 안다고 안 한다" 규율, story #4055류와 동형).
+  const beAnswered = Array.isArray(gate.linked_evidence);
+  if (beAnswered) {
+    for (const ev of gate.linked_evidence!) {
+      const parsed = parseReferenceToken(ev.reference_token, flatHref);
+      if (parsed) {
+        const key = `${parsed.entityType}:${parsed.entityId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        resolved.push({ ...parsed, key });
+      } else {
+        // reference_token이 null(또는 파싱 실패) — evidence.id로 유일화(같은 kind가 여러
+        // 건일 수 있다).
+        unresolvedKinds.push({ key: `unresolved:${ev.id}`, kind: ev.kind });
+      }
+    }
+  }
+  // draft_doc_reference_token이 linked_evidence[]와 같은 doc을 가리키면(#4135 착지 前엔
+  // 흔함 — 두 필드가 아직 같은 doc을 독립적으로 채우는 과도기) 중복 칩을 안 낸다. 이 필드는
+  // linked_evidence와 무관하게 이미 있어 왔으므로(#3569) beAnswered와 상관없이 항상 본다.
+  const draftDocRef = parseReferenceToken(gate.neutral_facts?.['draft_doc_reference_token'], flatHref);
+  if (draftDocRef) {
+    const key = `${draftDocRef.entityType}:${draftDocRef.entityId}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      resolved.push({ ...draftDocRef, key });
+    }
+  }
+
+  const totalCount = resolved.length + unresolvedKinds.length;
+  // beAnswered=false + 산출물 0(draft_doc도 없음) — "없다"고 말할 근거가 없으니 섹션 자체를
+  // 생략한다(과거 이 칸이 아예 없던 것과 동형 — #4135 미배포 구간엔 이 카드가 아무 것도
+  // 지어내지 않는다). beAnswered=true(BE가 [] 포함 명시 답)거나 draft_doc이라도 있으면
+  // 렌더한다.
+  if (!beAnswered && totalCount === 0) return null;
+
+  return (
+    <div className="space-y-1.5" data-testid="gate-linked-evidence">
+      <p className="text-[11px] font-semibold text-muted-foreground">{t('gateLinkedEvidenceSectionTitle')}</p>
+      {totalCount === 0 ? (
+        <p className="text-[11.5px] italic text-muted-foreground">{t('gateLinkedEvidenceEmpty')}</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {resolved.map((item) => (
+            <EntityChip
+              key={item.key}
+              entityType={item.entityType}
+              entityId={item.entityId}
+              label={item.label}
+              href={item.href}
+            />
+          ))}
+          {unresolvedKinds.map((u) => (
+            <Badge key={u.key} variant="outline" className="shrink-0">
+              {isProductionWorkbenchKind(u.kind) ? t(KIND_LABEL_KEY[u.kind]) : t('gateLinkedEvidenceKindUnknown')}
+            </Badge>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

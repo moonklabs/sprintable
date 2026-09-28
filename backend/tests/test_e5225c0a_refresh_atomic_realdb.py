@@ -282,6 +282,192 @@ async def test_refresh_failure_logs_reason_and_correlation_key_realdb(caplog):
 
 
 @pytest.mark.anyio
+async def test_refresh_failure_401_carries_x_auth_correlation_header_matching_log_key_realdb(caplog):
+    """story #2449 CHANGES(카디르 codex 읽기 검수, 페드루 PO 채택 2026-09-16 13:28Z) —
+    BE 401 로그의 correlation_key가 BFF(route.ts) warn 로그엔 없어 두 로그를 자동으로
+    못 짝지었다. 응답 헤더 X-Auth-Correlation(token_hash[:12], 비밀값 아님 — 원본 토큰
+    복원 불가)로 얹어 BFF가 자기 로그에 그대로 반영하게 한다. 헤더값이 로그의 key=와
+    바이트-동일한지까지 실증(따로 계산해 우연히 같은 값이 나온 게 아님을 보장)."""
+    import logging
+    from app.main import app
+    from app.core.config import settings
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            first = await client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]})
+            assert first.status_code == 200
+
+            from app.core.security import hash_token
+            from app.models.user import RefreshToken
+            from sqlalchemy import update as sa_update
+            stale_at = datetime.now(timezone.utc) - timedelta(
+                seconds=settings.auth_refresh_chain_resolve_window_seconds + 1
+            )
+            async with Session() as s:
+                await s.execute(
+                    sa_update(RefreshToken)
+                    .where(RefreshToken.token_hash == hash_token(seeded["raw_refresh"]))
+                    .values(revoked_at=stale_at)
+                )
+                await s.commit()
+
+            with caplog.at_level(logging.WARNING, logger="app.routers.auth"):
+                second = await client.post(
+                    "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+                )
+                assert second.status_code == 401
+                header_key = second.headers.get("x-auth-correlation")
+                assert header_key, f"X-Auth-Correlation 헤더 누락: {dict(second.headers)}"
+                failure_records = [
+                    r for r in caplog.records
+                    if "reason=token_not_found_or_revoked_or_expired" in r.message
+                ]
+                assert failure_records
+                assert all(f"key={header_key}" in r.message for r in failure_records), (
+                    f"헤더값({header_key})이 로그의 key=와 안 맞음: {[r.message for r in failure_records]}"
+                )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_refresh_failure_logs_delta_successor_used_true_and_ua_realdb(caplog):
+    """story #2449 AC1(계측, 페드루 PO 지시 2026-09-16) — 다음 하드 401이 「동시경합
+    straggler」인지 「탭이 오래 회전된 RT를 들고 있었다」인지 자동으로 가르는 3필드 중
+    delta_since_revoke_s·successor_used·ua를 실 PG로 실증. 이 케이스는 successor_used=True
+    (RT1의 후속 RT2가 이미 실제로 또 회전돼 정상 소유 탭이 계속 정상 사용 중이었다는 뜻)."""
+    import logging
+    from app.main import app
+    from app.core.config import settings
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            r1 = await client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]})
+            assert r1.status_code == 200, r1.text
+            rt1 = r1.json()["data"]["refresh_token"]
+
+            r2 = await client.post("/api/v2/auth/refresh", json={"refresh_token": rt1})
+            assert r2.status_code == 200, r2.text
+            rt2 = r2.json()["data"]["refresh_token"]
+
+            # RT1(rt1)의 후속(RT2)이 이미 또 회전됐다 — successor_used=True가 되는 전제.
+            r3 = await client.post("/api/v2/auth/refresh", json={"refresh_token": rt2})
+            assert r3.status_code == 200, r3.text
+
+            from app.core.security import hash_token
+            from app.models.user import RefreshToken
+            from sqlalchemy import update as sa_update
+            stale_at = datetime.now(timezone.utc) - timedelta(
+                seconds=settings.auth_refresh_chain_resolve_window_seconds + 50
+            )
+            async with Session() as s:
+                await s.execute(
+                    sa_update(RefreshToken)
+                    .where(RefreshToken.token_hash == hash_token(rt1))
+                    .values(revoked_at=stale_at)
+                )
+                await s.commit()
+
+            with caplog.at_level(logging.WARNING, logger="app.routers.auth"):
+                replay = await client.post(
+                    "/api/v2/auth/refresh", json={"refresh_token": rt1},
+                    headers={"User-Agent": "story2449-test-ua/1.0"},
+                )
+                assert replay.status_code == 401
+                failure_records = [
+                    r for r in caplog.records
+                    if "reason=token_not_found_or_revoked_or_expired" in r.message
+                ]
+                assert failure_records, f"관측성 로그 누락: {[r.message for r in caplog.records]}"
+                msg = failure_records[0].message
+                assert "successor_used=True" in msg, f"successor_used 누락/오판정: {msg}"
+                assert "story2449-test-ua/1.0" in msg, f"ua 누락: {msg}"
+                import re
+                m = re.search(r"delta_since_revoke_s=([\d.]+)", msg)
+                assert m, f"delta_since_revoke_s 누락: {msg}"
+                delta = float(m.group(1))
+                # backdate한 만큼(window+50s) ± 실행 시간 여유
+                assert delta >= settings.auth_refresh_chain_resolve_window_seconds + 45, (
+                    f"delta_since_revoke_s 값이 너무 작음(backdate 미반영 의심): {delta}"
+                )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_refresh_failure_logs_successor_used_false_when_never_used_realdb(caplog):
+    """story #2449 AC1 — 후속 RT가 «아직 한 번도» 안 쓰였으면 successor_used=False. 이
+    클래스는 straggler(동시경합)와 다른 신호 — 정당한 탭이 그 후속 토큰을 아직 안 썼다는
+    뜻이라, 「오래 유휴 탭이 예전 RT를 재시도」류 가설과 더 부합한다."""
+    import logging
+    from app.main import app
+    from app.core.config import settings
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            # RT0(seeded)이 RT1로 회전 — RT1은 이후 한 번도 안 쓴다(successor_used=False 전제).
+            r1 = await client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]})
+            assert r1.status_code == 200, r1.text
+
+            from app.core.security import hash_token
+            from app.models.user import RefreshToken
+            from sqlalchemy import update as sa_update
+            stale_at = datetime.now(timezone.utc) - timedelta(
+                seconds=settings.auth_refresh_chain_resolve_window_seconds + 50
+            )
+            async with Session() as s:
+                await s.execute(
+                    sa_update(RefreshToken)
+                    .where(RefreshToken.token_hash == hash_token(seeded["raw_refresh"]))
+                    .values(revoked_at=stale_at)
+                )
+                await s.commit()
+
+            with caplog.at_level(logging.WARNING, logger="app.routers.auth"):
+                replay = await client.post(
+                    "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+                )
+                assert replay.status_code == 401
+                failure_records = [
+                    r for r in caplog.records
+                    if "reason=token_not_found_or_revoked_or_expired" in r.message
+                ]
+                assert failure_records, f"관측성 로그 누락: {[r.message for r in caplog.records]}"
+                assert "successor_used=False" in failure_records[0].message, (
+                    f"successor_used 오판정: {failure_records[0].message}"
+                )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_refresh_success_logs_rotation_old_new_key_realdb(caplog):
     """#2124(오르테가군 요청 2026-07-27): 성공 rotation에도 로그가 없어(침묵) old_key의 훗날
     하드 401과 new_key의 미사용 여부를 대조할 방법이 없었다 — old_key→new_key→user_id 로깅 실증."""

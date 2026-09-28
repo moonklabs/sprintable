@@ -4,9 +4,11 @@ const h = vi.hoisted(() => ({ csrfCheck: vi.fn() }));
 vi.mock('@/lib/auth/csrf', () => ({ verifyCsrfOrigin: h.csrfCheck }));
 
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// story #4320 — 목은 맨 객체를 돌려도 된다(asFetchResponse가 진짜 Response로 · backendFetch는 본문을 다 읽는다).
+vi.stubGlobal('fetch', stubFetch(mockFetch));
 
 import { POST } from './route';
+import { stubFetch } from '@/test-utils/as-fetch-response';
 
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/auth/firebase/session', {

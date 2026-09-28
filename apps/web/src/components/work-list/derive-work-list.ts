@@ -44,6 +44,7 @@
  */
 
 import { deriveGateState } from './work-list-detail-actions';
+import type { HypothesisStatus } from '@sprintable/core-storage';
 
 export type WorkListRowKind = 'task' | 'agent_run';
 export type WorkListRowState = 'awaiting_approval' | 'awaiting_signature' | 'awaiting_answer' | 'in_progress' | 'done' | null;
@@ -87,6 +88,10 @@ export interface WorkListStoryInput {
   title: string;
   /** BE StoryResponse.epic_id — 목표 id. */
   epic_id: string | null;
+  /** story #3976 — 스토리 카드 배지용(SSOT). BE StoryResponse.status(backlog|ready-for-dev|
+   * in-progress|in-review|done, entity-status-labels.ts STATUS_LABELS.story와 동형) —
+   * 일/실행 행의 파생 실행상태(WorkListRowState)와는 다른 축이라 섞지 않는다(PO 확定). */
+  status: string;
 }
 
 export interface WorkListTaskInput {
@@ -121,10 +126,13 @@ export interface WorkListTeamMemberInput {
   name: string | null;
 }
 
-/** GET /api/hypotheses?project_id= 원소 부분집합. */
+/** GET /api/hypotheses?project_id= 원소 부분집합. story #3989(「일감」 흡수 3/N) —
+ * 전수 가설 보기(일감 「가설」 탭)가 상태 필터에 쓰도록 status 추가(새 BE 호출 0 —
+ * 응답 본문엔 이미 있던 필드, 이 타입이 그동안 안 읽었을 뿐). */
 export interface WorkListHypothesisInput {
   id: string;
   statement: string;
+  status: HypothesisStatus;
   epic_ids: string[];
   story_ids: string[];
 }
@@ -149,6 +157,8 @@ export interface WorkListRow {
 export interface WorkListStoryGroup {
   storyId: string;
   title: string;
+  /** story #3976 — Story.status SSOT(위 WorkListStoryInput 주석 참고). */
+  status: string;
   rows: WorkListRow[];
   /** 이 스토리에 직접·상속(부모 goal 경유) 둘 다로 연결된 가설 id들(필터용). */
   hypothesisIds: string[];
@@ -271,7 +281,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
 
   function ensureStoryGroup(story: WorkListStoryInput): WorkListStoryGroup {
     let g = storyGroups.get(story.id);
-    if (!g) { g = { storyId: story.id, title: story.title, rows: [], hypothesisIds: hypothesisIdsForStory(story) }; storyGroups.set(story.id, g); }
+    if (!g) { g = { storyId: story.id, title: story.title, status: story.status, rows: [], hypothesisIds: hypothesisIdsForStory(story) }; storyGroups.set(story.id, g); }
     return g;
   }
 

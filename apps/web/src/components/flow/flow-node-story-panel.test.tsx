@@ -13,12 +13,22 @@ import { FlowNodeStoryPanel } from './flow-node-story-panel';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 import koMessages from '../../../messages/ko.json';
 
+// [SID:4300] 프로젝트 문맥 — 흐름 화면은 늘 프로젝트 안이라 실제로는 projectId가 있다. 기본은 비워 두고(보드처럼 조직 범위
+// 주소) 필요한 테스트만 채운다. orgId는 비워 둔다(도메인 라벨 요청이 주소 목록에 끼지 않게).
+const dashCtx = vi.hoisted(() => ({ value: {} as { projectId?: string; orgId?: string } }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => dashCtx.value }));
+
 vi.mock('@/components/kanban/story-detail-panel', () => ({
-  StoryDetailPanel: ({ story, onClose, onDeleteSuccess, overlayPosition }: {
+  StoryDetailPanel: ({ story, onClose, onDeleteSuccess, overlayPosition, members, memberMap }: {
     story: { id: string; title: string }; onClose: () => void;
     onDeleteSuccess?: (id: string) => void; overlayPosition?: { top: number; heightPx: number };
+    members?: Array<{ id: string }>; memberMap?: Record<string, { name: string | null }>;
   }) => (
-    <div data-testid="story-detail-panel-stub" data-mode={overlayPosition ? 'overlay' : 'fullscreen'}>
+    <div
+      data-testid="story-detail-panel-stub" data-mode={overlayPosition ? 'overlay' : 'fullscreen'}
+      data-members={(members ?? []).map((m) => m.id).join(',')}
+      data-member-map={Object.entries(memberMap ?? {}).map(([id, m]) => `${id}=${m.name}`).sort().join(',')}
+    >
       <span data-testid="stub-title">{story.title}</span>
       {overlayPosition ? (
         <>
@@ -57,6 +67,9 @@ function stubFetch(calledUrls: string[], candidates: unknown[] = []) {
     }
     if (url.startsWith('/api/tasks?')) {
       return { ok: true, json: async () => ({ data: [{ id: 't1', title: 'Task', status: 'backlog' }] }) };
+    }
+    if (url === '/api/members' || url.startsWith('/api/members?')) {
+      return { ok: true, json: async () => ({ data: [{ id: 'om-1', name: '민', type: 'human' }, { id: 'ag-1', name: '봇', type: 'agent' }] }) };
     }
     return { ok: false, json: async () => null };
   }));
@@ -108,6 +121,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => { root.unmount(); });
+  dashCtx.value = {};
   container.remove();
   document.querySelectorAll('[data-node-id]').forEach((el) => el.remove());
   vi.unstubAllGlobals();
@@ -128,12 +142,54 @@ describe('FlowNodeStoryPanel — 자립 fetch (story #2354 AC8, 새 BE 0)', () =
     expect(calledUrls.some((u) => u.startsWith('/api/tasks?story_id=story-abc'))).toBe(true);
     // story #2358 후속 — 미확認 후보 건수를 위한 reference-candidates 호출이 하나 더 붙는다
     // (#2354의 "새 BE 0" 계약은 story/tasks 두 엔드포인트에 대한 것이지, 이 파일 전체가
-    // 영구히 2콜 고정이라는 뜻은 아니다). 정확히 이 3개만 있고 다른 건 없음을 잰다.
+    // 영구히 2콜 고정이라는 뜻은 아니다). 정확히 이 4개만 있고 다른 건 없음을 잰다.
+    // [SID:4300] 구성원 목록 하나 더 — 보드와 같은 `/api/members`(프로젝트 문맥 없으면 조직 범위). 새 BE 0.
     expect(calledUrls.sort()).toEqual([
+      '/api/members',
       '/api/stories/story-abc',
       '/api/stories/story-abc/reference-candidates',
       '/api/tasks?story_id=story-abc&limit=20',
     ]);
+    expect(container.querySelector('[data-testid="stub-title"]')?.textContent).toBe('앵커 시험 스토리');
+  });
+});
+
+// [SID:4300] 예전엔 이 패널만 StoryDetailPanel에 members · memberMap을 안 넘겨, 보드로 열면 이름이 나오는 스토리가 흐름 그래프로
+// 열면 «알 수 없는 구성원»이었고 담당자 고르는 목록도 비었다. 보드와 같은 `/api/members?project_id=` 목록을 같은 묶음에서 받아
+// 두 렌더 분기(데스크톱 겹침 · 모바일 전체화면) 모두 넘기는지 잰다.
+describe('FlowNodeStoryPanel — 구성원 목록을 넘긴다([SID:4300])', () => {
+  it.each([['데스크톱 겹침', 1280, 'overlay'], ['모바일 전체화면', 390, 'fullscreen']] as const)('%s — members · memberMap 둘 다', async (_n, width, mode) => {
+    dashCtx.value = { projectId: 'proj-1' };
+    setViewportWidth(width);
+    const calledUrls: string[] = [];
+    stubFetch(calledUrls);
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(calledUrls).toContain('/api/members?project_id=proj-1');
+    const stub = container.querySelector('[data-testid="story-detail-panel-stub"]');
+    expect(stub?.getAttribute('data-mode')).toBe(mode);
+    expect(stub?.getAttribute('data-members')).toBe('om-1,ag-1');
+    expect(stub?.getAttribute('data-member-map')).toBe('ag-1=봇,om-1=민');
+  });
+
+  it('구성원 목록이 실패해도 패널은 뜬다(빈 목록 — 이름은 패널이 조직 범위로 채움)', async () => {
+    dashCtx.value = { projectId: 'proj-1' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/members')) return { ok: false, json: async () => null };
+      if (url.endsWith('/reference-candidates')) return { ok: true, json: async () => [] };
+      if (url.startsWith('/api/stories/')) return { ok: true, json: async () => ({ data: { id: 'story-abc', title: '앵커 시험 스토리', status: 'backlog' } }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const stub = container.querySelector('[data-testid="story-detail-panel-stub"]');
+    expect(stub?.getAttribute('data-members')).toBe('');
     expect(container.querySelector('[data-testid="stub-title"]')?.textContent).toBe('앵커 시험 스토리');
   });
 });

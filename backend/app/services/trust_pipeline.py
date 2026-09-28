@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models.dependency import ItemDependency
+from app.models.evidence import Evidence
 from app.models.gate import Gate
 from app.models.pm import Story
 from app.models.pull_request_story_link import PullRequestStoryLink
@@ -74,6 +75,58 @@ def derive_exception_signals(facts: TrustFacts) -> dict[str, bool]:
     }
 
 
+# story #4299 — 신호별 조건(story id 매칭 제외)을 한 곳에: 아래 batch_*(id IN 목록)와 목록 한 문장(`story_list_facts`, id = 행마다)이
+# 같은 조건을 쓴다. 조건을 두 군데 적으면 두 판정이 갈린다(#3336 드리프트와 같은 부류).
+def pending_human_gate_filter(org_id: uuid.UUID) -> tuple:
+    return (
+        Gate.org_id == org_id,
+        Gate.work_item_type == "story",
+        Gate.status == "pending",
+        Gate.requires_human.is_(True),
+    )
+
+
+def verify_fail_filter(org_id: uuid.UUID) -> tuple:
+    return (
+        Gate.org_id == org_id,
+        Gate.work_item_type == "story",
+        Gate.gate_type == "merge",
+        Gate.evidence_status == "blocked",
+    )
+
+
+def unresolved_blocker_select(org_id: uuid.UUID):
+    """막힌 story(to_id)를 내는 SELECT — 호출부가 `ItemDependency.to_id` 매칭을 더한다."""
+    blocker = aliased(Story)
+    return (
+        select(ItemDependency.to_id)
+        .select_from(ItemDependency)
+        .join(blocker, blocker.id == ItemDependency.from_id)
+        .where(
+            ItemDependency.org_id == org_id,
+            ItemDependency.dep_type == "blocks",
+            ItemDependency.item_type == "story",
+            blocker.status != "done",
+            blocker.deleted_at.is_(None),
+        )
+    )
+
+
+def confident_pr_link_filter(org_id: uuid.UUID) -> tuple:
+    """scope_violation을 볼 PR 링크 — confident(should_auto_close와 같은 신뢰 등급) · 살아 있는 것."""
+    return (
+        PullRequestStoryLink.org_id == org_id,
+        PullRequestStoryLink.deleted_at.is_(None),
+        or_(
+            PullRequestStoryLink.link_source == "explicit",
+            and_(
+                PullRequestStoryLink.link_source.in_(("auto_match", "sid")),
+                PullRequestStoryLink.confidence == "high",
+            ),
+        ),
+    )
+
+
 async def batch_pending_human_gate(
     session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID]
 ) -> set[uuid.UUID]:
@@ -81,13 +134,7 @@ async def batch_pending_human_gate(
     if not story_ids:
         return set()
     result = await session.execute(
-        select(Gate.work_item_id).where(
-            Gate.org_id == org_id,
-            Gate.work_item_type == "story",
-            Gate.work_item_id.in_(story_ids),
-            Gate.status == "pending",
-            Gate.requires_human.is_(True),
-        )
+        select(Gate.work_item_id).where(*pending_human_gate_filter(org_id), Gate.work_item_id.in_(story_ids))
     )
     return set(result.scalars().all())
 
@@ -101,13 +148,7 @@ async def batch_verify_fail(
     if not story_ids:
         return set()
     result = await session.execute(
-        select(Gate.work_item_id).where(
-            Gate.org_id == org_id,
-            Gate.work_item_type == "story",
-            Gate.work_item_id.in_(story_ids),
-            Gate.gate_type == "merge",
-            Gate.evidence_status == "blocked",
-        )
+        select(Gate.work_item_id).where(*verify_fail_filter(org_id), Gate.work_item_id.in_(story_ids))
     )
     return set(result.scalars().all())
 
@@ -118,20 +159,7 @@ async def batch_unresolved_blocker(
     """blocked 신호원 — glance.py 기존 blocked 판정과 동형(막는 쪽도 미완인 미해소 blocks-dep)."""
     if not story_ids:
         return set()
-    blocker = aliased(Story)
-    result = await session.execute(
-        select(ItemDependency.to_id)
-        .select_from(ItemDependency)
-        .join(blocker, blocker.id == ItemDependency.from_id)
-        .where(
-            ItemDependency.org_id == org_id,
-            ItemDependency.dep_type == "blocks",
-            ItemDependency.item_type == "story",
-            ItemDependency.to_id.in_(story_ids),
-            blocker.status != "done",
-            blocker.deleted_at.is_(None),
-        )
-    )
+    result = await session.execute(unresolved_blocker_select(org_id).where(ItemDependency.to_id.in_(story_ids)))
     return set(result.scalars().all())
 
 
@@ -146,19 +174,8 @@ async def batch_scope_violation(
     latest = (
         select(PullRequestStoryLink.story_id, PullRequestStoryLink.evidence)
         .distinct(PullRequestStoryLink.story_id)
-        .where(
-            PullRequestStoryLink.org_id == org_id,
-            PullRequestStoryLink.story_id.in_(story_ids),
-            PullRequestStoryLink.deleted_at.is_(None),
-            or_(
-                PullRequestStoryLink.link_source == "explicit",
-                and_(
-                    PullRequestStoryLink.link_source.in_(("auto_match", "sid")),
-                    PullRequestStoryLink.confidence == "high",
-                ),
-            ),
-        )
-        .order_by(PullRequestStoryLink.story_id, PullRequestStoryLink.updated_at.desc())
+        .where(*confident_pr_link_filter(org_id), PullRequestStoryLink.story_id.in_(story_ids))
+        .order_by(PullRequestStoryLink.story_id, PullRequestStoryLink.updated_at.desc(), PullRequestStoryLink.id.desc())
         .subquery()
     )
     result = await session.execute(
@@ -170,7 +187,8 @@ async def batch_scope_violation(
 
 
 async def batch_trust_facts(
-    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID]
+    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
+    *, loaded: list[Story] | None = None, verified_map: dict[uuid.UUID, Evidence] | None = None,
 ) -> dict[uuid.UUID, TrustFacts]:
     """N개 story의 현재 trust facts를 실시간 파생(신규 쓰기 0 — 순수 조회, 고정 6쿼리 — story
     수와 무관). story #2933 H1 — `GET /stories`(보드 주경로, 최대 limit=2000)에 story별 루프로
@@ -178,17 +196,27 @@ async def batch_trust_facts(
     포함) org가 다른 story_id는 반환 dict에서 조용히 빠진다(그 자리는 呼출부가 None 취급)."""
     if not story_ids:
         return {}
-    rows = (
-        await session.execute(
-            select(Story.id, Story.status, Story.project_id).where(
-                Story.id.in_(story_ids), Story.org_id == org_id, Story.deleted_at.is_(None)
+    if loaded is not None:
+        # story #4299: 호출부가 이미 읽은 Story 행을 넘기면 같은 조건(org · 삭제 안 됨)을 여기서 걸러 쓴다 — stories 재조회 0.
+        wanted = set(story_ids)
+        rows = [
+            (s.id, s.status, s.project_id) for s in loaded
+            if s.id in wanted and s.org_id == org_id and s.deleted_at is None
+        ]
+    else:
+        rows = (
+            await session.execute(
+                select(Story.id, Story.status, Story.project_id).where(
+                    Story.id.in_(story_ids), Story.org_id == org_id, Story.deleted_at.is_(None)
+                )
             )
-        )
-    ).all()
+        ).all()
     if not rows:
         return {}
     found_ids = [row[0] for row in rows]
-    verified_map = await batch_human_verified(session, found_ids, "story")
+    if verified_map is None:
+        # story #4299: 같은 story 집합의 gate_approval evidence를 이미 읽었으면(`_attach_has_evidence`) 그 맵을 받아 쓴다.
+        verified_map = await batch_human_verified(session, found_ids, "story")
     pending_gate_ids = await batch_pending_human_gate(session, org_id, found_ids)
     verify_fail_ids = await batch_verify_fail(session, org_id, found_ids)
     blocker_ids = await batch_unresolved_blocker(session, org_id, found_ids)

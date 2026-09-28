@@ -99,7 +99,11 @@ export interface StoryListFilters extends PaginationOptions {
   status?: string;
   project_id?: string;
   q?: string;
+  /** 담당자 없는 story만(BE `no_assignee` — story_assignees 행 0 · assignee_id 비어 있음). story #4329 전엔 BE로 안 넘어가
+   * 조용히 버려졌다. `epic_unassigned`(에픽 없음)와 다른 축. */
   unassigned?: boolean;
+  /** story #4329 — 우선순위 일치(BE `priority`: critical · high · medium · low). */
+  priority?: string;
   /** story #2534(E-FLOW-V4 S4) — 가설/목표 둘 다 미매달림(BE #2532 stories.py:137
    * `unattached` 쿼리와 동형). `unassigned`(담당자 미배정)와 다른 축이라 별도 필드. */
   unattached?: boolean;

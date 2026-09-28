@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.event_definition_registry import SERVER_DERIVED_TARGETS
@@ -151,44 +151,232 @@ async def _resolve_none(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -
 async def _resolve_work_item_project_id(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
 ) -> uuid.UUID | None:
-    """story #3288 — recipe_role_binding이 project 스코프 바인딩을 찾으려면 work_item의
-    project_id가 필요하다. _resolve_work_item_stakeholders와 동일 타입 분기(중복이지만 그
-    함수는 담당자 id를, 이건 project_id를 뽑아 반환 shape이 달라 별도 함수로 유지 — 이후
-    공통화는 후속 리팩터, 이 스토리 스코프 밖)."""
+    """story #3288 — recipe_role_binding이 project 스코프 바인딩을 찾으려면 work_item의 project_id가 필요하다.
+
+    story #4249(까디르 4623 델타 codex · PO 12:54Z) — 작업 항목 → 프로젝트의 **한 원천**. 예전엔 이 함수(story · task · goal ·
+    epic)와 발행 코어가 대화방 프로젝트를 푸는 `gate_service.resolve_work_item_project_id`(story · task · epic · doc ·
+    visual_artifact · loop · hypothesis · sprint)가 따로 있어, «누가 이 stage인가(바인딩 · 완료 검증)»와 «어디서 발행되는가»가
+    종류에 따라 다른 프로젝트를 읽었다. 이 함수의 task 갈래는 Task에 없는 `project_id` 칼럼을 골라 500이었다(Task는 story를
+    거친다). 이제 이 함수가 그 함수에 위임하고 goal만 덧붙인다 — 완료 · 후보 판정(`work_item_project`) · 수신자 · 대화방
+    (events.py `_resolve_event_project_id`)이 모두 이 함수를 읽는다."""
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
     if not work_item_type or not work_item_id_raw:
         return None
     work_item_id = _parse_uuid(work_item_id_raw, field_name="work_item_id")
 
-    if work_item_type == "story":
-        from app.models.pm import Story
-
-        return (await db.execute(
-            select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id)
-        )).scalar_one_or_none()
-    if work_item_type == "task":
-        from app.models.pm import Task
-
-        return (await db.execute(
-            select(Task.project_id).where(Task.id == work_item_id, Task.org_id == org_id)
-        )).scalar_one_or_none()
-    if work_item_type in ("goal", "epic"):
+    if work_item_type == "goal":
         from app.models.pm import Goal
 
         return (await db.execute(
             select(Goal.project_id).where(Goal.id == work_item_id, Goal.org_id == org_id)
         )).scalar_one_or_none()
+    from app.services.gate_service import resolve_work_item_project_id
 
-    logger.warning(
-        "event_routing_resolver: unsupported work_item_type=%s for recipe_role_binding project lookup",
-        work_item_type,
+    project_id = await resolve_work_item_project_id(db, org_id, work_item_type, work_item_id)
+    if project_id is None:
+        logger.warning(
+            "event_routing_resolver: work_item_type=%s id=%s did not resolve to a project", work_item_type, work_item_id,
+        )
+    return project_id
+
+
+async def resolve_broad_crew_member_ids(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None,
+) -> set[uuid.UUID]:
+    """story #4147(페드루 PO 確定 2026-09-22) — `events.py::_resolve_crew_scoped_recipe_
+    binding`(#4132 CHANGES-1)의 3번 판정("이 project(+org 전역)에 적용된 모든 event_
+    definition_key에 걸쳐 agent_member_id로 묶인 «넓은 crew» 집합")을 그 함수에서 뽑아
+    여기로 옮긴 것 — 새 판정 로직 0, SQL 그대로 이동(추출 직후 events.py 쪽 실측: 기존
+    test_4110_generation_connector_read_realdb.py·test_4132_channel_connection_status_
+    realdb.py 전부 그린 유지). channel_posts.py(#4147, draft 미디어 업로드 참여 판정)가
+    두 번째 소비자가 되면서 events.py 라우터 안에 갇혀 있던 걸 서비스 계층(다른 라우터도
+    import 가능한 자리)으로 끌어냈다."""
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    binding_rows = (await db.execute(
+        select(RecipeRoleBinding.event_definition_key).where(
+            RecipeRoleBinding.org_id == org_id,
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).all()
+    applied_keys = sorted({k for (k,) in binding_rows})
+    if not applied_keys:
+        return set()
+
+    return set((await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.event_definition_key.in_(applied_keys),
+            RecipeRoleBinding.agent_member_id.is_not(None),
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).scalars().all())
+
+
+async def _bound_member_for_stage(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition_key: str, stage: str,
+) -> uuid.UUID | None:
+    """그 stage에 바인딩된 멤버(`agent_member_id` 열 — 에이전트·사람 종류 무관) — project 스코프 바인딩 우선, 없으면 org
+    전역(story #3288 규칙 그대로)."""
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    if project_id is not None:
+        agent_id = (await db.execute(
+            select(RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id == project_id,
+                RecipeRoleBinding.event_definition_key == definition_key,
+                RecipeRoleBinding.stage == stage,
+            )
+        )).scalar_one_or_none()
+        if agent_id is not None:
+            return agent_id
+    return (await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.project_id.is_(None),
+            RecipeRoleBinding.event_definition_key == definition_key,
+            RecipeRoleBinding.stage == stage,
+        )
+    )).scalar_one_or_none()
+
+
+async def recipe_crew_member_ids(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition_key: str,
+) -> set[uuid.UUID]:
+    """story #4110 — 같은 적용(org · [project 특이 ∪ org 전역] · 정의)의 crew: `agent_member_id`가 채워진 바인딩 행 전부.
+    연산 커넥터 stage(`live_generation`)의 수신자 폴백이자, story #4251 발행 검증에서 그 stage를 crew가 스스로 내는 허용 범위다
+    (PO 4251 Q3 — 규칙 한 원천)."""
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    # ⛔`.in_([project_id, None])`은 SQL `IN (val, NULL)`로 컴파일되는데 `col = NULL`은
+    # 항상 UNKNOWN이라 project_id가 NULL인(org 전역) 행을 못 잡는다(`?`/`!=` NULL 함정과
+    # 같은 클래스) — `or_(... == project_id, ... .is_(None))`로 명시.
+    project_filter = (
+        or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None))
+        if project_id is not None else RecipeRoleBinding.project_id.is_(None)
     )
-    return None
+    crew_ids = (await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.event_definition_key == definition_key,
+            RecipeRoleBinding.agent_member_id.is_not(None),
+            project_filter,
+        )
+    )).scalars().all()
+    return set(crew_ids)
+
+
+async def _stage_approval_is_elsewhere(
+    db: AsyncSession, *, org_id: uuid.UUID, definition_key: str, stage: str,
+) -> bool:
+    """story #4243 — stage가 `approval.surface`를 선언했고 그 stage의 멤버 종류가 에이전트가 아닌가. FE `stageApprovalSurface`
+    (recipe-role-slots.ts · `stageMemberKind() !== 'agent'`)와 같은 규칙이다(까디르 4606 델타 P2): 채널 연결 · 연산 커넥터
+    stage는 멤버 종류가 없어(null) 에이전트가 아니고, 선언 없는 역할은 에이전트다."""
+    from app.models.event_definition import EventDefinition
+
+    definition = (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key == definition_key,
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+        .order_by(EventDefinition.org_id.is_(None))
+        .limit(1)
+    )).scalar_one_or_none()
+    if definition is None:
+        return False
+    meta = (definition.stage_metadata or {}).get(stage) or {}
+    if not isinstance(meta, dict) or not (meta.get("approval") or {}).get("surface"):
+        return False
+    if (meta.get("capability") or {}).get("target") in ("channel_connection", "generation_connector"):
+        return True
+    kinds = definition.role_actor_kinds if isinstance(definition.role_actor_kinds, dict) else {}
+    return (kinds.get(meta.get("role")) or "agent") != "agent"
+
+
+async def _context_trigger_gate(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID | None, context: dict | None,
+):
+    """story #4255(까디르 P1) — 서버가 이벤트 문맥으로 실어 보낸 «이 발행을 촉발한 게이트». 없거나, 다른 조직이거나, 이 이벤트의
+    작업 항목이 아니면 None(PO 10:15Z — 엉뚱한 id가 실려 와도 다른 항목의 승인자에게 새지 않게)."""
+    from app.models.gate import Gate
+
+    raw = (context or {}).get("trigger_gate_id")
+    if not raw:
+        return None
+    try:
+        gate = await db.get(Gate, uuid.UUID(str(raw)))
+    except (TypeError, ValueError):
+        return None
+    if gate is None or gate.org_id != org_id or gate.work_item_id != work_item_id:
+        if gate is not None:
+            logger.warning("recipe_role_binding: trigger gate %s does not belong to this event's work item — ignored", gate.id)
+        return None
+    return gate
+
+
+async def _last_server_stage_recipients(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition, stage: str, payload: dict,
+    context: dict | None = None,
+) -> set[uuid.UUID]:
+    """story #4255 — 마지막 단계가 서버 stage(채널 연결 발행)면 받을 «다음 단계 담당»이 없다. 수신자(PO 확정 규칙):
+    ① 그 발행을 촉발한 게이트를 **실제로 승인한 사람**(게이트 행 resolver · 없으면 지정 승인자) ∪ ② 직전 stage에 바인딩된
+    **에이전트**. 촉발 게이트는 직전 stage가 연 이 레시피의 게이트다(`neutral_facts.stage` · `triggered_by_event` — 게이트
+    생성 훅이 싣는 사실 그대로 · 추측 없음). 마케팅 적용 창은 사람 승인 stage를 바인딩하지 않으므로 ①이 실사용의
+    수신자다(4177 체인 실측). 둘 다 없으면 0 + 경고(«모르면 안 준다»)."""
+    from app.models.gate import Gate
+    from app.models.team import TeamMember
+    from app.routers.events import _previous_recipe_stage
+
+    previous_stage = _previous_recipe_stage(definition, stage)
+    recipients: set[uuid.UUID] = set()
+    try:
+        work_item_id = uuid.UUID(str(payload.get("work_item_id")))
+    except (TypeError, ValueError):
+        work_item_id = None
+    trigger_gate = await _context_trigger_gate(db, org_id=org_id, work_item_id=work_item_id, context=context)
+    if previous_stage is not None and work_item_id is not None:
+        gate = trigger_gate or (await db.execute(
+            select(Gate).where(
+                Gate.org_id == org_id,
+                Gate.work_item_id == work_item_id,
+                Gate.work_item_type == payload.get("work_item_type"),
+                Gate.status == "approved",
+                Gate.neutral_facts["stage"].astext == previous_stage,
+                Gate.neutral_facts["triggered_by_event"].astext == definition.key,
+            )
+            .order_by(Gate.resolved_at.desc().nulls_last()).limit(1)
+        )).scalars().first()
+        if trigger_gate is None and gate is not None:
+            # 촉발 게이트 id가 실려 오지 않은 옛 경로 — 그 시점 최신 승인 게이트로 폴백한다(같은 작업 항목의 다음 회차가 그 사이
+            # 승인되면 틀릴 수 있어 경고를 남긴다 · 까디르 P1).
+            logger.warning(
+                "recipe_role_binding: last channel stage %r without trigger gate id — falling back to the latest approved gate %s "
+                "(definition=%s)", stage, gate.id, definition.key,
+            )
+        approver = (gate.resolver_id or gate.designated_approver_id) if gate is not None else None
+        if approver is not None:
+            recipients.add(approver)
+        bound = await _bound_member_for_stage(
+            db, org_id=org_id, project_id=project_id, definition_key=definition.key, stage=previous_stage,
+        )
+        if bound is not None and (await db.execute(
+            select(TeamMember.id).where(TeamMember.id == bound, TeamMember.org_id == org_id, TeamMember.type == "agent")
+        )).first() is not None:
+            recipients.add(bound)
+    if not recipients:
+        logger.warning(
+            "recipe_role_binding: last channel stage %r has no approved trigger gate on %r and no bound agent — 0 recipients (definition=%s)",
+            stage, previous_stage, definition.key,
+        )
+    return recipients
 
 
 async def _resolve_recipe_role_binding(
-    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str,
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str, context: dict | None = None,
 ) -> set[uuid.UUID]:
     """story #3288(축2-ⓐ) — stage_metadata.role은 표시 텍스트뿐이라, 발행 시점에 "이 stage는
     실제로 누구인가"를 recipe_role_bindings에서 조회한다. project 스코프 바인딩이 org 전역
@@ -201,39 +389,112 @@ async def _resolve_recipe_role_binding(
     if not stage:
         return set()
 
-    from app.models.recipe_role_binding import RecipeRoleBinding
-
     project_id = await _resolve_work_item_project_id(db, org_id=org_id, payload=payload)
+    if await _stage_approval_is_elsewhere(db, org_id=org_id, definition_key=definition_key, stage=stage):
+        # story #4243(까디르 4606 렌즈 · PO ⓑ) — 승인이 stage 밖(approval.surface)인 사람 · either 역할 stage는 고를 담당이
+        # 없는 읽기 전용 자리다. 적용 창이 이제 그 stage를 싣지 않지만, 예전에 적용한 조직엔 옛 바인딩 행이 남아 있다(적용 API는
+        # 빠진 stage를 지우지 않는다). 그 행을 수신자로 잡으면 옛 사람(바뀌었으면 엉뚱한 사람)에게 간다 — 해소에서 뺀다.
+        # 승인 쪽 이음매는 그 게이트의 결재 카드다.
+        return set()
 
-    if project_id is not None:
-        agent_id = (await db.execute(
-            select(RecipeRoleBinding.agent_member_id).where(
-                RecipeRoleBinding.org_id == org_id,
-                RecipeRoleBinding.project_id == project_id,
-                RecipeRoleBinding.event_definition_key == definition_key,
-                RecipeRoleBinding.stage == stage,
-            )
-        )).scalar_one_or_none()
-        if agent_id is not None:
-            return {agent_id}
+    # story #4110(#4109 PO 결정, 2026-09-21) — generation_connector-target stage(예:
+    # live_generation)는 agent_member_id가 원천적으로 없다(그 stage의 바인딩 행은
+    # generation_connector_id로 채워짐, #4101 XOR). 그 stage에 **한해서만**(다른 미배정
+    # agent-target stage까지 번지면 위 PO 확定 「모르면 안 준다」 원칙과 충돌) "같은
+    # 적용(org·[project 특이 ∪ org 전역]·event_definition_key)의 crew"(agent_member_id가
+    # 채워진 모든 행의 집합)로 폴백한다 — 리허설 1호에서 댄이 live_generation을 스스로
+    # 발행하고 이어간 형상을 제품이 명시적으로 지지하는 것.
+    from app.models.event_definition import EventDefinition
 
-    agent_id = (await db.execute(
-        select(RecipeRoleBinding.agent_member_id).where(
-            RecipeRoleBinding.org_id == org_id,
-            RecipeRoleBinding.project_id.is_(None),
-            RecipeRoleBinding.event_definition_key == definition_key,
-            RecipeRoleBinding.stage == stage,
+    definition = (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key == definition_key,
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
         )
+        # org 커스텀이 프리셋보다 우선 — events.py::get_recipe_start_candidates/
+        # apply_recipe_role_bindings와 동일 우선순위(중복 정의 시나리오 대비).
+        .order_by(EventDefinition.org_id.is_(None))
+        .limit(1)
     )).scalar_one_or_none()
-    return {agent_id} if agent_id is not None else set()
+    capability = (
+        ((definition.stage_metadata or {}).get(stage) or {}).get("capability") or {} if definition is not None else {}
+    )
+    # story #4255(까디르 P2) — stage의 방식(capability.target)이 먼저 정한다. 채널 연결 stage의 바인딩은 채널 연결 행이어야
+    # 하고, 0387 전에 남은 옛 **에이전트** 바인딩 행(dev 실측: 조직 1 · 영상 published)이 있어도 해소에 쓰지 않는다(4606 ⓑ
+    # «종류가 안 맞는 바인딩은 해소에서 뺀다»와 같은 원칙 · 데이터는 지우지 않는다) — 안 그러면 아래 4242 · 4255 규칙이 통째로
+    # 건너뛰어진다.
+    if capability.get("target") != "channel_connection":
+        member_id = await _bound_member_for_stage(
+            db, org_id=org_id, project_id=project_id, definition_key=definition_key, stage=stage,
+        )
+        if member_id is not None:
+            return {member_id}
+    if definition is None:
+        return set()
+    if capability.get("target") == "channel_connection":
+        # story #4242 — 채널 연결 stage(뉴스레터 «캠페인 생성» 등)는 서버가 대신 수행하는 자리라 바인딩된 멤버가 원래
+        # 없다(그 stage의 바인딩 행은 channel_connection_id). 그 이벤트는 **다음 stage에 바인딩된 멤버**(에이전트·사람 종류
+        # 무관 — 명시적 바인딩은 «아는» 경우)가 받는다. 그래야 다음 할 일(발행 예시 · 봉인 필드)이 도달한다. 예전엔 수신자
+        # 0이라 흐름이 거기서 멈췄다. 다음 stage가 없으면(마지막 stage) 0 그대로. 다음 stage에 바인딩된 멤버가 없거나 그
+        # stage가 또 다른 서버 stage(채널 연결 · 연산 커넥터)면 **건너뛰지 않고** 0 + 경고(PO 2026-09-24 — 흐름을 조용히
+        # 건너뛰게 두지 않는다 · 「모르면 안 준다」).
+        from app.routers.events import _next_recipe_stage
+
+        next_stage = _next_recipe_stage(definition, stage)
+        if next_stage is None:
+            return await _last_server_stage_recipients(
+                db, org_id=org_id, project_id=project_id, definition=definition, stage=stage, payload=payload,
+                context=context,
+            )
+        next_capability = (definition.stage_metadata.get(next_stage) or {}).get("capability") or {}
+        next_member = None
+        if next_capability.get("target") in (None, "agent"):
+            next_member = await _bound_member_for_stage(
+                db, org_id=org_id, project_id=project_id, definition_key=definition_key, stage=next_stage,
+            )
+        if next_member is None:
+            logger.warning(
+                "recipe_role_binding: channel stage %r -> next stage %r has no bound member — 0 recipients (definition=%s)",
+                stage, next_stage, definition_key,
+            )
+            return set()
+        return {next_member}
+    if capability.get("target") != "generation_connector":
+        return set()
+
+    return await recipe_crew_member_ids(db, org_id=org_id, project_id=project_id, definition_key=definition_key)
 
 
 # SERVER_DERIVED_TARGETS(event_definition_registry.py) 전체를 커버해야 한다 — 모듈 로드
 # 시점에 어긋나면 즉시 ImportError로 드러나게(운영 중 조용한 미해석 대신).
+async def _resolve_recipe_publish_failure(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> set[uuid.UUID]:
+    """story #4258 — 레시피 비동기 발행이 멈춘(dead_letter · blocked) 명령의 통지 수신자: 그 발행을 연 게이트를 실제로
+    승인한 사람 ∪ 요청 stage에 바인딩된 에이전트(`recipe_publish_failure` 한 곳이 해소 — 이벤트를 낸 쪽과 같은 답)."""
+    from app.models.publication_command import PublicationCommand
+    from app.services.recipe_publish_failure import (
+        recipe_publish_failure_recipients,
+        resolve_recipe_publish_failure_context,
+    )
+
+    command_id_raw = payload.get("command_id")
+    if not command_id_raw:
+        return set()
+    command = await db.get(PublicationCommand, _parse_uuid(command_id_raw, field_name="command_id"))
+    if command is None or command.org_id != org_id:
+        return set()
+    ctx = await resolve_recipe_publish_failure_context(db, command)
+    if ctx is None:
+        return set()
+    return await recipe_publish_failure_recipients(db, org_id=org_id, ctx=ctx)
+
+
 _SERVER_DERIVED_RESOLVERS = {
     "none": _resolve_none,
     "work_item_stakeholders": _resolve_work_item_stakeholders,
     "goal_owner": _resolve_goal_owner,
+    "recipe_publish_failure": _resolve_recipe_publish_failure,
 }
 assert set(_SERVER_DERIVED_RESOLVERS) == set(SERVER_DERIVED_TARGETS), (
     "event_routing_resolver의 server_derived resolver 어휘가 "
@@ -243,7 +504,7 @@ assert set(_SERVER_DERIVED_RESOLVERS) == set(SERVER_DERIVED_TARGETS), (
 
 async def resolve_routing_leg(
     leg: dict, *, payload: dict, org_id: uuid.UUID, db: AsyncSession,
-    definition_key: str | None = None,
+    definition_key: str | None = None, context: dict | None = None,
 ) -> set[uuid.UUID]:
     """routing.escalation 또는 routing.broadcast 한 leg를 실제 member_id 집합으로. leg는
     이미 validate_event_routing()을 통과한 정의에서 온 것을 전제(등록 시점 계약 검증 완료 —
@@ -255,7 +516,7 @@ async def resolve_routing_leg(
         if not definition_key:
             raise ValueError("recipe_role_binding 해석에는 definition_key가 필요합니다.")
         return await _resolve_recipe_role_binding(
-            db, org_id=org_id, payload=payload, definition_key=definition_key,
+            db, org_id=org_id, payload=payload, definition_key=definition_key, context=context,
         )
 
     if leg["kind"] == "payload_field":

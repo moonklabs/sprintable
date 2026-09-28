@@ -63,7 +63,7 @@ async def list_api_key_usage(session: AsyncSession, api_key_id: uuid.UUID, *, li
     result = await session.execute(
         select(AgentApiKeyUsageLog)
         .where(AgentApiKeyUsageLog.api_key_id == api_key_id)
-        .order_by(AgentApiKeyUsageLog.occurred_at.desc())
+        .order_by(AgentApiKeyUsageLog.occurred_at.desc(), AgentApiKeyUsageLog.id.desc())
         .limit(limit)
     )
     return list(result.scalars().all())

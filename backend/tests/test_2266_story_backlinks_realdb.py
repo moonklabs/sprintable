@@ -393,10 +393,14 @@ async def test_story_backlinks_zero_result_still_carries_collection_scope():
             assert body["data"] == []
             scope = body["meta"]["collection_scope"]
             # story #2267(C-9): meeting·story가 창조-출처(relation='created_from') source로 추가됨.
-            assert scope["source_types"] == ["chat_message", "doc", "meeting", "story"]
+            # story #4141(페드루 PO 確定 2026-09-22) — evidence·artifact가 entity_references
+            # write-path에 온보딩되면서 더 이상 "구조화 전이라 이 카운트에 없다"가 아니게 됐다
+            # — collection_scope에도 합류(정정, 거짓 0 방지 — 그대로 두면 이 응답이 "이
+            # source_type은 절대 안 온다"는 거짓 계약을 FE에 남긴다).
+            assert scope["source_types"] == ["chat_message", "doc", "meeting", "story", "evidence", "artifact"]
             assert scope["forms"] == "all"
             assert "pr_sid_text_convention" in scope["excludes"]
-            assert "evidence_free_text_reference" in scope["excludes"]
+            assert "evidence_free_text_reference" not in scope["excludes"]
         finally:
             await client.aclose()
             app.dependency_overrides.clear()

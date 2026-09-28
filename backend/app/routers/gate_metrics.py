@@ -13,12 +13,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.gate_metrics import compute_hitl_gate_metrics
 from app.services.project_auth import is_org_owner_or_admin
 
 router = APIRouter(prefix="/api/v2/gate", tags=["hitl-gate-metrics", "Trust"])
+
+# story #4294 — 기간 파라미터는 오프셋 필수(`app/core/datetime_query.py`) · 기본값 호출을 모듈 상수로(ruff B008).
+_START_QUERY = Depends(aware_datetime_query("start", description="Window start (inclusive)"))
+_END_QUERY = Depends(aware_datetime_query("end", description="Window end (inclusive)"))
 
 
 class HitlGateMetricsResponse(BaseModel):
@@ -42,8 +47,9 @@ class HitlGateMetricsResponse(BaseModel):
 @router.get("/metrics", response_model=HitlGateMetricsResponse)
 async def get_hitl_gate_metrics(
     project_id: uuid.UUID | None = Query(default=None),
-    start: datetime | None = Query(default=None, description="window 시작(이상)"),
-    end: datetime | None = Query(default=None, description="window 끝(이하)"),
+    # story #4294 — 오프셋 없는 일시는 422(`app/core/datetime_query.py`).
+    start: datetime | None = _START_QUERY,
+    end: datetime | None = _END_QUERY,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),

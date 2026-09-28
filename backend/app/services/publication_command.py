@@ -21,21 +21,71 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.publication_attempt import PublicationAttempt
 from app.models.publication_command import PublicationCommand
+from app.services.provider_call_mark import (
+    provider_call_marked,
+    provider_client,
+    reset_provider_call_mark,
+)
+
+from app.services.publish_error_body import preflight_error_facts
 
 logger = logging.getLogger(__name__)
 
 # story #3414 — cron 1회 tick이 집는 상한(workflow_sla_processor.py::_SLA_BATCH_SIZE와
 # 동형 사상 — 상한 없는 SKIP LOCKED 배치는 그 자체가 위험, story #2461 finding #5).
 BATCH_SIZE = 50
+
+# story #4336(PO 03:58Z · 04:52Z) — 워커가 도는 cron 요청 안에서만 명령을 집는다. 그 요청을 먼저 끊는 쪽은 스케줄러 시한(jobs.json
+# attempt_deadline)과 이 서비스의 Cloud Run 요청 시한 중 짧은 쪽이다(prod 요청 시한이 300초였을 때 1800초 시한은 헛말이었다) —
+# 틱 예산은 둘을 설정에서 읽어 계산한다(하드코딩 금지). 여유 60초는 커밋 · 멈춤 통지 · 응답 몫.
+TICK_MARGIN_SECONDS = 60
+# 한 건 최악이 **틱 예산 전체**보다 길면 어느 틱에도 못 들어간다 — 집지 않고 이 표시를 명령에 남긴다(비종결 · pending 그대로 ·
+# 초안 상세 `command_reason_code`로 드러남). 예산이 커지면(배포로 요청 시한 상향) 다음 틱에 집히며 표시가 지워진다.
+OVER_TICK_BUDGET_CODE = "WORKER_TICK_BUDGET_TOO_SMALL"
+
+
+def over_tick_budget_alert_dedupe_key(command_id: uuid.UUID) -> str:
+    """story #4341 AC4 — 같은 명령의 «예산 밖»은 운영 알림 한 번."""
+    return f"publication.over_tick_budget:{command_id}"
+
+
+async def _alert_over_tick_budget(
+    command_id: uuid.UUID, org_id: uuid.UUID, *, worst_seconds: float, budget_seconds: float,
+) -> bool:
+    """«예산 밖» 발행 명령 운영 알림(story #4341 AC4). 전달됐으면 True — 실패해도 예외 없이 False(워커 틱은 계속)."""
+    from app.services.operator_alerts import notify_operator
+
+    try:
+        result = await notify_operator(
+            kind="publication.over_tick_budget", dedupe_key=over_tick_budget_alert_dedupe_key(command_id),
+            target_org_id=org_id, target={"command_id": command_id},
+            facts={"code": OVER_TICK_BUDGET_CODE, "worst_case_seconds": int(worst_seconds), "tick_budget_seconds": int(budget_seconds)},
+        )
+        return result.delivered
+    except Exception:
+        logger.exception("operator alert for over-budget publication command %s failed", command_id)
+        return False
+
+
+def worker_tick_budget_seconds() -> float:
+    from app.core.config import settings
+
+    return max(
+        0, min(settings.publication_worker_scheduler_deadline_seconds, settings.backend_request_timeout_seconds) - TICK_MARGIN_SECONDS,
+    )
+
+# 틱 안 경과 시간 — 테스트가 바꿔 끼운다(모듈 속성으로 읽는다).
+_monotonic = time.monotonic
 MAX_RETRIES = 5
 # attempt_count는 실패마다 먼저 증가한 뒤 백오프를 계산한다(1부터 시작) — 그래서 실제
 # 지연 순서는 2분(2^1)→4분→8분→16분이다(다음 겹증가인 5번째 실패에서 MAX_RETRIES
@@ -49,6 +99,50 @@ _BACKOFF_BASE_SECONDS = 60
 FAILURE_KIND_CONNECTION = "connection"
 FAILURE_KIND_NEEDS_CHECK = "needs_check"
 FAILURE_KIND_TRANSIENT = "transient"
+# story #4262(PO 13:51Z 안 A · 유나 §11-5 개정) — «확실히 안 나감»: 어댑터를 부르기 전에 막혔거나 보낼 수 없는 채널이라 밖으로
+# 아무것도 안 나갔다. 곧바로 dead_letter · 자동 재시도 0(다시 해도 같은 결과) · 화면은 «알 수 없어요»가 아니라 «자동 재시도를
+# 멈췄어요». 전 발행 종류로 넓히는 것은 4264.
+FAILURE_KIND_NOT_SENT = "not_sent"
+# story #3953(블루프린트 §1-5) — 위 3값과 같은 열(failure_kind, DB CHECK 無·psql \d
+# publication_commands 실측 확認)이지만 유나 §11-5의 원래 3분류엔 없다 — 이건 실패가
+# 아니라 조직 owner의 의도적 정지다("재시도해도 되는지 모른다"류 불확실성과 다른
+# 축이라 needs_check로 뭉개지 않는다). external_publish_pause.py의 해제(resume)
+# 재큐가 이 값으로 "pause 때문에 blocked"만 골라낸다(connection 복구 대기 blocked와
+# 절대 안 섞인다).
+FAILURE_KIND_PAUSED = "paused"
+# story #4258(까디르 4621 codex P2) — `stop_notice_state` 값(0405 CHECK와 같은 어휘).
+STOP_NOTICE_PENDING = "pending"
+STOP_NOTICE_SENT = "sent"
+
+
+# story #4262 AC2(PO 14:13Z · 14:41Z) — 뉴스레터 발송이 `blocked_unapproved`로 멈췄을 때 **사람이 재시도할 수 있는** 사유 코드.
+# 멈춤 통지(`awaits_stop_notice`) · 사람 재시도 수용(`retry_dead_letter_command`) · 게이트 화면 «연결 문제로 멈춤 + 다시 시도»
+# (FE `newsletter-send-status.tsx` · 짝 테스트)가 모두 이 한 모음을 읽는다. 게이트 미승인 · 캠페인 없음은 사람 재시도 대상 아님.
+NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES = frozenset({"NEWSLETTER_SEND_CONNECTION_UNAVAILABLE"})
+
+
+def awaits_stop_notice(command: "PublicationCommand") -> bool:
+    """story #4258 — 이 명령이 «사람 손이 필요한 멈춤»인가(통지 대상). 표식을 세우는 쪽(`mark_stop_notice`)과 보내는 쪽
+    (`recipe_publish_failure._deliver_one_stop_notice`)이 같은 판정을 읽는다(까디르 4621 델타 codex ① · PO 14:23Z) — 취소 ·
+    voided · 완료 · 재시도 뒤 pending처럼 멈춤에서 벗어난 행은 표식이 남아 있어도 보내지 않는다.
+    - dead_letter(재시도 소진 · 확인 필요 · 확실히 안 나감): 사람 재시도.
+    - 연결 실패 blocked: 사람이 다시 연결한 뒤 재시도(조직 일시정지 blocked는 해제하면 서버가 스스로 재큐 — 제외).
+    - story #4262 AC2(PO 14:41Z — 명령 한 행을 받게 넓힘): 뉴스레터 `blocked_unapproved` 중 사람이 재시도할 수 있는 사유
+      (`NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES`) — 발송 실행기가 `apply_command_failure`를 안 거치고 직접 세우는 멈춤이라 사유
+      코드까지 봐야 가를 수 있다. 판정이 둘로 갈라지면 표식은 섰는데 전달기가 비우는(또는 그 반대) 독 행이 다시 생긴다."""
+    status = command.status
+    if status == "dead_letter" or (status == "blocked" and command.failure_kind == FAILURE_KIND_CONNECTION):
+        return True
+    return (
+        status == STATUS_BLOCKED_UNAPPROVED and command.content_kind == "newsletter_send"
+        and command.reason_code in NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES
+    )
+
+
+def mark_stop_notice(command: "PublicationCommand") -> None:
+    """전이와 같은 커밋에 통지 표식을 세운다 — 판정(`awaits_stop_notice`)이 참일 때만."""
+    if awaits_stop_notice(command):
+        command.stop_notice_state = STOP_NOTICE_PENDING
 
 # story #3414 — 어떤 서버 error code가 어느 failure_kind인지의 유일한 매핑 표. 새 코드가
 # 추가되면 여기 등재하지 않는 한 자동으로 needs_check(fail-closed)로 떨어진다 — "일단
@@ -78,16 +172,103 @@ _CONNECTION_BLOCKED_CODES = frozenset({
 # 끝났다. 폴링을 몇 번 더 반복해도 같은 결과이므로(결정적) transient 백오프가 아니라
 # needs_check(사람 재시도, AC5)로 바로 보낸다.
 _NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
-_TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED"})
-# story #3536(PO 確定 2026-09-06) — ChannelPublishProviderError.provider_code가 이
-# 집합에 있으면(어댑터가 구조적으로 실어 준 코드, 문자열 매칭 아님 — instagram_
-# publish.py::create_media_container가 ThreadsPublishError("INSTAGRAM_IMAGE_
-# REQUIRED", ...)로 던진 값이 _classify_threads_error→ChannelPublishProviderError.
-# provider_code에 그대로 실린다) 「영구 조건」이라 재시도해도 다시 같은 결과 —
-# 일반 provider 오류(_TRANSIENT_CODES)와 달리 classify_failure_kind가 needs_check로
-# 보내도록 이 코드 자체를 error_code로 승격한다(아래 except 분기). 매핑표에 없는
-# 코드는 이미 needs_check가 기본값이라 이 집합에 새 이름을 추가하는 것만으로 충분.
-_PERMANENT_PROVIDER_CONDITION_CODES = frozenset({"INSTAGRAM_IMAGE_REQUIRED"})
+# story #4272(까디르 codex P1) — 코드 없는 예외가 공급자 쓰기 호출 **전**에 났다(`provider_call_mark` 표시 없음) — 아무것도 안
+# 나갔으니 자동 재시도가 안전하다(이중 발행 0). 호출 뒤의 코드 없는 예외는 예전처럼 needs_check(모름).
+PRE_CALL_ERROR_CODE = "PUBLICATION_COMMAND_PRE_CALL_ERROR"
+# story #4264(까디르 codex P1 · PO 17:33Z) — **자동 재시도(transient)는 «안 나갔다»는 적극적 증거가 있는 명시 목록만.** 표 밖 ·
+# 모르는 코드의 기본값은 needs_check(`classify_failure_kind`). 공급자 5xx도 쓰기 호출 뒤면 나갔을 수 있으니 기본 transient가 아니다 —
+# 아래는 공급자에 **보이는 글을 만드는 쓰기 호출 전** 단계에서만 나는 코드와 다시 해도 같은 결과인 회수(삭제)뿐(각 묶음에 근거). 전수 표(코드 · 파일:줄 · 쓰기 前/後)는 PR 4264 본문.
+_RETRY_SAFE_CODES = frozenset({
+    # Threads · Instagram — 컨테이너 생성 · 상태 조회 · 게시 한도 조회는 `publish_container`(게시) 전(컨테이너는 게시 전엔 안 보임).
+    "THREADS_CREATE_CONTAINER_FAILED", "THREADS_CREATE_CONTAINER_MISSING_ID", "THREADS_CONTAINER_STATUS_FAILED",
+    "THREADS_CONTAINER_STATUS_MISSING_FIELD", "THREADS_PUBLISHING_LIMIT_FAILED", "THREADS_PUBLISHING_LIMIT_MISSING_FIELDS",
+    "THREADS_REPLY_CREATE_CONTAINER_FAILED", "THREADS_REPLY_CREATE_CONTAINER_MISSING_ID",
+    "INSTAGRAM_CREATE_CONTAINER_FAILED", "INSTAGRAM_CREATE_CONTAINER_MISSING_ID",
+    "INSTAGRAM_CREATE_CAROUSEL_CHILD_FAILED", "INSTAGRAM_CREATE_CAROUSEL_CHILD_MISSING_ID",
+    "INSTAGRAM_CREATE_CAROUSEL_PARENT_FAILED", "INSTAGRAM_CREATE_CAROUSEL_PARENT_MISSING_ID",
+    "INSTAGRAM_CREATE_REELS_CONTAINER_FAILED", "INSTAGRAM_CREATE_REELS_CONTAINER_MISSING_ID",
+    "INSTAGRAM_CONTAINER_STATUS_FAILED", "INSTAGRAM_CONTAINER_STATUS_MISSING_FIELD",
+    "INSTAGRAM_PUBLISHING_LIMIT_FAILED", "INSTAGRAM_PUBLISHING_LIMIT_MISSING_FIELDS",
+    # Facebook — 캐러셀 자식 사진은 `published=false` 업로드 · 릴스 start/upload는 `video_state=PUBLISHED` finish 전.
+    "FACEBOOK_CREATE_CAROUSEL_CHILD_FAILED", "FACEBOOK_CREATE_CAROUSEL_CHILD_MISSING_ID",
+    "FACEBOOK_REELS_START_FAILED", "FACEBOOK_REELS_START_MISSING_FIELDS", "FACEBOOK_REELS_UPLOAD_FAILED",
+    # X — 미디어 업로드(INIT · APPEND · FINALIZE · 상태)는 `post_tweet` 전(미디어만으로는 아무것도 안 보임).
+    "X_MEDIA_INIT_FAILED", "X_MEDIA_INIT_MISSING_ID", "X_MEDIA_APPEND_FAILED", "X_MEDIA_FINALIZE_FAILED", "X_MEDIA_STATUS_FAILED",
+    # YouTube — 업로드 세션 열기는 영상 바이트 PUT(영상 생성) 전.
+    "YOUTUBE_UPLOAD_SESSION_INIT_FAILED", "YOUTUBE_UPLOAD_SESSION_MISSING_LOCATION",
+    # 회수(삭제) — 다시 해도 같은 결과(이미 지워졌으면 404/410을 회수 성공으로 받는다 · channel_posts.py `unpublish_channel_post`).
+    "THREADS_DELETE_MEDIA_FAILED", "FACEBOOK_DELETE_POST_FAILED",
+    # sandbox 마커 — 실 어댑터의 같은 단계와 같은 부류로 둔다(sandbox로 실 동작을 재현하려는 것이라). Threads · Instagram sandbox의
+    # `[sandbox:provider-error]`는 컨테이너 생성 단계 실패(실 `THREADS_/INSTAGRAM_CREATE_*_FAILED`와 같은 쓰기 전 단계). Facebook ·
+    # X · YouTube · 스티비 sandbox 마커는 게시 쓰기 단계라 기본값(needs_check) 그대로.
+    "SANDBOX_PROVIDER_ERROR", "SANDBOX_INSTAGRAM_PROVIDER_ERROR",
+    # 캐러셀 자식(부모 게시 전) 실패 sandbox 마커 — 실 `FACEBOOK_/INSTAGRAM_CREATE_CAROUSEL_CHILD_FAILED`와 같은 칸(까디르 codex P2 · PO 18:51Z).
+    "SANDBOX_FACEBOOK_CAROUSEL_CHILD_FAILED", "SANDBOX_INSTAGRAM_CAROUSEL_CHILD_FAILED",
+})
+# `CHANNEL_PUBLISH_PROVIDER_ERROR`는 읽기 경로(인사이트 · 댓글 수집의 공급자 5xx — 재시도 안전)가 쓰는 코드라 transient 유지. 발행
+# 경로는 이제 이 코드를 내지 않는다(`provider_error_code`가 코드 그대로 · 블로그 쓰기는 `SITE_POST_PROVIDER_ERROR`).
+# 속도 제한(429)은 요청 자체가 거절된 것.
+# 공급자 쓰기 호출 전 코드 없는 예외(4272 `PRE_CALL_ERROR_CODE`)도 «안 나감»의 증거가 있는 재시도 안전 부류.
+_TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE}) | _RETRY_SAFE_CODES
+
+# story #4264(PO 15:18Z) — 실패 코드 → 부류의 **한 표**. 분류(`classify_failure_kind`)와 어댑터 코드 승격(`provider_error_code`)이
+# 같은 두 모음을 읽는다(사본 0). 원칙: `not_sent`는 «안 나간 적극적 증거»가 있을 때만 — HTTP 호출 전 검사에서 막혔거나 공급자가
+# 명시 거절 코드를 줬을 때. 일반 4xx에서 추론하지 않는다(성공 뒤 타임아웃이면 재시도의 4xx가 거짓 «안 나감»이 된다).
+# 전수 표(코드 · 내는 곳 · 근거 HTTP 단계)는 PR 4264 본문.
+_NOT_SENT_CODES = frozenset({
+    # story #4336 — 영상 업로드 전체 상한을 PUT **전**(원본 받기 · 세션 열기)에 넘김: 영상이 생기지 않는다(youtube_publish.py).
+    "YOUTUBE_UPLOAD_PREP_TIMEOUT",
+    # 뉴스레터 발송 실행기(4262) — 어댑터 호출 전.
+    "NEWSLETTER_SEND_CONNECTION_UNAVAILABLE", "NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
+    # 채널 게시 — HTTP 호출 전 검사(초안 · 글자 수 · 봉인 · 사용량 · 메타데이터 · 승인 · 예산).
+    "CHANNEL_POST_DRAFT_NOT_FOUND", "CHANNEL_TEXT_TOO_LONG", "SITE_POST_SEAL_MISSING", "YOUTUBE_QUOTA_EXCEEDED",
+    "YOUTUBE_METADATA_INVALID", "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "GENERATION_BUDGET_EXCEEDED",
+    "API_USAGE_BUDGET_EXCEEDED",
+    # story #4336(PO P2) — 이어쓰기 검사(HTTP 호출 전). 예전엔 코드가 없어 미분류로 떨어졌다.
+    "CHANNEL_THREAD_UNSUPPORTED", "CHANNEL_THREAD_SEGMENT_LIMIT_EXCEEDED", "CHANNEL_THREAD_SEGMENT_TOO_LONG",
+    # 어댑터가 provider_code로 싣는 사전 검사 · 명시 거절(`provider_error_code`로 승격).
+    "INSTAGRAM_IMAGE_REQUIRED", "INSTAGRAM_REELS_VIDEO_REQUIRED", "FACEBOOK_REELS_VIDEO_REQUIRED",
+    "CHANNEL_REELS_UNSUPPORTED", "CHANNEL_CAROUSEL_UNSUPPORTED", "YOUTUBE_IMAGE_CONTAINER_UNSUPPORTED",
+    "X_MEDIA_SOURCE_FETCH_FAILED", "YOUTUBE_VIDEO_SOURCE_FETCH_FAILED", "STIBEE_CONNECTION_INCOMPLETE",
+    "STIBEE_PLAN_RESTRICTED", "STIBEE_SENDER_NOT_VERIFIED",
+    # 블로그 외부 발행 — URL 검사 · 초안 · 게시 전 확인.
+    "SITE_POST_DESTINATION_INSECURE", "SITE_POST_DRAFT_NOT_FOUND", "SITE_POST_NOT_PUBLISHED",
+    # 댓글 답글 — 대상 행 없음.
+    "COMMENT_REPLY_NOT_FOUND", "COMMENT_NOT_FOUND",
+    # 광고 — 공급자에 시작 전 · 모든 객체를 PAUSED로 만들어 지출 0(«밖에 나감» = 광고가 도는 것).
+    "ADS_BOOST_NOT_STARTED_AT_PROVIDER", "META_ADS_CAMPAIGN_CREATE_FAILED", "META_ADS_CAMPAIGN_CREATE_MISSING_FIELD",
+    "META_ADS_ADSET_CREATE_FAILED", "META_ADS_ADSET_CREATE_MISSING_FIELD", "META_ADS_AD_CREATE_FAILED",
+    "META_ADS_AD_CREATE_MISSING_FIELD",
+})
+# «나갔을 수 있음» — 보이는 글을 만드는 **쓰기 호출 자체**가 실패했거나(5xx · 타임아웃이면 이미 만들어졌을 수 있다) 200/201을 준
+# **뒤** 응답에 id가 비었다. 자동 재시도(transient)면 이중 게시라 needs_check(재시도 0 · 사람이 채널에서 확인 뒤 재시도). 모르는
+# 코드도 기본값이 needs_check라 이 목록은 «왜 모르는지»를 적는 자리다(분류 결과는 같다).
+_MAYBE_SENT_CODES = frozenset({
+    # 200 뒤 id 없음.
+    "FACEBOOK_CREATE_POST_MISSING_ID", "X_POST_TWEET_MISSING_ID", "YOUTUBE_UPLOAD_MISSING_VIDEO_ID",
+    "THREADS_PUBLISH_CONTAINER_MISSING_ID", "INSTAGRAM_PUBLISH_CONTAINER_MISSING_ID",
+    "INSTAGRAM_REPLY_MISSING_ID", "FACEBOOK_REPLY_MISSING_ID",
+    "FACEBOOK_CREATE_CAROUSEL_PARENT_MISSING_ID",  # 부모 게시물(attached_media) 생성 = 게시(까디르 codex P1)
+    # 쓰기 호출 자체의 실패(상태 코드만으로는 나갔는지 모름).
+    "THREADS_PUBLISH_CONTAINER_FAILED", "INSTAGRAM_PUBLISH_CONTAINER_FAILED", "FACEBOOK_CREATE_POST_FAILED",
+    "FACEBOOK_CREATE_CAROUSEL_PARENT_FAILED", "FACEBOOK_REELS_FINISH_FAILED",  # finish = video_state=PUBLISHED(까디르 codex P1)
+    "X_POST_TWEET_FAILED", "YOUTUBE_UPLOAD_PUT_FAILED", "FACEBOOK_REPLY_FAILED", "INSTAGRAM_REPLY_FAILED",
+    "STIBEE_PUBLISH_PROVIDER_ERROR",  # 캠페인 초안 생성 · 본문 넣기 중 하나 — 초안이 이미 생겼을 수 있다(구독자 발송 아님)
+    "SITE_POST_PROVIDER_ERROR",  # 블로그 글 쓰기 호출의 non-2xx(site_posts.py)
+    "YOUTUBE_VIDEO_STATUS_FAILED",  # 영상 바이트 업로드(= 영상 생성) **뒤** 처리 상태 조회 — 재시도는 영상을 또 올린다
+    "YOUTUBE_UPLOAD_PUT_TIMEOUT",  # story #4336 — 업로드 전체 상한을 바이트 PUT 도중 넘김: 영상이 생겼을 수 있다(youtube_publish.py)
+})
+
+
+PROVIDER_CODE_MISSING = "CHANNEL_PUBLISH_PROVIDER_CODE_MISSING"
+
+
+def provider_error_code(provider_code: str | None) -> str:
+    """어댑터가 실어 준 provider_code를 명령의 error_code로(워커 · 즉시 발행 라우터 · 댓글 답글 공용 — PO 15:18Z). 코드는 **그대로**
+    올린다 — 표(`_RETRY_SAFE_CODES` · `_NOT_SENT_CODES` · `_MAYBE_SENT_CODES`)가 부류를 가르고, 표 밖 코드는 기본값
+    needs_check(까디르 codex P1 · PO 17:33Z — 예전엔 모르는 코드를 일반 공급자 오류 = transient = 자동 재시도로 뭉갰다). 코드가 없으면
+    `PROVIDER_CODE_MISSING`(역시 needs_check)."""
+    return provider_code or PROVIDER_CODE_MISSING
 
 
 # story #3474(페드루 PO 確定 2026-09-05) — 게이트가 approved가 아니거나(missing)
@@ -96,6 +277,17 @@ _PERMANENT_PROVIDER_CONDITION_CODES = frozenset({"INSTAGRAM_IMAGE_REQUIRED"})
 # 아니라 "재시도라는 개념 자체가 안 맞는" 종류: 사람이 다시 승인해야 새 커맨드가
 # 생긴다). 기존 'voided'(재승인으로 무효화)와 같은 결의 신규 terminal 상태.
 STATUS_BLOCKED_UNAPPROVED = "blocked_unapproved"
+
+
+def mark_blocked_unapproved(command: PublicationCommand, *, reason_code: str, last_error: str) -> None:
+    """story #4264 ④(까디르 codex P2 · PO 17:45Z) — 발행 직전 승인 필요 · 예산 초과로 막힘. 재시도 개념이 없다(다시 승인하면 새 명령).
+    워커 · 즉시 발행 라우터 · 블로그 워커가 **같은 모양**으로 남긴다 — 예전엔 워커는 사유 없이(승인 필요) · 라우터는 dead_letter +
+    «다시 시도» 버튼(눌러도 같은 이유로 또 막힘)으로 갈려 사람에게 다르게 보였다. 화면은 사유 문장만 · 버튼 0."""
+    command.status = STATUS_BLOCKED_UNAPPROVED
+    command.reason_code = reason_code
+    command.failure_kind = None
+    command.next_attempt_at = None
+    command.last_error = last_error[:2000]
 _GATE_REVERIFY_ERROR_CODES = frozenset({
     "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "SITE_POST_REAPPROVAL_REQUIRED",
     # story #3498(AC4) — 예산 재검사도 이 워커 재검증 묶음에 낀다(adapter 호출 0
@@ -133,9 +325,31 @@ def classify_failure_kind(error_code: str | None) -> str:
         return FAILURE_KIND_CONNECTION
     if error_code in _TRANSIENT_CODES:
         return FAILURE_KIND_TRANSIENT
-    if error_code in _NEEDS_CHECK_CODES:
+    if error_code in _NEEDS_CHECK_CODES or error_code in _MAYBE_SENT_CODES:
         return FAILURE_KIND_NEEDS_CHECK
+    if error_code in _NOT_SENT_CODES:
+        return FAILURE_KIND_NOT_SENT
     return FAILURE_KIND_NEEDS_CHECK
+
+
+# story #4264(유나 4632 CHANGES · PO 처방) — «나갔는지 모름»(needs_check)으로 멈춘 명령에 **새 발행 요청**이 들어오면 어댑터를 다시
+# 부르지 않고 거절한다. 멈춘 명령이 앞으로 가는 길은 사람이 채널을 확인한 뒤의 재시도(`retry_dead_letter_command` — failure_kind를
+# 비운다) 하나뿐. 예전엔 즉시 발행(`POST …/publish`)이 `create_or_get_publication_command`로 그 명령을 돌려받아 곧장 어댑터를
+# 다시 불렀다 — 서버 중복 막이는 «이미 published»뿐이라 한 번 더 나갈 수 있었다(4264가 막으려는 이중 발행 그 자체).
+# 워커는 pending만 집으므로(dead_letter인 needs_check 명령은 안 본다) 이 가드는 «새 요청을 받는 동기 진입점»에 선다.
+PUBLICATION_NEEDS_CHECK_CODE = "CHANNEL_POST_NEEDS_CHECK"
+
+
+class PublicationNeedsCheckError(Exception):
+    def __init__(self, command: PublicationCommand):
+        self.command = command
+        super().__init__(f"publication command {command.id} stopped as needs_check — check the channel, then retry")
+
+
+def raise_if_needs_check(command: PublicationCommand) -> None:
+    """새 발행 요청을 받는 동기 진입점이 어댑터를 부르기 전에 부른다(진입점 전수는 PR 4632 본문 · 호출처 가드 테스트)."""
+    if command.failure_kind == FAILURE_KIND_NEEDS_CHECK:
+        raise PublicationNeedsCheckError(command)
 
 
 async def create_or_get_publication_command(
@@ -240,7 +454,57 @@ def compute_next_attempt_at(
     return now + timedelta(seconds=delay)
 
 
-async def retry_dead_letter_command(db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID) -> PublicationCommand | None:
+def human_retryable(command: PublicationCommand) -> bool:
+    """story #4290 — 사람이 지금 «다시 시도»할 수 있는 명령인가 — 재시도(`retry_dead_letter_command`)와 상세 응답
+    (`command_retryable` · 화면 배지 버튼)이 같이 읽는 한 판정. 예전엔 화면(`deriveFailureAction`)이 따로 갈라 pending/in_progress
+    + (transient 아닌) failure_kind에서 버튼은 켜지는데 서버는 404인 틈이 있었다.
+    - dead_letter · blocked: 사람 재시도(연결을 고친 뒤 · 확인한 뒤).
+    - 단 조직 일시정지로 멈춘 blocked(`failure_kind=paused`)는 아니다(까디르 QA ①) — 정지 중엔 다시 올려도 워커가 또 막고, 정지를
+      풀면 서버가 스스로 다시 올린다(`external_publish_pause` · `only_paused`). 화면도 이 줄을 숨긴다 — 판정과 화면이 같은 뜻.
+    - 뉴스레터 `blocked_unapproved` 중 사람 재시도 사유(`NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES`) — 멈춤 통지 · 게이트 버튼과 같은 모음."""
+    if command.status == "blocked" and command.failure_kind == FAILURE_KIND_PAUSED:
+        return False
+    if command.status in ("dead_letter", "blocked"):
+        return True
+    return (
+        command.status == STATUS_BLOCKED_UNAPPROVED and command.content_kind == "newsletter_send"
+        and command.reason_code in NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES
+    )
+
+
+
+def derive_processing_kind(command: PublicationCommand | None, publication_status: str | None) -> str | None:
+    """«지금 진행 중»의 한 판정(story 620beefc AC5 · #4336) — 채널 초안 목록 · 상세와 게이트 상세가 같은 값을 쓴다(두 곳에서 계산하지 않는다).
+
+    - `awaiting_container`: 명령 대기 + 이 버전 발행이 컨테이너 생성까지 옴.
+    - `publishing`: 예약 없는 명령이 대기 · 진행 중이고 아직 실패가 없고(실패 뒤 재시도 대기는 실패 배지가 맡는다) 워커 예산 밖이 아니고
+      (`OVER_TICK_BUDGET_CODE`면 실제로 발행하지 않고 있다 — 화면이 사유 줄을 따로) 이 버전이 아직 안 나감.
+    - 그 밖 None. `publication_status`를 모르는 자리(게이트 상세 등)는 None을 넘긴다 — 그때 컨테이너 대기는 «발행 중»으로 읽힌다."""
+    if command is None:
+        return None
+    if command.status == "pending" and publication_status == "container_created":
+        return "awaiting_container"
+    if (
+        command.scheduled_at is None and command.failure_kind is None
+        and command.reason_code != OVER_TICK_BUDGET_CODE
+        and command.status in ("pending", "in_progress") and publication_status != "published"
+    ):
+        return "publishing"
+    return None
+
+
+def viewer_can_retry(command: PublicationCommand, *, viewer_is_human: bool) -> bool:
+    """story #4290(까디르 QA ③ · PO 06:40Z) — **이 화면을 보는 사람이** 지금 «다시 시도»할 수 있는가. 재시도 엔드포인트
+    (`channel_posts._retry_publication_command`)는 사람만 받으므로(`_require_human` · 에이전트 403) 응답의 `command_retryable`도
+    보는 쪽이 사람일 때만 참 — 화면은 이 값 하나로 버튼을 가른다(멤버 종류를 따로 보지 않는다)."""
+    # 조립 함수들(`_to_draft_list_item` · `_reply_view` · `_publication_command_view` · 보드 행 등)은 `viewer_is_human`을 기본값 없는
+    # 키워드로 받는다(까디르 델타 ②) — 새 호출처가 보는 쪽을 빠뜨리면 TypeError로 바로 드러난다(예전 캠페인 상세처럼 조용히 false가 아니라).
+    return viewer_is_human and human_retryable(command)
+
+
+async def retry_dead_letter_command(
+    db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID, only_paused: bool = False,
+) -> PublicationCommand | None:
     """story #3414 AC5 — `dead_letter` **또는 `blocked`**(연결 복구 대기) 상태인 command를
     사람이 다시 큐에 올린다. 페드루 리뷰 블로커B — 원래 `dead_letter`만 받았는데,
     토큰 만료로 `blocked`된 **예약** 명령은 owner가 재인증한 뒤에도 갈 길이 없었다
@@ -258,14 +522,111 @@ async def retry_dead_letter_command(db: AsyncSession, *, org_id: uuid.UUID, comm
             PublicationCommand.id == command_id, PublicationCommand.org_id == org_id,
         ).with_for_update()
     )).scalar_one_or_none()
-    if command is None or command.status not in ("dead_letter", "blocked"):
+    if command is None:
+        return None
+    # story #4262(PO 13:49Z) — 뉴스레터 발송은 연결이 비활성이면 `blocked_unapproved`로 서는데(발송 실행기가 게이트 · 캠페인 ·
+    # 연결을 확인해 막음) 이 함수가 받지 않아 연결을 고쳐도 다시 보낼 길이 없었다. 뉴스레터에 한해 받는다 — 실행기가 매번
+    # 다시 확인하므로 여전히 막혀 있으면 다시 blocked_unapproved로 설 뿐이다(무한 재시도 0). 다른 종류는 예전대로 404.
+    # story #4262 AC2(PO 14:13Z 조건 1) — 받는 사유는 멈춤 통지 · 게이트 화면 버튼과 같은 한 모음
+    # (`NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES`)으로 좁힌다 — 버튼 · 통지 · 재시도 수용이 어긋나지 않게.
+    # story #4290 — 사람이 누르는 재시도가 받는지는 상세 응답 · 화면 버튼과 같은 한 판정(`human_retryable`). 일시정지 해제의 자동 재큐
+    # (`only_paused`)는 사람 판정이 아니라 «정지로 멈춘 blocked»만 따로 받는다(사람 판정은 그 행을 받지 않으므로 — 까디르 QA ①).
+    # story #4195 AC2b(까디르 QA) — 자동 복구(pause 해제 재큐·크론 자가복구)는 id를 먼저 모은 뒤 여기서 하나씩 잠근다. 그 사이 다른
+    # tick이 이 명령을 처리해 `blocked/connection`·`dead_letter/needs_check`가 됐으면 사람의 «재시도 필요» 판단을 우회해 되살리면 안
+    # 된다 — 잠근 뒤 pause 차단이 맞는지 다시 본다.
+    if only_paused:
+        if not (command.status == "blocked" and command.failure_kind == FAILURE_KIND_PAUSED):
+            return None
+    elif not human_retryable(command):
         return None
     command.status = "pending"
     command.next_attempt_at = None
     command.dead_letter_at = None
+    # story #4258 — 사람이 다시 시도했다. 다시 멈추면 그건 새 멈춤이라 통지가 한 번 더 간다(표식을 비운다).
+    command.stop_notice_state = None
     command.last_error = None
     command.failure_kind = None
+    command.failure_detail = None  # story #4336 — 다시 시도(재개 포함)는 새 시도: 지난 멈춤의 본문을 화면에 남기지 않는다
     return command
+
+
+# story #4336 — 명령 하나의 최악 소요(초). 워커 틱이 «남은 시한 < 최악»이면 집지 않는다. 채널 발행은 공급자 호출 한 번의 시한
+# (`provider_client(timeout=20)`)을 기준으로: 기본 4단계(컨테이너 · 발행 · 조회 · 링크) + 스레드 이어쓰기 조각마다 2호출 + 영상 업로드
+# 상한(YouTube · `youtube_publish.YOUTUBE_UPLOAD_MAX_SECONDS`). 다른 종류(사이트 글 · 답글 · 뉴스레터 등)는 기본값.
+PROVIDER_CALL_SECONDS = 20
+DEFAULT_COMMAND_WORST_SECONDS = 4 * PROVIDER_CALL_SECONDS
+
+
+async def command_worst_case_seconds(db: AsyncSession, command: PublicationCommand) -> int:
+    if command.content_kind != "channel_post" or command.operation != "publish":
+        return DEFAULT_COMMAND_WORST_SECONDS
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_adapters import get_channel_adapter
+
+    connection = await db.get(ChannelConnection, command.destination)
+    config = get_channel_adapter(connection.channel) if connection is not None else None
+    if config is None:
+        return DEFAULT_COMMAND_WORST_SECONDS
+    # 스레드 조각마다 공급자 호출 둘(글 · 확인). 채널 최대 조각 수가 아니라 **이 승인본의 실제 조각 수**로 센다 — 최대로 세면
+    # X 단일 글도 480초로 잡혀 요청 시한 300(예산 240)인 환경에서 영영 못 집힌다(4336 회귀에서 실측).
+    from app.models.channel_post_version import ChannelPostVersion
+
+    version = await db.get(ChannelPostVersion, command.approved_version)
+    segments = len(((version.channel_payload if version is not None else None) or {}).get("thread") or [])
+    segments = min(segments, config.thread_max_segments or 0)
+    worst = DEFAULT_COMMAND_WORST_SECONDS + segments * 2 * PROVIDER_CALL_SECONDS
+    if connection.channel.startswith("youtube"):
+        from app.services.youtube_publish import YOUTUBE_UPLOAD_MAX_SECONDS
+
+        worst += YOUTUBE_UPLOAD_MAX_SECONDS
+    return worst
+
+
+def requeue_for_human_publish(command: PublicationCommand) -> bool:
+    """story #4336 — 사람이 «지금 발행»을 누름 = 이 명령을 지금 due로(공급자 호출은 cron 워커 하나). 반환 = 워커가 집을 차례가 됐는지.
+    - pending: 백오프를 지우고 지금 due(예전 동기 경로의 «사람의 즉시 재시도는 백오프에 안 막힘» 계약 그대로).
+    - in_progress: 워커가 이미 들고 있다 — 그대로.
+    - completed: 이미 나감 — 그대로(False).
+    - voided: 그대로(False) — 다시 승인해야 새 명령이 생긴다.
+    - 그 밖(dead_letter · blocked · blocked_unapproved): `retry_dead_letter_command`와 같은 칸을 비우고 pending — 예전 동기 경로는
+      이 상태에서 누르면 공급자를 바로 다시 불렀다. «나갔는지 모름»(needs_check)은 호출부가 먼저 409로 막는다(`raise_if_needs_check`)."""
+    if command.status in ("completed", "voided"):
+        return False  # voided = 승인본이 바뀌었거나 대상이 사라짐 — 다시 승인해야 새 명령(되살리지 않는다)
+    if command.status == "in_progress":
+        return True
+    command.status = "pending"
+    command.next_attempt_at = None
+    command.failure_detail = None
+    if command.dead_letter_at is not None or command.failure_kind is not None or command.last_error is not None:
+        command.dead_letter_at = None
+        command.stop_notice_state = None
+        command.last_error = None
+        command.failure_kind = None
+    return True
+
+
+async def _local_publication_complete(db: AsyncSession, command: PublicationCommand) -> bool:
+    """story #4336(PO 03:58Z) — 호출 도중 죽은 명령(표식 있음 · 결과 모름)을 공급자에 다시 보내기 전에 «이미 나갔나»를 본다. 공급자
+    쪽 조회 API가 어댑터에 없어(`channel_adapters.py` — 채널별 «이 요청으로 만든 글 찾기» 없음) 지금 볼 수 있는 확실한 사실은 우리가
+    공급자 응답을 받아 적은 발행 행이다: 이 (게이트, 승인본)의 발행 행이 **기대한 조각 수만큼 전부 published**면 이미 나간 것 →
+    완료. 하나라도 모자라면(스레드 일부 · 행 없음) 모른다 → needs_check(자동 재호출 0 — 중복 영상 · 중복 스레드 0)."""
+    if command.content_kind != "channel_post" or command.operation != "publish":
+        return False
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.channel_publication import ChannelPublication
+
+    rows = (await db.execute(
+        select(ChannelPublication).where(
+            ChannelPublication.gate_id == command.gate_id, ChannelPublication.version_id == command.approved_version,
+        )
+    )).scalars().all()
+    if not rows or any(r.status != "published" for r in rows):
+        return False
+    version = await db.get(ChannelPostVersion, command.approved_version)
+    thread = list(((version.channel_payload if version is not None else None) or {}).get("thread") or [])
+    # 스레드는 헤드 + 이어지는 조각마다 행 하나(sequence 1..N, 헤드=1) — `_publish_x_thread_draft`가 `[head_text, *thread]`를
+    # 보내므로 N = 1 + len(thread). 스레드가 없으면 행 하나.
+    return len(rows) >= 1 + len(thread)
 
 
 async def _process_one_command(db: AsyncSession, command: PublicationCommand, *, now: datetime) -> None:
@@ -281,7 +642,31 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     story e4fc29fa(조각③c) — `content_kind`(SSOT 컬럼)가 "site_post"면 아래 channel_
     post 전용 로직(ChannelPostVersion·publish_channel_post_draft 하드코딩)을 전혀
     안 타고 `_process_one_site_post_command`로 넘긴다 — approved_version이 어느
-    테이블을 가리키는지(ChannelPostVersion vs SitePostVersion)의 유일한 판별축."""
+    테이블을 가리키는지(ChannelPostVersion vs SitePostVersion)의 유일한 판별축.
+
+    story #3953(블루프린트 §1-5) — content_kind 분기보다 먼저 조직 pause를 본다
+    (5도메인 전부를 한 자리에서 막는 유일한 이유 — 여기서 막히면 아래 5개 분기
+    중 어느 것도 adapter를 부르는 자리까지 못 간다). pause 확認은 이 함수 진입마다
+    (배치의 command 각각)이라, «완주»의 경계는 "in_progress로 클레임됐는가"가 아니라
+    "이미 이 함수를 통과해 adapter 호출에 들어갔는가"다 — 어댑터 호출에 들어간
+    명령은 그대로 끝까지 간다(이 호출 도중엔 pause를 다시 안 본다, 중간에 끊을 자리
+    자체가 없다). 배치가 여러 건을 한 번에 in_progress로 클레임했더라도(아래
+    `process_due_publication_commands`), 아직 자기 차례가 안 돼 이 함수에 진입 전인
+    명령은 그 사이 pause가 켜지면 여기서 blocked로 걸린다 — 안전측(fail-closed,
+    카디르군 QA 관찰 2026-09-22) — pause 해제 시 자동 재큐(resume)가 그 명령을
+    다시 태운다."""
+    from app.services.external_publish_pause import is_external_publish_paused
+
+    paused, pause_reason = await is_external_publish_paused(db, org_id=command.org_id)
+    if paused:
+        await _block_for_external_publish_pause(db, command, now=now, reason=pause_reason)
+        return
+
+    # story #4287(PO 00:16Z) — 아래 다섯 갈래(사이트 글 · 댓글 답글 · 광고 · 뉴스레터 · 채널 글)의 어댑터 진입 **앞 한 자리**에서 영속
+    # 표식을 쓰고 커밋한다. 표식이 늦으면(쓰기 뒤) 회수가 이중 발행을 낼 수 있고, 이르면(어댑터 안 사전 검사 앞) 도중 죽음이
+    # needs_check로 한 번 더 보수적으로 갈 뿐이라 가장 이른 공통 자리에 둔다. 이 아래로 공급자 쓰기가 없는 갈래는 pause뿐(위).
+    await mark_provider_call_started(db, command)
+
     if command.content_kind == "site_post":
         await _process_one_site_post_command(db, command, now=now)
         return
@@ -326,11 +711,16 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         ChannelPublishProviderError,
         ChannelRateLimitedError,
         ChannelTextTooLongError,
+        ChannelThreadSegmentLimitExceededError,
+        ChannelThreadSegmentTooLongError,
+        ChannelThreadUnsupportedError,
         ChannelTokenExpiredError,
+        ChannelYouTubeMetadataError,
         ExternalPublishGateNotApprovedError,
         get_channel_post_draft,
         publish_channel_post_draft,
     )
+    from app.services.external_publish_pause import ExternalPublishPausedError
     from app.services.generation_budget import GenerationBudgetExceededError
     from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY
     from app.services.youtube_quota import YouTubeQuotaExceededError
@@ -339,6 +729,10 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     last_error: str | None = None
     retry_after_seconds: int | None = None
     attempt_started_at = now
+    # story #4093 — 실패 분기(아래 except 전부)가 draft를 못 구했을 수도 있다(예: draft
+    # 자체가 없음, version_row 조회 실패) — 실패 경로에서 레시피 publish_outcome을
+    # 남기려면 draft가 있을 때만 시도해야 하므로 None으로 먼저 초기화한다.
+    draft: ChannelPostDraft | None = None
     try:
         version_row = (await db.execute(
             select(ChannelPostVersion).where(ChannelPostVersion.id == command.approved_version)
@@ -377,6 +771,23 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
+        # story #4192(PO 09:34Z) — 실제 외부 발행 성공(completed)을 레시피 이벤트보다 **먼저** 커밋한다. 예전엔 같은
+        # 트랜잭션에서 이벤트까지 냈다가 이벤트 쪽 DB 오류로 트랜잭션이 중단되면 completed가 안 남아 다음 tick이 같은 글을
+        # 외부 채널에 다시 발행할 수 있었다. 이벤트는 커밋 뒤, emit_recipe_published_stage_event가 별도 세션에서.
+        await db.commit()
+
+        # story #4093(#4090 지름길 해소, 페드루 PO 確定 2026-09-21) — 즉시-발행 경로는
+        # `publish_recipe_approved_draft`가 발행 직후 레시피 published stage 이벤트를
+        # 잇지만, 예약 발행(이 워커)은 그 훅을 안 거쳐(`_maybe_create_scheduled_
+        # publication_command`가 세운 command를 여기서 곧장 처리) 아무도 그 이벤트를
+        # 안 냈다 — 같은 함수(`emit_recipe_published_stage_event`)로 격차 처방. 이
+        # 블록 실패가 방금 확정된 "completed"(실제 발행 성공)를 되돌리면 안 되므로
+        # 별도 try/except로 격리(side-channel, recipe_repeat_scheduler.py 선례 동형).
+        #
+        # story #4192(까디르 4583 P1) — «발행 뒤 레시피 처리» 전체(레시피 문맥 읽기 · 레시피 게이트 outcome 기록 · 이벤트)를
+        # **격리 세션**에서. 예전엔 앞 두 단계를 워커 세션에서 해, 거기서 SQL 오류가 나면 워커 트랜잭션이 aborted →
+        # 같은 배치 다음 명령이 망가졌다(4573 부류). 워커 세션은 위 completed 커밋까지만 — 여기선 값만 넘긴다.
+        await _emit_recipe_published_for_channel_command(db, command, draft, publication.id)
         return
     except ChannelImageContainerFailedError as exc:
         error_code, last_error = "CHANNEL_IMAGE_CONTAINER_FAILED", str(exc)
@@ -392,9 +803,11 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         command.status = "voided"
         command.reason_code = "CONTENT_CHANGED"
         command.last_error = str(exc)[:2000]
+        command.failure_detail = preflight_error_facts(exc)  # story #4336(PO P2) — 모든 preflight 실패가 요청 때와 같은 본문
         return
     except ChannelPostDraftNotFoundError as exc:
         error_code, last_error = "CHANNEL_POST_DRAFT_NOT_FOUND", str(exc)
+        command.failure_detail = preflight_error_facts(exc)
     except ExternalPublishGateNotApprovedError as exc:
         # story #3474 — 새 terminal 상태(blocked_unapproved). apply_command_failure로
         # 안 보낸다 — "재시도해도 안 되는" 종류가 아니라 "재시도라는 개념 자체가 안
@@ -403,8 +816,8 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             db, command=command, approval_check="missing", adapter_called=False,
             started_at=attempt_started_at, finished_at=now, result_code=None,
         )
-        command.status = STATUS_BLOCKED_UNAPPROVED
-        command.last_error = str(exc)[:2000]
+        mark_blocked_unapproved(command, reason_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc))
+        command.failure_detail = preflight_error_facts(exc)
         return
     except GenerationBudgetExceededError as exc:
         # story #3498(AC4) — site_post 쪽의 GENERATION_BUDGET_EXCEEDED 처리와 동형
@@ -417,12 +830,16 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             db, command=command, approval_check="budget_exceeded", adapter_called=False,
             started_at=attempt_started_at, finished_at=now, result_code=None,
         )
-        command.status = STATUS_BLOCKED_UNAPPROVED
-        command.reason_code = (
-            "API_USAGE_BUDGET_EXCEEDED" if exc.rule_key == API_USAGE_BUDGET_RULE_KEY
-            else "GENERATION_BUDGET_EXCEEDED"
+        mark_blocked_unapproved(
+            command,
+            reason_code=(
+                "API_USAGE_BUDGET_EXCEEDED" if exc.rule_key == API_USAGE_BUDGET_RULE_KEY
+                else "GENERATION_BUDGET_EXCEEDED"
+            ),
+            last_error=str(exc),
         )
-        command.last_error = str(exc)[:2000]
+        # story #4336(PO 조건 2) — 요청 때 통과했는데 여기서 걸렸다: 즉시 발행 응답과 같은 사실을 명령에(화면이 같은 배너).
+        command.failure_detail = preflight_error_facts(exc)
         return
     except YouTubeQuotaExceededError as exc:
         # story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12 —
@@ -442,13 +859,17 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             db, command, error_code="YOUTUBE_QUOTA_EXCEEDED", last_error=str(exc), now=now,
             reason_reset_at=exc.reset_at,
         )
+        command.failure_detail = preflight_error_facts(exc)  # story #4336 — 즉시 발행 응답과 같은 사실
         return
     except ChannelPostSealMissingError as exc:
         error_code, last_error = "SITE_POST_SEAL_MISSING", str(exc)
+        command.failure_detail = preflight_error_facts(exc)
     except ChannelTextTooLongError as exc:
         error_code, last_error = "CHANNEL_TEXT_TOO_LONG", str(exc)
+        command.failure_detail = preflight_error_facts(exc)  # story #4336 — 즉시 발행 응답과 같은 사실
     except ChannelConnectionNotActiveError as exc:
         error_code, last_error = "CHANNEL_CONNECTION_NOT_ACTIVE", str(exc)
+        command.failure_detail = preflight_error_facts(exc)
     # story #3605(실측 정정) — ChannelConnectionRevokedError·ChannelConnectionAuthError
     # 둘 다 ChannelTokenExpiredError의 서브클래스(신규 except 절 없이 기존 라우터가
     # 계속 잡는다는 설계, #3598)라 Python except 순서상 **부모보다 먼저** 와야 한다
@@ -469,28 +890,159 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         # 필수 채널에 이미지 없이 도달) 그 코드 자체를 error_code로 써서 classify_
         # failure_kind가 needs_check(재시도 0·dead_letter)로 보내게 한다. 그 외
         # 일반 provider 오류는 기존처럼 CHANNEL_PUBLISH_PROVIDER_ERROR(transient).
-        if exc.provider_code in _PERMANENT_PROVIDER_CONDITION_CODES:
-            error_code, last_error = exc.provider_code, str(exc)
-        else:
-            error_code, last_error = "CHANNEL_PUBLISH_PROVIDER_ERROR", str(exc)
+        # story #4264 — 표(`_NOT_SENT_CODES` · `_MAYBE_SENT_CODES`)에 있는 provider_code는 그대로 올려 부류를 가른다(즉시 발행
+        # 라우터 · 댓글 답글과 같은 헬퍼).
+        error_code, last_error = provider_error_code(exc.provider_code), str(exc)
+    except ChannelYouTubeMetadataError as exc:
+        # story #4264 — 예전엔 이 절이 없어 아래 미분류(None → needs_check)로 떨어졌다. 메타데이터 검사는 HTTP 호출 전이라
+        # 확실히 안 나감(즉시 발행 라우터는 이미 이 코드를 쓴다).
+        error_code, last_error = "YOUTUBE_METADATA_INVALID", str(exc)
+        command.failure_detail = preflight_error_facts(exc)
+    except (ChannelThreadUnsupportedError, ChannelThreadSegmentLimitExceededError, ChannelThreadSegmentTooLongError) as exc:
+        # story #4336(PO P2) — 예전엔 절이 없어 아래 미분류(공급자 호출 전 → 자동 재시도)로 떨어져, 고칠 때까지 안 풀리는 입력
+        # 오류를 계속 다시 돌렸다. 이어쓰기 검사는 HTTP 호출 전 — 확실히 안 나감(글자 수 · 메타데이터와 같은 부류).
+        command.failure_detail = preflight_error_facts(exc)
+        error_code, last_error = command.failure_detail["code"], str(exc)
     except ChannelPublishInProgressError as exc:
         error_code, last_error = "CHANNEL_PUBLISH_IN_PROGRESS", str(exc)
+    except ExternalPublishPausedError as exc:
+        # story #4195 ② — 워커 진입 검사(위 _process_one_command)를 통과한 직후 pause가 켜져
+        # publish_channel_post_draft 안 두 번째 검사에 걸린 경우. 예전엔 여기 절이 없어 아래
+        # 미분류 실패로 떨어져 백오프·attempt 증가 → 길면 dead_letter(resume 대상 밖)였다.
+        # 진입 검사와 같은 분기로 — 어댑터는 안 불렸다.
+        await _block_for_external_publish_pause(db, command, now=now, reason=exc.reason)
+        return
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("publication_command 처리 중 미분류 예외 command_id=%s", command.id)
+        if not provider_call_marked():
+            error_code = PRE_CALL_ERROR_CODE  # story #4272 — 공급자 호출 전 → 자동 재시도
 
     # story #3474 — 여기 도달한 실패는 전부 게이트 재검증(missing/version_mismatch)을
     # 이미 통과한 뒤(publish_channel_post_draft 내부)의 실패다(그 둘은 위에서 별도
-    # return으로 먼저 빠졌다). DRAFT_NOT_FOUND만 예외 — 그건 gate 조회 자체보다도
-    # 먼저(버전/초안 조회 단계) 나므로 adapter가 안 불렸다.
+    # return으로 먼저 빠졌다). story #4272 — 공급자를 불렀는지는 코드 목록 대신 호출 직전 표시(`provider_call_marked`)로
+    # 적는다(예전: 코드 없는 호출 뒤 실패를 False로, 호출 전 검사 실패 · 연결 비활성을 True로 적었다).
     await record_publication_attempt(
         db, command=command, approval_check="ok",
-        adapter_called=error_code not in (None, "CHANNEL_POST_DRAFT_NOT_FOUND"),
+        adapter_called=provider_call_marked(),
         started_at=attempt_started_at, finished_at=now, result_code=error_code,
     )
+    # story #4093 AC2(음성 대조, 페드루 PO 確定 2026-09-21) — 워커 발행 실패 시 published
+    # 이벤트는 0건(emit 자체를 안 부른다), 대신 레시피 게이트의 publish_outcome(기계
+    # 소유 필드)에 실패 사유를 남긴다 — 승인자 resolution_note는 절대 안 건드린다
+    # (#4090과 동일 규율). draft를 못 구한 경우(위 DRAFT_NOT_FOUND 등)는 레시피 문맥
+    # 자체를 못 찾으므로 조용히 스킵(지어내지 않는다).
+    if draft is not None:
+        try:
+            from app.services.channel_posts import resolve_recipe_context_for_scheduled_publication
+
+            recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
+                db, org_id=command.org_id, work_item_id=draft.work_item_id,
+                connection_id=draft.connection_id,
+            )
+            if recipe_ctx is not None:
+                recipe_gate, _definition_key, _next_stage = recipe_ctx
+                # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — 꼬리도 닫힌
+                # 어휘 3값(channel_posts.py::classify_publish_failure_outcome
+                # 재사용, 커넥터 원문 error_code를 그대로 안 싣는다) — 원문 사유는
+                # last_error(이미 command.last_error로 별도 기록됨, record_
+                # publication_attempt/apply_command_failure)에만.
+                from app.services.channel_posts import classify_publish_failure_outcome
+
+                _failure_code = classify_publish_failure_outcome(error_code=error_code)
+                recipe_gate.publish_outcome = f"publish_failed:{_failure_code}"
+                await db.commit()
+        except Exception:
+            logger.warning(
+                "publication command 예약 발행 실패 뒤 레시피 publish_outcome 갱신 실패 "
+                "command_id=%s draft_id=%s", command.id, draft.id, exc_info=True,
+            )
     await apply_command_failure(
         db, command, error_code=error_code, last_error=last_error, now=now,
         retry_after_seconds=retry_after_seconds,
+    )
+
+
+async def _emit_recipe_published_for_channel_command(
+    db: AsyncSession, command: PublicationCommand, draft: ChannelPostDraft, publication_id: uuid.UUID | None = None,
+) -> None:
+    """story #4093·#4192 — 예약 채널 발행 명령이 **성공으로** 끝난 순간(completed 커밋 뒤) 레시피 뒤처리: 레시피 문맥 읽기 ·
+    레시피 게이트 outcome 기록 · published 단계 이벤트. 전부 **격리 세션**에서(까디르 4583 P1) — 워커 세션은 completed
+    커밋까지만이고 여기선 `command`·`draft`의 값만 읽는다(DB 접근 0). 실패는 발행 성공을 되돌리지 않는다.
+
+    story #4229 — `_process_one_command` 안 인라인 클로저였던 것을 site 쪽 `_emit_recipe_published_for_site_post_command`와
+    같은 모양으로 뺐다(동작 무변) — «워커 세션 안 건드림» 계약을 테스트가 직접 잴 수 있게."""
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+    _org_id, _work_item_id, _connection_id = command.org_id, draft.work_item_id, draft.connection_id
+
+    async def _recipe_after_channel_publish(side: AsyncSession) -> None:
+        from app.services.channel_posts import (
+            emit_recipe_published_stage_event, resolve_recipe_context_for_scheduled_publication,
+        )
+
+        recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
+            side, org_id=_org_id, work_item_id=_work_item_id, connection_id=_connection_id,
+        )
+        if recipe_ctx is None:
+            return
+        recipe_gate, definition_key, next_stage = recipe_ctx
+        recipe_gate.publish_outcome = "published"
+        # 페드루 PO REQUIRED(PR #4473) — work_item_type은 찾은 게이트 행 자신의 값(SSOT는 행 자신).
+        work_item_type = recipe_gate.work_item_type
+        await side.commit()
+        await emit_recipe_published_stage_event(
+            side, org_id=_org_id, work_item_type=work_item_type,
+            work_item_id=_work_item_id, definition_key=definition_key, next_stage=next_stage,
+            publication_id=publication_id,  # story #4242 — 뉴스레터 «발송 요청» 봉인 필드 `publication_id`의 원천
+            trigger_gate_id=recipe_gate.id,  # story #4255 — 이 발행을 촉발한 레시피 게이트(추측 없이)
+        )
+
+    await run_side_effect_in_own_session(
+        db, _recipe_after_channel_publish,
+        describe=f"recipe after scheduled channel publish command_id={command.id} draft_id={draft.id}",
+    )
+
+
+async def _emit_recipe_published_for_site_post_command(db: AsyncSession, command: PublicationCommand) -> None:
+    """story #4192 AC1·AC2 — 외부 블로그 발행 명령이 **성공으로** 끝난 순간, 그 초안이 블로그 레시피 회차(«발행 승인
+    대기» 단계)에서 온 것이면 레시피 `published` 단계 이벤트를 낸다(채널 워커 #4093과 같은 `emit_recipe_published_
+    stage_event` — 멱등: 이미 낸 stage면 스킵, 겹친 tick도 중복 0). 실패·무효화(void)·차단 분기는 이 함수에 오지 않는다
+    (성공 분기에서만 호출). 레시피 문맥 판별 = `resolve_site_post_recipe_context`(자사 블로그 자동 발행·승인 알림과 같은
+    판정). 이벤트 발행 실패는 발행 성공을 되돌리지 않는다.
+
+    까디르 4583 P1 — 게이트 읽기 · 레시피 문맥 조회 · 이벤트를 **전부 격리 세션**에서(워커 세션은 completed 커밋까지만).
+    앞단 조회에서 SQL 오류가 나도 워커 트랜잭션은 멀쩡하다."""
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+    _gate_id = command.gate_id
+
+    async def _recipe_after_site_publish(side: AsyncSession) -> None:
+        from app.models.gate import Gate
+        from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD, resolve_site_post_recipe_context
+        from app.services.channel_posts import emit_recipe_published_stage_event
+
+        gate = await side.get(Gate, _gate_id)
+        if gate is None:
+            return
+        # 4572 P1 — 레시피 문맥은 회차가 연결한 초안(`site_post_draft_id`)이 바로 이 게이트의 초안일 때만.
+        draft_id = (gate.neutral_facts or {}).get("draft_id")
+        ctx = await resolve_site_post_recipe_context(
+            side, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+            draft_id=draft_id,
+        )
+        if ctx is None:
+            return
+        definition_key, next_stage = ctx
+        await emit_recipe_published_stage_event(
+            side, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+            definition_key=definition_key, next_stage=next_stage,
+            extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
+            trigger_gate_id=gate.id,  # story #4255 — 발행을 촉발한 초안 게이트
+        )
+
+    await run_side_effect_in_own_session(
+        db, _recipe_after_site_publish, describe=f"recipe after site publish command_id={command.id}",
     )
 
 
@@ -500,6 +1052,7 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
     kind`)를 그대로 재사용 — `site_posts.py::SitePostExternalPublishError.error_code`가
     그 표의 기존 문자열(CHANNEL_CONNECTION_NOT_ACTIVE 등)을 그대로 쓰므로 새 매핑을
     안 만든다."""
+    from app.services.external_publish_pause import ExternalPublishPausedError
     from app.services.site_posts import (
         SitePostExternalPublishError,
         publish_site_post_external_command,
@@ -529,6 +1082,24 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
+        if command.operation != "unpublish":
+            # story #4192 — 발행 성공(completed)을 먼저 커밋(채널 분기와 같은 이유 — 이벤트 쪽 DB 오류가 completed를
+            # 지워 다음 tick이 같은 글을 다시 발행하는 일이 없게).
+            await db.commit()
+            # story #4192 — 레시피 이벤트는 발행 성공의 부산물(side-channel). 여기서 나는 예외가 아래 except로 흘러
+            # «완료된 발행»을 실패로 재분류하지 않게 격리한다.
+            try:
+                await _emit_recipe_published_for_site_post_command(db, command)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "site_post 발행 성공 뒤 레시피 published 이벤트 처리 실패 command_id=%s", command.id, exc_info=True,
+                )
+        return
+    except ExternalPublishPausedError as exc:
+        # story #4195(PO 리뷰) — 지금 이 분기가 부르는 publish_site_post_external_command엔 pause 검사가 없어
+        # 실제로는 안 오지만(검사는 즉시-발행 publish_site_post_from_draft에만), 채널 분기와 같은 규칙을 여기도
+        # 둔다 — 나중에 발행 경로 안에 검사가 들어와도 미분류 실패(→dead_letter)로 새지 않게.
+        await _block_for_external_publish_pause(db, command, now=now, reason=exc.reason)
         return
     except SitePostExternalPublishError as exc:
         error_code, last_error = exc.error_code, str(exc)
@@ -553,21 +1124,23 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
                 command.status = "voided"
                 command.reason_code = "CONTENT_CHANGED"
             else:
-                command.status = STATUS_BLOCKED_UNAPPROVED
-                if approval_check == "budget_exceeded":
-                    command.reason_code = "GENERATION_BUDGET_EXCEEDED"
+                mark_blocked_unapproved(command, reason_code=error_code, last_error=last_error)
+                return
             command.last_error = last_error[:2000]
             return
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("site_post publication_command 처리 중 미분류 예외 command_id=%s", command.id)
+        if not provider_call_marked():
+            error_code = PRE_CALL_ERROR_CODE  # story #4272 — 공급자 호출 전 → 자동 재시도
 
     # story #3474 — SITE_POST_DRAFT_NOT_FOUND/SITE_POST_NOT_PUBLISHED는 게이트 조회
     # 자체보다 먼저(버전/발행기록 조회 단계) 나므로 adapter가 안 불렸다. 그 외(연결
     # 비활성·자격거절 등)는 게이트 재검증을 통과한 뒤의 실패라 adapter가 불렸다.
+    # story #4272 — 공급자 호출 여부는 호출 직전 표시 그대로(위 채널 갈래와 같은 규칙).
     await record_publication_attempt(
         db, command=command, approval_check="ok",
-        adapter_called=error_code not in (None, "SITE_POST_DRAFT_NOT_FOUND", "SITE_POST_NOT_PUBLISHED"),
+        adapter_called=provider_call_marked(),
         started_at=attempt_started_at, finished_at=now, result_code=error_code,
     )
     await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)
@@ -661,10 +1234,9 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
             raise _CommentReplySendFailed()
 
         _publish_client = get_publish_client_module(comment.channel)
-        import httpx
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with provider_client() as client:
                 external_reply_id, external_reply_url = await _publish_client.reply(
                     client, access_token=access_token, threads_user_id=connection.account_id,
                     reply_to_id=comment.external_comment_id, text=reply.text,
@@ -675,7 +1247,8 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
             elif exc.status_code == 429:
                 error_code = "CHANNEL_RATE_LIMITED"
             else:
-                error_code = "CHANNEL_PUBLISH_PROVIDER_ERROR"
+                # story #4264 — «200인데 답글 id 없음»(나갔을 수 있음) 등 표에 있는 코드는 그대로 올린다(자동 재시도 = 이중 답글).
+                error_code = provider_error_code(exc.code)
             last_error = str(exc)
             raise _CommentReplySendFailed() from exc
 
@@ -696,9 +1269,11 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("comment_reply publication_command 처리 중 미분류 예외 command_id=%s", command.id)
+        if not provider_call_marked():
+            error_code = PRE_CALL_ERROR_CODE  # story #4272 — 공급자 호출 전 → 자동 재시도
 
     await record_publication_attempt(
-        db, command=command, approval_check="ok", adapter_called=error_code is not None,
+        db, command=command, approval_check="ok", adapter_called=provider_call_marked(),  # story #4272 — 호출 직전 표시
         started_at=attempt_started_at, finished_at=now, result_code=error_code,
     )
     reply.status = "failed"
@@ -784,6 +1359,8 @@ async def apply_command_failure(
             # 4필드 다 채움). 공용 헬퍼로 갭을 닫는다(message만 서는 자리 0).
             mark_connection_failed(connection, error_code=error_code, message=last_error, now=now)
         command.status = "blocked"
+        # story #4258(까디르 4621 codex P2) — 사람 손이 필요한 멈춤. 전이와 같은 커밋에 통지 표식(워커가 따로 보낸다).
+        mark_stop_notice(command)
         return
 
     if failure_kind == FAILURE_KIND_NEEDS_CHECK:
@@ -798,6 +1375,18 @@ async def apply_command_failure(
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
+        mark_stop_notice(command)
+        return
+
+    if failure_kind == FAILURE_KIND_NOT_SENT:
+        # story #4262 — 확실히 안 나갔고 다시 해도 같다 — 백오프 없이 곧바로 사람 재시도(연결을 고친 뒤)로.
+        command.attempt_count += 1
+        command.status = "dead_letter"
+        command.dead_letter_at = now
+        command.next_attempt_at = None
+        # story #4262 AC2(PO 14:11Z) — 4621의 다른 dead_letter 갈래와 같이 전이와 같은 커밋에 통지 표식(빠지면 not_sent 멈춤만
+        # 통지 0인 조용한 구멍).
+        mark_stop_notice(command)
         return
 
     # transient만 지수 백오프 재시도 큐로.
@@ -824,6 +1413,7 @@ async def apply_command_failure(
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
+        mark_stop_notice(command)
         return
     command.status = "pending"
     command.next_attempt_at = compute_next_attempt_at(
@@ -831,7 +1421,150 @@ async def apply_command_failure(
     )
 
 
-async def process_due_publication_commands(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
+# story #4142 AC5(페드루 PO CHANGES-1, 2026-09-22) — 이 여유(5분)는 정상 진행 中인
+# 컨테이너(30초 폴링 간격, story 620beefc B3)와 겹칠 일이 없을 만큼 크게 잡는다 —
+# 정상 경로(즉시-발행 라우터·#4142 AC1 수정 레시피 경로 둘 다)는 컨테이너 생성과
+# 같은 커밋에서 command를 남기므로, 5분 뒤에도 command가 없다는 것 자체가 "그
+# 커밋 경로가 어떤 이유로든 명령을 안 남겼다"는 신호다.
+_STUCK_CONTAINER_SWEEP_THRESHOLD_MINUTES = 5
+
+
+async def _sweep_stuck_container_created_publications(db: AsyncSession, *, now: datetime) -> int:
+    """story #4142 AC5(페드루 PO CHANGES-1) — 클래스 처방. `container_created`인데
+    `PublicationCommand`가 하나도 없는(pending·completed 등 상태 불문 전무) 발행물을
+    훑어 같은 헬퍼(`create_or_get_publication_command`)로 pending 1건을 뒤늦게
+    큐잉한다 — 이미 Cloud Scheduler로 도는 이 워커 tick 자체가 매번 스스로 고치므로,
+    특정 사람이 스크립트/Job을 손으로 돌릴 필요가 0이다(2호 초안 9e879c8a도 배포
+    뒤 다음 tick부터 저절로 완주).
+
+    새로 큐잉한 command는 이 tick 안에서 곧바로 처리하지 않는다(`next_attempt_at`=
+    +30s, 컨테이너 폴링 30초 관례 그대로) — 방금 만들어진 정상 컨테이너와 똑같은
+    대기를 거친다(같은 tick 즉시완료 특혜 0), 다음 tick이 실제로 이어 폴링한다."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+
+    threshold = now - timedelta(minutes=_STUCK_CONTAINER_SWEEP_THRESHOLD_MINUTES)
+    stuck_rows = (await db.execute(
+        select(ChannelPublication).where(
+            ChannelPublication.status == "container_created",
+            ChannelPublication.created_at < threshold,
+        )
+    )).scalars().all()
+
+    queued = 0
+    for pub in stuck_rows:
+        already_has_command = (await db.execute(
+            select(PublicationCommand.id).where(
+                PublicationCommand.org_id == pub.org_id, PublicationCommand.destination == pub.connection_id,
+                PublicationCommand.approved_version == pub.version_id, PublicationCommand.operation == "publish",
+                PublicationCommand.toggle_seq == 0,
+            )
+        )).first()
+        if already_has_command is not None:
+            continue
+
+        gate = await db.get(Gate, pub.gate_id)
+        if gate is None or gate.resolver_id is None:
+            # 승인자를 알 수 없으면(비정상 상태) 조용히 스킵 — 지어내지 않는다.
+            # 사람이 다시 승인하면 정상 경로가 이어받는다.
+            continue
+
+        command, _created = await create_or_get_publication_command(
+            db, org_id=pub.org_id, gate_id=pub.gate_id, destination=pub.connection_id,
+            approved_version=pub.version_id, requested_by_member_id=gate.resolver_id,
+            scheduled_at=None,
+        )
+        command.next_attempt_at = now + timedelta(seconds=30)
+        queued += 1
+    if queued:
+        await db.commit()
+    return queued
+
+
+async def _block_for_external_publish_pause(
+    db: AsyncSession, command: PublicationCommand, *, now: datetime, reason: str | None,
+) -> None:
+    """story #3953/#4195 — 조직 pause로 이 명령을 멈춘다. 워커 진입 검사와 발행 함수 안 두 번째 검사
+    (channel_posts.publish_channel_post_draft) 둘 다 이 한 분기로 간다 — `blocked`·`failure_kind=paused`,
+    attempt_count·백오프는 안 건드린다(실패가 아니라 대기). 해제(resume)와 크론 자가복구 스윕이 이
+    failure_kind만 골라 되살린다."""
+    await record_publication_attempt(
+        db, command=command, approval_check="paused", adapter_called=False,
+        started_at=now, finished_at=now, result_code=None,
+    )
+    command.status = "blocked"
+    command.failure_kind = FAILURE_KIND_PAUSED
+    command.last_error = f"EXTERNAL_PUBLISH_PAUSED: {reason}" if reason else "EXTERNAL_PUBLISH_PAUSED"
+    # story #4336(PO P2) — 진입 검사 · 발행 함수 안 두 번째 검사 둘 다 여기로 온다: 즉시 발행 423과 같은 본문.
+    from app.services.external_publish_pause import ExternalPublishPausedError
+
+    command.failure_detail = preflight_error_facts(ExternalPublishPausedError(reason=reason))
+
+
+# story #4287(PO 00:16Z) — in_progress로 집힌 채 이 시간을 넘긴 명령은 워커가 도중에 죽은 것으로 본다. 워커 요청은 Cloud Run 요청
+# 타임아웃에서 끊긴다(backend-dev 3600s · prod 300s — `.github/workflows/cloud-build.yml` backend_timeout. 스케줄러 attempt_deadline
+# 120s는 스케줄러 쪽 대기일 뿐 요청 수명이 아니다). 가장 긴 3600s + 여유 30분. 살아 있는 요청을 회수하면(표식 전 → 재시도) 두 번
+# 나가므로 이 값은 요청 수명보다 반드시 길어야 한다 — 타임아웃을 늘리면 이 값도 같이 올린다.
+STUCK_IN_PROGRESS_THRESHOLD = timedelta(minutes=90)
+# 표식 뒤(또는 표식 칸 전 옛 행) 도중에 멈춘 명령 — 코드 표 밖이라 needs_check(나갔는지 모름 · 사람 확인 뒤 재시도).
+WORKER_INTERRUPTED_ERROR_CODE = "PUBLICATION_WORKER_INTERRUPTED"
+
+
+async def mark_provider_call_started(db: AsyncSession, command: PublicationCommand) -> None:
+    """story #4287 — 공급자 쓰기 직전 영속 표식. 서비스 코드가 명시적으로 쓰고 **커밋**한다(HTTP 훅은 메모리 표시만 — 워커 공유 세션에
+    훅이 끼어들어 쓰지 않는다). 커밋이 실패하면 예외가 그대로 올라가 어댑터를 부르지 않는다(표식 없이 쓰기 0)."""
+    command.provider_call_started_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def _recover_interrupted_commands(db: AsyncSession, *, now: datetime) -> int:
+    """story #4287 — 상한 시간을 넘긴 in_progress 명령을 되살린다. 판정은 영속 표식 하나(PO 00:16Z):
+    - `claimed_at` 있음 · 표식 없음 → 공급자 쓰기 전이 확실 → `PRE_CALL_ERROR_CODE`(transient)로 자동 재시도(4272의 «호출 전» 갈래와
+      같은 코드 · 같은 백오프 · 같은 재시도 상한).
+    - 표식 있음 → 나갔는지 모름 → `PUBLICATION_WORKER_INTERRUPTED`(needs_check dead_letter · 자동 재시도 0 · 멈춤 통지).
+    - `claimed_at` 없음(이 칸이 생기기 전에 집힌 옛 행) → «호출 전 확실»로 읽지 않는다 → needs_check.
+    행마다 자기 트랜잭션 · SKIP LOCKED(겹친 틱이 같은 행을 두 번 회수하지 않는다)."""
+    threshold = now - STUCK_IN_PROGRESS_THRESHOLD
+    stuck_ids = (await db.execute(
+        select(PublicationCommand.id).where(
+            PublicationCommand.status == "in_progress",
+            func.coalesce(PublicationCommand.claimed_at, PublicationCommand.updated_at) < threshold,
+        ).order_by(PublicationCommand.created_at.asc()).limit(BATCH_SIZE)
+    )).scalars().all()
+    await db.commit()
+    recovered = 0
+    for command_id in stuck_ids:
+        try:
+            command = (await db.execute(
+                select(PublicationCommand).where(
+                    PublicationCommand.id == command_id, PublicationCommand.status == "in_progress",
+                ).with_for_update(skip_locked=True)
+            )).scalar_one_or_none()
+            if command is None:
+                await db.rollback()
+                continue
+            call_may_have_started = command.provider_call_started_at is not None or command.claimed_at is None
+            if call_may_have_started and await _local_publication_complete(db, command):
+                # story #4336 — 호출 도중 죽었지만 발행 행이 전부 published(공급자 응답을 이미 받아 적음) → 다시 보내지 않고 완료.
+                command.status = "completed"
+                command.last_error = None
+                command.failure_kind = None
+                await db.commit()
+                recovered += 1
+                continue
+            error_code = WORKER_INTERRUPTED_ERROR_CODE if call_may_have_started else PRE_CALL_ERROR_CODE
+            await apply_command_failure(db, command, error_code=error_code, last_error=error_code, now=now)
+            await db.commit()
+            recovered += 1
+        except Exception:  # 한 행의 회수 실패가 틱을 막지 않는다(다음 틱이 다시 본다).
+            await db.rollback()
+            logger.exception("publication command 회수 실패 command_id=%s", command_id)
+    return recovered
+
+
+async def process_due_publication_commands(
+    db: AsyncSession, *, now: datetime | None = None, tick_budget_seconds: float | None = None,
+) -> dict[str, int]:
     """story #3414 AC3 — cron 워커의 유일한 진입점. `scheduled_at`(예약 시각, null=즉시라
     이미 동기 경로가 처리했어야 함 — 여기 남아 있다면 그 동기 경로가 중간에 죽은
     것이라 자가치유 대상)이 도래했고, 재시도 대기 중(`next_attempt_at`)이면 그것도
@@ -849,30 +1582,99 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
     'pending'` 조건에 안 걸려 겹친 tick이 아예 못 다시 집는다. 그 다음에야 건별로
     개별 트랜잭션(커밋 경계)으로 처리 — 한 건의 실패(또는 진짜 미분류 버그)가 배치의
     나머지 org·command를 막지 않는다(AC4 격리, 이 축은 원래 구조 그대로)."""
+    fixed_now = now
     now = now or datetime.now(timezone.utc)
-    rows = (await db.execute(
-        select(PublicationCommand).where(
-            PublicationCommand.status == "pending",
-            (PublicationCommand.scheduled_at.is_(None)) | (PublicationCommand.scheduled_at <= now),
-            (PublicationCommand.next_attempt_at.is_(None)) | (PublicationCommand.next_attempt_at <= now),
-        ).order_by(PublicationCommand.created_at.asc())
-        .limit(BATCH_SIZE)
-        .with_for_update(skip_locked=True)
-    )).scalars().all()
+    # story #4142 AC5 — 이 tick이 실제 due-command를 집기 前에 self-heal 스윕부터.
+    # 방금 큐잉된 command는 next_attempt_at=+30s라 아래 SELECT엔 안 걸린다(같은
+    # tick 즉시완료 특혜 0 — 다음 tick이 잇는다).
+    await _sweep_stuck_container_created_publications(db, now=now)
+    # story #4195 ① — pause가 풀린 조직의 `blocked/paused` 명령 자가복구. resume의 1회 스캔은 그 순간
+    # 워커가 들고 있던(pause를 읽고 blocked를 아직 커밋 안 한 in_progress) 명령을 못 본다 — 그 명령은
+    # 해제 뒤에 blocked/paused로 내려앉아 영구 정체였다. 매 tick이 «지금 안 멈춘 조직인데 pause로
+    # 막힌 명령»을 다시 보므로 경합 창이 한 tick 뒤로 닫힌다(재큐는 pending 전환뿐 — 같은 행이라 중복 0).
+    from app.services.external_publish_pause import requeue_paused_commands_of_unpaused_orgs
 
-    for command in rows:
-        command.status = "in_progress"
+    await requeue_paused_commands_of_unpaused_orgs(db)
     await db.commit()
-
+    # story #4287 — 집힌 채 멈춘 명령을 이번 틱의 집기 전에 되살린다(«호출 전»으로 되살린 것은 백오프 뒤 다음 틱에 한 번).
+    recovered = await _recover_interrupted_commands(db, now=now)
     counts = {
         "completed": 0, "pending_retry": 0, "dead_letter": 0, "blocked": 0, "voided": 0,
         # story #3474 — 게이트 재검증 실패 전용 종결 상태. "pending_retry" 버킷에
         # 안 섞는다(재시도 대상이 아니므로 그 이름이 거짓말이 된다).
-        "blocked_unapproved": 0, "error": 0,
+        "blocked_unapproved": 0, "error": 0, "recovered": recovered,
+        # story #4336 — 남은 시한이 다음 명령의 최악보다 짧아 이번 틱에 집지 않고 넘긴 수(다음 틱이 집는다).
+        "deferred": 0,
+        # story #4336 — 한 건 최악이 틱 예산 전체보다 길어 어느 틱에도 못 들어가는 명령(표시만 · pending 그대로).
+        "over_budget": 0,
     }
-    for command in rows:
+    # story #4336 — 한 번에 하나씩 집는다(예전: BATCH_SIZE만큼 한꺼번에 in_progress로 표시 · 차례로 처리). 틱이 최대 30분이 되면서
+    # «집어 놓고 뒤에서 기다리는» 명령이 생기면 안 된다 — 집을 때마다 남은 시한과 그 명령의 최악을 대조하고, 모자라면 집지 않는다
+    # (잠금만 풀고 pending 그대로 — 다음 틱). 집기 · in_progress 표시는 여전히 SKIP LOCKED 한 트랜잭션(겹친 틱의 이중 처리 0).
+    tick_started = _monotonic()
+    budget = worker_tick_budget_seconds() if tick_budget_seconds is None else tick_budget_seconds
+    processed = 0
+    over_budget_ids: list[uuid.UUID] = []  # 이번 틱에서 «예산 밖»으로 표시한 명령 — 같은 틱에 다시 집지 않게
+    while processed < BATCH_SIZE:
+        claim_now = datetime.now(timezone.utc) if fixed_now is None else fixed_now
+        command = (await db.execute(
+            select(PublicationCommand).where(
+                PublicationCommand.status == "pending",
+                (PublicationCommand.scheduled_at.is_(None)) | (PublicationCommand.scheduled_at <= claim_now),
+                (PublicationCommand.next_attempt_at.is_(None)) | (PublicationCommand.next_attempt_at <= claim_now),
+                PublicationCommand.id.not_in(over_budget_ids) if over_budget_ids else true(),
+            ).order_by(PublicationCommand.created_at.asc())
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )).scalar_one_or_none()
+        if command is None:
+            # 잠근 행이 없다 — commit으로 끝낸다(rollback은 호출자 세션의 ORM 객체를 전부 만료시킨다 · 바꾼 것 없음).
+            await db.commit()
+            break
+        worst = await command_worst_case_seconds(db, command)
+        if worst > budget:
+            # 어느 틱에도 못 들어간다 — 조용히 굶기지 않고 명령에 드러낸다(비종결). 이 틱의 나머지 명령은 계속 본다.
+            over_budget_ids.append(command.id)
+            counts["over_budget"] += 1
+            newly_over_budget = command.reason_code != OVER_TICK_BUDGET_CODE
+            if newly_over_budget:
+                command.reason_code = OVER_TICK_BUDGET_CODE
+                command.last_error = f"worst case {worst}s exceeds worker tick budget {budget:.0f}s"
+                logger.error(
+                    "publication command %s: worst case %ss exceeds the worker tick budget %.0fs — not claimed",
+                    command.id, worst, budget,
+                )
+            await db.commit()
+            # story #4341 AC4 — «예산 밖» 명령은 사람이 받는 곳(운영 대화)으로 알린다. «처음 표시한 틱에만» 부르면 표시 커밋과 알림 사이에
+            # 워커가 죽을 때 다음 틱은 «이미 표시됨»으로 건너뛰어 영영 침묵한다(까디르 09-27) — 그래서 예산 밖인 동안 **틱마다** 부르고,
+            # 메시지 1은 명령마다 하나인 멱등 키가 지킨다(이미 보냈으면 서비스가 already_delivered로 끝낸다). 커밋 뒤에(알림은 자기 세션 ·
+            # 예외를 던지지 않음 — 워커 틱을 막지 않는다).
+            await _alert_over_tick_budget(command.id, command.org_id, worst_seconds=worst, budget_seconds=budget)
+            continue
+        remaining = budget - (_monotonic() - tick_started)
+        if worst > remaining:
+            await db.commit()  # 잠금만 푼다(바꾼 것 없음) — pending 그대로 다음 틱. rollback은 호출자 세션 객체를 만료시킨다.
+            counts["deferred"] += 1
+            break
+        if command.reason_code == OVER_TICK_BUDGET_CODE:
+            command.reason_code = None
+            command.last_error = None
+        command.status = "in_progress"
+        # story #4287 — 집은 시각(회수 기준) · 표식은 이번 시도 몫이라 비운다(앞 시도의 표식이 남아 이번 시도를 needs_check로 보내지 않게).
+        command.claimed_at = claim_now
+        command.provider_call_started_at = None
+        command.failure_detail = None  # story #4336 — 이번 시도의 결과만 남긴다
+        command_id = command.id
+        await db.commit()
+        processed += 1
+
+        # story #4272 — rollback은 세션의 ORM 객체를 전부 만료시킨다. 원시 id만 들고 건마다 행을 다시 읽는다.
+        reset_provider_call_mark()
         try:
-            await _process_one_command(db, command, now=now)
+            command = await db.get(PublicationCommand, command_id)
+            if command is None:
+                continue
+            await _process_one_command(db, command, now=claim_now)
             await db.commit()
             key = (
                 command.status
@@ -883,5 +1685,33 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
         except Exception:  # noqa: BLE001 — 2중 방어(AC4): 진짜 미분류 예외도 이 건만 격리.
             await db.rollback()
             counts["error"] += 1
-            logger.exception("publication command batch item 처리 실패 command_id=%s", command.id)
+            logger.exception("publication command batch item 처리 실패 command_id=%s", command_id)
+            await _record_unclassified_batch_failure(db, command_id, provider_called=provider_call_marked(), now=claim_now)
+    # story #4258(까디르 4621 codex P2) — 멈춤 통지는 표식(`stop_notice_state = pending`)을 보고 보낸다. 이번 틱에 방금 멈춘 것
+    # · 지난 틱에 전이 커밋 뒤 통지 전에 죽은 것 · 통지가 실패해 남은 것을 모두 여기서 줍는다(행마다 자기 트랜잭션).
+    from app.services.recipe_publish_failure import deliver_pending_stop_notices
+
+    counts["stop_notices"] = await deliver_pending_stop_notices(db)
     return counts
+
+
+UNCLASSIFIED_ERROR_CODE = "PUBLICATION_COMMAND_UNCLASSIFIED_ERROR"
+
+
+async def _record_unclassified_batch_failure(
+    db: AsyncSession, command_id: uuid.UUID, *, provider_called: bool, now: datetime,
+) -> None:
+    """story #4272 — 배치 밖으로 샌 예외로 rollback된 건은 in_progress로 남으면 아무도 다시 집지 않는다. 공급자 쓰기 호출 전이면
+    (`provider_call_mark` 표시 없음) 아무것도 안 나갔으니 자동 재시도(transient — `PRE_CALL_ERROR_CODE`), 호출 뒤면 나갔는지
+    모르니 사람 확인 뒤 재시도(needs_check dead_letter — `UNCLASSIFIED_ERROR_CODE`, 까디르 codex P1 · 4264 원칙). 이 기록마저
+    실패해도 배치는 잇는다."""
+    try:
+        command = await db.get(PublicationCommand, command_id)
+        if command is None or command.status != "in_progress":
+            return
+        error_code = UNCLASSIFIED_ERROR_CODE if provider_called else PRE_CALL_ERROR_CODE
+        await apply_command_failure(db, command, error_code=error_code, last_error=error_code, now=now)
+        await db.commit()
+    except Exception:  # 기록 실패도 이 건에서 멈춘다.
+        await db.rollback()
+        logger.exception("publication command 미분류 실패 기록 실패 command_id=%s", command_id)

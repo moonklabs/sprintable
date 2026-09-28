@@ -72,14 +72,14 @@ interface StubMember {
   hit_rate: number | null; resolved: number | null; computed_at: string; pending: number | null;
 }
 
-function stubFetchAdmin(members: StubMember[]) {
+function stubFetchAdmin(members: StubMember[], orgMembers: Array<{ id: string; name: string; email?: string; role?: string }> = []) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === '/api/trust-scores/org-summary') {
       return { ok: true, status: 200, json: async () => ({ members }) };
     }
     if (url === '/api/org-members') {
-      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      return { ok: true, status: 200, json: async () => ({ data: orgMembers }) };
     }
     if (url.startsWith('/api/team-members')) {
       return { ok: true, status: 200, json: async () => ({ data: [] }) };
@@ -174,6 +174,27 @@ describe('OrganizationTrustPage — 콜드스타트 두 갈래(story #3749, 定 
     expect(row?.textContent).toContain(koMessages.organization.trustColdStart);
   });
 
+  // [SID:4282 · 유나 결정] 배포 27 실측 모양 — 같은 이름 «송윤재»가 소유자 · 관리자 두 계정. 이름이 겹친 행에만 역할 꼬리.
+  it('⭐같은 이름 · 다른 구성원 두 줄은 «이름 · 역할»로 갈린다 · 이름이 하나뿐인 행은 그대로', async () => {
+    mountAsAdmin();
+    stubFetchAdmin([
+      { member_id: 'e75ca548', role_key: 'dev', role_label: '개발', hit_rate: null, resolved: 0, computed_at: '2026-09-09T00:00:00Z', pending: 0 },
+      { member_id: '2fd14616', role_key: 'dev', role_label: '개발', hit_rate: null, resolved: 0, computed_at: '2026-09-09T00:00:00Z', pending: 0 },
+      { member_id: 'c3', role_key: 'dev', role_label: '개발', hit_rate: null, resolved: 0, computed_at: '2026-09-09T00:00:00Z', pending: 0 },
+    ], [
+      { id: 'e75ca548', name: '송윤재', email: 'iamyoonjae@moonklabs.com', role: 'owner' },
+      { id: '2fd14616', name: '송윤재', email: 'sellerking@moonklabs.com', role: 'admin' },
+      { id: 'c3', name: 'dosunyun', email: 'dosunyun@moonklabs.com', role: 'admin' },
+    ]);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    const text = container.textContent ?? '';
+    expect(text).toContain(`송윤재 · ${koMessages.organization.roleGroupOwner}`);
+    expect(text).toContain(`송윤재 · ${koMessages.organization.roleGroupAdmin}`);
+    expect(text).toContain('dosunyun');
+    expect(text).not.toContain(`dosunyun · `);
+  });
+
   it('⭐resolved=0·pending=0 — 「아직 판정한 가설이 없습니다」(수 없음, "3건" 류 계약에 없는 수 0)', async () => {
     mountAsAdmin();
     stubFetchAdmin([
@@ -185,6 +206,9 @@ describe('OrganizationTrustPage — 콜드스타트 두 갈래(story #3749, 定 
     const row = container.querySelector('[data-testid="trust-roster-row"]');
     expect(row?.textContent).toContain(koMessages.organization.trustColdStartEmptyReason);
     expect(row?.textContent).not.toContain(koMessages.organization.trustColdStartPendingReason.replace('{n}', ''));
+    // [SID:4282] 좁은 칸에서 낱말 중간 줄바꿈(«판정한 가/설이») 방지 — 사유 문장을 담은 부제(공용 ListRow)가 break-keep.
+    const reasonEl = Array.from(row?.querySelectorAll('p') ?? []).find((el) => el.textContent?.includes(koMessages.organization.trustColdStartEmptyReason));
+    expect(reasonEl?.className ?? '').toMatch(/(^|\s)break-keep(\s|$)/);
   });
 
   it('resolved=0인데 pending이 null(계약 부재)이면 수 없는 문장으로 떨어진다(모른다≠지어낸 수)', async () => {
@@ -363,7 +387,8 @@ describe('OrganizationTrustPage — 「추이 보기」 펼침(HistoryDrilldown 
     await flush();
 
     const panel = container.querySelector('[data-testid="trust-history-panel"]');
-    expect(panel?.textContent).toMatch(/\d{2}-\d{2} \d{2}:\d{2} .*\d{2}-\d{2} \d{2}:\d{2} /);
+    // story #4280 — 시간대 표기는 보는 사람(실행 기계 TZ)과 같은 오프셋이면 생략 · 다르면 «GMT±N»이라 기계 TZ에 따라 붙거나 안 붙는다 — 표기는 선택으로 둔다(표기 규칙 자체는 schedule-format.test.ts 진리표가 고정).
+    expect(panel?.textContent).toMatch(/\d{2}-\d{2} \d{2}:\d{2}.*\d{2}-\d{2} \d{2}:\d{2}/);
     expect(panel?.textContent).not.toMatch(/분 전|시간 전|일 전|어제|오늘/);
   });
 });
@@ -435,5 +460,122 @@ describe('OrganizationTrustPage — PageHeader(⓪, story #3749)', () => {
     expect(container.textContent).toContain(koMessages.organization.trustPurposeFraming);
     // 定① 옛 값("오케스트레이션")은 걷었다.
     expect(container.textContent).not.toContain('오케스트레이션');
+  });
+});
+
+// story #4285 — 이름은 org-summary 응답이 싣는다(조직 범위). 조직 구성원 · 지금 프로젝트 팀원 어디에도 없는 다른 프로젝트 에이전트(실측:
+// 페드루)도 이름으로 뜨고, «알 수 없는 구성원»은 지워진 구성원(name=null · member_deleted)일 때만. 뮤테이션: page.tsx에서
+// withSummaryNames를 빼면 첫 테스트가 «알 수 없는 구성원»으로 RED.
+describe('OrganizationTrustPage — 이름은 조직 범위 응답에서(story #4285)', () => {
+  type SummaryRow = StubMember & { name?: string | null; member_type?: 'human' | 'agent' | null; member_deleted?: boolean };
+  const base = { role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 2, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+
+  it('⭐다른 프로젝트 에이전트 — 조직 구성원 · 팀원 목록에 없어도 응답 이름으로 보인다', async () => {
+    mountAsAdmin();
+    const rows: SummaryRow[] = [{ ...base, member_id: 'agent-other-project', name: '페드루 올리베이라', member_type: 'agent', member_deleted: false }];
+    stubFetchAdmin(rows);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    expect(container.textContent).toContain('페드루 올리베이라');
+    expect(container.textContent).not.toContain(koMessages.organization.trustUnknownMember);
+  });
+
+  it('⭐지워진 구성원만 «알 수 없는 구성원»', async () => {
+    mountAsAdmin();
+    const rows: SummaryRow[] = [
+      { ...base, member_id: 'alive', name: '살아 있는 에이전트', member_type: 'agent', member_deleted: false },
+      { ...base, member_id: 'gone', name: null, member_type: null, member_deleted: true },
+    ];
+    stubFetchAdmin(rows);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    expect(container.textContent).toContain('살아 있는 에이전트');
+    expect(container.textContent!.split(koMessages.organization.trustUnknownMember).length - 1).toBe(1);
+  });
+});
+
+// story #4285(까디르 P2 · PO 처방) — 살아 있는데 이름이 빈 에이전트(PATCH가 name null을 받는다)는 «이름 없는 구성원» · 지워진 구성원은
+// «알 수 없는 구성원» · 날것 `?`는 0. 예전엔 이름 빈 행이 옛 조회로 떨어져 리터럴 '?'가 떴다(팀원 목록에 이름 빈 항목이 있으면).
+// 뮤테이션: rosterDisplayName의 «이름 없음» 갈래를 «알 수 없음»으로 되돌리면 첫 단언 RED.
+describe('OrganizationTrustPage — 이름 빈 구성원 · 지워진 구성원(story #4285 · 까디르 P2)', () => {
+  it('⭐이름 빈 살아 있는 에이전트 → «이름 없는 구성원» · 지워진 → «알 수 없는 구성원» · `?` 0', async () => {
+    mountAsAdmin();
+    const base = { role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 2, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+    const rows: Array<StubMember & { name?: string | null; member_type?: 'human' | 'agent' | null; member_deleted?: boolean }> = [
+      { ...base, member_id: 'nameless-agent', name: null, member_type: 'agent', member_deleted: false },
+      { ...base, member_id: 'gone', name: null, member_type: null, member_deleted: true },
+    ];
+    // 팀원 목록에도 이름 빈 항목이 있는 경우(예전 '?' 리터럴의 출처) — 그대로 흉내 낸다.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/trust-scores/org-summary') return { ok: true, status: 200, json: async () => ({ members: rows }) };
+      if (url === '/api/org-members') return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.startsWith('/api/team-members')) return { ok: true, status: 200, json: async () => ({ data: [{ id: 'nameless-agent', name: null }] }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    const text = container.textContent!;
+    expect(text).toContain(koMessages.common.memberUnnamed);
+    expect(text.split(koMessages.organization.trustUnknownMember).length - 1).toBe(1);
+    expect(text).not.toMatch(/(^|[\s>])\?($|[\s<])/);
+    const rowNames = [...container.querySelectorAll('li, [role="listitem"], a, button')].map((el) => el.textContent?.trim());
+    expect(rowNames).not.toContain('?');
+  });
+});
+
+
+// story #4285(유나 재검 03:02Z) — 진짜 이름이 없는 행의 표식은 대체 낱말의 첫 글자(«이» · «알»)가 아니라 아이콘(에이전트 Bot · 그 외
+// User · UnnamedMemberIcon) · 이름 있는 행은 머리글자 그대로. 뮤테이션: AdminRow가 hasRealName을 무시하고 늘 initial(name)을 그리면 RED.
+describe('OrganizationTrustPage — 이름 없는 행 표식은 아이콘(story #4285 · 유나 재검)', () => {
+  it('⭐이름 빈 에이전트 → Bot · 지워진 구성원 → User · 표식 안에 글자 0 · 이름 있는 행은 머리글자', async () => {
+    mountAsAdmin();
+    const base = { role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 2, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+    const summary: Array<StubMember & { name?: string | null; member_type?: 'human' | 'agent' | null; member_deleted?: boolean }> = [
+      { ...base, member_id: 'nameless-agent', name: null, member_type: 'agent', member_deleted: false },
+      { ...base, member_id: 'gone', name: null, member_type: null, member_deleted: true },
+      { ...base, member_id: 'named', name: '하늘', member_type: 'human', member_deleted: false },
+    ];
+    stubFetchAdmin(summary);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    const rows = [...container.querySelectorAll('[data-testid="trust-roster-row"]')];
+    const byTitle = (text: string) => rows.find((r) => r.textContent?.includes(text))!;
+    const markOf = (row: Element) => row.querySelector('[aria-hidden="true"].rounded-full')!;
+    const unnamed = markOf(byTitle(koMessages.common.memberUnnamed));
+    const unknown = markOf(byTitle(koMessages.organization.trustUnknownMember));
+    expect(unnamed.querySelector('[data-testid="trust-mark-icon-agent"]')).not.toBeNull();
+    expect(unknown.querySelector('[data-testid="trust-mark-icon-person"]')).not.toBeNull();
+    expect(unnamed.textContent).toBe('');
+    expect(unknown.textContent).toBe('');
+    expect(markOf(byTitle('하늘')).textContent).toBe('하');
+  });
+});
+
+// story #4285(까디르 P2 둘째 · PO 렌즈) — 사람인데 이름 · display_name이 둘 다 비어 BE가 name null(이메일 폴백 0)을 준 행. 예전엔
+// 조직 구성원 조회의 이메일 앞부분이 제목 · 이니셜로 뜨고 정렬에서 이름 있는 행 앞에 섰다. 뮤테이션: rosterRealName이 새 서버에서도
+// 조회 이름을 보게 되돌리면 RED.
+describe('OrganizationTrustPage — 이메일 폴백 0(story #4285 · 까디르 P2 둘째)', () => {
+  it('⭐name null · 이메일 있음 → «이름 없는 구성원» · 이메일 앞부분 0 · 이름 있는 행 뒤', async () => {
+    mountAsAdmin();
+    const base = { role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 2, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+    const rows = [
+      { ...base, member_id: 'nameless-human', name: null, member_type: 'human' as const, member_deleted: false },
+      { ...base, member_id: 'named', name: '하늘', member_type: 'human' as const, member_deleted: false },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/trust-scores/org-summary') return { ok: true, status: 200, json: async () => ({ members: rows }) };
+      if (url === '/api/org-members') return { ok: true, status: 200, json: async () => ({ data: [{ id: 'nameless-human', name: null, email: 'zeta.person@x.dev' }] }) };
+      if (url.startsWith('/api/team-members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    expect(container.textContent).not.toContain('zeta.person');
+    const titles = [...container.querySelectorAll('[data-testid="trust-roster-row"]')].map((el) => el.textContent ?? '');
+    expect(titles).toHaveLength(2);
+    expect(titles[0]).toContain('하늘');
+    expect(titles[1]).toContain(koMessages.common.memberUnnamed);
   });
 });

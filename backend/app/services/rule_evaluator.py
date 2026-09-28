@@ -110,7 +110,7 @@ async def evaluate(
             AgentRoutingRule.is_enabled.is_(True),
             AgentRoutingRule.deleted_at.is_(None),
         )
-        .order_by(AgentRoutingRule.priority.asc(), AgentRoutingRule.created_at.asc())
+        .order_by(AgentRoutingRule.priority.asc(), AgentRoutingRule.created_at.asc(), AgentRoutingRule.id)
     )
     rules = list(result.scalars().all())
 

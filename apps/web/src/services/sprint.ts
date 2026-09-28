@@ -112,23 +112,10 @@ export class SprintService {
   async getBurndown(id: string) {
     const token = await this.getToken();
     if (token) return fastapiCall<Record<string, unknown>>('GET', `/api/v2/sprints/${id}/burndown`, token);
+    // story #4293 — 예전 이 아래 직접 DB 갈래(스토리 합산 · 이상선 · UTC 날짜 자르기)는 유일한 호출자(api/sprints/[id]/burndown)가
+    // db를 넘기지 않아(dbClient = undefined) 운영 도달 0이었다 — 걷고, 토큰이 없을 때의 빈 결과만 남긴다.
     const sprint = await this.getById(id);
-    if (!this.db) return { sprint, total_points: 0, done_points: 0, remaining_points: 0, completion_pct: 0, stories_count: 0, done_count: 0, ideal_line: [], actual_line: [] };
-    const { data: stories, error } = await this.db.from('stories').select('story_points, status, updated_at').eq('sprint_id', id);
-    if (error) throw error;
-    const totalPoints = (stories ?? []).reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
-    const donePoints = (stories ?? []).filter((s) => s.status === 'done').reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
-    const remaining = totalPoints - donePoints;
-    const duration = (sprint.duration as number | undefined) ?? 14;
-    const startDate = sprint.start_date ? new Date(sprint.start_date as string) : null;
-    const idealLine: Array<{ date: string; points: number }> = [];
-    for (let day = 0; day <= duration; day++) {
-      const date = startDate ? new Date(startDate.getTime() + day * 86_400_000).toISOString().slice(0, 10) : String(day);
-      idealLine.push({ date, points: Math.round(totalPoints * (1 - day / duration)) });
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    const startDateStr = startDate ? startDate.toISOString().slice(0, 10) : today;
-    return { sprint, total_points: totalPoints, done_points: donePoints, remaining_points: remaining, completion_pct: totalPoints > 0 ? Math.round((donePoints / totalPoints) * 100) : 0, stories_count: stories?.length ?? 0, done_count: (stories ?? []).filter((s) => s.status === 'done').length, ideal_line: idealLine, actual_line: [{ date: startDateStr, points: totalPoints }, { date: today, points: remaining }] };
+    return { sprint, total_points: 0, done_points: 0, remaining_points: 0, completion_pct: 0, stories_count: 0, done_count: 0, ideal_line: [], actual_line: [] };
   }
 
   async kickoff(id: string, message?: string) {

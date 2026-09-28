@@ -1,15 +1,18 @@
 """E-CAGE-REFEREE P3: HITL Gate CRUD + 전이 엔드포인트."""
 import logging
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, select
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OffsetDatetime
 from app.core.error_envelope import human_error
+from app.services.gate_service import RecipeReviewedDraftChangedError
 from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
@@ -20,7 +23,7 @@ from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation
 from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
-from app.models.visual_artifact import VisualArtifact
+from app.models.workflow_line import WorkflowLineStepApproval
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _push_to_agent
 from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
@@ -29,6 +32,8 @@ from app.services.merge_verdict_gate import MERGE_GATE_TYPE, reconcile_merge_gat
 from app.services.verdict_capture import fetch_status_check_rollup
 from app.services.gate_service import (
     GateUndoNotSelfError,
+    resolve_work_item_project_ids_batch,
+    self_anchored_gate_project_id,
     GateUndoWindowExpiredError,
     RiskGrade,
     apply_gate_urgency_sort,
@@ -45,6 +50,7 @@ from app.services.gate_service import (
     void_gate,
 )
 from app.services.member_resolver import resolve_member
+from app.services.reference_token import build_reference_token
 from app.services.project_auth import (
     accessible_project_ids_in_org,
     get_project_role,
@@ -84,6 +90,14 @@ _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
 router = APIRouter(prefix="/api/v2/gates", tags=["gates", "Trust"])
 
 
+# story #4080 — `list_gates`의 gate_type 조회 필터가 검증하는 형식(소속이 아니라 모양만,
+# 아래 list_gates 본문 주석 참조). 실존 gate_type 전수(GATE_TYPES + generation_budget +
+# support_escalation_review + org 자작 recipe gate.type)가 전부 lower_snake_case라 그
+# 관례를 패턴화한다 — 새 gate_type이 이 패턴 밖(대문자·공백·기호 등)이면 그게 오히려
+# 이례적이라 422로 잡는 편이 맞다.
+_GATE_TYPE_FILTER_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
 class GateCreateRequest(BaseModel):
     work_item_id: uuid.UUID
     work_item_type: str
@@ -120,6 +134,12 @@ class GateTransitionRequest(BaseModel):
     # merge 게이트 승인 시의 fail-closed 강제는 transition_gate_endpoint 본문에서(None도 「안 보냄」
     # 취급돼 known SHA와 불일치로 거부됨 — "안 보내면 조용히 통과"라는 구멍 자체가 생기지 않는다).
     reviewed_head_sha: str | None = None
+    # story #4190(PO 판정 2026-09-23 11:49Z) — 레시피 external_publish 게이트 승인 화면이 보여 준 초안
+    # (`linked_channel_draft`의 draft_id·version). 위 reviewed_head_sha와 같은 원리: 화면을 연 뒤·클릭 전에 새 버전이
+    # 커밋되면 옛 화면 클릭이 본 적 없는 새 버전을 봉인하던 창을 닫는다. 보여 준 초안이 있는 승인에서 미전송·불일치면
+    # 409(fail-closed · gate_service.RecipeReviewedDraftChangedError). 다른 gate_type엔 무관(무시).
+    reviewed_draft_id: uuid.UUID | None = None
+    reviewed_draft_version: int | None = None
 
     @field_validator("status")
     @classmethod
@@ -141,6 +161,80 @@ class WorkItemSummary(BaseModel):
     현재 doc gate 에 채움(향후 타 work_item_type 확장 여지)."""
     title: str
     slug: str | None = None
+
+
+class LinkedChannelDraft(BaseModel):
+    """story #4098([E-RECIPE-1], 페드루 PO 確定 2026-09-21) — 레시피 unscoped
+    external_publish 게이트(scope_key="")를 승인하면 #4090 AC2가 자동으로 발행하는
+    그 채널 초안의 실물. `channel_posts.py::find_ready_recipe_channel_drafts`(#4090의
+    실제 자동발행 실행 선택 규칙과 **같은 함수** — 두 표면이 다른 draft를 가리키는
+    드리프트 방지)가 고르는 draft만 싣는다."""
+    draft_id: uuid.UUID
+    # story #4190 — 화면이 보여 주는 이 초안의 버전. 승인 요청이 `reviewed_draft_id`·`reviewed_draft_version`으로
+    # 그대로 돌려보내고, 서버가 승인 순간(초안 잠금 뒤) 최신과 대조한다(«사람 승인은 본 내용에만»).
+    version: int
+    channel: str
+    account_id: str
+    account_label: str | None = None
+    text: str | None = None
+    image_urls: list[str] = []
+    video_url: str | None = None
+    # scoped(초안 자체) external_publish 게이트 상태 — "approved"(승인하면 즉시 자동발행)
+    # | "pending"(#4069 자동충족 대기 中, 이 unscoped 게이트 승인과 함께 승계-승인된다).
+    scoped_gate_status: str
+    sealed_scheduled_at: datetime | None = None
+
+
+class LinkedSiteDraft(BaseModel):
+    """story #4190(PO 판정 2026-09-23 12:03Z · 유나 site 초안 카드) — `LinkedChannelDraft`의 블로그(site) 짝. 레시피 게이트
+    승인 화면이 그리는 블로그 초안(`gate_service.find_recipe_shown_draft`가 고른 것 — 봉인·캐스케이드와 같은 답).
+    목적지 연결 필드(channel·account_*)는 외부 블로그일 때만 값이 있다 — 자사(호스팅) 블로그면 None(카드가 그 줄을 생략).
+    `body_preview`는 마크다운 기호를 걷은 평문 앞부분(`text_preview.markdown_plain_text_preview`) — FE는 파싱하지 않는다."""
+    draft_id: uuid.UUID
+    version: int
+    title: str
+    body_preview: str
+    channel: str | None = None
+    account_id: str | None = None
+    account_label: str | None = None
+    scoped_gate_status: str
+    sealed_scheduled_at: datetime | None = None
+
+
+class LinkedEvidenceItem(BaseModel):
+    """story #4135(PO 실측 2026-09-22) — «이것을 가리키는 것들» 0건 실사고 처방. neutral_
+    facts.draft_doc_*은 게이트 *생성* 시점 스냅샷이라(recipe_gate_hooks.py 참조) 생성
+    뒤 핀된 evidence는 거기 절대 안 실린다 — 이 필드는 조회 시점마다 다시 계산해 그
+    갭을 메운다(`_enrich_linked_evidence`). reference_token이 None인 항목도 남긴다 —
+    "이 evidence가 존재는 하는데 무엇을 가리키는지 확認 불가"를 "이 evidence 자체가
+    없음"과 구분해서 보여준다(지어내지 않되 침묵하지도 않는다)."""
+    id: uuid.UUID
+    kind: str
+    ref: str
+    reference_token: str | None = None
+
+
+class NewsletterSendCommandSummary(BaseModel):
+    """story #4262 — 발송 게이트의 발송 명령(가장 최근 1) 요약. 사람이 멈춘 발송을 다시 시도하려면 명령 id가 필요하다(공용 재시도
+    `POST /organizations/{org}/publication-commands/{id}/retry`)."""
+
+    id: uuid.UUID
+    status: str
+    failure_kind: str | None = None
+    reason_code: str | None = None
+    # 유나 4262 표 — «{time}에 자동으로 다시 시도해요»(재시도 대기) · 제공자 한도 풀리는 시각.
+    next_attempt_at: datetime | None = None
+    reason_reset_at: datetime | None = None
+    # story #4290 — **보는 사람이** 지금 이 발송 명령을 «다시 시도»할 수 있는가(재시도 엔드포인트와 같은 한 판정 `viewer_can_retry`).
+    command_retryable: bool = False
+
+
+class PublishCommandSummary(NewsletterSendCommandSummary):
+    """story #4336 AC4 — 외부 발행(external_publish) 게이트의 발행 명령(가장 최근 1) 요약. 채널 초안 목록 · 상세와 같은 판정 재료를
+    싣는다(화면이 같은 `deriveFailureAction`으로 «발행 중 · 완료 · 실패 · 다시 시도»를 고른다). `processing_kind` = 목록 · 상세와 같은
+    `derive_processing_kind`(게이트 상세는 버전 발행 상태를 안 보므로 컨테이너 대기도 «발행 중»)."""
+
+    processing_kind: str | None = None
 
 
 class GateResponse(BaseModel):
@@ -189,10 +283,64 @@ class GateResponse(BaseModel):
     # #4253 원칙과 동형). additive·하위호환(신규 필드, 기존 소비처 무변).
     conversation_id: uuid.UUID | None = None
     gate_type: str
+    # story #4098 — FE가 "이 게이트가 레시피 unscoped external_publish(scope_key="")인지"
+    # 를 직접 판별해야 linked_channel_draft/_pending의 "값 없음"과 "이 카드 자체가 대상이
+    # 아님"을 구분할 수 있다(둘 다 null/false로 같아 보이는 값이라 별도 신호 필요). Gate
+    # ORM 컬럼과 이름 일치 — from_attributes로 자동 채워짐(resolution_note와 동일 선례).
+    #
+    # ⛔페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰, CI RED — test_1970/1972/1973 9건) —
+    # DB 컬럼은 `NOT NULL DEFAULT ''`(0328)지만, 아직 flush/refresh 안 된 in-memory Gate
+    # ORM 객체(또는 이 필드를 안 세팅한 옛 테스트 픽스처)는 Python 값이 `None`이라 model_
+    # validate(from_attributes=True)가 그대로 터진다 — 코드 곳곳의 `gate.scope_key or ""`
+    # 방어가 바로 그 증거. 응답 필드도 그 실태를 그대로 받아 `str | None`(FE는 이미
+    # `gate.scope_key ?? ''`로 처리 — gate-evidence.tsx). 기본값 ""는 "명시로 안 준 신규
+    # 필드는 무해한 기본값" 관례일 뿐 실제 None 유입을 못 막는다 — 타입 자체를 넓힌다.
+    scope_key: str | None = None
     status: str
     resolver_id: uuid.UUID | None = None
     resolved_at: datetime | None = None
     resolution_note: str | None = None
+    # story #4090([E-RECIPE-1] Publisher 슬롯) AC2, migration 0388 — 레시피 자동발행 훅의
+    # 기계 소유 결과(스킵 사유|"published"|"scheduled"). `resolution_note`(승인자 본인
+    # 문장)와 절대 안 섞는다(페드루 PO 確定 2026-09-21) — Gate ORM 컬럼과 이름 일치라
+    # from_attributes로 자동 채워짐(resolution_note와 동일 선례). external_publish
+    # (scope_key="") 게이트가 아니면 항상 None.
+    publish_outcome: str | None = None
+    # story #4098([E-RECIPE-1], 페드루 PO 確定 2026-09-21) — 레시피 unscoped external_
+    # publish 게이트(scope_key="") 상세에 "이 승인으로 발행될 채널 초안" 실물을 싣는다.
+    # Gate ORM 컬럼이 아니라(`work_item_summary`/`can_approve`와 동일 선례) `to_gate_
+    # response()`가 매 응답마다 배선 — 다른 gate_type·scoped 게이트는 항상 None/False.
+    linked_channel_draft: "LinkedChannelDraft | None" = None
+    # linked_channel_draft가 None인 이유가 "제출된 게 없음"(문구 A)인지 "제출은 됐지만
+    # scoped 게이트가 아직 pending, #4069 자동충족 대기 中"(문구 B — 이 unscoped 게이트
+    # 승인과 함께 승계-승인된다)인지 FE가 갈라야 해서 별도 플래그(같은 조회 한 번의
+    # 부산물, 새 쿼리 0 — find_ready_recipe_channel_drafts의 still_pending 그대로).
+    linked_channel_draft_pending: bool = False
+    # story #4190(PO 판정 2026-09-23 12:03Z) — 레시피 게이트가 보여 주는 초안이 블로그(site)일 때의 카드. 채널 카드와
+    # 둘 중 하나만 채워진다(어느 카드인지 BE가 가른다 — `find_recipe_shown_draft`). `_pending`은 채널 짝과 같은 뜻
+    # (제출은 됐지만 멀티목적지 pending이라 이 승인이 승계하지 않음).
+    linked_site_draft: "LinkedSiteDraft | None" = None
+    linked_site_draft_pending: bool = False
+    # story #4190(PO 12:16Z · 유나 빈 상태 절) — 보여 줄 초안이 **없을 때만** 채운다: 레시피 정의 capability로 가른 초안 종류
+    # (`events.recipe_draft_kind`). FE는 빈 상태 문구 고르기에만 쓴다(channel_post → 채널 · site_post → 블로그 · null → 중립).
+    linked_draft_kind: Literal["channel_post", "site_post"] | None = None
+    # story #4135(PO 실측 2026-09-22) — concept_approval·structure_approval 게이트의
+    # «확定 대상 실물». `_enrich_linked_evidence()`가 매 응답마다 배선(linked_channel_draft와
+    # 동일 선례) — 그 gate_type이 아니거나(_GATE_TYPE_EXPECTED_EVIDENCE_KINDS 미등재)
+    # evidence가 0건이면 항상 빈 리스트(None 아님 — "아직 안 봄"과 "0건 확認"을 같은 값으로
+    # 안 섞는다).
+    linked_evidence: list[LinkedEvidenceItem] = []
+    # story #4139([E-RECIPE-1] Phase3 폴리시, 페드루 PO 確定 2026-09-22) — 이 게이트 자신이
+    # draft-scoped(scope_key≠"") external_publish이고, 같은 work_item의 레시피 unscoped
+    # (scope_key="") external_publish 게이트가 아직 pending 中이며, 이 게이트가 그 work_item의
+    # 유일한 pending scoped 게이트(단일 목적지 — #4069/#3478 규칙과 동일 기준)면 그 레시피
+    # 게이트의 id를 싣는다. "이 게이트는 레시피 게이트가 대신 결재한다"는 **파생값**(저장
+    # 컬럼 0·마이그 0) — Gate ORM에 이 필드가 없다(work_item_summary/can_approve와 동일
+    # 선례, `_enrich_deferred_to_gate_id`가 매 응답마다 계산). None이면 이 게이트가 사람
+    # 결재함에 정상적으로 뜬다(레시피 무관·비-scoped·다중목적지·레시피 게이트 이미 결정됨
+    # 등 전부 여기 포함). FE는 이 값이 있으면 액션 버튼을 숨기고 「레시피 게이트에서 함께
+    # 결재돼요」+링크를 보인다(직접 transition 호출 자체는 안 막는다 — 멱등이라 위험 없음).
+    deferred_to_gate_id: uuid.UUID | None = None
     # story #3001(선생님 정책 확定 2026-08-24) — FE가 "이 카드 원 수신자==나인데 지금은 다른
     # 사람이 지정돼 있다"(위임됨)를 로컬 판단하는 데 필요. Gate ORM 컬럼과 이름 일치라
     # from_attributes로 자동 채워짐(resolver_id와 동일 선례) — 오늘(#2985) 이 필드 자체를
@@ -234,6 +382,14 @@ class GateResponse(BaseModel):
     sealed_content_version: int | None = None
     sealed_content_sha256: str | None = None
     sealed_content_body: str | None = None
+    # story #3414(Phase1·마케팅운영, 페드루 PO 確定 2026-09-04) — external_publish 예약
+    # 발행 두 번째 봉인 축(sealed_content_*와 같은 관례, 예약 없는 다른 gate_type은
+    # 항상 null). story #4073(카디르 QA④ 실측, 2026-09-19) — 이 컬럼(models/gate.py)은
+    # channel_posts.py 발행 실행 경로엔 이미 쓰이는데(gate_service.py:1097/1137)
+    # 이 응답 스키마 등재를 빠뜨려 승인카드에서 예약시각이 안 보였다 — sealed_ads_*·
+    # sealed_newsletter_*·sealed_estimated_cost_minor(#4072)에 이어 같은 클래스의
+    # 마지막 인스턴스. Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐.
+    sealed_scheduled_at: datetime | None = None
     # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("결재 카드에서... 목적지를
     # 확認할 수 있고")의 입력. Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐
     # (sealed_content_*와 동일 선례). null=hosted_site(site_posts.py::_reseal_gate_on_
@@ -293,6 +449,18 @@ class GateResponse(BaseModel):
     # publication.version_id가 가리키는 ChannelPostVersion.channel_payload에서
     # 「지금」 값을 읽는다(estimated_recipient_count와 동일 계산값 선례).
     newsletter_subject: str | None = None
+    # story #4262(PO 13:39Z) — 발송 게이트의 발송 명령 상태(dead_letter · blocked면 게이트 화면이 사람 재시도 자리를 연다).
+    # 단건 `GET /gates/{id}`만 채운다(목록은 None — 게이트마다 조회하는 N+1을 만들지 않는다). 뉴스레터 게이트가 아니거나
+    # 아직 명령이 없으면 None.
+    newsletter_send_command: NewsletterSendCommandSummary | None = None
+    # story #4336 AC4 — 외부 발행 게이트의 발행 명령 상태(발행 중 · 완료 · 실패 · 다시 시도). 단건 `GET /gates/{id}`만 채운다(목록 None ·
+    # N+1 0). 이 게이트 id로 만든 채널 · 사이트 발행 명령이 없으면 None(레시피 무범위 게이트는 명령이 범위 게이트에 묶여 None).
+    publish_command: PublishCommandSummary | None = None
+    # story #4044(0333)가 Gate ORM 컬럼(models/gate.py)만 추가하고 이 응답 스키마 등재를
+    # 빠뜨려 API가 항상 None을 냈다 — sealed_ads_*/sealed_newsletter_* PR2 재발 클래스와
+    # 동형(story #4072가 그 클래스 자체를 회귀가드로 봉인). generation_budget 전용 sealing —
+    # Gate ORM 컬럼명과 일치라 from_attributes로 자동 채워짐(다른 gate_type은 전부 None).
+    sealed_estimated_cost_minor: int | None = None
     reapproval_required: bool = False
     created_at: datetime
     updated_at: datetime
@@ -365,7 +533,257 @@ async def to_gate_response(
     if posture is _POSTURE_UNSET:
         posture = await get_org_posture(session, org_id)
     resp.risk_grade = derive_risk_grade(posture, gate.gate_type)
+    await _enrich_linked_channel_draft(session, org_id, gate, resp)
+    await _enrich_scoped_channel_draft_media(session, org_id, gate, resp)
+    await _enrich_linked_evidence(session, org_id, gate, resp)
+    await _enrich_deferred_to_gate_id(session, org_id, gate, resp)
     return resp
+
+
+async def _enrich_deferred_to_gate_id(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, resp: GateResponse,
+) -> None:
+    """story #4139 — 좁은 가드가 먼저(비용 0, `_enrich_linked_channel_draft`와 동일 관례):
+    draft-scoped(scope_key≠"") pending external_publish 게이트만 대상. 그 밖은 이 함수의
+    나머지 줄에 절대 안 들어간다."""
+    if gate.gate_type != "external_publish" or (gate.scope_key or "") == "" or gate.status != "pending":
+        return
+
+    from app.services.gate_service import (
+        find_pending_recipe_external_publish_gate,
+        recipe_approval_cascade_target,
+    )
+
+    recipe_gate = await find_pending_recipe_external_publish_gate(
+        session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+    )
+    if recipe_gate is None:
+        return
+    # story #4190 — «대신 결재»는 레시피 승인이 실제로 캐스케이드할 게이트뿐 — 캐스케이드(transition_gate)와 같은 판정
+    # 함수. 블로그 초안(승인 화면에 없음)·다른 목적지가 살아 있는 게이트를 숨기면 레시피 승인 뒤에도 사람이 못 찾는다.
+    target = await recipe_approval_cascade_target(
+        session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+    )
+    if target is not None and target.id == gate.id:
+        resp.deferred_to_gate_id = recipe_gate.id
+
+
+async def _enrich_linked_channel_draft(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, resp: GateResponse,
+) -> None:
+    """story #4098 — `to_gate_response()`의 단일 통로 불변식(위 docstring)을 그대로
+    타 create/get/list/transition/void 전부가 이 enrich를 받는다(list_gates도 이미
+    gate마다 `to_gate_response()`를 부르므로 배치 전용 재구현 없이 한 곳으로 족하다
+    — 대상 자체가 「레시피 unscoped external_publish 게이트」뿐이라 일반 목록에서
+    차지하는 비중이 낮다, 페드루 PO 사전 승인 여지 없음 — 필요시 후속 배치 최적화).
+
+    좁은 가드가 먼저라 다른 gate_type·scoped 게이트는 이 함수의 나머지 줄에 절대
+    안 들어간다(비용 0).
+
+    ⛔페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰) — `external_publish && scope_key
+    ==""`만으로는 여전히 넓다. #4090 AC2 자동발행의 진짜 전제는 그보다 좁은 「레시피
+    게이트」(`neutral_facts.triggered_by_event`·`stage`가 실린 게이트,
+    `publish_recipe_approved_draft`의 첫 분기와 정확히 같은 조건)뿐이다 — facts가
+    없는 옛/비레시피 unscoped external_publish 행(있다면)까지 이 가드를 통과시키면
+    "승인해도 발행되지 않아요" 카드가 붙어 그 게이트엔 아예 다른 세계의 문장이
+    새고, list_gates에서도 그 행마다 불필요한 쿼리가 샌다. `publish_recipe_
+    approved_draft`와 완전히 동형인 가드로 좁힌다(새 조건 발명 0, 그 함수의 첫
+    return 문 그대로 복제)."""
+    if gate.gate_type != "external_publish" or (gate.scope_key or "") != "":
+        return
+    facts = gate.neutral_facts or {}
+    if not facts.get("triggered_by_event") or not facts.get("stage"):
+        return
+    # story #4105(#4098 잔여, 페드루 PO 실측 2026-09-21) — find_ready_recipe_channel_
+    # drafts는 «scoped 승인 済·미발행» 초안만 담는다(#4090 자동발행 대상 정의) — 이
+    # 게이트가 이미 승인(또는 반려/보류 등 비-pending)이면 그 정의상 이 쿼리는 항상
+    # 빈 결과만 낸다(발행이 끝났으면 초안은 already_published로 걸러지고, 반려/보류면
+    # 애초에 자동발행 대상이 아니다). 쿼리 자체를 skip — FE는 gate.status로 판별해
+    # publish_outcome 라벨(또는 무문장)로 갈아 끼운다(gate-evidence.tsx).
+    if gate.status != "pending":
+        return
+
+    from app.services.gate_service import find_recipe_shown_draft
+
+    # story #4190 — 채널·블로그 중 어느 카드를 그릴지는 봉인·캐스케이드와 같은 판정 하나(`find_recipe_shown_draft`).
+    shown, channel_pending, site_pending = await find_recipe_shown_draft(
+        session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+    )
+    if shown is None:
+        resp.linked_channel_draft_pending = channel_pending
+        resp.linked_site_draft_pending = site_pending
+        resp.linked_draft_kind = await _recipe_draft_kind_for_gate(session, org_id, facts.get("triggered_by_event"))
+        return
+    if shown.kind == "site_post":
+        resp.linked_site_draft = await _build_linked_site_draft(
+            session, draft=shown.draft, latest=shown.latest,
+            scoped_gate_status=shown.scoped_gate.status, sealed_scheduled_at=shown.scoped_gate.sealed_scheduled_at,
+        )
+        return
+    resp.linked_channel_draft = await _build_linked_channel_draft(
+        session, draft=shown.draft, latest=shown.latest,
+        scoped_gate_status=shown.scoped_gate.status, sealed_scheduled_at=shown.scoped_gate.sealed_scheduled_at,
+    )
+
+
+async def _recipe_draft_kind_for_gate(session: AsyncSession, org_id: uuid.UUID, definition_key) -> str | None:
+    """레시피 게이트 `neutral_facts.triggered_by_event`(= 정의 key)로 정의를 찾아 초안 종류를 가른다. 조직 정의가 같은 key의
+    플랫폼 정의보다 앞선다. 못 찾으면 None(중립 문구)."""
+    if not isinstance(definition_key, str) or not definition_key:
+        return None
+    from sqlalchemy import or_
+
+    from app.models.event_definition import EventDefinition
+    from app.routers.events import recipe_draft_kind
+
+    rows = (await session.execute(
+        select(EventDefinition).where(
+            EventDefinition.key == definition_key,
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalars().all()
+    if not rows:
+        return None
+    definition = next((d for d in rows if d.org_id is not None), rows[0])
+    return recipe_draft_kind(definition)
+
+
+async def _build_linked_site_draft(
+    session: AsyncSession, *, draft, latest, scoped_gate_status: str, sealed_scheduled_at,
+) -> "LinkedSiteDraft":
+    from app.models.channel_connection import ChannelConnection
+    from app.services.text_preview import SITE_DRAFT_BODY_PREVIEW_MAX, markdown_plain_text_preview
+
+    connection = await session.get(ChannelConnection, draft.connection_id) if draft.connection_id else None
+    return LinkedSiteDraft(
+        draft_id=draft.id, version=latest.version, title=latest.title,
+        body_preview=markdown_plain_text_preview(latest.body_md, SITE_DRAFT_BODY_PREVIEW_MAX),
+        channel=connection.channel if connection is not None else None,
+        account_id=connection.account_id if connection is not None else None,
+        account_label=connection.account_label if connection is not None else None,
+        scoped_gate_status=scoped_gate_status, sealed_scheduled_at=sealed_scheduled_at,
+    )
+
+
+async def _build_linked_channel_draft(
+    session: AsyncSession, *, draft, latest, scoped_gate_status: str, sealed_scheduled_at,
+) -> "LinkedChannelDraft":
+    """story #4098이 원래 `_enrich_linked_channel_draft`(레시피 unscoped 게이트) 안에
+    인라인으로 갖고 있던 직렬화(draft+version+connection → LinkedChannelDraft) 그대로 —
+    story #4143(페드루 PO 確定 2026-09-22, AC1 "단일 경로, 두 번째 직렬화기 0")가
+    scoped 게이트 자신의 미디어 표시에도 같은 shape가 필요해지면서 재사용 가능한
+    조각으로 뺐다. 두 번째 직렬화기를 새로 짜면 두 표면이 "같은 draft인데 다른 필드
+    모양"으로 갈리는 twin-system 갭이 된다(이 코드베이스가 반복 경험한 그 클래스)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_post_images import list_channel_post_images_for_version, public_url_for_object_path
+    from app.services.channel_post_videos import get_channel_post_video_for_version
+
+    connection = await session.get(ChannelConnection, draft.connection_id)
+    image_rows = await list_channel_post_images_for_version(session, version_id=latest.id)
+    image_urls = [
+        url for row in image_rows if (url := public_url_for_object_path(row.final_object_path)) is not None
+    ]
+    video_row = await get_channel_post_video_for_version(session, version_id=latest.id)
+    video_url = public_url_for_object_path(video_row.original_object_path) if video_row is not None else None
+
+    return LinkedChannelDraft(
+        draft_id=draft.id, version=latest.version, channel=draft.channel,
+        account_id=connection.account_id if connection is not None else "",
+        account_label=connection.account_label if connection is not None else None,
+        text=latest.text, image_urls=image_urls, video_url=video_url,
+        scoped_gate_status=scoped_gate_status, sealed_scheduled_at=sealed_scheduled_at,
+    )
+
+
+async def _enrich_scoped_channel_draft_media(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, resp: GateResponse,
+) -> None:
+    """story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 채널 초안의 scoped
+    external_publish 게이트(이 게이트 자신이 그 초안이 쥔 게이트) 상세·인박스 카드가
+    초안 실물(영상·이미지·목적지 채널)을 하나도 안 보여주던 결함. `_enrich_linked_
+    channel_draft`(레시피 unscoped 게이트 전용, scope_key=="" 가드)와 정확히 대칭인
+    scope_key!="" 가드 — 같은 `_build_linked_channel_draft` 직렬화를 재사용해 두 번째
+    구현을 안 짠다(AC1).
+
+    좁은 가드가 먼저라 다른 gate_type·unscoped 게이트는 이 함수의 나머지 줄에 절대
+    안 들어간다(비용 0, `_enrich_linked_channel_draft`와 동일 관례)."""
+    if gate.gate_type != "external_publish" or (gate.scope_key or "") == "":
+        return
+    draft_id_raw = (gate.neutral_facts or {}).get("draft_id")
+    if not draft_id_raw:
+        return
+    try:
+        draft_id = uuid.UUID(str(draft_id_raw))
+    except (ValueError, AttributeError, TypeError):
+        return
+
+    from app.services.channel_posts import get_channel_post_draft, list_channel_post_draft_versions
+
+    draft = await get_channel_post_draft(session, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        return
+    versions = await list_channel_post_draft_versions(session, draft_id=draft_id)
+    if not versions:
+        return
+    latest = versions[-1]
+
+    resp.linked_channel_draft = await _build_linked_channel_draft(
+        session, draft=draft, latest=latest,
+        scoped_gate_status=gate.status, sealed_scheduled_at=gate.sealed_scheduled_at,
+    )
+
+    # story #4143 AC1 "기존 게이트(봉인 前 생성분)는 조회 시 초안에서 파생해 같은 모양으로
+    # 답한다" — channel_posts.py::submit_channel_post_draft가 이제 gate.sealed_
+    # destination_connection_id를 채우지만(신규 게이트), 이 컬럼이 아직 null인(그 write-path
+    # 배포 前에 생성된) 옛 게이트는 여기서 draft.connection_id로 파생해 응답 필드를 채운다
+    # (DB 컬럼 자체는 안 건드린다 — 응답 직렬화 시점 보정, 소급 UPDATE 0).
+    if resp.sealed_destination_connection_id is None:
+        resp.sealed_destination_connection_id = draft.connection_id
+
+    # sealed_destination_channel은 write-path(channel_posts.py) 어느 쪽도 채우지 않는
+    # Gate 컬럼(site_posts.py도 동형 — connection_id만 봉인)이라 신규/옛 게이트 가리지
+    # 않고 여기서 매번 채운다. draft.channel이 이미 그 값(ChannelConnection 재조회
+    # 불필요 — create_channel_post_draft_version이 connection.channel을 그대로 돌려준
+    # 값이 draft에 실려 있다).
+    if resp.sealed_destination_channel is None:
+        resp.sealed_destination_channel = draft.channel
+
+
+async def _enrich_linked_evidence(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, resp: GateResponse,
+) -> None:
+    """story #4135(PO 실측 2026-09-22, 2호 게이트 1 실사고) — «확정 대상 실물»이 게이트
+    카드에 안 보이던 결함. `neutral_facts.draft_doc_*`은 게이트 *생성* 시점 스냅샷
+    (recipe_gate_hooks.py::_build_approval_neutral_facts)이라, 생성 뒤 핀된 evidence는
+    거기 절대 안 실린다(댄이 00:39Z에 artifact를 붙였는데 00:37Z에 만들어진 게이트의
+    neutral_facts는 그대로였던 실측 그 문제) — 이 함수는 조회 시점마다 다시 계산해 그
+    갭을 메운다(`_enrich_linked_channel_draft`와 동일 사상·자리).
+
+    `recipe_gate_hooks._GATE_TYPE_EXPECTED_EVIDENCE_KINDS`에 없는 gate_type(generation_
+    budget·external_publish 등)은 즉시 빈 리스트 — 쿼리 자체를 안 돈다(비용 0, 좁은 가드
+    선행 선례 동일)."""
+    from app.services.recipe_gate_hooks import (
+        _GATE_TYPE_EXPECTED_EVIDENCE_KINDS,
+        resolve_stage_evidence_entries,
+    )
+
+    if gate.gate_type not in _GATE_TYPE_EXPECTED_EVIDENCE_KINDS:
+        return
+
+    entries = await resolve_stage_evidence_entries(
+        session, org_id=org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+        gate_type=gate.gate_type,
+    )
+    resp.linked_evidence = [
+        LinkedEvidenceItem(
+            id=e["id"], kind=e["kind"], ref=e["ref"],
+            reference_token=(
+                build_reference_token(e["entity_type"], e["entity_id"], e["title"])
+                if e["entity_type"] is not None else None
+            ),
+        )
+        for e in entries
+    ]
 
 
 @router.post("", response_model=GateResponse, status_code=201)
@@ -733,6 +1151,55 @@ async def _authorize_gate_approve_equivalent(
             )
 
 
+
+async def _enrich_latest_author_kind(session: AsyncSession, responses: list, gates: list) -> None:
+    """story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7(«마지막 수정 주체»)의 입력. sealed_content_body의 작성자(봉인 시점)가 아니라
+    초안의 **지금** 최신 버전 author_kind. external_publish 게이트만(`neutral_facts.draft_id` — 사이트 · 채널 초안 둘 다 심는다).
+    독립 1회 배치 · N+1 0. 목록(list_gates)과 단건(get_gate_endpoint)이 같이 부른다.
+
+    story #4336(PO 라이브 03:55Z) — 예전엔 목록에서만 채우고 **SitePostVersion만** 봐서, 단건 상세는 늘 None · 채널 초안 게이트도 늘 None이라
+    게이트 화면 «마지막 수정 주체 · —»였다. 이제 둘 다 채우고, 사이트 버전에 없는 초안 id는 채널 버전에서 찾는다."""
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.site_post_version import SitePostVersion
+
+    latest_author_draft_ids: dict[uuid.UUID, uuid.UUID] = {}
+    for resp, g in zip(responses, gates):
+        if g.gate_type != "external_publish":
+            continue
+        raw_draft_id = (g.neutral_facts or {}).get("draft_id")
+        if not raw_draft_id:
+            continue
+        try:
+            latest_author_draft_ids[resp.id] = uuid.UUID(str(raw_draft_id))
+        except ValueError:
+            continue
+    if not latest_author_draft_ids:
+        return
+    draft_ids = set(latest_author_draft_ids.values())
+    latest_author_kind_by_draft_id: dict[uuid.UUID, str] = {}
+    for version_model in (SitePostVersion, ChannelPostVersion):
+        remaining = draft_ids - set(latest_author_kind_by_draft_id)
+        if not remaining:
+            break
+        latest_version_ids = (
+            select(version_model.draft_id, func.max(version_model.version).label("max_version"))
+            .where(version_model.draft_id.in_(remaining))
+            .group_by(version_model.draft_id)
+            .subquery()
+        )
+        author_rows = (await session.execute(
+            select(version_model.draft_id, version_model.author_kind).join(
+                latest_version_ids,
+                (version_model.draft_id == latest_version_ids.c.draft_id)
+                & (version_model.version == latest_version_ids.c.max_version),
+            )
+        )).all()
+        latest_author_kind_by_draft_id.update({did: kind for did, kind in author_rows})
+    for resp in responses:
+        draft_id = latest_author_draft_ids.get(resp.id)
+        if draft_id is not None:
+            resp.latest_author_kind = latest_author_kind_by_draft_id.get(draft_id)
+
 @router.get("", response_model=list[GateResponse])
 async def list_gates(
     work_item_id: uuid.UUID | None = Query(default=None),
@@ -770,12 +1237,22 @@ async def list_gates(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
 ) -> list[GateResponse]:
-    # gate_type은 GATE_TYPES(GateCreateRequest.validate_gate_type과 동일 SSOT)로 검증 —
-    # 미지 값은 422(침묵 무시 대신 명시 거부).
-    if gate_type is not None:
-        from app.models.hitl_config import GATE_TYPES
-        if gate_type not in GATE_TYPES:
-            raise HTTPException(status_code=422, detail=f"gate_type must be one of {sorted(GATE_TYPES)}")
+    # story #4080(PO 方向정정) — gate_type 조회 필터는 GATE_TYPES(생성 관문 허용 세트,
+    # "무엇을 만들 수 있는지")를 조회 값 SSOT로 재사용하지 않는다: create_gate()를 전용
+    # 서비스코드가 직접 호출해(generic POST 밖에서) 만드는 gate_type(예: generation_
+    # budget)도, org가 recipe stage_metadata에 직접 짓는 완전 개방 gate.type도 실 데이터로
+    # 존재해 닫힌 소속 검사로는 원천적으로 못 덮는다(둘 다 실사고/그라운딩으로 확認, 카드
+    # 본문 참조). 형식만 검증한다 — 소속 밖 값은 거부가 아니라 빈 결과(정직한 필터,
+    # #2864가 막은 "파라미터 자체가 무시됨"과는 다른 결). 형식 위반(패턴 밖·길이초과)만
+    # 여전히 422(#2864 원 취지 — 명백한 오입력은 침묵하지 않는다).
+    if gate_type is not None and not _GATE_TYPE_FILTER_PATTERN.fullmatch(gate_type):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "gate_type must match ^[a-z][a-z0-9_]{0,63}$ "
+                f"(got {gate_type!r}, length {len(gate_type)})"
+            ),
+        )
 
     # story #5ace2e84 — ids 배치 앵커 조회 파싱(stories.py list_stories와 동형: comma-separated·
     # invalid UUID=422·과대 IN 방어). ids가 오면 아래 work_item_id/status/gate_type 등 나머지
@@ -825,6 +1302,14 @@ async def list_gates(
                 raise HTTPException(status_code=404, detail="Gate not found")
 
     q = select(Gate).where(Gate.org_id == org_id)
+    # story #4351 — 접근이 제한된 caller에겐 접근 불가 프로젝트의 게이트를 싣지 않는다(SEC-S8 · PO 2026-09-26: 접근 가능 프로젝트 게이트 +
+    # 어느 프로젝트에도 안 걸린 org 수준 게이트 · owner/admin 등 전체 접근은 옛 동작 그대로 — merge-gate 집계와 같은 규칙).
+    from app.services.gate_service import gate_in_inaccessible_project_clause
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    _restricted = await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id)
+    if _restricted is not None:
+        q = q.where(~gate_in_inaccessible_project_clause(_restricted))
     if gate_ids is not None:
         # story #5ace2e84 — ids 배치는 고정 집합 앵커 조회(stories.py list_stories ids 분기와
         # 동형). 나머지 필터/정렬/페이지네이션은 의미가 없어 전부 건너뛴다.
@@ -848,7 +1333,7 @@ async def list_gates(
             # 의존)이었던 기존 동작을, 페이지네이션을 실제로 쓰는 호출에서만 created_at desc(최신
             # 우선, 다른 목록 API들과 동형)로 명시. limit/offset 둘 다 안 쓰면 기존 무정렬 그대로
             # (list_gate_inbox 등 기존 호출부 회귀 0).
-            q = q.order_by(Gate.created_at.desc())
+            q = q.order_by(Gate.created_at.desc(), Gate.id.desc())
         if limit is not None:
             q = q.limit(limit)
         if offset:
@@ -880,47 +1365,7 @@ async def list_gates(
             if g.sealed_doc_id is not None:
                 resp.sealed_doc_title = sealed_doc_title_by_id.get(g.sealed_doc_id)
 
-    # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체")의 입력.
-    # sealed_content_body의 작성자(봉인 시점, approved 뒤 편집이면 옛 버전에 묶임)가
-    # 아니라 draft의 **지금** 최신 버전 author_kind다 — sealed_doc_ids 배치(위)와 동일
-    # 선례(독립 1회 배치·N+1 0). external_publish 게이트만 대상(gate_type 축) — neutral_
-    # facts.draft_id는 site_posts.py::submit_site_post_draft/_reseal_gate_on_new_version이
-    # 문자열로 심는다(_reseal_gate_on_new_version:509 그라운딩 確認).
-    latest_author_draft_ids: dict[uuid.UUID, uuid.UUID] = {}
-    for resp, g in zip(responses, gates):
-        if g.gate_type != "external_publish":
-            continue
-        raw_draft_id = (g.neutral_facts or {}).get("draft_id")
-        if not raw_draft_id:
-            continue
-        try:
-            latest_author_draft_ids[resp.id] = uuid.UUID(str(raw_draft_id))
-        except ValueError:
-            continue
-    if latest_author_draft_ids:
-        from app.models.site_post_version import SitePostVersion
-
-        latest_version_ids = (
-            select(
-                SitePostVersion.draft_id,
-                func.max(SitePostVersion.version).label("max_version"),
-            )
-            .where(SitePostVersion.draft_id.in_(set(latest_author_draft_ids.values())))
-            .group_by(SitePostVersion.draft_id)
-            .subquery()
-        )
-        author_rows = (await session.execute(
-            select(SitePostVersion.draft_id, SitePostVersion.author_kind).join(
-                latest_version_ids,
-                (SitePostVersion.draft_id == latest_version_ids.c.draft_id)
-                & (SitePostVersion.version == latest_version_ids.c.max_version),
-            )
-        )).all()
-        latest_author_kind_by_draft_id = {did: kind for did, kind in author_rows}
-        for resp in responses:
-            draft_id = latest_author_draft_ids.get(resp.id)
-            if draft_id is not None:
-                resp.latest_author_kind = latest_author_kind_by_draft_id.get(draft_id)
+    await _enrich_latest_author_kind(session, responses, gates)
 
     # story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — sealed_destination_
     # connection_id(위, Gate 실 컬럼)가 non-null인 행의 실제 channel(예:
@@ -1026,12 +1471,6 @@ async def list_gates(
     if non_doc_gates:
         story_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "story"}
         task_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "task"}
-        # story #2082: artifact_canonicalize 게이트(work_item_type="visual_artifact")가 이 배치에서
-        # 빠져 있어 project_id_by_work_item 조회가 항상 None으로 떨어졌다 — _non_doc_gate_approvable
-        # 이 그걸 "구조적으로 project-무관"으로 오판해 org owner/admin에게만 노출되고, project-level
-        # owner/admin(정본 담당자)에겐 assigned_to_me=true 인박스에서 사라졌다(회귀). VisualArtifact.
-        # project_id는 NOT NULL이라 story/task와 동형으로 항상 배치 해소 가능.
-        artifact_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "visual_artifact"}
         # story #3784a8d0(3038, 실사고 — 선생님 제보 2026-08-25) — work_item_summary가 doc만
         # 배치 enrich됐다. merge 게이트(work_item_type=='story', 결재함 대다수)는 항상 None이라
         # FE가 "#해시" 폴백만 그렸다 — `_resolve_work_item_summary`(단건 GET /{id} 경로, story
@@ -1055,13 +1494,13 @@ async def list_gates(
             )).all()
             project_id_by_work_item.update({tid: pid for tid, pid, _ in rows})
             summary_by_work_item.update({tid: WorkItemSummary(title=title) for tid, _, title in rows})
-        if artifact_ids:
-            rows = (await session.execute(
-                select(VisualArtifact.id, VisualArtifact.project_id).where(
-                    VisualArtifact.id.in_(artifact_ids), VisualArtifact.org_id == org_id,
-                )
-            )).all()
-            project_id_by_work_item.update({aid: pid for aid, pid in rows})
+        # story #4241 → #4244 — 나머지 종류(visual_artifact · loop · hypothesis · epic(=Goal) · sprint · wf_line_version)는 알림 목록과 같은
+        # 배치 해소기(gate_service.resolve_work_item_project_ids_batch · 종류당 IN 1개)로. story/task는 위에서 제목과 함께 이미 해소했다.
+        _rest = await resolve_work_item_project_ids_batch(session, org_id, (
+            (g.work_item_type, g.work_item_id) for _, g in non_doc_gates
+            if g.work_item_type not in ("story", "task", "doc")  # doc은 위 doc_proj(제목·slug와 함께)
+        ))
+        project_id_by_work_item.update({wid: pid for (_t, wid), pid in _rest.items()})
         for resp in responses:
             if resp.work_item_type in ("story", "task"):
                 resp.work_item_summary = summary_by_work_item.get(resp.work_item_id)
@@ -1072,7 +1511,8 @@ async def list_gates(
     # 단건 조회만 resp.project_id 를 대입했고 목록은 빠져 있었다). doc/story/task/artifact 전부
     # 이 한 dict 로 커버(project_id_by_work_item 은 dict(doc_proj) 로 시작).
     for resp, g in zip(responses, gates):
-        resp.project_id = project_id_by_work_item.get(g.work_item_id)
+        # story #4241 — 자기 참조 앵커(agent_decision · support_escalation)는 neutral_facts.project_id(gate_service.self_anchored_gate_project_id).
+        resp.project_id = project_id_by_work_item.get(g.work_item_id) or self_anchored_gate_project_id(g)
 
     # #2198(PO 판정): 캐시 키가 project_id 단독에서 (gate_type, project_id) 로 바뀌었다 — 승인
     # 자격이 이제 gate_type 에도 의존한다(_non_doc_can_approve 표 참조. artifact_canonicalize
@@ -1155,6 +1595,13 @@ async def list_gates(
     # 된다 — 예전엔 그래서 `status=held&assigned_to_me=true` 가 항상 빈 배열이었다.
     filtered: list[GateResponse] = []
     for resp, g in zip(responses, gates):
+        # story #4139 AC1 — 레시피 게이트가 대신 결재하는 scoped external_publish는 사람
+        # 결재함(assigned_to_me=true)에 "추가로" 안 뜬다(deferred_to_gate_id는 위 responses
+        # 계산 단계에서 이미 채워졌다 — 새 쿼리 0). 그 게이트의 단건 조회(GET /{id})·
+        # work_item_id 필터 조회는 이 분기를 안 타 영향 없다(존재 자체가 사라지는 게
+        # 아니라 "내가 지금 봐야 할 목록"에서만 빠진다).
+        if resp.deferred_to_gate_id is not None:
+            continue
         if g.gate_type == "doc_approval":
             # story #1983(까심 #1960 QA 적출 회귀, story #2259 후속): doc_approval assigned_to_me
             # 도 WHO(승인 자격) 판정이지 STATE(pending/held) 판정이 아니다 — story #2259가 non-doc
@@ -1173,6 +1620,10 @@ async def list_gates(
 
 class GateDesignatedPendingCountResponse(BaseModel):
     count: int
+    # story #4245(까디르 QA P2 · PO 04:12Z) — 이 수를 센 문장의 스냅숏 워터마크 pg_snapshot_xmin(pg_current_snapshot())(xid8 · 문자열).
+    # 그보다 작은 xid의 트랜잭션은 그 순간 이미 끝났다 → 그 트랜잭션이 만든 이벤트(events.created_xid)는 커밋됐으면 이 수에 이미 보였다.
+    # FE는 SSE 백필 이벤트 중 created_xid < snapshot_xmin인 것만 «반영됨»으로 건너뛴다(시각 판정은 쓰지 않는다). 옛 클라이언트는 무시해도 되는 필드.
+    snapshot_xmin: str | None = None
 
 
 @router.get("/designated-pending-count", response_model=GateDesignatedPendingCountResponse)
@@ -1190,14 +1641,14 @@ async def get_designated_pending_count(
     쿼리라, "주 대화 추론"이 틀려도(층2가 best-effort인 이유) 이 뱃지는 항상 정확하다
     (AC1이 이 층에서 닫히는 근거)."""
     resolved = await resolve_member(auth, org_id, session)
-    count = (await session.execute(
-        select(func.count()).select_from(Gate).where(
+    count, snapshot_xmin = (await session.execute(
+        select(func.count(), func.pg_snapshot_xmin(func.pg_current_snapshot())).select_from(Gate).where(
             Gate.org_id == org_id,
             Gate.designated_approver_id == resolved.id,
             Gate.status == "pending",
         )
-    )).scalar_one()
-    return GateDesignatedPendingCountResponse(count=count)
+    )).one()
+    return GateDesignatedPendingCountResponse(count=count, snapshot_xmin=str(snapshot_xmin) if snapshot_xmin is not None else None)
 
 
 class HitlInboxItem(BaseModel):
@@ -1223,6 +1674,8 @@ class HitlInboxItem(BaseModel):
     work_type: str | None = None
     created_at: datetime
     expires_at: datetime | None = None
+    # story #4241 — 결재함은 조직 전체 목록이라 행 링크가 «현재 프로젝트»가 아니라 이 요청의 프로젝트를 싣게(GateResponse.project_id와 짝).
+    project_id: uuid.UUID | None = None
 
 
 # gate_enforce.py:22/gate_metrics.py:24 선례(cross-module import 대신 로컬 재선언) — HitlRequest 중
@@ -1232,13 +1685,16 @@ _GATE_REQUEST_TYPE = "gate_approval"
 
 
 async def _list_hitl_inbox_rows(
-    session: AsyncSession, org_id: uuid.UUID, status: str | None,
+    session: AsyncSession, org_id: uuid.UUID, status: str | None, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> list[HitlRequest]:
     q = select(HitlRequest).where(
         HitlRequest.org_id == org_id,
         HitlRequest.request_type == _GATE_REQUEST_TYPE,
         HitlRequest.deleted_at.is_(None),
     )
+    # story #4351 — 제한된 caller는 접근 가능 프로젝트의 결재 + 프로젝트 없는 org 수준 결재만(None = 전체 접근 · 옛 동작).
+    if restricted_project_ids is not None:
+        q = q.where(or_(HitlRequest.project_id.is_(None), HitlRequest.project_id.in_(restricted_project_ids)))
     if status:
         q = q.where(HitlRequest.status == status)
     return list((await session.execute(q)).scalars().all())
@@ -1261,6 +1717,7 @@ def _hitl_item_from_row(r: HitlRequest) -> HitlInboxItem:
         work_type=meta.get("work_type"),
         created_at=r.created_at,
         expires_at=r.expires_at,
+        project_id=r.project_id,
     )
 
 
@@ -1290,7 +1747,12 @@ async def list_gate_inbox(
         work_item_id=None, work_item_type=None, status=status, sort=sort,
         assigned_to_me=assigned_to_me, session=session, org_id=org_id, auth=auth,
     )
-    hitl_rows = await _list_hitl_inbox_rows(session, org_id, status)
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    hitl_rows = await _list_hitl_inbox_rows(
+        session, org_id, status,
+        restricted_project_ids=await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id),
+    )
 
     if assigned_to_me:
         # Gate의 non-doc assigned_to_me(WHO)와 동일 규칙 재사용: gate_approval park 대상
@@ -1449,7 +1911,9 @@ async def get_gate_endpoint(
         raise HTTPException(status_code=404, detail="Gate not found")
 
     resp = await to_gate_response(session, org_id, gate)
-    resp.project_id = project_id
+    # story #4253(까디르 codex 01a0d35f P2) — 목록(list_gates)과 같은 규칙: 자기 참조 앵커(agent_decision · support_escalation)는
+    # neutral_facts.project_id. 접근 판정은 위 work item 해소값 그대로(이 값은 응답 표시 · 링크의 ?p=에만 쓰인다).
+    resp.project_id = project_id or self_anchored_gate_project_id(gate)
     resp.work_item_summary = await _resolve_work_item_summary(
         session, org_id, gate.work_item_type, gate.work_item_id,
     )
@@ -1498,6 +1962,57 @@ async def get_gate_endpoint(
                 resp.newsletter_subject = (version.channel_payload or {}).get("subject") if version else None
         except Exception:  # noqa: BLE001 — 카드 조회 자체를 이 계산값 실패로 죽이지 않는다.
             logger.warning("newsletter_send estimated_recipient_count/subject 조회 실패(비중단) org=%s gate=%s", org_id, id, exc_info=True)
+        # story #4262 — 이 게이트에 묶인 발송 명령 중 가장 최근 1(생성 시각 내림차순 · 같으면 id). 조직 조건 + 이 게이트 id라
+        # 다른 조직 · 다른 게이트 명령이 섞이지 않는다. 사람 재시도가 같은 행을 pending으로 되돌리므로 보통 게이트당 1행이다.
+        from app.models.publication_command import PublicationCommand
+
+        command = (await session.execute(
+            select(PublicationCommand)
+            .where(
+                PublicationCommand.org_id == org_id,
+                PublicationCommand.gate_id == gate.id,
+                PublicationCommand.content_kind == "newsletter_send",
+            )
+            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if command is not None:
+            from app.services.publication_command import viewer_can_retry
+
+            # story #4290(까디르 QA ③) — 재시도는 사람만 — 발송 명령 요약의 command_retryable도 보는 쪽 기준.
+            viewer_is_human = (await resolve_member(auth, org_id, session)).type == "human"
+            resp.newsletter_send_command = NewsletterSendCommandSummary(
+                id=command.id, status=command.status, failure_kind=command.failure_kind, reason_code=command.reason_code,
+                next_attempt_at=command.next_attempt_at, reason_reset_at=command.reason_reset_at,
+                command_retryable=viewer_can_retry(command, viewer_is_human=viewer_is_human),
+            )
+    # story #4336 — 목록과 같은 «마지막 수정 주체»(예전엔 단건에서 안 채워 늘 «—»).
+    await _enrich_latest_author_kind(session, [resp], [gate])
+    # story #4336 AC4 — 외부 발행 게이트의 발행 명령(가장 최근 1). 이 게이트 id로 만든 채널 · 사이트 발행 명령만(조직 조건 포함).
+    if gate.gate_type == "external_publish":
+        from app.models.publication_command import PublicationCommand
+        from app.services.publication_command import derive_processing_kind, viewer_can_retry
+
+        publish_command = (await session.execute(
+            select(PublicationCommand)
+            .where(
+                PublicationCommand.org_id == org_id,
+                PublicationCommand.gate_id == gate.id,
+                PublicationCommand.content_kind.in_(("channel_post", "site_post")),
+                PublicationCommand.operation == "publish",
+            )
+            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if publish_command is not None:
+            viewer_is_human = (await resolve_member(auth, org_id, session)).type == "human"
+            resp.publish_command = PublishCommandSummary(
+                id=publish_command.id, status=publish_command.status, failure_kind=publish_command.failure_kind,
+                reason_code=publish_command.reason_code, next_attempt_at=publish_command.next_attempt_at,
+                reason_reset_at=publish_command.reason_reset_at,
+                command_retryable=viewer_can_retry(publish_command, viewer_is_human=viewer_is_human),
+                processing_kind=derive_processing_kind(publish_command, None),
+            )
     # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
     if gate.gate_type == MERGE_GATE_TYPE:
         _link = await resolve_pr_link(session, org_id, gate.work_item_id)
@@ -1695,7 +2210,7 @@ async def list_gate_activity_endpoint(
             ActivityLog.entity_type == "gate", ActivityLog.entity_id == id,
             ActivityLog.org_id == org_id,
         )
-        .order_by(ActivityLog.created_at.desc())
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
     )).scalars().all()
 
     actor_ids = {r.actor_id for r in rows if r.actor_id}
@@ -1871,6 +2386,10 @@ async def _transition_gate_endpoint(
         gate = await transition_gate(
             session, org_id, id, body.status, _resolver_id, body.note,
             pending_deliveries=_pending_deliveries,
+            reviewed_draft=(
+                (body.reviewed_draft_id, body.reviewed_draft_version)
+                if body.reviewed_draft_id is not None and body.reviewed_draft_version is not None else None
+            ),
         )
         # ⛔카디르 QA(PR#3243, 2026-08-19) 레이스 fix — anchor(gate.approved_head_sha)를 배경
         # publish 태스크가 뒤늦게 적으면, 승인(SHA A) 직후·태스크 실행 前에 새 커밋(B)의
@@ -1905,11 +2424,25 @@ async def _transition_gate_endpoint(
                 # gate.status 무관하게 "관측"은 항상 기록하도록 바뀌어, PR이 opened/
                 # synchronize될 때 거의 항상 먼저 오는 실 웹훅이 승인보다 앞서 워터마크를
                 # 이미 심어 둔다 — 이 승인 지점은 그 값을 그대로 둔다).
+        # story #4069(훅B) — 「승인-뒤-제출」순서 커버 + story #4090 AC2 자동발행 훅은
+        # story #4090에서 `gate_service.py::transition_gate`(approved 분기)로 이관됐다
+        # (라우터를 안 거치는 승인 호출자도 같은 혜택을 받게, 페드루 PO 確定 2026-09-21
+        # — 2026-09-19 원본은 여기 있었다). 위 `transition_gate()` 호출이 이미 처리를
+        # 마쳤으므로 이 라우터엔 더 남길 코드가 없다(중복 제거).
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
         # ccbcd9da(A-1): doc/epic 자동재개 wake — commit(recipient_seq 확정) 후 발화(이중전달 방지).
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
+        # story #4192(까디르 4583 P1) — 레시피 회차 자사 블로그 초안 게이트면 서버 발행은 **승인 커밋 뒤** 격리 세션에서
+        # (발행 실패가 승인을 지우지 않게). 이 세션은 안 쓴다 — 결과(publish_outcome)만 다시 읽어 응답에 싣는다.
+        if gate.status == "approved":
+            from app.services.site_posts import publish_recipe_approved_hosted_site_draft_after_commit
+
+            await publish_recipe_approved_hosted_site_draft_after_commit(
+                session, gate_id=gate.id, resolver_id=gate.resolver_id,
+            )
+            await session.refresh(gate)
         # story #2813 — 사람 승인/반려를 GitHub check-run(success/failure)으로 반영. commit 後
         # 배경 태스크(fail-closed: 실패해도 이미 commit된 gate 상태엔 영향 없음, GitHub 쪽만 stale).
         # merge 게이트 아니면 publish_gate_check 내부에서 조용히 no-op.
@@ -1931,6 +2464,16 @@ async def _transition_gate_endpoint(
         # #2027 원래 "N+1 0" 의도 그대로)하고, 그 외 상태(rejected 등, 검증 블록 자체를
         # 안 태움)만 to_gate_response가 자체적으로 1쿼리 한다(AC1이 명시 허용하는 비용).
         return await to_gate_response(session, org_id, gate, posture=_transition_posture)
+    except RecipeReviewedDraftChangedError as e:
+        # story #4190 — 사람 문구는 카탈로그 키(유나 확정 대기 · PO 11:49Z). 코드·현재 초안 버전은 FE 새로고침 안내용.
+        raise HTTPException(
+            status_code=409,
+            detail=human_error(
+                "gate_draft_changed", "The draft changed after this approval screen was opened.",
+                user_message=t("gates.draft_changed", resolved_locale),
+                current_draft_id=str(e.current_draft_id), current_version=e.current_version,
+            ),
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -2190,7 +2733,7 @@ async def _void_gate_endpoint(
 
 class GateHoldRequest(BaseModel):
     reason: str | None = None       # S31: 보류 사유(선택·가역적 일시정지라 마찰↓)
-    held_until: datetime | None = None  # 시한부 만료(무기한이면 None)
+    held_until: OffsetDatetime | None = None  # 시한부 만료(무기한이면 None)
 
 
 async def _require_gate_admin(session, auth, org_id, resolved_locale: str):
@@ -2713,6 +3256,106 @@ async def _reassign_gate_approver_endpoint(
         raise HTTPException(status_code=422, detail=str(e))
 
 
+class WorkflowStepApprovalDecisionRequest(BaseModel):
+    decision: Literal["approved", "rejected", "abstained"]
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _note_required_for_reject(self) -> "WorkflowStepApprovalDecisionRequest":
+        # pydantic v2는 필드가 기본값(None)을 쓴 경우 field_validator를 건너뛴다
+        # (validate_default=False가 기본) — model_validator(mode="after")는 기본값
+        # 사용 여부와 무관하게 항상 실행돼 이 필수-사유 계약을 확실히 강제한다.
+        if self.decision == "rejected" and not (self.note and self.note.strip()):
+            raise ValueError("note is required when decision is 'rejected'")
+        return self
+
+
+class WorkflowStepApprovalDecisionResponse(BaseModel):
+    approver: GateApproverResponse
+    outcome: str
+    skipped: bool
+    approved: int
+    rejected: int
+    total_blocking: int
+
+
+@router.post(
+    "/{id}/approvers/{approval_id}/decision",
+    response_model=WorkflowStepApprovalDecisionResponse,
+)
+async def decide_gate_approval_endpoint(
+    id: uuid.UUID,
+    approval_id: uuid.UUID,
+    body: WorkflowStepApprovalDecisionRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> WorkflowStepApprovalDecisionResponse:
+    """story #3793 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다(까심 QA CI FAILURE
+    원칙). 직접-호출 테스트는 `_decide_gate_approval_endpoint`를 불러야 한다."""
+    return await _decide_gate_approval_endpoint(
+        id, approval_id, body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _decide_gate_approval_endpoint(
+    id: uuid.UUID,
+    approval_id: uuid.UUID,
+    body: WorkflowStepApprovalDecisionRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth,
+    resolved_locale: str,
+) -> WorkflowStepApprovalDecisionResponse:
+    """story #3965 — 「오늘」 needs_me의 ``workflow_step`` 소스(today_service.py::
+    _needs_me_from_workflow_steps)가 이미 노출 중인 ``actions: ["approve","request_changes","hold"]``
+    가운데 approve/request_changes(reject)를 실제로 처리하는 첫 HTTP 엔드포인트 — story #3334가
+    미리 심어둔 ``record_parallel_decision``(그때까지 라우터 미배선·자기 테스트만 호출자였음)을
+    처음 배선한다. hold는 기존 gate-level ``/{id}/hold``(admin 전용)가 그대로 담당해 이 카드
+    범위 밖(approver row 단위가 아니라 gate 단위 동작이라 다른 축).
+
+    resolver=인증 caller 본인 강제(body 신뢰 0 — 대리결정 없음). ``record_parallel_decision``
+    자체가 resolver_id != approver_member_id 면 SelfApprovalError(SoD)를 던져 "본인 row만
+    해소"를 서비스층에서 이미 강제하지만, 그 함수는 org_id 스코프를 받지 않아(PK 단독 조회) 이
+    라우트가 org/gate 스코프 404 가드를 앞단에 추가로 건다(cross-org IDOR 차단)."""
+    resolved = await resolve_member(auth, org_id, session)
+    appr = (await session.execute(
+        select(WorkflowLineStepApproval).where(
+            WorkflowLineStepApproval.id == approval_id,
+            WorkflowLineStepApproval.org_id == org_id,
+            WorkflowLineStepApproval.gate_id == id,
+        )
+    )).scalar_one_or_none()
+    if appr is None:
+        raise HTTPException(status_code=404, detail=t("gates.approval_not_found", resolved_locale))
+
+    from app.services.workflow_parallel_approval import SelfApprovalError, record_parallel_decision
+    try:
+        result = await record_parallel_decision(
+            session, approval_id, body.decision, resolver_id=resolved.id, note=body.note,
+        )
+    except SelfApprovalError:
+        raise HTTPException(status_code=403, detail=t("gates.approval_self_or_foreign", resolved_locale))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    await session.commit()
+    await session.refresh(appr)
+    enriched = await _enrich_approvers(session, org_id, [appr])
+    return WorkflowStepApprovalDecisionResponse(
+        approver=enriched[0],
+        outcome=result["outcome"],
+        skipped=result["skipped"],
+        approved=result["approved"],
+        rejected=result["rejected"],
+        total_blocking=result["total_blocking"],
+    )
+
+
 class GateOverrideRequest(BaseModel):
     decision: str  # "approved" | "rejected" (owner 강제 결정)
     reason: str    # 필수 — 가장 민감한 액션이라 사유 의무
@@ -2774,6 +3417,26 @@ async def _override_gate_endpoint(
         await session.refresh(gate)
         # ccbcd9da(A-1): override 도 transition_gate 재사용 경로라 동일하게 doc/epic wake 대상.
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
+        # story #4192(까디르 4583 P1) — 레시피 회차 자사 블로그 초안 게이트면 서버 발행은 **승인 커밋 뒤** 격리 세션에서
+        # (발행 실패가 승인을 지우지 않게). 이 세션은 안 쓴다 — 결과(publish_outcome)만 다시 읽어 응답에 싣는다.
+        if gate.status == "approved":
+            from app.services.site_posts import publish_recipe_approved_hosted_site_draft_after_commit
+
+            await publish_recipe_approved_hosted_site_draft_after_commit(
+                session, gate_id=gate.id, resolver_id=gate.resolver_id,
+            )
+            await session.refresh(gate)
         return await to_gate_response(session, org_id, gate)
+    except RecipeReviewedDraftChangedError as e:
+        # story #4190 — override는 «본 초안 버전»을 싣지 않는다(UI 호출처 없음). 승인 화면에 초안이 있는 레시피 발행
+        # 게이트를 override로 승인하면 fail-closed 409(예전 그대로면 새 예외가 ValueError 밖이라 500이었다).
+        raise HTTPException(
+            status_code=409,
+            detail=human_error(
+                "gate_draft_changed", "Recipe publish approval must carry the reviewed draft — use the approval screen.",
+                user_message=t("gates.draft_changed", resolved_locale),
+                current_draft_id=str(e.current_draft_id), current_version=e.current_version,
+            ),
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

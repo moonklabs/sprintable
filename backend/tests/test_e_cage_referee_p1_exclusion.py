@@ -44,7 +44,8 @@ async def test_get_agent_stats_excludes_marked_stories():
     session = AsyncMock()
     # TeamMember 존재 확인 쿼리
     member_result = MagicMock()
-    member_result.scalar_one_or_none.return_value = MEMBER_ID
+    # story #4185 — 단건이 묶음 조회 한 벌을 쓰게 되며 멤버 확인이 scalars().all()(id 목록)로 바뀌었다.
+    member_result.scalars.return_value.all.return_value = [MEMBER_ID]
     # stories 쿼리
     stories_result = MagicMock()
     stories_result.all.return_value = []

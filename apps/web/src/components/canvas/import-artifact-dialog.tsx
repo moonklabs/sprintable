@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ArtifactStage } from './artifact-stage';
 import { newNodeId, type ArtifactNode } from '@/services/canvas-nodes';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 type ImportTab = 'image' | 'html';
 
@@ -16,6 +17,8 @@ interface ImportArtifactDialogProps {
   /** 실제 createArtifact(source='imported') 호출은 호출부가 소유(PinAuthoringPopover의
    * onSave와 동일 계약) — 이 다이얼로그는 업로드+미리보기+노드 구성까지만 책임진다. */
   onImport: (nodes: ArtifactNode[]) => Promise<boolean>;
+  /** story #4370 — HTML 붙여넣기 초안 키(스토리 id). */
+  targetId: string | null;
 }
 
 /**
@@ -24,21 +27,25 @@ interface ImportArtifactDialogProps {
  * (OAuth/API 0). 미리보기=기존 ArtifactStage 재사용(신규 뷰어 0). 실패=조용한 info 안내
  * (⛔낙인 0 — provenance 규율의 연장).
  */
-export function ImportArtifactDialog({ open, onOpenChange, onImport }: ImportArtifactDialogProps) {
+interface ImportFormDraft { tab: ImportTab; imageUrl: string | null; html: string }
+/** 빈 가져오기 폼(안정 참조 — 같으면 초안 없음). */
+const EMPTY_IMPORT_FORM: ImportFormDraft = { tab: 'image', imageUrl: null, html: '' };
+
+export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }: ImportArtifactDialogProps) {
   const t = useTranslations('canvas');
-  const [tab, setTab] = useState<ImportTab>('image');
   const [uploading, setUploading] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [htmlContent, setHtmlContent] = useState('');
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(HTML 붙여넣기)이 든 폼이라 **폼 전체**(탭 · 올린 이미지 · HTML)가 스토리별 초안 하나:
+  // ✕ · 바깥 · Esc로 닫혀도 남고(다시 열면 쓰던 탭 그대로 — 숨은 초안 0) «취소» · 가져오기 성공에서만 지운다.
+  // (예전엔 거꾸로 — Dialog 자체 닫힘에서만 비우고 «취소»는 남겼다.)
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<ImportFormDraft>(
+    { surface: 'artifact-import', targetId, field: 'form' }, EMPTY_IMPORT_FORM,
+  );
+  const { tab, imageUrl, html: htmlContent } = form;
+  const setTab = (next: ImportTab) => setForm((prev) => ({ ...prev, tab: next }));
+  const setImageUrl = (next: string | null) => setForm((prev) => ({ ...prev, imageUrl: next }));
+  const setHtmlContent = (next: string) => setForm((prev) => ({ ...prev, html: next }));
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState(false);
-
-  function reset() {
-    setTab('image');
-    setImageUrl(null);
-    setHtmlContent('');
-    setError(false);
-  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -69,14 +76,15 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport }: ImportArt
     const ok = await onImport(nodes);
     setImporting(false);
     if (!ok) { setError(true); return; }
-    reset();
+    clearFormDraft();
+    setError(false);
     onOpenChange(false);
   }
 
   const canConfirm = tab === 'image' ? (!!imageUrl && !uploading) : htmlContent.trim().length > 0;
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) reset(); onOpenChange(next); }}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) setError(false); onOpenChange(next); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{t('importDialogTitle')}</DialogTitle>
@@ -129,7 +137,7 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport }: ImportArt
         {error ? <p className="text-[11px] text-muted-foreground">{t('importFailedNote')}</p> : null}
 
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={importing}>
+          <Button variant="outline" size="sm" onClick={() => { clearFormDraft(); setError(false); onOpenChange(false); }} disabled={importing}>
             {t('specPinCancelAction')}
           </Button>
           <Button size="sm" onClick={() => void handleConfirm()} disabled={!canConfirm || importing}>

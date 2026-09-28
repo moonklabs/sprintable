@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publication_body, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_e4fc29fa_site_post_orchestration import _seed_org, _session_factory, _seed_default_role, _seed_agent
 from tests.test_3475_publishing_metrics import _seed_human, _client_for, _setup_org_scoped_app
 from tests.test_3497_insight_snapshots import _seed_channel_connection
@@ -537,7 +539,7 @@ async def test_full_round_trip_draft_publish_then_send_via_http():
             await _approve_gate_directly(s, gate_id)
 
         async with _client_for(app) as client:
-            r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r_publish.status_code == 200, r_publish.text
         version_id = uuid.UUID(r_publish.json()["version_id"])
 
@@ -623,10 +625,11 @@ async def test_channel_payload_subject_actually_reaches_create_container():
             await _approve_gate_directly(s, gate_id)
 
         async with _client_for(app) as client:
-            r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         # subject의 마커가 실제로 create_container에 도달했다는 증거 — 배선이
         # 끊겨 있었다면(subject 무시) text엔 마커가 없어 이 발행이 성공했을 것이다.
-        assert r_publish.status_code != 200, "subject가 create_container에 전달 안 됐다(배선 끊김)"
+        # story #4336 — 공급자 호출은 워커가 한다: 결과는 응답이 아니라 발행 행에.
+        assert (await publication_body(Session, draft_id))["status"] != "published", "subject가 create_container에 전달 안 됐다(배선 끊김)"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

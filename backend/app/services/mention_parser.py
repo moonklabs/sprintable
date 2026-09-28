@@ -80,9 +80,9 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
 
+from sqlalchemy import literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.models.reference import Reference
 from app.services.member_resolver import canonicalize_member_id
@@ -654,11 +654,25 @@ async def reconcile_entity_references(
             # story #2267(C-9): relation이 유니크 인덱스에 추가돼 이 목록도 같이 늘어야
             # 매치한다 — 이 write-path(멘션 추출)는 relation을 안 채우므로(위 dict 참조)
             # 컬럼 기본값 'none'이 그대로 적용된다(창조-출처는 이 파서가 다루는 개념이 아니다).
+            #
+            # story #4051(E-RECIPE-1 ②, 미르코 실측 2026-09-18) — `!= "proof"`를 그냥 쓰면
+            # SQLAlchemy가 평범한 bind parameter로 컴파일한다. PostgreSQL은 이 arbiter
+            # predicate를 커스텀 플랜(파라미터 값을 알고 있는 채로 매 실행 재계획)에서는
+            # 문제없이 index와 매치하지만, 같은 prepared statement를 5회 넘겨 실행하면
+            # (extended query protocol·plan_cache_mode=auto 기본값) 제네릭 플랜으로
+            # 전환한다 — 제네릭 플랜은 파라미터 값을 모르는 채로 한 번만 계획되므로 "$n이
+            # 무슨 값이든 이 partial index(WHERE form <> 'proof')와 매치한다"를 증명할 수
+            # 없어 매칭에 실패한다("no unique or exclusion constraint matching the ON
+            # CONFLICT specification" — 실측: 같은 세션에서 6번째 호출부터 재현). `literal(
+            # ..., literal_execute=True)`(SQLAlchemy 2.0)는 이 값을 커스텀/제네릭 플랜 여부와
+            # 무관하게 항상 SQL 텍스트에 직접 리터럴로 박아 index의 리터럴 predicate와 항상
+            # 구조적으로 일치시킨다 — 새 메커니즘 발명이 아니라 SQLAlchemy가 이 정확한
+            # 시나리오(파라미터화되면 깨지는 DDL 매칭)를 위해 이미 제공하는 문서화된 옵션.
             index_elements=[
                 Reference.source_type, Reference.source_field, Reference.source_id,
                 Reference.target_type, Reference.target_id, Reference.form, Reference.relation,
             ],
-            index_where=Reference.form != "proof",
+            index_where=Reference.form != literal("proof", literal_execute=True),
         )
         await db.execute(stmt)
 

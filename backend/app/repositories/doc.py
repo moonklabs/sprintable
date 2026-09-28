@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.models.doc import Doc
 from app.repositories.base import BaseRepository
@@ -35,14 +36,32 @@ def parse_doc_cursor(cursor: object) -> tuple[int, uuid.UUID] | None:
         raise HTTPException(status_code=400, detail="Invalid cursor format") from exc
 
 
+
+# story #4376(까디르 codex HIGH · PO dev 실측 08:36Z) — 사이드바 트리는 요약(DocSummaryResponse)만 싣는데 select(Doc)이 본문(content) ·
+# search_vector(본문 전체의 tsvector)까지 읽어 버렸다(dev 1,065개 · 본문 합 9.4MB · 문서함을 열 때마다). 트리 경로만 요약이 실제로 읽는
+# 칸으로 좁힌다(is_folder = doc_type · canonical_slug = slug · snippet은 트리에서 안 채움). 다른 경로(단건 · 검색)는 그대로.
+def doc_summary_columns():
+    from app.models.doc import Doc
+
+    return (
+        Doc.id, Doc.project_id, Doc.parent_id, Doc.title, Doc.slug, Doc.slug_locked, Doc.icon, Doc.sort_order,
+        Doc.doc_type, Doc.status, Doc.tags, Doc.created_at, Doc.updated_at,
+    )
+
 class DocRepository(BaseRepository[Doc]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Doc, session, org_id)
 
     async def list(
-        self, limit: int = 500, cursor: str | None = None, **filters: Any
+        self, limit: int = 500, cursor: str | None = None, *, project_ids: list[uuid.UUID] | None = None,
+        summary_only: bool = False, **filters: Any
     ) -> list[Doc]:  # type: ignore[override]
         q = select(Doc).where(self._org_filter(), Doc.deleted_at.is_(None))
+        if summary_only:
+            q = q.options(load_only(*doc_summary_columns()))
+        if project_ids is not None:
+            # story #4350 PR 3(까디르 HIGH) — project 없는 목록은 caller의 접근 가능 프로젝트 문서만(SQL · 빈 집합 = 0건).
+            q = q.where(Doc.project_id.in_(project_ids))
         for attr, val in filters.items():
             q = q.where(getattr(Doc, attr) == val)
         parsed = parse_doc_cursor(cursor)
@@ -63,8 +82,51 @@ class DocRepository(BaseRepository[Doc]):
         )
         return result.scalar_one_or_none()
 
+    async def resolve_wiki_link_targets(self, project_id: uuid.UUID, slugs: list[str]) -> dict[str, str]:
+        """story #4313: 적힌 slug → 지금 slug. 이 프로젝트에 살아 있는(삭제 안 된) 문서만.
+
+        살아 있는 slug는 자기 자신. 아니면 옛 slug(`doc_slug_aliases`) → 그 문서의 지금 slug(PO 13:44Z — 이름 바꾼 문서를 가리키는
+        «[[옛-slug]]»도 열리는 문서이므로 링크 · 주소는 지금 slug라 alias 해소 왕복이 없다). 살아 있는 slug가 alias보다 앞선다
+        (`?slug=` 조회 get_by_slug → get_by_alias 순서와 같다). 두 쿼리(살아 있는 것 · 남은 것의 alias).
+        """
+        if not slugs:
+            return {}
+        from app.models.doc import DocSlugAlias
+
+        live = await self.session.execute(
+            select(Doc.slug).where(
+                self._org_filter(),
+                Doc.project_id == project_id,
+                Doc.slug.in_(slugs),
+                Doc.deleted_at.is_(None),
+            )
+        )
+        targets = {row[0]: row[0] for row in live.all()}
+        rest = [s for s in slugs if s not in targets]
+        if rest:
+            aliased = await self.session.execute(
+                select(DocSlugAlias.old_slug, Doc.slug)
+                .join(Doc, DocSlugAlias.doc_id == Doc.id)
+                .where(
+                    self._org_filter(),
+                    DocSlugAlias.project_id == project_id,
+                    Doc.project_id == project_id,
+                    DocSlugAlias.old_slug.in_(rest),
+                    Doc.deleted_at.is_(None),
+                )
+            )
+            # rest엔 살아 있는 slug가 없으니 alias가 살아 있는 slug를 덮지 않는다(살아 있는 쪽 우선은 위 rest 거르기 하나로).
+            for old_slug, current in aliased.all():
+                targets[old_slug] = current
+        return dict(sorted(targets.items()))
+
     async def get_by_alias(self, project_id: uuid.UUID, old_slug: str) -> Doc | None:
-        """4dd399c6 AC3: 구 slug(alias) → canonical doc 해소. live(get_by_slug) 미스 시 fallback."""
+        """4dd399c6 AC3: 구 slug(alias) → canonical doc 해소. live(get_by_slug) 미스 시 fallback.
+
+        story #4317(까디르 4673 P1) — alias의 프로젝트뿐 아니라 **문서의 프로젝트도** 이 프로젝트여야 한다. 예전엔 alias 칸만 걸러서, 문서가
+        다른 프로젝트에 있으면(지금은 옮기는 기능이 없어 도달 0) 이 프로젝트 접근권만으로 그 문서를 돌려줄 수 있는 모양이었다. 위키 링크
+        해석기(resolve_wiki_link_targets · 4313)와 같은 규칙.
+        """
         from app.models.doc import DocSlugAlias
 
         result = await self.session.execute(
@@ -73,6 +135,7 @@ class DocRepository(BaseRepository[Doc]):
             .where(
                 self._org_filter(),
                 DocSlugAlias.project_id == project_id,
+                Doc.project_id == project_id,
                 DocSlugAlias.old_slug == old_slug,
                 Doc.deleted_at.is_(None),
             )
@@ -100,8 +163,19 @@ class DocRepository(BaseRepository[Doc]):
         result = await self.session.execute(q)
         return list(result.scalars().all())
 
+    async def count_live(self, project_id: uuid.UUID, tags: list[str] | None = None) -> int:
+        """story #4376 — 트리 총량: 프로젝트의 살아 있는 문서 수(태그를 주면 그 태그를 모두 가진 문서 수 · search_by_tags와 같은 조건)."""
+        from sqlalchemy import Text, cast, func
+        from sqlalchemy.dialects.postgresql import ARRAY
+
+        q = select(func.count()).select_from(Doc).where(self._org_filter(), Doc.project_id == project_id, Doc.deleted_at.is_(None))
+        if tags:
+            q = q.where(Doc.tags.contains(cast(tags, ARRAY(Text))))
+        return (await self.session.execute(q)).scalar_one()
+
     async def search_by_tags(
         self, project_id: uuid.UUID, tags: list[str], limit: int = 500, cursor: str | None = None,
+        *, summary_only: bool = False,
     ) -> list[Doc]:
         """tags 배열이 주어진 태그를 모두 포함하는 docs 조회 (@> 연산자).
 
@@ -117,6 +191,8 @@ class DocRepository(BaseRepository[Doc]):
             Doc.deleted_at.is_(None),
             Doc.tags.contains(cast(tags, ARRAY(Text))),
         )
+        if summary_only:
+            q = q.options(load_only(*doc_summary_columns()))
         parsed = parse_doc_cursor(cursor)
         if parsed is not None:
             q = q.where(tuple_(Doc.sort_order, Doc.id) > tuple_(*parsed))

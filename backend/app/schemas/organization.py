@@ -33,6 +33,13 @@ class OrganizationResponse(BaseModel):
     updated_at: datetime
 
 
+class OrganizationDetailResponse(OrganizationResponse):
+    """story #4219 G2 — 단건 조회(GET /organizations/{id}) 전용: 요청자의 이 org 역할(소속 판정에 이미 계산한 값 · 가산 필드).
+    proxy가 /glance 307에 sp_resolve_cache(org·project·역할 서명 쿠키)를 심을 때 쓴다. 생성·수정 응답(OrganizationResponse)은 무변."""
+
+    role: str
+
+
 class MyOrganizationResponse(BaseModel):
     """내 Organization 목록 조회 응답 — role 포함."""
 

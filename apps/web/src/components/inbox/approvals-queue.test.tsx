@@ -223,6 +223,32 @@ describe('ApprovalsQueue', () => {
     expect(container.textContent).toContain(koMessages.cage.gateInboxLoadError);
   });
 
+  // story #4310 AC3 — 응답이 아예 안 오는(걸린) 요청도 fetchWithAuth 시간 제한(30s) 뒤 망 오류와 같은 갈래로 «못 불러옴» + 다시 시도.
+  // 예전엔 제한이 없어 «불러오는 중»이 CF 524(~100초)까지 그대로였다. 실제 fetch처럼 신호가 끊겨야만 reject한다.
+  it('⭐held 요청이 응답 없이 걸려도 30s 뒤 «못 불러옴» + 다시 시도(그 전엔 불러오는 중)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+        if (url.includes('status=held')) {
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+          });
+        }
+        return Promise.resolve({ ok: true, json: async () => [] });
+      }));
+      await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+      expect(container.querySelector('[data-testid="gate-inbox-load-error"]'), '30s 전').toBeNull();
+      expect(container.textContent).toContain(koMessages.cage.gateInboxLoading);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
+      expect(container.textContent).toContain(koMessages.cage.gateInboxLoadError);
+      expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.cage.gateInboxRetry)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('4유형(게이트·문서결재·머지게이트·보류) 모두 렌더하고 gate_type 배지를 표시한다', async () => {
     mockFetches(
       [
@@ -296,6 +322,47 @@ describe('ApprovalsQueue', () => {
     await mount();
     const text = container.textContent ?? '';
     expect(text).not.toContain('파일');
+  });
+
+  // story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — recipe_gate_hooks.py::
+  // maybe_create_stage_gate가 denorm한 neutral_facts.stage(+stage_role).
+  it('neutral_facts.stage_role이 있으면 「단계: X (역할)」을 한글 낱말표로 표시한다(유나 design CHANGES, 내부어 노출 0)', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-stage', can_approve: true, requires_human: true,
+        neutral_facts: { stage: 'concept_confirmed', stage_role: 'Director' },
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정 (디렉터)`);
+    expect(text).not.toContain('concept_confirmed');
+    expect(text).not.toContain('Director');
+  });
+
+  it('neutral_facts.stage만 있고 stage_role이 없으면 역할 괄호 없이 단계만 표시한다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-stage-no-role', can_approve: true, requires_human: true,
+        neutral_facts: { stage: 'concept_confirmed' },
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정`);
+    expect(text).not.toContain('(디렉터)');
+  });
+
+  it('비레시피 게이트(neutral_facts.stage 없음)는 단계 줄 자체가 안 뜬다(회귀 0)', async () => {
+    mockFetches(
+      [gate({ id: 'g-no-stage', can_approve: true, requires_human: true, neutral_facts: { diff_size: 1 } })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).not.toContain(koMessages.cage.gateStageLabel);
   });
 
   // story #3369(§3-1-2-1, 페드루 PO 2026-09-03 06:56Z) — reapproval_required=true인
@@ -440,6 +507,41 @@ describe('ApprovalsQueue', () => {
     const button = container.querySelector('button');
     await act(async () => { button?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/gates/g-tap');
+  });
+
+  it.each([
+    ['다른 프로젝트 결재 → 그 결재의 프로젝트', 'proj-C', '/gates/g-own?p=proj-C'],
+    ['같은 프로젝트 결재 → 지금과 같음', 'proj-A', '/gates/g-own?p=proj-A'],
+    ['프로젝트 무관 대상(null) → 현재 프로젝트', null, '/gates/g-own?p=proj-A'],
+  ])('story #4241 — 행 링크는 결재 자신의 프로젝트: %s', async (_label, projectId, expected) => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }], projectMemberships: [],
+      currentMemberType: 'human', currentTeamMemberId: 'member-1', projectId: 'proj-A',
+    });
+    mockFetches([{ ...gate({ id: 'g-own' }), project_id: projectId }], []);
+    await mount();
+    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenLastCalledWith(expected);
+  });
+
+  it('story #4231 — 항목 탭은 현재 프로젝트(`?p=`)를 싣고 · 프로젝트 전환 대기 중이면 그 목표를 싣는다(4585와 같은 동작)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }], projectMemberships: [],
+      currentMemberType: 'human', currentTeamMemberId: 'member-1', projectId: 'proj-A',
+    });
+    mockFetches([gate({ id: 'g-tap' })], []);
+    await mount();
+    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenLastCalledWith('/gates/g-tap?p=proj-A');
+
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    try {
+      await act(async () => { setPendingProjectTarget('proj-B'); });
+      await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(pushMock).toHaveBeenLastCalledWith('/gates/g-tap?p=proj-B');
+    } finally {
+      setPendingProjectTarget(null);
+    }
   });
 
   // story #2926(P0-F F3) — 클릭-스루 전용 항목은 ProofCapsule density="row"(컷코너+신뢰단계
@@ -1387,3 +1489,96 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     expect(JSON.parse(postCall?.body ?? '{}').status).toBe('rejected');
   });
 });
+
+// story #4190(유나 «본 버전 대조» 3 · 자리별 동작) — 레시피 발행 게이트: 저위험 원탭은 승인하지 않고 초안 카드가 있는 서명
+// 모달을 연다(라벨 «초안 보고 승인»). 모달 승인은 카드가 그린 (draft_id, version)을 싣고, 409 gate_draft_changed면 행 오류
+// 자리 문장 + 그 행만 재조회 → 모달 카드가 새 버전.
+describe('ApprovalsQueue — 레시피 발행 게이트 본 초안 버전 (story #4190)', () => {
+  function recipeGate(version: number): GateItem {
+    return gate({
+      id: 'g-recipe', gate_type: 'external_publish', scope_key: '', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: { title: '블로그 레시피', slug: null },
+      neutral_facts: { stage: 'pending_approval', triggered_by_event: 'e-1' },
+      linked_site_draft: {
+        draft_id: 'site-d1', version, title: `제목 v${version}`, body_preview: '본문',
+        channel: null, account_id: null, account_label: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      },
+    });
+  }
+
+  it('⭐원탭 라벨이 «초안 보고 승인»이고 누르면 전이 없이 초안 카드가 있는 서명 모달이 열린다', async () => {
+    const calls = mockFetches([recipeGate(1)], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')];
+    expect(buttons.some((b) => b.textContent === koMessages.cage.gateApprove)).toBe(false);
+    const reviewBtn = buttons.find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
+    expect(reviewBtn).toBeTruthy();
+    await act(async () => { reviewBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]');
+    expect(dialog?.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v1');
+    expect(calls.some((c) => c.url.endsWith('/transition'))).toBe(false);
+  });
+
+  it('⭐모달 승인이 본 버전을 싣고, 409면 문장 + 그 행 재조회로 모달 카드가 v2가 된다', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    let rowFetches = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      if (url.includes('status=pending')) return { ok: true, json: async () => [recipeGate(1)] };
+      if (url.includes('status=held')) return { ok: true, json: async () => [] };
+      if (url === '/api/gates/g-recipe/transition') {
+        bodies.push(JSON.parse(String(init?.body)));
+        return { ok: false, status: 409, json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'x' }, meta: null }) };
+      }
+      if (url === '/api/gates/g-recipe') { rowFetches += 1; return { ok: true, status: 200, json: async () => (recipeGate(2)) }; }
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const reviewBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
+    await act(async () => { reviewBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    let dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    await act(async () => { (dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).click(); });
+    const textarea = dialog.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'v1 봤음');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const signBtn = [...dialog.querySelectorAll('button')].find((b) => !b.disabled && b.textContent?.includes(koMessages.cage.sigApproveAndSign)) as HTMLButtonElement;
+    await act(async () => { signBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(bodies[0]).toMatchObject({ reviewed_draft_id: 'site-d1', reviewed_draft_version: 1 });
+    expect(document.body.textContent).toContain(koMessages.cage.gateDraftChangedError);
+    expect(rowFetches).toBe(1);
+    dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    expect(dialog.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v2');
+    expect((dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
+  });
+});
+
+// story #4370(까디르 P3) — 받은편지함 서명 창: 닫아도 사유 초안은 남고, 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
+describe('ApprovalsQueue — 서명 창 «취소»는 사유 초안을 지운다(story #4370)', () => {
+  it('사유를 쓰고 «취소» → 창이 닫히고 · 다시 열면 빈 칸', async () => {
+    mockFetches([gate({ id: 'g-high-cancel', gate_type: 'merge_gate', status: 'pending', requires_human: true, can_approve: true, risk_grade: 'high', work_item_summary: { title: '고위험 항목', slug: null } })], []);
+    await mount();
+    const openSig = async () => {
+      const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+      await act(async () => { signBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    };
+    const cancelLabel = (koMessages.cage as unknown as Record<string, string>).cancel;
+    const reason = () => document.body.querySelector<HTMLTextAreaElement>('[data-slot="dialog-content"] #gate-sig-reason');
+    await openSig();
+    const el = reason()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, '버릴 사유');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const cancel = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[data-slot="dialog-content"] button')).find((b) => b.textContent?.trim() === cancelLabel)!;
+    await act(async () => { cancel.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(reason()).toBeNull();
+    await openSig();
+    expect(reason()!.value).toBe('');
+  });
+});
+

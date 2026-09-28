@@ -4,6 +4,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildApproverPickerOptions, type ApproverPickerMember } from './approver-picker-options';
 
+// [SID:4286] 이름 없는 후보의 이름 자리 문구(common.memberUnnamed).
+const U = { unnamed: '이름 없는 구성원' };
+
 function member(overrides: Partial<ApproverPickerMember>): ApproverPickerMember {
   return {
     id: 'm-default', user_id: 'u-default', name: 'Default', email: 'default@test.com', role: 'admin',
@@ -15,7 +18,7 @@ describe('buildApproverPickerOptions', () => {
   it('AC1 — label은 항상 "이름 (이메일)" 병기다(이름만 렌더 금지)', () => {
     const { options } = buildApproverPickerOptions([
       member({ id: 'm-1', name: '송윤재', email: 'iamyoonjae@moonklabs.com' }),
-    ]);
+    ], undefined, U);
     expect(options).toEqual([{ value: 'm-1', label: '송윤재 (iamyoonjae@moonklabs.com)' }]);
   });
 
@@ -23,7 +26,7 @@ describe('buildApproverPickerOptions', () => {
     const { options, hasDuplicateNames } = buildApproverPickerOptions([
       member({ id: 'e75ca548', name: '송윤재', email: 'iamyoonjae@moonklabs.com' }),
       member({ id: '2fd14616', name: '송윤재', email: 'sellerking@moonklabs.com' }),
-    ]);
+    ], undefined, U);
     expect(hasDuplicateNames).toBe(true);
     expect(options).toEqual([
       { value: 'e75ca548', label: '송윤재 (iamyoonjae@moonklabs.com)' },
@@ -35,29 +38,30 @@ describe('buildApproverPickerOptions', () => {
     const { hasDuplicateNames } = buildApproverPickerOptions([
       member({ id: 'm-1', name: 'Alice' }),
       member({ id: 'm-2', name: 'Bob' }),
-    ]);
+    ], undefined, U);
     expect(hasDuplicateNames).toBe(false);
   });
 
-  it('이름 없으면 이메일만 label(지어내지 않음)', () => {
+  it('⭐이름 없으면 «이름 없는 구성원 (이메일)» — 이메일을 이름 자리에 올리지 않는다(story #4286)', () => {
     const { options } = buildApproverPickerOptions([
       member({ id: 'm-1', name: null, email: 'noname@test.com' }),
-    ]);
-    expect(options).toEqual([{ value: 'm-1', label: 'noname@test.com' }]);
+    ], undefined, U);
+    expect(options).toEqual([{ value: 'm-1', label: '이름 없는 구성원 (noname@test.com)' }]);
   });
 
-  it('이름·이메일 둘 다 없으면 user_id 앞 8자로 후퇴(최후 fallback)', () => {
+  it('⭐이름·이메일 둘 다 없으면 «이름 없는 구성원»만 — user_id · id 조각 0(story #4286)', () => {
     const { options } = buildApproverPickerOptions([
       member({ id: 'm-1', name: null, email: null, user_id: 'abcdef1234567890' }),
-    ]);
-    expect(options).toEqual([{ value: 'm-1', label: 'abcdef12' }]);
+    ], undefined, U);
+    expect(options).toEqual([{ value: 'm-1', label: '이름 없는 구성원' }]);
+    expect(options[0]!.label).not.toContain('abcdef');
   });
 
   it('role=member는 후보에서 제외된다(owner/admin만, 기존 규율 무변경)', () => {
     const { options } = buildApproverPickerOptions([
       member({ id: 'm-owner', role: 'owner' }),
       member({ id: 'm-member', role: 'member' }),
-    ]);
+    ], undefined, U);
     expect(options.map((o) => o.value)).toEqual(['m-owner']);
   });
 
@@ -65,6 +69,7 @@ describe('buildApproverPickerOptions', () => {
     const { options } = buildApproverPickerOptions(
       [member({ id: 'm-1' }), member({ id: 'm-2' })],
       'm-1',
+      U,
     );
     expect(options.map((o) => o.value)).toEqual(['m-2']);
   });
@@ -75,6 +80,8 @@ describe('buildApproverPickerOptions', () => {
         member({ id: 'm-1', name: '송윤재', role: 'owner' }),
         member({ id: 'm-2', name: '송윤재', role: 'member' }), // role=member라 후보 제외 → 동명 카운트 무관
       ],
+      undefined,
+      U,
     );
     expect(hasDuplicateNames).toBe(false);
   });

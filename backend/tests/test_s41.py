@@ -35,6 +35,20 @@ def _mock_resolve_member_db_verified(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _mock_assert_agent_owner(monkeypatch):
+    """story #4000(보안 감사) — 5개 라우트가 이제 assert_agent_owner(TeamMember VIEW 실조회)를
+    부른다. 이 파일은 순수 AsyncMock 세션(ownership과 무관한 CRUD 계약)이 대상이라 bare
+    AsyncMock()의 자식 속성이 재귀적으로 전부 AsyncMock이 되는 특성상 `scalar_one_or_none()`
+    (원래 sync)이 미await 코루틴을 반환해 AttributeError가 난다 — resolve_member_db_verified와
+    동형으로 이 가드 자체를 통과 처리(가드 자체 검증은 test_4000_agent_owner_guard_realdb.py 몫)."""
+    from unittest.mock import AsyncMock as _AsyncMock
+    monkeypatch.setattr(
+        "app.routers.agent_deployments.assert_agent_owner",
+        _AsyncMock(return_value=MagicMock()),
+    )
+
+
 async def _client():
     from app.main import app
     ctx = MagicMock()

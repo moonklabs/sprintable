@@ -77,7 +77,7 @@ async def _list_release_notes(session: AsyncSession, locale: str = "ko") -> list
         await session.execute(
             select(ReleaseNote)
             .where(ReleaseNote.is_published.is_(True))
-            .order_by(ReleaseNote.published_at.desc())
+            .order_by(ReleaseNote.published_at.desc(), ReleaseNote.id.desc())
         )
     ).scalars().all()
     return [_to_response(r, locale) for r in rows]

@@ -1,11 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
+import { FileText, MessageSquare, Calendar, BookOpen, ClipboardCheck, Frame } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
+import { pickEunNeunJosa } from '@/lib/korean-particle';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { stageRoleLabel } from '@/lib/stage-role';
+import { gateApproverLabel } from '@/lib/gate-approver-label';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 
 interface BacklinkMember { id: string; name: string; type: string }
 
@@ -14,8 +19,10 @@ interface BacklinkMember { id: string; name: string; type: string }
 export interface BacklinkItem {
   id: string;
   // story #2267(C-9): meeting·story도 source가 될 수 있다(backend/app/services/backlinks.py
-  // 동반 확장) — doc·chat_message 둘뿐이던 것에서 넓어짐.
-  source_type: 'chat_message' | 'doc' | 'meeting' | 'story';
+  // 동반 확장) — doc·chat_message 둘뿐이던 것에서 넓어짐. story #4141: evidence·artifact도
+  // source가 된다(entity_references 온보딩 — 이 전엔 이 체계가 evidence/artifact를 아예
+  // 못 셌다).
+  source_type: 'chat_message' | 'doc' | 'meeting' | 'story' | 'evidence' | 'artifact';
   source_id: string;
   created_by: BacklinkMember | null;
   created_at: string;
@@ -26,9 +33,28 @@ export interface BacklinkItem {
   relation: 'none' | 'created_from';
   still_exists: boolean;
   doc: { id: string; title: string } | null;
-  message: { id: string; conversation_id: string; content_snippet: string; sender: BacklinkMember | null } | null;
+  message: {
+    id: string; conversation_id: string; content_snippet: string; sender: BacklinkMember | null;
+    /** story #4091(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §c) — 이 메시지가 이벤트 발행
+     * 메시지(story #2637 AC 0-a)면 content_snippet 원문(agent 채널 전용 raw stage/approver
+     * — events.py `_render_event_message_content` docstring 참조) 대신 이 구조화 필드로
+     * recipe-stage-label.ts/gate-approver-label.ts(#4464) SSOT 재구성 렌더를 쓴다.
+     * role/gate_type/approver/name은 BE가 정의를 못 찾으면(삭제 등) 지어내지 않고 null. */
+    event: {
+      definition_key: string; name: string | null; stage: string;
+      role: string | null; gate_type: string | null; approver: string | null;
+    } | null;
+  } | null;
   meeting: { id: string; title: string } | null;
   story: { id: string; title: string } | null;
+  // story #4141 — evidence는 title이 없어(자유문자열 ref로 대체) BE가 title 자리에 ref를
+  // 싣는다(backend/app/services/backlinks.py::_SIMPLE_SOURCE_TYPE_SPECS의 evidence
+  // title_col=Evidence.ref 주석 참조). BE 응답은 이 두 키를 항상 싣지만(response_key
+  // 초기화 루프가 5종 전부 None으로 깐다), 옵셔널로 선언해 이 필드 신설 前에 쓰인 기존
+  // 픽스처(story-origin-section.test.tsx 등)를 건드리지 않는다 — 소비부는 항상 `?.`로
+  // 읽으므로 undefined/null 구분이 무해하다.
+  evidence?: { id: string; title: string } | null;
+  artifact?: { id: string; title: string } | null;
 }
 
 const SOURCE_TYPE_ICON = {
@@ -36,14 +62,38 @@ const SOURCE_TYPE_ICON = {
   chat_message: MessageSquare,
   meeting: Calendar,
   story: BookOpen,
+  evidence: ClipboardCheck,
+  artifact: Frame,
 } as const satisfies Record<BacklinkItem['source_type'], unknown>;
 
-function backlinkLabel(item: BacklinkItem): string | undefined {
+/** story #4091(§c) — 이벤트 발행 메시지의 구조화 필드를 recipe-stage-label.ts/stage-role.ts/
+ * gate-approver-label.ts(#4464) SSOT로 재구성한다. name이 없으면(정의 삭제 등) definition_key
+ * 원문으로 물러난다(raw이긴 하지만 machine key가 사람 낱말보다 나은 유일한 폴백 — 지어내지
+ * 않는다는 원칙 그대로). gate_type이 있을 때만(그 stage에 실제로 게이트가 걸릴 때만) 승인자
+ * 세그먼트를 덧붙인다 — #4076이 처방한 _render_event_message_content의 "게이트 있을 때만
+ * approver를 말한다" 관례와 동형. */
+function eventBacklinkLabel(event: NonNullable<BacklinkItem['message']>['event'], tOrg: (key: string) => string): string {
+  const name = event!.name ?? event!.definition_key;
+  const stage = recipeStageLabel(event!.stage, tOrg);
+  const role = event!.role ? ` (${stageRoleLabel(event!.role, tOrg)})` : '';
+  const approver = event!.gate_type ? ` · ${gateApproverLabel(tOrg, event!.approver)}` : '';
+  return `${name} · ${stage}${role}${approver}`;
+}
+
+function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): string | undefined {
   switch (item.source_type) {
     case 'doc': return item.doc?.title;
-    case 'chat_message': return item.message?.content_snippet;
+    // story #3949 — content_snippet은 메시지 원문 조각이라 마크다운 링크/entity 참조
+    // 토큰이 그대로 실릴 수 있다(본문 칩 렌더러를 거치지 않는 자리라 평문화 필요) —
+    // #4091의 event 구조화 렌더 분기는 그대로 두고, 그 분기가 아닐 때(raw
+    // content_snippet 폴백)만 평문화를 적용한다.
+    case 'chat_message':
+      if (item.message?.event) return eventBacklinkLabel(item.message.event, tOrg);
+      return item.message?.content_snippet != null ? toPlainPreview(item.message.content_snippet) : undefined;
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
+    case 'evidence': return item.evidence?.title;
+    case 'artifact': return item.artifact?.title;
   }
 }
 
@@ -57,10 +107,26 @@ interface BacklinksMeta {
   collection_scope?: CollectionScope;
 }
 
-/** excludes 코드 → i18n 키. BE가 사실만 주고 문안은 FE 몫(collection_scope 주석 그대로). */
+/** excludes 코드 → i18n 키. BE가 사실만 주고 문안은 FE 몫(collection_scope 주석 그대로).
+ * story #4141 — evidence_free_text_reference는 BE가 더는 안 보낸다(evidence가 이제
+ * 정식 source_type이라 이 exclude 사유 자체가 소멸 — backlinks.py::list_entity_backlinks
+ * 응답 참조). 소비처 0인 키를 죽은 채 남기지 않는다(i18n 키=소비처 1:1 규율). */
 const EXCLUDE_LABEL_KEYS: Record<string, string> = {
   pr_sid_text_convention: 'backlinksExcludePrSid',
-  evidence_free_text_reference: 'backlinksExcludeEvidenceFreeText',
+};
+
+// story #4096(리허설 1호 실측, 2026-09-21) — collection_scope.source_types 코드(BE
+// app/services/backlinks.py::BACKLINKS_ALLOWED_SOURCE_TYPES, 4종 고정)가 EXCLUDE_LABEL_KEYS
+// 와 달리 사람 낱말 매핑 없이 원문 그대로(«source=chat_message» 등) 화면에 샜다 — 같은
+// 패턴(코드→i18n 키 조회 테이블)으로 처방. 매핑에 없는 코드(향후 BE가 늘릴 경우)는 excludes와
+// 동일 원칙으로 원문 코드 그대로(번역 키 오조회 대신 "정상 경로").
+const SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
+  chat_message: 'backlinksSourceChatMessage',
+  doc: 'backlinksSourceDoc',
+  meeting: 'backlinksSourceMeeting',
+  story: 'backlinksSourceStory',
+  evidence: 'backlinksSourceEvidence',
+  artifact: 'backlinksSourceArtifact',
 };
 
 /** BacklinksEntityType → BE 라우트 세그먼트. 불규칙복수(story→stories)라 순수 접미사 파생이
@@ -123,6 +189,9 @@ interface LoadedResult {
 
 export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinksSectionProps) {
   const t = useTranslations('board');
+  // story #4091(§c) — recipe-stage-label.ts/stage-role.ts/gate-approver-label.ts SSOT가
+  // 전부 organization 네임스페이스에 산다(recipe-detail-view.tsx 등 기존 소비처와 동일).
+  const tOrg = useTranslations('organization');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   // story-detail-panel처럼 entityId만 바뀌고 이 컴포넌트가 리마운트 안 되는 호출부가 있을 수
@@ -157,19 +226,31 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
       {mentionItems.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           {scope
-            ? t('backlinksEmptyScoped', {
-                sources: scope.source_types.join('·'),
-                // 매핑에 없는 코드(향후 BE가 excludes를 늘릴 경우)는 원문 코드 그대로 — 번역
-                // 키 오조회 대신 "정상 경로"로 보여준다(#2263 ㉢와 같은 원칙).
-                excludes: scope.excludes.map((k) => (EXCLUDE_LABEL_KEYS[k] ? t(EXCLUDE_LABEL_KEYS[k]!) : k)).join('·'),
-              })
+            ? (() => {
+                // story #4096 — excludes 목록(마지막 항목 기준)에 맞는 「은/는」을 렌더
+                // 시점에 결정적으로 고른다(korean-particle.ts, more/page.tsx::moreTabHint와
+                // 동일 패턴) — 조사를 메시지 문자열에 고정하지 않는다.
+                const excludesText = scope.excludes
+                  .map((k) => (EXCLUDE_LABEL_KEYS[k] ? t(EXCLUDE_LABEL_KEYS[k]!) : k))
+                  .join('·');
+                return t('backlinksEmptyScoped', {
+                  // 매핑에 없는 코드(향후 BE가 source_types를 늘릴 경우)는 원문 코드
+                  // 그대로 — 번역 키 오조회 대신 "정상 경로"로 보여준다(#2263 ㉢와 같은
+                  // 원칙, excludes와 동형).
+                  sources: scope.source_types
+                    .map((k) => (SOURCE_TYPE_LABEL_KEYS[k] ? t(SOURCE_TYPE_LABEL_KEYS[k]!) : k))
+                    .join('·'),
+                  excludes: excludesText,
+                  particle: pickEunNeunJosa(excludesText),
+                });
+              })()
             : t('backlinksEmptyFallback')}
         </p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {mentionItems.map((item) => {
             const Icon = SOURCE_TYPE_ICON[item.source_type];
-            const label = backlinkLabel(item);
+            const label = backlinkLabel(item, tOrg);
             const creatorName = item.created_by?.name;
             return (
               <li

@@ -1,0 +1,1 @@
+{"file": "tests/test_4195_pause_resume_gaps_realdb.py", "sec": 6.6, "source": "story-4195 — 신규 파일 실측(로컬 pg16, pytest 직접 1회 실행, 6건 wall time 약 6.6s — test_3953 등재 선례와 동일 방법론)"}

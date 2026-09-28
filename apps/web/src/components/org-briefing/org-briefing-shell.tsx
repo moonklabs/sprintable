@@ -9,9 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { fetchWithAuth } from '@/lib/db/client';
-import { EMPTY_TODAY_SNAPSHOT, parseToday, type TodaySnapshot } from './derive-today';
+import { EMPTY_TODAY_SNAPSHOT, useTodaySnapshot } from './use-today-snapshot';
 import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定 2026-09-13) — 옛 조직 브리핑(NowFace·
 // LoopFace·WorkforceFace, 각자 다른 BFF 4종 조합)을 시안 v3(오늘 1caf61fe)로 흡수한다.
@@ -24,28 +24,8 @@ import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-
 // 파라미터 자체가 없다) 그 조건은 이제 거짓이 된다(项目 없어도 내용은 뜬다). `next`(#2212
 // 리다이렉트 복귀 안내)만 남긴다.
 
-function useTodaySnapshot() {
-  const [data, setData] = useState<TodaySnapshot | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [reloadNonce, setReloadNonce] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    // 재시도(reloadNonce) 때마다 이전 에러 배너를 먼저 걷어야 새 fetch 결과가 도착할
-    // 때까지 헌 상태가 안 남는다(channels/page.tsx의 load() 관례와 동형).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoadError(false);
-    fetchWithAuth('/api/today')
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((json) => { if (!cancelled) setData(parseToday(json)); })
-      .catch(() => { if (!cancelled) setLoadError(true); });
-    return () => { cancelled = true; };
-  }, [reloadNonce]);
-
-  return { data, loadError, retry: () => setReloadNonce((n) => n + 1) };
-}
-
 function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('orgBriefing');
   const router = useRouter();
   const [value, setValue] = useState('');
@@ -64,7 +44,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
     if (!trimmed) return;
     // story #3831 PO 確定(c)(2026-09-13 14:04Z) — 수신자 발명 0. 「대화」의 기존 두 경로
     // (최근 대화 프리필 / 0건이면 새 대화 모달, chat-list-view.tsx 참고)로 위임만 한다.
-    router.push(`/chats?compose=${encodeURIComponent(trimmed)}`);
+    router.push(flatHref(`/chats?compose=${encodeURIComponent(trimmed)}`));
   };
 
   return (
@@ -112,7 +92,10 @@ export function OrgBriefingShell() {
   const dateLabel = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(today);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 lg:p-6">
+    // story #4277(민 기기 #1) — 셸 본문 열(flex-col) 안에서 mx-auto(자동 여백)가 stretch를 꺼 이 뿌리가 «내용 폭»으로 줄었다 → 긴 제목(한 줄
+    // 말줄임 · nowrap)의 폭이 그대로 뿌리 폭(최대 max-w-4xl = 896px)이 돼 402폭에서 가로로 밀어야 «승인하고 서명» · «보내기»가 보였다.
+    // w-full로 열 폭을 채우고(말줄임이 제 폭 안에서 동작) mx-auto는 넓은 화면 가운데 정렬만 맡는다.
+    <div className="mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6">
       {nextTarget ? (
         <Alert role="status">
           <AlertDescription>{t('projectRequiredBannerNext')}</AlertDescription>

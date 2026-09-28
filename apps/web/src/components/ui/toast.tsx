@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 
 export interface ToastAction {
@@ -8,13 +8,20 @@ export interface ToastAction {
   onClick: () => void;
 }
 
+/** story #4345 — 토스트가 닫힌 까닭. 늦춘 쓰기(첨부 삭제 등)는 «되돌리기가 사라지는 순간»에 보낸다 — timeout · dismiss(✕) · evicted(새 토스트에 밀려남)면 보내고, action(되돌리기)이면 안 보낸다. */
+export type ToastCloseReason = 'timeout' | 'dismiss' | 'action' | 'evicted';
+
 export interface ToastItem {
   id: string;
   title: string;
   body?: string;
+  /** 둘째 줄을 한 줄 말줄임으로(파일 이름 등). 기본은 어디서나 끊어 감는다. */
+  bodySingleLine?: boolean;
   type?: 'info' | 'warning' | 'success' | 'error';
   isHighlight?: boolean;
   action?: ToastAction;
+  /** 토스트마다 딱 한 번 — 닫힌 까닭과 함께. 호출부가 직접 `dismissToast`로 닫으면 부르지 않는다(그 호출부가 이미 안다). */
+  onClose?: (reason: ToastCloseReason) => void;
 }
 
 interface ToastProps {
@@ -24,11 +31,24 @@ interface ToastProps {
 
 function Toast({ item, onDismiss }: ToastProps) {
   const t = useTranslations('common');
+  // story #4345(유나 규격) — 포인터나 초점이 토스트 안에 있으면 안 닫힌다(읽고 «되돌리기»를 누르는 중에 사라지지 않게).
+  // 떠나면 시간을 처음부터 다시 잰다.
+  const [pointerInside, setPointerInside] = useState(false);
+  const [focusInside, setFocusInside] = useState(false);
+  const held = pointerInside || focusInside;
+  const closedRef = useRef(false);
+  const close = useCallback((reason: ToastCloseReason) => {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    item.onClose?.(reason);
+    onDismiss(item.id);
+  }, [item, onDismiss]);
   useEffect(() => {
+    if (held) return;
     // action(예: 되돌리기)이 있으면 사용자가 읽고 누를 시간을 더 준다(5s→8s).
-    const timer = setTimeout(() => onDismiss(item.id), item.action ? 8000 : 5000);
+    const timer = setTimeout(() => close('timeout'), item.action ? 8000 : 5000);
     return () => clearTimeout(timer);
-  }, [item.id, item.action, onDismiss]);
+  }, [item.id, item.action, held, close]);
 
   const borderColor = item.isHighlight
     ? 'border-l-4 border-l-brand'
@@ -60,6 +80,10 @@ function Toast({ item, onDismiss }: ToastProps) {
       // story #2969 §2 PR-4(doc proofline-system-layer-2969) — shadow-lg→--elev-overlay·
       // 나머지 3면 hairline을 proof-line-strong으로(좌측은 type별 색이 계속 덮어씀).
       className={`animate-slide-in rounded-lg border border-proof-line-strong bg-popover p-4 shadow-[var(--elev-overlay)] ${borderColor}`}
+      onPointerEnter={() => setPointerInside(true)}
+      onPointerLeave={() => setPointerInside(false)}
+      onFocus={() => setFocusInside(true)}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusInside(false); }}
     >
       <div className="flex items-start justify-between">
         {/* 유나 지적(error-display 폴리시) — 공백 없는 초장문(토큰·URL 등)이 토스트 폭을
@@ -69,21 +93,21 @@ function Toast({ item, onDismiss }: ToastProps) {
         <div className="min-w-0">
           <p className="text-sm font-semibold text-popover-foreground [overflow-wrap:anywhere]">{item.title}</p>
           {item.body && (
-            <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{item.body}</p>
+            <p className={`mt-1 text-xs text-muted-foreground ${item.bodySingleLine ? 'truncate' : '[overflow-wrap:anywhere]'}`}>{item.body}</p>
           )}
         </div>
         <div className="ml-3 flex shrink-0 items-center gap-3">
           {item.action && (
             <button
               type="button"
-              onClick={() => { item.action?.onClick(); onDismiss(item.id); }}
+              onClick={() => { item.action?.onClick(); close('action'); }}
               className="text-xs font-semibold text-primary hover:underline"
             >
               {item.action.label}
             </button>
           )}
           <button
-            onClick={() => onDismiss(item.id)}
+            onClick={() => close('dismiss')}
             aria-label={t('close')}
             className="text-muted-foreground hover:text-foreground"
           >
@@ -101,6 +125,13 @@ interface ToastContextValue {
   dismissToast: (id: string) => void;
 }
 
+/** 다섯 장까지만 쌓는다 — 밀려나는 오래된 토스트는 onClose('evicted')를 받는다(늦춘 쓰기가 되돌리기 없이 영영 대기하지 않게 · story #4345). */
+function pushToast(prev: ToastItem[], item: ToastItem): ToastItem[] {
+  const evicted = prev.slice(0, Math.max(0, prev.length - 4));
+  if (evicted.length > 0) queueMicrotask(() => evicted.forEach((e) => e.onClose?.('evicted')));
+  return [...prev.slice(-4), item];
+}
+
 // story #3759 — useToast()는 예전엔 호출부마다 독립된 useState였다(31곳 호출부 = 31개
 // 서로 안 보이는 토스트 목록). 셸(dashboard-shell.tsx)이 딱 한 번 <ToastProvider>로 감싸고,
 // 그 안의 모든 useToast() 호출이 이 하나의 Context를 공유 — addToast 하나면 어디서
@@ -113,7 +144,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const addToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    setToasts((prev) => [...prev.slice(-4), { ...toast, id }]);
+    setToasts((prev) => pushToast(prev, { ...toast, id }));
   }, []);
 
   const dismissToast = useCallback((id: string) => {
@@ -137,7 +168,7 @@ export function useToast(): ToastContextValue {
   const [localToasts, setLocalToasts] = useState<ToastItem[]>([]);
   const localAddToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    setLocalToasts((prev) => [...prev.slice(-4), { ...toast, id }]);
+    setLocalToasts((prev) => pushToast(prev, { ...toast, id }));
   }, []);
   const localDismissToast = useCallback((id: string) => {
     setLocalToasts((prev) => prev.filter((t) => t.id !== id));
@@ -205,7 +236,9 @@ export function ToastContainer({
   return (
     <div className="pointer-events-auto flex min-h-0 flex-col-reverse gap-2">
       <div className="shrink-0">
-        <Toast item={newest} onDismiss={onDismiss} />
+        {/* story #4345 — key로 토스트마다 제 인스턴스를(닫힘 · 붙잡기 상태가 다음 토스트로 새지 않게 — key가 없으면 새 토스트가 이 자리의
+            옛 인스턴스를 물려받아 «이미 닫힘»이 남아 영영 안 닫혔다). */}
+        <Toast key={newest.id} item={newest} onDismiss={onDismiss} />
       </div>
       {older.length > 0 && (
         <div className="flex min-h-0 flex-col-reverse gap-2 overflow-hidden">

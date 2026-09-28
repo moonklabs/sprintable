@@ -64,5 +64,20 @@ export function useTreeExpanded(projectId: string | undefined) {
     [key, collapsedIds],
   );
 
-  return { isExpanded, toggleExpanded, expandFolder };
+  // story #4348 — 여러 폴더를 한 번에 펼침(«⋮» 폴더로 이동: 목표 폴더 + 조상). expandFolder를 잇달아 부르면 매번 같은 옛 스냅숏에서 시작해
+  // 마지막 하나만 남는다 → 한 번에 지우고 한 번 쓴다.
+  const expandFolders = useCallback(
+    (ids: string[]) => {
+      if (!key) return;
+      const current = new Set<string>(collapsedIds);
+      let changed = false;
+      for (const id of ids) changed = current.delete(id) || changed;
+      if (!changed) return;
+      writeCollapsed(key, current);
+      listeners.forEach((l) => l());
+    },
+    [key, collapsedIds],
+  );
+
+  return { isExpanded, toggleExpanded, expandFolder, expandFolders };
 }

@@ -2,10 +2,13 @@ import uuid
 
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.dependencies.ownership import assert_agent_owner
+from app.models.agent_deployment import AgentDeployment
 from app.schemas.agent_deployment import (
     AgentDeploymentResponse,
     CreateDeploymentRequest,
@@ -41,6 +44,22 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID, uuid.UUID]:
     return uuid.UUID(str(org_id_str)), uuid.UUID(str(project_id_str))
 
 
+async def _get_deployment_agent_id(
+    session: AsyncSession, deployment_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """story #4000(보안 감사) — patch/delete/complete_verification은 deployment_id만 받아
+    소유권 검사 대상(agent_id)을 모른다 — 컬럼 하나만 가볍게 조회."""
+    r = await session.execute(
+        select(AgentDeployment.agent_id).where(
+            AgentDeployment.id == deployment_id,
+            AgentDeployment.org_id == org_id,
+            AgentDeployment.project_id == project_id,
+            AgentDeployment.deleted_at.is_(None),
+        )
+    )
+    return r.scalar_one_or_none()
+
+
 @router.get("")
 async def list_deployment_cards(
     auth: AuthContext = Depends(get_current_user),
@@ -62,6 +81,9 @@ async def create_deployment(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #4000(보안 감사) — org/project 스코프만 보고 agent 소유권 검사가 없어, 남의
+    # agent에 배포(persona·runtime·model 지정 포함)를 만들 수 있었다.
+    await assert_agent_owner(body.agent_id, svc.session, org_id, uuid.UUID(auth.user_id))
     try:
         # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
         # AgentDeployment.created_by로 영속된다(휴먼 JWT의 auth.user_id는 users.id,
@@ -94,6 +116,9 @@ async def run_preflight(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #4000(보안 감사) — create_deployment와 같은 축(위 참고). 미리보기라도 남의
+    # agent의 배포 설정/라우팅 프리뷰를 볼 이유가 없다.
+    await assert_agent_owner(body.agent_id, svc.session, org_id, uuid.UUID(auth.user_id))
     # story #3370 회귀 클래스 — create_deployment와 같은 actor_id 축(위 주석 참고).
     resolved = await resolve_member_db_verified(auth, org_id, svc.session)
     preflight = await svc.run_deployment_preflight(
@@ -138,6 +163,12 @@ async def patch_deployment(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #4000(보안 감사) — PATCH는 org/project 스코프만 보고 소유권 검사가 없어, 남의
+    # agent 배포 상태(live 전이·실패 처리)를 바꿀 수 있었다.
+    agent_id = await _get_deployment_agent_id(svc.session, id, org_id, project_id)
+    if agent_id is None:
+        return _err("DEPLOYMENT_NOT_FOUND", "Deployment not found in current project", 404)
+    await assert_agent_owner(agent_id, svc.session, org_id, uuid.UUID(auth.user_id))
     try:
         # story #3370 회귀 클래스 — actor_id는 AgentAuditLog.payload·AgentDeployment
         # 감사기록에 "누가 이 전이를 했는지"로 실린다(create_deployment와 동형 축).
@@ -164,6 +195,11 @@ async def delete_deployment(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #4000(보안 감사) — patch_deployment와 동일 축(위 참고).
+    agent_id = await _get_deployment_agent_id(svc.session, id, org_id, project_id)
+    if agent_id is None:
+        return _err("DEPLOYMENT_NOT_FOUND", "Deployment not found in current project", 404)
+    await assert_agent_owner(agent_id, svc.session, org_id, uuid.UUID(auth.user_id))
     try:
         # story #3370 회귀 클래스 — actor_id 축(위 patch_deployment와 동형).
         resolved = await resolve_member_db_verified(auth, org_id, svc.session)
@@ -187,6 +223,11 @@ async def complete_verification(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #4000(보안 감사) — patch_deployment와 동일 축(위 참고).
+    agent_id = await _get_deployment_agent_id(svc.session, id, org_id, project_id)
+    if agent_id is None:
+        return _err("DEPLOYMENT_NOT_FOUND", "Deployment not found in current project", 404)
+    await assert_agent_owner(agent_id, svc.session, org_id, uuid.UUID(auth.user_id))
     try:
         # story #3370 회귀 클래스 — actor_id는 config.verification.completed_by로
         # 영속된다("완료자" 표시 필드, create_deployment와 동형 축).

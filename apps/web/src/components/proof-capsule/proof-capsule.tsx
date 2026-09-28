@@ -11,13 +11,18 @@ import { TrustSeal, type TrustSealClaimedProps, type TrustSealVerifiedProps } fr
 export type { ProofState } from './proofline';
 
 export interface ProofCapsuleHuman {
-  name: string;
+  // story #4284 — 신원 이름은 nullable(표시 이름 없는 휴먼). 이름 자리(머리글자 · 아바타)엔 name 그대로(null이면 사람 아이콘), 사람이 읽는 글자는
+  // label(호출부가 memberDisplayLabel로 «이름 없는 구성원») — shared/avatar.tsx의 name/label 계약과 같다.
+  name: string | null;
+  label?: string;
   role: string;
 }
 
+// [SID:4286 · 까디르 4646 codex] 머리글자 `initial`은 선언만 있고 렌더 0(Avatar가 name으로 그림) — 호출부가 initials(null)로 «?»를 넘기던 죽은 prop이라 걷었다.
 export interface ProofCapsuleAgent {
-  name: string;
-  initial: string;
+  // story #4284 — name/label 계약(shared/avatar.tsx): 머리글자 · 아바타는 name(null이면 아이콘), 읽는 글자는 label ?? name.
+  name: string | null;
+  label?: string;
 }
 
 export interface ProofCapsuleEvidence {
@@ -71,6 +76,10 @@ export interface ProofCapsuleProps {
    * 시각 스캐폴딩: 실 데이터(self_reported/human_verified)는 BE 계약 확정 후 배선, 지금은
    * 타입·렌더만 준비(호출부 없음 무방 — density="full"와 동일 선례). */
   trustSeal?: TrustSealClaimedProps | TrustSealVerifiedProps;
+  /** full 밀도 — claim 위 눈썹 글. 생략 = 기본 «에이전트 주장 · 완료했다고 말해요»(`claim.label`). `null` = 눈썹 없음.
+   * story #4336(PO 03:55Z) — 사람이 상신한 외부 발행 게이트처럼 «에이전트가 완료했다고 말함»이 아닌 자리에 늘 붙던 눈썹을 호출부가 끈다.
+   * 외부 발행 게이트는 «발행 승인 · 이대로 발행할지 결정해요»(`claim.publishApprovalLabel` · 유나 04:47Z)를 넘긴다. */
+  claimLabel?: string | null;
   density: ProofCapsuleDensity;
   /** card·full 밀도 — claim/evidence 아래 호출부 컨텐츠(예: Board card의 담당자 스택·배지,
    * /gates/[id] 상세의 org/project 컨텍스트·상태별 액션 분기·EntityBacklinksSection) 삽입
@@ -105,7 +114,7 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader,
+  proofState, stateLabel, claim, claimLabel, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
@@ -130,7 +139,7 @@ export function ProofCapsule({
   }
   return (
     <FullVariant
-      proofState={proofState} stateLabel={stateLabel} claim={claim} human={human} agent={agent}
+      proofState={proofState} stateLabel={stateLabel} claim={claim} claimLabel={claimLabel} human={human} agent={agent}
       now={now} evidence={evidence} gate={gate} trustSeal={trustSeal} className={className} footer={footer}
     />
   );
@@ -222,7 +231,7 @@ function GateRow({ gate, human }: { gate: ProofCapsuleGate; human: ProofCapsuleH
         {t('gate.label')}
       </div>
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] text-proof-ink-2">
-        <span>{t.rich('gate.owner', { name: human.name, b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}</span>
+        <span>{t.rich('gate.owner', { name: human.label ?? human.name ?? '', b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}</span>
         {gate.risk ? (
           <span className="font-mono text-[10.5px]">{t('gate.risk', { risk: t(`risk.${gate.risk}`) })}</span>
         ) : null}
@@ -256,7 +265,7 @@ function useEvidenceSweep(evidence: ProofCapsuleEvidence | undefined) {
 }
 
 function FullVariant({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, className, footer,
+  proofState, stateLabel, claim, claimLabel, human, agent, now, evidence, gate, trustSeal, className, footer,
 }: Omit<ProofCapsuleProps, 'density'>) {
   const t = useTranslations('proofCapsule');
   const sweep = useEvidenceSweep(evidence);
@@ -264,25 +273,28 @@ function FullVariant({
     <CutCornerShell state={proofState} className={className}>
       <div className="min-w-0 flex-1 px-4.5 py-4">
         <StateHeader state={proofState} label={stateLabel} />
-        <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
-          {t('claim.label')}
-        </div>
+        {claimLabel === null ? null : (
+          <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3" data-testid="proof-capsule-claim-label">
+            {claimLabel ?? t('claim.label')}
+          </div>
+        )}
         {/* story #3054(2984-S6 §3.4) — serif는 claim→Verified 전이의 최종 판정 헤드라인
             "포인트"에만(2974 규율: 본문/라벨/칩은 절대 금지) — proofState==='green'(검증됨)
             일 때만 font-serif(Source Serif 4, layout.tsx 기배선) 켠다. 다른 상태(blue/amber/
             red)는 무변경(sans 그대로). */}
-        <div className={cn('text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink', proofState === 'green' && 'font-serif')}>{claim}</div>
+        {/* 눈썹이 없으면(claimLabel=null) 눈썹이 맡던 위 간격(mt-3)을 claim이 대신 — 상태 줄과 붙지 않게. */}
+        <div className={cn('text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink', proofState === 'green' && 'font-serif', claimLabel === null && 'mt-3')}>{claim}</div>
         <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-proof-ink-3">
           {human ? (
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={human.name} actorType="human" size={19} />
-              {t.rich('gate.owner', { name: human.name, b: (chunks) => <>{chunks}</> })}
+              <Avatar name={human.name} label={human.label} actorType="human" size={19} />
+              {t.rich('gate.owner', { name: human.label ?? human.name ?? '', b: (chunks) => <>{chunks}</> })}
             </span>
           ) : null}
           {agent ? (
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={agent.name} actorType="agent" size={19} />
-              {t('claim.executor', { name: agent.name })}
+              <Avatar name={agent.name} label={agent.label} actorType="agent" size={19} />
+              {t('claim.executor', { name: agent.label ?? agent.name ?? '' })}
             </span>
           ) : null}
           {now ? <span className="text-proof-ink-2">{t.rich('claim.now', { now, b: (chunks) => <b>{chunks}</b> })}</span> : null}
@@ -391,8 +403,8 @@ function InlineRow({
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink" title={claim}>{claim}</span>
         <span className="inline-flex shrink-0 items-center gap-2">
           {duration ? <span className="shrink-0 text-[10.5px] font-medium text-proof-ink-3">{duration}</span> : null}
-          {human ? <Avatar name={human.name} actorType="human" size={22} /> : null}
-          {agent ? <Avatar name={agent.name} actorType="agent" size={22} /> : null}
+          {human ? <Avatar name={human.name} label={human.label} actorType="human" size={22} /> : null}
+          {agent ? <Avatar name={agent.name} label={agent.label} actorType="agent" size={22} /> : null}
           {gate ? (
             <a
               href={gate.href}
@@ -420,13 +432,16 @@ function AuditRow({ proofState, claim, now, human, agent, className }: Pick<Proo
   const dotTone: Record<ProofState, string> = {
     blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
   };
-  const actorName = agent?.name ?? human?.name;
+  // [SID:4286 · 까디르 873bcf080] #4284 name/label 계약 — 아바타는 name(null → 아이콘), 읽는 글자는 label ?? name.
+  // 예전엔 name만 읽어 활동 로그가 넘긴 label(«이름 없는 구성원»)을 버려 이름 없는 행위자가 빈칸이었다.
+  const actor = agent ?? human;
+  const actorLabel = actor ? (actor.label ?? actor.name) : null;
   return (
     <div className={cn('flex items-center gap-2 rounded-[6px] border border-proof-line bg-proof-panel px-3 py-2 text-[11px]', className)}>
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-medium text-proof-ink" title={claim}>{claim}</span>
-      {actorName ? <Avatar name={actorName} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
-      <span className="shrink-0 font-mono text-[9.5px] text-proof-ink-3">{[now, actorName].filter(Boolean).join(' ')}</span>
+      {actor ? <Avatar name={actor.name} label={actor.label} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
+      <span className="shrink-0 font-mono text-[9.5px] text-proof-ink-3">{[now, actorLabel].filter(Boolean).join(' ')}</span>
     </div>
   );
 }

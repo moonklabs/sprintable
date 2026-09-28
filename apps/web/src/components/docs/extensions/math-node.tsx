@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
+import { Fragment } from '@tiptap/pm/model';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 
 // ─── KaTeX Renderer ───────────────────────────────────────────────────────────
@@ -14,6 +15,9 @@ async function renderKatex(latex: string, displayMode: boolean, fallbackError: s
       displayMode,
       throwOnError: true,
       output: 'html',
+      // story #4338 — 문서 글쓴이 입력이라 링크 · 임의 HTML 명령(`\href` · `\url` · `\htmlClass` 등)을 믿지 않는다. 기본값이 false여도
+      // 기본값에 기대지 않고 적는다(라이브러리 기본이 바뀌어도 이 자리는 그대로).
+      trust: false,
     });
     return { html };
   } catch (err) {
@@ -145,12 +149,21 @@ export const MathBlockNode = Node.create({
   defining: true,
 
   parseHTML() {
-    return [{ tag: 'div[data-type="mathBlock"]' }];
+    // story #4339 — 수식은 노드의 글이 원본이다. 저장 HTML이 `data-latex`만 싣고 글이 비어 있으면(MCP · 렌더러 형식) 그 값을 글로 세운다 —
+    // 예전엔 편집기에서 빈 수식 · 저장하면 `data-latex=""`로 수식이 사라졌다.
+    return [{
+      tag: 'div[data-type="mathBlock"]',
+      getContent: (node, schema) => {
+        const el = node as HTMLElement;
+        const latex = (el.textContent ?? '').trim() ? el.textContent ?? '' : el.getAttribute('data-latex') ?? '';
+        return latex ? Fragment.from(schema.text(latex)) : Fragment.empty;
+      },
+    }];
   },
 
-  renderHTML({ HTMLAttributes }) {
-    const latex = (HTMLAttributes as Record<string, unknown>)['data-latex'] as string ?? '';
-    return ['div', mergeAttributes({ 'data-type': 'mathBlock', 'data-latex': latex }, HTMLAttributes), 0];
+  renderHTML({ node, HTMLAttributes }) {
+    // `data-latex` = 노드의 글(예전엔 없는 속성을 읽어 늘 ""). 렌더러는 이 값을 먼저 읽고 없으면 글로 되돌아간다.
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'mathBlock', 'data-latex': node.textContent }), 0];
   },
 
   addKeyboardShortcuts() {

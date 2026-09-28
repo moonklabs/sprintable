@@ -31,6 +31,18 @@ def _mock_resolve_member_db_verified(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _mock_assert_agent_owner(monkeypatch):
+    """story #4000(보안 감사) — 5개 분기(create/PUT items·single/PATCH disable_all·reorder/
+    delete)가 이제 assert_agent_owner(직접 또는 _assert_owns_all_agents 경유)를 부른다.
+    이 파일은 순수 AsyncMock 세션이 대상이라 test_s41/test_s42와 동형 이유로 통과 처리
+    (가드 자체 검증은 test_4000_agent_owner_guard_realdb.py 몫)."""
+    monkeypatch.setattr(
+        "app.routers.agent_routing_rules.assert_agent_owner",
+        AsyncMock(return_value=MagicMock()),
+    )
+
+
 async def _client():
     from app.main import app
     ctx = MagicMock()
@@ -128,7 +140,11 @@ async def test_replace_rules_200():
         # story f0c99070: bulk-replace 분기도 이제 요청시점 재해소를 거친다 — body에 project_id를
         # 실어보내(FE PR #2120과 동일 계약) explicit 경로로 단락, has_project_access만 mock.
         with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.replace", new_callable=AsyncMock) as mock_replace, \
+             patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.list", new_callable=AsyncMock, return_value=[]), \
              patch("app.services.project_auth.has_project_access", new_callable=AsyncMock, return_value=True):
+            # story #4000 — 이 분기는 이제 교체 대상 project의 기존 규칙들도 repo.list()로
+            # 조회해 소유권 union에 넣는다(_assert_owns_all_agents). 이 테스트는 그 판정
+            # 자체가 아니라 replace 호출 배선을 검증하므로 빈 목록으로 무해화.
             mock_replace.return_value = [_make_rule()]
             payload = {
                 "items": [{"agent_id": str(AGENT_ID), "name": "Test Rule"}],
@@ -153,10 +169,14 @@ async def test_update_rule_200():
         # resolve_required_project_id 자체를 직접 patch한다(그 함수 자신의 계약은
         # test_f0c99070_critical_project_scope_realdb.py가 실PG로 따로 검증한다).
         with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.update", new_callable=AsyncMock) as mock_update, \
+             patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.get", new_callable=AsyncMock, return_value=_make_rule()), \
              patch(
                  "app.routers.agent_routing_rules.resolve_required_project_id",
                  new_callable=AsyncMock, return_value=PROJECT_ID,
              ) as mock_resolve:
+            # story #4000 — 이 분기는 이제 update 前 repo.get()으로 대상 규칙의 agent_id를
+            # 먼저 찾는다(assert_agent_owner 대상 조회) — 이 테스트는 update 호출 배선을
+            # 검증하므로 존재하는 규칙으로 무해화.
             updated = _make_rule()
             updated.name = "Updated Rule"
             mock_update.return_value = updated
@@ -180,7 +200,10 @@ async def test_reorder_rules_200():
         # story f0c99070: reorder-items 분기도 이제 요청시점 재해소를 거친다 — body에 project_id를
         # 실어보내(FE PR #2120과 동일 계약) explicit 경로로 단락.
         with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.reorder", new_callable=AsyncMock) as mock_reorder, \
+             patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.list", new_callable=AsyncMock, return_value=[]), \
              patch("app.services.project_auth.has_project_access", new_callable=AsyncMock, return_value=True):
+            # story #4000 — reorder 대상 규칙들이 실제로 걸치는 agent도 repo.list()로 조회한다
+            # (_assert_owns_all_agents) — 이 테스트는 reorder 호출 배선을 검증하므로 무해화.
             mock_reorder.return_value = [_make_rule()]
             payload = {"items": [{"id": str(RULE_ID), "priority": 5}], "project_id": str(PROJECT_ID)}
             async with client as c:
@@ -215,7 +238,9 @@ async def test_disable_all_200():
 async def test_delete_rule_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.delete", new_callable=AsyncMock) as mock_del:
+        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.delete", new_callable=AsyncMock) as mock_del, \
+             patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.get", new_callable=AsyncMock, return_value=_make_rule()):
+            # story #4000 — delete도 이제 삭제 前 repo.get()으로 대상 agent_id를 먼저 찾는다.
             mock_del.return_value = True
             async with client as c:
                 resp = await c.delete(f"/api/v2/agent-routing-rules?id={RULE_ID}")
@@ -229,7 +254,10 @@ async def test_delete_rule_200():
 async def test_delete_rule_not_found_404():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.delete", new_callable=AsyncMock) as mock_del:
+        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.delete", new_callable=AsyncMock) as mock_del, \
+             patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.get", new_callable=AsyncMock, return_value=_make_rule()):
+            # story #4000 — repo.get()은 존재를 찾되(소유권 통과) delete() 자체가 레이스로
+            # 실패하는 케이스(이 테스트의 원래 의도)를 그대로 보존.
             mock_del.return_value = False
             async with client as c:
                 resp = await c.delete(f"/api/v2/agent-routing-rules?id={RULE_ID}")

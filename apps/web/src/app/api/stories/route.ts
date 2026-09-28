@@ -3,16 +3,17 @@ import { createStorySchema } from '@sprintable/shared';
 
 import { StoryService, type CreateStoryInput } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { apiSuccess, apiSuccessRawJson, apiError, ApiErrors } from '@/lib/api-response';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createStoryRepository } from '@/lib/storage/factory';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { markRoute, markRouteReturn, withRouteTiming } from '@/lib/server-timing';
 
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
@@ -37,9 +38,13 @@ export async function POST(request: Request) {
 // story ca37b2b0 — BE 배치 lookup(#2131) cap과 동일 상한. FE에서 먼저 잘라 보내 BE 422를 피한다.
 const IDS_BATCH_CAP = 200;
 
-export async function GET(request: Request) {
+// story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
+// AC2 꼬리 — 하위 구간 auth · service · serialize.
+export const GET = withRouteTiming('stories', async (request: Request) => {
   try {
-    const me = await getAuthContext(request);
+    // story #4346 — 목록 GET은 org/project 판단조차 BE에 맡긴다(rate-limit 칸만 읽음) → JWT claim으로 충분, `/me` 왕복 0.
+    const me = await getOrgProjectAuthContext(request);
+    markRoute('auth');
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
@@ -64,11 +69,13 @@ export async function GET(request: Request) {
     if (searchParams.get('unattached') === 'true' || searchParams.get('no_sprint') === 'true') {
       const _r = await proxyToFastapi(request, '/api/v2/stories');
       if (!_r.ok) return _r;
-      const data = await _r.json();
+      // [SID:4299 AC2 꼬리] 본문은 글자로만 받아 봉투에 그대로 끼운다(파싱 · 재직렬화 0 — apiSuccessRawJson).
+      const raw = await _r.text();
+      markRoute('service');
       const totalHeader = _r.headers.get('x-total-count');
       // story #3761 — `total` 은퇴, 정본 `totalCount`(goals/tasks 관례) — 헤더 없으면
       // 키 생략이 아니라 `totalCount: null`로 «모른다»를 명시한다.
-      return apiSuccess(data, { totalCount: totalHeader !== null ? Number(totalHeader) : null });
+      return markRouteReturn('serialize', apiSuccessRawJson(raw, { totalCount: totalHeader !== null ? Number(totalHeader) : null }));
     }
 
     const repo = await createStoryRepository();
@@ -81,7 +88,8 @@ export async function GET(request: Request) {
         ids,
         limit: ids.length,
       });
-      return apiSuccess(stories);
+      markRoute('service');
+      return markRouteReturn('serialize', apiSuccess(stories));
     }
 
     const pageInput = parseCursorPageInput({
@@ -97,6 +105,8 @@ export async function GET(request: Request) {
       project_id: searchParams.get('project_id') ?? undefined,
       q: searchParams.get('q') ?? undefined,
       unassigned: searchParams.get('unassigned') === 'true' ? true : undefined,
+      // story #4329 — BE가 priority · no_assignee(= unassigned)를 받게 되며 같은 클래스 재발 방지로 신설과 동시에 포함.
+      priority: searchParams.get('priority') ?? undefined,
       // story #2534(E-FLOW-V4 S4) — 가설/목표 둘 다 미매달림(unassigned와 다른 축).
       unattached: searchParams.get('unattached') === 'true' ? true : undefined,
       story_number: storyNumberParam ? Number(storyNumberParam) : undefined,
@@ -116,9 +126,10 @@ export async function GET(request: Request) {
       limit: pageInput.limit + 1,  // RC3: 오버페치 → buildCursorPageMeta hasMore 판단
       cursor: pageInput.cursor,
     });
+    markRoute('service');
     const { page, meta } = buildCursorPageMeta(stories, pageInput.limit, 'created_at');
-    return apiSuccess(page, meta);
+    return markRouteReturn('serialize', apiSuccess(page, meta));
   } catch (err: unknown) {
     return handleApiError(err);
   }
-}
+});

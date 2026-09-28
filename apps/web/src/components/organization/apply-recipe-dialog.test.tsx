@@ -8,18 +8,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { NextIntlClientProvider } from 'next-intl';
+import { NextIntlClientProvider, createTranslator } from 'next-intl';
 import { ApplyRecipeDialog } from './apply-recipe-dialog';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
+
+// story #4118 — 토스트 count 값이 실제로 문장에 interpolate됐는지 검증하려면 t가
+// row-action-aria-labels.test.ts 선례처럼 진짜 번역기여야 한다(다른 테스트들의
+// `t={(k) => k}` 항등 mock은 값을 문장에 못 박는다).
+type LooseTranslator = (key: string, vars?: Record<string, unknown>) => string;
+const realT = createTranslator({
+  locale: 'ko', messages: koMessages, namespace: 'organization',
+} as Parameters<typeof createTranslator>[0]) as unknown as LooseTranslator;
+
+// story #4106 — 채널/연산 leg(org 스코프 fetch)를 재현하려면 orgId가 필요한데
+// ApplyRecipeDialog는 useDashboardContext()에서 그 값을 직접 읽는다(props 아님).
+// organization/roles/page.test.tsx 선례와 동형 — useDashboardContext 자체를 mock.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
+let LOCALE: 'ko' | 'en' = 'ko';
 function wrap(node: React.ReactNode) {
   return (
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+    <NextIntlClientProvider locale={LOCALE} messages={LOCALE === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>
   );
@@ -29,6 +47,9 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  // 기존 테스트 전부는 orgId 없이도(채널/연산 leg가 즉시 'loaded'로 no-op) 통과하던
+  // 회귀 기준 — 기본값을 undefined로 유지, orgId가 필요한 신규 테스트만 개별 override.
+  useDashboardContextMock.mockReturnValue({ orgId: undefined });
 });
 
 afterEach(async () => {
@@ -50,6 +71,18 @@ const TARGET = {
   payload_schema: { properties: { stage: { enum: ['step_1'] } } },
   stage_metadata: { step_1: { role: 'Developer', action: 'do it' } },
   enabled: true,
+};
+
+// story #4106 — 채널·연산 대상 stage가 있는 real-shape 픽스처(위 TARGET은 무선언이라
+// hasChannelStage/hasGenerationStage 자체가 안 걸려 이 두 leg를 검증 못 한다).
+const TARGET_WITH_CHANNEL_AND_GENERATION = {
+  ...TARGET,
+  payload_schema: { properties: { stage: { enum: ['step_1', 'publish', 'compute'] } } },
+  stage_metadata: {
+    step_1: { role: 'Developer', action: 'do it' },
+    publish: { role: 'Publisher', capability: { kind: 'publish', target: 'channel_connection' as const } },
+    compute: { role: 'Compute', capability: { kind: 'generate', target: 'generation_connector' as const } },
+  },
 };
 
 function stubFetch(applyBody: unknown, capture: { body: unknown }) {
@@ -127,6 +160,181 @@ describe('ApplyRecipeDialog', () => {
     await flush();
 
     expect(capture.body).toEqual({ project_id: 'proj-1', role_mapping: { step_1: 'agent-1' } });
+  });
+
+  // story #4118(라이브 실사고 그라운딩, 2026-09-21) — 토스트 count가 서버 실 값(리터럴
+  // 1 고정 아님)을 반영하는지 진짜 번역기로 문장 자체를 고정한다.
+  it('까디르 4606 P1 — 승인이 stage 밖인 읽기 전용 stage에 예전 바인딩이 남아 있어도 제출 payload에 그 stage는 0', async () => {
+    const capture = { body: null as unknown };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) {
+        return { ok: true, json: async () => ({ bindings: { brief: 'agent-old', kickoff: 'agent-1' } }) };
+      }
+      if (url === '/api/events/definitions/def-1/apply') {
+        capture.body = init?.body ? JSON.parse(init.body as string) : null;
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 1, warnings: [] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    const target = {
+      ...TARGET,
+      payload_schema: { properties: { stage: { enum: ['brief', 'kickoff'] } } },
+      stage_metadata: {
+        brief: { role: 'PO', action: '브리프', approval: { surface: 'doc_approval' as const } },
+        kickoff: { role: 'PO', action: '기획' },
+      },
+      role_actor_kinds: { PO: 'either' as const },
+    };
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={target}
+          open
+          onOpenChange={() => {}}
+          t={((k: string) => k) as never}
+          tc={((k: string) => k) as never}
+          addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit');
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capture.body).toEqual({ project_id: 'proj-1', role_mapping: { kickoff: 'agent-1' } });
+  });
+
+  it('apply 성공 토스트 count가 실제 bindings_upserted(5)를 반영한다(리터럴 1 고정 아님)', async () => {
+    const capture = { body: null as unknown };
+    stubFetch({ ok: true, bindings_upserted: 5, warnings: [] }, capture);
+    const addToast = vi.fn();
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET}
+          open
+          onOpenChange={() => {}}
+          t={realT as never}
+          tc={((k: string) => k) as never}
+          addToast={addToast}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const selects = [...document.body.querySelectorAll('select')];
+    const roleSelect = selects[1] as HTMLSelectElement;
+    await act(async () => {
+      roleSelect.value = 'agent-1';
+      roleSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기');
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(addToast).toHaveBeenCalledWith({ type: 'success', title: '배정 5건 저장 완료' });
+  });
+
+  it('bindings_upserted=0이면(재제출 등 무변경) «배정 0건» 대신 무변경 문구로 분기한다', async () => {
+    const capture = { body: null as unknown };
+    stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, capture);
+    const addToast = vi.fn();
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET}
+          open
+          onOpenChange={() => {}}
+          t={realT as never}
+          tc={((k: string) => k) as never}
+          addToast={addToast}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const selects = [...document.body.querySelectorAll('select')];
+    const roleSelect = selects[1] as HTMLSelectElement;
+    await act(async () => {
+      roleSelect.value = 'agent-1';
+      roleSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기');
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(addToast).toHaveBeenCalledWith({ type: 'success', title: '이미 적용돼 있어요 — 새로 바뀐 배정이 없어요.' });
+  });
+
+  // story #3994(«거짓 경고» 클래스, PO 확定) — 「시스템 발행」에 워크플로 역할을
+  // 매핑하는 것 자체가 의미 없다(연결 대상이 아닌 내부 멤버) — select에서 제외.
+  it('⭐team-members에 「시스템 발행」이 섞여 와도 역할매핑 select 옵션엔 안 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'sp1', name: '시스템 발행', runtime_type: 'system-publisher' },
+              { id: 'agent-1', name: '디디군', runtime_type: 'claude-code' },
+            ],
+          }),
+        };
+      }
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog target={TARGET} open onOpenChange={() => {}} t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}} />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const roleSelect = [...document.body.querySelectorAll('select')][1] as HTMLSelectElement;
+    const optionLabels = [...roleSelect.querySelectorAll('option')].map((o) => o.textContent);
+    expect(optionLabels).not.toContain('시스템 발행');
+    expect(optionLabels).toContain('디디군');
   });
 
   // story #3519(§16-7 2부, PO 確定 2026-09-05) — memberRes/bindingsRes 둘 다 부수인데
@@ -312,5 +520,311 @@ describe('ApplyRecipeDialog', () => {
     await flush();
 
     expect(document.body.textContent).toContain('capability.connector_key 미해소 — org에 매칭되는 커넥터 여러 개');
+  });
+
+  // story #4106(페드루 PO 실측, PR #4478/#4479 리뷰 계기) — #3521 agentsLoadFailed와
+  // 동형 3값을 채널·연산 leg에도. t prop은 raw-key passthrough라 organization ns 키는
+  // 그 키 문자열 그대로 렌더 확認, 채널 실패 문구는 useTranslations('channelConnect')를
+  // 컴포넌트 내부에서 직접 호출하므로 wrap()의 실 ko 메시지로 대조한다.
+  it('채널 목록 fetch 실패 — «없어요» 대신 로드 실패 문구+재시도, 재시도 성공하면 옵션이 채워진다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    let shouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      if (url.includes('/channel-connections')) {
+        if (shouldFail) return { ok: false, status: 500, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: [{ id: 'conn-1', channel: 'instagram', account_label: '메인', account_id: 'a1', status: 'active' }] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect1 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect1.value = 'proj-1'; projectSelect1.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-load-error"]')).toBeTruthy();
+    expect(document.body.textContent).toContain(koMessages.channelConnect.channelLoadFailed);
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeNull();
+
+    shouldFail = false;
+    const retryBtn = document.body.querySelector('[data-testid="apply-recipe-channels-load-error"] button') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-load-error"]')).toBeNull();
+    const selects = [...document.body.querySelectorAll('select')];
+    expect(selects.some((s) => s.textContent?.includes('메인'))).toBe(true);
+  });
+
+  it('연산 커넥터 목록 fetch 실패 — «없어요» 대신 로드 실패 문구+재시도', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/channel-connections')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/generation-connectors')) return { ok: false, status: 500, json: async () => ({}) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect2 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect2.value = 'proj-1'; projectSelect2.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-load-error"]')).toBeTruthy();
+    expect(document.body.textContent).toContain('eventApplyGenerationConnectorsLoadError');
+    expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-empty"]')).toBeNull();
+  });
+
+  it('채널·연산 둘 다 성공+0건이면 각각 «없어요»만 뜨고 실패 문구는 안 뜬다(진짜 0건과 실패를 혼동 X)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/channel-connections')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect3 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect3.value = 'proj-1'; projectSelect3.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-empty"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-load-error"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-load-error"]')).toBeNull();
+  });
+
+  // story #4116(#4112 시안 §6) — 연산 커넥터 빈 상태 문장 끝에 /organization/
+  // generation-connectors로 가는 목적지 링크가 있다(#4479 비차단① 닫기).
+  it('연산 커넥터 빈 상태 문장에 /organization/generation-connectors 목적지 링크가 있다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/channel-connections')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect4 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect4.value = 'proj-1'; projectSelect4.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const emptyBlock = document.body.querySelector('[data-testid="apply-recipe-generation-connectors-empty"]')!;
+    const link = emptyBlock.querySelector('a')!;
+    expect(link).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/organization/generation-connectors');
+  });
+
+  it('로딩 中(fetch 미완)엔 두 leg 다 «없어요»·실패 문구 둘 다 안 뜬다(먼저 보이면 오독)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
+    let resolveChannels: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url.includes('/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      if (url.includes('/channel-connections')) {
+        return new Promise((resolve) => {
+          resolveChannels = () => resolve({ ok: true, json: async () => ({ data: [] }) });
+        });
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET_WITH_CHANNEL_AND_GENERATION} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect4 = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => { projectSelect4.value = 'proj-1'; projectSelect4.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-load-error"]')).toBeNull();
+
+    await act(async () => { resolveChannels?.(); });
+    await flush();
+    expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeTruthy();
+  });
+});
+
+// story #4202(까디르 QA) — 자리별 회귀 핀: 이벤트 적용 다이얼로그 제목의 프리셋 이름.
+describe('ApplyRecipeDialog — 제목의 프리셋 이름 로케일(story #4202)', () => {
+  it('en — 플랫폼 마케팅 프리셋이면 제목 name 값이 영어', async () => {
+    stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, { body: null as unknown });
+    const target = { ...TARGET, key: 'preset.marketing.social_text_post', name: 'SNS 텍스트 포스트' };
+    const t = ((k: string, v?: { name?: string }) => `${k}:${v?.name ?? ''}`) as never;
+    LOCALE = 'en';
+    try {
+      await act(async () => {
+        root.render(wrap(
+          <ApplyRecipeDialog target={target} open onOpenChange={() => {}} t={t} tc={((k: string) => k) as never} addToast={() => {}} />,
+        ));
+      });
+      await flush();
+      expect(document.body.textContent).toContain(`eventApplyDialogTitle:${enMessages.recipePreset.socialTextPostName}`);
+      expect(document.body.textContent).not.toContain('eventApplyDialogTitle:SNS 텍스트 포스트');
+    } finally {
+      LOCALE = 'ko';
+    }
+  });
+});
+
+// story #4203 — 이벤트 적용 다이얼로그 제목: 워크플로우 프리셋도 로케일 문안(ko 화면에 시드 «Kanban Flow» 0).
+describe('ApplyRecipeDialog — 워크플로우 프리셋 제목 로케일(story #4203)', () => {
+  it.each([['ko', koMessages], ['en', enMessages]] as const)('%s', async (locale, messages) => {
+    stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, { body: null as unknown });
+    const target = { ...TARGET, key: 'preset.workflow.kanban', name: 'Kanban Flow' };
+    const t = ((k: string, v?: { name?: string }) => `${k}:${v?.name ?? ''}`) as never;
+    LOCALE = locale;
+    try {
+      await act(async () => {
+        root.render(wrap(
+          <ApplyRecipeDialog target={target} open onOpenChange={() => {}} t={t} tc={((k: string) => k) as never} addToast={() => {}} />,
+        ));
+      });
+      await flush();
+      expect(document.body.textContent).toContain(`eventApplyDialogTitle:${messages.recipePreset.workflowKanbanName}`);
+      expect(document.body.textContent).not.toContain('eventApplyDialogTitle:Kanban Flow');
+    } finally {
+      LOCALE = 'ko';
+    }
+  });
+});
+
+// story #4243 AC2 — 역할별 사람/에이전트 선언(role_actor_kinds)으로 stage 한 줄의 선택지와 필수 여부가 갈린다.
+// loop_agency 모양(시드 0260의 역할 배치)에 human/either를 선언했을 때의 창 동작 — 0403 시드는 사람 완료 경로가 생길 때까지
+// 전부 agent(까디르 QA P1 · story 4249에서 either 복원). 여기선 선언이 오면 창이 어떻게 그리는지를 고정한다: Human → 사람만(비워도 됨) ·
+// Any → 사람 + 에이전트 · Agent → 에이전트만 · PO(either)의 «브리프»는 승인 자리 선언(approval.surface=doc_approval)이라 선택기 없는 읽기 전용 줄.
+describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
+  const LOOP_AGENCY = {
+    ...TARGET,
+    key: 'preset.workflow.loop_agency',
+    payload_schema: { properties: { stage: { enum: [
+      'goal_hypothesis', 'brief_doc_approval', 'generate_variants', 'loop_decision', 'execute', 'track_and_learn',
+    ] } } },
+    stage_metadata: {
+      goal_hypothesis: { role: 'Human', action: 'a' },
+      brief_doc_approval: { role: 'PO', action: 'b', approval: { surface: 'doc_approval' as const } },
+      generate_variants: { role: 'Agent', action: 'c' },
+      loop_decision: { role: 'Human', action: 'd' },
+      execute: { role: 'Any', action: 'e' },
+      track_and_learn: { role: 'Any', action: 'f' },
+    },
+    role_actor_kinds: { Human: 'human', PO: 'either', Agent: 'agent', Any: 'either' } as const,
+  };
+
+  function stubMixedMembers(capture: { body: unknown }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) {
+        return { ok: true, json: async () => ({ data: [
+          { id: 'agent-1', name: '디디군', type: 'agent' },
+          { id: 'human-1', name: '윤재신', type: 'human' },
+        ] }) };
+      }
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url === '/api/events/definitions/def-1/apply') {
+        capture.body = init?.body ? JSON.parse(init.body as string) : null;
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 4, warnings: [] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+  }
+
+  it('사람 역할 줄엔 에이전트 선택 0 · either 줄엔 사람 + 에이전트 · 브리프는 읽기 전용 · 사람 줄을 비워도 에이전트·either 줄만 채우면 적용되고 빈 줄은 싣지 않는다', async () => {
+    const capture = { body: null as unknown };
+    stubMixedMembers(capture);
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog target={LOOP_AGENCY} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}} />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const rows = [...document.body.querySelectorAll('select')].slice(1) as HTMLSelectElement[];
+    const values = (s: HTMLSelectElement) => [...s.options].map((o) => o.value).filter(Boolean);
+    expect(rows).toHaveLength(5); // 브리프 줄엔 선택기 없음
+    const [goal, variants, decision, run, learn] = rows;
+    expect(values(goal)).toEqual(['human-1']);
+    expect(values(decision)).toEqual(['human-1']);
+    expect(values(run)).toEqual(['agent-1', 'human-1']);
+    expect(values(variants)).toEqual(['agent-1']);
+    const notes = [...document.body.querySelectorAll('[data-testid="mapping-approval-elsewhere"]')].map((n) => n.textContent);
+    expect(notes).toEqual(['recipeApplyV2ApprovalOnDocApproval']);
+
+    const submitBtn = () => [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit') as HTMLButtonElement;
+    expect(submitBtn().disabled).toBe(true);
+    for (const [select, value] of [[variants, 'agent-1'], [run, 'agent-1'], [learn, 'human-1']] as const) {
+      await act(async () => {
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+    await flush();
+    expect(submitBtn().disabled).toBe(false);
+
+    await act(async () => { submitBtn().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(capture.body).toEqual({
+      project_id: 'proj-1',
+      role_mapping: { generate_variants: 'agent-1', execute: 'agent-1', track_and_learn: 'human-1' },
+    });
   });
 });

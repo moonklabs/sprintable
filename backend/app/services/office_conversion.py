@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.asset import Asset
+from app.services.storage.deadline import with_storage_deadline
 
 # story #2822 — Settings SSOT 경유(예전엔 os.environ 직접읽기라 infra/check_env_drift.py
 # ④축 report 대상이었다). settings도 프로세스 시작 시 1회 인스턴스화라 타이밍 동일 —
@@ -30,6 +31,11 @@ from app.models.asset import Asset
 _GOTENBERG_URL = settings.gotenberg_service_url.rstrip("/")
 _CONVERTIBLE_EXTS = frozenset({"pptx"})
 _TIMEOUT = httpx.Timeout(120.0)  # §7-4: 대형 pptx 변환 지연 흡수
+# story #4336 PR2 ② — 원본 받기 · PDF 올리기에도 명시 시한(라이브러리 기본 60s × 재시도 120s 대신). 워커 작업(attachment_convert)의 최악
+# = 받기 30 + Gotenberg 120 + 올리기 30 + DB 여유 ≈ 190s가 틱 예산(240s) 안에 들게.
+CONVERT_DOWNLOAD_SECONDS = 30.0
+CONVERT_PUT_SECONDS = 30.0
+CONVERT_WORST_SECONDS = CONVERT_DOWNLOAD_SECONDS + 120.0 + CONVERT_PUT_SECONDS + 10.0
 # ⛔QA catch(카디르군, 2026-08-19) — %PDF- 매직만으론 부족, 응답 크기도 상한 필요(무제한
 # 메모리 적재+캐시 방지). 근거: 원본 pptx 업로드 상한 = 100MB(conversations.py
 # `_MAX_ATTACHMENT_SIZE`, conversation 첨부 경로). pptx→pdf는 보통 원본과 비슷하거나 작지만
@@ -136,7 +142,7 @@ def _pdf_name(source_name: str) -> str:
     return f"{stem}.pdf"
 
 
-async def get_or_convert_pdf(db: AsyncSession, *, source_asset: Asset) -> Asset:
+async def get_or_convert_pdf(db: AsyncSession, *, source_asset: Asset, commit: bool = True) -> Asset:
     """source_asset(pptx) → 변환된 pdf Asset(캐시 hit 또는 변환).
 
     호출부가 authz(org 매치 + has_project_access)를 이미 통과시킨 asset만 넘길 것 — 이 함수는
@@ -167,10 +173,14 @@ async def get_or_convert_pdf(db: AsyncSession, *, source_asset: Asset) -> Asset:
     from app.services.storage import get_storage_provider
 
     provider = get_storage_provider()
-    source_bytes = await provider.download_object(container, source_asset.object_path)
+    source_bytes = await with_storage_deadline(
+        provider.download_object(container, source_asset.object_path), seconds=CONVERT_DOWNLOAD_SECONDS, what="download",
+    )
     pdf_bytes = await _call_gotenberg(source_asset.name, source_bytes)
 
-    if not await provider.put_object(container, obj_path, pdf_bytes, content_type="application/pdf"):
+    if not await with_storage_deadline(
+        provider.put_object(container, obj_path, pdf_bytes, content_type="application/pdf"), seconds=CONVERT_PUT_SECONDS, what="put",
+    ):
         raise ConversionFailed("failed to store converted pdf")
 
     ins = pg_insert(Asset).values(
@@ -197,6 +207,8 @@ async def get_or_convert_pdf(db: AsyncSession, *, source_asset: Asset) -> Asset:
     if asset_id is None:
         # 동시 요청 레이스로 다른 트랜잭션이 먼저 upsert — 재조회(asset_registry.py와 동일 TOCTOU 대응).
         asset_id = (await db.execute(_select_cached())).scalar_one().id
-    await db.commit()
+    # story #4336 PR2 ② — 작업 워커는 commit=False(결과와 작업 완료를 한 커밋 — background_jobs 모듈 docstring). 요청 경로는 예전대로 여기서 커밋.
+    if commit:
+        await db.commit()
 
     return (await db.execute(select(Asset).where(Asset.id == asset_id))).scalar_one()

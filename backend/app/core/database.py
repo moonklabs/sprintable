@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
+from app.core.request_db_timing import engine_pool_kwargs, instrument_if_enabled
 
 
 def db_application_name(suffix: str = "") -> str:
@@ -54,10 +55,15 @@ def _build_engine_kwargs() -> dict:
         "pool_pre_ping": True,
         "echo": settings.debug,
         "connect_args": connect_args,
+        # story #4332 — 풀 체크아웃 대기를 요청 범위로 잰다(동작은 기본 AsyncAdaptedQueuePool과 같다). 까디르 4697 ①: 플래그가
+        # 켜진 경우에만(꺼져 있으면 기본 풀 · 비용 0).
+        **engine_pool_kwargs(),
     }
 
 
 engine = create_async_engine(settings.database_url, **_build_engine_kwargs())
+# story #4332 — 요청마다 SQL 수 · 합계 ms(app/core/request_db_timing.py) · 플래그가 켜진 경우에만(까디르 4697 ①).
+instrument_if_enabled(engine.sync_engine)
 
 async_session_factory = async_sessionmaker(
     engine,
@@ -73,6 +79,7 @@ read_engine = (
     if settings.database_url_read
     else engine
 )
+instrument_if_enabled(read_engine.sync_engine)
 read_session_factory = async_sessionmaker(
     read_engine,
     expire_on_commit=False,
@@ -111,10 +118,22 @@ class Base(DeclarativeBase):
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    # story #4389 — the session is registered so CommitBeforeResponseMiddleware commits it (if it wrote) **before** the response
+    # headers go out. This teardown still commits whatever is written after the response (BackgroundTasks · streaming bodies); if the
+    # early commit failed (500 already sent), it rolls back instead of committing again.
+    from app.core.commit_before_response import (
+        COMMIT_FAILED_KEY,
+        register_request_session,
+    )
+
     async with async_session_factory() as session:
+        register_request_session(session)
         try:
             yield session
-            await session.commit()
+            if session.info.get(COMMIT_FAILED_KEY):
+                await session.rollback()
+            else:
+                await session.commit()
         except Exception:
             await session.rollback()
             raise
@@ -126,10 +145,19 @@ async def get_worker_db() -> AsyncGenerator[AsyncSession, None]:
     뜬다 — FOR UPDATE SKIP LOCKED 락을 쥔 채 외부 서비스(Vertex AI 등)를 기다리는 구간이
     요청풀이 아닌 이 전용 풀에서만 소모되게 한다(embedding_backlog.py의 잔여 pool-hold를
     이 풀로 옮겨 해소 — PO 판단 2026-08-05, lease 마이그 불요·SKIP LOCKED dedup 보존)."""
+    from app.core.commit_before_response import (
+        COMMIT_FAILED_KEY,
+        register_request_session,
+    )
+
     async with worker_session_factory() as session:
+        register_request_session(session)  # story #4389 — same as get_db
         try:
             yield session
-            await session.commit()
+            if session.info.get(COMMIT_FAILED_KEY):
+                await session.rollback()
+            else:
+                await session.commit()
         except Exception:
             await session.rollback()
             raise

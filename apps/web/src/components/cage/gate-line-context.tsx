@@ -3,6 +3,8 @@
 import { useTranslations } from 'next-intl';
 import { ArrowRight, CheckCircle, Circle, Clock, EyeOff, XCircle } from 'lucide-react';
 import type { WorkflowLineStepRun } from '@/components/kanban/types';
+import { actorRowLabels } from '@/lib/member-display';
+import { RowName } from '@/components/shared/row-name';
 
 /**
  * E-DG S11 ② — GateInbox 라인 컨텍스트 미니블록(display-only).
@@ -25,9 +27,11 @@ interface ApproverRowProps {
   status: string;
   blocking: boolean;
   name: string;
+  /** [SID:4311 PR 3] 꼬리(«· ID 앞 8자»)를 이름과 갈라 이름만 잘리게(RowName). */
+  memberId: string;
 }
 
-function ApproverRow({ status, blocking, name }: ApproverRowProps) {
+function ApproverRow({ status, blocking, name, memberId }: ApproverRowProps) {
   const t = useTranslations('cage');
   const view =
     status === 'approved'
@@ -43,7 +47,7 @@ function ApproverRow({ status, blocking, name }: ApproverRowProps) {
   return (
     <div className="flex items-center gap-1.5 text-[11px]">
       <Icon className={`size-3 shrink-0 ${view.cls}`} />
-      <span className="truncate text-foreground/90">{name}</span>
+      <RowName className="text-foreground/90" label={name} id={memberId} />
       {blocking ? (
         // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
         <span className="shrink-0 rounded-sm bg-warning-tint px-1 text-[9px] font-medium uppercase text-foreground">
@@ -64,6 +68,8 @@ interface GateLineContextProps {
 export function GateLineContext({ step, resolveName, className }: GateLineContextProps) {
   const t = useTranslations('cage');
   const sla = step.sla_due_at ? formatSlaCompact(step.sla_due_at) : null;
+  // [SID:4311 PR 2] 승인자 줄 — 같은 이름 둘이면 «· ID 앞 8자»(꼬리 규칙 한 곳 · 줄 주인이 이 목록이라 여기서).
+  const approverLabels = actorRowLabels(step.approvers.map((a) => ({ id: a.member_id, label: resolveName(a.member_id) })));
 
   return (
     <div className={`space-y-1.5 rounded-lg bg-muted/45 px-2.5 py-2 ${className ?? ''}`}>
@@ -103,7 +109,8 @@ export function GateLineContext({ step, resolveName, className }: GateLineContex
               key={a.member_id}
               status={a.status}
               blocking={a.blocking}
-              name={resolveName(a.member_id)}
+              name={approverLabels.get(a.member_id) ?? resolveName(a.member_id)}
+              memberId={a.member_id}
             />
           ))}
         </div>

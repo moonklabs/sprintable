@@ -109,7 +109,8 @@ describe('story #3915 — loading.tsx 경계 아래 은퇴 주소 3건은 next.c
     const paletteActions = readFileSync(
       join(APP_DIR, '../components/command-palette/command-palette-actions.ts'), 'utf-8',
     );
-    expect(paletteActions).toContain("targetRoute: '/organization/workforce/recruiter'");
+    // story #4231 3차 — 목적지는 프로젝트를 싣는 함수(withProject)를 거친다.
+    expect(paletteActions).toContain("targetRoute: withProject('/organization/workforce/recruiter')");
   });
 });
 

@@ -49,6 +49,23 @@ async function mount() {
   await act(async () => { root.render(wrap(<MorePage />, TopBarProvider)); });
 }
 
+// story #3946 — TopBarSlot은 렌더 없이(return null) context에만 title을 심는다. 이 파일의
+// 기존 mount()는 소비처(<TopBar/> 등) 없이 Provider만 두르므로 title이 DOM에 아예 안
+// 나타난다 — h1 카운트를 재려면 얇은 소비처가 하나 있어야 한다(chats/layout.test.tsx와
+// 동일 원칙 — 무관한 실 <TopBar/> 트리는 끌어오지 않는다).
+async function mountWithTopBarProbe() {
+  const { default: MorePage } = await import('./page');
+  const { TopBarProvider, useTopBar } = await import('@/components/nav/top-bar-context');
+  function TopBarTitleProbe() {
+    const { title } = useTopBar();
+    return <div>{title}</div>;
+  }
+  function Combined({ children }: { children: React.ReactNode }) {
+    return <TopBarProvider><TopBarTitleProbe />{children}</TopBarProvider>;
+  }
+  await act(async () => { root.render(wrap(<MorePage />, Combined)); });
+}
+
 describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () => {
   // story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13 조건②) — 데스크톱 사이드바가
   // 5항목으로 줄어도 모바일 `/more`는 회귀 0(PO 조건) — NAV_GROUPS 미러 섹션 뒤에
@@ -63,17 +80,31 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
   // 전담(별도 축, 이 파일 관심사 아님).
   it('섹션(h2) 순서가 확定대로다(오늘/결과/연결·규칙[NAV_GROUPS]/그 밖의 화면[legacy 단일 카드] — 일감[NAV_GROUPS]은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
     await mount();
+    // story #4292(유나 1안) — 한 항목 구역(오늘 · 결과)은 머리 없이 항목 줄 하나. 카드(구역)는 넷 그대로 · 순서도 그대로.
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
-    expect(sectionLabels).toEqual(['오늘', '결과', '연결·규칙', '그 밖의 화면새 자리로 옮기는 중이에요']);
+    expect(sectionLabels).toEqual(['연결·규칙', '그 밖의 화면새 자리로 옮기는 중이에요']);
+    const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
+    expect(cards).toHaveLength(4);
+    expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
+      ['오늘', '결과', expect.any(String), expect.any(String)],
+    );
+    // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
+    expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual([[null, null], [null, null], [null, null], [null, null]]);
+    // 같은 낱말이 한 카드에 두 번(머리 · 항목) 보이지 않는다.
+    for (const card of cards) {
+      const header = card.querySelector('[data-testid="more-section-header"]')?.textContent;
+      const rows = card.querySelectorAll('[data-testid="more-menu-link"]');
+      if (header && rows.length === 1) expect(rows[0]!.querySelector('span span')?.textContent).not.toBe(header);
+    }
     // h2 안 캡션은 "그 밖의 화면" 라벨과 별도 span(§⑤ 해요체 인라인 캡션, moreLegacyMovingCaptionInline)
     // — 위 concat 문자열이 그 둘의 합임을 명시로도 확認(텍스트 원문이 바뀌면 이 assert가 RED).
     const legacyH2 = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith('그 밖의 화면'));
     expect(legacyH2?.querySelector('[data-testid="legacy-moving-caption"]')?.textContent).toBe('새 자리로 옮기는 중이에요');
   });
 
-  it('「그 밖의 화면」 묶음(이벤트·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
+  it('「그 밖의 화면」 묶음(레시피·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
     await mount();
-    expect(container.textContent).toContain('이벤트');
+    expect(container.textContent).toContain('레시피');
     expect(container.textContent).toContain('구성원');
     expect(container.textContent).toContain('에이전트');
     const todayLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing');
@@ -99,8 +130,10 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     // <button aria-expanded>류 접이식 컨트롤이 그룹 헤더에 없다 — h2는 순수 텍스트.
     const toggles = [...container.querySelectorAll('[aria-expanded]')];
     expect(toggles.length).toBe(0);
-    // 이벤트(조직 그룹, 목록 순서상 뒤쪽 섹션)가 별도 조작 없이 이미 렌더돼 있다.
-    const eventsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('이벤트'));
+    // story #4043(«이벤트»→«레시피» 낱말 통일) — 조직 그룹, 목록 순서상 뒤쪽 섹션이
+    // 별도 조작 없이 이미 렌더돼 있다. 텍스트는 orgEvents 값을 따라 레시피로 바뀌었지만
+    // href/route(/organization/events)는 이 카드 범위 밖(Tier2)이라 그대로.
+    const eventsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('레시피'));
     expect(eventsLink?.getAttribute('href')).toBe('/organization/events');
   });
 
@@ -160,17 +193,24 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(membersLink?.textContent).toContain('사람과 에이전트 명단');
   });
 
-  it('⭐탭 문장은 useIsMobile() true일 때만 서고, 나올 땐 nav 이름 셋+탭 이름 셋을 조립한다(AC1②) — story #3824 CHANGES②: 탭 이름 中 「오늘」·「대화」는 nav.zoneNow·nav.chats와 같은 labelKey 공유(「결재」만 mobileTabBar 자기 키)', async () => {
+  it('⭐탭 문장의 탭 이름은 탭바가 실제로 그리는 탭 그대로(story #4278 · 유나 ①) — 플래그 OFF: 「일감」·「결재」·「대화」(예전엔 없는 «오늘» 탭을 가리켰다)', async () => {
     isMobileMock = true;
     await mount();
     const hint = container.querySelector('[data-testid="more-tab-hint"]');
-    expect(hint?.textContent).toBe('보드·알림·대화는 아래 「오늘」·「결재」·「대화」 탭에 있어 여기엔 없어요');
+    expect(hint?.textContent).toBe('아래 탭(「일감」·「결재」·「대화」)에 있는 화면은 여기엔 없어요');
   });
 
-  it('⭐데스크톱 폭(useIsMobile() false)에선 탭 문장이 아예 없다(탭 바 자체가 없어 거짓이 되므로)', async () => {
+  it('⭐데스크톱 폭(lg 이상)에선 탭 문장이 보이지 않는다(탭 바 자체가 없어 거짓이 되므로) — story #4222: JS 분기 대신 lg:hidden', async () => {
+    // 서버·첫 렌더와 하이드레이션 뒤가 같아야(흔들림 0) 늘 그리고 CSS로 숨긴다 — display:none이라 데스크톱 스크린리더에도 안 읽힌다.
     isMobileMock = false;
     await mount();
-    expect(container.querySelector('[data-testid="more-tab-hint"]')).toBeNull();
+    const hint = container.querySelector('[data-testid="more-tab-hint"]');
+    expect(hint).not.toBeNull();
+    expect(hint!.className.split(/\s+/)).toContain('lg:hidden');
+    // 유나 design — 숨은 문장이 space-y의 마지막 자식이면 부제에 margin이 남아 데스크톱 검색창이 4px 밀렸다 → 묶음은 flex+gap.
+    const group = hint!.parentElement!;
+    expect(group.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-col', 'gap-1']));
+    expect(group.className).not.toMatch(/\bspace-y-/);
   });
 
   // story #3845(§①④, 2026-09-14) — retro·standup이 LEGACY_NAV_ITEMS에서 빠지며(각각
@@ -179,19 +219,19 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
   // 설명과 안 겹침).
   it('⭐찾기 — 입력값이 이름에 매치하면 그 행만 남고 나머지 구역은 숨는다', async () => {
     await mount();
-    await typeQuery('실험실');
+    await typeQuery('실행');
     const links = [...container.querySelectorAll('a')];
     expect(links).toHaveLength(1);
-    expect(links[0]?.textContent).toContain('실험실');
+    expect(links[0]?.textContent).toContain('실행');
   });
 
   it('⭐찾기 — 입력값이 설명에만 매치해도 걸린다(이름+설명 둘 다 부분일치)', async () => {
     await mount();
-    // '기억'(org-memory) 설명 = "에이전트가 쌓은 것 — 사람이 안 씀" — '쌓은'은 설명에만 있다.
-    await typeQuery('쌓은');
+    // '문서'(docs) 설명 = "우리가 쓴 글 — 규격·회의록·정본" — '회의록'은 설명에만 있다.
+    await typeQuery('회의록');
     const links = [...container.querySelectorAll('a')];
     expect(links).toHaveLength(1);
-    expect(links[0]?.textContent).toContain('기억');
+    expect(links[0]?.textContent).toContain('문서');
   });
 
   it('⭐찾기 — 0건이면 「「{q}」에 맞는 화면이 없어요」 한 줄만 뜨고 카드는 0장', async () => {
@@ -206,7 +246,7 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
 
   it('⭐찾기 — 지우면 전량 복귀한다(story #3824로 총 링크 수 변동, 리터럴 수 대신 >1로 검증)', async () => {
     await mount();
-    await typeQuery('실험실');
+    await typeQuery('실행');
     expect(container.querySelectorAll('a')).toHaveLength(1);
     await typeQuery('');
     expect(container.querySelectorAll('a').length).toBeGreaterThan(1);
@@ -223,5 +263,14 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(container.querySelectorAll('[data-slot="card"]').length).toBeGreaterThan(0);
     const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
     expect(membersLink?.className).toContain('min-h-12');
+  });
+});
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+describe('MorePage — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    await mountWithTopBarProbe();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });

@@ -18,6 +18,7 @@ import {
 import { ArtifactExpandDialog } from '@/components/canvas/artifact-expand-dialog';
 import { type GalleryTimelineVersion } from '@/components/canvas/artifact-gallery-timeline';
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberDisplayLabel, memberLookup } from '@/lib/member-display';
 
 const VISIBLE_LIMIT = 4;
 
@@ -152,7 +153,9 @@ interface EvidenceSectionProps {
   humanVerified: boolean | null | undefined;
   humanVerifiedBy: string | null | undefined;
   humanVerifiedAt: string | null | undefined;
-  memberMap?: Record<string, { name: string }>;
+  memberMap?: Record<string, { name: string | null }>;
+  /** [SID:4300] 부모(스토리 패널)가 조직 범위 이름을 아직 받는 중이면 false — 그동안 «알 수 없는 구성원 검증»을 먼저 띄우지 않는다. */
+  memberNamesLoaded?: boolean;
   className?: string;
 }
 
@@ -167,7 +170,7 @@ interface EvidenceSectionProps {
  * (evidence 리스트 fetch를 기다릴 필요 없음 — verified 여부/who/when은 집계 필드).
  */
 export function EvidenceSection({
-  workItemId, workItemType, selfReported, humanVerified, humanVerifiedBy, humanVerifiedAt, memberMap = {}, className,
+  workItemId, workItemType, selfReported, humanVerified, humanVerifiedBy, humanVerifiedAt, memberMap = {}, memberNamesLoaded = true, className,
 }: EvidenceSectionProps) {
   const t = useTranslations('verify');
   const tCommon = useTranslations('common');
@@ -282,11 +285,17 @@ export function EvidenceSection({
   const visibleItems = items && !showAll ? items.slice(0, VISIBLE_LIMIT) : items;
   const hiddenCount = items ? items.length - VISIBLE_LIMIT : 0;
   const signerId = items?.[0]?.created_by ?? null;
-  const signerName = signerId ? memberMap[signerId]?.name : null;
+  // story #4284 — 실존인데 이름 없는 구성원은 «이름 없는 구성원»(목록에 없으면 예전처럼 표시 안 함).
+  const signerName = signerId && memberMap[signerId] ? memberDisplayLabel(memberMap[signerId].name, tCommon) : null;
   // E-VERIFY P0-04 — Lv0/Lv1 씰은 이 자리에서 즉시 정확하게(evidence fetch 대기 없이): verified는
   // human_verified_by 실명(who), claimed는 "에이전트 주장"(self_reported엔 who가 없어 일반화,
   // §3 계약 그대로). 과거 무조건 초록 체크였던 자리 — human 미검증 건은 여기서 amber로 정정된다.
-  const verifiedByName = humanVerifiedBy ? (memberMap[humanVerifiedBy]?.name ?? humanVerifiedBy.slice(0, 6)) : null;
+  // [SID:4286] 검증자 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원».
+  // [SID:4300] 표 = 프로젝트 범위 + 없을 때 조직 범위(스토리 패널이 채워 넘김). 받는 동안(null)은 이름 없이 «증명된 완결»만 —
+  // «알 수 없는 구성원 검증»이 먼저 섰다가 이름으로 바뀌는 거짓을 안 만든다.
+  const verifiedByName = humanVerifiedBy
+    ? memberLookup(memberMap, humanVerifiedBy, tCommon, { loaded: memberNamesLoaded })?.label ?? null
+    : null;
   const verifiedWhen = humanVerifiedAt ? formatRelativeTime(humanVerifiedAt, locale, displayTimezone) : null;
   const sealLabel = trustStage === 'verified'
     ? (verifiedByName ? `${t('trustSealVerifiedBy', { name: verifiedByName })}${verifiedWhen ? ` · ${verifiedWhen}` : ''}` : t('provenCompletion'))

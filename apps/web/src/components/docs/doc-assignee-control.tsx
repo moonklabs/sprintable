@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { User, UserPlus } from 'lucide-react';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { initials as toInitials } from '@/lib/storage/format';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 /**
  * 박스1: 담당자 아바타 + popover. 슬림 헤더 액션 클러스터에 glanceable owner 신호(누가 owner인지 보여야 함).
@@ -28,14 +30,22 @@ export function DocAssigneeControl({
 }) {
   const t = useTranslations('docs');
   const [open, setOpen] = useState(false);
+  const panelClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
   const ref = useRef<HTMLDivElement>(null);
   const memberName = assigneeName;
+  // story #4364(AC3 확장 · 유나 4737 판) — 담당자 창도 공용 훅(4349) 패널 길: Esc = 닫고 아바타 트리거로 초점 · 트리거 aria-expanded/controls ·
+  // 트리거에서 Tab이면 창 첫 조작으로. 안의 «더 보기» 메뉴 Esc는 그 메뉴 훅이 전파를 멈춰 메뉴만 닫는다 → 두 번째 Esc가 창을 닫는다.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const setPanel = useCallback((el: HTMLDivElement | null) => { panelRef.current = el; panelClampRef(el); }, [panelClampRef]);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  const keys = usePortalMenuKeys({ open, onClose: close, popoverRef: panelRef, triggerRef, kind: 'panel' });
 
-  // click-outside 닫기
+  // click-outside 닫기 — 안의 «더 보기» 메뉴는 body로 포털된다(#4349 PR 2) → 포털 팝오버 안 누름도 «안»(유나 #4728: 예전엔 창이 먼저 닫혀 «이벤트 전달» 탭이 요청 0).
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (isOutsidePress(ref.current, e.target)) setOpen(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
@@ -51,8 +61,11 @@ export function DocAssigneeControl({
   return (
     <div ref={ref} className="relative shrink-0">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={keys.onTriggerKeyDown}
+        {...keys.triggerProps}
         title={label}
         aria-label={label}
         className={
@@ -65,7 +78,7 @@ export function DocAssigneeControl({
       </button>
       {open ? (
         // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.
-        <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-border bg-popover p-2 shadow-[var(--elev-overlay)]">
+        <div ref={setPanel} onKeyDown={keys.onPopoverKeyDown} {...keys.popoverProps} data-dropdown-panel="doc-assignee" className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-2 shadow-[var(--elev-overlay)]">
           <EntityDispatchPanel
             entityType="doc"
             entityId={docId}

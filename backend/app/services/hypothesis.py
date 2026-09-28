@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -316,7 +318,7 @@ async def get_hypothesis_lifecycle(
         gate_rows = (await session.execute(
             select(Gate.work_item_id, Gate.status, Gate.created_at)
             .where(Gate.org_id == org_id, Gate.work_item_type == "story", Gate.work_item_id.in_(story_ids))
-            .order_by(Gate.work_item_id, Gate.created_at.desc())
+            .order_by(Gate.work_item_id, Gate.created_at.desc(), Gate.id.desc())
         )).all()
         for wid, status, _created_at in gate_rows:
             gate_map.setdefault(wid, status)  # 정렬상 첫 행 = 그 story의 최신 gate
@@ -378,9 +380,11 @@ async def list_hypotheses(
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
     limit: int = 100,
+    project_ids: list[uuid.UUID] | None = None,
 ) -> list[HypothesisResponse]:
     repo = HypothesisRepository(session, org_id)
     rows = await repo.list_filtered(
+        project_ids=project_ids,
         project_id=project_id,
         status=status,
         owner_member_id=owner_member_id,
@@ -692,7 +696,8 @@ async def draft_hypothesis(
     S15: gen-LLM(S25)으로 statement 초안 시도 → 미가용/실패 시 기존 deterministic 템플릿으로
     graceful fallback. metric_definition/measure_after는 여전히 고정값(사람이 다듬는 전제).
     """
-    statement, llm_generated = _draft_statement(payload.context)
+    # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+    statement, llm_generated = await asyncio.to_thread(_draft_statement, payload.context)
     metric_definition = {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"}
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     snapshot = _build_source_snapshot(payload.context)
@@ -853,7 +858,7 @@ async def resolve_dispatch_context_pack(
             LoopRun.status != "abandoned",
             LoopRun.deleted_at.is_(None),
         )
-        .order_by(LoopRun.created_at.desc())
+        .order_by(LoopRun.created_at.desc(), LoopRun.id.desc())
         .limit(1)
     )).scalar_one_or_none()
     if loop is None or loop.brief_doc_id is None:

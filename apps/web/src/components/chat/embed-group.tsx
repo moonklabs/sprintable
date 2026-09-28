@@ -6,7 +6,7 @@ import { ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
 import { EmbedCard } from './embed-card';
 import { ApprovalRequestCard } from './approval-request-card';
 import type { GateItem } from '@/components/kanban/types';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchGateById } from '@/lib/fetch-gate';
 import type { ReadingPanelTarget } from './reading-panel';
 import type { EventDefinitionSummary } from '@/lib/block-template';
 import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
@@ -37,15 +37,9 @@ function GateGroup({ refs, eventDefinitionsByKey }: { refs: EmbedGroupProps['ref
     void (async () => {
       const entries = await Promise.all(
         refs.map(async (r) => {
-          try {
-            const res = await fetchWithAuth(`/api/gates/${r.entityId}`);
-            if (!res.ok) return [r.entityId, null] as const;
-            const json = (await res.json().catch(() => null)) as { data?: GateItem } | GateItem | null;
-            const gate = (json && 'data' in json ? json.data : json) as GateItem | undefined;
-            return [r.entityId, gate?.status ?? null] as const;
-          } catch {
-            return [r.entityId, null] as const;
-          }
+          // story #4253 — 공용 fetchGateById(날 GateResponse 한 모양).
+          const result = await fetchGateById<GateItem>(r.entityId);
+          return [r.entityId, result.kind === 'ok' ? result.gate.status ?? null : null] as const;
         }),
       );
       if (!cancelled) {

@@ -60,3 +60,9 @@ backend/scripts/*_result.json
 backend/scripts/*_survey*.json
 backend/scripts/*_dump.json
 backend/scripts/*_dump.csv
+
+# story #4029 — Lighthouse CI 로컬 재현 산출물(런타임에만 생성, CI가 커밋하지 않음).
+.lighthouseci/
+lighthouserc.ci.json
+lighthouse-puppeteer-auth.js
+backend.log

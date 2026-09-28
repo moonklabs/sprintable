@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { actorRowLabels, memberLookup } from '@/lib/member-display';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CheckCircle, ExternalLink, RotateCcw, Shield, ShieldCheck, ShieldX, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,8 @@ import type { GateItem } from '@/components/kanban/types';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { fetchWithAuth } from '@/lib/db/client';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 
 /**
  * story #2955 §3/§7(doc docs-index-reader-redesign-handoff) — 셸 B "에디토리얼 리더"의
@@ -68,7 +71,8 @@ export function useDocGateData(docId: string, status: string | undefined) {
     const [gates, revsJson, membersJson] = await Promise.all([
       fetchWithAuth(`/api/gates?work_item_id=${docId}&work_item_type=doc`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       fetchWithAuth(`/api/docs/${docId}/revisions`).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
-      fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      // [SID:4300] 이름만 쓰는 표 — 비활성 에이전트도 «목록이 거른 것»이라 비활성까지 싣는 조직 원천(떠난 사람은 BE 4303 대기).
+      fetchWithAuth(ORG_NAMES_URL).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
     ]);
     if (signal?.aborted) return;
     const gs = (Array.isArray(gates) ? gates : []) as GateItem[];
@@ -87,7 +91,10 @@ export function useDocGateData(docId: string, status: string | undefined) {
   }, [load]);
 
   const t = useTranslations('docs');
-  const resolveName = (id: string | null | undefined) => (id ? (memberNames[id] ?? id.slice(0, 6)) : '—');
+  const tc = useTranslations('common');
+  // [SID:4286] 구성원 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원». 이름 표는 게이트 · 개정 목록과
+  // 같은 load(Promise.all)에서 함께 채워져, 이름을 찾는 시점엔 늘 다 불러온 상태(불러오는 중 갈래 없음 → loaded: true).
+  const resolveName = (id: string | null | undefined) => (id ? (memberLookup(memberNames, id, tc, { loaded: true })?.label ?? '') : '—');
   const state = toState(status);
   const isApprover = state === 'pending' && gate?.can_approve === true;
   // ⚠️PR#3384 QA CRITICAL — doc_approval은 org posture가 permissive가 아닌 한 항상 high
@@ -119,7 +126,7 @@ export function useDocGateData(docId: string, status: string | undefined) {
     setError(null);
     setBusy(true);
     try {
-      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       if (res.ok) { onDone(); await load(); } else { setError(await parseErrorBody(res)); }
@@ -140,7 +147,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
   const fmtDate = (s: string | undefined | null) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
 
   const errorBanner = error ? (
-    <p className="mt-1.5 basis-full text-xs text-destructive">{error}</p>
+    <p className="mt-1.5 basis-full break-keep text-xs text-destructive">{error}</p>
   ) : null;
 
   // draft — 접힌 박스의 "검토 요청" CTA를 그대로 상시 승격(§7: 새 상태·새 API 0).
@@ -148,7 +155,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
     return (
       <div className="proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border border-proof-line bg-proof-panel px-4 py-3">
         <Icon className="size-5 shrink-0 text-muted-foreground" />
-        <p className="min-w-0 flex-1 text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
+        <p className="min-w-0 flex-1 break-keep text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
         <Button size="sm" className="focus-outset" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
           {t('docGateRequestReview')}
         </Button>
@@ -179,7 +186,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         {state === 'confirmed' && gate ? (
           <div className="text-xs text-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
         ) : state === 'denied' ? (
-          <div className="mt-1 text-xs text-foreground">
+          <div className="mt-1 break-keep [overflow-wrap:anywhere] text-xs text-foreground">
             <span className="font-medium">{t('docGateDeniedReason')}:</span> {gate?.resolution_note?.trim() || t('docGateNoReason')}
           </div>
         ) : null}
@@ -216,7 +223,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         // 상단 삼항의 else 분기(bg-warning-tint)를 입는다 — text-muted-foreground는 그 tint
         // 배경 위에서 AA 미달. 항상 pending 상태에서만 렌더되므로 상시 노출 — text-foreground로
         // 교체(#3865 AC0 PO 확定).
-        <span className="shrink-0 text-xs text-foreground">{t('docGateAwaitingGeneric')}</span>
+        <span className="shrink-0 break-keep text-xs text-foreground">{t('docGateAwaitingGeneric')}</span>
       ) : state === 'denied' ? (
         <Button size="sm" variant="ghost" disabled={busy} className="shrink-0 gap-1" onClick={() => void docTransition('draft', onTransitioned)}>
           <RotateCcw className="size-3.5" />{t('docGateEdit')}
@@ -233,6 +240,8 @@ interface AuditEvent {
   kind: AuditKind;
   proofState: ProofState;
   name: string;
+  /** [SID:4311 PR 3] 행위자 id — 같은 이름 서로 다른 사람 둘이면 «· ID 앞 8자» 꼬리의 기준. */
+  actorId: string | null;
   at: string;
   version?: number;
   note?: string | null;
@@ -251,17 +260,19 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
   revisions.forEach((rev, i) => {
     auditEvents.push({
       key: `rev-${rev.id}`, kind: i === 0 ? 'request' : 'resubmit', proofState: AUDIT_KIND_PROOF[i === 0 ? 'request' : 'resubmit'],
-      name: resolveName(rev.created_by), at: rev.created_at ?? '', version: i + 1,
+      name: resolveName(rev.created_by), actorId: rev.created_by ?? null, at: rev.created_at ?? '', version: i + 1,
     });
   });
   if (gate?.resolved_at) {
     if (gate.status === 'approved' || gate.status === 'confirmed') {
-      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', proofState: 'green', name: resolveName(gate.resolver_id), at: gate.resolved_at });
+      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', proofState: 'green', name: resolveName(gate.resolver_id), actorId: gate.resolver_id, at: gate.resolved_at });
     } else if (gate.status === 'rejected' || gate.status === 'denied') {
-      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', proofState: 'red', name: resolveName(gate.resolver_id), at: gate.resolved_at, note: gate.resolution_note });
+      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', proofState: 'red', name: resolveName(gate.resolver_id), actorId: gate.resolver_id, at: gate.resolved_at, note: gate.resolution_note });
     }
   }
   auditEvents.sort((a, b) => b.at.localeCompare(a.at));
+  // [SID:4311 PR 3] 감사 이력 줄 — 같은 이름 서로 다른 사람 둘이면 «· ID 앞 8자»(행위자 id마다 한 번). 읽는 글자(label)에만 · 머리글자는 이름.
+  const auditLabels = actorRowLabels(auditEvents.map((ev) => ({ id: ev.actorId, label: ev.name })));
 
   // story #3493 — 감사 이력 항목 시각은 "기록"(정본 formatRelativeTime).
   const fmtDate = (s: string) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
@@ -287,7 +298,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
             stateLabel={auditKindLabel[ev.kind]}
             claim={`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}
             now={fmtDate(ev.at)}
-            human={{ name: ev.name, role: '' }}
+            human={{ name: ev.name, label: ev.actorId ? auditLabels.get(ev.actorId) : undefined, role: '' }}
           />
         ))}
       </div>
@@ -314,10 +325,10 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
               stateLabel={auditKindLabel[ev.kind]}
               claim={`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}
               now={fmtDate(ev.at)}
-              human={{ name: ev.name, role: '' }}
+              human={{ name: ev.name, label: ev.actorId ? auditLabels.get(ev.actorId) : undefined, role: '' }}
             />
             {ev.note?.trim() ? (
-              <p className="mt-1 whitespace-pre-wrap border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
+              <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
             ) : null}
           </li>
         ))}

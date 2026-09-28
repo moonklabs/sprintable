@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -491,6 +492,316 @@ def test_heavy_file_own_weight_cap_still_fails_past_3x_boundary():
     assert slow == ["tests/test_2813_gate_github_check_realdb.py"]
 
 
+# ── story #4152(CI·결정성, 페드루 PO 確定 2026-09-22) — «같은 run 상대» 정규화(#3396)
+# 이 러너 부하 노이즈에 취약함을 드러낸 실사고 2건(오늘, 2026-09-22)의 실측값을 그대로
+# 픽스처로 고정한다. PR#4351 run 35696793719 shard(2): test_3502_insights_board.py
+# 261s(그 run의 정규화 판정선 187.7s 초과) — 이 PR은 FE h1 파일 9개뿐(백엔드 파일 0,
+# 즉 test_3502는 diff 밖 무관 파일). PR#4355 run 35697222669 shard(6): 자기 신규 테스트
+# test_3804_prod_promotion_bridge_0354a.py 80s(판정선 71.2s 초과) — 등재 weight
+# 25.0(잠정값, 로컬 추정치)의 첫 CI run.
+
+_INCIDENT4152A_WEIGHT = 70.0  # test_3502_insights_board.py 실 등재값(story-3911)
+_INCIDENT4152B_WEIGHT = 25.0  # test_3804_...py 실 등재값(provisional=true)
+
+
+def test_absolute_threshold_is_own_weight_times_multiplier_floored_at_60():
+    mod = _load()
+    assert mod.absolute_slow_threshold_sec(70.0) == pytest.approx(175.0)  # 70*2.5
+    assert mod.absolute_slow_threshold_sec(1.0) == 60.0  # AC3 — 60초 절대 최저선 무변
+
+
+def test_provisional_files_in_requires_structured_flag_not_free_text():
+    mod = _load()
+    entries = [
+        {"file": "tests/a.py", "sec": 5.0, "source": "잠정값 — 아직 안 채움"},  # 자유문뿐, 구조화 X
+        {"file": "tests/b.py", "sec": 5.0, "provisional": True, "source": "x"},
+    ]
+    assert mod.provisional_files_in(entries) == frozenset({"tests/b.py"})
+
+
+def test_entries_missing_provisional_flag_catches_tentative_source_without_flag():
+    """story #4159 AC2 — source에 잠정/추정/실측 전 문구가 있는데 provisional:true가
+    없으면 잡힌다(test_4101/PR 4381 shard 10 실사고 클래스)."""
+    mod = _load()
+    entries = [
+        {"file": "tests/a.py", "sec": 10.0, "source": "로컬 추정치 — CI 실측 전 잠정값"},
+        {"file": "tests/b.py", "sec": 10.0, "provisional": True, "source": "잠정값"},
+        {"file": "tests/c.py", "sec": 10.0, "source": "PR#1234 CI 실측 42.0s"},
+    ]
+    assert mod.entries_missing_provisional_flag(entries) == ["tests/a.py"]
+
+
+def test_entries_missing_provisional_flag_is_purely_mechanical_no_tense_awareness():
+    """⚠️story #4159 실측 함정 — 이 축은 자유문 형태소 분석 없이 순수 부분문자열 매치다.
+    "이전 잠정값을 대체"처럼 과거형(이미 실측 교체 완료)으로 써도 "잠정"이 텍스트에
+    남아 있으면 여전히 걸린다(#4159 본 작업 중 330개 파일 source를 처음 이렇게 썼다가
+    이 축에 다시 걸려 재작성한 실사고 — "구 로컬×배율 스냅샷을 대체"로 트리거 단어
+    자체를 피해야 한다). 그래서 문서(entries_missing_provisional_flag docstring)에
+    「실측 완료 서술은 트리거 단어를 아예 안 쓰는 게 정답」을 명시해 둔다."""
+    mod = _load()
+    entries = [{"file": "tests/a.py", "sec": 42.0, "source": "이전 잠정값을 CI 실측으로 대체"}]
+    assert mod.entries_missing_provisional_flag(entries) == ["tests/a.py"]
+
+
+def test_parse_changed_files_strips_blank_lines():
+    mod = _load()
+    assert mod.parse_changed_files("tests/a.py\n\n  \ntests/b.py\n") == frozenset({"tests/a.py", "tests/b.py"})
+
+
+# ── story #4163 — __ALL__ 모드 RED 범위 축소(import-그래프 narrowing) ──────────────
+def test_changed_app_files_to_modules_basic_path():
+    mod = _load()
+    assert mod.changed_app_files_to_modules(frozenset({"app/routers/other.py"})) == frozenset({"app.routers.other"})
+
+
+def test_changed_app_files_to_modules_init_py_maps_to_package():
+    mod = _load()
+    assert mod.changed_app_files_to_modules(frozenset({"app/services/__init__.py"})) == frozenset({"app.services"})
+
+
+def test_changed_app_files_to_modules_multiple_and_non_py_ignored():
+    mod = _load()
+    result = mod.changed_app_files_to_modules(frozenset({"app/a/b.py", "app/c.py", "README.md"}))
+    assert result == frozenset({"app.a.b", "app.c"})
+
+
+def test_files_depending_on_modules_direct_import(tmp_path: Path):
+    """⭐AC1 정탐① — `import app.x.y`(직접 import)를 잡는다."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    t1 = tmp_path / "tests" / "test_direct.py"
+    t1.write_text("import app.x.y\n\ndef test_a():\n    assert True\n")
+    t2 = tmp_path / "tests" / "test_unrelated.py"
+    t2.write_text("import app.other\n\ndef test_b():\n    assert True\n")
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.x.y"}), ["tests/test_direct.py", "tests/test_unrelated.py"], backend_dir=tmp_path,
+    )
+    assert result == ["tests/test_direct.py"]
+
+
+def test_files_depending_on_modules_from_import(tmp_path: Path):
+    """⭐AC1 정탐② — `from app.x.y import Z`(from-import)도 잡는다."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_from.py").write_text(
+        "from app.x.y import Z\n\ndef test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.x.y"}), ["tests/test_from.py"], backend_dir=tmp_path,
+    )
+    assert result == ["tests/test_from.py"]
+
+
+def test_files_depending_on_modules_member_of_package_import(tmp_path: Path):
+    """⭐AC1 정탐③ — `from app.services import approval_delivery`(부모 패키지에서
+    멤버로 import, 이 레포 실측 관례상 가장 흔한 형태)도 잡는다."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_member.py").write_text(
+        "from app.services import approval_delivery\n\ndef test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.services.approval_delivery"}), ["tests/test_member.py"], backend_dir=tmp_path,
+    )
+    assert result == ["tests/test_member.py"]
+
+
+def test_files_depending_on_modules_unrelated_file_not_matched(tmp_path: Path):
+    """음성대조 — 변경 모듈을 전혀 참조하지 않는 파일은 안 잡힌다(오늘 PR#4527
+    실사고 — test_3373/test_3415/test_3523/test_3806는 approval_delivery.py를 안
+    건드림)."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_unrelated.py").write_text(
+        "from app.services.other_thing import Foo\n\ndef test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.services.approval_delivery"}), ["tests/test_unrelated.py"], backend_dir=tmp_path,
+    )
+    assert result == []
+
+
+def test_files_depending_on_modules_leaf_word_boundary_no_false_positive(tmp_path: Path):
+    """⭐«못 틀리는 대조» 방지 — leaf 이름이 다른 식별자의 부분문자열로 우연히
+    나타나도(예: `approval_delivery_v2`) 단어경계(\\b)로 오탐 안 한다."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_similar_name.py").write_text(
+        "from app.services import approval_delivery_v2\n\ndef test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.services.approval_delivery"}), ["tests/test_similar_name.py"], backend_dir=tmp_path,
+    )
+    assert result == []
+
+
+def test_files_depending_on_modules_no_dotall_leak_across_later_lines(tmp_path: Path):
+    """⭐최초 구현 함정(실측으로 발견) — DOTALL을 쓰면 `from app.services import X` 뒤
+    파일 어딘가에 우연히 leaf 단어가 또 나타나도 매치돼 버린다. MULTILINE(줄 경계
+    고정)으로 그 오탐을 막았는지 직접 재현해 고정."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_no_leak.py").write_text(
+        "from app.services import other_thing\n\n"
+        "# approval_delivery라는 단어가 여기 우연히 있다(주석, import 문과 무관)\n"
+        "def test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.services.approval_delivery"}), ["tests/test_no_leak.py"], backend_dir=tmp_path,
+    )
+    assert result == []
+
+
+def test_files_depending_on_modules_empty_modules_returns_empty_list():
+    mod = _load()
+    assert mod.test_files_depending_on_modules(frozenset(), ["tests/test_a.py"]) == []
+
+
+def test_files_depending_on_modules_multiple_files_sorted(tmp_path: Path):
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_z.py").write_text("import app.x\n")
+    (tmp_path / "tests" / "test_a.py").write_text("import app.x\n")
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.x"}), ["tests/test_z.py", "tests/test_a.py"], backend_dir=tmp_path,
+    )
+    assert result == ["tests/test_a.py", "tests/test_z.py"]
+
+
+def test_ac1_e2e_module_dependent_red_unrelated_warn(tmp_path: Path):
+    """⭐AC1 핵심 — PO 지정 합성 케이스: app 모듈 X 변경 + T1(X를 import)·T2(무관)
+    둘 다 절대 임계 초과 → T1 RED·T2 WARN(exit 0에 해당하는 slow_files_absolute
+    반환값 — narrowed changed_files가 실제로 red/warn 갈림을 만든다는 파이프라인
+    전체 증거, test_files_depending_on_modules의 출력을 그대로 slow_files_absolute의
+    changed_files 인자에 먹인다)."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_t1_depends.py").write_text("from app.x import Y\n")
+    (tmp_path / "tests" / "test_t2_unrelated.py").write_text("from app.other import Z\n")
+
+    narrowed = mod.test_files_depending_on_modules(
+        mod.changed_app_files_to_modules(frozenset({"app/x.py"})),
+        ["tests/test_t1_depends.py", "tests/test_t2_unrelated.py"],
+        backend_dir=tmp_path,
+    )
+    assert narrowed == ["tests/test_t1_depends.py"]
+
+    weights = {"tests/test_t1_depends.py": 30.0, "tests/test_t2_unrelated.py": 30.0}
+    elapsed = {"tests/test_t1_depends.py": 100.0, "tests/test_t2_unrelated.py": 100.0}  # 둘 다 threshold(75.0) 초과
+    red, warn = mod.slow_files_absolute(elapsed, weights, changed_files=frozenset(narrowed))
+    assert red == ["tests/test_t1_depends.py"]
+    assert warn == ["tests/test_t2_unrelated.py"]
+
+
+def test_ac1_test_file_direct_change_stays_red_even_if_unrelated_to_app_module(tmp_path: Path):
+    """AC1 — "테스트 파일 직접 변경은 RED 유지": narrowed 목록은 app-모듈-의존
+    테스트뿐 아니라 PR이 직접 바꾼 테스트 파일도 포함해야 한다(호출부 책임 —
+    ci.yml은 backend_test_files_changed가 __ALL__이 아닐 때의 기존 경로를 그대로
+    쓰므로 이 축은 무변경이지만, __ALL__+app-narrowing 경로에서도 "이 PR이 신설/
+    수정한 테스트 파일 자신"은 기존 classify 스크립트의 줄1 로직이 __ALL__로
+    뭉개므로, T3(무관·비변경)까지만 이 테스트로 고정하고 직접변경 케이스는
+    narrowed 목록에 수동으로 합쳐도 RED가 유지됨을 보인다(합집합 계약 자체는
+    ci.yml이 아니라 호출부/향후 확장 몫 — 여기선 slow_files_absolute가 그 합집합을
+    올바로 RED 처리한다는 것만 고정)."""
+    mod = _load()
+    weights = {"tests/test_t1_depends.py": 30.0, "tests/test_directly_changed.py": 30.0}
+    elapsed = {"tests/test_t1_depends.py": 100.0, "tests/test_directly_changed.py": 100.0}
+    narrowed = frozenset({"tests/test_t1_depends.py"}) | frozenset({"tests/test_directly_changed.py"})
+    red, warn = mod.slow_files_absolute(elapsed, weights, changed_files=narrowed)
+    assert set(red) == {"tests/test_t1_depends.py", "tests/test_directly_changed.py"}
+    assert warn == []
+
+
+def test_ac1_mutation_without_narrowing_unrelated_file_also_red():
+    """뮤테이션 — narrowing을 걷어내면(changed_files=None, #4163 처방 前 동작) 무관
+    파일(T2)도 RED로 되돌아간다 — narrowing이 실제로 이 값을 갈랐음을 고정(#4152의
+    기존 뮤테이션 관례와 동형)."""
+    mod = _load()
+    weights = {"tests/test_t1_depends.py": 30.0, "tests/test_t2_unrelated.py": 30.0}
+    elapsed = {"tests/test_t1_depends.py": 100.0, "tests/test_t2_unrelated.py": 100.0}
+    red, warn = mod.slow_files_absolute(elapsed, weights, changed_files=None)
+    assert set(red) == {"tests/test_t1_depends.py", "tests/test_t2_unrelated.py"}, (
+        f"narrowing 없이는(구현 걷어냄) 무관 파일도 RED로 재현돼야: {red}"
+    )
+
+
+def test_incident4152a_unrelated_file_over_absolute_threshold_is_warn_not_red():
+    """⭐AC1/AC2 — PR#4351 실사고: test_3502(261s, weight 70.0 → 절대 임계 175.0s 초과)
+    이지만 이 PR의 changed_files 밖(FE h1 파일 9개뿐)이라 RED 아니라 WARN — 잡 초록."""
+    mod = _load()
+    elapsed = {"tests/test_3502_insights_board.py": 261.0}
+    weights = {"tests/test_3502_insights_board.py": _INCIDENT4152A_WEIGHT}
+    red, warn = mod.slow_files_absolute(
+        elapsed, weights, changed_files=frozenset({"apps/web/src/app/h1-unrelated.tsx"}),
+    )
+    assert red == [], f"무관 파일인데도 RED: {red}"
+    assert warn == ["tests/test_3502_insights_board.py"]
+
+
+def test_incident4152b_own_provisional_weight_file_is_excluded_not_red():
+    """⭐AC4 — PR#4355 실사고: test_3804(80s, weight 25.0 provisional)는 이 PR 자신의
+    신설 테스트(changed_files 안)라 AC2로는 못 구한다 — provisional 제외(AC4)로 red도
+    warn도 0(등재값 자체를 못 믿는 축이라 이 게이트가 no-op, #3558 별도 경고는 무변)."""
+    mod = _load()
+    elapsed = {"tests/test_3804_prod_promotion_bridge_0354a.py": 80.0}
+    weights = {"tests/test_3804_prod_promotion_bridge_0354a.py": _INCIDENT4152B_WEIGHT}
+    provisional = frozenset({"tests/test_3804_prod_promotion_bridge_0354a.py"})
+    red, warn = mod.slow_files_absolute(
+        elapsed, weights, provisional_files=provisional,
+        changed_files=frozenset({"tests/test_3804_prod_promotion_bridge_0354a.py"}),
+    )
+    assert red == [], f"provisional인데도 RED: {red}"
+    assert warn == [], f"provisional은 WARN도 0이어야 함(등재값 자체를 못 믿음): {warn}"
+
+
+def test_incident4152b_mutation_without_provisional_exclusion_would_be_red():
+    """뮤테이션(AC4) — provisional_files를 안 주면(구현을 걷어내면) 같은 표본이 RED로
+    되돌아가야 한다 — AC4의 provisional 제외가 실제로 이 값을 살리고 있음을 고정."""
+    mod = _load()
+    elapsed = {"tests/test_3804_prod_promotion_bridge_0354a.py": 80.0}
+    weights = {"tests/test_3804_prod_promotion_bridge_0354a.py": _INCIDENT4152B_WEIGHT}
+    red, warn = mod.slow_files_absolute(
+        elapsed, weights, changed_files=frozenset({"tests/test_3804_prod_promotion_bridge_0354a.py"}),
+    )
+    assert red == ["tests/test_3804_prod_promotion_bridge_0354a.py"], (
+        f"provisional 제외 없이는 RED가 재현돼야 하는데: {red}"
+    )
+
+
+def test_changed_files_none_treats_everything_as_changed_regression_zero():
+    """회귀 0 — changed_files=None(호출측이 diff 정보를 안 줬을 때)이면 예전처럼 전부
+    RED 후보(안전측 폴백) — AC2의 WARN 완화가 새 인자를 안 쓰는 기존 소비처까지 조용히
+    관대해지게 만들면 안 된다."""
+    mod = _load()
+    elapsed = {"tests/test_3502_insights_board.py": 261.0}
+    weights = {"tests/test_3502_insights_board.py": _INCIDENT4152A_WEIGHT}
+    red, warn = mod.slow_files_absolute(elapsed, weights, changed_files=None)
+    assert red == ["tests/test_3502_insights_board.py"]
+    assert warn == []
+
+
+def test_ac3_mutation_changed_file_over_absolute_threshold_stays_red():
+    """AC3 — 진짜 폭주는 여전히 잡힌다: 변경 파일(diff 안)이 자기 weight×2.5를 넘으면
+    provisional이 아닌 한 RED 유지(«전부 다 봐주는» 가드로 변질되면 안 된다, #3396의
+    AC5와 동형 회귀 원칙)."""
+    mod = _load()
+    elapsed = {"tests/genuinely_slow.py": 100.0}
+    weights = {"tests/genuinely_slow.py": 5.0}  # threshold = max(5*2.5, 60) = 60, 100 > 60
+    red, warn = mod.slow_files_absolute(
+        elapsed, weights, changed_files=frozenset({"tests/genuinely_slow.py"}),
+    )
+    assert red == ["tests/genuinely_slow.py"]
+    assert warn == []
+
+
+def test_unweighted_files_are_not_touched_by_absolute_gate():
+    """회귀 0 — unweighted 파일은 이 게이트의 대상이 아니다(#3392가 전담, 무변)."""
+    mod = _load()
+    elapsed = {"tests/brand_new_unweighted.py": 999.0}
+    red, warn = mod.slow_files_absolute(elapsed, {}, changed_files=frozenset())
+    assert red == [] and warn == []
+
+
 def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys, monkeypatch):
     """_check_elapsed_mode()를 통째로 돌려 오늘 실사고 표본이 exit 0(정상 판정)이
     되는지 e2e로 확인한다(파일 파싱·가중치 로딩·판정 전체 경로). 이 픽스처는 PR
@@ -498,17 +809,55 @@ def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys, monke
     재현하는 것이 목적이라 **그 시점 값을 고정**해야 한다 — 실 weights.json을 그대로
     읽으면(story #3558, 2026-09-06 전수 재측정으로 값이 갱신된 뒤) 이 역사적 시나리오
     재현이 매번 지금 시점의 등재값에 따라 값이 달라져 깨진다(실측 fix 자체가 이
-    회귀를 노출시킴 — load_weights를 monkeypatch해 고정)."""
+    회귀를 노출시킴 — load_weights를 monkeypatch해 고정).
+
+    story #4152 이관 — `_check_elapsed_mode`는 이제 run-relative 정규화(#3396) 대신
+    diff-scoping(AC2)으로 판정한다. 이 25개 파일은 실측 근거(`git show 4bfa823b4
+    --stat`, PR#3753 실 diff)로 확認된 «PR#3753과 무관한 파일들»이다(그 PR이 실제로
+    건드린 테스트는 test_3666_channel_post_image_import.py·test_3753_*.py 셋뿐 —
+    test_3373_channel_connections.py는 없다). `--changed-files`로 그 사실을 알리면
+    WARN(exit 0)만 — 옛 run-relative 값(중앙값 5.91배)은 더 이상 판정에 안 쓰인다."""
     mod = _load()
     monkeypatch.setattr(mod, "load_weights", lambda: _RUN_33773872963_SHARD0_WEIGHTS)
     elapsed_path = tmp_path / "elapsed.tsv"
     elapsed_path.write_text(
         "\n".join(f"{f}\t{s}" for f, s in _RUN_33773872963_SHARD0_ELAPSED.items())
     )
-    exit_code = mod._check_elapsed_mode(elapsed_path)
+    changed_files_path = tmp_path / "changed.txt"
+    changed_files_path.write_text(
+        "tests/test_3666_channel_post_image_import.py\n"
+        "tests/test_3753_image_integrity_validator.py\n"
+        "tests/test_3753_mcp_import_image_path.py\n"
+    )
+    exit_code = mod._check_elapsed_mode(elapsed_path, changed_files_path=changed_files_path)
     assert exit_code == 0
     captured = capsys.readouterr()
     assert "OK" in captured.err
+    assert "::warning::" in captured.out  # AC2 — 무관 파일 초과는 경고로 남는다(가시성)
+
+
+def test_check_elapsed_mode_without_changed_files_arg_is_conservative_red(tmp_path, capsys, monkeypatch):
+    """story #4152 회귀 0 — `--changed-files` 생략(diff 정보 없음)이면 전부 RED 후보(안전측 폴백)는 그대로다.
+
+    story #4206 — 판정선은 샤드 전체를 대조군으로 잰 러너 배율만큼 올라가지만 상한 1.5(까디르 P1 · PO 결정)라, 이
+    픽스처(PR#3753 당시 shard 0, 중앙값 약 5.9배)는 상한을 넘어 ① 그대로 RED(exit 1)다 — 상한 밖 둔화는 러너 탓인지
+    코드 탓인지 가드가 가를 수 없어 안전측. ② 같은 러너 위에서 파일 하나만 더 튀어도 당연히 RED."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: _RUN_33773872963_SHARD0_WEIGHTS)
+    elapsed_path = tmp_path / "elapsed.tsv"
+    elapsed_path.write_text(
+        "\n".join(f"{f}\t{s}" for f, s in _RUN_33773872963_SHARD0_ELAPSED.items())
+    )
+    assert mod._check_elapsed_mode(elapsed_path) == 1
+    assert "::error::" in capsys.readouterr().out
+
+    lone = next(iter(_RUN_33773872963_SHARD0_WEIGHTS))
+    spiked = dict(_RUN_33773872963_SHARD0_ELAPSED) | {
+        lone: mod.absolute_slow_threshold_sec(_RUN_33773872963_SHARD0_WEIGHTS[lone]) * 20,
+    }
+    elapsed_path.write_text("\n".join(f"{f}\t{s}" for f, s in spiked.items()))
+    assert mod._check_elapsed_mode(elapsed_path) == 1
+    assert "::error::" in capsys.readouterr().out
 
 
 def test_check_elapsed_mode_returns_1_and_prints_error_when_genuinely_slow(tmp_path, capsys, monkeypatch):
@@ -1116,3 +1465,878 @@ def test_s3911_genuinely_hanging_file_still_caught_after_rebaseline():
     slow, threshold, _ = mod.slow_files_normalized(elapsed, weights)
     assert slow == ["tests/test_3497_insight_snapshots.py"]
     assert threshold == 60.0  # 정상 러너(배율 1.0)
+
+
+# ─── story #4206 — 러너 속도 배율(대조군)·push 범위 ─────────────────────────────────────
+
+_RUNS_4206 = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "story_4206_runner_guard_runs.json").read_text()
+)
+
+
+def _judge_4206(run: dict, *, changed_files, use_factor: bool):
+    mod = _load()
+    changed = frozenset(changed_files) if changed_files is not None else None
+    provisional = frozenset(run["provisional"])
+    factor = (
+        mod.runner_speed_factor(
+            run["elapsed"], run["weights"], exclude=changed or frozenset(), provisional_files=provisional,
+        )
+        if use_factor else 1.0
+    )
+    red, _warn = mod.slow_files_absolute(
+        run["elapsed"], run["weights"], provisional_files=provisional, changed_files=changed, runner_factor=factor,
+    )
+    return red, factor
+
+
+@pytest.mark.parametrize("run", _RUNS_4206, ids=[r["label"] for r in _RUNS_4206])
+def test_4206_old_judgment_reproduces_todays_red(run):
+    """AC3 전제 — 옛 판정(diff 정보 없음·배율 1.0)이 오늘 attempt-1 로그의 RED 파일을 그대로 재현한다(픽스처가
+    실제 입력임을 고정: job 로그의 파일별 elapsed · 그 시점 등재 weight)."""
+    red, _ = _judge_4206(run, changed_files=None, use_factor=False)
+    assert red == run["observed_red"]
+
+
+@pytest.mark.parametrize("run", _RUNS_4206, ids=[r["label"] for r in _RUNS_4206])
+def test_4206_new_judgment_passes_todays_runs(run):
+    """⭐AC3 — 새 판정(push·PR 실제 diff의 변경 파일 + 대조군 러너 배율)으로 오늘 세 실행(6개 RED 샤드) 전부 RED 0.
+    changed_files = 그 실행의 실제 diff를 classify_backend_test_diff_scope.sh(+#4163 app 모듈 참조 좁힘)로 판정한 값."""
+    red, factor = _judge_4206(run, changed_files=run["changed_files"], use_factor=True)
+    assert red == [], f"{run['label']} factor={factor:.2f} red={red}"
+
+
+def test_4206_each_half_alone_is_not_enough():
+    """근거(선택 이유) — 둘 중 하나만으로는 오늘을 못 구한다: diff만 쓰면 push ece08100e shard 5의 test_4098
+    (events.py 변경의 참조 테스트, 73s>60s)이 남고, 배율만 쓰면(diff 없음) 등재값이 낡은 파일(test_3806 등)이 남는다."""
+    diff_only = [r for run in _RUNS_4206 for r in _judge_4206(run, changed_files=run["changed_files"], use_factor=False)[0]]
+    factor_only = [r for run in _RUNS_4206 for r in _judge_4206(run, changed_files=None, use_factor=True)[0]]
+    assert diff_only == ["tests/test_4098_gate_linked_channel_draft_realdb.py"]
+    assert "tests/test_3806_ads_boost_gate.py" in factor_only
+
+
+def test_4206_slow_runner_changed_file_passes_but_lone_regression_stays_red():
+    """AC2 — 느린 러너 흉내(대조군 전부 ×1.4 — 상한 1.5 안): 변경 파일도 그만큼 느리면 통과. 러너는 정상(대조군 ×1)인데
+    변경 파일만 ×3이면 RED(양성 대조 — 배율이 «진짜로 느려진 변경 파일»까지 덮지 않는다)."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    changed = frozenset({"tests/changed.py"})
+
+    slow_runner = {f"tests/c{i}.py": 42.0 for i in range(6)} | {"tests/changed.py": 100.0}
+    factor = mod.runner_speed_factor(slow_runner, weights, exclude=changed)
+    assert factor == pytest.approx(1.4)
+    red, _ = mod.slow_files_absolute(slow_runner, weights, changed_files=changed, runner_factor=factor)
+    assert red == []
+
+    normal_runner = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 90.0}
+    factor = mod.runner_speed_factor(normal_runner, weights, exclude=changed)
+    assert factor == 1.0
+    red, _ = mod.slow_files_absolute(normal_runner, weights, changed_files=changed, runner_factor=factor)
+    assert red == ["tests/changed.py"]
+
+
+def test_4206_mutation_without_factor_slow_runner_is_red():
+    """뮤테이션 — 배율을 빼면(1.0) 같은 느린 러너 표본이 RED로 되돌아간다."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    slow_runner = {f"tests/c{i}.py": 42.0 for i in range(6)} | {"tests/changed.py": 100.0}
+    red, _ = mod.slow_files_absolute(slow_runner, weights, changed_files=frozenset({"tests/changed.py"}))
+    assert red == ["tests/changed.py"]
+
+
+def test_4206_factor_never_lowers_threshold_and_needs_min_sample():
+    """빠른 러너(대조군 ×0.5)는 임계를 좁히지 않는다(1.0) · 대조군이 MIN_RATIO_SAMPLE 미만이면 1.0 ·
+    변경 파일·provisional은 대조군에서 빠진다."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(4)}
+    fast = {f"tests/c{i}.py": 15.0 for i in range(4)}
+    assert mod.runner_speed_factor(fast, weights) == 1.0
+    slow = {f"tests/c{i}.py": 90.0 for i in range(4)}
+    assert mod.runner_speed_factor(slow, weights) == mod.RUNNER_FACTOR_CAP  # 3.0 → 상한(까디르 P1)
+    assert mod.runner_speed_factor(slow, weights, cap=None) == 3.0
+    assert mod.runner_speed_factor(slow, weights, exclude=frozenset({"tests/c0.py", "tests/c1.py"})) == 1.0
+    assert mod.runner_speed_factor(
+        slow, weights, provisional_files=frozenset({"tests/c0.py", "tests/c1.py"}),
+    ) == 1.0
+
+
+def test_4206_check_elapsed_mode_uses_factor_end_to_end(tmp_path, capsys, monkeypatch):
+    """_check_elapsed_mode 전체 경로 — 오늘 push ece08100e shard 5(가장 빡빡했던 샤드) 입력 그대로: 변경 파일 목록을
+    주면 exit 0 · 배율이 로그에 찍힌다."""
+    mod = _load()
+    run = next(r for r in _RUNS_4206 if r["label"] == "push ece08100e shard 5")
+    monkeypatch.setattr(mod, "load_weights", lambda: run["weights"])
+    monkeypatch.setattr(mod, "load_raw_entries", lambda: [{"file": f, "provisional": True} for f in run["provisional"]])
+    elapsed_path = tmp_path / "elapsed.tsv"
+    elapsed_path.write_text("\n".join(f"{f}\t{s}" for f, s in run["elapsed"].items()))
+    changed_path = tmp_path / "changed.txt"
+    changed_path.write_text("\n".join(run["changed_files"]))
+    assert mod._check_elapsed_mode(elapsed_path, changed_files_path=changed_path) == 0
+    err = capsys.readouterr().err
+    assert "러너 속도 배율" in err and "OK" in err
+
+
+
+def test_4206_code_wide_slowdown_is_red_again_because_of_the_cap():
+    """까디르 P1 — 코드발 전역 둔화(conftest·공용 픽스처)로 **모든** 파일이 5배: 상한이 없으면 대조군 중앙값도 5라 판정선이
+    같이 올라가 RED 0이었다. 상한 1.5로 다시 RED. 뮤테이션: 상한 제거(cap=None) → RED 0으로 이 테스트 RED.
+
+    정직한 한계(수치): 판정선 = 등재 weight × 2.5(#4152) × 배율(≤1.5) → 전역 둔화는 등재값의 **3.75배를 넘어야** RED다.
+    3배 전역 둔화는 경고 줄(배율 3.0 > 1.3)로만 보인다 — 아래 3.5배 대조가 그 경계를 고정한다."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    changed = frozenset({"tests/changed.py"})
+    for mult, expect_red in ((5.0, True), (3.5, False)):
+        everything = {f: w * mult for f, w in weights.items()}
+        factor = mod.runner_speed_factor(everything, weights, exclude=changed)
+        assert factor == mod.RUNNER_FACTOR_CAP
+        red, _ = mod.slow_files_absolute(everything, weights, changed_files=changed, runner_factor=factor)
+        assert (red == ["tests/changed.py"]) is expect_red, (mult, red)
+
+
+def test_4206_capped_factor_still_clears_todays_twenty():
+    """PO 결정 근거 — 상한 1.5에서도 오늘 RED 20건 픽스처는 전부 0(위 new_judgment 테스트가 상한 적용 판정으로 잰다 ·
+    여기선 각 샤드 적용 배율이 상한 이하임을 같이 확인)."""
+    for run in _RUNS_4206:
+        red, factor = _judge_4206(run, changed_files=run["changed_files"], use_factor=True)
+        assert red == [] and factor <= 1.5, (run["label"], factor, red)
+
+
+def test_4206_factor_over_warn_threshold_prints_big_summary_line(tmp_path, capsys, monkeypatch):
+    """배율 1.3 초과면 annotation + 잡 요약(GITHUB_STEP_SUMMARY)에 경고 줄 — 1.0~1.5배 전역 둔화가 사람에게 보이는 유일한
+    자리. 배율 1.4 대조군 · 1.2면 안 뜸."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)}
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", lambda: [])
+    for ratio, expect in ((1.4, True), (1.2, False)):
+        summary = tmp_path / f"summary_{ratio}.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+        elapsed_path = tmp_path / f"elapsed_{ratio}.tsv"
+        elapsed_path.write_text("\n".join(f"{f}\t{w * ratio}" for f, w in weights.items()))
+        changed_path = tmp_path / "changed.txt"
+        changed_path.write_text("")
+        assert mod._check_elapsed_mode(elapsed_path, changed_files_path=changed_path) == 0
+        out = capsys.readouterr().out
+        assert ("러너 속도 배율" in out) is expect, (ratio, out)
+        assert summary.exists() is expect
+
+
+# ─── story #4283 — 한 번 재실행으로 확인한 뒤에만 RED · 판정 여유 붕괴 경고 ──────────────
+
+# 카드의 네 run(PO · 까디르 2026-09-24) — 1차 경과 · 그 샤드의 적용 러너 배율(잡 로그 «실측 → 적용» 줄) · 재실행 경과.
+# 재실행 경과는 같은 run attempt 2 잡 로그의 `elapsed:` 줄(36018618543 · 36040923585 · 36041927912). 36035793068은
+# attempt 2 없이 새 커밋으로 넘어가 재실행 값이 없다 — 그 둘만 성공 run 17개의 CI 중앙값(test_2636 41s · test_3815 34s)을
+# 대리값으로 쓴다(그 파일이 평소 속도로 한 번 더 돈다는 가정 — 라벨로 구분).
+_CARD_RUNS_4283 = [
+    {"label": "36018618543 a1 샤드4", "file": "tests/test_3313_recipe_notification_render.py", "first": 108.0, "factor": 1.07, "rerun": 27.0},
+    {"label": "36035793068 샤드1(재실행=CI 중앙값 대리)", "file": "tests/test_2636_custom_event_registration.py", "first": 156.0, "factor": 1.50, "rerun": 41.0},
+    {"label": "36035793068 샤드1(재실행=CI 중앙값 대리)", "file": "tests/test_3815_youtube_publish.py", "first": 102.0, "factor": 1.50, "rerun": 34.0},
+    {"label": "36040923585 a1 샤드7", "file": "tests/test_4191_recipe_newsletter_send_realdb.py", "first": 82.0, "factor": 1.25, "rerun": 25.0},
+    {"label": "36041927912 a1 샤드6", "file": "tests/test_3809_org_cost_summary.py", "first": 141.0, "factor": 1.50, "rerun": 40.0},
+]
+
+
+def _judge_4283(mod, case, *, rerun):
+    weights = mod.load_weights()
+    red, _ = mod.slow_files_absolute(
+        {case["file"]: case["first"]}, weights, changed_files=frozenset({case["file"]}), runner_factor=case["factor"],
+    )
+    if not red:
+        return [], []
+    return mod.confirmed_slow_files(red, {case["file"]: rerun}, weights, runner_factor=case["factor"])
+
+
+@pytest.mark.parametrize("case", _CARD_RUNS_4283, ids=[f"{c['label']} {c['file']}" for c in _CARD_RUNS_4283])
+def test_4283_card_runs_are_green_with_the_rerun_they_actually_got(case):
+    """⭐AC(양성 대조 ②) — 카드의 네 run 재현 입력(현재 등재 weight): 1차 판정에서 이미 통과하거나(weight 갱신) 재실행
+    경과로 내려와 RED 0."""
+    confirmed, _ = _judge_4283(_load(), case, rerun=case["rerun"])
+    assert confirmed == [], case
+
+
+@pytest.mark.parametrize("case", _CARD_RUNS_4283, ids=[f"{c['label']} {c['file']}" for c in _CARD_RUNS_4283])
+def test_4283_same_input_with_a_deterministic_slowdown_stays_red(case):
+    """⭐AC(양성 대조 ①) — 같은 입력인데 재실행도 1차만큼 느리면(PR이 그 경로를 결정적으로 느리게 만든 경우) RED.
+    1차에서 판정선 안인 파일은 재실행까지 안 가므로, 판정선을 넘을 만큼 느려진 경우(1차 = 판정선 × 1.3)로 잰다."""
+    mod = _load()
+    weights = mod.load_weights()
+    slow = mod.absolute_slow_threshold_sec(weights[case["file"]]) * case["factor"] * 1.3
+    slowed = dict(case, first=slow)
+    confirmed, _ = _judge_4283(mod, slowed, rerun=slow)
+    assert confirmed == [case["file"]]
+
+
+def test_4283_confirmed_slow_files_rules():
+    """재실행도 넘으면 RED · 내려오면 해제 · 재실행 기록이 없으면(재실행이 못 돈 파일) RED(안전측) · 판정선은 1차 배율."""
+    mod = _load()
+    weights = {"tests/a.py": 30.0, "tests/b.py": 30.0, "tests/c.py": 30.0}
+    # 판정선 = max(30×2.5, 60) × 1.2 = 90s.
+    confirmed, cleared = mod.confirmed_slow_files(
+        ["tests/a.py", "tests/b.py", "tests/c.py"], {"tests/a.py": 95.0, "tests/b.py": 85.0}, weights, runner_factor=1.2,
+    )
+    assert confirmed == ["tests/a.py", "tests/c.py"]
+    assert cleared == ["tests/b.py"]
+
+
+def _write_run(tmp_path, name, elapsed):
+    path = tmp_path / name
+    path.write_text("\n".join(f"{f}\t{s}" for f, s in elapsed.items()))
+    return path
+
+
+def test_4283_check_then_confirm_end_to_end(tmp_path, capsys, monkeypatch):
+    """ci.yml이 부르는 순서 그대로: --check-elapsed --suspects-out → exit 3 · 후보 파일 → --confirm-elapsed.
+    재실행에서 내려오면 exit 0 + 두 값을 ::warning:: 로(PO 조건 ①) · 재실행도 넘으면 exit 1 + ::error::."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    first = _write_run(tmp_path, "first.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 100.0})
+    changed = tmp_path / "changed.txt"
+    changed.write_text("tests/changed.py\n")
+    suspects = tmp_path / "suspects.txt"
+
+    assert mod._check_elapsed_mode(first, changed_files_path=changed, suspects_out_path=suspects) == mod.CONFIRM_RERUN_EXIT
+    assert suspects.read_text() == "tests/changed.py\n"
+    assert "::error::" not in capsys.readouterr().out
+
+    spike = _write_run(tmp_path, "rerun_spike.tsv", {"tests/changed.py": 31.0})
+    assert mod._confirm_elapsed_mode(first, spike, suspects, changed_files_path=changed) == 0
+    out = capsys.readouterr().out
+    assert "::warning::러너 정규화 가드(story #4283) — tests/changed.py 1차 100s" in out and "재실행 31s" in out
+    assert "::error::" not in out
+
+    real = _write_run(tmp_path, "rerun_real.tsv", {"tests/changed.py": 98.0})
+    assert mod._confirm_elapsed_mode(first, real, suspects, changed_files_path=changed) == 1
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/changed.py" in capsys.readouterr().out
+
+
+def test_4283_more_suspects_than_the_cap_is_red_without_rerun(tmp_path, capsys, monkeypatch):
+    """1차 초과가 CONFIRM_RERUN_MAX_FILES를 넘으면(광범위 둔화) 재실행 없이 바로 RED(exit 1) · 후보 파일 안 씀.
+    뮤테이션: 상한 검사를 빼면 exit 3으로 이 테스트 RED."""
+    mod = _load()
+    n = mod.CONFIRM_RERUN_MAX_FILES + 1
+    changed_names = [f"tests/x{i}.py" for i in range(n)]
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {f: 30.0 for f in changed_names}
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    first = _write_run(tmp_path, "first.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {f: 100.0 for f in changed_names})
+    changed = tmp_path / "changed.txt"
+    changed.write_text("\n".join(changed_names))
+    suspects = tmp_path / "suspects.txt"
+    assert mod._check_elapsed_mode(first, changed_files_path=changed, suspects_out_path=suspects) == 1
+    assert not suspects.exists()
+    assert capsys.readouterr().out.count("::error::러너 정규화 절대 가드 초과") == n
+
+
+def test_4283_without_suspects_out_the_old_contract_holds(tmp_path, monkeypatch):
+    """--suspects-out을 안 주는 호출(예전 호출부)은 예전 그대로 바로 RED(exit 1)."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    first = _write_run(tmp_path, "first.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 100.0})
+    changed = tmp_path / "changed.txt"
+    changed.write_text("tests/changed.py\n")
+    assert mod._check_elapsed_mode(first, changed_files_path=changed) == 1
+
+
+def test_4283_ci_yml_reruns_suspects_before_confirming():
+    """ci.yml 배선 — 1차 판정에 --suspects-out, exit 3이면 같은 격리 루프 스크립트로 후보만 재실행 → 재실행 실패는
+    RED → --confirm-elapsed. 순서가 뒤집히거나 한 줄이 빠지면 이 테스트 RED."""
+    text = (_REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    i_check = text.index('--suspects-out "$suspects_file"')
+    i_gate = text.index('if [ "$slow_exit" -eq 3 ]; then', i_check)
+    i_rerun = text.index('FILES_LIST_FILE="$suspects_file"', i_gate)
+    i_loop = text.index("run-destructive-shard-loop.sh", i_rerun)
+    i_failed = text.index('if [ -s "$rerun_failed" ]; then', i_loop)
+    i_confirm = text.index('--confirm-elapsed "$elapsed_file" "$rerun_elapsed" "$suspects_file"', i_failed)
+    i_json = text.index("--elapsed-to-json", i_confirm)
+    assert i_check < i_gate < i_rerun < i_loop < i_failed < i_confirm < i_json
+
+
+# 카드 7건에 걸렸던 · 판정 여유가 무너졌던 12개 파일의 CI 중앙값(성공 run 17개 durations 산출물 · 2026-09-17~24).
+_CI_MEDIAN_4283 = {
+    "tests/test_3808_x_thread_publish.py": 36.0, "tests/test_3815_youtube_publish.py": 34.0,
+    "tests/test_3813_stibee_esp_connection.py": 28.0, "tests/test_3806_ads_boost_gate.py": 35.0,
+    "tests/test_3816_ghost_connect.py": 31.0, "tests/test_4042_evidence_kind_fail_closed_registry_realdb.py": 31.0,
+    "tests/test_3806_ads_boost_execution.py": 29.0, "tests/test_3813_newsletter_send_gate.py": 29.0,
+    "tests/test_3806_ads_boost_spend.py": 37.0, "tests/test_3809_org_cost_summary.py": 37.0,
+    "tests/test_4191_recipe_newsletter_send_realdb.py": 35.0, "tests/test_3828_conversation_thread_link.py": 33.0,
+}
+
+
+def test_4283_refreshed_weights_restore_the_guard_margin():
+    """갱신 뒤 12개 파일 전부 판정선이 CI 중앙값의 GUARD_MARGIN_WARN배 이상(= 여유 붕괴 경고 대상 아님) · 등재 source에
+    출처가 박혀 있다. 누가 이 값을 옛 로컬값으로 되돌리면 RED."""
+    mod = _load()
+    weights = mod.load_weights()
+    entries = {e["file"]: e for e in mod.load_raw_entries()}
+    assert mod.guard_margin_collapsed(_CI_MEDIAN_4283, weights) == []
+    for f in _CI_MEDIAN_4283:
+        assert "story #4283" in entries[f]["source"] and entries[f].get("provisional") is not True, f
+
+
+def test_4283_margin_collapse_warns_after_three_runs_and_resets(tmp_path, capsys, monkeypatch):
+    """PO 조건 ② — 다음 낡음이 사람 눈에 먼저: 판정선이 실측의 2배 미만인 run이 3번 연속이면 audit이 ::warning:: +
+    잡 요약 표. 2번까진 안 뜸(단발 튐 거름) · 발화 뒤 리셋 · 정상 run이 끼면 스트릭 0.
+    옛 등재값(test_3808 3.9s) × CI 중앙값 36s 그대로 — 판정선 60s = 실측의 1.67배."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/test_3808_x_thread_publish.py": 3.9})
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    state_path = tmp_path / "drift-state.json"
+
+    def _run(run_id, elapsed):
+        (artifact_dir / "shard-durations-0.json").write_text(
+            json.dumps({"shard": 0, "durations": {"tests/test_3808_x_thread_publish.py": elapsed}})
+        )
+        mod._audit_durations_mode(artifact_dir, drift_state_path=state_path, run_id=run_id)
+        return capsys.readouterr().out
+
+    tag = "::warning::절대 가드 판정 여유 붕괴(story #4283): tests/test_3808_x_thread_publish.py"
+    assert tag not in _run("r1", 36.0)
+    assert tag not in _run("r2", 36.0)
+    assert tag not in _run("r2", 36.0)  # 같은 run 재시도 — 이중 카운트 없음.
+    assert tag in _run("r3", 36.0)
+    assert "절대 가드 판정 여유 붕괴" in summary.read_text()
+    assert tag not in _run("r4", 36.0)  # 발화 뒤 리셋.
+    assert tag not in _run("r5", 20.0)  # 판정선 60s / 20s = 3배 — 정상, 스트릭 0.
+    assert tag not in _run("r6", 36.0)
+    assert tag not in _run("r7", 36.0)
+    assert tag in _run("r8", 36.0)
+
+
+def test_4283_margin_state_is_backward_compatible(tmp_path):
+    """옛 모양 상태 파일(margin_streaks 키 없음)은 빈 스트릭으로 읽히고 · 비어 있으면 저장에도 안 실린다."""
+    mod = _load()
+    state_path = tmp_path / "s.json"
+    state_path.write_text(json.dumps({"run_id": "r", "streaks": {"tests/a.py": 1}}))
+    assert mod._load_drift_state(state_path)["margin_streaks"] == {}
+    mod._save_drift_state(state_path, run_id="r", streaks={}, margin_streaks={})
+    assert json.loads(state_path.read_text()) == {"run_id": "r", "streaks": {}}
+
+
+# ─── story #4283(까디르 P1) — 워크플로 스텝 원문을 GitHub 기본 셸(`bash -e {0}`)로 그대로 돌린다 ──────────────
+# 이 스텝엔 `shell:`이 없어(워크플로 `defaults`도 없음) GitHub 기본 `bash -e {0}`로 돈다. 첫 구현은 `set -uo pipefail`만
+# 적어 -e가 켜진 채였고, `--check-elapsed`가 exit 3을 내는 순간 스텝이 죽어 재실행 갈래에 못 갔다. 로컬 e2e는 -e 없는
+# 셸로 돌려 이걸 못 봤다 — 그래서 여기선 ci.yml의 `run:` 텍스트를 그대로 꺼내 `bash -e`로 실행한다. 바꾸는 건 `${{ }}`
+# 값 · `/tmp/` 위치 · `uv`(→ 이 파이썬으로 실제 스크립트 실행) · 격리 루프 스크립트(→ 시나리오대로 경과를 쓰는 스텁)뿐이고,
+# 판정은 진짜 `shard_destructive_tests.py` + 진짜 등재 weight가 한다.
+
+_LOOP_STUB = r"""#!/usr/bin/env bash
+# 격리 루프 스텁 — 부를 때마다 call 번호를 올리고 $SCENARIO_DIR/call_N.tsv의 경과를 FILES_LIST_FILE 순서대로 쓴다.
+set -u
+n=$(( $(cat "$SCENARIO_DIR/calls" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$SCENARIO_DIR/calls"
+: > "$FAILED_OUT_FILE"
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  sec=$(awk -F'\t' -v f="$f" '$1==f {print $2}' "$SCENARIO_DIR/call_$n.tsv")
+  printf '%s\t%s\n' "$f" "${sec:-1}" >> "$ELAPSED_OUT_FILE"
+done < "$FILES_LIST_FILE"
+[ -f "$SCENARIO_DIR/fail_$n.txt" ] && cat "$SCENARIO_DIR/fail_$n.txt" >> "$FAILED_OUT_FILE"
+[ -f "$SCENARIO_DIR/unreadable_$n" ] && chmod 000 "$FAILED_OUT_FILE"
+exit "$(cat "$SCENARIO_DIR/exit_$n" 2>/dev/null || echo 0)"
+"""
+
+
+def _bash5() -> str | None:
+    import shutil
+    import subprocess
+
+    for cand in (shutil.which("bash"), "/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"):
+        if not cand or not Path(cand).exists():
+            continue
+        out = subprocess.run([cand, "-c", "echo ${BASH_VERSINFO[0]}"], capture_output=True, text=True, check=False).stdout.strip()
+        if out.isdigit() and int(out) >= 4:  # mapfile — macOS 기본 /bin/bash 3.2엔 없다.
+            return cand
+    return None
+
+
+def _destructive_step_run() -> str:
+    import yaml
+
+    wf = yaml.safe_load((_REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    step = next(
+        s for s in wf["jobs"]["backend-test-destructive"]["steps"]
+        if s.get("name", "").startswith("Run pytest (destructive schema")
+    )
+    # 전제 고정: 셸을 안 적었다 = GitHub 기본 `bash -e {0}`. 누가 `shell:`을 달면 이 테스트의 셸도 같이 바꿔야 한다.
+    assert "shell" not in step and "defaults" not in wf and "defaults" not in wf["jobs"]["backend-test-destructive"]
+    return step["run"]
+
+
+def _run_step(
+    tmp_path, *, targets, first, rerun=None, rerun_fail=None, run_text=None, uv_fail_on="", value_overrides=None,
+    drop_shard_files=False, mktemp_fail_at=None, unreadable_failed_out_call=None, rerun_exit=None, collect_files=None,
+):
+    import re
+    import shutil
+    import subprocess
+
+    bash = _bash5()
+    if bash is None:
+        pytest.skip("bash 4+ 없음(mapfile) — CI ubuntu엔 있다")
+    mod = _load()
+    weights = mod.load_weights()
+    provisional = mod.provisional_files_in(mod.load_raw_entries())
+    controls = [f for f in sorted(weights) if f not in provisional and f not in targets][:6]
+    scen = tmp_path / "scenario"
+    scen.mkdir(parents=True)
+    ws = tmp_path / "ws"
+    (ws / "scripts").mkdir(parents=True)
+    loop = ws / "scripts" / "run-destructive-shard-loop.sh"
+    loop.write_text(_LOOP_STUB)
+    loop.chmod(0o755)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    uv = bindir / "uv"
+    # story #4283 — collect_files를 주면 `uv run pytest ... --collect-only`(narrowing의 discover_files)에 그 목록을 답한다.
+    collect = (
+        "if [ \"$1\" = run ] && [ \"$2\" = pytest ]; then printf '%s\\n' "
+        + " ".join(f"'{f}::t'" for f in collect_files) + "; exit 0; fi\n"
+    ) if collect_files else ""
+    uv.write_text(
+        '#!/usr/bin/env bash\n' + collect + '[ "$1" = run ] && [ "$2" = python ] || exit 99\n'
+        'if [ -n "${UV_FAIL_ON:-}" ]; then case " $* " in *" $UV_FAIL_ON "*) exit 7;; esac; fi\n'
+        f'shift 2\nexec "{sys.executable}" "$@"\n'
+    )
+    uv.chmod(0o755)
+    if mktemp_fail_at is not None:
+        # N번째 mktemp만 실패(디스크 가득 흉내) — 나머지는 진짜 mktemp.
+        real_mktemp = shutil.which("mktemp")
+        stub = bindir / "mktemp"
+        stub.write_text(
+            '#!/usr/bin/env bash\n'
+            'c=$(( $(cat "$SCENARIO_DIR/mktemp_calls" 2>/dev/null || echo 0) + 1 )); echo "$c" > "$SCENARIO_DIR/mktemp_calls"\n'
+            f'[ "$c" -eq {mktemp_fail_at} ] && exit 1\n'
+            f'exec "{real_mktemp}" "$@"\n'
+        )
+        stub.chmod(0o755)
+    tmpdir = tmp_path / "t"
+    tmpdir.mkdir()
+    if not drop_shard_files:
+        (tmpdir / "shard_files.txt").write_text("".join(f"{f}\n" for f in controls + targets))
+
+    def _write_call(n, values):
+        (scen / f"call_{n}.tsv").write_text("".join(f"{f}\t{s}\n" for f, s in values.items()))
+
+    _write_call(1, {f: weights[f] for f in controls} | {f: first(mod, weights, f) for f in targets})
+    if rerun is not None:
+        _write_call(2, {f: rerun(mod, weights, f) for f in targets})
+    if rerun_fail:
+        (scen / "fail_2.txt").write_text("".join(f"{f}\n" for f in rerun_fail))
+    if rerun_exit is not None:
+        (scen / "exit_2").write_text(f"{rerun_exit}\n")
+    if unreadable_failed_out_call is not None:
+        (scen / f"unreadable_{unreadable_failed_out_call}").write_text("")
+
+    values = {
+        "github.workspace": str(ws), "matrix.shard": "0",
+        "needs.detect-changed-scope.outputs.backend_test_files_changed": " ".join(targets),
+        "needs.detect-changed-scope.outputs.backend_app_files_changed": "",
+        "needs.detect-changed-scope.outputs.backend_mixed_test_files_changed": "",
+    } | (value_overrides or {})
+    text = run_text if run_text is not None else _destructive_step_run()
+    # `/tmp/`를 먼저 바꾼다 — CI 러너의 pytest tmp_path가 /tmp 아래라, `${{ github.workspace }}`를 먼저 채우면 그 경로까지 바뀐다.
+    text = text.replace("/tmp/", f"{tmpdir}/")
+    text = re.sub(r"\$\{\{\s*([^}]+?)\s*\}\}", lambda m: values[m.group(1)], text)
+    script = tmp_path / "step.sh"
+    script.write_text(text)
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", SCENARIO_DIR=str(scen), TMPDIR=str(tmpdir),
+               UV_FAIL_ON=uv_fail_on)
+    env.pop("GITHUB_STEP_SUMMARY", None)
+    proc = subprocess.run([bash, "-e", str(script)], cwd=_REPO_ROOT / "backend", env=env, capture_output=True, text=True, check=False)
+    calls = int((scen / "calls").read_text()) if (scen / "calls").exists() else 0
+    return proc.returncode, proc.stdout + proc.stderr, calls
+
+
+def _over(mod, weights, f):
+    return round(mod.absolute_slow_threshold_sec(weights[f]) * 1.3)
+
+
+def _normal(mod, weights, f):
+    return round(weights[f])
+
+
+_STEP_TARGET = ["tests/test_3813_stibee_esp_connection.py"]
+
+
+def test_4283_step_under_bash_e_spike_is_green_with_warning(tmp_path):
+    """⭐후보 1 → 재실행에서 내려옴 → 스텝 exit 0 + 두 값 ::warning::(루프 두 번 불림 = 재실행 갈래에 실제로 감)."""
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal)
+    assert code == 0, out
+    assert calls == 2
+    assert "::warning::러너 정규화 가드(story #4283) — tests/test_3813_stibee_esp_connection.py 1차" in out
+
+
+def test_4283_step_under_bash_e_repeat_is_red(tmp_path):
+    """후보 1 → 재실행도 넘음 → exit 1 + ::error::."""
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_over)
+    assert code == 1 and calls == 2, out
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/test_3813_stibee_esp_connection.py" in out
+
+
+def test_4283_step_under_bash_e_rerun_test_failure_is_red(tmp_path):
+    """재실행에서 테스트가 실패하면 경과와 무관하게 exit 1."""
+    code, out, calls = _run_step(
+        tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, rerun_fail=_STEP_TARGET,
+    )
+    assert code == 1 and calls == 2, out
+    assert "재실행에서 테스트 실패(story #4283)" in out
+
+
+def test_4283_step_under_bash_e_six_suspects_is_red_without_rerun(tmp_path):
+    """후보 6(> CONFIRM_RERUN_MAX_FILES) → 재실행 없이 exit 1(루프 한 번만)."""
+    mod = _load()
+    weights = mod.load_weights()
+    provisional = mod.provisional_files_in(mod.load_raw_entries())
+    targets = [f for f in sorted(weights, reverse=True) if f not in provisional][: mod.CONFIRM_RERUN_MAX_FILES + 1]
+    code, out, calls = _run_step(tmp_path, targets=targets, first=_over)
+    assert code == 1 and calls == 1, out
+    assert out.count("::error::러너 정규화 절대 가드 초과") == len(targets)
+
+
+_CHECK_CAPTURE = '--suspects-out "$suspects_file" --expected-files /tmp/shard_files.txt || slow_exit=$?'
+
+
+def test_4283_step_mutation_first_implementation_dies_at_exit_3(tmp_path):
+    """뮤테이션 — 첫 구현 모양(`set +e` 없음 + `cmd` 다음 줄 `slow_exit=$?`)으로 되돌리면 기본 셸의 -e가 exit 3에서 스텝을
+    죽여 재실행 갈래에 못 간다: 단발 튐이 RED가 된다(루프 한 번만). 지금 모양은 둘 중 하나만 있어도 산다 — `|| x=$?`가
+    -e에서도 종료 코드를 받는 쪽이고 `set +e`는 주석이 말한 설계를 실제 셸에 맞추는 쪽이라, 둘 다 걷어야 옛 결함이 재현된다."""
+    text = _destructive_step_run()
+    assert text.count("\nset +e\n") == 1 and text.count(_CHECK_CAPTURE) == 1
+    mutated = text.replace("\nset +e\n", "\n").replace(
+        _CHECK_CAPTURE, '--suspects-out "$suspects_file" --expected-files /tmp/shard_files.txt\nslow_exit=$?',
+    )
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, run_text=mutated)
+    assert code != 0 and calls == 1, out
+
+    only_set_e_removed = text.replace("\nset +e\n", "\n")
+    code, out, calls = _run_step(tmp_path / "b", targets=_STEP_TARGET, first=_over, rerun=_normal, run_text=only_set_e_removed)
+    assert code == 0 and calls == 2, out
+
+
+def test_4283_step_loop_infra_failure_still_stops_the_step(tmp_path):
+    """-e에 기대던 자리 — 격리 루프가 인프라 실패(non-zero)로 끝나면 여전히 스텝 RED(명시 처리로 옮김)."""
+    # call 1이 exit 1 — 시나리오 폴더는 _run_step 안에서 만들어지므로 스텁이 읽을 exit_1을 스텝 앞머리에 심는다.
+    text = _destructive_step_run().replace("\nset +e\n", '\nset +e\necho 1 > "$SCENARIO_DIR/exit_1"\n', 1)
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_normal, run_text=text)
+    assert code == 1 and calls == 1, out
+    assert "격리 루프 인프라 실패" in out
+
+
+@pytest.mark.parametrize(
+    ("content", "expected", "needle"),
+    [
+        ("tests/a.py\tnan\n", None, "유한수가 아님"),
+        ("tests/a.py\tinf\n", None, "유한수가 아님"),
+        ("tests/a.py\t-3\n", None, "음수"),
+        ("tests/a.py\tabc\n", None, "숫자가 아님"),
+        ("", None, "0줄"),
+        ("tests/a.py\t10\n", ["tests/a.py", "tests/b.py"], "tests/b.py: 경과 기록 없음"),
+    ],
+)
+def test_4283_record_fail_open_is_red_in_both_modes(tmp_path, capsys, monkeypatch, content, expected, needle):
+    """까디르 P1② — NaN(어떤 비교도 False) · inf · 음수 · 숫자 아님 · 0줄 · 돌았어야 하는 파일 누락 → check/confirm 둘 다 exit 1
+    + ::error::(판정 불가). 예전엔 전부 «느린 게 없다»로 읽혀 초록."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/a.py": 30.0, "tests/b.py": 30.0})
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    bad = tmp_path / "bad.tsv"
+    bad.write_text(content)
+    expected_path = None
+    if expected is not None:
+        expected_path = tmp_path / "expected.txt"
+        expected_path.write_text("\n".join(expected))
+    assert mod._check_elapsed_mode(bad, expected_files_path=expected_path) == 1
+    assert needle in capsys.readouterr().out
+
+    good = _write_run(tmp_path, "good.tsv", {"tests/a.py": 100.0, "tests/b.py": 30.0})
+    suspects = tmp_path / "suspects.txt"
+    suspects.write_text("tests/a.py\n" + ("tests/b.py\n" if expected else ""))
+    assert mod._confirm_elapsed_mode(good, bad, suspects) == 1
+    assert "::error::러너 정규화 가드 재실행 기록 이상" in capsys.readouterr().out
+
+
+def test_4283_confirm_with_missing_or_empty_suspects_is_red(tmp_path, capsys, monkeypatch):
+    """후보 목록 파일이 없거나 비면(재실행이 무엇을 확인했는지 모름) RED."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/a.py": 30.0})
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    good = _write_run(tmp_path, "good.tsv", {"tests/a.py": 100.0})
+    empty = tmp_path / "empty.txt"
+    empty.write_text("")
+    assert mod._confirm_elapsed_mode(good, good, empty) == 1
+    assert mod._confirm_elapsed_mode(good, good, tmp_path / "nope.txt") == 1
+    assert "재실행 후보 목록이 비었거나 없음" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("label", "kwargs", "needle"),
+    [
+        ("파일 목록 없음", {"drop_shard_files": True}, "샤드 파일 목록"),
+        ("narrowing 계산 실패", {
+            "uv_fail_on": "--resolve-app-module-dependents",
+            "value_overrides": {
+                "needs.detect-changed-scope.outputs.backend_test_files_changed": "__ALL__",
+                "needs.detect-changed-scope.outputs.backend_app_files_changed": "app/routers/events.py",
+            },
+        }, "narrowing 계산 실패"),
+        ("산출물 변환 실패", {"uv_fail_on": "--elapsed-to-json"}, "산출물 변환 실패"),
+    ],
+)
+def test_4283_step_places_that_relied_on_bash_e_still_stop_the_step(tmp_path, label, kwargs, needle):
+    """`set +e` 뒤에도 예전에 -e가 막던 자리(파일 목록 · narrowing · 산출물 변환 · 격리 루프는 위 테스트)는 명시로 RED —
+    그냥 넘어가면 0개 실행 · 후보 목록 빔 · 산출물 누락으로 조용히 초록이 된다."""
+    code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_normal, **kwargs)
+    assert code == 1, (label, out)
+    assert needle in out, (label, out)
+
+
+# 스텝 안 mktemp 순서: elapsed · stall_evidence_dir(디렉터리 · story #4319) · failed_out · overage_out · unweighted · suspects ·
+# rerun_elapsed · rerun_failed(8번째).
+@pytest.mark.parametrize("n", range(1, 9))
+def test_4283_step_mktemp_failure_is_red(tmp_path, n):
+    """까디르 P2 — `set +e` 뒤 임시 파일 생성 실패가 조용히 지나가면 안 된다: 몇 번째 mktemp가 실패하든(단발 튐 시나리오 —
+    재실행 갈래까지 가는 경로) exit 1 + ::error::. 특히 8번째(`rerun_failed`)가 안 생기면 `[ -s ]`가 «재실행 실패 없음»으로
+    읽혀 테스트 실패를 초록으로 가렸다."""
+    code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, mktemp_fail_at=n)
+    assert code == 1, (n, out)
+    assert "임시 파일 생성 실패" in out, (n, out)
+
+
+def test_4283_step_unreadable_loop_result_is_red(tmp_path):
+    """격리 루프 결과(FAILED_OUT_FILE)를 못 읽으면 «실패 0건»으로 읽지 않고 RED."""
+    code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_normal, unreadable_failed_out_call=1)
+    assert code == 1, out
+    assert "결과 파일을 못 읽음" in out
+
+
+
+def test_4283_step_rerun_loop_nonzero_without_failure_file_is_red(tmp_path):
+    """까디르 델타 — 재실행 루프가 실패 파일을 못 쓰고(= 비어 있음) non-zero로 끝나면, 파일 내용이 «실패 없음»이어도 RED:
+    재실행 갈래는 실패 파일과 루프 종료 코드를 둘 다 본다(둘 다 깨끗해야 초록). 재실행 경과 자체는 판정선 안(단발 튐)."""
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, rerun_exit=1)
+    assert code == 1 and calls == 2, out
+    assert "재실행 루프 인프라 실패" in out
+
+
+def test_4283_step_harness_works_when_the_work_dir_is_under_tmp():
+    """까디르 CHANGES — 하네스 자신의 결함: `${{ github.workspace }}`를 먼저 채우고 `/tmp/`를 나중에 바꾸면, CI 러너처럼 pytest
+    tmp_path가 `/tmp/…`일 때 workspace 경로 안의 `/tmp/`까지 또 바뀌어 스텁 루프를 못 찾는다(exit 127 · CI에서만 RED — macOS
+    tmp_path는 /private/var/…라 로컬은 초록으로 가려졌다). 작업 폴더를 일부러 `/tmp` 아래 만들어 리눅스 경로 모양을 흉내 낸다.
+    뮤테이션: 치환 순서를 되돌리면 macOS에서도 RED."""
+    import shutil
+    import tempfile
+
+    work = Path(tempfile.mkdtemp(prefix="sdt4283-", dir="/tmp"))
+    try:
+        code, out, calls = _run_step(work, targets=_STEP_TARGET, first=_over, rerun=_normal)
+        assert code == 0 and calls == 2, out
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# ─── story #4283(AC4 미달 → AC5 · PO 2026-09-28 07:26Z) — import 확장 테스트는 교차 샤드로만 RED ──────────────
+# import 확장으로만 들어온 테스트(#4163 narrowing)는 하나가 튀어도 샤드 RED가 아니다 — 재실행에서도 넘으면 산출물(import_expanded_over)에
+# 적고, 서로 다른 샤드 2개 이상에서 같이 넘었을 때만 --audit-durations가 RED. 직접 바꾼 테스트는 예전 그대로(단일 절대 + 재실행).
+
+_HUB_4656 = "app/routers/events.py"  # PR 4656이 바꾼 허브(이번 거짓 RED run 36099290855 · 샤드 11)
+_T2636 = "tests/test_2636_custom_event_registration.py"
+
+
+def test_4283_import_expanded_cross_shard_rule():
+    mod = _load()
+    assert mod.IMPORT_EXPANDED_MIN_SHARDS == 2
+    assert mod.import_expanded_cross_shard_red({}) == []
+    assert mod.import_expanded_cross_shard_red({11: [_T2636], 3: []}) == []                  # 한 샤드 = 러너 튐
+    assert mod.import_expanded_cross_shard_red({8: ["tests/a.py", "tests/b.py"]}) == []      # 같은 샤드 둘도 한 러너
+    assert mod.import_expanded_cross_shard_red({3: ["tests/a.py"], 7: ["tests/b.py"]}) == [3, 7]
+
+
+def test_4283_the_false_red_file_is_an_import_expanded_test_of_the_hub():
+    """AC5 입력 전제 — test_2636은 PR 4656이 바꾼 허브(app/routers/events.py)를 import해서 narrowing에 들어온 파일(직접 변경 아님)."""
+    mod = _load()
+    dependents = mod.test_files_depending_on_modules(mod.changed_app_files_to_modules(frozenset({_HUB_4656})), mod.discover_files())
+    assert _T2636 in dependents
+
+
+def _setup_4283(tmp_path, monkeypatch, weights):
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    return mod
+
+
+def test_4283_check_mode_import_over_is_warn_and_recorded_direct_over_stays_red(tmp_path, capsys, monkeypatch):
+    """재실행 없이 판정하는 길(--suspects-out 없음): import 확장 파일 초과 → exit 0 · import-over 파일에 적힘 · ::warning:: ·
+    직접 바꾼 파일 초과 → 예전 그대로 exit 1."""
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 30.0, "tests/direct.py": 30.0}
+    mod = _setup_4283(tmp_path, monkeypatch, weights)
+    changed = tmp_path / "changed.txt"
+    changed.write_text("tests/imp.py\ntests/direct.py\n")
+    direct = tmp_path / "direct.txt"
+    direct.write_text("tests/direct.py\n")
+    over = tmp_path / "over.txt"
+
+    only_import = _write_run(tmp_path, "a.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 100.0, "tests/direct.py": 30.0})
+    assert mod._check_elapsed_mode(only_import, changed_files_path=changed, direct_files_path=direct, import_over_out_path=over) == 0
+    out = capsys.readouterr().out
+    assert over.read_text() == "tests/imp.py\n"
+    assert "::warning::러너 정규화 가드(story #4283) — tests/imp.py" in out and "::error::" not in out
+
+    both = _write_run(tmp_path, "b.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 100.0, "tests/direct.py": 100.0})
+    assert mod._check_elapsed_mode(both, changed_files_path=changed, direct_files_path=direct, import_over_out_path=over) == 1
+    out = capsys.readouterr().out
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/direct.py" in out
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/imp.py" not in out
+    assert over.read_text() == "tests/imp.py\n"
+
+    # 뮤테이션 대조: --direct-files를 안 주면(예전) import 파일도 직접 변경 취급 → RED.
+    assert mod._check_elapsed_mode(only_import, changed_files_path=changed, import_over_out_path=over) == 1
+    capsys.readouterr()
+
+
+def test_4283_confirm_mode_import_confirmed_is_recorded_not_red(tmp_path, capsys, monkeypatch):
+    """ci.yml 순서 그대로(check --suspects-out → exit 3 → confirm): 재실행에서도 넘은 import 확장 파일 → exit 0 + import-over에 적힘 ·
+    재실행에서도 넘은 직접 변경 파일 → exit 1."""
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 30.0, "tests/direct.py": 30.0}
+    mod = _setup_4283(tmp_path, monkeypatch, weights)
+    changed = tmp_path / "changed.txt"
+    changed.write_text("tests/imp.py\ntests/direct.py\n")
+    direct = tmp_path / "direct.txt"
+    direct.write_text("tests/direct.py\n")
+    over = tmp_path / "over.txt"
+    suspects = tmp_path / "suspects.txt"
+    first = _write_run(tmp_path, "first.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 100.0})
+    assert mod._check_elapsed_mode(
+        first, changed_files_path=changed, suspects_out_path=suspects, direct_files_path=direct, import_over_out_path=over,
+    ) == mod.CONFIRM_RERUN_EXIT
+    assert suspects.read_text() == "tests/imp.py\n" and over.read_text() == ""
+    rerun = _write_run(tmp_path, "rerun.tsv", {"tests/imp.py": 98.0})
+    assert mod._confirm_elapsed_mode(
+        first, rerun, suspects, changed_files_path=changed, direct_files_path=direct, import_over_out_path=over,
+    ) == 0
+    out = capsys.readouterr().out
+    assert over.read_text() == "tests/imp.py\n"
+    assert "재실행에서도" in out and "::error::" not in out
+
+    first_d = _write_run(tmp_path, "first_d.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/direct.py": 100.0})
+    assert mod._check_elapsed_mode(
+        first_d, changed_files_path=changed, suspects_out_path=suspects, direct_files_path=direct, import_over_out_path=over,
+    ) == mod.CONFIRM_RERUN_EXIT
+    rerun_d = _write_run(tmp_path, "rerun_d.tsv", {"tests/direct.py": 98.0})
+    assert mod._confirm_elapsed_mode(
+        first_d, rerun_d, suspects, changed_files_path=changed, direct_files_path=direct, import_over_out_path=over,
+    ) == 1
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/direct.py" in capsys.readouterr().out
+
+
+def _shard_artifact(dirpath, shard, over):
+    mod = _load()
+    mod.write_durations_json({"tests/x.py": 1.0}, dirpath / f"shard-durations-{shard}.json", shard=shard, import_over=over)
+
+
+def test_4283_durations_json_carries_import_over_and_audit_reads_it(tmp_path):
+    mod = _load()
+    _shard_artifact(tmp_path, 11, [_T2636])
+    _shard_artifact(tmp_path, 3, [])
+    mod.write_durations_json({"tests/x.py": 1.0}, tmp_path / "shard-durations-5.json", shard=5)  # 예전 모양(키 없음)
+    assert json.loads((tmp_path / "shard-durations-11.json").read_text())["import_expanded_over"] == [_T2636]
+    assert "import_expanded_over" not in json.loads((tmp_path / "shard-durations-5.json").read_text())
+    assert mod.load_import_over_by_shard(tmp_path) == {3: [], 5: [], 11: [_T2636]}
+
+
+def test_4283_ac5_the_false_red_run_is_green_across_shards(tmp_path, capsys):
+    """⭐AC5 ① — 이번 거짓 RED 입력(run 36099290855 · 샤드 11 · test_2636 import 확장 · 1차 127s · 재실행 110s)이 산출물에 실려도
+    한 샤드뿐이라 Audit exit 0 + ::warning::(예전엔 샤드 잡 RED)."""
+    mod = _load()
+    for shard in range(12):
+        _shard_artifact(tmp_path, shard, [_T2636] if shard == 11 else [])
+    assert mod._audit_durations_mode(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "::error::러너 정규화 가드 교차 샤드 초과" not in out
+    assert f"샤드 11 하나에만 있음({_T2636})" in out
+
+
+def test_4283_ac5_hub_slowdown_across_shards_is_red(tmp_path, capsys):
+    """⭐AC5 ② 양성 대조 — 허브가 정말 느려져 import 테스트가 서로 다른 샤드 둘 이상에서 같이 넘으면 Audit exit 1 + ::error::.
+    뮤테이션: IMPORT_EXPANDED_MIN_SHARDS를 올리거나 교차 샤드 검사를 빼면 이 테스트 RED."""
+    mod = _load()
+    dependents = mod.test_files_depending_on_modules(mod.changed_app_files_to_modules(frozenset({_HUB_4656})), mod.discover_files())
+    a, b = dependents[0], dependents[1]
+    for shard in range(12):
+        _shard_artifact(tmp_path, shard, [a] if shard == 3 else [b] if shard == 7 else [])
+    assert mod._audit_durations_mode(tmp_path) == 1
+    out = capsys.readouterr().out
+    assert "::error::러너 정규화 가드 교차 샤드 초과(story #4283)" in out and f"샤드 3: {a}" in out and f"샤드 7: {b}" in out
+
+
+def test_4283_ac5_step_the_false_red_input_keeps_the_shard_green_and_carries_it(tmp_path):
+    """⭐AC5 ① 배선 — ci.yml 스텝 그대로(실 bash · 스텁 루프): 허브만 바뀐 PR(__ALL__ + app/routers/events.py · 직접 바꾼 테스트 0)에서
+    import 확장 test_2636이 1차 · 재실행 둘 다 선을 넘어도 **샤드 잡 초록**이고 산출물에 import_expanded_over로 실린다.
+    뮤테이션: ci.yml에서 --direct-files를 빼면 예전처럼 샤드 RED(아래 대조)."""
+    values = {
+        "needs.detect-changed-scope.outputs.backend_test_files_changed": "__ALL__",
+        "needs.detect-changed-scope.outputs.backend_app_files_changed": _HUB_4656,
+        "needs.detect-changed-scope.outputs.backend_mixed_test_files_changed": "",
+    }
+    code, out, calls = _run_step(tmp_path, targets=[_T2636], first=_over, rerun=_over, value_overrides=values, collect_files=[_T2636])
+    assert code == 0 and calls == 2, out
+    artifact = json.loads((tmp_path / "t" / "shard-durations-0.json").read_text())
+    assert artifact["import_expanded_over"] == [_T2636]
+
+    without_direct = _destructive_step_run().replace(" --direct-files /tmp/direct_test_files.txt", "")
+    assert without_direct != _destructive_step_run()
+    code, out, _ = _run_step(
+        tmp_path / "m", targets=[_T2636], first=_over, rerun=_over, value_overrides=values, run_text=without_direct,
+        collect_files=[_T2636],
+    )
+    assert code != 0 and "::error::러너 정규화 절대 가드 초과(story #4152)" in out, out
+
+
+def test_4283_ac5_step_directly_changed_slow_test_is_still_red(tmp_path):
+    """⭐AC5 ③ — 같은 PR 모양이어도 PR이 그 테스트를 **직접** 바꿨으면(MIXED) 예전 그대로 샤드 RED(단일 절대 + 재실행)."""
+    values = {
+        "needs.detect-changed-scope.outputs.backend_test_files_changed": "__ALL__",
+        "needs.detect-changed-scope.outputs.backend_app_files_changed": _HUB_4656,
+        "needs.detect-changed-scope.outputs.backend_mixed_test_files_changed": _T2636,
+    }
+    code, out, calls = _run_step(tmp_path, targets=[_T2636], first=_over, rerun=_over, value_overrides=values, collect_files=[_T2636])
+    assert code != 0 and calls == 2, out
+    assert f"::error::러너 정규화 절대 가드 초과(story #4152): {_T2636}" in out
+
+
+# story #4283(까디르 QA 07:56Z) — 이 PR이 CI 실측 중앙값으로 고친 다섯 weight는 절대 판정 **대상**이어야 한다(provisional이면
+# provisional_files_in()이 판정에서 아예 빼 표의 «선 70 → 125»가 안 먹는다 — test_4190에 provisional:true가 남았던 결함).
+_WEIGHTS_4283 = {
+    "tests/test_3808_x_publish_budget.py": 29.0,
+    "tests/test_4264_failure_classification_realdb.py": 26.0,
+    "tests/test_4190_site_post_recipe_hooks_realdb.py": 50.0,
+    "tests/test_4258_stop_notice_outbox_realdb.py": 28.0,
+    "tests/test_3734_post_archive.py": 27.0,
+}
+
+
+@pytest.mark.parametrize("path", sorted(_WEIGHTS_4283))
+def test_4283_updated_weights_are_judged_at_the_new_line(path):
+    mod = _load()
+    weights = mod.load_weights()
+    provisional = mod.provisional_files_in(mod.load_raw_entries())
+    assert weights[path] == _WEIGHTS_4283[path]
+    assert path not in provisional
+    line = mod.absolute_slow_threshold_sec(weights[path])
+    red, _ = mod.slow_files_absolute(
+        {path: line + 5}, weights, provisional_files=provisional, changed_files=frozenset({path}),
+    )
+    assert red == [path]
+    red, _ = mod.slow_files_absolute(
+        {path: line - 5}, weights, provisional_files=provisional, changed_files=frozenset({path}),
+    )
+    assert red == []

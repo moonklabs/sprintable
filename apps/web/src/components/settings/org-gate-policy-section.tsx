@@ -7,7 +7,10 @@ import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
+import { memberLookup } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { cn } from '@/lib/utils';
 
 /**
@@ -21,6 +24,11 @@ import { cn } from '@/lib/utils';
  * 승인자 픽커는 approval-request-card.tsx::DelegateApprovalControl과 동일 소스
  * (/api/org-members/eligible-approvers + buildApproverPickerOptions + OperatorDropdownSelect,
  * story #3040 v3 단일 소스 원칙 재사용 — 새 픽커 로직 발명 0).
+ *
+ * story #4083 — recipe_gate_default_approver_member_id 필드 1칸 추가(merge 칸과 완전
+ * 동형 — 같은 eligible-approvers 목록·같은 저장 흐름·같은 human-only 422 문구 표시).
+ * "org_owner 하드코딩" 실사고 처방(org owner≠마케팅 담당인 org에서 레시피 사람 게이트가
+ * 전부 owner 결재함으로만 가던 것).
  */
 
 type Posture = 'conservative' | 'balanced' | 'permissive';
@@ -36,6 +44,7 @@ interface OrgGatePolicyResponse {
   org_id: string;
   posture: string;
   merge_gate_default_approver_member_id: string | null;
+  recipe_gate_default_approver_member_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +67,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   const [loading, setLoading] = useState(true);
   const [posture, setPosture] = useState<Posture>('balanced');
   const [approverId, setApproverId] = useState<string>(''); // '' = 미지정(현행)
+  const [recipeApproverId, setRecipeApproverId] = useState<string>(''); // '' = 미지정(현행, org owner)
   const [approverOptions, setApproverOptions] = useState<SelectOption[]>([]);
   const [loadingApprovers, setLoadingApprovers] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -76,6 +86,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
           if (policy) {
             if ((POSTURES as string[]).includes(policy.posture)) setPosture(policy.posture as Posture);
             setApproverId(policy.merge_gate_default_approver_member_id ?? '');
+            setRecipeApproverId(policy.recipe_gate_default_approver_member_id ?? '');
           }
         } else {
           setMessage({ type: 'error', text: t('loadFailed') });
@@ -105,7 +116,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
         if (cancelled) return;
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as { data?: EligibleApprover[] } | null;
-          const { options } = buildApproverPickerOptions(json?.data ?? []);
+          const { options } = buildApproverPickerOptions(json?.data ?? [], undefined, { unnamed: tc('memberUnnamed') });
           setApproverOptions(options);
         }
       } finally {
@@ -116,7 +127,8 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // [SID:4286] tc(이름 없는 후보 라벨)는 로케일이 같으면 같은 함수 — 조회는 사실상 한 번 그대로.
+  }, [tc]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -128,13 +140,16 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
         body: JSON.stringify({
           posture,
           merge_gate_default_approver_member_id: approverId || null,
+          recipe_gate_default_approver_member_id: recipeApproverId || null,
         }),
       });
       if (res.ok) {
         setMessage({ type: 'success', text: t('saved') });
       } else {
-        // story e0c1b24c AC — 에이전트 멤버 지정 시 422 문구가 화면에 그대로 나와야 한다
-        // (backend/app/routers/hitl_config.py의 human-only 검증 메시지, HTTPException.detail).
+        // story e0c1b24c AC — 승인자 검증 422 문구가 화면에 그대로 나와야 한다(backend/
+        // app/routers/hitl_config.py의 human-only 검증 메시지, HTTPException.detail).
+        // merge·레시피 필드 둘 다 이 관례 그대로 — 문구 자체가 사람 문장이어야 하는 책임은
+        // 이 컴포넌트가 아니라 BE 카탈로그(i18n_catalog.py, story #4083 정정) 쪽에 있다.
         const body = (await res.json().catch(() => null)) as { detail?: string; error?: { message?: string } } | null;
         setMessage({ type: 'error', text: body?.detail ?? body?.error?.message ?? t('saveFailed') });
       }
@@ -146,8 +161,18 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   };
 
   const approverSelectOptions: SelectOption[] = [{ value: '', label: t('approverUnset') }, ...approverOptions];
+  // [SID:4286] 지정 승인자가 후보(owner/admin)에 없을 때 UUID 통째를 이름 칸에 싣던 것 — 후보 목록을 다 불러왔으면
+  // «알 수 없는 구성원», 불러오는 중이면 빈 칸(자리 칸이 «불러오는 중» placeholder를 이미 보인다).
+  const approverLabelTable = Object.fromEntries(approverOptions.map((o) => [o.value, o.label])) as Record<string, string>;
+  // [SID:4300] 후보(owner/admin · 고르는 목록)에 없는 지정 승인자 — 역할이 바뀐 사람 등 — 도 조직 범위로 이름을 채운다(아는 사람을
+  // «알 수 없는 구성원»이라 하지 않게). 고르는 목록은 후보 그대로.
+  const { orgId } = useDashboardContext();
+  const approverNames = useMemberNameFallback(orgId, approverLabelTable, [approverId, recipeApproverId], !loadingApprovers);
   const currentApproverLabel = approverId
-    ? (approverOptions.find((o) => o.value === approverId)?.label ?? approverId)
+    ? (memberLookup(approverNames.memberMap, approverId, tc, { loaded: approverNames.loaded })?.label ?? '')
+    : t('approverUnset');
+  const currentRecipeApproverLabel = recipeApproverId
+    ? (memberLookup(approverNames.memberMap, recipeApproverId, tc, { loaded: approverNames.loaded })?.label ?? '')
     : t('approverUnset');
 
   return (
@@ -216,7 +241,22 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                   disabled={loadingApprovers || saving}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">{currentApproverLabel}</p>
+                <p className="min-h-5 text-sm text-muted-foreground">{currentApproverLabel}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">{t('recipeApproverLabel')}</p>
+              {canEdit ? (
+                <OperatorDropdownSelect
+                  value={recipeApproverId}
+                  onValueChange={setRecipeApproverId}
+                  options={approverSelectOptions}
+                  placeholder={loadingApprovers ? t('approverLoading') : t('approverPickPlaceholder')}
+                  disabled={loadingApprovers || saving}
+                />
+              ) : (
+                <p className="min-h-5 text-sm text-muted-foreground">{currentRecipeApproverLabel}</p>
               )}
             </div>
 

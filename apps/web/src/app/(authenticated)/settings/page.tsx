@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -44,6 +44,10 @@ import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { memberRowLabels } from '@/lib/member-display';
+import { RowName } from '@/components/shared/row-name';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
 const BillingTab = dynamic(
@@ -139,6 +143,7 @@ function resolveSettingsTab(tab: string | null): string {
 }
 
 export default function SettingsPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const tNav = useTranslations('nav');
@@ -217,6 +222,8 @@ export default function SettingsPage() {
   const [savingProject, setSavingProject] = useState(false);
   const [memberProjectId, setMemberProjectId] = useState('');
   const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  // story #4311 — 휴먼 웹훅 줄은 이름만 보이니 같은 이름 구성원이 갈리게 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const webhookRowLabels = useMemo(() => memberRowLabels(projectMembers.filter((m) => m.type === 'human'), tc, () => ''), [projectMembers, tc]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
   const [currentProjectRole, setCurrentProjectRole] = useState<string>('member'); // S-GATE-4: 현재 프로젝트 effective role
@@ -361,7 +368,7 @@ export default function SettingsPage() {
     async function loadContext() {
       // admin 감지: /api/me role 기반 (invitations 응답 결과에 의존하지 않음)
       try {
-        const meRes = await fetchWithAuth('/api/me');
+        const meRes = await fetchMe();
         const meJson = meRes.ok ? await meRes.json() : null;
         const role = (meJson?.data?.role ?? 'member') as string;
         setIsAdmin(role === 'admin' || role === 'owner');
@@ -450,11 +457,17 @@ export default function SettingsPage() {
     void refreshMemberData(memberProjectId).catch((err) => { console.error('멤버 데이터 로드 실패', err); });
   }, [memberProjectId]);
 
+  // story #4231 3차 · 까디르 QA(ccef5258a [P2]) — 이동 이유는 탭(activeTab)이고 프로젝트는 싣는 값일 뿐이다. flatHref를 deps에 넣으면
+  // 프로젝트가 «모름 → A → 대기 B → A»로 바뀌는 동안 이동이 여러 번 나가(Next가 앞 이동을 버리는 경로) — 발사 순간의 최신 값을 ref로 읽는다.
+  const flatHrefRef = useRef(flatHref);
+  useEffect(() => { flatHrefRef.current = flatHref; }, [flatHref]);
+
   // api-keys 탭 접근 시 /agents(관리 탭)으로 자동 전환 (레거시 리다이렉트)
   useEffect(() => {
     // 에이전트 관리 IA 통일(story d63d3f73) — Members 서브탭 흡수, /agents(관리 탭)으로 재타겟.
     if (activeTab === 'api-keys') {
-      router.push('/organization/workforce');
+      const flatHref = flatHrefRef.current;
+      router.push(flatHref('/organization/workforce'));
     }
   }, [activeTab, router]);
 
@@ -709,7 +722,13 @@ export default function SettingsPage() {
 
   return (
     <>
-      <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="flex-1 min-h-0 gap-0">
+      {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스) LNB+
+          콘텐츠 split(각자 독립 overflow-y-auto)이 자기 높이를 잃는다 — 여기서 직접 앵커
+          (h-[calc(100svh-var(--shell-chrome-h))] — story #4131, --shell-chrome-h가 TopBar
+          표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT. /settings는 showTopBar=false라
+          이 값이 0으로 떨어져 TopBar 몫을 안 뺀다 — #4130의 하드코딩 3rem이 여기서
+          48px를 과다 차감하던 것도 같이 해소). */}
+      <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="h-[calc(100svh-var(--shell-chrome-h))] min-h-0 gap-0">
         {/* Left nav: desktop/tablet(≥md)=always visible, mobile(<md)=toggle via lnbOpen */}
         <div className={`shrink-0 border-r overflow-y-auto p-4 flex-col w-52 ${lnbOpen ? 'flex' : 'hidden'} md:flex`}>
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
@@ -815,7 +834,7 @@ export default function SettingsPage() {
             {/* E-GHAPP: 연동 — 자체 섹션(결제와 분리·향후 slack/jira 등 통합 표준 위치)·서브라우트 `/settings/integrations`(install-callback 타깃·탭 아닌 발견성 진입점) */}
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('tabIntegrations')}</span>
             <Link
-              href="/settings/integrations"
+              href={flatHref('/settings/integrations')}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
             >
               <Webhook className="h-4 w-4" />
@@ -900,7 +919,7 @@ export default function SettingsPage() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => router.push('/organization/workforce')}
+                    onClick={() => router.push(flatHref('/organization/workforce'))}
                     className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
                   >
                     {t('agentManagementCta')}
@@ -930,7 +949,8 @@ export default function SettingsPage() {
                       <div className="mb-3 flex items-center overflow-x-auto border-b pb-2">
                         <span className="min-w-0 flex-1 text-xs text-muted-foreground">{t('notifications')}</span>
                         <div className="ml-auto flex shrink-0 gap-6 pl-4 text-center text-xs font-medium text-muted-foreground">
-                          <span className="w-14">{t('notification_channel_in_app')}</span>
+                          {/* [SID:4375] 행마다 «앱 내» 토글의 이름 = 행 이름(이벤트) + 이 열 머리(aria-labelledby) */}
+                          <span id="notif-col-in-app" className="w-14">{t('notification_channel_in_app')}</span>
                           <span className="w-14 opacity-40">{t('notification_channel_webhook')}</span>
                           <span className="w-14 opacity-40">{t('notification_channel_email')}</span>
                         </div>
@@ -946,6 +966,7 @@ export default function SettingsPage() {
                               type="button"
                               disabled={savingPreferenceLevel}
                               onClick={() => void handleSetGlobalPreferenceLevel(level)}
+                              aria-pressed={globalPreferenceLevel === level}
                               className={`rounded px-2 py-1 text-xs font-medium transition disabled:opacity-50 ${globalPreferenceLevel === level ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                             >
                               {t(`notificationLevel_${level}`)}
@@ -983,15 +1004,19 @@ export default function SettingsPage() {
                                       key={eventType}
                                       className="flex items-center px-3 py-2.5"
                                     >
-                                      <span className="min-w-0 flex-1 text-sm text-foreground">
+                                      <span id={`notif-event-${eventType}`} className="min-w-0 flex-1 text-sm text-foreground">
                                         {t(`event_${eventType}`)}
                                       </span>
                                       <div className="ml-auto flex shrink-0 items-center gap-6">
                                         {/* in_app 토글 */}
                                         <div className="flex w-14 justify-center">
+                                          {/* [SID:4379] 스위치 모양 켜고 끄기 — 화면 읽기가 «스위치 · 켬/끔»으로 읽게(예전엔 «단추»만 · 켜짐 모름). */}
                                           <button
                                             type="button"
+                                            role="switch"
+                                            aria-checked={enabled}
                                             onClick={() => void toggleSetting(eventType, enabled)}
+                                            aria-labelledby={`notif-event-${eventType} notif-col-in-app`}
                                             className={`relative h-6 w-11 rounded-full transition ${enabled ? 'bg-primary' : 'bg-muted'}`}
                                           >
                                             <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
@@ -1093,7 +1118,7 @@ export default function SettingsPage() {
                         </div>
 
                         <div className="space-y-1.5">
-                          <label className="text-sm font-medium text-foreground">Slug</label>
+                          <label className="text-sm font-medium text-foreground">{t('orgSlugLabel')}</label>
                           <p className="rounded-md border border-input bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">{orgInfo.slug}</p>
                           <p className="text-xs text-muted-foreground">{t('orgSlugImmutable')}</p>
                         </div>
@@ -1333,7 +1358,7 @@ export default function SettingsPage() {
                           return (
                             <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3">
                               <div className="flex flex-wrap items-center gap-2">
-                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{member.name}</span>
+                                <RowName className="flex-1 text-sm font-medium text-foreground" label={webhookRowLabels.get(member.id)} id={member.id} />
                                 <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
                                   <Webhook className="size-3" aria-hidden />
                                   {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}

@@ -354,7 +354,7 @@ async def test_follow_up_creation_rate_end_to_end_via_real_endpoint_not_hand_see
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            human_id = await _seed_human(s, org_id, role="member")
+            human_id = await _seed_human(s, org_id, role="member", grant=True)
             from tests.test_3471_org_content_rules_lint import _seed_story
             story_id = await _seed_story(s, org_id, project_id, title="원문 글")
             sp = await _seed_site_post(

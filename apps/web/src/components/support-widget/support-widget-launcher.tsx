@@ -6,8 +6,10 @@ import { useTranslations } from 'next-intl';
 import { LifeBuoy, X } from 'lucide-react';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useActivationStatus } from '@/hooks/use-activation-status';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSupportWidgetSession } from '@/hooks/use-support-widget-session';
 import { SupportWidgetPanelHeader, SupportWidgetPanelBody } from './support-widget-panel';
+import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 
 const PANEL_ID = 'support-widget-panel';
 
@@ -55,7 +57,8 @@ export function SupportWidgetLauncher() {
   const session = useSupportWidgetSession();
   const { isMobile } = useSidebar();
   const pathname = usePathname();
-  const { state: activationState, allComplete } = useActivationStatus();
+  const { orgId } = useDashboardContext();
+  const { state: activationState, allComplete } = useActivationStatus(undefined, { orgId });
   const isMobileChatDetailRoute = isMobile && pathname !== '/chats' && pathname.startsWith('/chats/');
   // story #3274(유나 design 리뷰 🟡, 2026-09-01) — 설정 > 문의 탭(support-tab-panel.tsx)이
   // 마운트 시 자체 세션을 연다. 같은 화면에 이 플로팅까지 열려있으면 세션 훅 인스턴스
@@ -88,7 +91,10 @@ export function SupportWidgetLauncher() {
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // [SID:4369] 유나 규칙 — 조합 중 Esc는 조합만 · 패널 안 글 있는 여러 줄 칸의 첫 Esc는 칸에서만 빠져나옴(초점 = 패널 뿌리).
+      if (leaveMultilineFieldOnEsc(e, document.getElementById(PANEL_ID))) return;
+      setOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -144,8 +150,9 @@ export function SupportWidgetLauncher() {
         <div
           id={PANEL_ID}
           role="dialog"
+          tabIndex={-1}
           aria-label={t('panelTitle')}
-          className="pointer-events-auto flex max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+          className="pointer-events-auto flex outline-none max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
         >
           <SupportWidgetPanelHeader onClose={() => setOpen(false)} />
           <SupportWidgetPanelBody session={session} />

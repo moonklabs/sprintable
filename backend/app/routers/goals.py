@@ -88,6 +88,14 @@ async def list_goals(
     # 「센티널 객체」 — FastAPI 경유 없이 이 함수를 직접 호출하는 테스트가 ids를 안 넘기면
     # 그 센티널 그대로를 받는다. `is not None`은 센티널도 통과시켜 버려 `.split`이 터진다
     # (stories.py list_stories가 이미 겪은 동형 함정) — isinstance로 실제 타입을 검사한다.
+    # story #4350(까디르 4721 [P2]) — 이 확인은 ids= 분기보다 **먼저**: 예전엔 ids= 분기가 먼저 반환해 `?ids=…&project_id=<접근 불가>`가
+    # 확인 없이 200을 받았다(ids 쪽이 접근 가능분만 걸러 누설은 0이었지만 계약 우회).
+    # ratchet round8(잔여 HIGH): project_id 필터(지정 시)에 caller 접근권 검증이 없어
+    # same-org cross-project goal(제목/목표/전략의도)이 노출됐다 — resource-actual
+    # project_id 직접검증. EE 훅 없음(이 엔드포인트는 EE RBAC 미적용 확認).
+    if project_id is not None:
+        if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, org_id):
+            raise HTTPException(status_code=404, detail="Project not found")
     if isinstance(ids, str):
         try:
             goal_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
@@ -106,12 +114,6 @@ async def list_goals(
         await _attach_org_project_slugs(repo.session, org_id, goals)
         return [GoalResponse.model_validate(g) for g in goals]
 
-    # ratchet round8(잔여 HIGH): project_id 필터(지정 시)에 caller 접근권 검증이 없어
-    # same-org cross-project goal(제목/목표/전략의도)이 노출됐다 — resource-actual
-    # project_id 직접검증. EE 훅 없음(이 엔드포인트는 EE RBAC 미적용 확認).
-    if project_id is not None:
-        if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, org_id):
-            raise HTTPException(status_code=404, detail="Project not found")
 
     filters: dict = {}
     if project_id:
@@ -129,8 +131,13 @@ async def list_goals(
                 status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
             ) from exc
 
+    # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트로만(SEC-S8 선생님 확정: org 전체 노출 = 갭 · sprints와 같은 규칙).
+    project_ids = None
+    if not project_id:
+        from app.services.project_auth import accessible_project_ids_in_org
+        project_ids = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), org_id)
     goals, total = await repo.list_paginated(
-        limit=limit, cursor=cursor_dt, order_by=order_by, **filters
+        limit=limit, cursor=cursor_dt, order_by=order_by, project_ids=project_ids, **filters
     )
 
     if include != "glance":

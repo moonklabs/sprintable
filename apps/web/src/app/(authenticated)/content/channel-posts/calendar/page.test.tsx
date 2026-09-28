@@ -110,6 +110,19 @@ describe('ChannelPostCalendarPage (story #3422 ③)', () => {
   // 칩 문구를 무너뜨린다, 3661과 동형 결함). 채널명+연결 id 짧은 꼬리로 폴백한다
   // (channelConnectionIdentityLabel, 새 낱말 0). 뮤테이션 표적: label을
   // c.account_label ?? c.account_id로 되돌리면 이 테스트가 RED(전체 URL 노출).
+  //
+  // story #3742 CHANGES(카디르 재현) — 이 자리가 `channelConnectionIdentityLabel(c, t)`
+  // (t는 'content' 네임스페이스)로 남아있던 걸 못 잡았던 이유: 아래 두 assertion이
+  // "URL이 안 보인다"·"…이 있다"만 재서, 채널 라벨 부분이 실제로 「웹훅」인지 아니면
+  // next-intl MISSING_MESSAGE 아티팩트("content.channelLabelWebhook" 같은 원시 키
+  // 문자열)인지는 안 갈랐다 — content ns에서 그 키를 지운 이 스토리(3742)에서야
+  // 처음으로 실측 드러남.
+  //
+  // story #3742 CHANGES2(카디르 재실측, codex) — `container.textContent`에 대한
+  // `toContain('웹훅')`는 페이지 전체 텍스트 중 어디든 그 부분문자열만 있으면 통과한다
+  // (오염값 "잘못된웹훅(…)"도 PASS — 못 틀리는 대조). 셀 자체(`[data-testid="channel-
+  // post-calendar-channel-row"] td:first-child`)를 집어 `toBe(정확값)`로 좁힌다 — 채널
+  // 라벨 전체 문자열("웹훅(…ebhook-1)")이 정확히 그 자리에 있어야만 통과.
   it('⭐account_label이 없는 연결은 필터 칩에 「채널명(…짧은 꼬리)」로 폴백하고 URL 전체를 노출하지 않는다', async () => {
     stubFetch({
       connections: [{
@@ -124,7 +137,12 @@ describe('ChannelPostCalendarPage (story #3422 ③)', () => {
     await flush();
     expect(container.querySelector('[data-testid="channel-post-calendar-grid"]')).not.toBeNull();
     expect(container.textContent).not.toContain('https://example.com');
-    expect(container.textContent).toContain('…');
+    // 채널 라벨 셀 정확값 — 정본(channelConnect.channelLabelWebhook="웹훅") + 식별자
+    // 짧은 꼬리. 부분문자열이 아니라 그 자리 전체 텍스트를 대조해 오염값("잘못된웹훅(…)"류)
+    // 도 잡는다 — next-intl MISSING_MESSAGE 아티팩트("content.webhook(…)" 원시 키)도 이
+    // 정확값과 다르므로 자동으로 걸린다.
+    const labelCell = container.querySelector('[data-testid="channel-post-calendar-channel-row"] td:first-child');
+    expect(labelCell?.textContent).toBe(`${koMessages.channelConnect.channelLabelWebhook}(…ebhook-1)`);
   });
 
   it('「날짜 미정」 항목은 레인에 뜨고 격자 셀에는 안 나온다', async () => {

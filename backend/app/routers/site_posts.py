@@ -11,15 +11,19 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
+from app.services.project_auth import require_project_access, restricted_accessible_project_ids
 from app.routers.insight_snapshots import InsightSnapshotView
 from app.services.generation_budget import GenerationBudgetExceededError
+from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.insight_snapshots import get_latest_insight_snapshot
 from app.services.content_rules import get_org_content_rules
+from app.services.publication_command import viewer_can_retry
 from app.services.site_posts import (
     CampaignNotFoundError,
     ConceptApprovalNotApprovedError,
@@ -220,6 +224,10 @@ class SubmitSitePostDraftRequest(BaseModel):
 
 class SubmitSitePostDraftResponse(BaseModel):
     gate_id: uuid.UUID
+    # story #4174(까디르 P2) — 제출한 초안 id. 블로그 레시피는 이 값을 다음 단계(발행 승인 대기) 발행 payload의
+    # `site_post_draft_id`(events.RECIPE_SITE_DRAFT_LINK_FIELD)에 실어 «이 회차의 초안»을 명시 연결한다 — 에이전트 안내 문구가
+    # 이 필드 이름을 그대로 가리킨다. 필드 추가라 하위 호환.
+    draft_id: uuid.UUID
     version_id: uuid.UUID
     content_sha256: str
     status: str
@@ -466,6 +474,28 @@ async def patch_site_post_draft_campaign(
     )
 
 
+async def _require_site_post_draft_project_access(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, user_id: uuid.UUID,
+):
+    """story #4351 — 사이트 글 초안은 프로젝트 소속(work_item_id → Story.project_id). 채널 초안의
+    `_require_channel_post_draft_project_access`와 같은 축 · 접근 불가 = 404(존재 비노출). 반환값 = 초안."""
+    from app.models.pm import Story
+
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+    story = (await db.execute(
+        select(Story).where(Story.id == draft.work_item_id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+    if story is None:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+    await require_project_access(
+        db, user_id=user_id, project_id=story.project_id, org_id=org_id,
+        not_found_detail=f"draft를 찾을 수 없습니다: {draft_id}",
+    )
+    return draft
+
+
 @router.get("/{org_id}/site-posts/drafts", response_model=list[SitePostDraftListItem])
 async def list_site_post_drafts_endpoint(
     org_id: uuid.UUID,
@@ -476,6 +506,11 @@ async def list_site_post_drafts_endpoint(
         default=False,
         description="story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 "
         "포함한다(「보관됨 보기」 필터). 기본은 제외.",
+    ),
+    work_item_id: uuid.UUID | None = Query(
+        default=None,
+        description="story #3988 — drafts linked to this work item only (worklist detail "
+        "Publications tab). Omitted: response identical to before (no regression).",
     ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -492,8 +527,15 @@ async def list_site_post_drafts_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     requester_member_id, is_org_admin = await _resolve_member_best_effort(db, auth, org_id)
-    rows = await list_site_post_drafts(db, org_id=org_id, limit=limit, offset=offset, include_deleted=include_deleted)
-    total = await count_site_post_drafts(db, org_id=org_id, include_deleted=include_deleted)
+    # story #4351 — 제한된 caller는 접근 가능 프로젝트의 초안만(목록 · 총계 같은 범위 — 총계가 새면 존재가 샌다).
+    restricted = await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id)
+    rows = await list_site_post_drafts(
+        db, org_id=org_id, limit=limit, offset=offset, include_deleted=include_deleted,
+        work_item_id=work_item_id, project_ids=restricted,
+    )
+    total = await count_site_post_drafts(
+        db, org_id=org_id, include_deleted=include_deleted, work_item_id=work_item_id, project_ids=restricted,
+    )
     response.headers["X-Total-Count"] = str(total)
     return [
         _to_site_post_draft_list_item(
@@ -528,7 +570,10 @@ async def get_site_post_draft_detail_endpoint(
 
     # story #3734 — 단건 조회는 보관 여부와 무관하게 항상 보인다(목록 기본 필터가
     # 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다, withdraw #3614와 동형 관례).
-    rows = await list_site_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1, include_deleted=True)
+    rows = await list_site_post_drafts(
+        db, org_id=org_id, draft_id=draft_id, limit=1, include_deleted=True,
+        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+    )
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
     draft, latest, origin, gate, post = rows[0]
@@ -628,7 +673,7 @@ async def list_site_post_draft_version_history(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    draft = await _require_site_post_draft_project_access(db, org_id=org_id, draft_id=draft_id, user_id=uuid.UUID(auth.user_id))
     if draft is None:
         raise HTTPException(status_code=404, detail="draft not found")
 
@@ -735,7 +780,7 @@ async def submit_site_post_draft_endpoint(
         ) from exc
 
     return SubmitSitePostDraftResponse(
-        gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
+        gate_id=gate.id, draft_id=draft_id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
         status=gate.status,
     )
 
@@ -770,6 +815,8 @@ class PublicationCommandView(BaseModel):
     dead_letter_at: str | None = None
     command_reason_code: str | None = None
     last_error: str | None = None
+    # story #4290 — **보는 사람이** 지금 이 명령을 «다시 시도»할 수 있는가(재시도 엔드포인트와 같은 한 판정 `viewer_can_retry` = 사람 · `human_retryable`).
+    command_retryable: bool = False
 
 
 def _channel_publication_view(pub) -> ChannelPublicationView | None:
@@ -783,7 +830,7 @@ def _channel_publication_view(pub) -> ChannelPublicationView | None:
     )
 
 
-def _publication_command_view(cmd) -> PublicationCommandView | None:
+def _publication_command_view(cmd, *, viewer_is_human: bool) -> PublicationCommandView | None:
     if cmd is None:
         return None
     return PublicationCommandView(
@@ -793,6 +840,7 @@ def _publication_command_view(cmd) -> PublicationCommandView | None:
         dead_letter_at=cmd.dead_letter_at.isoformat() if cmd.dead_letter_at else None,
         command_reason_code=cmd.reason_code,
         last_error=cmd.last_error,
+        command_retryable=viewer_can_retry(cmd, viewer_is_human=viewer_is_human),
     )
 
 
@@ -875,7 +923,7 @@ async def publish_site_post_from_draft_endpoint(
         return PublishSitePostFromDraftResponse(
             version_id=command.approved_version, command_id=command.id, status=command.status,
             channel_publication=_channel_publication_view(publication),
-            command=_publication_command_view(command),
+            command=_publication_command_view(command, viewer_is_human=resolved.type == "human"),
         )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -893,6 +941,19 @@ async def publish_site_post_from_draft_endpoint(
         raise HTTPException(
             status_code=403,
             detail={"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)},
+        ) from exc
+    except ExternalPublishPausedError as exc:
+        # story #3953(블루프린트 §1-5) — hosted_site 분기(connection_id None)만 이
+        # 자리에서 예외를 받는다(외부 목적지 분기는 command만 만들고 실제 발행은
+        # 워커 몫이라 여기 안 걸린다 — publish_site_post_from_draft 자체 안의 검사가
+        # 워커 쪽 경로를 막는다). conversations.py circuit_breaker_open과 같은 결
+        # (일시 차단·423). §3779(페드루 PO 정정) — BE는 사람 문장을 싣지 않는다:
+        # FE(api-error.ts EXTERNAL_PUBLISH_PAUSED 엔트리, "reason 표시 0" 명시
+        # 주석)가 이 message를 안 쓰고 정적 labelKey만 렌더한다 — str(exc)는
+        # 중립 코드꼴(external_publish_pause.py, Korean 0)이라 그대로 실어도 안전.
+        raise HTTPException(
+            status_code=423,
+            detail={"code": "EXTERNAL_PUBLISH_PAUSED", "message": str(exc)},
         ) from exc
     except SitePostSealMissingError as exc:
         raise HTTPException(
@@ -946,6 +1007,8 @@ async def get_site_post_publication_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
+    # story #4351 — 초안 소속 프로젝트 접근 확인(접근 불가 = 404 · 존재 비노출).
+    await _require_site_post_draft_project_access(db, org_id=org_id, draft_id=draft_id, user_id=uuid.UUID(auth.user_id))
     try:
         info = await get_site_post_publication_info(db, org_id=org_id, draft_id=draft_id)
         destination, publication, command = await get_site_post_external_publication_state(
@@ -969,13 +1032,15 @@ async def get_site_post_publication_endpoint(
                 normalized=snapshot.normalized, source=snapshot.source, error_code=snapshot.error_code,
             )
 
+    # story #4290(까디르 QA ③) — 재시도는 사람만 — 명령 요약의 command_retryable도 보는 쪽 기준.
+    viewer_is_human = (await resolve_member(auth, org_id, db)).type == "human"
     return SitePostPublicationResponse(
         published_at=info.published_at.isoformat() if info.published_at else None,
         url=info.url, published_by_member_id=info.published_by_member_id,
         published_body_sha256=info.published_body_sha256,
         destination=destination,
         channel_publication=_channel_publication_view(publication),
-        command=_publication_command_view(command),
+        command=_publication_command_view(command, viewer_is_human=viewer_is_human),
         publication_id=insight_publication_id,
         latest_insight=latest_insight,
     )
@@ -1038,7 +1103,7 @@ async def unpublish_site_post_endpoint(
         return UnpublishSitePostResponse(
             command_id=command.id, status=command.status,
             channel_publication=_channel_publication_view(publication),
-            command=_publication_command_view(command),
+            command=_publication_command_view(command, viewer_is_human=resolved.type == "human"),
         )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

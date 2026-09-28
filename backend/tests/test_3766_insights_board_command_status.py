@@ -83,7 +83,7 @@ async def test_dead_letter_command_status_joins_onto_row():
             )
             await _seed_command(s, org_id=org_id, gate_id=gate.id, requested_by_member_id=human_id, status="dead_letter")
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == cp.id)
         assert row["command_status"] == "dead_letter"
     finally:
@@ -108,7 +108,7 @@ async def test_blocked_command_status_joins_onto_row():
             )
             await _seed_command(s, org_id=org_id, gate_id=gate.id, requested_by_member_id=human_id, status="blocked")
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == cp.id)
         assert row["command_status"] == "blocked"
     finally:
@@ -133,7 +133,7 @@ async def test_no_command_for_gate_leaves_command_status_none():
                 s, org_id=org_id, gate_id=gate.id, channel="threads", published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == cp.id)
         assert row["command_status"] is None
     finally:
@@ -157,7 +157,7 @@ async def test_site_post_row_command_status_always_none():
                 published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
         assert row["command_status"] is None
     finally:
@@ -194,7 +194,7 @@ async def test_latest_command_by_created_at_wins_when_gate_has_multiple_commands
                 created_at=now - timedelta(minutes=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == cp.id)
         assert row["command_status"] == "pending", "더 최신(created_at) 명령이 이겨야 하는데 옛 dead_letter가 남았다"
     finally:
@@ -223,7 +223,7 @@ async def test_status_filter_axis_stays_separate_from_command_status():
             )
             await _seed_command(s, org_id=org_id, gate_id=gate.id, requested_by_member_id=human_id, status="dead_letter")
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", status="dead_letter")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", status="dead_letter")
         assert result["rows"] == [], (
             "status='dead_letter'가 InsightSnapshot 축이 아니라 command_status 축에 "
             "잘못 걸리면(교차 오염) 이 행이 여기 섞여 든다 — 두 축은 분리돼야 한다"

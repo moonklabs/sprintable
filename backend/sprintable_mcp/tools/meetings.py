@@ -59,7 +59,7 @@ async def list_meetings(args: ListMeetingsInput) -> list[TextContent]:
             params["limit"] = str(args.limit)
         return ok(await client.get("/api/v2/meetings", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_meeting(args: MeetingIdInput) -> list[TextContent]:
@@ -67,7 +67,7 @@ async def get_meeting(args: MeetingIdInput) -> list[TextContent]:
     try:
         return ok(await client.get(f"/api/v2/meetings/{args.meeting_id}"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def create_meeting(args: CreateMeetingInput) -> list[TextContent]:
@@ -80,7 +80,7 @@ async def create_meeting(args: CreateMeetingInput) -> list[TextContent]:
                 body[field] = val
         return ok(await client.post("/api/v2/meetings", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_meeting(args: UpdateMeetingInput) -> list[TextContent]:
@@ -94,7 +94,7 @@ async def update_meeting(args: UpdateMeetingInput) -> list[TextContent]:
     try:
         return ok(await client.put(f"/api/v2/meetings/{args.meeting_id}", json=updates))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def delete_meeting(args: MeetingIdInput) -> list[TextContent]:
@@ -102,7 +102,7 @@ async def delete_meeting(args: MeetingIdInput) -> list[TextContent]:
     try:
         return ok(await client.delete(f"/api/v2/meetings/{args.meeting_id}"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def trigger_ai_summary(args: MeetingIdInput) -> list[TextContent]:
@@ -110,4 +110,4 @@ async def trigger_ai_summary(args: MeetingIdInput) -> list[TextContent]:
     try:
         return ok(await client.post(f"/api/v2/meetings/{args.meeting_id}/summary", json={}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

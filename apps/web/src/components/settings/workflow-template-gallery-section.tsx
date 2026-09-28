@@ -6,8 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { RecipeRoleMappingFields } from '@/components/organization/recipe-role-mapping-fields';
+import { RecipeRoleMappingFields, type ChannelConnectionOption, type GenerationConnectorOption } from '@/components/organization/recipe-role-mapping-fields';
+import { presetDescription, presetName } from '@/lib/platform-preset-copy';
+import { requiredMappingStages, submittableRoleMapping } from '@/lib/recipe-role-slots';
 
 // story #3293(도메인탈고정 축2-ⓒ) — 구세대 workflow_templates(story #3010 P3 등) 소비를
 // 신세대(EventDefinition/recipe_role_bindings, 축2-ⓐ story #3288)로 이전. doc
@@ -21,20 +24,23 @@ interface TeamMember {
   name: string;
   type: string;
   role?: string;
+  runtime_type?: string | null;
 }
 
+// story #4359(PO 23:37Z · 유나) — 영어 고정 배지(«1-step» · `${n}-step`)였다. 조직 레시피 갤러리(recipe-gallery.tsx)가 같은 셈을
+// 부르는 기존 키로 두 화면 말을 하나로. «Kanban»(0단계) 갈래는 지움 — 배지는 순환 정의(isCyclicDefinition = 단계 > 0)에만 그려져 닿지 않는 길.
 function StageCountBadge({ count }: { count: number }) {
-  const labels: Record<number, string> = { 0: 'Kanban', 1: '1-step', 2: '2-step', 3: '3-step' };
+  const tOrg = useTranslations('organization');
   return (
     <Badge variant="secondary" className="text-[10px]">
-      {labels[count] ?? `${count}-step`}
+      {tOrg('recipeGalleryStageCountBadge', { count })}
     </Badge>
   );
 }
 
 export function WorkflowTemplateGallerySection({
   projectId,
-  orgId: _orgId,
+  orgId,
 }: {
   projectId: string;
   orgId?: string;
@@ -45,9 +51,14 @@ export function WorkflowTemplateGallerySection({
   const tOrg = useTranslations('organization');
   // story #3776(1층B) — "로딩 중..."/"다시 시도", common ns의 기존 loading/retry 키 재사용.
   const tc = useTranslations('common');
+  const tPreset = useTranslations('recipePreset');
 
   const [definitions, setDefinitions] = useState<EventDefinitionResponse[]>([]);
-  const [agents, setAgents] = useState<TeamMember[]>([]);
+  const [memberOptions, setMemberOptions] = useState<TeamMember[]>([]);
+  // story #4090(alembic 0385) — apply-recipe-dialog.tsx와 동형(org 스코프, project 무관).
+  const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
+  // story #4101 — channelConnections와 동형(org 스코프, project 무관).
+  const [generationConnectors, setGenerationConnectors] = useState<GenerationConnectorOption[]>([]);
   const [loading, setLoading] = useState(true);
   // story #3521(유나 §22-2, PO 確定 2026-09-05) — defRes(주)는 3519 당시에도 catch가
   // 없었다(memberRes만 격리). §16-7 주 계약("주는 던져도 된다")은 지켜졌지만 그 throw를
@@ -81,9 +92,14 @@ export function WorkflowTemplateGallerySection({
       // (§16-7 주 계약 — 주는 던져도 된다). 대신 이제 이 함수를 감싸는 catch가 있어
       // defRes의 reject·!ok 둘 다 loadError로 정직하게 착지한다(예전엔 던져도 받을
       // 그릇이 없어 unhandled rejection으로 샜다).
-      const [defRes, memberRes] = await Promise.all([
+      const [defRes, memberRes, channelRes, generationRes] = await Promise.all([
         fetchWithAuth('/api/events/definitions'),
-        fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`).catch(() => null),
+        // story #4243 — 사람 + 에이전트(stage마다 role_actor_kinds로 거른다 — RecipeRoleMappingFields).
+        fetchWithAuth(`/api/team-members?project_id=${projectId}`).catch(() => null),
+        // story #4090 — org 스코프(project 무관), memberRes와 동형으로 격리(부수 leg).
+        orgId ? fetchWithAuth(`/api/organizations/${orgId}/channel-connections`).catch(() => null) : Promise.resolve(null),
+        // story #4101 — 같은 원칙(부수 leg, 격리).
+        orgId ? fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=true`).catch(() => null) : Promise.resolve(null),
       ]);
       if (!defRes.ok) {
         setLoadError(true);
@@ -115,14 +131,24 @@ export function WorkflowTemplateGallerySection({
       if (memberRes?.ok) {
         const json = await memberRes.json() as { data?: TeamMember[] } | TeamMember[];
         const members = Array.isArray(json) ? json : ((json as { data?: TeamMember[] }).data ?? []);
-        setAgents(members);
+        // story #3994 — 「시스템 발행」에 워크플로 역할을 매핑하는 것 자체가 의미
+        // 없다(연결 대상이 아닌 내부 멤버) — 고르는 자리에서 제외.
+        setMemberOptions(members.filter((m) => !isSystemPublisher(m.runtime_type)));
+      }
+      if (channelRes?.ok) {
+        const json = await channelRes.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
+        setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
+      }
+      if (generationRes?.ok) {
+        const json = await generationRes.json() as { data?: { connectors?: GenerationConnectorOption[] } };
+        setGenerationConnectors(json.data?.connectors ?? []);
       }
     } catch {
       setLoadError(true);
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, orgId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
@@ -145,7 +171,9 @@ export function WorkflowTemplateGallerySection({
     }
   };
 
-  const requiredStages = selected ? cyclicStages(selected) : [];
+  const mappingStages = selected ? cyclicStages(selected) : [];
+  // story #4243 — 사람 역할(human 선언) stage는 비워도 적용된다(requiredMappingStages).
+  const requiredStages = selected ? requiredMappingStages(mappingStages, selected.stage_metadata, selected.role_actor_kinds) : [];
 
   const handleApply = async () => {
     if (!selected) return;
@@ -159,11 +187,13 @@ export function WorkflowTemplateGallerySection({
     setApplying(true);
     setApplyResult(null);
     setApplyWarnings([]);
+    // story #4243 — 비워 둔 선택(사람 stage 등)과 승인이 stage 밖인 읽기 전용 stage는 싣지 않는다.
+    const chosen = submittableRoleMapping(roleMapping, selected.stage_metadata, selected.role_actor_kinds);
     try {
       const res = await fetchWithAuth(`/api/events/definitions/${selected.id}/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, role_mapping: roleMapping }),
+        body: JSON.stringify({ project_id: projectId, role_mapping: chosen }),
       });
       const data = await res.json() as {
         ok?: boolean; bindings_upserted?: number; warnings?: string[]; error?: { message?: string };
@@ -247,8 +277,8 @@ export function WorkflowTemplateGallerySection({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="font-medium text-sm text-foreground truncate">{def.name || def.key}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{def.description}</p>
+                  <p className="font-medium text-sm text-foreground truncate">{presetName(def, tPreset)}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{presetDescription(def, tPreset)}</p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <StageCountBadge count={cyclicStages(def).length} />
@@ -269,19 +299,27 @@ export function WorkflowTemplateGallerySection({
         {selected && !loadingBindings && (
           <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4 space-y-4">
             <div>
-              <h3 className="font-semibold text-sm text-foreground">{selected.name || selected.key} {_t('workflowGalleryRoleMappingSuffix')}</h3>
+              <h3 className="font-semibold text-sm text-foreground">{presetName(selected, tPreset)} {_t('workflowGalleryRoleMappingSuffix')}</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {tOrg('eventApplyRoleMappingHint')}
               </p>
             </div>
 
             <RecipeRoleMappingFields
-              stages={requiredStages}
+              stages={mappingStages}
               stageMetadata={selected.stage_metadata}
-              agents={agents}
+              members={memberOptions}
+              roleActorKinds={selected.role_actor_kinds}
+              channelConnections={channelConnections}
+              generationConnectors={generationConnectors}
               roleMapping={roleMapping}
-              onChange={(stage, agentId) => setRoleMapping(prev => ({ ...prev, [stage]: agentId }))}
+              onChange={(stage, value) => setRoleMapping(prev => ({ ...prev, [stage]: value }))}
               agentPlaceholder={tOrg('eventApplyAgentPlaceholder')}
+              personPlaceholder={tOrg('recipeApplyV2PersonPlaceholder')}
+              memberPlaceholder={tOrg('recipeApplyV2MemberPlaceholder')}
+              approvalNote={(surface) => (surface === 'doc_approval' ? tOrg('recipeApplyV2ApprovalOnDocApproval') : tOrg('recipeApplyV2ApprovalOnDraftGate'))}
+              channelPlaceholder={tOrg('eventApplyChannelPlaceholder')}
+              generationConnectorPlaceholder={tOrg('eventApplyGenerationConnectorPlaceholder')}
             />
 
             {applyWarnings.length > 0 && (

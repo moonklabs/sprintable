@@ -101,7 +101,7 @@ describe('ProofCapsule (optional fields — evidence/gate/agent 없이도 정직
 
   it('renders the agent avatar distinctly from the human avatar when an agent is present', () => {
     const markup = renderWithIntl(
-      <ProofCapsule {...BASE} agent={{ name: '미르코', initial: '미' }} density="full" />,
+      <ProofCapsule {...BASE} agent={{ name: '미르코' }} density="full" />,
     );
     expect(markup).toContain('실행 미르코');
     expect(markup).toContain('책임 윤재');
@@ -152,7 +152,7 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
       <ProofCapsule
         {...BASE}
         density="row"
-        agent={{ name: '미르코', initial: '미' }}
+        agent={{ name: '미르코' }}
         gate={{ action: '병합', tone: 'ready' }}
       />,
     );
@@ -270,7 +270,7 @@ describe('ProofCapsule (audit density — actor avatar shape, story #2923 AQ4)',
   it('renders a rounded-full avatar (agent shape) for an agent actor', () => {
     const { human: _human, ...withoutHuman } = BASE;
     const markup = renderWithIntl(
-      <ProofCapsule {...withoutHuman} density="audit" agent={{ name: '미르코', initial: '미' }} />,
+      <ProofCapsule {...withoutHuman} density="audit" agent={{ name: '미르코' }} />,
     );
     expect(markup).toContain('rounded-full');
     expect(markup).toContain('미르코');
@@ -280,6 +280,25 @@ describe('ProofCapsule (audit density — actor avatar shape, story #2923 AQ4)',
     const { human: _human, ...withoutHuman } = BASE;
     const markup = renderWithIntl(<ProofCapsule {...withoutHuman} density="audit" />);
     expect(markup).not.toContain('undefined');
+  });
+
+  // [SID:4286 · 까디르 873bcf080] 활동 로그가 넘긴 label을 버려 이름 없는 행위자가 빈칸이던 것 — 아바타(아이콘) · 시각 줄 둘 다 label.
+  it('이름 없는 행위자(name null + label) — 아바타는 아이콘 + 접근성 이름 label · 시각 줄에 label(사람 · 에이전트)', () => {
+    const { human: _human, ...withoutHuman } = BASE;
+    const humanMarkup = renderWithIntl(
+      <ProofCapsule {...withoutHuman} density="audit" now="3일 전" human={{ name: null, label: '이름 없는 구성원', role: 'human' }} />,
+    );
+    expect(humanMarkup).toContain('aria-label="이름 없는 구성원"');
+    expect(humanMarkup).toContain('3일 전 이름 없는 구성원');
+    expect(humanMarkup).toContain('rounded-md');
+    expect(humanMarkup).not.toContain('>이름<');
+
+    const agentMarkup = renderWithIntl(
+      <ProofCapsule {...withoutHuman} density="audit" now="3일 전" agent={{ name: null, label: '이름 없는 에이전트' }} />,
+    );
+    expect(agentMarkup).toContain('aria-label="이름 없는 에이전트"');
+    expect(agentMarkup).toContain('3일 전 이름 없는 에이전트');
+    expect(agentMarkup).toContain('rounded-full');
   });
 });
 
@@ -375,7 +394,7 @@ describe('ProofCapsule (EN locale — regression: 전면 하드코딩 한국어�
     const markup = renderWithIntlEn(
       <ProofCapsule
         {...BASE}
-        agent={{ name: 'Alex', initial: 'A' }}
+        agent={{ name: 'Alex' }}
         now="2h ago"
         evidence={{ acMet: 4, acTotal: 4, autoVerify: 'passed', proofCount: 3 }}
         gate={{ risk: 'low', action: 'Open merge gate' }}
@@ -547,5 +566,31 @@ describe('ProofCapsule — story #3054 serif 포인트(claim→Verified 전이�
   it('card 밀도(본문 규모)는 proofState=green이어도 font-serif가 없다(2974 — 본문/칩 금지)', () => {
     const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" proofState="green" />);
     expect(markup).not.toContain('font-serif');
+  });
+});
+
+// story #4336(PO 03:55Z) — «에이전트 주장 · 완료했다고 말해요» 눈썹이 게이트 종류와 무관하게 늘 붙어, 사람이 상신한 외부 발행 게이트에도 떴다.
+// 호출부가 claimLabel로 가른다: 생략 = 기본 눈썹(에이전트 완료 주장 자리 그대로) · null = 눈썹 없음(낱말은 유나가 정할 때까지 비움).
+describe('ProofCapsule full — claim 눈썹(claimLabel)', () => {
+  const EYEBROW = (koMessages.proofCapsule as { claim: { label: string } }).claim.label;
+
+  it('⭐생략하면 기본 눈썹(에이전트 완료 주장) 그대로', () => {
+    const html = renderWithIntl(<ProofCapsule {...BASE} />);
+    expect(html).toContain(EYEBROW);
+    expect(html).toContain('data-testid="proof-capsule-claim-label"');
+  });
+
+  it('⭐글을 넘기면 그 눈썹(외부 발행 게이트 «발행 승인 · 이대로 발행할지 결정해요») · 기본 눈썹은 없음', () => {
+    const label = (koMessages.proofCapsule as { claim: { publishApprovalLabel: string } }).claim.publishApprovalLabel;
+    const html = renderWithIntl(<ProofCapsule {...BASE} claimLabel={label} />);
+    expect(html).toContain(label);
+    expect(html).not.toContain(EYEBROW);
+  });
+
+  it('⭐null이면 눈썹 없음 · claim 본문은 그대로', () => {
+    const html = renderWithIntl(<ProofCapsule {...BASE} claimLabel={null} />);
+    expect(html).not.toContain(EYEBROW);
+    expect(html).not.toContain('data-testid="proof-capsule-claim-label"');
+    expect(html).toContain(BASE.claim);
   });
 });

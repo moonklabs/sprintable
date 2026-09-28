@@ -47,6 +47,35 @@ describe('ApiDocRepository.list — cursor 전달 + {data,meta} 응답 언랩 (#
   });
 });
 
+// story #4376 — 사이드바 트리는 한 번에: tree=true를 싣고, meta.total을 total로 푼다. tree 아닌 호출엔 total 키가 없다.
+describe('ApiDocRepository.list — tree=true와 total(#4376)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{ id: 'doc-1' }], meta: { has_more: false, next_cursor: null, total: 1 } }),
+    })) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('tree면 요청에 tree=true · 응답 total을 그대로', async () => {
+    const result = await new ApiDocRepository('token').list({ project_id: 'proj-1', tree: true });
+    const requested = new URL((fetchMock.mock.calls[0]![0] as URL | string).toString());
+    expect(requested.searchParams.get('tree')).toBe('true');
+    expect(requested.searchParams.has('limit')).toBe(false);
+    expect(result.total).toBe(1);
+  });
+
+  it('tree가 아니면 tree 파라미터도 total 키도 없다(기존 호출 회귀 0)', async () => {
+    const result = await new ApiDocRepository('token').list({ project_id: 'proj-1', limit: 20 });
+    const requested = new URL((fetchMock.mock.calls[0]![0] as URL | string).toString());
+    expect(requested.searchParams.has('tree')).toBe(false);
+    expect('total' in result).toBe(false);
+  });
+});
+
 describe('ApiDocRepository.getBySlug — 단건 조회도 {data,meta} 봉투를 언랩한다 (#2191)', () => {
   it('data[0]에서 첫 문서를 찾아 단건 조회로 이어간다', async () => {
     const fetchMock = vi.fn()
@@ -65,6 +94,27 @@ describe('ApiDocRepository.getBySlug — 단건 조회도 {data,meta} 봉투를 
 
     expect(doc.content).toBe('본문');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('⭐slug 단건 응답의 wiki_link_targets(적힌 slug → 지금 slug)를 상세 응답에 실어 돌려준다 — 요청 추가 0(story #4313)', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ data: [{ id: 'doc-1', slug: 'my-doc', wiki_link_targets: { onboarding: 'onboarding', 'old-name': 'new-name' } }], meta: { has_more: false, next_cursor: null } }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 'doc-1', slug: 'my-doc', content: '[[onboarding]]' }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const doc = await new ApiDocRepository('token').getBySlug('proj-1', 'my-doc');
+    expect(doc.wiki_link_targets).toEqual({ onboarding: 'onboarding', 'old-name': 'new-name' });
+    expect(doc.content).toBe('[[onboarding]]');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('slug 응답에 wiki_link_targets가 없으면(옛 BE) null — 렌더러는 전부 글자 그대로', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [{ id: 'doc-1', slug: 'my-doc' }], meta: { has_more: false, next_cursor: null } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 'doc-1', slug: 'my-doc' }) }));
+    expect((await new ApiDocRepository('token').getBySlug('proj-1', 'my-doc')).wiki_link_targets).toBeNull();
   });
 
   it('data가 빈 배열이면 Doc not found를 던진다', async () => {

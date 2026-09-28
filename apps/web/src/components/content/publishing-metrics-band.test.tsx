@@ -13,6 +13,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { PublishingMetricsBand } from './publishing-metrics-band';
+import { formatScheduledAt, resolveDisplayTimezone } from './schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -161,7 +162,8 @@ describe('PublishingMetricsBand(story #3484, §18)', () => {
     await act(async () => { root.render(wrap(<PublishingMetricsBand orgId="org-1" window="7d" />)); });
     await flush();
     const el = container.querySelector('[data-testid="publishing-metrics-computed-at"]');
-    expect(el?.textContent).toMatch(/09-05 \d{2}:\d{2}/);
+    // story #4280 — 화면은 표시 시간대(조직 tz 없으면 실행 기계 TZ)로 날짜를 그린다. 날짜를 박아 두면 음의 오프셋 기계(LA)에서 하루 앞으로 밀려 깨졌다 — 같은 포맷터로 기대값.
+    expect(el?.textContent).toContain(formatScheduledAt('2026-09-05T01:20:00Z', resolveDisplayTimezone().tz).display);
   });
 
   it('computed_at이 없으면 그 자리를 안 그린다(Date.now()로 안 지어낸다)', async () => {

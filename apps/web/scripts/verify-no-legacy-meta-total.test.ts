@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanFileContent, scanRepo } from './verify-no-legacy-meta-total';
+import { measureFsReads } from './test-utils/fs-work';
 
 const API_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/api');
 
@@ -66,11 +67,13 @@ describe('scanFileContent — story #3761 셀프테스트', () => {
 describe('scanRepo — story #3761(실 트리 실행)', () => {
   // 지금 develop(#3761 처리 뒤) — API route.ts 전수 위반 0. 되돌리면(누군가 total을 다시
   // 쓰면) RED.
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-  // 재현 5회 = 156·150·176·201·159ms 중 최댓값 201ms → ×3 ≈ 603ms → 1000ms로 반올림).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실 트리(apps/web/src/app/api) — legacy total 프로퍼티 0건', () => {
-    const { refs, fileCount } = scanRepo(API_ROOT);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(API_ROOT));
+    const { refs, fileCount } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(fileCount).toBeGreaterThan(400);
     expect(refs).toEqual([]);
-  }, 1000);
+  });
 });

@@ -22,6 +22,8 @@ import uuid
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publication_body, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_620beefc_channel_post_image_upload import (
     _approve_gate_directly,
     _client_for,
@@ -203,13 +205,62 @@ def _object_path_for_video(org_id, draft_id, *, content_type: str = "video/mp4")
     return f"channel-media/{org_id}/{draft_id}/{uuid.uuid4().hex}.{ext}"
 
 
-async def _upload_and_confirm_video(client, org_id, draft_id, raw: bytes, *, content_type: str = "video/mp4"):
-    object_path = _object_path_for_video(org_id, draft_id, content_type=content_type)
-    await _put_raw_object(object_path, raw, content_type=content_type)
-    return await client.post(
+class _JobOutcome:
+    """story #4336 PR2 — 영상 확정이 작업화된 뒤에도 예전 응답 모양으로 읽는 대역(완료 = 201 + 영상 · 실패 = 그 상태 + {error: 본문})."""
+
+    def __init__(self, status_code: int, body: dict):
+        self.status_code = status_code
+        self._body = body
+        self.text = __import__("json").dumps(body, ensure_ascii=False, default=str)
+
+    def json(self):
+        return self._body
+
+
+async def run_background_jobs_once(app) -> dict:
+    """앱의 DB 오버라이드 세션으로 공용 작업 줄을 한 번 돈다(cron 틱 대신 · 넉넉한 예산)."""
+    import time
+
+    from app.dependencies.database import get_db
+    from app.services.background_jobs import process_due_background_jobs
+
+    provider = app.dependency_overrides[get_db]
+    agen = provider()
+    session = await agen.__anext__()
+    try:
+        return await process_due_background_jobs(session, deadline_monotonic=time.monotonic() + 600)
+    finally:
+        await agen.aclose()
+
+
+async def confirm_video_and_wait(client, org_id, draft_id, object_path: str, app=None, *, in_request_status: int | None = None):
+    """영상 확정 요청(202) → 작업 한 번 처리 → 작업 상태를 예전 응답 모양으로.
+
+    story #4336 PR2 ②(까디르 codex) — 예전엔 202가 아니면 무엇이든 그대로 돌려줘, 작업으로 가야 할 거부가 요청 안에서 나도 테스트가 통과했다.
+    이제 기본은 **202 필수**. 요청 안 검사(DB · HEAD) 거부를 보는 테스트만 `in_request_status=`로 그 상태를 밝힌다."""
+    r = await client.post(
         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
         json={"object_path": object_path},
     )
+    if in_request_status is not None:
+        assert r.status_code == in_request_status, r.text
+        return r
+    assert r.status_code == 202, f"영상 확정은 작업(202)으로 가야 한다 — 받은 {r.status_code}: {r.text}"
+    if app is None:
+        from app.main import app
+    job_id = r.json()["id"]
+    await run_background_jobs_once(app)
+    job = (await client.get(f"/api/v2/organizations/{org_id}/background-jobs/{job_id}")).json()
+    if job["status"] == "completed":
+        return _JobOutcome(201, job["result"]["video"])
+    error = job["error"] or {"status_code": 500, "detail": {"code": "JOB_NOT_FINISHED", "status": job["status"]}}
+    return _JobOutcome(error["status_code"], {"data": None, "error": error["detail"], "meta": None})
+
+
+async def _upload_and_confirm_video(client, org_id, draft_id, raw: bytes, *, content_type: str = "video/mp4"):
+    object_path = _object_path_for_video(org_id, draft_id, content_type=content_type)
+    await _put_raw_object(object_path, raw, content_type=content_type)
+    return await confirm_video_and_wait(client, org_id, draft_id, object_path)
 
 
 _VALID_9_16 = {"width": 720, "height": 1280}  # 720/1280 = 0.5625 = 9/16 정확히.
@@ -583,7 +634,7 @@ async def test_publish_dispatches_to_reels_container_for_video_instagram_sandbox
             await _approve_gate_directly(s, uuid.UUID(gate_id))
 
         async with _client_for(app) as client:
-            r_publish_1 = await client.post(
+            r_publish_1 = await publish_and_run_worker(client, Session,
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
             )
             assert r_publish_1.status_code == 200, r_publish_1.text
@@ -598,11 +649,12 @@ async def test_publish_dispatches_to_reels_container_for_video_instagram_sandbox
         )
 
         async with _client_for(app) as client:
-            r_publish_2 = await client.post(
+            r_publish_2 = await publish_and_run_worker(client, Session,
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
             )
         assert r_publish_2.status_code == 200, r_publish_2.text
-        body = r_publish_2.json()
+        # story #4336 — 요청은 «발행 중»(대기열), 결과는 워커 한 틱 뒤 발행 행에.
+        body = await publication_body(Session, draft_id)
         assert body["processing"] is False
         assert body["external_id"] is not None and body["external_id"].startswith("sandbox-ig-media-")
     finally:

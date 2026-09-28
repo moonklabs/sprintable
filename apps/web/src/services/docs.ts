@@ -15,8 +15,8 @@ export class DocsService {
     return new DocsService(new ApiDocRepository(db), db);
   }
 
-  async list(projectId: string, input?: { limit?: number; cursor?: string | null; tags?: string[] }) {
-    return this.repo.list({ project_id: projectId, limit: input?.limit, cursor: input?.cursor ?? undefined, tags: input?.tags });
+  async list(projectId: string, input?: { limit?: number; cursor?: string | null; tags?: string[]; tree?: boolean }) {
+    return this.repo.list({ project_id: projectId, limit: input?.limit, cursor: input?.cursor ?? undefined, tags: input?.tags, tree: input?.tree });
   }
 
   /** story #2262 PR②(BE #2905) — ids 배치 lookup은 project_id 없이 org 전체에서

@@ -55,6 +55,49 @@ from unittest.mock import AsyncMock, MagicMock
 # 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
 os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
 
+
+# story #4319(AC5) — CI 정지 감지기(scripts/run-with-stall-detection.sh)가 죽이기 전에 보내는 신호로 스택을 남긴다.
+# STALL_EVIDENCE_DIR이 있을 때만(CI destructive 샤드). 모듈 최상위에서 등록해 수집(collection) 중 멈춤도 잡힌다.
+# 파일로 쓴다 — pytest의 출력 가로채기(fd 수준)가 stderr를 삼키고, 정지 판은 곧 죽어 그 버퍼가 사라진다.
+#   SIGUSR1 → faulthandler: 모든 스레드 스택(C 수준이라 파이썬이 한 호출에 묶여 있어도 찍힌다)
+#   SIGUSR2 → 지금 테스트 · 단계(PYTEST_CURRENT_TEST)와 실행 중인 asyncio 루프의 모든 태스크 스택
+_STALL_EVIDENCE_FILES: list = []
+
+
+def _register_stall_evidence_dumps() -> None:
+    evidence_dir = os.environ.get("STALL_EVIDENCE_DIR")
+    if not evidence_dir:
+        return
+    import asyncio
+    import faulthandler
+    import signal
+    import time
+
+    os.makedirs(evidence_dir, exist_ok=True)
+    threads_file = open(os.path.join(evidence_dir, f"pytest-{os.getpid()}-threads.txt"), "a", buffering=1)  # noqa: SIM115 — 프로세스 끝까지 연다
+    _STALL_EVIDENCE_FILES.append(threads_file)
+    faulthandler.register(signal.SIGUSR1, file=threads_file, all_threads=True)
+    tasks_path = os.path.join(evidence_dir, f"pytest-{os.getpid()}-asyncio.txt")
+
+    def _dump_asyncio_tasks(_signum, _frame) -> None:
+        with open(tasks_path, "a") as out:
+            out.write(f"== {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} · PYTEST_CURRENT_TEST={os.environ.get('PYTEST_CURRENT_TEST')!r}\n")
+            # 신호 처리기는 주 스레드에서 돈다 — 루프가 주 스레드에서 돌고 있으면 그 루프가 보인다(공개 API는 코루틴 안에서만 쓸 수 있다).
+            loop = asyncio.events._get_running_loop()
+            if loop is None:
+                out.write("(주 스레드에 실행 중인 asyncio 루프 없음)\n")
+                return
+            tasks = asyncio.all_tasks(loop)
+            out.write(f"({len(tasks)} tasks)\n")
+            for task in tasks:
+                out.write(f"-- {task!r}\n")
+                task.print_stack(file=out)
+
+    signal.signal(signal.SIGUSR2, _dump_asyncio_tasks)
+
+
+_register_stall_evidence_dumps()
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -472,6 +515,24 @@ def pytest_collection_modifyitems(items: list) -> None:
     # 바로 그 위험한 패턴이다.
     destructive_items = [i for i in items if i.get_closest_marker(_MARKER_NAME) is not None]
     non_destructive_items = [i for i in items if i.get_closest_marker(_MARKER_NAME) is None]
+
+    # story #4153/#4152 후속(CI·소형, 페드루 PO 確定 2026-09-22) — pytest-timeout 전역
+    # 상한(pyproject.toml [tool.pytest.ini_options] timeout=30)이 destructive_schema
+    # 파일마다 붙는 파일별 완전 격리(fresh DB·마이그레이션 replay 등)를 전제하지 않는다 —
+    # 정상적으로 30초를 넘는 파일(예: test_3804_prod_promotion_bridge_0354a.py의 60-
+    # 마이그레이션 replay+pg_dump 스키마 대조, 등재 weight 85.0s)이 러너 부하 없이도
+    # 매번 하드킬됐다(PR#4381 shard6 run, 10:31:44Z 실측 — "Failed: Timeout (>30.0s)
+    # from pytest-timeout", 그 파일에 자기 timeout 마커도 backend/tests 전체에 per-test
+    # 오버라이드 선례도 0). 처방은 지목 파일 하나가 아니라 destructive_schema 클래스
+    # 전체로 — 자기 자신의 `@pytest.mark.timeout(...)`이 없는 항목에만 상한을 210초로
+    # 올린다(관측 최댓값 83s × 2.5 — #4152 ABSOLUTE_SLOW_MULTIPLIER와 같은 배수, 새
+    # 매직넘버 발명 0). 파일이 자기 자신의 timeout 마커를 이미 명시하면(더 좁게든
+    # 넓게든) 그 값을 그대로 존중한다(덮어쓰지 않는다).
+    _DESTRUCTIVE_SCHEMA_DEFAULT_TIMEOUT_SEC = 210
+    for item in destructive_items:
+        if item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(_DESTRUCTIVE_SCHEMA_DEFAULT_TIMEOUT_SEC))
+
     if destructive_items and non_destructive_items:
         destructive_files = sorted({str(Path(str(i.fspath))) for i in destructive_items})
         preview = destructive_files[:5]
@@ -808,3 +869,119 @@ async def test_client(mock_session: AsyncMock, auth_ctx: MagicMock):
         yield client
 
     app.dependency_overrides.clear()
+
+
+async def _team_members_is_view(session) -> bool:
+    """story #4070 — `team_members`가 실 스키마의 VIEW(마이그 0088)인지 disposable
+    schema(`Base.metadata.create_all()`)의 평문 테이블인지는 스키마마다 갈린다.
+    `pg_class.relkind`('v'=view, 'r'=ordinary table)로 실측해 분기 — 파일마다 손으로
+    다르게 심어온 것(story #4083이 반대편 증상, #4070이 이쪽 증상을 겪음)이 이 클래스의
+    근본원인이라 «재는 코드 하나»로 합친다."""
+    from sqlalchemy import text
+
+    # relkind은 postgres "char" 유사타입 — asyncpg가 str이 아니라 bytes(b'v')로 돌려줘
+    # 드라이버에 따라 비교가 조용히 항상 False가 나는 함정이 있다(실측 확認, #4070).
+    # ::text 캐스트로 드라이버 무관하게 str을 강제.
+    relkind = (await session.execute(
+        text("SELECT relkind::text FROM pg_class WHERE relname = 'team_members'")
+    )).scalar_one_or_none()
+    return relkind == "v"
+
+
+async def seed_org_with_human_owner(session, *, slug: str, org_name: str = "Org"):
+    """story #4070 — org+project+human owner(OrgMember) 시드 + `team_members` 투영 보장을
+    스키마 형상 무관하게 한 자리에서 처리한다. `_seed_org_with_owner` 복붙 사본이 파일마다
+    schema shape(view vs table)을 다르게 가정해 산발적으로 깨진 것(test_4044 FK위반·#4083의
+    반대편 VIEW insert 실패)이 근본원인 — 이 헬퍼가 SSOT.
+
+    - disposable schema(`create_all()`, `team_members`=평문 테이블): test_4050 선례대로
+      `TeamMember(id=owner_member.id, type="human", ...)` 미러 행을 직접 심는다.
+    - 실 마이그 스키마(`team_members`=VIEW, human 분기는 `members ⋈ project_access`):
+      `Member(type="human", id=owner_member.id)` + `ProjectAccess(member_id=owner_member.id,
+      permission="granted", role="owner")`를 심어 뷰 투영 조건을 재현한다(#4083의 agent용
+      3-write 앵커와 동형 원리, human 축).
+
+    반환 = (org_id, project_id, owner_member_id) — 기존 `_seed_org_with_owner` 시그니처와
+    동일해 drop-in 교체 가능."""
+    from app.models.organization import Organization
+    from app.models.project import OrgMember, Project
+
+    org = Organization(id=uuid.uuid4(), name=org_name, slug=slug)
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=uuid.uuid4(), role="owner")
+    session.add(owner_member)
+    await session.commit()
+
+    if await _team_members_is_view(session):
+        from app.models.member import Member
+        from app.models.project_access import ProjectAccess
+
+        # user_id=None — 기존 `_seed_org_with_owner` 관례(OrgMember.user_id=uuid.uuid4(),
+        # 매칭 User 행 없음)를 그대로 잇는다. OrgMember.user_id는 FK가 없어 무방하지만
+        # Member.user_id는 users.id FK라 그 임의값을 그대로 넣으면 위반 — 뷰의 human
+        # 분기는 JOIN/WHERE에 user_id를 쓰지 않으므로 None이어도 투영에 영향 없다.
+        session.add(Member(
+            id=owner_member.id, org_id=org.id, type="human", user_id=None,
+            name="org owner",
+        ))
+        await session.commit()
+        # org_member_id=owner_member.id — 0075 마이그 코멘트("project_access.member_id=
+        # org_member_id")가 서술하는 실 프로덕션 형상 그대로(휴먼은 두 id가 같다, agent는
+        # org_member 행이 아예 없어 NULL).
+        session.add(ProjectAccess(
+            id=uuid.uuid4(), project_id=project.id, org_member_id=owner_member.id,
+            member_id=owner_member.id, permission="granted", role="owner",
+        ))
+        await session.commit()
+    else:
+        from app.models.team import TeamMember
+
+        session.add(TeamMember(
+            id=owner_member.id, org_id=org.id, project_id=project.id, type="human",
+            name="org owner", is_active=True,
+        ))
+        await session.commit()
+
+    return org.id, project.id, owner_member.id
+
+
+async def grant_org_projects(session, org_id, *, user_id=None, agent_member_id=None) -> None:
+    """story #4351 — 테스트 호출자에게 그 org의 **지금 있는** 프로젝트 전부 접근 grant(`accessible_project_ids_in_org`가 보는 축 그대로).
+
+    project 필터 없는 목록 · 단건이 caller 접근 가능 프로젝트로 좁혀지면서(SEC-S8), org 전체 공개를 전제로 grant 없이 쓰인 기존 테스트의
+    시드에 이 한 줄을 더한다 — 단언은 그대로. 사람(user_id) = org_member 경유 grant. 에이전트(agent_member_id) = members 행(없으면 만듦 ·
+    옛 team_members 시드 호환) + member_id 경유 grant. 이미 있는 grant는 건너뛴다."""
+    from sqlalchemy import select
+
+    from app.models.member import Member
+    from app.models.project import OrgMember, Project
+    from app.models.project_access import ProjectAccess
+
+    await session.flush()  # 같은 세션에 아직 flush 안 된 grant도 아래 «이미 있음» 조회에 보이게(uq_project_access_project_member 중복 방지)
+    project_ids = list((await session.execute(
+        select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalars())
+    if user_id is not None:
+        om_id = (await session.execute(
+            select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+        )).scalar_one()
+        have = set((await session.execute(
+            select(ProjectAccess.project_id).where(ProjectAccess.org_member_id == om_id)
+        )).scalars())
+        for pid in project_ids:
+            if pid not in have:
+                session.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, org_member_id=om_id, permission="granted", role="member"))
+    if agent_member_id is not None:
+        if await session.get(Member, agent_member_id) is None:
+            session.add(Member(id=agent_member_id, org_id=org_id, type="agent", name="agent", is_active=True))
+            await session.flush()
+        have = set((await session.execute(
+            select(ProjectAccess.project_id).where(ProjectAccess.member_id == agent_member_id)
+        )).scalars())
+        for pid in project_ids:
+            if pid not in have:
+                session.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, member_id=agent_member_id, permission="granted", role="member"))
+    await session.commit()

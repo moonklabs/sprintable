@@ -94,7 +94,11 @@ test.describe('Layout Verification', () => {
       // A. HTTP 200 + no JS errors
       const response = await page.goto(route.path);
       expect(response?.status(), `${route.label}: HTTP status`).toBe(200);
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거: 이 라우트들은 전부
+      // DashboardShell 안(SSE 연결 보유)이라 네트워크가 안 조용해질 수 있다. 이 테스트가
+      // 실제로 필요로 하는 신호(셸이 렌더됐다는 것 — 바로 다음이 그 셸의 sidebar 개수를
+      // 잼)로 대체.
+      await page.locator('aside[data-sidebar="sidebar"]').first().waitFor({ state: 'visible' });
 
       const hydrationWarnings = consoleErrors.filter(
         (e) => e.includes('Hydration') || e.includes('hydration'),
@@ -159,7 +163,12 @@ test.describe('Layout Verification', () => {
       await page.setViewportSize({ width: 390, height: 844 });
       const response = await page.goto(route.path);
       expect(response?.status(), `${route.label} mobile: HTTP status`).toBe(200);
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거. 모바일에서는 sidebar가
+      // Sheet라 숨어 있을 수 있어(의도된 동작) 그 요소로는 못 잰다 — 대신 이 테스트가
+      // 실제로 요구하는 신호(본문 콘텐츠 가시성)를 먼저 기다린다(아래 두 검사보다 앞으로
+      // 옮김 — 검사 자체가 스냅샷 체크라 그 前에 렌더가 끝나 있어야 함).
+      const mainContent = page.locator('main, [role="main"], .overflow-y-auto').first();
+      await mainContent.waitFor({ state: 'visible' });
 
       // Sidebar should be a Sheet (not visible inline) on mobile
       const inlineSidebar = page.locator('aside[data-sidebar="sidebar"]');
@@ -171,7 +180,6 @@ test.describe('Layout Verification', () => {
       }
 
       // Content should be accessible (not clipped)
-      const mainContent = page.locator('main, [role="main"], .overflow-y-auto').first();
       await expect(mainContent, `${route.label} mobile: main content visible`).toBeVisible();
     });
   }
@@ -179,7 +187,8 @@ test.describe('Layout Verification', () => {
   // Settings-specific: all tabs navigate correctly
   test('settings: all tab panels render without errors', async ({ page }) => {
     await page.goto('/settings');
-    await page.waitForLoadState('networkidle');
+    // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거, sidebar(항상 렌더)로 대체.
+    await page.locator('aside[data-sidebar="sidebar"]').first().waitFor({ state: 'visible' });
 
     const tabValues = [
       'profile',

@@ -39,4 +39,4 @@ async def get_content_rules(args: GetContentRulesInput) -> list[TextContent]:
         budget_resp = await client.get(f"/api/v2/organizations/{org_id}/generation-budget")
         return ok({**rules_resp, "generation_budget_status": budget_resp})
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

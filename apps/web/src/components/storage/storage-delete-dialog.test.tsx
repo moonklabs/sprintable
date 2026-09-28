@@ -32,7 +32,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function makeAsset(sourceLinkCount: number): Asset {
+function makeAsset(sourceLinkCount: number, name = 'design.png'): Asset {
   const source_links: AssetSourceLink[] = Array.from({ length: sourceLinkCount }, (_, i) => ({
     type: 'story',
     id: `story-${i}`,
@@ -46,7 +46,7 @@ function makeAsset(sourceLinkCount: number): Asset {
     folder_id: null,
     container: 'c',
     object_path: 'p',
-    name: 'design.png',
+    name,
     content_type: 'image/png',
     size_bytes: 1024,
     created_at: '2026-08-01T00:00:00Z',
@@ -70,6 +70,23 @@ function renderDialog(asset: Asset) {
 // jsdom은 실제 overflow/clipping을 계산하지 않으므로, footer가 스크롤 영역 밖(shrink-0)에
 // 구조적으로 고정돼 있는지 + body가 스스로 스크롤(overflow-y-auto)하는지를 클래스 계약으로 고정한다.
 // 실제 시각 확인(usage list가 viewport를 넘겨도 버튼이 보이는지)은 라이브 QA 몫.
+// story #4120(PO 실측, 2026-09-21) — deleteBody의 「{name}을(를)」 고정 조사가 asset.name
+// 받침 유무와 안 맞으면 비문이 된다(pickEulReulJosa 렌더 시점 결정 처방, #4117 gcRevokeConfirmTitle
+// 선례와 동형).
+describe('StorageDeleteDialog — deleteBody 조사(story #4120)', () => {
+  it('받침 없는 이름 → «를»(design.png)', () => {
+    renderDialog(makeAsset(0, 'design.png'));
+    expect(document.body.textContent).toContain('design.png를 삭제하면 되돌릴 수 없어요.');
+    expect(document.body.textContent).not.toContain('을(를)');
+  });
+
+  it('받침 있는 이름 → «을»(문서파일)', () => {
+    renderDialog(makeAsset(0, '문서파일'));
+    expect(document.body.textContent).toContain('문서파일을 삭제하면 되돌릴 수 없어요.');
+    expect(document.body.textContent).not.toContain('을(를)');
+  });
+});
+
 describe('StorageDeleteDialog — #2525 footer sticky', () => {
   // base-ui Dialog는 document.body에 portal 렌더된다(container 안이 아님) — document에서 쿼리.
   it('usage list가 길어도 footer가 스크롤 영역 밖(shrink-0)에 고정된다', () => {
@@ -143,5 +160,16 @@ describe('StorageDeleteDialog — #3241 삭제 왕복 + 에러 카피', () => {
     expect(document.body.textContent).toContain(koMessages.storage.deleteErrorTitle);
     expect(document.body.textContent).not.toContain(koMessages.storage.errorTitle);
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+});
+
+// [SID:4375] AC5 — 머리 줄이 보이는 제목인데 DialogTitle이 아니라 창 이름이 0이었다(화면 읽기가 «대화 상자»로만 읽음).
+describe('StorageDeleteDialog — 창 접근 이름([SID:4375])', () => {
+  it('창(role=dialog) aria-labelledby → 머리 줄 «deleteTitle»', () => {
+    renderDialog(makeAsset(0));
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
+    const labelledby = dialog.getAttribute('aria-labelledby');
+    expect(labelledby).toBeTruthy();
+    expect(document.getElementById(labelledby!)?.textContent?.trim()).toBe(koMessages.storage.deleteTitle);
   });
 });

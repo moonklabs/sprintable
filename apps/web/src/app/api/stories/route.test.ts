@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // story ca37b2b0 — GET ids 배치 lookup(BE #2131) 분기 회귀가드. StoryService.list()를
 // 목킹해 (a) ids 없으면 기존 커서 페이지네이션 경로 (b) ids 있으면 meta 없는 배치 응답
@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(), createStoryRepository: vi.fn(), list: vi.fn(), proxyToFastapi: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+// story #4346 — 목록 GET은 getOrgProjectAuthContext(`/me` 0)로 옮겼다 — 같은 스텁을 물려 이 파일의 인증 가정을 그대로 둔다.
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, getOrgProjectAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createStoryRepository: h.createStoryRepository }));
 vi.mock('@/services/story', async (importActual) => ({
   ...(await importActual<typeof import('@/services/story')>()),
@@ -101,6 +102,27 @@ describe('/api/stories GET — unattached=true 분기(story #2534, 카디르 QA 
     expect(body.meta).toEqual({ totalCount: null });
   });
 
+  // [SID:4299 AC2 꼬리] 본문을 파싱 · 재직렬화하지 않고 봉투에 글자 그대로 — 응답 바이트는 옛 apiSuccess(파싱 결과)와 같다.
+  it('응답 바이트 = 옛 봉투 {data, error: null, meta} 글자 그대로([SID:4299])', async () => {
+    const upstream = JSON.stringify([story('1'), { ...story('2'), title: '«한글» "따옴표"\n줄' }]);
+    h.proxyToFastapi.mockResolvedValue(new Response(upstream, { status: 200, headers: { 'Content-Type': 'application/json', 'x-total-count': '2' } }));
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true&limit=100'));
+    expect(res.headers.get('content-type')).toBe('application/json');
+    expect(await res.text()).toBe(JSON.stringify({ data: JSON.parse(upstream), error: null, meta: { totalCount: 2 } }));
+  });
+
+  it('본문을 파싱하지 않는다 — 상류 글자로 JSON.parse 0([SID:4299])', async () => {
+    const upstream = JSON.stringify([story('1')]);
+    h.proxyToFastapi.mockResolvedValue(new Response(upstream, { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true'));
+      expect(parse.mock.calls.filter(([text]) => text === upstream)).toEqual([]);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it('BE 에러 응답이면 그대로 통과시킨다(200 아닌 응답 삼키지 않음)', async () => {
     h.proxyToFastapi.mockResolvedValue(new Response('boom', { status: 500 }));
     const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true'));
@@ -157,5 +179,70 @@ describe('/api/stories GET — exclude_status 화이트리스트 전달(cursor �
     await GET(new Request('http://localhost/api/stories?project_id=p'));
     const calledWith = h.list.mock.calls[0]![0] as { exclude_status?: string };
     expect(calledWith.exclude_status).toBeUndefined();
+  });
+});
+
+// story #4329 — BE가 priority · no_assignee를 받게 되며(MCP가 보내던 거름) 같은 클래스(프록시가 삼킴) 재발 방지.
+describe('/api/stories GET — priority · unassigned 화이트리스트 전달(story #4329)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createStoryRepository.mockResolvedValue({});
+  });
+
+  it('priority · unassigned=true가 StoryService.list()에 전달된다', async () => {
+    h.list.mockResolvedValue([story('1')]);
+    await GET(new Request('http://localhost/api/stories?project_id=p&priority=high&unassigned=true'));
+    const calledWith = h.list.mock.calls[0]![0] as { priority?: string; unassigned?: boolean };
+    expect(calledWith.priority).toBe('high');
+    expect(calledWith.unassigned).toBe(true);
+  });
+
+  it('둘 다 미지정이면 undefined(지어내지 않음, 회귀 0)', async () => {
+    h.list.mockResolvedValue([story('1')]);
+    await GET(new Request('http://localhost/api/stories?project_id=p'));
+    const calledWith = h.list.mock.calls[0]![0] as { priority?: string; unassigned?: boolean };
+    expect(calledWith.priority).toBeUndefined();
+    expect(calledWith.unassigned).toBeUndefined();
+  });
+});
+
+// story #4299 AC2 꼬리 — 하위 구간(dev 전용 · SERVER_TIMING_MARKERS). 분기 셋 모두 auth → service → serialize.
+describe('/api/stories GET — 하위 구간 bff_auth · bff_service · bff_serialize(4299)', () => {
+  const ORDER = /^bff;dur=\d+, bff_auth;dur=\d+, bff_service;dur=\d+, bff_serialize;dur=\d+$/;
+  let log: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createStoryRepository.mockResolvedValue({});
+    process.env['SERVER_TIMING_MARKERS'] = 'true';
+    log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => { delete process.env['SERVER_TIMING_MARKERS']; log.mockRestore(); });
+
+  it.each([
+    ['목록(커서)', 'http://localhost/api/stories?project_id=p'],
+    ['ids 배치', 'http://localhost/api/stories?project_id=p&ids=a1'],
+    ['unattached 프록시', 'http://localhost/api/stories?project_id=p&unattached=true'],
+  ])('%s: 헤더에 셋이 차례로', async (_label, url) => {
+    h.list.mockResolvedValue([story('1')]);
+    h.proxyToFastapi.mockResolvedValue(new Response(JSON.stringify([story('1')]), { status: 200, headers: { 'Content-Type': 'application/json', 'x-total-count': '1' } }));
+    const res = await GET(new Request(url));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Server-Timing')).toMatch(ORDER);
+  });
+
+  it('인증 실패(401)면 auth까지만 — service · serialize 없음', async () => {
+    h.getAuthContext.mockResolvedValue(null);
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p'));
+    expect(res.status).toBe(401);
+    expect(res.headers.get('Server-Timing')).toMatch(/^bff;dur=\d+, bff_auth;dur=\d+$/);
+  });
+
+  it('꺼져 있으면 헤더 없음', async () => {
+    delete process.env['SERVER_TIMING_MARKERS'];
+    h.list.mockResolvedValue([story('1')]);
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p'));
+    expect(res.headers.get('Server-Timing')).toBeNull();
   });
 });

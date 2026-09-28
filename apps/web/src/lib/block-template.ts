@@ -60,6 +60,8 @@ export interface BlockTemplate {
 export interface EventDefinitionSummary {
   key: string;
   org_id: string | null;
+  /** story #4209 — 채팅 이벤트 카드 머리말 «{이름} 워크플로우»(presetName)에 쓴다. 목록 응답에 이미 실린 필드. */
+  name?: string | null;
   payload_schema: Record<string, unknown>;
   routing: Record<string, unknown>;
   block_template: unknown;

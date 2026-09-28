@@ -32,9 +32,12 @@ export interface HypothesisRowActions {
 export function HypothesisRow({
   hypothesis,
   actions,
+  resolveName = () => '',
 }: {
   hypothesis: Hypothesis;
   actions: HypothesisRowActions;
+  // [SID:4286] 주인 칸 — 구성원 id 조각(@앞 8자)을 이름으로 싣지 않는다. 부모의 이름 표로 푼다(없으면 빈 칸).
+  resolveName?: (memberId: string) => string;
 }) {
   const t = useTranslations('hypotheses');
   const md = hypothesis.metric_definition;
@@ -90,7 +93,7 @@ export function HypothesisRow({
           </>
         ) : null}
         <span className="text-border">·</span>
-        <span>@{hypothesis.owner_member_id?.slice(0, 8) ?? t('owner')}</span>
+        <span>@{hypothesis.owner_member_id ? resolveName(hypothesis.owner_member_id) : t('owner')}</span>
       </div>
 
       {/* §12.2ⓑ: 초안이면 [초안 확인], 확인됨/휴먼 proposed면 같은 자리에 [활성화] 연속 노출. */}

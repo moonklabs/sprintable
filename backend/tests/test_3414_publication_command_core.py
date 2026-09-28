@@ -28,6 +28,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.conftest import grant_org_projects
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -99,16 +102,18 @@ async def _seed_org(session, *, slug=None):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+async def _seed_agent(session, org_id, project_id, *, name="담롱", grant: bool = False):
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, agent_member_id=m.id)
     return m.id
 
 
-async def _seed_human(session, org_id, *, role="member"):
+async def _seed_human(session, org_id, *, role="member", grant: bool = False):
     from app.models.project import OrgMember
     from app.models.user import User
 
@@ -118,6 +123,8 @@ async def _seed_human(session, org_id, *, role="member"):
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
     session.add(om)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, user_id=user.id)
     return user.id
 
 
@@ -254,7 +261,7 @@ async def test_submit_with_scheduled_at_seals_it_and_publish_returns_scheduled_c
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
             assert r.status_code == 200, r.text
             body = r.json()["data"] if "data" in r.json() else r.json()
             assert body["scheduled"] is True
@@ -310,11 +317,14 @@ async def test_publish_immediate_no_scheduled_at_completes_synchronously_and_mar
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                detail = await draft_detail(client, org_id, draft_id)
             assert r.status_code == 200, r.text
             body = r.json()["data"] if "data" in r.json() else r.json()
             assert body["scheduled"] is False
-            assert body["permalink"] == "https://www.threads.net/@demo/post/media-1"
+            # story #4336 — 요청은 «발행 중», 발행 결과는 워커 한 틱 뒤 초안 상세에.
+            assert body["processing"] is True
+            assert detail["permalink"] == "https://www.threads.net/@demo/post/media-1"
 
         async with Session() as s:
             from app.models.publication_command import PublicationCommand
@@ -371,7 +381,7 @@ async def test_publish_denied_when_gate_not_approved_creates_no_orphan_command()
 
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
         async with _client_for(app) as client:
-            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r.status_code == 403, r.text
 
         async with Session() as s:
@@ -414,9 +424,9 @@ async def test_publish_immediate_idempotent_no_duplicate_command_sequential():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r1 = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r1.status_code == 200, r1.text
-                r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r2 = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r2.status_code == 200, r2.text
 
         async with Session() as s:
@@ -592,7 +602,7 @@ async def test_resubmit_schedule_change_after_approval_triggers_reapproval_and_v
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_pub = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_pub.status_code == 200, r_pub.text
                 pending_command_id = uuid.UUID((r_pub.json().get("data") or r_pub.json())["command_id"])
 
@@ -668,7 +678,7 @@ async def test_resubmit_content_change_after_approval_voids_with_content_changed
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_pub = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_pub.status_code == 200, r_pub.text
                 pending_command_id = uuid.UUID((r_pub.json().get("data") or r_pub.json())["command_id"])
 

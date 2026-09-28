@@ -302,3 +302,39 @@ async def test_comment_with_no_recipients_regression_zero():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_comment_notification_body_strips_html_comment():
+    """story #4182 — 외부 동기화가 본문 앞에 심은 HTML 주석이 코멘트 알림 body(=알림벨·인박스
+    미리보기 원천)에 새지 않는다. 실 PG 왕복으로 저장된 Event.payload.body를 잰다."""
+    from app.main import app
+    from sqlalchemy import select
+    from app.models.event import Event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, author_id, assignee_id, mentioned_id, story_id = await _seed(s)
+
+        await _setup_app(app, Session, author_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/stories/{story_id}/comments",
+                json={"content": "<!-- linear-comment-id: abc-123 -->\n\n리뷰 부탁하는", "mentioned_ids": []},
+            )
+            assert resp.status_code == 201, resp.text
+        finally:
+            await client.aclose()
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(Event).where(Event.org_id == org_id, Event.event_type == "dispatched")
+            )).scalars().all()
+            assert rows, "코멘트 알림 Event가 안 생김"
+            for r in rows:
+                assert r.payload["body"] == "리뷰 부탁하는"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

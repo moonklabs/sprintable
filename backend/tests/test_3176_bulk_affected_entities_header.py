@@ -81,6 +81,8 @@ async def test_bulk_update_stories_affected_entities_excludes_inaccessible_items
     repo.org_id = s1.org_id
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_attach_has_evidence", AsyncMock())
     monkeypatch.setattr(stories_mod, "_attach_has_hypothesis_or_goal", AsyncMock())
     monkeypatch.setattr(stories_mod, "_attach_org_project_slugs", AsyncMock())
@@ -124,6 +126,8 @@ async def test_bulk_update_stories_no_response_object_does_not_raise(monkeypatch
     repo.org_id = s1.org_id
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_attach_has_evidence", AsyncMock())
     monkeypatch.setattr(stories_mod, "_attach_has_hypothesis_or_goal", AsyncMock())
     monkeypatch.setattr(stories_mod, "_attach_org_project_slugs", AsyncMock())

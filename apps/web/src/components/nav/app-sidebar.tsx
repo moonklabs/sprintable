@@ -12,13 +12,15 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { Button } from '@/components/ui/button';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
 import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
-  CHAT_CENTER_ITEM,
   groupVisibleLegacyByTarget,
+  resolveNavGroups,
+  resolveChatCenterItem,
 } from '@/lib/nav-config';
+import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags, scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 import {
@@ -36,6 +38,7 @@ import {
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface AppSidebarProps {
   orgId?: string;
@@ -49,6 +52,9 @@ interface AppSidebarProps {
   // story #2007(perf·서버부하): dashboard-shell.tsx가 단일 useChatUnreadTotal() 호출 결과를
   // prop으로 내려준다 — 여기서 직접 훅을 호출하면 MobileTabBar와 각자 SSE 연결을 열게 된다.
   chatUnreadTotal: number;
+  // story #4003(E-UX-OVERHAUL·셸 통합 2/N) — (authenticated)/layout.tsx(서버)가 읽은
+  // v3 플래그 3개. 이 컴포넌트는 'use client'라 process.env를 직접 못 읽는다.
+  navV3Flags?: NavV3Flags;
 }
 
 // story #d986fd6c(IA·S4)의 «활성 구역+뷰포트 높이로 기본 접힘을 역산» 규칙은 폐기된
@@ -135,9 +141,15 @@ export function AppSidebar({
   projectMemberships,
   userName,
   chatUnreadTotal,
+  navV3Flags = DEFAULT_NAV_V3_FLAGS,
 }: AppSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // story #4003 — nav-v3-destinations.ts 결정 함수를 그대로 재사용(복붙 규칙 0, AC2).
+  const navGroups = useMemo(() => resolveNavGroups(navV3Flags), [navV3Flags]);
+  // story #4226 — static(flat) 항목 링크는 `?p=`를 싣는다(use-flat-href · 셸의 착지 정규화 router.replace 0).
+  const flatHref = useFlatHref();
+  const chatCenterItem = useMemo(() => resolveChatCenterItem(navV3Flags), [navV3Flags]);
   // story a539c649(S2 최초·S3 리소스 확장) — 실 ws/proj slug 있으면 직접 path(리다이렉트 홉
   // 절약) — 없으면 bare `/{resource}`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
@@ -147,7 +159,7 @@ export function AppSidebar({
   // extraActivePaths로 WORKSPACE_FRAME_TAB_PATHS(SSOT, 하드코딩 0)를 함께 검사 — 탭을
   // 하나 늘리면 이 판정도 자동으로 늘어난다. href는 여전히 resource(주 진입점) 기준.
   function resourceLink(resource: string, extraActivePaths: readonly string[] = []): { href: string; isActive: boolean } {
-    const href = orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
+    const href = scopedResourceHref(resource, orgSlug, currentProjectSlug, flatHref);
     const isActivePath = (p: string) => pathname === `/${p}` || pathname.startsWith(`/${p}/`)
       || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${p}`));
     const isActive = [resource, ...extraActivePaths].some(isActivePath);
@@ -199,7 +211,9 @@ export function AppSidebar({
   // useChatUnreadTotal() 호출 결과를 prop으로 받는다(MobileTabBar와 SSE 연결 중복 제거).
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  // story #4211 — setPaletteOpen은 안정 참조라 동작 무변. React Compiler가 추론한 의존성과 맞춰 컴파일 건너뜀(lint error)을 없앤다
+  // (이 컴포넌트가 scopedResourceHref를 부르며 컴파일러가 이 자리까지 분석하게 되면서 드러난 기존 불일치).
+  const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
 
   // story #f81657f8(IA·S4 후속, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고
   // 접을 수 있게 하면 좋을 것 같다」) — 예전엔 여기서 현재 라우트의 활성 구역+뷰포트 높이를
@@ -289,12 +303,9 @@ export function AppSidebar({
         // 결재자로 지정된 미해소 건이 몇 개인가", room 추론 0)로 교체. #3001부터 카드가
         // 지정 라인 전용으로만 발행되므로 이 좁은 쿼리가 GNB "미확認" 뱃지의 정확한 SSOT다
         // (BE 문서 gates.py::get_designated_pending_count — "AC1이 이 층에서 닫히는 근거").
-        const res = await fetchWithAuth('/api/gates/designated-pending-count');
-        if (!res.ok || cancelled) return;
-        const json = await res.json() as { count?: number };
-        if (!cancelled) {
-          setInboxPendingCount(typeof json.count === 'number' ? json.count : 0);
-        }
+        // story #4171 — 하단 탭바와 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거).
+        const count = await fetchDesignatedPendingCount();
+        if (count !== null && !cancelled) setInboxPendingCount(count);
       } catch { /* noop */ }
     };
 
@@ -316,22 +327,12 @@ export function AppSidebar({
   // story #3084(2026-08-25 층1) — "라이브 카운트"(유나 규격 §3). 승인/토스/위임 어느 쪽이든
   // 이 뱃지가 세는 집합(designated_approver_id=me AND status=pending)을 바꿀 수 있는 3
   // 이벤트 전부에서 즉시 재조회(30초 폴링은 mux 미연결/이벤트 유실 대비 안전망으로 유지).
+  // story #4245 — 연결 직후 백필 중 **마지막 수에 이미 보였던** 이벤트는 다시 묻지 않는다(dev 배포 21 · 기동마다 designated-pending-count
+  // 2번째 요청의 발신 지점이 이 자리였다). story #4263 — 그 구독 · 판정을 모바일 탭바와 공유하는 한 곳(subscribeDesignatedPendingCount)으로.
+  // 실패는 null — 다음 정상 이벤트나 30초 폴링으로 자연 회복.
   useEffect(() => {
     if (!mux) return;
-    const refetch = () => {
-      void fetchWithAuth('/api/gates/designated-pending-count')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((json: { count?: number } | null) => {
-          if (json && typeof json.count === 'number') setInboxPendingCount(json.count);
-        })
-        .catch(() => { /* noop — 다음 정상 이벤트나 30초 폴링으로 자연 회복 */ });
-    };
-    const unsubs = [
-      mux.subscribe('conversation.gate_resolved', refetch),
-      mux.subscribe('conversation.gate_delegated', refetch),
-      mux.subscribe('conversation.gate_tossed', refetch),
-    ];
-    return () => { for (const unsub of unsubs) unsub(); };
+    return subscribeDesignatedPendingCount(mux, setInboxPendingCount);
   }, [mux]);
 
   // story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」. 4구역
@@ -347,7 +348,7 @@ export function AppSidebar({
   const chatCenterCard = (
     <div className="mx-2.5 mt-2">
       <Link
-        href={CHAT_CENTER_ITEM.path}
+        href={flatHref(chatCenterItem.path)}
         // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
         // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
         // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
@@ -355,7 +356,7 @@ export function AppSidebar({
         className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
       >
         <MessageSquare className="size-[18px] shrink-0" />
-        <span className="flex-1 truncate text-[13px] font-bold">{t(CHAT_CENTER_ITEM.labelKey)}</span>
+        <span className="flex-1 truncate text-[13px] font-bold">{t(chatCenterItem.labelKey)}</span>
         {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
             4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
             bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
@@ -407,7 +408,7 @@ export function AppSidebar({
             전역 스크롤바 숨김(#2165)까지 겹쳐 신뢰 아래 구역이 스크롤 가능한데도 "없다"로
             보였다(그라운딩: org/role 무관 재현 — CSS overflow affordance 결함, 컨텍스트
             문제 아님). .scrollbar-visible은 story #2528과 동일한 기존 옵트인 패턴. */}
-        {NAV_GROUPS.map((group, groupIndex) => {
+        {navGroups.map((group, groupIndex) => {
           // story #d986fd6c(IA·S4) — 라벨 없는 유틸 그룹(설정)은 접기 대상이 아니다(항목
           // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
           // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
@@ -444,8 +445,16 @@ export function AppSidebar({
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => {
+                  // story #4003(4002 그라운딩 AC1, CHANGES PR#4386 1차 리뷰) — 「일감」
+                  // (id 'board')의 1차 진입점(item.path)은 이미 resolveNavGroups가
+                  // dest.work.path('work-list'|'flow', 플래그 인지)로 덮어써 넘겨준다 —
+                  // 여기선 그 값을 그대로 resourceLink에 넘길 뿐, 어느 경로인지 다시
+                  // 판단하지 않는다(단일 소스, id 분기 중복 0). isActive는 여전히
+                  // WORKSPACE_FRAME_TAB_PATHS 전체(flow 포함)를 봐 sprints/epics/
+                  // retro/flow 탭에서도 사이드바가 계속 활성으로 뜬다(story #3844
+                  // 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
                   const link = item.kind === 'static'
-                    ? { href: item.path, isActive: isActive(item.path) }
+                    ? { href: flatHref(item.path), isActive: isActive(item.path) }
                     : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
                   const Icon = item.icon;
                   const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
@@ -501,7 +510,7 @@ export function AppSidebar({
           const legacyLinkByItemId = new Map(
             legacyGroups.flatMap((group) => group.items).map((item) => [
               item.id,
-              item.kind === 'static' ? { href: item.path, isActive: isActive(item.path) } : resourceLink(item.path),
+              item.kind === 'static' ? { href: flatHref(item.path), isActive: isActive(item.path) } : resourceLink(item.path),
             ]),
           );
           const legacyHasActiveItem = [...legacyLinkByItemId.values()].some((link) => link.isActive);

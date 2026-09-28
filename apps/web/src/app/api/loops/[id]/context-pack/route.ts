@@ -1,4 +1,5 @@
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 // GET /api/loops/[id]/context-pack → FastAPI GET /api/v2/loops/{id}/context-pack (E-LOOP-LEDGER S12).
 // ⚠️ S13 착수 시점(handoff e-loop-ledger-s13-context-pack-handoff §3) 기준 BE 엔드포인트 미착지 —
@@ -6,5 +7,8 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 // 라이브 연결(이 파일은 변경 불필요 — 순수 passthrough).
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await params;
-  return proxyToFastapi(request, `/api/v2/loops/${id}/context-pack`);
+  return proxyToFastapi(request, `/api/v2/loops/${id}/context-pack`, {
+    // story #4336 PR2 ② — 임베드 · 검색 · 캐시 확인까지만 요청 안(미스면 BE가 202 + 작업 · 상태코드 그대로 통과) — 시한은 표 한 곳(bff-route-timeouts).
+    timeoutMs: LONG_ROUTES.loopContextPack.bffMs,
+  });
 }

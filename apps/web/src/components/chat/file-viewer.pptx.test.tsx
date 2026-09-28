@@ -11,6 +11,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { FileViewer } from './file-viewer';
 import koMessages from '../../../messages/ko.json';
 import type { ReadingPanelTarget } from './reading-panel';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -18,6 +19,13 @@ const fetchWithAuthMock = vi.fn();
 vi.mock('@/lib/db/client', () => ({
   fetchWithAuth: (...args: unknown[]) => fetchWithAuthMock(...args),
 }));
+// story #4336 PR2 ② — 요청 예산을 넘긴 변환은 작업(202). 작업 기다림은 타이머 없는 목으로(끝난 작업을 곧바로 돌려줌).
+const { waitForBackgroundJobMock } = vi.hoisted(() => ({ waitForBackgroundJobMock: vi.fn() }));
+vi.mock('@/lib/background-job', async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  waitForBackgroundJob: (...args: unknown[]) => waitForBackgroundJobMock(...args),
+}));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ orgId: 'org-1' }) }));
 vi.mock('@/lib/native-shell-bridge', () => ({
   downloadAsset: vi.fn(),
   openExternal: vi.fn(),
@@ -85,6 +93,8 @@ describe('FileViewer pptx (story #2803)', () => {
       }
       if (url.includes('/api/attachments/convert') && init?.method === 'POST') {
         expect(url).toContain(`asset_id=${ORIGINAL_ASSET_ID}`);
+        // story #4310 — 동기 변환(BE 120s)이라 fetchWithAuth 기본 30s 대신 화면 상한과 같은 130s.
+        expect((init as { timeoutMs?: number }).timeoutMs).toBe(LONG_ROUTES.attachmentConvert.browserMs);
         return jsonResponse({ data: { asset_id: CONVERTED_ASSET_ID, name: 'deck.pdf', content_type: 'application/pdf' } });
       }
       if (url.includes('/api/attachments/sign') && url.includes(`asset_id=${CONVERTED_ASSET_ID}`)) {
@@ -205,7 +215,7 @@ describe('FileViewer pptx (story #2803)', () => {
     await act(async () => { await Promise.resolve(); });
     expect(container.textContent).toContain('변환 중이에요');
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(130000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(LONG_ROUTES.attachmentConvert.browserMs + 2_000); });
 
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).toContain('변환에 실패했어요');
@@ -233,7 +243,7 @@ describe('FileViewer pptx (story #2803)', () => {
     mount(<FileViewer target={target} onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(130000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(LONG_ROUTES.attachmentConvert.browserMs + 2_000); });
     expect(container.textContent).toContain('변환에 실패했어요');
 
     // failed 확정 후에야 convert가 뒤늦게 성공 응답으로 resolve — 나머지(sign) 왕복이 실제로
@@ -245,6 +255,54 @@ describe('FileViewer pptx (story #2803)', () => {
     });
 
     expect(container.textContent).toContain('변환에 실패했어요');
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('⭐#4336 PR2 ② — 변환이 요청 예산(40초)을 넘겨 202 + 작업이면 «아직 변환 중이에요…» → 작업이 끝나면 그 PDF를 렌더', async () => {
+    let release: (job: unknown) => void = () => {};
+    waitForBackgroundJobMock.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    fetchWithAuthMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/api/attachments/sign') && url.includes(`asset_id=${ORIGINAL_ASSET_ID}`)) {
+        return jsonResponse({ data: { url: 'https://signed.example/original.pptx' } });
+      }
+      if (url.includes('/api/attachments/convert') && init?.method === 'POST') {
+        return jsonResponse({ data: { id: 'job-1', kind: 'attachment_convert', status: 'pending', result: null, error: null } }, 202);
+      }
+      if (url.includes('/api/attachments/sign') && url.includes(`asset_id=${CONVERTED_ASSET_ID}`)) {
+        return jsonResponse({ data: { url: 'https://signed.example/deck.pdf' } });
+      }
+      throw new Error(`unexpected fetchWithAuth call: ${url}`);
+    });
+    fetchMock.mockImplementation(async () => new Response('%PDF-fake', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:job-pdf'), revokeObjectURL: vi.fn() }));
+
+    mount(<FileViewer target={target} onClose={() => {}} />);
+    await waitFor(() => container.textContent!.includes('아직 변환 중이에요…'));
+    // 유나 CHANGES(PR 4780) — 느림 줄이 낱말 가운데서 끊기지 않게.
+    const slowLine = [...container.querySelectorAll('p')].find((p) => p.textContent?.includes('창을 닫아도 계속 처리돼요'));
+    expect(slowLine?.classList.contains('break-keep')).toBe(true);
+    expect(container.textContent).toContain('창을 닫아도 계속 처리돼요');
+    expect(waitForBackgroundJobMock.mock.calls[0].slice(0, 2)).toEqual(['org-1', 'job-1']);
+
+    await act(async () => {
+      release({ id: 'job-1', kind: 'attachment_convert', status: 'completed', result: { asset_id: CONVERTED_ASSET_ID, name: 'deck.pdf', content_type: 'application/pdf' }, error: null });
+    });
+    await waitFor(() => container.querySelector('iframe') !== null);
+    expect(container.querySelector('iframe')!.getAttribute('src')).toBe('blob:job-pdf');
+  });
+
+  it('#4336 PR2 ② — 변환 작업이 실패로 끝나면 정직 폴백(작업 오류 문장을 그대로)', async () => {
+    waitForBackgroundJobMock.mockResolvedValue({
+      id: 'job-1', kind: 'attachment_convert', status: 'failed', result: null,
+      error: { status_code: 502, detail: { code: 'CONVERSION_FAILED', message: 'gotenberg 502' } },
+    });
+    fetchWithAuthMock.mockImplementation(async (url: string) => (url.includes('/api/attachments/convert')
+      ? jsonResponse({ data: { id: 'job-1', kind: 'attachment_convert', status: 'pending', result: null, error: null } }, 202)
+      : jsonResponse({ data: { url: 'https://signed.example/original.pptx' } })));
+
+    mount(<FileViewer target={target} onClose={() => {}} />);
+    await waitFor(() => container.textContent!.includes('gotenberg 502'));
     expect(container.querySelector('iframe')).toBeNull();
   });
 });

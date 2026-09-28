@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { GateEvidence, GateActivityHistory } from './gate-evidence';
+import { GateEvidence, GateActivityHistory, GateLinkedEvidenceSection } from './gate-evidence';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { GateItem } from '@/components/kanban/types';
 import koMessages from '../../../messages/ko.json';
@@ -324,6 +324,334 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.querySelectorAll('[role="button"], a, button').length).toBeGreaterThan(0);
   });
 
+  // story #4090([E-RECIPE-1] Publisher 슬롯) AC2·AC3 — 레시피 자동발행 훅의 기계 소유
+  // 결과(gate.publish_outcome, neutral_facts가 아니라 GateItem top-level 필드 — sealed
+  // 인자로 넘긴다)가 승인 카드에 실제로 렌더되는지(승인자가 「자동으로 발행됐는지」를
+  // 보는 유일한 자리, 페드루 PO 확定 2026-09-21).
+  it('story #4090 — gate.publish_outcome이 자동발행 결과 문장으로 실 DOM에 나타난다', async () => {
+    const gate = recipeApprovalGate(
+      { stage: 'published' },
+      { publish_outcome: 'published' },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.publishOutcomePublished);
+  });
+
+  it('story #4090 — publish_outcome이 null(레시피 무관 게이트)이면 그 줄 자체가 렌더되지 않는다', async () => {
+    const gate = recipeApprovalGate({ stage: 'approve', channel: 'threads' }, { publish_outcome: null });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalPublishOutcomeLabel);
+  });
+
+  // story #4264(유나 조건 · PO 23:40Z) — needs_check로 자동 발행이 서지 않았다: 글 화면(«확인했어요 · 다시 시도»)으로 가는 링크가
+  // 있으면 짧은 형 + 링크, 없으면 «글 화면에서» 긴 형. «다시 승인» 류 generic 문장은 어느 쪽에도 안 나온다.
+  it.each([
+    ['링크 있음 → 짧은 형 + 글 화면 링크', true],
+    ['링크 없음 → 긴 형', false],
+  ])('story #4264 — publish_failed:needs_check %s', async (_label, withDraft) => {
+    const gate = recipeApprovalGate(
+      { stage: 'published' },
+      {
+        scope_key: '', status: 'approved', publish_outcome: 'publish_failed:needs_check',
+        linked_channel_draft: withDraft ? {
+          draft_id: 'draft-nc', version: 1, channel: 'sandbox', account_id: 'acct-1', account_label: null,
+          text: '본문', image_urls: [], video_url: null, scoped_gate_status: 'approved', sealed_scheduled_at: null,
+        } : null,
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    const link = container.querySelector('[data-testid="recipe-publish-outcome-needs-check-draft-link"]');
+    if (withDraft) {
+      expect(container.textContent).toContain(koMessages.cage.publishOutcomeFailedNeedsCheck);
+      expect(link?.getAttribute('href')).toBe('/content/channel-posts/draft-nc');
+    } else {
+      expect(container.textContent).toContain(koMessages.cage.publishOutcomeFailedNeedsCheckNoLink);
+      expect(link).toBeNull();
+    }
+    expect(container.textContent).not.toContain(koMessages.cage.publishOutcomeFailedGeneric);
+  });
+
+  // story #4098([E-RECIPE-1], 2026-09-21) — 「이 승인으로 발행될 채널 초안」 카드,
+  // 3상태(콘텐츠 있음·초안 없음·scoped 게이트 pending) 렌더.
+  // story #4190(PO 판정 2026-09-23 · 유나 site 초안 카드) — 채널 카드의 형제. BE linked_site_draft만 읽는다.
+  describe('linked_site_draft 카드(story #4190)', () => {
+    const site = (over: Partial<NonNullable<GateItem['linked_site_draft']>> = {}): NonNullable<GateItem['linked_site_draft']> => ({
+      draft_id: 'site-1', version: 2, title: '아주 긴 블로그 제목입니다', body_preview: '마크다운 기호를 걷은 본문 앞부분',
+      channel: null, account_id: null, account_label: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      ...over,
+    });
+
+    it('⭐자사 블로그 — 버전·제목·본문 앞부분·«초안 열기»(/content/{id})가 나오고 목적지 줄은 없다 · 채널 카드·빈 문구 없음', async () => {
+      const gate = recipeApprovalGate({ stage: 'pending_approval' }, { scope_key: '', linked_site_draft: site() });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      const card = container.querySelector('[data-testid="linked-site-draft"]');
+      expect(card).toBeTruthy();
+      expect(card?.querySelector('[data-testid="linked-draft-version"]')?.textContent).toBe(`${koMessages.cage.linkedDraftVersionLabel} · v2`);
+      expect(card?.textContent).toContain('아주 긴 블로그 제목입니다');
+      const body = [...(card?.querySelectorAll('p') ?? [])].find((p) => p.textContent === '마크다운 기호를 걷은 본문 앞부분');
+      expect(body?.className).toContain('line-clamp-4');
+      expect(body?.className).toContain('break-words');
+      expect(card?.querySelector('a[href="/content/site-1"]')?.textContent).toBe(koMessages.cage.linkedChannelDraftOpenLink);
+      expect(card?.textContent).not.toContain(koMessages.cage.linkedChannelDraftDestinationLabel);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedDraftNone);
+    });
+
+    it('외부 블로그면 목적지 줄(계정 이름, 없으면 연결종류(계정 id))을 그린다', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval' },
+        { scope_key: '', linked_site_draft: site({ channel: 'wordpress', account_id: 'https://b.example.com', account_label: null }) },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('wordpress(https://b.example.com)');
+    });
+  });
+
+  describe('linked_channel_draft 카드(story #4098)', () => {
+    it('콘텐츠가 있으면 본문·목적지·「초안 열기」 링크가 실제 DOM에 나타난다', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        {
+          scope_key: '',
+          linked_channel_draft: {
+            draft_id: 'draft-1', version: 1, channel: 'sandbox', account_id: 'acct-1', account_label: '공식 계정',
+            text: '발행될 본문입니다', image_urls: [], video_url: null,
+            scoped_gate_status: 'approved', sealed_scheduled_at: null,
+          },
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain('발행될 본문입니다');
+      expect(container.textContent).toContain('공식 계정');
+      expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftOpenLink);
+      const link = container.querySelector('a[href="/content/channel-posts/draft-1"]');
+      expect(link).toBeTruthy();
+    });
+
+    it('영상이 있으면 <video controls>로 재생 가능하게 그린다', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        {
+          scope_key: '',
+          linked_channel_draft: {
+            draft_id: 'draft-2', version: 1, channel: 'sandbox', account_id: 'acct-1', account_label: null,
+            text: null, image_urls: [], video_url: 'https://storage.example/video.mp4',
+            scoped_gate_status: 'approved', sealed_scheduled_at: null,
+          },
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      const video = container.querySelector('video[data-testid="linked-channel-draft-video"]');
+      expect(video).toBeTruthy();
+      expect(video?.getAttribute('controls')).not.toBeNull();
+      expect(video?.getAttribute('src')).toBe('https://storage.example/video.mp4');
+      // 유나 design:CHANGES(PR #4475 리뷰) — object-cover가 9:16 릴스 훅·CTA를 잘랐다.
+      // object-contain(크롭 0)으로 교정 — 클래스 자체를 단언해 회귀를 고정.
+      expect(video?.className).toContain('object-contain');
+      expect(video?.className).not.toContain('object-cover');
+    });
+
+    it('제출된 초안이 없으면(linked_channel_draft=null·pending=false) «제출된 초안 없음» 문구', async () => {
+      // story #4190 — «없음» 문구는 BE linked_draft_kind로 고른다(채널 레시피 = channel_post).
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        { scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: false, linked_draft_kind: 'channel_post' },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftNone);
+    });
+
+    // story #4190(유나 빈 상태 절 · PO 12:17Z) — «없음» 세 갈래: channel_post → 채널 문구 · site_post → 블로그 문구 ·
+    // null(모르는 레시피) → 중립 문구. 채널 문구를 블로그 레시피에 빌려 쓰지 않는다.
+    it.each([
+      ['site_post', 'linkedSiteDraftNone'],
+      [null, 'linkedDraftNone'],
+    ] as const)('linked_draft_kind=%s면 «없음» 문구가 %s', async (kind, key) => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval' },
+        { scope_key: '', linked_channel_draft: null, linked_site_draft: null, linked_draft_kind: kind },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage[key]);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+    });
+
+    it('블로그 초안이 승계 대기면(linked_site_draft_pending=true) 공용 대기 문구', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval' },
+        { scope_key: '', linked_site_draft: null, linked_site_draft_pending: true, linked_draft_kind: 'site_post' },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftPending);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedSiteDraftNone);
+    });
+
+    it('채널 카드에도 «버전 · v{n}» 줄이 있다', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        {
+          scope_key: '',
+          linked_channel_draft: {
+            draft_id: 'draft-1', version: 3, channel: 'sandbox', account_id: 'acct-1', account_label: '공식 계정',
+            text: '본문', image_urls: [], video_url: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+          },
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.querySelector('[data-testid="linked-draft-version"]')?.textContent).toBe(
+        `${koMessages.cage.linkedDraftVersionLabel} · v3`,
+      );
+    });
+
+    it('scoped 게이트가 아직 pending이면(linked_channel_draft_pending=true) 승계 승인 문구', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        { scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: true },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftPending);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+    });
+
+    it('레시피 무관 unscoped external_publish 게이트(facts에 stage/triggered_by_event 없음)엔 카드 자체가 안 뜬다', async () => {
+      // 페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰) — BE가 이미 같은 전제(neutral_
+      // facts.triggered_by_event·stage)로 가드를 좁혀 이런 게이트엔 linked_channel_
+      // draft/_pending을 항상 기본값(null/false)으로 둔다. FE도 recipeFacts(레시피
+      // 게이트 판별)를 AND로 걸지 않으면 그 기본값을 «제출된 초안 없음» 문구로
+      // 오독해 렌더한다 — 다른 세계의 문장이 새는 자리(state B 진입은 sealed_
+      // content_*로, stage/channel 없이).
+      const gate = recipeApprovalGate(
+        {},
+        {
+          scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: false,
+          sealed_content_body: '레시피 무관 본문', sealed_content_version: 1,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
+    });
+
+    // story #4105(#4098 잔여, 페드루 PO 실측 2026-09-21) — find_ready_recipe_channel_
+    // drafts는 「scoped 승인 済·미발행」 초안만 담아, 이미 승인·발행이 끝난 게이트에선
+    // linked_channel_draft가 항상 null이다. status를 안 보면 "승인해도 발행되지
+    // 않아요"(linkedChannelDraftNone)가 다른 세계의 문장으로 그대로 새는 결함.
+    it('승인 済 게이트 + publish_outcome=published → «없어요» 안 뜨고, «발행됨» 라벨은 정확히 1회(facts 블록 몫 — LinkedChannelDraftCard가 중복 렌더 X)', async () => {
+      // 페드루 PO CHANGES(PR #4481 리뷰) — 1차 처방은 LinkedChannelDraftCard 비-pending
+      // 분기에서도 publishOutcomeLabel을 그려, 같은 화면의 RecipeApprovalFactsBlock
+      // (facts.publishOutcome, 같은 gate.publish_outcome 원천)이 이미 그린 «발행 결과
+      // · 발행됨»과 완전히 같은 라벨이 한 줄 더 떴다 — 정본은 facts 블록 하나뿐이어야
+      // 한다(카드는 비-pending이면 null).
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox', triggered_by_event: 'recipe.stage.approved' },
+        {
+          scope_key: '', status: 'approved', publish_outcome: 'published',
+          linked_channel_draft: null, linked_channel_draft_pending: false,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      const label = koMessages.cage.publishOutcomePublished;
+      const occurrences = container.textContent!.split(label).length - 1;
+      expect(occurrences).toBe(1);
+    });
+
+    it('승인 済 게이트 + publish_outcome=null(0388 前 게이트) → 아무 문장도 안 낸다(지어내지 않음)', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox', triggered_by_event: 'recipe.stage.approved' },
+        {
+          scope_key: '', status: 'approved', publish_outcome: null,
+          linked_channel_draft: null, linked_channel_draft_pending: false,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
+    });
+
+    it('scoped(초안 자체) 게이트(scope_key≠"")에는 카드 자체가 안 뜬다', async () => {
+      // 까디르 QA 렌즈(b)(PR #4475 리뷰, 2026-09-21) — 이전 픽스처는 neutral_facts에 stage가
+      // 없어 recipeFacts?.stage 자체가 falsy였다(scope_key 절과 무관하게 카드 미렌더) —
+      // «scope_key 절 제거 → RED»가 실측과 달라 그 절 단독 검증이 안 됐다(까디르 뮤테이션
+      // 재현: scope_key 절만 빼도 63/63 그대로 GREEN). stage(+triggered_by_event, BE 가드와
+      // 같은 전제)를 실어 recipeFacts?.stage를 참으로 만들고 scope_key만으로 막히는지 pin.
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox', triggered_by_event: 'recipe.stage.approved' },
+        {
+          scope_key: 'some-connection-id', linked_channel_draft: null, linked_channel_draft_pending: false,
+          sealed_content_body: '실 초안 본문', sealed_content_version: 1,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
+    });
+  });
+
   // PO 변경요청①(2026-09-02, PR#3710 리뷰) — BE `_escape_title`(reference_token.py)이 라벨 안
   // `\ [ ] ( )`를 백슬래시-escape한다. 초기 구현이 escape 없는 픽스처로만 테스트해 못 잡았던
   // 자리 — 실 게이트 09631e56 제목(팀 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려
@@ -567,9 +895,17 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
 
   // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체·목적지").
   describe('마지막 수정 주체·목적지(story #3367 AC7)', () => {
-    it('⭐destination=null(hosted_site)·latest_author_kind=human — 「마지막 수정 주체 · 휴먼」·「목적지 · 호스팅 블로그」가 뜬다', async () => {
+    it('⭐destination="hosted_site"(BE SSOT)·latest_author_kind=human — 「마지막 수정 주체 · 휴먼」·「목적지 · 호스팅 블로그」가 뜬다', async () => {
+      // story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 이 픽스처가 예전엔
+      // sealed_destination_connection_id===null을 "호스팅 블로그"의 근거로 썼다(그게
+      // 실은 채널 초안 게이트가 이 컬럼을 안 채우던 시절의 «우연한 동값»이었다는 게
+      // 이 카드의 발견). 이제는 neutral_facts.destination==="hosted_site"(site_posts.py/
+      // channel_posts.py 둘 다 상신 시점에 채우는 원문 목적지 코드)를 직접 대조한다 —
+      // sealed_destination_connection_id는 여전히 null로 둔다(hosted_site는 실제로도
+      // 커넥션이 없다, requires_connection=False adapter — 값 자체는 안 바뀜, «근거»만
+      // 정정).
       const gate = recipeApprovalGate(
-        { channel: 'hosted_site', stage: 'approve' },
+        { channel: 'hosted_site', stage: 'approve', destination: 'hosted_site' },
         {
           sealed_content_version: 3, sealed_content_sha256: 'abcdef0123456789',
           sealed_destination_connection_id: null, latest_author_kind: 'human',
@@ -580,7 +916,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       root = createRoot(container);
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
-      expect(container.textContent).toContain(koMessages.cage.recipeApprovalLatestAuthorLabel);
+      expect(container.textContent).toContain(koMessages.content.columnLastModified);
       expect(container.textContent).toContain(koMessages.content.authorHuman);
       expect(container.textContent).toContain(koMessages.cage.recipeApprovalDestinationLabel);
       expect(container.textContent).toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
@@ -602,7 +938,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
       expect(container.textContent).toContain(koMessages.content.authorAgent);
-      expect(container.textContent).toContain(koMessages.content.channelLabelWordpress);
+      expect(container.textContent).toContain(koMessages.channelConnect.channelLabelWordpress);
       expect(container.textContent).not.toContain('99999999');
       expect(container.textContent).not.toContain('44443333');
       // 호스팅 블로그 문구가 잘못 새지 않는다(destination이 실제로 non-null인데).
@@ -655,7 +991,97 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
       expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationLabel);
-      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalLatestAuthorLabel);
+      expect(container.textContent).not.toContain(koMessages.content.columnLastModified);
+    });
+
+    // story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 라이브 실사고를 직접
+    // pin(뮤테이션 킬): sealed_destination_connection_id===null이 "호스팅 블로그"의
+    // 근거이던 시절, 채널 초안 게이트(#4098 前엔 이 컬럼을 아예 안 채움)가 이 조건에
+    // 우연히 걸려 인스타 sandbox 초안이 «호스팅 블로그»로 잘못 표시됐다. destination
+    // Connection Id===null "추정"을 되돌리면 이 테스트가 RED가 돼야 한다.
+    it('⭐라이브 실사고 재현: connectionId===null인데 destination이 "hosted_site"가 아니면(채널 초안 게이트, #4098 前 미봉인 흉내) 호스팅 블로그로 오추정하지 않는다', async () => {
+      const gate = recipeApprovalGate(
+        { channel: 'instagram_sandbox', stage: 'approve', destination: 'instagram_sandbox' },
+        {
+          sealed_content_version: 1, sealed_content_sha256: 'abc123',
+          // 라이브 실사고 그대로 — 채널 초안 게이트가 이 컬럼을 안 채워 null인 상태
+          // (이 카드의 BE 수정 前 상태를 흉내— write-path 수정 前 옛 게이트도 이 read-
+          // side fallback으로 정정돼야 하지만, 이 FE 테스트는 read-side 응답이 이미
+          // sealed_destination_channel까지 채워 온 경우를 가정 — BE realdb 테스트가
+          // write/read 양쪽 파생을 따로 검증한다).
+          sealed_destination_connection_id: null,
+          sealed_destination_channel: 'instagram_sandbox',
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
+      expect(container.textContent).toContain(koMessages.channelConnect.channelLabelInstagramSandbox);
+    });
+  });
+
+  // story #4143 AC2/AC3 — scoped 채널 초안 게이트(이 카드 자신이 그 초안을 쥔 게이트)의
+  // 상세·인박스 카드도 이제 초안 실물(영상·이미지)을 보여준다(LinkedChannelDraftCard를
+  // #4098과 공유 — isRecipeGate로 레시피 전용 빈-상태 문구만 가른다). 3상태: 영상 있음·
+  // 이미지만·미디어 0(텍스트만, hosted_site 아님이어도 미디어가 아예 없을 수 있다).
+  describe('scoped 채널 초안 게이트의 초안 실물 카드(story #4143 AC2)', () => {
+    function scopedChannelGate(linkedChannelDraft: GateItem['linked_channel_draft']) {
+      return recipeApprovalGate(
+        { channel: 'instagram_sandbox', stage: 'approve', destination: 'instagram_sandbox' },
+        {
+          scope_key: 'conn-1', status: 'pending',
+          sealed_content_version: 1, sealed_content_sha256: 'abc123',
+          sealed_destination_connection_id: 'conn-1', sealed_destination_channel: 'instagram_sandbox',
+          linked_channel_draft: linkedChannelDraft,
+        },
+      );
+    }
+
+    it('⭐영상 편입 — <video controls>가 실제 DOM에 나타난다(src=서명 URL)', async () => {
+      const gate = scopedChannelGate({
+        draft_id: 'draft-1', version: 1, channel: 'instagram_sandbox', account_id: 'acct-1', account_label: '인스타 샌드박스',
+        text: '릴스 캡션', image_urls: [], video_url: 'https://storage.test/signed/video.mp4',
+        scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      const video = container.querySelector('[data-testid="linked-channel-draft-video"]');
+      expect(video).not.toBeNull();
+      expect(video?.getAttribute('src')).toBe('https://storage.test/signed/video.mp4');
+      expect(container.querySelector('img')).toBeNull();
+    });
+
+    it('⭐이미지만 편입(영상 0) — 썸네일 <img>가 실제 DOM에 나타난다', async () => {
+      const gate = scopedChannelGate({
+        draft_id: 'draft-2', version: 1, channel: 'instagram_sandbox', account_id: 'acct-1', account_label: null,
+        text: null, image_urls: ['https://storage.test/img1.png', 'https://storage.test/img2.png'], video_url: null,
+        scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      const images = container.querySelectorAll('img');
+      expect(images.length).toBe(2);
+      expect(container.querySelector('[data-testid="linked-channel-draft-video"]')).toBeNull();
+    });
+
+    it('linked_channel_draft가 null(초안 정보를 못 찾음, 구버전 데이터 등) — 레시피 전용 "제출된 초안 없음" 문구를 빌리지 않고 조용히 생략한다', async () => {
+      const gate = scopedChannelGate(null);
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
     });
   });
 
@@ -1057,5 +1483,272 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" refreshKey={1} />)); });
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsSpendRefreshRequested);
+  });
+});
+
+// story #4136(FE)·#4135(BE, 미르코) — 게이트 상세 «제작 산출물» 칸. 라이브 실측(2호 게이트
+// 1, PO 세션, 2026-09-22 00:40Z)에서 지정 결재자가 아니면 이 칸에 안내 문장 한 줄만
+// 보이고 linked_evidence[]/draft_doc_reference_token이 있어도 카드 어디에도 링크가 안
+// 보였다 — canAct/needsAction과 무관하게 항상 렌더되는지, 실 API 응답 shape(id·kind·
+// reference_token)로 실제 DOM에 칩이 나타나는지를 마운트로 검증한다.
+describe('GateLinkedEvidenceSection — 제작 산출물 칸(story #4136 AC1~3)', () => {
+  it('⭐linked_evidence[] 항목이 클릭 가능한 칩으로 실제 DOM에 나타난다(있음 케이스)', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'concept_brief', ref: 'concept-brief-ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' },
+        { id: 'ev-2', kind: 'storyboard', ref: 'storyboard-ref-2', reference_token: '[컨셉 보드](entity:artifact:44444444-4444-4444-4444-444444444444)' },
+      ],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceSectionTitle);
+    expect(container.textContent).toContain('컨셉 브리프');
+    expect(container.textContent).toContain('컨셉 보드');
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBeGreaterThan(0);
+  });
+
+  it('draft_doc_reference_token만 있어도(linked_evidence[] 미착지, #4135 前 상태) 칩으로 나타난다', async () => {
+    const gate = realApiShapedGate({
+      neutral_facts: { draft_doc_reference_token: '[2호 시트](entity:doc:55555555-5555-5555-5555-555555555555)' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain('2호 시트');
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+  });
+
+  it('linked_evidence[]와 draft_doc_reference_token이 같은 doc을 가리키면 중복 칩을 안 낸다', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'concept_brief', ref: 'concept-brief-ref-1', reference_token: '[2호 시트](entity:doc:55555555-5555-5555-5555-555555555555)' },
+      ],
+      neutral_facts: { draft_doc_reference_token: '[2호 시트](entity:doc:55555555-5555-5555-5555-555555555555)' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    const chipCount = container.querySelectorAll('[role="button"], a, button').length;
+    expect(chipCount).toBe(1);
+  });
+
+  // 미르코군 1:1 정정(2026-09-22 01:14Z) — reference_token은 nullable. evidence는 있는데
+  // doc/artifact로 못 풀리면(payload 형식 불일치 등) null이지만 항목 자체는 남는다("확定
+  // 대상은 맞는데 실물을 아직 못 찾음"이라는 정직한 신호 — 조용히 빼면 "그 산출물이 아예
+  // 없다"로 오독). FE는 그 항목을 클릭 불가한 kind 배지로 보여준다(EntityChip 아님 — 진짜로
+  // 갈 곳이 없다).
+  // CHANGES-2(유나 design-pass, 2026-09-22 01:56Z) — raw snake_case enum이 고객 대면 배지에
+  // 그대로 새던 결함(issuecomment-5770100618). kind→라벨 t() 맵으로 한글화하고, raw enum
+  // 문자열이 DOM에 안 나타나는지까지 pin(양성대조).
+  it('⭐reference_token이 null인 항목은 클릭 불가한 kind **라벨**(한글, raw enum 아님)로 나타나고, 없음 문구도 안 뜬다', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'verification_sheet', ref: 'vs-ref-1', reference_token: null },
+      ],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain('검증 시트');
+    expect(container.textContent).not.toContain('verification_sheet');
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    // 클릭 가능한 요소(EntityChip)가 아니라 순수 배지여야 한다 — 갈 곳이 없다.
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBe(0);
+  });
+
+  it('resolved 항목과 unresolved(null) 항목이 섞여 있으면 둘 다 같이 나타난다(unresolved도 한글 라벨)', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'concept_brief', ref: 'ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' },
+        { id: 'ev-2', kind: 'animatic', ref: 'ref-2', reference_token: null },
+      ],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain('컨셉 브리프');
+    expect(container.textContent).toContain('애니매틱');
+    expect(container.textContent).not.toContain('animatic');
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBe(1);
+  });
+
+  it('미지의 kind(5종 밖)는 raw를 안 내고 중립 «산출물»로 폴백한다(enum이 UI에 안 닿는다)', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'some_future_kind_not_yet_known', ref: 'ref-1', reference_token: null },
+      ],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceKindUnknown);
+    expect(container.textContent).not.toContain('some_future_kind_not_yet_known');
+  });
+
+  // story #4136 CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"(BE가 [] 로 명시 답)과
+  // "모름"(BE가 필드 자체를 아직 안 보냄, #4135 미배포)을 가른다. 라이브 2호 게이트 1처럼
+  // evidence·doc·artifact가 실재하는데 "없어요"라고 말하면 거짓이 된다 — beAnswered=true일
+  // 때만(BE가 [] 든 항목이든 답을 한 때만) 그 claim을 한다.
+  it('⭐linked_evidence가 BE 응답에서 명시 []면(BE가 «답을 함») «이 게이트에 등록된 산출물이 없어요»가 나타난다(없음)', async () => {
+    const gate = realApiShapedGate({ linked_evidence: [], neutral_facts: null });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBe(0);
+  });
+
+  it('⭐linked_evidence 필드 자체가 undefined(구버전 응답, #4135 착지 前)면 «없어요» 문구 없이 섹션 자체가 안 그려진다(모름 ≠ 없음, 거짓 참조 금지)', async () => {
+    const gate = realApiShapedGate({ linked_evidence: undefined, neutral_facts: null });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceSectionTitle);
+    expect(container.textContent).toBe('');
+  });
+
+  it('linked_evidence가 undefined여도 draft_doc_reference_token이 있으면(우리가 아는 것만) 섹션이 그 칩으로 나타난다', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: undefined,
+      neutral_facts: { draft_doc_reference_token: '[2호 시트](entity:doc:66666666-6666-6666-6666-666666666666)' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceSectionTitle);
+    expect(container.textContent).toContain('2호 시트');
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+  });
+});
+
+// story #4138(페드루 PO, 2호 게이트 3(generation_budget) 실측 2026-09-22 01:14Z) — «예상
+// 비용»이 통화·천 단위·소수(minor 단위) 표기 0으로 «4000» 그대로 찍혔다. KRW/USD는 기존
+// formatMinorCurrency(§3500 SSOT) 그대로(발명 0) · currency 미기재(BE structure_passed
+// 발행 페이로드 실측처럼)면 formatCount(§3808 자매 함수)로 천 단위 구분만 하고 «통화
+// 미확인»으로 거짓 단위를 안 낸다.
+describe('generation_budget «예상 비용» 통화·단위 표기(story #4138 AC1·AC3)', () => {
+  it('⭐currency=KRW면 기존 금액 관례(4,000원)로 렌더되고 «통화 미확인»은 안 뜬다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 4000,
+      neutral_facts: { currency: 'KRW' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('4,000원');
+    expect(container.textContent).not.toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
+  });
+
+  it('⭐currency=USD면 minor/100로 소수 2자리(40.00)로 렌더된다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 4000,
+      neutral_facts: { currency: 'USD' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('$40.00');
+    expect(container.textContent).not.toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
+  });
+
+  it('⭐currency 키 자체가 없으면(2호 게이트 3 실측 재현) 천 단위 구분(4,000)만 하고 «통화 미확인»을 명시한다(거짓 단위 0)', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 4000,
+      neutral_facts: { stage: 'structure_passed' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('4,000');
+    expect(container.textContent).not.toContain('4000');
+    expect(container.textContent).toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
+  });
+
+  it('sealed_estimated_cost_minor가 null(미봉인)이면 «예상 비용» 줄 자체가 안 뜬다(회귀 0 — 이 카드가 안 건드린 조건)', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: null,
+      neutral_facts: { currency: 'KRW' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.generationBudgetSealedCostLabel);
+  });
+});
+
+// story #4085 AC4-B(3호 라이브 실측 2026-09-22, 페드루 PO 처방) — «예상 비용»까지는
+// 통화가 뜨는데(#4138) org 예산 한도·사용·남음이 카드 어디에도 안 그려짐(apps/web grep
+// 0)이 실측됐다. neutral_facts의 budget_limit_minor/budget_spent_minor/budget_
+// remaining_minor 셋이 다 있을 때만 한 줄 추가(BE recipe_gate_hooks.py가 같은
+// if-블록에서 currency와 함께 싣는다 — 존재 보증 동일).
+describe('generation_budget 한도·사용·남음 한 줄(story #4085 AC4-B)', () => {
+  it('⭐budget_limit_minor·budget_spent_minor·budget_remaining_minor 셋이 다 있으면 한 줄로 렌더된다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 500,
+      neutral_facts: {
+        currency: 'KRW',
+        budget_limit_minor: 50000,
+        budget_spent_minor: 11121,
+        budget_remaining_minor: 38879,
+      },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('한도 50,000원');
+    expect(container.textContent).toContain('사용 11,121원');
+    expect(container.textContent).toContain('남음 38,879원');
+  });
+
+  it('셋 중 하나라도 없으면(org 예산 규칙 미등록 등) 이 줄이 안 뜨고 기존 «예상 비용»/«통화 미확인» 표기는 무변이다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 4000,
+      neutral_facts: { stage: 'structure_passed' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain('한도');
+    expect(container.textContent).not.toContain('남음');
+    expect(container.textContent).toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
   });
 });

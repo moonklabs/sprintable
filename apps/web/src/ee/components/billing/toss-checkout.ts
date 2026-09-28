@@ -12,6 +12,7 @@
  * checkout이 같은 값을 재사용해 실 빌링키로 덮어씀).
  */
 import { loadTossPayments } from '@tosspayments/tosspayments-sdk';
+import { newAttemptId, postAttempt, type AttemptResult } from './payment-attempt';
 import type { TierId } from './pricing-data';
 
 const CUSTOMER_KEY_PATH = '/api/billing/customer-key';
@@ -52,7 +53,10 @@ export async function startBillingAuth({ tier, cycle }: BillingCycleParam): Prom
   const tossPayments = await loadTossPayments(clientKey);
   const payment = tossPayments.payment({ customerKey });
 
-  const returnParams = new URLSearchParams({ tab: 'billing', tier, cycle: toBillingCycleApiValue(cycle) });
+  // story #4335 — 결제 시도 id를 위젯 가기 전에 만든다(복귀 URL에 실어 새로고침 · 재진입도 같은 시도).
+  const returnParams = new URLSearchParams({
+    tab: 'billing', tier, cycle: toBillingCycleApiValue(cycle), attempt: newAttemptId(),
+  });
   const origin = window.location.origin;
 
   await payment.requestBillingAuth({
@@ -66,38 +70,21 @@ export async function startBillingAuth({ tier, cycle }: BillingCycleParam): Prom
   });
 }
 
-export interface CheckoutResult {
-  org_id: string;
-  tier: string;
-  billing_cycle: string | null;
-  status: string;
-  current_period_start: string | null;
-  current_period_end: string | null;
-  declined_reason: string | null;
-}
-
-export type CheckoutOutcome =
-  | { kind: 'active'; result: CheckoutResult }
-  | { kind: 'declined'; result: CheckoutResult }
-  | { kind: 'error'; status: number };
-
-/** successUrl 복귀 後 authKey로 실 체크아웃(구독 성립 + 즉시 1차 청구)을 완결한다. */
+/**
+ * successUrl 복귀 後 authKey로 결제 시도를 시작한다(story #4335) — 서버는 곧바로 시도 상태를 돌려주고, 결제 결과는
+ * `fetchAttempt`로 확정한다. `attemptId`는 위젯 가기 전에 만든 그 id(복귀 URL의 `attempt`) — 새로고침으로 다시 와도
+ * 같은 시도라 새 결제가 생기지 않는다.
+ */
 export async function completeCheckout(params: {
+  attemptId: string;
   authKey: string;
   tier: Exclude<TierId, 'free'>;
   billingCycle: 'monthly' | 'annual';
-}): Promise<CheckoutOutcome> {
-  const res = await fetch('/api/billing/checkout', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ auth_key: params.authKey, tier: params.tier, billing_cycle: params.billingCycle }),
+}): Promise<AttemptResult> {
+  return postAttempt('/api/billing/checkout', {
+    attempt_id: params.attemptId,
+    auth_key: params.authKey,
+    tier: params.tier,
+    billing_cycle: params.billingCycle,
   });
-
-  if (!res.ok) {
-    return { kind: 'error', status: res.status };
-  }
-  const json = (await res.json()) as { data: CheckoutResult };
-  const result = json.data;
-  return result.status === 'active' ? { kind: 'active', result } : { kind: 'declined', result };
 }

@@ -2,18 +2,24 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { markRoute, markRouteReturn, withRouteTiming } from '@/lib/server-timing';
 
 // GET /api/glance/attention?project_id=X — 현 프로젝트 예외 스트림(gate_pending·blocked·merge_ready).
 // BE `/api/v2/glance/attention`(#2097)로 프록시. project-scope 가드는 BE(has_project_access·404)가 수행.
-export async function GET(request: Request) {
+// story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
+// AC2 꼬리 — 하위 구간 auth · service · serialize.
+export const GET = withRouteTiming('glance-attention', async (request: Request) => {
   try {
     const me = await getOrgProjectAuthContext(request);
+    markRoute('auth');
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const res = await proxyToFastapi(request, '/api/v2/glance/attention');
     if (!res.ok) return res;
-    return apiSuccess(await res.json());
+    const data = await res.json();
+    markRoute('service');
+    return markRouteReturn('serialize', apiSuccess(data));
   } catch (err: unknown) {
     return handleApiError(err);
   }
-}
+});

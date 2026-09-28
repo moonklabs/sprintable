@@ -84,43 +84,39 @@ async def test_list_hypotheses_project_id_still_supported():
 
 @pytest.mark.anyio
 async def test_list_hypotheses_no_project_id_filters_by_access():
-    """핵심 회귀(C1): project_id 생략 → org 전체 svc 조회 후 has_project_access 통과분만."""
+    """핵심 회귀(C1): project_id 생략 → caller의 접근 가능 프로젝트로 좁힌 조회. story #4350 PR 3(까디르) — 접근권 거르기가 라우터
+    후필터(limit 뒤라 페이지가 모자람)에서 SQL로 옮겨졌다: 라우터는 접근 가능 프로젝트를 서비스에 넘긴다(실제 거르기는
+    test_4350_pr3_docs_webhooks_hypotheses_realdb.py 실 PG)."""
     client, _session, app = await _client()
     try:
         accessible = _hyp(PROJECT_ID, statement="accessible")
-        inaccessible = _hyp(OTHER_PROJECT_ID, statement="inaccessible")
-
-        async def fake_access(_db, _user_id, project_id, _org_id):
-            return project_id == PROJECT_ID
-
-        with patch(
-            "app.routers.hypotheses.svc.list_hypotheses",
-            new=AsyncMock(return_value=[accessible, inaccessible]),
-        ), patch("app.routers.hypotheses.has_project_access", new=AsyncMock(side_effect=fake_access)):
+        list_mock = AsyncMock(return_value=[accessible])
+        with patch("app.routers.hypotheses.svc.list_hypotheses", new=list_mock), \
+             patch("app.services.project_auth.accessible_project_ids_in_org", new=AsyncMock(return_value=[PROJECT_ID])):
             async with client as c:
                 resp = await c.get("/api/v2/hypotheses")
 
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body) == 1
-        assert body[0]["project_id"] == str(PROJECT_ID)
-        assert body[0]["statement"] == "accessible"
+        assert [b["statement"] for b in body] == ["accessible"]
+        assert list_mock.await_args.kwargs["project_ids"] == [PROJECT_ID]
     finally:
         app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
 async def test_list_hypotheses_no_project_id_all_inaccessible_returns_empty():
-    """비접근 project만 있으면 빈 리스트(존재 비노출 — 404가 아니라 200+빈배열, retro와 동형)."""
+    """비접근 project만 있으면 빈 리스트(존재 비노출 — 404가 아니라 200+빈배열, retro와 동형) — 접근 가능 집합이 비면 서비스에
+    빈 목록이 넘어가 SQL이 0건을 낸다."""
     client, _session, app = await _client()
     try:
-        with patch(
-            "app.routers.hypotheses.svc.list_hypotheses",
-            new=AsyncMock(return_value=[_hyp(OTHER_PROJECT_ID)]),
-        ), patch("app.routers.hypotheses.has_project_access", new=AsyncMock(return_value=False)):
+        list_mock = AsyncMock(return_value=[])
+        with patch("app.routers.hypotheses.svc.list_hypotheses", new=list_mock), \
+             patch("app.services.project_auth.accessible_project_ids_in_org", new=AsyncMock(return_value=[])):
             async with client as c:
                 resp = await c.get("/api/v2/hypotheses")
         assert resp.status_code == 200
         assert resp.json() == []
+        assert list_mock.await_args.kwargs["project_ids"] == []
     finally:
         app.dependency_overrides.clear()

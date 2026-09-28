@@ -44,4 +44,4 @@ async def request_decision(args: RequestDecisionInput) -> list[TextContent]:
         result = await client.post("/api/v2/gates/decisions", json=body)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

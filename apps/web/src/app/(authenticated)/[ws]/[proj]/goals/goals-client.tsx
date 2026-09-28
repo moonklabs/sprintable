@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
@@ -49,6 +49,10 @@ import { SteerDispatchModal } from './steer-dispatch-modal';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { GoalsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
@@ -230,14 +234,25 @@ interface GoalCreateFormProps {
   onCancel: () => void;
 }
 
+interface GoalEditDraft { title: string; description: string; priority: GoalPriority; targetDate: string; targetSp: string }
+interface GoalCreateDraft extends GoalEditDraft { declarations: HypothesisDeclarationValue[] }
+/** 목표 만들기 폼 초안의 빈 값(안정 참조 — 같은 값이면 초안 없음). */
+const EMPTY_GOAL_CREATE: GoalCreateDraft = { title: '', description: '', priority: 'medium', targetDate: '', targetSp: '', declarations: [] };
+
 function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFormProps) {
   const t = useTranslations('goals');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<GoalPriority>('medium');
-  const [targetDate, setTargetDate] = useState('');
-  const [targetSp, setTargetSp] = useState('');
-  const [declarations, setDeclarations] = useState<HypothesisDeclarationValue[]>([]);
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(설명 · 가설 문장)이 든 폼이라 **폼 전체**가 프로젝트별 초안 하나: 창이 ✕ · 바깥 · Esc로
+  // 닫혀도 남고 보이는 «취소»와 만들기 성공에서만 지운다. 키 = 표면 + 대상(새로 만들기라 프로젝트) + form.
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<GoalCreateDraft>(
+    { surface: 'goal-create', targetId: projectId, field: 'form' }, EMPTY_GOAL_CREATE,
+  );
+  const { title, description, priority, targetDate, targetSp, declarations } = form;
+  const setTitle = (v: string) => setForm({ ...form, title: v });
+  const setDescription = (v: string) => setForm({ ...form, description: v });
+  const setPriority = (v: GoalPriority) => setForm({ ...form, priority: v });
+  const setTargetDate = (v: string) => setForm({ ...form, targetDate: v });
+  const setTargetSp = (v: string) => setForm({ ...form, targetSp: v });
+  const setDeclarations = (v: HypothesisDeclarationValue[]) => setForm({ ...form, declarations: v });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -299,13 +314,14 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
 
       const { data } = await res.json() as { data: Goal };
       await wireDeclarations(data.id);
+      clearFormDraft();
       onCreated(data);
     } catch {
       setError(t('createError'));
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations, t]);
+  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations, t, clearFormDraft]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -381,7 +397,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
       {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => { clearFormDraft(); onCancel(); }}>
           {t('cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || !title.trim()}>
@@ -402,11 +418,24 @@ interface GoalEditFormProps {
 
 function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
   const t = useTranslations('goals');
-  const [title, setTitle] = useState(epic.title);
-  const [description, setDescription] = useState(epic.description ?? '');
-  const [priority, setPriority] = useState<GoalPriority>(epic.priority);
-  const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
-  const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined ? String(epic.target_sp) : '');
+  // story #4370(유나 판정 (가)) — 설명(여러 줄)이 든 폼이라 폼 전체가 목표별 초안 하나 · 서버 값이 처음 값(같아지면 초안 없음) ·
+  // 저장 성공과 «취소»에서만 지운다.
+  const serverForm = useMemo<GoalEditDraft>(() => ({
+    title: epic.title,
+    description: epic.description ?? '',
+    priority: epic.priority,
+    targetDate: epic.target_date?.slice(0, 10) ?? '',
+    targetSp: epic.target_sp !== undefined ? String(epic.target_sp) : '',
+  }), [epic.title, epic.description, epic.priority, epic.target_date, epic.target_sp]);
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<GoalEditDraft>(
+    { surface: 'goal-edit', targetId: epic.id, field: 'form' }, serverForm,
+  );
+  const { title, description, priority, targetDate, targetSp } = form;
+  const setTitle = (v: string) => setForm({ ...form, title: v });
+  const setDescription = (v: string) => setForm({ ...form, description: v });
+  const setPriority = (v: GoalPriority) => setForm({ ...form, priority: v });
+  const setTargetDate = (v: string) => setForm({ ...form, targetDate: v });
+  const setTargetSp = (v: string) => setForm({ ...form, targetSp: v });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -436,13 +465,14 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
       if (!res.ok) throw new Error('Failed to update epic');
 
       const { data } = await res.json() as { data: Goal };
+      clearFormDraft();
       onSaved({ ...data, stories: epic.stories });
     } catch {
       setError(t('updateError'));
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved, t]);
+  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved, t, clearFormDraft]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -509,7 +539,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
       {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => { clearFormDraft(); onCancel(); }}>
           {t('cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || !title.trim()}>
@@ -676,7 +706,9 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                 type="button"
                 aria-label={t('deleteGoal')}
                 onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
-                className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors"
+                // story #4345 — `hidden`(탭 순서에서 빠짐) → 호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점에서(HOVER_REVEAL).
+                // 누르는 자리 24(HIT)는 `-my-1`로 줄 높이에 안 얹는다(전엔 숨김이라 줄 높이 0 기여 · 까디르 4718).
+                className={`-my-1 rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors ${HOVER_REVEAL_HIT} ${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -739,11 +771,13 @@ interface GoalDetailPanelProps {
 }
 
 function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   const t = useTranslations('goals');
   // story #3878(§⑤ 낱말 드리프트) — 스토리 목록 배지의 story.status(canonical slug)를
   // t() 없이 그대로 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례
   // 그대로 재사용(§②-1 기존 상태 낱말, 새 키 0).
   const tBoard = useTranslations('board');
+  const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
@@ -812,6 +846,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
           <button
             type="button"
             onClick={onClose}
+            aria-label={tc('close')}
             className="hidden rounded-xl p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:block"
           >
             <X className="size-4" />
@@ -887,7 +922,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
                     <button
                       key={story.id}
                       type="button"
-                      onClick={() => router.push(`/board?story=${story.id}`)}
+                      onClick={() => router.push(flatHref(`/flow?story=${story.id}`))}
                       className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
                     >
                       <p className="text-sm text-foreground">{story.title}</p>
@@ -924,6 +959,7 @@ interface CreateModalProps {
 
 function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps) {
   const t = useTranslations('goals');
+  const tc = useTranslations('common');
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -933,6 +969,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
           <button
             type="button"
             onClick={onClose}
+            aria-label={tc('close')}
             className="rounded-xl p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <X className="size-4" />
@@ -1120,7 +1157,13 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   if (loading) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+        {/* story #3945 — 아래 :1157(본문 «목표» 제목)이 이 페이지의 진짜 h1이다. 로딩
+            상태에도 같은 TopBarSlot 라벨을 쓰므로 일관되게 비-헤딩(<p>)으로. */}
+        <TopBarSlot title={<GoalsTopBarTitle />} showContextChip />
+        {/* story #3946(유나 확認·페드루 정정) — 로딩 상태엔 본문 마스트헤드(:1157)가 아직
+            안 그려져 h1이 0개가 되던 gap. 시각은 무변(스크린리더 전용) — sr-only h1로
+            "페이지 h1 항상 정확히 1개" 불변식을 로딩 분기에서도 지킨다. */}
+        <h1 className="sr-only">{t('title')}</h1>
         <div className="flex h-64 items-center justify-center">
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
@@ -1271,18 +1314,25 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   return (
     <>
       <TopBarSlot
-        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        title={<GoalsTopBarTitle />}
         actions={
-          <Button size="sm" variant="outline" onClick={() => setShowCreate(true)}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('newGoal')}
+          // story #4277 — 402폭에서 글자 버튼이 상단바를 가로로 넘쳤다(410/402 · 가드가 잡음). 스프린트 상단바 관례: 폰은 아이콘만 · 접근 이름 aria-label.
+          <Button size="sm" variant="outline" onClick={() => setShowCreate(true)} aria-label={t('newGoal')}>
+            <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">{t('newGoal')}</span>
           </Button>
         }
         showContextChip
       />
 
-      {/* Desktop layout: list + slide-in detail panel */}
-      <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
+      {/* Desktop layout: list + slide-in detail panel.
+          story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 게이트
+          상세 sticky 픽스) 이 2열 split(리스트+상세, 각자 독립 overflow-y-auto)이 뷰포트
+          기준 고정 높이를 잃는다 — 여기서 직접 앵커(h-[calc(100svh-var(--shell-chrome-h))] —
+          story #4131, --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한
+          SSOT). ActivationChecklistBanner 표시 시엔 그만큼 못 미침(페이지 스크롤로 보정,
+          기능 파손 아님) — PO 라이브 확認 요청. */}
+      <div className="hidden h-[calc(100svh-var(--shell-chrome-h))] min-h-0 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
         <div className={`transition-all duration-300 ${selectedEpic ? 'w-[380px] shrink-0 border-r border-border/80' : 'w-full'}`}>
           {listPanel}
         </div>
@@ -1300,8 +1350,10 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       {/* Mobile layout */}
       {/* min-h-0 필수 — 없으면 flex item 기본 min-height:auto가 content 높이만큼 커져
           이 wrapper의 overflow-hidden이 하단 콘텐츠를 스크롤 불가하게 clip한다(desktop
-          분기 L893의 min-h-0와 동형·모바일 스크롤 불가 재현+근본 확인 후 정정). */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:hidden">
+          분기 L893의 min-h-0와 동형·모바일 스크롤 불가 재현+근본 확인 후 정정).
+          story #4130/#4131 — 같은 이유로 h-[calc(100svh-var(--shell-chrome-h))] 앵커 추가
+          (위 desktop 분기와 동형). */}
+      <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-hidden lg:hidden">
         {mobileView === 'list' ? (
           <div className="min-h-0 flex-1">{listPanel}</div>
         ) : (

@@ -106,6 +106,8 @@ async def _call_list_stories(session, org_id, agent_id, ids_param):
         epic_ids=None, include_unassigned=False, done_within_days=None,
         # story #3148: exclude_status 신규 Query 파라미터 — 동일 이유로 명시.
         exclude_status=None,
+        # story #4329: priority/no_assignee 신규 Query 파라미터 — 동일 이유로 명시.
+        priority=None, no_assignee=False,
     )
 
 

@@ -5,7 +5,9 @@ import json
 import logging
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -14,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.datetime_query import OffsetDatetime
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -31,6 +34,7 @@ from app.routers.events import _push_to_agent
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
+from app.services.text_preview import NOTIFICATION_BODY_PREVIEW_MAX, plain_text_preview
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.services.command_classifier import classify_command
@@ -552,9 +556,7 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
     이벤트명(`conversation.message_created`)이 노출됐다. 발신자+미리보기로 "무슨 일인지" 1초 노출.
     """
     name = sender_name or "Someone"
-    preview = " ".join((content or "").split())  # 개행/연속공백 정규화
-    if len(preview) > _SUMMARY_PREVIEW_MAX:
-        preview = preview[:_SUMMARY_PREVIEW_MAX].rstrip() + "…"
+    preview = plain_text_preview(content, _SUMMARY_PREVIEW_MAX)
     if not preview:
         preview = "📎" if has_attachment else ""
     return f"{name}: {preview}" if preview else name
@@ -1246,6 +1248,9 @@ class ConversationResponse(BaseModel):
     # story #2009: list_conversations와 동일 shape의 participants(재사용, 로직 복제 금지 — AC).
     # dict 그대로 노출(별도 Pydantic 서브모델 미도입) — list 엔드포인트와 byte-identical JSON 보장.
     participants: list[dict] = Field(default_factory=list)
+    # story #4179 — free_response(#2603 멘션 전용 라우팅의 방 단위 예외)가 PATCH 응답에만 있어
+    # 웹 토글이 새로 열 때마다 off로 읽혔다(그 상태로 다시 저장하면 꺼짐 — 데이터 훼손). additive.
+    free_response: bool = False
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -1390,7 +1395,7 @@ class MarkReadRequest(BaseModel):
     """story #1976: up_to 지정 시 그 시각으로 SET(FE 실 렌더 마지막 메시지 timestamp — 권장 경로).
     up_to 생략 시 서버 now() 사용 — 이는 "전체 읽음"(mark-all-read) 명시 액션 전용 의도(§3-2)."""
 
-    up_to: datetime | None = None
+    up_to: OffsetDatetime | None = None
 
 
 class CircuitBreakerReleaseRequest(BaseModel):
@@ -1523,7 +1528,7 @@ async def list_conversations(
     convs = (await db.execute(
         select(Conversation)
         .where(*conv_filter)
-        .order_by(Conversation.updated_at.desc())
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
         .limit(limit).offset(offset)
     )).scalars().all()
 
@@ -1570,6 +1575,12 @@ async def list_conversations(
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
+                # story #3973(E-UX-OVERHAUL·「대화」 3/N) — 목록 행 클립 아이콘용. tombstone
+                # (deleted_at 있음)이면 story #2319 스크럽 관례(위 _serialize_message의
+                # 동일 근거) 그대로 false — 삭제된 메시지의 첨부 존재를 새지 않는다.
+                "has_attachments": (
+                    isinstance(latest_msg.attachments, list) and len(latest_msg.attachments) > 0
+                ) if latest_msg.deleted_at is None else False,
                 # story #3888(§⑤·Chat, PO 확定 2026-09-14 18:19Z) — FE가 이벤트 메시지를
                 # raw content(발행 시점 slug) 대신 렌더 시점 「헤더 · 요약」으로 조립하려면
                 # event_key/payload가 필요하다. _event_payload()(기존 함수, 전체 메시지
@@ -1577,6 +1588,7 @@ async def list_conversations(
                 **_event_payload(latest_msg),
             } if latest_msg else None,
             "updated_at": conv.updated_at.isoformat(),
+            "free_response": conv.free_response,  # story #4179 — 단건 GET과 같은 값(additive).
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
@@ -1831,6 +1843,7 @@ async def get_conversation(
         created_by=conv.created_by,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
+        free_response=conv.free_response,
     )
     resp.muted = caller_row is not None and caller_row.muted_at is not None
     if caller_row is not None:
@@ -2509,6 +2522,27 @@ async def send_message(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """POST /api/v2/conversations/{id}/messages — 전송 + SSE dispatch."""
+    return await send_message_core(conversation_id, body, background_tasks, db=db, auth=auth, org_id=org_id)
+
+
+async def send_message_core(
+    conversation_id: uuid.UUID,
+    body: SendMessageRequest,
+    background_tasks: BackgroundTasks,
+    *,
+    db: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    after_commit: list[Callable[[], Any]] | None = None,
+) -> dict:
+    """`send_message`(HTTP 엔드포인트)의 본체.
+
+    story #4230 — `after_commit`을 넘기면 **호출자 트랜잭션에 참여**한다: 스스로 커밋하지 않고(flush만) 커밋 뒤에만 해야
+    하는 일(SSE push · ws 브로드캐스트)을 그 목록에 넣어 돌려준다 — 호출자가 자기 커밋 뒤에 실행한다
+    (`app.services.after_commit.schedule_after_commit`). 서버 훅(`publish_preset_event`)이 게이트 전이 한가운데서 이 함수를
+    불러 전이 트랜잭션을 중간 커밋하던 결함의 뿌리 처방. 엔드포인트 경로(`after_commit=None`)는 예전과 같다(여기서 커밋 ·
+    커밋 뒤 작업 즉시). background task 등록은 두 경로 모두 같다(실행 시점은 호출자 몫 — HTTP는 응답 뒤, 훅은 커밋 뒤).
+    참여형은 서버 발신(에이전트) 메시지 전용이다 — 사람 발신은 커밋 뒤 `process_event` 훅이 세션을 쓰므로 받지 않는다."""
     conv = (await db.execute(
         select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
     )).scalar_one_or_none()
@@ -2516,6 +2550,8 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    if after_commit is not None and sender.type != "agent":
+        raise ValueError("send_message_core(after_commit=...) is for server-issued (agent) messages only")
 
     # 참여자 검증
     participant = (await db.execute(
@@ -2548,12 +2584,34 @@ async def send_message(
 
         open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
         if open_breaker_id is not None:
+            # story #3933 AC3 — 이 자리는 사람이 아니라 «차단된 에이전트 자신»이 읽는다
+            # (MCP send_chat_message 호출자). `error` 키를 `code`로 바꿔 api_client.py::
+            # _extract_error_message의 dict-detail 케이스({code,message})가 그대로
+            # code+message로 뽑게 한다(새 파싱 분기 발명 0). 기존 문장은 이미 저자가
+            # 「무슨 일」(message)과 「다음 행동」(hint)을 em-dash로 나눠 뒀던 것 그대로
+            # 자른다 — 새 낱말 0.
+            # code는 이 코드베이스의 지배적 관례(대문자+밑줄, `grep '"code": "[A-Z_]+"'`
+            # 실측 — ADOPTION_REQUIRES_HUMAN류 수백 건)로 대문자화한다. 소문자
+            # "circuit_breaker_open"이면 api_client.py::_split_code_message의 코드
+            # 인식 정규식(`^[A-Z][A-Z0-9_]*: `)이 못 잡아 code가 안 뽑힌다 — 값 자체를
+            # 새로 발명하는 게 아니라 이 레포 전체가 이미 쓰는 대소문자 관례로 맞추는 것.
+            # 원문 리터럴은 개명 前 그대로 한 덩어리 유지(인접 문자열 리터럴 결합 —
+            # `scripts/verify_no_new_korean_user_strings.py`가 AST `ast.Constant` 단위로
+            # 세므로 이렇게 두 줄로 이어 써도 파서가 하나의 상수로 합친다) — message/hint
+            # 분리는 런타임 `.split(" — ", 1)`로만 한다. 리터럴 자체를 둘로 쪼개면 그
+            # 가드의 "baseline can only shrink" 순증 체크가 파일당 항목 수 증가로 잡는다
+            # (CI 실측, PR#4357 — 5→6건 FAIL). 새 낱말은 여전히 0.
+            _circuit_breaker_notice = (
+                "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
+                "org owner/admin의 해제 또는 자동 해소를 기다려주세요."
+            )
+            _cb_message, _cb_hint = _circuit_breaker_notice.split(" — ", 1)
             raise HTTPException(
                 status_code=423,
                 detail={
-                    "error": "circuit_breaker_open",
-                    "message": "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
-                                "org owner/admin의 해제 또는 자동 해소를 기다려주세요.",
+                    "code": "CIRCUIT_BREAKER_OPEN",
+                    "message": _cb_message,
+                    "hint": _cb_hint.rstrip("."),
                     "conversation_id": str(conversation_id),
                     "circuit_breaker_id": str(open_breaker_id),
                 },
@@ -2750,13 +2808,15 @@ async def send_message(
     # story #2889(S2h③, 페드루 확定 2026-08-21): gate/pull_request/member는 TARGET_ONLY_TYPES
     # (완전지원 ENTITY_RESOLVERS 아님)라 insert_chat_mentions의 기본 target_types(=ENTITY_
     # RESOLVERS만)엔 안 잡힌다 — "존재판정+멘션 자동감지"까지가 이 세 타입의 계약(reference_
-    # registry.py 참고)이라 여기서 명시로 넓힌다. chat_message는 안 넣는다(자기 자신을
-    # @멘션하는 토큰은 의미가 없음 — proof form의 별도 경로로만 채팅 메시지를 인용한다).
-    from app.services.reference_registry import ENTITY_RESOLVERS
+    # registry.py 참고)이라 여기서 명시로 넓힌다. chat_message는 이 합집합에도 포함되지만
+    # 여기선 실질적으로 안 쓰인다(자기 자신을 @멘션하는 토큰은 의미가 없음 — proof form의
+    # 별도 경로로만 채팅 메시지를 인용한다). story #4141 — evidence.py write-path(게이트 핀)도
+    # 같은 조합이 필요해져 `WRITE_TARGET_TYPES_WITH_TARGET_ONLY`로 합쳤다(literal 재타이핑 0).
+    from app.services.reference_registry import WRITE_TARGET_TYPES_WITH_TARGET_ONLY
     mention_result = await insert_chat_mentions(
         db, org_id=org_id, message_id=msg.id, content=msg.content, created_by=sender.id,
         auto_story_ids=frozenset(_auto_story_ids),
-        target_types=frozenset(ENTITY_RESOLVERS) | {"gate", "pull_request", "member"},
+        target_types=WRITE_TARGET_TYPES_WITH_TARGET_ONLY,
     )
 
     # story #2889(S2h): #2263 AC6이 남긴 갭(SSE/POST 응답엔 읽기 경로의 references[] 키가
@@ -3062,7 +3122,7 @@ async def send_message(
                             # story #3903 PO PASS 후속 — 「회원님을」→「나를」(inbox.mentionTitle과
                             # 동일 문구·PO 2인칭 통일 지시 그대로 적용, f0083e15dc).
                             title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 나를 멘션했어요",
-                            body=(msg.content or "")[:200],
+                            body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX),
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
                             # story #3903(migration 0378) — sender_name(제목 렌더시 조합용)
@@ -3112,7 +3172,7 @@ async def send_message(
                         # 「새 메시지」는 명사구라 합니다체/해요체 어미 자체가 없음(AC1 대상
                         # 아님, 3903 실측 확認) — 그대로.
                         title=f"{sender.name or UNNAMED_MEMBER_LABEL}님의 새 메시지",
-                        body=(msg.content or "")[:200],
+                        body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX),
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
                         # story #3903(migration 0378) — 위 mention 블록과 동형.
@@ -3129,7 +3189,11 @@ async def send_message(
     # conversation updated_at 갱신
     conv.updated_at = datetime.now(timezone.utc)
 
-    await db.commit()
+    if after_commit is None:
+        await db.commit()
+    else:
+        # story #4230 — 호출자 트랜잭션 참여: 커밋은 전이를 연 쪽이 한 번.
+        await db.flush()
     await db.refresh(msg)
 
     # Phase 6-1: human 발신 메시지 → process_event 훅
@@ -3155,8 +3219,14 @@ async def send_message(
             logger.warning("process_event failed for message.created message_id=%s", msg.id, exc_info=True)
 
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
-    for pid_str, sse_payload in pending_sse_pushes:
-        _push_to_agent(pid_str, sse_payload)
+    def _push_pending_sse() -> None:
+        for pid_str, sse_payload in pending_sse_pushes:
+            _push_to_agent(pid_str, sse_payload)
+
+    if after_commit is None:
+        _push_pending_sse()
+    else:
+        after_commit.append(_push_pending_sse)
     # story #2090 정정(2026-07-22, 까심 발견 — 2026-07-21 PR #2375의 착오 정정) + #2132(2026-07-23
     # 근본수정): publish_event()의 org _subscribers fanout은 영구 죽은 레지스트리(story #2059/
     # #2067과 동일 근본)라 실제 SSE 전달 경로가 아니었다 — 그 함수 자체를 삭제했다. L1
@@ -3207,9 +3277,15 @@ async def send_message(
                     "content": msg.content,
                     "ts": msg.created_at.isoformat(),
                 })
-                for aid in agent_ids:
-                    if aid in _rooms:
-                        await _broadcast(aid, ws_payload)
+                async def _ws_send(ids: set[str] = agent_ids, payload: str = ws_payload) -> None:
+                    for aid in ids:
+                        if aid in _rooms:
+                            await _broadcast(aid, payload)
+
+                if after_commit is None:
+                    await _ws_send()
+                else:
+                    after_commit.append(_ws_send)
     except Exception:
         logger.warning("ws_chat broadcast failed message_id=%s", msg.id, exc_info=True)
 
@@ -3275,7 +3351,7 @@ async def send_message(
             entity_id=conversation_id,
             context={
                 "message_id": str(msg.id),
-                "content_preview": msg.content[:80] if msg.content else "",
+                "content_preview": plain_text_preview(msg.content, _SUMMARY_PREVIEW_MAX),
             },
         )
 

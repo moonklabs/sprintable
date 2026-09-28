@@ -2,8 +2,7 @@
 `message_kind` 배선. BE `SendMessageRequest.message_kind`(app/routers/conversations.py,
 E-ACTIVATION S1)는 이미 4-enum을 받는데, MCP `SendChatInput`엔 이 필드가 없어 발신측이
 kind를 실을 길이 없었다(doc result-card-final-spec-5c29454b가 지목한 근본원인 — FE result
-카드 density 레일이 헛돎). `message_type`(기존, metadata에 얹히는 별개 축)과 이름이 비슷해
-혼동하기 쉬워 그 구분도 함께 고정한다.
+카드 density 레일이 헛돎). 옛 `message_type`(metadata에 얹히던 별개 축)은 BE가 받지 않아 story #4329에서 뺐다.
 
 `test_2618_mcp_mentioned_ids.py`와 동일 컨벤션(mock 기반 payload 배선 확認)."""
 from __future__ import annotations
@@ -52,15 +51,15 @@ async def test_message_kind_rejects_values_outside_4_enum():
 
 
 @pytest.mark.anyio
-async def test_message_kind_is_top_level_not_nested_in_metadata():
-    """message_type(기존, meta에 얹힘)과 message_kind(신규, top-level)는 별개 축 — 함께 보내도
-    서로 안 섞인다(회귀 축 — 향후 이름 혼동으로 둘을 합치는 실수 방지)."""
-    args = SendChatInput(
-        conversation_id="conv-1", content="결과 보고", message_kind="result", message_type="report",
-    )
+async def test_message_kind_is_top_level_and_no_metadata_is_sent():
+    """message_kind는 top-level. story #4329 — BE `SendMessageRequest`가 받지 않아 조용히 버려지던 `metadata`(message_type ·
+    review_type을 담던 봉투)는 더 싣지 않고, 그 입력은 도구 경계에서 거절된다(extra=forbid — 버려지는 줄 모르고 쓰는 일 0)."""
+    args = SendChatInput(conversation_id="conv-1", content="결과 보고", message_kind="result")
     with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         await send_chat_message(args)
         _, kwargs = m.call_args
         assert kwargs["json"]["message_kind"] == "result"
-        assert kwargs["json"]["metadata"]["message_type"] == "report"
-        assert "message_kind" not in kwargs["json"]["metadata"]
+        assert "metadata" not in kwargs["json"]
+    for dropped in ({"message_type": "report"}, {"review_type": "design"}, {"metadata": {"k": "v"}}):
+        with pytest.raises(ValidationError):
+            SendChatInput(conversation_id="conv-1", content="결과 보고", **dropped)

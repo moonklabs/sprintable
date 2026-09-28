@@ -141,19 +141,9 @@ def test_reserved_workspace_slugs_exact_denylist():
     assert "moonklabs" not in RESERVED_WORKSPACE_SLUGS
 
 
-def test_reserved_workspace_slugs_covers_fe_flat_resource_routes():
-    """미르코 S-route-project 그라운딩 발견(2026-07-15) 후속 봉합 — apps/web/src/app 실측
-    최상위 라우트명 전체가 denylist에 있어야 /{ws}/... 마이그 이후 오배정이 없다."""
-    from app.services.entity_slug import RESERVED_WORKSPACE_SLUGS
-
-    for w in (
-        "activity", "artifacts", "board", "channel", "chats", "docs", "epics", "glance",
-        "inbox", "loops", "meetings", "mockups", "org-briefing", "retro", "rewards",
-        "sprints", "standup", "storage",
-        "auth", "dashboard", "forgot-password", "internal-dogfood", "invite", "mfa",
-        "privacy", "register", "reset-password", "share", "terms", "verify-email",
-    ):
-        assert w in RESERVED_WORKSPACE_SLUGS, f"{w} 라우트명이 denylist에 없음"
+# story #4218 — 예전 `test_reserved_workspace_slugs_covers_fe_flat_resource_routes`(FE 최상위 라우트 손 스냅샷 하드코딩)는
+# FE `RESERVED_FIRST_SEGMENTS`를 직접 읽는 동기 가드(test_4218_reserved_workspace_slugs_sync.py)로 대체했다 — 이 손 목록은
+# 2026-07-15 이후 FE에 생긴 라우트를 못 따라가 그대로 통과했다.
 
 
 @pytest.mark.anyio

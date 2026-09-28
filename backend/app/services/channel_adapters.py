@@ -884,6 +884,17 @@ if SANDBOX_CHANNEL_ENABLED:
     )
 
 
+# story #4239 — 채널 키 전체(샌드박스 포함)의 정적 목록. 샌드박스 어댑터는 `SANDBOX_CHANNEL_ENABLED`일 때만 위에서
+# 등록되므로, 레시피 정의의 `capability.channels`(허용 채널 종류) 검증처럼 **환경과 무관해야 하는** 자리는 이 목록을 쓴다.
+# 드리프트 가드: `tests/test_4239_recipe_channel_allowlist_realdb.py` — 샌드박스를 켜고 import한 등록 키 == 이 목록.
+ALL_CHANNEL_KEYS: frozenset[str] = frozenset({
+    "threads", "instagram", "facebook", "hosted_site", "wordpress", "webhook", "stibee", "ghost", "meta_ads", "x",
+    "youtube",
+    "sandbox", "instagram_sandbox", "stibee_sandbox", "ghost_sandbox", "facebook_sandbox", "ads_sandbox", "x_sandbox",
+    "youtube_sandbox",
+})
+
+
 def get_channel_adapter(channel: str) -> ChannelAdapterConfig | None:
     return CHANNEL_ADAPTERS.get(channel)
 

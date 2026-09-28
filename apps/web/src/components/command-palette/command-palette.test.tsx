@@ -85,7 +85,8 @@ describe('CommandPalette — existing navigate/search behavior (regression guard
 // 바로 아래 별도 테스트로.
 describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 AC1·AC3)', () => {
   // story #3845 §④ — go-retro 신규(retro가 LEGACY_NAV_ITEMS에서 빠지며 이 앵커로 이관).
-  const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics', 'go-retro', 'go-work-list']);
+  // story #3989 — go-hypotheses 신규(가설 탭도 WorkspaceFrameTabs 전용 진입점).
+  const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics', 'go-retro', 'go-work-list', 'go-hypotheses']);
 
   it('팔레트 navigate id 집합이 정확히 NAV_GROUPS+LEGACY_NAV_ITEMS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 2개는 문서화된 예외로 제외)', async () => {
     await mount();
@@ -161,7 +162,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     // 파생으로 그 밖의 항목(신뢰·지식·마케팅·조직 구역)도 전부 도달하는지 표본 확認.
     expect(document.body.textContent).toContain('신뢰 센터'); // org-trust(신뢰 구역, 예전엔 누락)
     expect(document.body.textContent).toContain('블로그 포스트'); // content(마케팅 구역, 예전엔 누락)
-    expect(document.body.textContent).toContain('기억'); // org-memory(지식 구역, 예전엔 누락)
+    expect(document.body.textContent).toContain('스토리지'); // storage(지식 구역, 예전엔 누락)
     expect(document.body.textContent).toContain('설정'); // settings(예전엔 누락)
   });
 
@@ -233,7 +234,8 @@ describe('CommandPalette — action commands (story 4f991165)', () => {
 
   it('selecting an action command routes (route-first) instead of performing an inline mutation', async () => {
     await mount();
-    const recruitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('에이전트 모집하기'));
+    // story #4380 — 항목 = Autocomplete option(div role="option").
+    const recruitBtn = [...document.querySelectorAll('[role="option"]')].find((b) => b.textContent?.includes('에이전트 모집하기'));
     expect(recruitBtn).toBeDefined();
     await act(async () => { recruitBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/organization/workforce/recruiter');
@@ -254,3 +256,97 @@ describe('CommandPalette — 로드맵 P2·PR-E L1(다이얼로그 elevation 토
     expect(popup?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
   });
 });
+
+
+// story #4231 4차 B — 래칫 예외(GUARD_ANCHOR_ITEMS href)의 전제: 앵커 href가 bare 옛 자원 경로로 나가지 않는다.
+// story #4274(PO · 유나 실측) — 앵커도 프로젝트 자원이라 resolveResourceHref(= scopedResourceHref · slug 모르면 flat + `?p=`)를 거쳐
+// `/{ws}/{proj}/{자원}` 직접 주소로 나간다(flat이면 proxy 307 동안 로딩 경계가 설 자리가 없다). 앵커 전부가 그 한 길을 거치는지 잡는다.
+describe('GUARD_ANCHOR_ITEMS — 앵커는 resolveResourceHref로만(#4231 4차 B · #4274)', () => {
+  it('⭐앵커는 전부 자원 경로를 resolveResourceHref에 넘긴 값을 href로 쓴다(bare flat 없음)', async () => {
+    const { deriveNavigateItems, GUARD_ANCHOR_ITEMS } = await import('./command-palette');
+    const anchors = deriveNavigateItems((resource) => `/ws-1/proj-1/${resource}`).filter((i) => GUARD_ANCHOR_ITEMS.some((a) => a.id === i.id));
+    expect(anchors).toHaveLength(GUARD_ANCHOR_ITEMS.length);
+    for (const anchor of GUARD_ANCHOR_ITEMS) {
+      const item = anchors.find((i) => i.id === anchor.id)!;
+      expect(item.href).toBe(`/ws-1/proj-1${anchor.href}`);
+      expect(item.isWorkspaceless).toBe(false);
+    }
+  });
+});
+
+// story #4380 — 화면 읽기가 지금 켜진 항목을 안다: 입력칸 = combobox · 목록 = listbox · 항목 = option · 켜진 항목 = aria-activedescendant
+// + aria-selected(Base UI Autocomplete · inline). 예전엔 입력칸 · 단추뿐이라 ↑↓로 옮긴 «켜짐»이 모양(bg-accent)으로만 보였다.
+describe('CommandPalette — 목록상자 · 켜진 항목 알림(story #4380)', () => {
+  const input = () => document.querySelector<HTMLInputElement>('input')!;
+  const options = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+  const key = async (k: string) => { await act(async () => { input().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }); };
+  const active = () => document.getElementById(input().getAttribute('aria-activedescendant') ?? '');
+
+  it('입력칸 = combobox → listbox · 항목 = option · 묶음 = 이름 붙은 group · option은 전부 대화상자 안(포털 0 · 숨은 조상 0)', async () => {
+    await mount();
+    expect(input().getAttribute('role')).toBe('combobox');
+    expect(input().getAttribute('aria-expanded')).toBe('true');  // combobox 필수 속성(inline이면 Base UI가 안 닮)
+    const listbox = document.getElementById(input().getAttribute('aria-controls') ?? '');
+    expect(listbox?.getAttribute('role')).toBe('listbox');
+    expect(options().length).toBeGreaterThan(5);
+    expect(options().every((o) => listbox!.contains(o))).toBe(true);
+    const groupNames = [...listbox!.querySelectorAll('[role="group"]')].map((g) => document.getElementById(g.getAttribute('aria-labelledby') ?? '')?.textContent);
+    const cp = koMessages.commandPalette as LooseMessages;
+    expect(groupNames).toEqual([cp.navigate, cp.actions]);
+    const popup = input().closest('[role="dialog"]')!;
+    expect(options().every((o) => popup.contains(o) && !o.closest('[aria-hidden="true"],[inert]'))).toBe(true);
+  });
+
+  it('열면 첫 항목이 켜져 있다(activedescendant · aria-selected 하나) · ↓ 하면 둘째로 옮겨 간다 · 초점은 입력칸 그대로', async () => {
+    await mount();
+    expect(active()).toBe(options()[0]);
+    expect(options().filter((o) => o.getAttribute('aria-selected') === 'true')).toEqual([options()[0]]);
+    await key('ArrowDown');
+    expect(active()).toBe(options()[1]);
+    expect(options().filter((o) => o.getAttribute('aria-selected') === 'true')).toEqual([options()[1]]);
+    expect(document.activeElement).toBe(input());
+  });
+
+  it('첫 Enter가 켜진 항목을 연다(목록 여는 데 안 쓰임)', async () => {
+    await mount();
+    await key('ArrowDown');
+    const target = active()!;
+    await key('Enter');
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    const boardIdx = options().indexOf(target);
+    expect(boardIdx).toBe(1);
+    expect(target.getAttribute('data-command-id')).toBeTruthy();
+  });
+
+  it('맞는 항목이 없으면 aria-expanded="false" · 안내 문구', async () => {
+    await mount();
+    await act(async () => {
+      const el = input();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, 'zzzz');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(options()).toHaveLength(0);
+    expect(input().getAttribute('aria-expanded')).toBe('false');
+    expect(document.body.textContent).toContain((koMessages.commandPalette as LooseMessages).noResults as string);
+  });
+
+  it('항목을 고른 뒤 입력칸에 그 항목 이름이 채워지지 않는다(다음에 열 때 빈 칸)', async () => {
+    const onOpenChange = vi.fn();
+    await mount({ onOpenChange });
+    await key('Enter');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(input().value).toBe('');
+  });
+
+  it('스토리 맥락: 명령 묶음이 먼저 · 켜진 명령 아래에만 영향 줄', async () => {
+    await mount({ contextStoryId: 's1' });
+    const first = options()[0];
+    expect(active()).toBe(first);
+    expect(first.textContent).toContain('웰컴 이메일 시안 위임하기');
+    const impacts = () => options().filter((o) => o.querySelector('.border-info\\/40'));
+    expect(impacts()).toEqual([first]);
+    await key('ArrowDown');
+    expect(impacts()).toEqual([options()[1]]);
+  });
+});
+

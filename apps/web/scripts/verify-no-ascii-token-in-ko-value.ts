@@ -93,8 +93,9 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 //    실측: "PR 리뷰"·"CI · 납품"·"AC {met}/{total} 충족"·"웹 UI 사용"·"PC 화면에서만"·
 //    "SNS에 나가는 글"·"우선 큐 · SSO" 등 전부 Korean 문장 안에 자연 삽입된 기술 용어
 //    (§⑤ 대상인 "말투/낱말"이 아니라 업계 공통 이니셜리즘).
-//  - 이 제품 자체의 고유 기능명(coined term, 브랜드명과 동형): BYOA·BYOM·BYO(Bring
-//    Your Own *) — flow.guidedExampleByoa="BYOA 채택" 등, 기능 고유명사.
+//  - 이 제품 자체의 고유 기능명(coined term, 브랜드명과 동형): BYOM·BYO(Bring Your Own *).
+//    ⚠️story #4201(PO·유나) — BYOA는 사용자 화면에 쓰지 않는 내부 전략 약어로 판정돼 목록에서 뺐다
+//    (verify-no-internal-jargon.test.ts가 금지 — 되살리면 거기서 RED).
 //  - board.backlinksExcludePrSid="PR/커밋의 [SID:XXX] 텍스트 관례"의 SID·XXX — 이
 //    프로젝트 자체 PR 제목 관례([SID:XXX], CLAUDE.md에 명문화)를 설명하는 플레이스홀더
 //    표기 — 번역 대상 낱말이 아니라 구문 표기.
@@ -118,7 +119,7 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 //    전환 — 값이 사라져 이 축엔 안 남음.
 export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'API', 'AI', 'URL', 'MCP', 'ID', 'SSE', 'UTM', 'HTML', 'JSON', 'LLM', 'CI', 'SHA', 'DM',
-  'BYOA', 'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
+  'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
   'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
   'QA', 'PO', 'PM',
   // prod 승격(결제 되돌림)으로 AU/UI 유일 소비처(automation-usage 경고 배너 문구)가
@@ -170,6 +171,10 @@ export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'organization.channelLabelGhostSandbox', 'organization.channelLabelInstagram',
   'organization.channelLabelWordpress', 'organization.channelLabelYoutube',
   'organization.channelThreads',
+  // story #4116(2026-09-21) — 연산 커넥터 provider 브랜드명(제3자 고유명사, 위 채널
+  // 브랜드명과 동일 근거·동일 카테고리). 현재 vertex_gemini 1종만 지원(story
+  // GENERATION_CONNECTOR_PROVIDER_KEYS 닫힌 집합) — 새 provider 추가 시 같은 패턴으로.
+  'organization.gcProviderVertexGeminiLabel',
 
   // 제품/플랫폼 고정 식별자(PO 명시 카테고리 (b) — MCP Config·GitHub App·Webhook URL·
   // CI) 및 그 동류(App ID·App Secret·HTML 파일형식) — 번역하면 실제 설정 화면·API
@@ -208,6 +213,9 @@ export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'onboarding.roleQa', 'organization.stageRoleLabelPo', 'organization.stageRoleLabelQa',
   'organization.trustRoleLabelDevops', 'organization.trustRoleLabelPo',
   'organization.trustRoleLabelQa',
+  // story #4209(유나 확정 문안) — 워크플로우 «3단계 스크럼» 단계 라벨 qa_review=«QA». 위 role-badge 패밀리와 같은 낱말
+  // (stageRoleLabelQa와 같은 값·4203 설명 «기획 → 개발 → QA»와 같은 흐름 낱말) — 같은 PO 判定(2026-09-15) 범위로 등재.
+  'organization.recipeStageLabelQaReview',
 
   // 이 제품 자체의 고유 기능명(coined term, 축1의 BYOA/BYOM/BYO와 동일 패밀리) —
   // agentRuns.billingMode_managed(대응짝)는 일반 영단어라 "관리형"으로 한국어 전환.
@@ -293,6 +301,8 @@ export function lowercaseWordRefKey(r: Pick<LowercaseWordRef, 'key' | 'word'>): 
 //    stderr에 실제로 찍히는 로그 문자열 리터럴.
 //  - 브랜드명 예시(moonklabs)·시스템 기능명 리터럴(ping).
 export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // story #4359 — 버튼이 복사하는 셸 `export KEY=…` 줄의 명령어 그대로(유나 문구 판정 · PO 2026-09-27 22:42Z 전달).
+  'agents.fakechatEnvCopyExport::export',
   'agents.toolPermissions.coreAlways::ping',
   'board.backlinksEmptyScoped::source',
   'cage.githubCheckRependingReason::pending',
@@ -328,6 +338,11 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'organization.eventActionAuthRolePlaceholder::admin',
   'organization.eventActionAuthRolePlaceholder::owner',
   'organization.eventKeyPrefixHint::org',
+  // story #4140(페드루 PO 처방 원문, 2026-09-22) — "global"은 Vertex AI의 실제 리전
+  // 값 리터럴(GENERATION_CONNECTOR_LOCATIONS의 원소, select 옵션에 그대로 노출)이라
+  // 번역하면 실제 API 값과 달라진다 — organization.definerStagesSlugHint::slug/enum과
+  // 동일 사유(시스템이 실제로 쓰는 리터럴 값).
+  'organization.gcLocationHint::global',
   'recruiter.keyOnceBody::mcp',
   'recruiter.keyOnceBodyNoMcp::transport',
   'recruiter.kitOrientingConnectBodyCli::cmd',
