@@ -657,22 +657,60 @@ async def _build_app_metadata(
     }
 
 
+def _context_uuid(md: dict, key: str) -> uuid.UUID | None:
+    value = md.get(key) or None
+    return uuid.UUID(str(value)) if value else None
+
+
 async def _store_refresh_token(
     session: AsyncSession,
     user: User,
     raw_token: str,
     expires_at: datetime,
+    *,
+    app_metadata: dict,
 ) -> uuid.UUID:
+    """story #4400 — the refresh token carries its session's org and project (the app_metadata the tokens were issued
+    with). A refresh re-issues that session's context (`_refresh_session_context`), so each session keeps its own org:
+    switching org on one device no longer moves the others (they used to follow the person-wide last_org_id)."""
     row = RefreshToken(
         user_id=user.id,
         token_hash=hash_token(raw_token),
-        org_id=None,
-        project_id=None,
+        org_id=_context_uuid(app_metadata, "org_id"),
+        project_id=_context_uuid(app_metadata, "project_id"),
         expires_at=expires_at,
     )
     session.add(row)
     await session.commit()
     return row.id
+
+
+async def _refresh_session_context(
+    user: User, session: AsyncSession, rt_org_id: uuid.UUID | None, rt_project_id: uuid.UUID | None,
+) -> dict:
+    """story #4400 — app_metadata for a refresh (and switch-account, the same rotation): the session's own org, the one on
+    its refresh token, while the person is still a live member of it.
+
+    Otherwise (they left that org, or a token issued before #4400 carries no org) the person-wide default as before:
+    user.last_org_id — unless they have left that org too, then their first live org (a departed org is never
+    re-issued). Transition: a pre-#4400 token follows last_org_id on its first refresh only; the token issued then
+    carries the org.
+
+    The session's project is re-applied the way switch-project sets it (last_project_id, and the explicit target under
+    the de-fallback flag); _build_app_metadata only lands on it when it is still accessible in that org."""
+    live_orgs = list((await session.execute(
+        select(OrgMember.org_id)
+        .where(OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None))
+        .order_by(OrgMember.created_at.asc(), OrgMember.id)
+    )).scalars().all())
+    if rt_org_id is not None and rt_org_id in live_orgs:
+        if rt_project_id is not None:
+            user.last_project_id = rt_project_id
+        return await _build_app_metadata(user, session, org_id=rt_org_id, project_id=rt_project_id)
+    last_org_id = getattr(user, "last_org_id", None)
+    if last_org_id is not None and last_org_id not in live_orgs and live_orgs:
+        return await _build_app_metadata(user, session, org_id=live_orgs[0])
+    return await _build_app_metadata(user, session)
 
 
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────
@@ -730,7 +768,7 @@ async def register(
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
 
     # 이메일 인증 발송 — 실패해도 가입은 완료하되 **반드시 가시화**(silent swallow 금지).
     # send_email은 bool 반환(True=Resend/SMTP 실발송, False=콘솔 폴백=미발송). delivered를 응답
@@ -874,7 +912,7 @@ async def login(
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
 
     _ip = request.client.host if request.client else None
     _ua = request.headers.get("user-agent")
@@ -926,7 +964,7 @@ async def refresh_token(
     # (replaced_by)의 성패가 anti-replay 불변식의 성패에 영향을 줘선 안 된다 — 그래서 이 revoke
     # UPDATE는 replaced_by 없이 «독립적으로» 커밋되고, replaced_by는 새 row가 실제로 INSERT+
     # commit된 «후에» 별개 문장으로 기록한다(아래 _store_refresh_token 호출부 이후).
-    revoked_user_id = (await session.execute(
+    rotated = (await session.execute(
         update(RefreshToken)
         .where(
             RefreshToken.token_hash == token_hash,
@@ -934,8 +972,10 @@ async def refresh_token(
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
         .values(revoked_at=datetime.now(timezone.utc))
-        .returning(RefreshToken.user_id)
-    )).scalar_one_or_none()
+        .returning(RefreshToken.user_id, RefreshToken.org_id, RefreshToken.project_id)
+    )).first()
+    revoked_user_id = rotated.user_id if rotated else None
+    rt_org_id, rt_project_id = (rotated.org_id, rotated.project_id) if rotated else (None, None)
     won_atomic_rotation = revoked_user_id is not None
     if revoked_user_id is None:
         # ⛔P0 신 클래스(#1887 쿠키-Domain no-op과 별개) — proxy.ts 의 FE 인스턴스-로컬
@@ -972,14 +1012,17 @@ async def refresh_token(
         resolve_cutoff = datetime.now(timezone.utc) - timedelta(
             seconds=settings.auth_refresh_chain_resolve_window_seconds
         )
-        revoked_user_id = (await session.execute(
-            select(RefreshToken.user_id).where(
+        straggler = (await session.execute(
+            select(RefreshToken.user_id, RefreshToken.org_id, RefreshToken.project_id).where(
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.revoked_at.is_not(None),
                 RefreshToken.revoked_at > resolve_cutoff,
                 RefreshToken.expires_at > datetime.now(timezone.utc),
             )
-        )).scalar_one_or_none()
+        )).first()
+        revoked_user_id = straggler.user_id if straggler else None
+        if straggler:
+            rt_org_id, rt_project_id = straggler.org_id, straggler.project_id
         if revoked_user_id is None:
             # #2124(관측성 보강 — 오르테가군 요청 2026-07-27): 하드 401은 지금까지 계정 상관이
             # 0이라 "누가 이 루프에 빠졌는지" 못 쫓았다(prod 실측: 같은 key가 ~20초 간격으로
@@ -1045,7 +1088,7 @@ async def refresh_token(
         )
         return _err("USER_NOT_FOUND", "User not found", 401)
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _refresh_session_context(user, session, rt_org_id, rt_project_id)  # story #4400 — this session's org
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     # story #3247 — session_started_at은 원 refresh 토큰(위에서 이미 decode한 payload)의
@@ -1070,7 +1113,7 @@ async def refresh_token(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
     if won_atomic_rotation:
         # story #2449(회귀 수정): 이 시점엔 새 row가 이미 INSERT+commit 완료라(_store_refresh_
         # token 내부), old row의 이 UPDATE가 실패하거나 프로세스가 죽어도 원자 revoke(위)는
@@ -1120,7 +1163,7 @@ async def switch_account(
     # ⚠️ 원자 single-use rotation(까심 TOCTOU): SELECT-then-UPDATE 비원자면 동시 2요청이 둘 다
     # 통과해 double-spend. 검증+revoke 를 단일 UPDATE...WHERE revoked_at IS NULL...RETURNING 으로
     # 원자화 — 동시 요청 중 정확히 1건만 row 매치(나머지 0행→401).
-    revoked_user_id = (await session.execute(
+    rotated = (await session.execute(
         update(RefreshToken)
         .where(
             RefreshToken.token_hash == token_hash,
@@ -1128,8 +1171,10 @@ async def switch_account(
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
         .values(revoked_at=datetime.now(timezone.utc))
-        .returning(RefreshToken.user_id)
-    )).scalar_one_or_none()
+        .returning(RefreshToken.user_id, RefreshToken.org_id, RefreshToken.project_id)
+    )).first()
+    revoked_user_id = rotated.user_id if rotated else None
+    rt_org_id, rt_project_id = (rotated.org_id, rotated.project_id) if rotated else (None, None)
     if revoked_user_id is None:
         return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
 
@@ -1137,7 +1182,7 @@ async def switch_account(
     if not user:
         return _err("USER_NOT_FOUND", "User not found", 401)
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _refresh_session_context(user, session, rt_org_id, rt_project_id)  # story #4400 — this session's org
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # last_project_id/last_org_id 영속
     # story #3247 — refresh_token()과 동형(위 §3247 주석 참고) — 타겟 계정의 원 세션 시작
@@ -1153,7 +1198,7 @@ async def switch_account(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
 
     return _ok({
         **tokens,
@@ -1607,7 +1652,7 @@ async def oauth_callback(
     tokens = create_tokens(str(user.id), user.email, _md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     raw_refresh = tokens["refresh_token"]
     expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    await _store_refresh_token(session, user, raw_refresh, expires_at)
+    await _store_refresh_token(session, user, raw_refresh, expires_at, app_metadata=_md)
 
     return _ok({
         "access_token": tokens["access_token"],
@@ -2045,6 +2090,27 @@ async def resend_verification(
 
 class SwitchProjectRequest(BaseModel):
     project_id: uuid.UUID
+    # story #4400 — this session's refresh token (the web BFF sends its sp_rt): only that token is revoked.
+    refresh_token: str | None = None
+
+
+async def _revoke_switching_session(session: AsyncSession, user: User, refresh_token: str | None) -> None:
+    """story #4400 — switch-org / switch-project revoke **this session's** refresh token only, not every device's.
+
+    The all-device revoke came with switch-project (#655) and was copied into switch-org (#847), with no threat stated.
+    The refresh token now carries its session's org (`_store_refresh_token`), so other sessions keep their own org and
+    have nothing to be revoked for. #3649's protections are untouched: the stale-session check runs before this, and
+    the revoke goes through the same seam (`_explicit_revoke_values`, which also closes the refresh grace window).
+    logout · password change · admin revoke still revoke every device.
+
+    Without a token (a caller that does not send it yet — web pods older than the backend during a deploy) the
+    previous behaviour stays: every token of the person."""
+    conditions = [RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)]
+    if refresh_token:
+        conditions.append(RefreshToken.token_hash == hash_token(refresh_token))
+    await session.execute(
+        update(RefreshToken).where(*conditions).values(**_explicit_revoke_values(datetime.now(timezone.utc)))
+    )
 
 
 @router.post("/switch-project")
@@ -2081,15 +2147,10 @@ async def switch_project(
     target_project_id = body.project_id
     user.last_project_id = target_project_id
 
-    # 기존 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
-    # refresh()의 유예창(§3649 주석)이 이 RT들을 재사용 대상에서 뺀다(명시 폐기,
-    # 회전 경합 straggler 아님).
-    _now = datetime.now(timezone.utc)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(**_explicit_revoke_values(_now))
-    )
+    # 이 세션 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
+    # refresh()의 유예창(§3649 주석)이 이 RT를 재사용 대상에서 뺀다(명시 폐기,
+    # 회전 경합 straggler 아님). story #4400: 전 기기 → 이 세션만.
+    await _revoke_switching_session(session, user, body.refresh_token)
 
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
     app_metadata = await _build_app_metadata(user, session, project_id=target_project_id)
@@ -2111,7 +2172,7 @@ async def switch_project(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata)
 
     await session.commit()
     return _ok(tokens)
@@ -2121,6 +2182,7 @@ async def switch_project(
 
 class SwitchOrganizationRequest(BaseModel):
     org_id: uuid.UUID
+    refresh_token: str | None = None  # story #4400 — see SwitchProjectRequest
 
 
 @router.post("/switch-org")
@@ -2157,14 +2219,9 @@ async def switch_organization(
     # cross-org 옛 프로젝트 재주입 0 (last_project_id=None이어도 org는 유지).
     user.last_org_id = body.org_id
 
-    # 기존 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
-    # (§3649 주석 참고).
-    _now = datetime.now(timezone.utc)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(**_explicit_revoke_values(_now))
-    )
+    # 이 세션 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
+    # (§3649 주석 참고). story #4400: 전 기기 → 이 세션만.
+    await _revoke_switching_session(session, user, body.refresh_token)
 
     # _build_app_metadata 호출 전에 target project_id 고정
     # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
@@ -2197,7 +2254,7 @@ async def switch_organization(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata)
 
     await session.commit()
 
