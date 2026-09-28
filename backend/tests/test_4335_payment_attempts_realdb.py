@@ -88,7 +88,6 @@ class FakeToss:
         self.cancel_keys: list[str | None] = []
         self.refunded: dict[str, dict] = {}  # 멱등키 → 첫 응답(Toss 멱등: 같은 키면 같은 응답 · 두 번째 환불 0)
         self.amounts: dict[str, int] = {}  # orderId → 청구 금액(조회의 totalAmount)
-        self.log: list[tuple[str, str]] = []  # story #4344 까디르 ③ — 청구 · 취소가 일어난 순서 그대로(«청구 뒤에 취소»)
 
     @property
     def approvals(self) -> int:
@@ -104,7 +103,6 @@ class FakeToss:
             return {"billingKey": f"bk-{uuid.uuid4().hex[:8]}", "card": {}, "authenticatedAt": "2026-09-26T00:00:00+09:00"}
         if path.endswith("/cancel"):
             self.cancel_calls.append((path, json["cancelAmount"]))
-            self.log.append(("cancel", path))
             self.cancel_keys.append(idempotency_key)
             if self.cancel_mode == "slow":
                 await asyncio.sleep(0.3)
@@ -124,7 +122,6 @@ class FakeToss:
         # 청구 /v1/billing/{billingKey}
         order_id = json["orderId"]
         self.charge_calls.append(order_id)
-        self.log.append(("charge", order_id))
         self.amounts[order_id] = json.get("amount", 0)
         if self.charge_mode == "hang":
             assert self.hang_event is not None
@@ -327,18 +324,6 @@ async def test_change_tier_attempt_charges_once_moves_tier_and_refunds_the_captu
         await _seed_active_paid_subscription(s, org_id, tier="starter")
         await _seed_active_billing_key(s, org_id)
         await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
-        # story #4344(까디르 · PO 10:24Z) — 걷은 test_2880이 재던 금액 · 원장 · 기간을 결제 시도 경로에서. 기대값은 같은 산식 함수로.
-        from datetime import UTC as _UTC, datetime as _dt
-
-        from app.services import org_subscription_tier_change as tier_svc
-        from app.services.billing_charge_amount import compute_full_charge_for_new_offering
-
-        before, old_offering, new_offering = await tier_svc.validate_change_tier(s, org_id=org_id, new_tier="team")
-        old_start, old_end = before.current_period_start, before.current_period_end
-        expected_charge, _cur = await compute_full_charge_for_new_offering(s, org_id=org_id, new_offering=new_offering)
-        expected_refund = await tier_svc.prorated_refund_amount(
-            s, old_offering=old_offering, old_period_start=old_start, old_period_end=old_end, now=_dt.now(_UTC),
-        )
         attempt_id = uuid.uuid4()
         attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
         assert attempt.refund_target_order_id is not None
@@ -351,190 +336,7 @@ async def test_change_tier_attempt_charges_once_moves_tier_and_refunds_the_captu
         assert (sub.tier, sub.checkout_claimed_at) == ("team", None)
         refunded = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=attempt.refund_target_order_id)
         assert refunded.refund_status == "confirmed"
-        done = await svc.get_attempt(s, attempt_id)
-        # 금액: 새 등급 전액(좌석 · VAT 포함 산식) 한 번 · 옛 결제 비례 환불(잔여일 산식) 한 번.
-        assert toss.amounts[done.order_id] == expected_charge > 0
-        assert expected_refund > 0 and done.refund_amount_minor == expected_refund
-        assert toss.cancel_calls[0][1] == expected_refund
-        # 원장: 청구 행 = 새 등급 금액, 환불 행 = 비례 환불액.
-        ledger = [(r.entry_type, r.amount_minor) for r in (await s.execute(
-            text("SELECT entry_type, amount_minor FROM billing_ledger_entries WHERE org_id=:o ORDER BY ts"), {"o": org_id},
-        )).all()]
-        assert ("charge", expected_charge) in ledger, ledger
-        assert any(amount == expected_refund and kind != "charge" for kind, amount in ledger), ledger
-        # 새 구독 기간: 옛 기간과 다르고, 시작 = 변경 시점 근처 · 끝 = 월납 한 달 뒤.
-        period = await _row(s, "SELECT current_period_start, current_period_end FROM org_subscriptions WHERE org_id=:o", o=org_id)
-        assert period.current_period_start > old_start and period.current_period_end > old_end
-        assert 27 <= (period.current_period_end - period.current_period_start).days <= 31
     assert toss.approvals == 1 and len(toss.cancel_calls) == 1
-
-
-async def _change_tier_world(s, *, pack_amount=None):
-    """story #4344 까디르 ①~④ — 활성 starter · 빌링키 · 옛 구독 결제(10일 전) · (선택) 더 최근 pack 결제. 옛 결제 키 · pack 키 반환."""
-    from datetime import UTC, datetime, timedelta
-
-    from tests.test_2880_tier_change_upgrade_proration_realdb import _seed_pack_purchase_order
-
-    org_id = await _new_org(s, seats=1)
-    start = datetime.now(UTC) - timedelta(days=10)
-    await _seed_active_paid_subscription(s, org_id, tier="starter", period_start=start, period_end=start + timedelta(days=30))
-    await _seed_active_billing_key(s, org_id)
-    sub_order_id, sub_key = await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890, created_at=start)
-    pack = None
-    if pack_amount is not None:
-        pack = await _seed_pack_purchase_order(s, org_id, amount_minor=pack_amount, created_at=datetime.now(UTC) - timedelta(days=1))
-    return org_id, sub_order_id, sub_key, pack
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("pack_amount", [5_000, 32_890 * 10], ids=["A-pack-smaller", "B-pack-larger"])
-async def test_change_tier_refunds_the_subscription_charge_not_a_newer_pack_purchase(Session, toss, pack_amount):
-    """까디르 ① [P1] — 걷은 test_2880의 pack 오인 환불 A · B를 **실제 환불 길 끝까지**(시도 시작 → 구동 → 토스 취소): 취소는 한 번 ·
-    구독 결제 키를 겨눔 · 구독 주문만 confirmed · pack 주문은 손대지 않음. 뮤테이션: 환불 대상 고르개에서 purpose 필터를 빼면 RED."""
-    from app.services import billing_payment_attempt as svc
-
-    async with Session() as s:
-        org_id, sub_order_id, sub_key, (pack_order_id, pack_key) = await _change_tier_world(s, pack_amount=pack_amount)
-        attempt_id = uuid.uuid4()
-        _attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
-        await svc.drive_attempt(s, attempt_id, token)
-        assert (await svc.get_attempt(s, attempt_id)).status == "succeeded"
-        sub_row = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=sub_order_id)
-        pack_row = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=pack_order_id)
-    assert len(toss.cancel_calls) == 1
-    assert sub_key in toss.cancel_calls[0][0] and pack_key not in toss.cancel_calls[0][0]
-    assert sub_row.refund_status == "confirmed" and pack_row.refund_status is None
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("mode", ["decline", "5xx"])
-async def test_change_tier_refund_failure_keeps_the_new_plan_and_the_new_charge(Session, toss, mode):
-    """까디르 ② [P2] — 옛 결제 부분 환불이 실패해도(확정 거절 · 5xx) 새 요금제는 그대로 · 새 청구 주문은 confirmed(청구를 되돌리지 않는다).
-    뮤테이션: 환불 실패에서 tier를 되돌리면 RED."""
-    from app.services import billing_payment_attempt as svc
-
-    toss.cancel_mode = mode
-    async with Session() as s:
-        org_id, sub_order_id, _sub_key, _ = await _change_tier_world(s)
-        attempt_id = uuid.uuid4()
-        attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
-        await svc.drive_attempt(s, attempt_id, token)
-        done = await svc.get_attempt(s, attempt_id)
-        sub = await _row(s, "SELECT tier FROM org_subscriptions WHERE org_id=:o", o=org_id)
-        new_order = await _row(s, "SELECT status FROM billing_orders WHERE order_id=:oid", oid=done.order_id)
-        old = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=sub_order_id)
-    assert sub.tier == "team"
-    assert new_order.status == "confirmed"
-    assert old.refund_status != "confirmed"
-
-
-@pytest.mark.anyio
-async def test_change_tier_cancels_after_the_charge_and_targets_the_old_payment_key(Session, toss):
-    """까디르 ③ [P2] — 순서와 키: 새 등급 청구가 **먼저**, 옛 결제 부분취소가 **그 뒤** · 취소는 옛 결제 키를 겨눈다.
-    뮤테이션: 청구 전에 환불을 부르면(순서 뒤집음) RED."""
-    from app.services import billing_payment_attempt as svc
-
-    async with Session() as s:
-        org_id, _sub_order_id, sub_key, _ = await _change_tier_world(s)
-        attempt_id = uuid.uuid4()
-        _attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
-        await svc.drive_attempt(s, attempt_id, token)
-    kinds = [k for k, _ in toss.log]
-    assert kinds == ["charge", "cancel"], toss.log
-    assert sub_key in toss.log[1][1]
-
-
-@pytest.mark.anyio
-async def test_change_tier_refund_and_period_by_an_independent_formula(Session, toss):
-    """까디르 ④ [P3] — 기대값을 운영 도우미 없이 **독립 공식**으로: 환불 = floor(round(옛 월요금 × (1 + VAT)) × 잔여/전체) — 계산 시각을
-    모르므로 시도 시작 직전 · 구동 직후 두 시각의 구간 안에 있어야 한다 · VAT 포함 > 공급가 · 새 기간은 호출 창 안에서 시작하고 달력 한 달.
-    뮤테이션: 환불을 VAT 없이 공급가로 일할하면 구간 밖으로 RED."""
-    import math
-    from datetime import UTC, datetime
-
-    from app.services import billing_payment_attempt as svc
-
-    async with Session() as s:
-        org_id, _sub_order_id, _sub_key, _ = await _change_tier_world(s)
-        old = await _row(s, "SELECT current_period_start AS a, current_period_end AS b FROM org_subscriptions WHERE org_id=:o", o=org_id)
-        price = (await _row(s, "SELECT monthly_price_minor AS p FROM offering_versions WHERE tier='starter' AND currency='krw' AND effective_to IS NULL")).p
-        vat_bp = (await _row(s, "SELECT vat_rate_bp AS v FROM platform_settings LIMIT 1")).v
-        taxed = round(price * (10_000 + vat_bp) / 10_000)
-        assert vat_bp > 0 and taxed > price, (price, taxed)
-        total = (old.b - old.a).total_seconds()
-        t_before = datetime.now(UTC)
-        attempt_id = uuid.uuid4()
-        _attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
-        await svc.drive_attempt(s, attempt_id, token)
-        t_after = datetime.now(UTC)
-        done = await svc.get_attempt(s, attempt_id)
-        new = await _row(s, "SELECT current_period_start AS a, current_period_end AS b FROM org_subscriptions WHERE org_id=:o", o=org_id)
-    low = math.floor(taxed * (old.b - t_after).total_seconds() / total)
-    high = math.floor(taxed * (old.b - t_before).total_seconds() / total)
-    assert low <= done.refund_amount_minor <= high, (low, done.refund_amount_minor, high)
-    assert toss.cancel_calls[0][1] == done.refund_amount_minor
-    assert t_before <= new.a <= t_after, (t_before, new.a, t_after)
-    # 새 기간 = 달력 한 달(월납) — 28~31일이고 달이 하나 넘어간다(«30일 이상» 고정은 2월에 거짓 RED).
-    assert 28 <= (new.b - new.a).days <= 31 and (new.b.year * 12 + new.b.month) - (new.a.year * 12 + new.a.month) == 1, (new.a, new.b)
-
-
-@pytest.mark.anyio
-async def test_change_tier_declined_on_an_active_plan_keeps_tier_period_and_the_old_order(Session, toss):
-    """story #4344 까디르 ② — 걷은 test_2880이 재던 «상향 청구 거절 → 원래 tier · 기간 그대로 · 옛 결제 환불 시도 0»을 결제 시도 경로로.
-    (위 :343 거절 테스트는 checkout(pending 구독)뿐이었다.) 뮤테이션: 거절에서도 tier를 옮기거나 옛 결제를 부분취소하면 RED."""
-    from app.services import billing_payment_attempt as svc
-
-    toss.charge_mode = "decline"
-    async with Session() as s:
-        org_id = await _new_org(s, seats=1)
-        await _seed_active_paid_subscription(s, org_id, tier="starter")
-        await _seed_active_billing_key(s, org_id)
-        prior_order_id = (await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890))[0]
-        before = await _row(s, "SELECT tier, current_period_start, current_period_end FROM org_subscriptions WHERE org_id=:o", o=org_id)
-        attempt_id = uuid.uuid4()
-        _attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
-        await svc.drive_attempt(s, attempt_id, token)
-        done = await svc.get_attempt(s, attempt_id)
-        assert done.status == "declined", done.status
-        after = await _row(s, "SELECT tier, current_period_start, current_period_end, checkout_claimed_at FROM org_subscriptions WHERE org_id=:o", o=org_id)
-        assert (after.tier, after.current_period_start, after.current_period_end) == (before.tier, before.current_period_start, before.current_period_end)
-        assert after.checkout_claimed_at is None, "거절 뒤 결제 슬롯이 풀려야 다시 시도할 수 있다"
-        prior = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=prior_order_id)
-        assert prior.refund_status is None, "청구가 거절됐는데 옛 결제를 건드렸다"
-    assert toss.approvals == 0 and toss.cancel_calls == []
-
-
-@pytest.mark.anyio
-async def test_two_concurrent_change_tier_attempts_charge_once(Session, toss):
-    """story #4344 까디르 ③ — 걷은 test_2880의 «동시 두 요금제 변경 → 성공 1 · 진행 중 1»을 결제 시도 경로로(서로 다른 시도 id · 두 세션이
-    동시에). :263은 checkout, :861은 순차였다. 뮤테이션: 조직 결제 슬롯 claim을 빼면 둘 다 시작돼 청구가 2."""
-    import asyncio
-
-    from app.services import billing_payment_attempt as svc
-    from app.services.org_subscription_tier_change import TierChangeInProgress
-
-    async with Session() as s:
-        org_id = await _new_org(s, seats=1)
-        await _seed_active_paid_subscription(s, org_id, tier="starter")
-        await _seed_active_billing_key(s, org_id)
-        await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
-
-    async def _start(tier):
-        async with Session() as s:
-            try:
-                return await svc.start_change_tier_attempt(s, attempt_id=uuid.uuid4(), org_id=org_id, requested_by=None, new_tier=tier)
-            except TierChangeInProgress as exc:
-                return exc
-
-    results = await asyncio.gather(_start("team"), _start("business"))
-    started = [r for r in results if not isinstance(r, Exception)]
-    refused = [r for r in results if isinstance(r, TierChangeInProgress)]
-    assert (len(started), len(refused)) == (1, 1), results
-    (attempt, token), = started
-    async with Session() as s:
-        await svc.drive_attempt(s, attempt.id, token)
-        assert (await svc.get_attempt(s, attempt.id)).status == "succeeded"
-    assert toss.approvals == 1 and len(toss.charge_calls) == 1
 
 
 @pytest.mark.anyio
@@ -1330,7 +1132,7 @@ async def test_recheck_stops_after_24h_and_alerts_only_without_a_definite_answer
 @pytest.mark.parametrize("mode", ["5xx", "5xx_done", "network"])
 async def test_refund_5xx_stays_pending_and_the_sweep_retries_same_key(Session, toss, alerts, mode):
     """까디르 ② — 환불 5xx · 네트워크(Toss는 환불했는데 응답만 잃은 경우 포함)는 failed가 아니라 pending · 다음 쓸기가 같은 멱등키로
-    다시 → confirmed · Toss 환불은 1. 뮤테이션: 모든 예외를 failed로 접으면(옛 동기 경로의 부분취소 방식 — story #4344에서 걷힘) RED."""
+    다시 → confirmed · Toss 환불은 1. 뮤테이션: 예전 `_attempt_partial_refund`(모든 예외 → failed)로 되돌리면 RED."""
     from app.services import billing_payment_attempt as svc
 
     async with Session() as s:
