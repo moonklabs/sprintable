@@ -1,0 +1,1 @@
+{"file": "tests/test_4303_departed_members_name_rows_migration.py", "sec": 2.0, "source": "story #4303(2026-09-28) — 로컬 실측 wall time 1.2s(native PG16 · create_all 1회 + 마이그 업·업·다운). CI 실측 전 잠정 — 여유 두어 2.0s.", "provisional": true}

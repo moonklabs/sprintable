@@ -546,9 +546,12 @@ async def _lookup_members_by_ids_anchor(
             )
         else:
             # story #3755 — display_name 없으면(또는 user_id 자체가 없으면) None(id 문자열 0).
+            # story #4303 — 떠난 사람 이름 행(마이그 0414: user_id NULL · deleted_at 있음)은 users가 없어 members.name이 유일한 이름.
+            # 그 모양일 때만 members.name을 쓴다(0075가 사용자 없는 옛 행에 id 문자열을 name으로 넣은 적이 있어 넓히지 않음).
+            departed_name_row = m.user_id is None and m.deleted_at is not None
             result[orig_id] = ResolvedMember(
                 id=m.id, user_id=m.user_id,
-                name=display_name_by_user.get(m.user_id) if m.user_id else None,
+                name=display_name_by_user.get(m.user_id) if m.user_id else (m.name if departed_name_row else None),
                 type="human", role=m.org_role or "member", org_id=m.org_id, project_id=None,
                 avatar_url=m.avatar_url,
             )
