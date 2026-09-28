@@ -397,7 +397,10 @@ export default function OrganizationEventsPage() {
               titleAs="dialog-title"
               onApply={() => setMarketingApplyTarget(marketingDetailTarget)}
             />
-          ) : null}
+          ) : (
+            // story #4386 — 닫히는 동안(대상이 비는 순간)에도 창 이름이 남게. 보이는 글 없음.
+            <DialogTitle className="sr-only">{t('recipeGalleryTabMarketing')}</DialogTitle>
+          )}
         </DialogContent>
       </Dialog>
     </div>
