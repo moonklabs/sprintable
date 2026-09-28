@@ -265,3 +265,20 @@ describe('ImageLightbox — story #2037 상태(denied/expired) — AttachmentIma
     expect(document.body.textContent).toContain(koMessages.chats.attachmentReload);
   });
 });
+
+// [SID:4375] AC5 — 확대 보기 창에 제목 · 이름이 없어 화면 읽기가 «대화 상자»로만 읽었다 → 창 이름 = 지금 이미지 이름(넘기면 따라감).
+describe('ImageLightbox — 창 접근 이름([SID:4375])', () => {
+  it('창 aria-label = 지금 이미지 alt · 다음으로 넘기면 바뀐다', async () => {
+    mockFetchFor({ 'att-1.png': SIGNED1, 'att-2.png': SIGNED2 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[IMG1, IMG2]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const dialog = () => document.body.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog().getAttribute('aria-label')).toBe(IMG1.alt);
+    const next = document.body.querySelector(`button[aria-label="${koMessages.chats.lightboxNext}"]`) as HTMLButtonElement;
+    await act(async () => { next.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); });
+    expect(dialog().getAttribute('aria-label')).toBe(IMG2.alt);
+  });
+});

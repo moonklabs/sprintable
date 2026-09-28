@@ -169,6 +169,7 @@ interface SprintCreateDraft {
 
 export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   const t = useTranslations('sprints');
+  const tc = useTranslations('common');
   // story #4370(유나 판정 (가)) — 여러 줄 칸(목표 · 가설 문장)이 든 폼이라 **폼 전체**가 프로젝트별 초안 하나: 창이 ✕ · 바깥 · Esc로
   // 닫혀도 남고 보이는 «취소»와 만들기 성공에서만 지운다. 빈 값의 기본 날짜는 이 창이 열린 날 기준(마운트마다 한 번).
   const emptyForm = useMemo<SprintCreateDraft>(() => ({
@@ -248,7 +249,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
       <DialogContent className="max-h-[90vh] max-w-lg" showCloseButton={false}>
         <div className="mb-4 flex items-center justify-between">
           <DialogTitle className="text-base font-bold text-foreground">{t('newSprint')}</DialogTitle>
-          <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted">
+          <button type="button" onClick={onClose} aria-label={tc('close')} className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted">
             <X className="size-4" />
           </button>
         </div>

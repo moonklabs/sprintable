@@ -434,10 +434,10 @@ export default function AgentDetailPage() {
                   placeholder={t('agentRolePlaceholder')}
                   className="max-w-32"
                 />
-                <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} className="text-success transition hover:opacity-80 disabled:opacity-50">
+                <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} aria-label={tc('save')} className="text-success transition hover:opacity-80 disabled:opacity-50">
                   <Check className="h-4 w-4" />
                 </button>
-                <button type="button" onClick={() => setEditingName(false)} className="text-muted-foreground hover:text-foreground">
+                <button type="button" onClick={() => setEditingName(false)} aria-label={tc('cancel')} className="text-muted-foreground hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -473,6 +473,7 @@ export default function AgentDetailPage() {
                 <button
                   type="button"
                   onClick={() => { setEditName(agent.name); setEditRole(agent.role); setEditingName(true); }}
+                  aria-label={tc('edit')}
                   className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <Pencil className="h-3.5 w-3.5" />

@@ -154,6 +154,9 @@ jobs:
       - name: "Verify no new raw fetch('/api/*') (story #2691 regression guard)"
         run: pnpm --filter web verify:no-new-raw-fetch-api
 
+      - name: "Verify no nameless icon buttons or dialogs (story #4375 regression guard)"
+        run: pnpm --filter web verify:no-nameless-button
+
       - name: Test
         run: |
           set -o pipefail

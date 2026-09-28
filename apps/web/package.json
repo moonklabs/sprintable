@@ -73,6 +73,7 @@
     "verify:no-dropped-hook-error": "tsx scripts/verify-no-dropped-hook-error.ts",
     "verify:no-hardcoded-english-ui-message": "tsx scripts/verify-no-hardcoded-english-ui-message.ts",
     "verify:no-hardcoded-english-browser-dialog": "tsx scripts/verify-no-hardcoded-english-browser-dialog.ts",
+    "verify:no-nameless-button": "tsx scripts/verify-no-nameless-button.ts",
     "verify:no-raw-ascii-jsx-attr": "tsx scripts/verify-no-raw-ascii-jsx-attr.ts",
     "verify:no-ascii-token-in-ko-value": "tsx scripts/verify-no-ascii-token-in-ko-value.ts",
     "verify:no-latin-in-uppercase-eyebrow": "tsx scripts/verify-no-latin-in-uppercase-eyebrow.ts",

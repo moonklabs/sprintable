@@ -777,6 +777,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
   // t() 없이 그대로 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례
   // 그대로 재사용(§②-1 기존 상태 낱말, 새 키 0).
   const tBoard = useTranslations('board');
+  const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
@@ -845,6 +846,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
           <button
             type="button"
             onClick={onClose}
+            aria-label={tc('close')}
             className="hidden rounded-xl p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:block"
           >
             <X className="size-4" />
@@ -957,6 +959,7 @@ interface CreateModalProps {
 
 function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps) {
   const t = useTranslations('goals');
+  const tc = useTranslations('common');
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -966,6 +969,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
           <button
             type="button"
             onClick={onClose}
+            aria-label={tc('close')}
             className="rounded-xl p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <X className="size-4" />
