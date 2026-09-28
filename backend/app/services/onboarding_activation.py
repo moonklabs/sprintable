@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -320,7 +321,8 @@ async def send_activation_reminder(db: AsyncSession, user: User) -> bool:
     unsub_link = f"{app_url}/unsubscribe?token={unsub_token}"
     # story #3205 — locale=ko 유저 → ko 메일·locale=en 유저 → en 메일(AC1).
     locale = resolve_locale(user.locale)
-    delivered = send_email(
+    delivered = await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+        send_email,
         to=user.email,
         # 유나 design:pass 권장(2026-08-27) — 해요체("완료예요") → 합니다체 정합.
         subject=REMINDER_COPY[locale]["subject"],
