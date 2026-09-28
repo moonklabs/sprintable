@@ -211,13 +211,34 @@ async def test_logout_is_untouched_it_ends_only_its_own_session():
         await _close(engine, w)
 
 
-async def test_a_switch_without_the_token_keeps_the_previous_all_device_revoke():
-    """A caller that does not send its refresh token yet (an older web pod during a deploy): previous behaviour."""
+async def test_a_switch_without_the_token_keeps_the_previous_all_device_revoke_and_logs_it(caplog):
+    """A caller that does not send its refresh token yet (an older web pod during a deploy): previous behaviour, and one
+    structured line per use (PO 21:35Z) so the fallback can be removed once it reads 0."""
+    import logging
+
     engine, w = await _world()
     try:
         a, b = await w.login(), await w.login()
-        await w.switch_org(a, w.org2, send_rt=False)
+        with caplog.at_level(logging.INFO, logger="app.routers.auth"):
+            await w.switch_org(a, w.org2, send_rt=False)
         assert (await w.refresh(b["refresh_token"])).status_code == 401
+        lines = [r for r in caplog.records if getattr(r, "structured", {}).get("event") == "switch_revoke_fallback"]
+        assert len(lines) == 1
+        assert lines[0].structured == {"event": "switch_revoke_fallback", "route": "switch-org", "revoked": 2}
+        assert str(w.user_id) not in lines[0].getMessage() + repr(lines[0].structured)
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_switch_with_the_token_logs_no_fallback(caplog):
+    import logging
+
+    engine, w = await _world()
+    try:
+        a = await w.login()
+        with caplog.at_level(logging.INFO, logger="app.routers.auth"):
+            await w.switch_org(a, w.org2)
+        assert not [r for r in caplog.records if getattr(r, "structured", {}).get("event") == "switch_revoke_fallback"]
     finally:
         await _close(engine, w)
 
@@ -251,7 +272,10 @@ async def test_mutation_switch_revoking_every_token_signs_the_other_session_out(
     from app.routers import auth as auth_module
 
     real = auth_module._revoke_switching_session
-    monkeypatch.setattr(auth_module, "_revoke_switching_session", lambda session, user, rt: real(session, user, None))
+    monkeypatch.setattr(
+        auth_module, "_revoke_switching_session",
+        lambda session, user, rt, *, route: real(session, user, None, route=route),
+    )
     engine, w = await _world()
     try:
         a, a2, b = await _two_sessions_after_a_switches(w)

@@ -2094,7 +2094,9 @@ class SwitchProjectRequest(BaseModel):
     refresh_token: str | None = None
 
 
-async def _revoke_switching_session(session: AsyncSession, user: User, refresh_token: str | None) -> None:
+async def _revoke_switching_session(
+    session: AsyncSession, user: User, refresh_token: str | None, *, route: str,
+) -> None:
     """story #4400 — switch-org / switch-project revoke **this session's** refresh token only, not every device's.
 
     The all-device revoke came with switch-project (#655) and was copied into switch-org (#847), with no threat stated.
@@ -2104,13 +2106,19 @@ async def _revoke_switching_session(session: AsyncSession, user: User, refresh_t
     logout · password change · admin revoke still revoke every device.
 
     Without a token (a caller that does not send it yet — web pods older than the backend during a deploy) the
-    previous behaviour stays: every token of the person."""
+    previous behaviour stays: every token of the person. Each such use logs one structured line
+    (event=switch_revoke_fallback · route · how many tokens; no user id) so the fallback can be removed once it reads 0."""
     conditions = [RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)]
     if refresh_token:
         conditions.append(RefreshToken.token_hash == hash_token(refresh_token))
-    await session.execute(
+    result = await session.execute(
         update(RefreshToken).where(*conditions).values(**_explicit_revoke_values(datetime.now(timezone.utc)))
     )
+    if not refresh_token:
+        logger.info(
+            "auth switch revoked every token (no refresh_token sent)",
+            extra={"structured": {"event": "switch_revoke_fallback", "route": route, "revoked": result.rowcount or 0}},
+        )
 
 
 @router.post("/switch-project")
@@ -2150,7 +2158,7 @@ async def switch_project(
     # 이 세션 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
     # refresh()의 유예창(§3649 주석)이 이 RT를 재사용 대상에서 뺀다(명시 폐기,
     # 회전 경합 straggler 아님). story #4400: 전 기기 → 이 세션만.
-    await _revoke_switching_session(session, user, body.refresh_token)
+    await _revoke_switching_session(session, user, body.refresh_token, route="switch-project")
 
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
     app_metadata = await _build_app_metadata(user, session, project_id=target_project_id)
@@ -2221,7 +2229,7 @@ async def switch_organization(
 
     # 이 세션 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
     # (§3649 주석 참고). story #4400: 전 기기 → 이 세션만.
-    await _revoke_switching_session(session, user, body.refresh_token)
+    await _revoke_switching_session(session, user, body.refresh_token, route="switch-org")
 
     # _build_app_metadata 호출 전에 target project_id 고정
     # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
