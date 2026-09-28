@@ -796,7 +796,7 @@ function ApprovalRequestBody({
         <div className="space-y-1.5">
           <GateSignatureApproval
             // story #4190 — 409 뒤 재조회로 초안 버전이 바뀌어도 같은 리셋(새 버전을 다시 보고 서명).
-            key={`${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
+            key={`${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
             gate={gate}
             resolving={resolving}
             error={transitionError}

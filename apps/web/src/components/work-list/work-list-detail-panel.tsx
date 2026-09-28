@@ -564,7 +564,7 @@ export function WorkListDetailPanel({
               <div data-testid="panel-signature-flow">
                 <GateSignatureApproval
                   // story #4190 — 409 뒤 재조회로 초안 버전이 바뀌면 열람 체크·사유를 리셋(새 버전을 다시 보고 서명).
-                  key={`${gate!.github_check_run_sha ?? ''}:${reviewedDraftOf(gate!)?.version ?? ''}`}
+                  key={`${gate!.id}:${gate!.github_check_run_sha ?? ''}:${reviewedDraftOf(gate!)?.version ?? ''}`}
                   gate={gate!}
                   resolving={transitioning}
                   error={transitionError

@@ -888,7 +888,7 @@ export function ApprovalsQueue() {
             // 변경 시 evidenceViewed/reason 강제 리셋). page.tsx만 #2975에서 고쳐졌었다.
             // story #4190 — 초안 버전이 바뀌어도(409 뒤 행 재조회) 같은 리셋: 새 버전을 다시 보고 서명하게.
             <GateSignatureApproval
-              key={`${signatureGate.github_check_run_sha ?? ''}:${reviewedDraftOf(signatureGate)?.version ?? ''}`}
+              key={`${signatureGate.id}:${signatureGate.github_check_run_sha ?? ''}:${reviewedDraftOf(signatureGate)?.version ?? ''}`}
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}

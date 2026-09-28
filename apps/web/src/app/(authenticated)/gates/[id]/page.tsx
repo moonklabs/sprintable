@@ -621,7 +621,7 @@ export default function GateDetailPage() {
               <div className="space-y-2">
                 <GateSignatureApproval
                   // story #4190 — 초안 버전이 바뀌어도(409 gate_draft_changed 뒤 재조회) 같은 리셋.
-                  key={`${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
+                  key={`${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
                   gate={gate}
                   resolving={resolving}
                   error={transitionError}

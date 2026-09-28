@@ -53,10 +53,17 @@ export function GateSignatureApproval({
   // gates/[id]/page.tsx의 평문 버튼은 저위험 전용) — 처음 처방이 평문 버튼에만
   // 붙어 정작 여기엔 「승인하고 서명」이 그대로 남아 있었다.
   const approveAndSignLabelKey = sigApproveAndSignLabelKey(gate);
-  const [evidenceViewed, setEvidenceViewed] = useState(false);
   // story #4370 — 사유는 게이트 + 검토 대상(머리 SHA · 초안 버전)별 초안: 닫히거나 떠나도 남고 결재 성공에서만 지운다.
   // 검토 대상이 바뀌면 키가 바뀌어 빈 칸(story #4190 — 새 버전은 다시 보고 서명).
   const draftTarget = `${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`;
+  // 확인 체크(유나 규칙 · 까디르 P2)는 초안이 아니다. 검토 대상(게이트 · SHA · 버전)이 바뀌면 — 부르는 쪽 key가 무엇이든,
+  // 같은 컴포넌트가 다시 쓰여도 — 체크를 버린다(돌아와도 다시 보고 체크). 그린 동안 이전 대상과 비교해 되돌리는 React 권장 모양.
+  const [evidenceViewed, setEvidenceViewed] = useState(false);
+  const [shownTarget, setShownTarget] = useState(draftTarget);
+  if (shownTarget !== draftTarget) {
+    setShownTarget(draftTarget);
+    setEvidenceViewed(false);
+  }
   const [reason, setReason, clearReason] = useFieldDraft({ surface: 'gate-signature', targetId: draftTarget, field: 'form' });
   const act = (action: SignatureAction) => {
     const result = action(reason);

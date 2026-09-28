@@ -122,3 +122,19 @@ describe('GateSignatureApproval — 확인 체크는 초안 제외(story #4370)'
     expect(Object.keys(window.sessionStorage).filter((k) => k.startsWith('sprintable:field-draft:')).every((k) => !/evidence|confirm|ack/i.test(k))).toBe(true);
   });
 });
+
+// 까디르 P2 — 부르는 쪽 key에 게이트 id가 빠져 있어, SHA · 버전이 같은(둘 다 빈) 다른 게이트로 옮기면 같은 컴포넌트가 다시 쓰이며
+// 체크가 켜진 채 남았다. 이제 체크는 체크한 대상(게이트 + SHA + 버전)에만 묶인다 — key가 무엇이든.
+describe('GateSignatureApproval — 확인 체크는 다른 게이트로 옮기면 꺼진다(story #4370 · 까디르 P2)', () => {
+  it('게이트 A에서 체크 → 같은 SHA · 버전의 게이트 B(같은 인스턴스, key 바뀜 없음) → 꺼져 있다 · A로 돌아와도 다시 체크해야', async () => {
+    const box = () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await mount(gate({ id: 'gate-a' }));
+    await act(async () => { box().click(); });
+    expect(box().checked).toBe(true);
+    await mount(gate({ id: 'gate-b' }));
+    expect(box().checked).toBe(false);
+    await mount(gate({ id: 'gate-a' }));
+    expect(box().checked).toBe(false);
+  });
+});
+
