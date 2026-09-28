@@ -581,9 +581,15 @@ export function LoopCreateDialog({
           <span className={cn('text-[11px] font-medium', goalComplete ? 'text-success' : 'text-muted-foreground')}>
             {goalComplete ? t('createLoopGoalComplete') : t('createLoopValidationHint')}
           </span>
-          <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-            {submitting ? tc('creating') : t('createLoopSubmit')}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* story #4370(까디르 P3) — 폼 초안을 버릴 길: 보이는 «취소»(✕ · 바깥 · Esc 닫힘은 초안을 남긴다). */}
+            <Button variant="ghost" onClick={() => { clearFormDraft(); reset(); onOpenChange(false); }} disabled={submitting}>
+              {tc('cancel')}
+            </Button>
+            <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
+              {submitting ? tc('creating') : t('createLoopSubmit')}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

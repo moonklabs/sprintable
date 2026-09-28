@@ -70,4 +70,19 @@ describe('루프 만들기 창 폼 초안(story #4370)', () => {
     expect(titleInput()!.value).toBe('결제 전환 루프');
     expect(statement()!.value).toBe('결제 단계를 줄이면\n전환이 오른다');
   });
+
+  it('보이는 «취소»는 폼 초안을 버리고 닫는다(까디르 P3)', async () => {
+    await mount();
+    await open();
+    await setValue(titleInput()!, '버릴 루프');
+    await setValue(statement()!, '버릴 가설');
+    const cancel = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === koMessages.common.cancel)!;
+    await act(async () => { cancel.click(); });
+    await settle();
+    expect(statement()).toBeNull();
+    await open();
+    expect(titleInput()!.value).toBe('');
+    expect(statement()!.value).toBe('');
+  });
 });
+
