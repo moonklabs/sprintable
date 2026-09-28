@@ -101,7 +101,7 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
             ))}
           </TabsList>
 
-        <TabsContent value="image" className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
+        <TabsContent value="image" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
           <div className="space-y-2">
             <input type="file" accept="image/*" onChange={(e) => void handleFileChange(e)} disabled={uploading} className="text-xs text-muted-foreground" />
             <p className="text-[11px] text-muted-foreground">{t('importFigmaHint')}</p>
@@ -113,7 +113,7 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
             ) : null}
           </div>
         </TabsContent>
-        <TabsContent value="html" className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
+        <TabsContent value="html" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
           <div className="space-y-2">
             <textarea
               value={htmlContent}

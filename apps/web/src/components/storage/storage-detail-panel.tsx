@@ -91,7 +91,9 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
       </div>
 
       {/* tabs — [SID:4388] shared line tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it.
-          The body is the tab panel (role=tabpanel · named by its tab · a focus stop, so Tab reaches it); `contents` keeps the layout. */}
+          The body is the tab panel (role=tabpanel · named by its tab · a focus stop, so Tab reaches it); `contents` keeps the layout.
+          The shared TabsContent sets text-sm, whose line-height ratio (1.25/0.875) is below the inherited 1.5: the 12.5px meta rows
+          each came out 0.91px shorter (5.44px over six rows, Chromium). The panels inherit font-size and line-height instead. */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'detail' | 'usage')} className="contents">
       <div className="border-b border-border px-[14px] pt-[6px] pb-[5px]">
         <TabsList variant="line" activateOnFocus>
@@ -106,7 +108,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
 
       {/* body */}
       <div className="min-h-0 flex-1 overflow-auto px-4 py-[14px]">
-        <TabsContent value="detail" className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
+        <TabsContent value="detail" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <MetaRow label={t('metaFormat')} value={asset.content_type} />
             <MetaRow label={t('metaSize')} value={formatFileSize(asset.size_bytes)} />
             <MetaRow label={t('metaFolder')} value={folderLabel ?? t('usageNone')} />
@@ -135,7 +137,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
               </>
             ) : null}
         </TabsContent>
-        <TabsContent value="usage" className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
+        <TabsContent value="usage" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
           <StorageSourceUsageList links={asset.source_links} />
         </TabsContent>
       </div>

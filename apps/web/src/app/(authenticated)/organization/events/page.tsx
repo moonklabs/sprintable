@@ -876,7 +876,7 @@ function EventFormDialog({
             />
             {!name.trim() ? <p className="mt-1 text-[11px] text-muted-foreground">{t('eventNameHint')}</p> : null}
           </div>
-          <TabsContent value="basic" className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
+          <TabsContent value="basic" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <EventDefinerForm
               state={definerState}
               onChange={setDefinerState}
@@ -887,7 +887,7 @@ function EventFormDialog({
               testPublishResult={savedKey ? testPublishResult : { ok: false, message: t('definerTestPublishSaveFirst') }}
             />
           </TabsContent>
-          <TabsContent value="advanced" className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
+          <TabsContent value="advanced" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-key">

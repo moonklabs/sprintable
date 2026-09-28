@@ -99,6 +99,11 @@ describe('[SID:4388] StorageDetailPanel tabs announce the chosen tab', () => {
     const full = { panels: 1, namedByChosenTab: true, chosenControlsIt: true, focusable: true };
     expect(panelFacts(container)).toEqual(full);
     expect(container.querySelector('[role="tabpanel"]')!.textContent).toContain(koMessages.storage.metaFormat);
+    // The shared panel's text-sm set a smaller line-height than the inherited one and pulled each meta row up ~1px (Yuna's
+    // real-build diff). The panel inherits both instead.
+    const panelClass = container.querySelector('[role="tabpanel"]')!.className.split(/\s+/);
+    expect(panelClass).not.toContain('text-sm');
+    expect(panelClass).toEqual(expect.arrayContaining(['text-[length:inherit]', 'leading-[inherit]']));
 
     const usage = Array.from(container.querySelectorAll('[role="tab"]')).find((el) => el.textContent?.includes('사용처')) as HTMLElement;
     await act(async () => { usage.click(); });
