@@ -620,7 +620,7 @@
   },
   "organization": {
     "rolesTitle": "권한",
-    "recipeApplyV2MembersLoadFailed": "멤버 목록을 불러오지 못했어요.",
+    "recipeApplyV2MembersLoadFailed": "담당자 목록을 불러오지 못했어요.",
     "rolesDescription": "조직 구성원의 역할을 그룹별로 확인하고 변경해요.",
     "roleGroupOwner": "소유자",
     "roleGroupAdmin": "관리자",

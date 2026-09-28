@@ -620,7 +620,7 @@
   },
   "organization": {
     "rolesTitle": "Permissions",
-    "recipeApplyV2MembersLoadFailed": "Couldn't load the member list.",
+    "recipeApplyV2MembersLoadFailed": "Couldn't load the assignee list.",
     "rolesDescription": "View and change organization members' roles, grouped by role.",
     "roleGroupOwner": "Owner",
     "roleGroupAdmin": "Admin",
