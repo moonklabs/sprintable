@@ -20,6 +20,7 @@ import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 import { blockedByConnection, deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { StatusChip } from '@/components/content/status-chip';
 import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 import type { GateItem } from '@/components/kanban/types';
 import { Button } from '@/components/ui/button';
@@ -29,9 +30,36 @@ const CONNECTION_UNAVAILABLE = 'NEWSLETTER_SEND_CONNECTION_UNAVAILABLE';
 
 type View =
   | { kind: 'badge'; action: FailureAction }
-  | { kind: 'connection_blocked' };
+  | { kind: 'connection_blocked' }
+  | { kind: 'published' };
 
-function viewOf(command: NonNullable<GateItem['newsletter_send_command']>): View | null {
+type GateCommand = NonNullable<GateItem['newsletter_send_command']> & { processing_kind?: string | null };
+
+// story #4336 AC4 — 외부 발행 게이트도 같은 자리 · 같은 판정. 발송(newsletter_send)은 예전 그대로(진행 · 완료는 줄 없음 — 4262 유나 표),
+// 외부 발행은 채널 초안 목록 · 상세처럼 «발행 중»(processing_kind · 같은 deriveFailureAction) · 완료(목록의 «게시됨» 칩)도 보인다.
+function commandOf(gate: GateItem): { command: GateCommand; isPublish: boolean } | null {
+  if (gate.gate_type === 'newsletter_send' && gate.newsletter_send_command) return { command: gate.newsletter_send_command, isPublish: false };
+  if (gate.gate_type === 'external_publish' && gate.publish_command) return { command: gate.publish_command, isPublish: true };
+  return null;
+}
+
+function viewOf(command: GateCommand, isPublish: boolean): View | null {
+  if (isPublish) {
+    // story #4336(까디르 QA changes · PR 4767) — 외부 발행은 채널 초안 목록 · 상세와 **같은 입력으로 같은 판정 하나만**. 아래 두 뉴스레터 갈래
+    // (blocked_unapproved → 일반 멈춤 · 일시정지 → 줄 없음)를 태우면 승인 필요 · 예산 초과가 «멈춤»으로, 조직 일시정지가 빈칸으로 목록 · 상세와
+    // 다른 말을 했다.
+    if (command.status === 'completed') return { kind: 'published' };
+    const publishAction = deriveFailureAction({
+      commandStatus: command.status as CommandStatus,
+      failureKind: command.failure_kind,
+      nextRetryAt: command.next_attempt_at,
+      reasonCode: command.reason_code,
+      reasonResetAt: command.reason_reset_at,
+      processingKind: command.processing_kind ?? null,
+      retryable: command.command_retryable ?? null,
+    });
+    return publishAction ? { kind: 'badge', action: publishAction } : null;
+  }
   if (command.status === 'blocked_unapproved') {
     if (command.reason_code === CONNECTION_UNAVAILABLE) return { kind: 'connection_blocked' };
     return { kind: 'badge', action: { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null } };
@@ -66,9 +94,18 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
   const [retrying, setRetrying] = useState(false);
   const [result, setResult] = useState<PublicationRetryResult | null>(null);
 
-  const command = gate.gate_type === 'newsletter_send' ? gate.newsletter_send_command : null;
-  const view = command ? viewOf(command) : null;
+  const picked = commandOf(gate);
+  const command = picked?.command ?? null;
+  const view = picked ? viewOf(picked.command, picked.isPublish) : null;
   if (!command || !view) return <PublicationRetryResultLine result={result} testId="channel-post-retry-result" />;
+  if (view.kind === 'published') {
+    return (
+      <section className="space-y-2" data-testid="gate-publish-status">
+        <StatusChip status="published" />
+        <PublicationRetryResultLine result={result} testId="channel-post-retry-result" />
+      </section>
+    );
+  }
 
   // story #4290 — 버튼은 서버 판정(`command_retryable`)만 본다 — 화면이 상태로 따로 가르면 서버 404와 갈라진다. 사람인지도 서버가 이미
   // 판정에 넣어 싣는다(까디르 QA ③ · `viewer_can_retry`) — 화면이 멤버 종류를 따로 보지 않는다.
@@ -95,7 +132,7 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
   };
 
   return (
-    <section className="space-y-2" data-testid="newsletter-send-status">
+    <section className="space-y-2" data-testid={picked?.isPublish ? 'gate-publish-status' : 'newsletter-send-status'}>
       {view.kind === 'connection_blocked' ? (
         <div className="space-y-1">
           <FailureActionBadge action={{ kind: 'blocked' }} displayTimezone={displayTimezone} />
@@ -118,7 +155,10 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
           // 재시도 대상이 아니면(사람이 아니거나 서버 판정 false) 버튼 없이 상태 줄만(compact) — 4262/4290 뉴스레터 디자인(비활성 버튼 없음).
           // story #4304(유나 반려 08:56Z) — 단 연결로 멈춘 발송은 재시도를 못 해도 «연결 확인» 링크가 서야 해서 접지 않는다: blocked 배지는
           // onRetryClick이 없으면 버튼 없이 머리 줄(+ 링크)만 그린다. (dead_letter · needs_check는 펼치면 비활성 버튼이 생겨 그대로 접는다.)
-          compact={!canRetry && !blockedByConnection(command.status, command.failure_kind)}
+          // story #4336(까디르 QA changes) — 조직 일시정지도 접지 않는다: 버튼이 없는 줄이라 펼쳐도 비활성 버튼이 안 생기고, 상세와 같이 «소유자가
+          // 풀면 다시 나가요»까지 말한다.
+          compact={!canRetry && !blockedByConnection(command.status, command.failure_kind)
+            && !(view.action.kind === 'blocked' && view.action.paused)}
           onRetryClick={canRetry ? openConfirm : undefined}
           connectionHref={blockedByConnection(command.status, command.failure_kind) ? connectRulesHref : undefined}
         />

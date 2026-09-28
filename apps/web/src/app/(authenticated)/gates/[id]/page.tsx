@@ -35,6 +35,7 @@ import { gateApproveLabelKey } from '@/lib/newsletter-gate-approve-label';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+import { isAwaitingPublishWorker, PUBLISH_WORKER_POLL_MS } from '@/lib/publish-worker-poll';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -79,6 +80,7 @@ export default function GateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations('cage');
+  const tProof = useTranslations('proofCapsule');
   // story #3565 — ccGateType*/ccGateGeneric 키는 'dashboard' 네임스페이스에 산다
   // (공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는 그대로) — 이 화면 자체 t는 'cage'.
   const tDashboard = useTranslations('dashboard');
@@ -136,6 +138,14 @@ export default function GateDetailPage() {
   }, [id]);
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
+
+  // story #4336 AC4 — 외부 발행은 워커가 돌린다: «발행 중»인 동안 게이트를 다시 읽어 결과(게시됨 · 실패)로 넘어간다(채널 초안 상세와 같은 간격).
+  const awaitingPublishWorker = gate?.gate_type === 'external_publish' && isAwaitingPublishWorker(gate.publish_command?.processing_kind);
+  useEffect(() => {
+    if (!awaitingPublishWorker) return;
+    const timer = setInterval(() => { void fetchGate({ silent: true }); }, PUBLISH_WORKER_POLL_MS);
+    return () => clearInterval(timer);
+  }, [awaitingPublishWorker, fetchGate]);
 
   // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 이 게이트를 먼저 해소하거나
   // 위임하면, 이 상세 페이지를 보고 있는 화면도 새로고침 없이 갱신된다. approval-request-
@@ -514,7 +524,8 @@ export default function GateDetailPage() {
             const evidencePanels = (
               <>
                 <GateEvidence gate={gate} />
-                {/* story #4262(유나 표) — 발송 게이트면 뉴스레터 사실 칸 바로 아래 «발송 상태» 한 줄 + 사람 재시도. */}
+                {/* story #4262(유나 표) — 발송 게이트면 뉴스레터 사실 칸 바로 아래 «발송 상태» 한 줄 + 사람 재시도.
+                    story #4336 AC4 — 외부 발행 게이트도 같은 자리에 «발행 중 · 게시됨 · 실패 · 다시 시도»(목록 · 상세와 같은 판정). */}
                 <NewsletterSendStatus
                   gate={gate} orgId={gate.org_id ?? null}
                   displayTimezone={resolveDisplayTimezone(orgTimezone).tz}
@@ -522,7 +533,9 @@ export default function GateDetailPage() {
                   onRetried={async () => {
                     const ok = await fetchGate({ silent: true });
                     if (!ok) return false;
-                    return { retryable: latestGateRef.current?.newsletter_send_command?.command_retryable === true };
+                    const g = latestGateRef.current;
+                    const cmd = g?.gate_type === 'external_publish' ? g.publish_command : g?.newsletter_send_command;
+                    return { retryable: cmd?.command_retryable === true };
                   }}
                 />
                 {/* story #4136 — canAct/needsAction과 무관하게 항상 렌더(모든 열람자, AC1).
@@ -731,6 +744,9 @@ export default function GateDetailPage() {
                   return statusKey ? t(statusKey) : gate.status;
                 })()}
                 claim={decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+                // story #4336(PO 03:55Z · 유나 낱말 04:47Z) — 외부 발행 게이트는 «에이전트가 완료했다고 말함»이 아니라 발행 승인 요청이다(사람이
+                // 상신하기도 함 · 승인된 뒤에도 참인 문장) → 눈썹을 «발행 승인 · 이대로 발행할지 결정해요»로.
+                claimLabel={gate.gate_type === 'external_publish' ? tProof('claim.publishApprovalLabel') : undefined}
                 className="max-w-none"
                 footer={
                   showActionColumn ? (

@@ -22,6 +22,7 @@ import { parseScheduledAtServerError } from '@/components/content/validate-sched
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { blockedByConnection, blockedReason, deriveFailureAction, WORKER_TICK_BUDGET_TOO_SMALL, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { isAwaitingPublishWorker, PUBLISH_WORKER_POLL_MS } from '@/lib/publish-worker-poll';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { BoostRequestDialog } from '@/components/content/boost-request-dialog';
@@ -501,7 +502,6 @@ const BLOCKED_REASON_LINE_KEYS: Record<string, string> = {
 };
 
 // story #4336 — 워커가 발행하는 동안 초안을 다시 읽는 간격(워커는 1분마다 돈다).
-const PUBLISH_WORKER_POLL_MS = 5000;
 
 export default function ChannelPostEditPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
@@ -2146,7 +2146,7 @@ export default function ChannelPostEditPage() {
 
   // story #4336 — 발행은 워커(cron)가 돌린다: «발행 중»(publishing) · 컨테이너 대기인 동안 초안을 다시 읽어 결과로 넘어간다.
   // 서버가 결과를 적으면 processing_kind가 null로 바뀌어 폴링이 멈춘다.
-  const awaitingWorker = draft?.processing_kind === 'publishing' || draft?.processing_kind === 'awaiting_container';
+  const awaitingWorker = isAwaitingPublishWorker(draft?.processing_kind);
   const reloadDraftRef = useRef(reloadDraft);
   useEffect(() => {
     reloadDraftRef.current = reloadDraft;

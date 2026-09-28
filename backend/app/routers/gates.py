@@ -229,6 +229,14 @@ class NewsletterSendCommandSummary(BaseModel):
     command_retryable: bool = False
 
 
+class PublishCommandSummary(NewsletterSendCommandSummary):
+    """story #4336 AC4 — 외부 발행(external_publish) 게이트의 발행 명령(가장 최근 1) 요약. 채널 초안 목록 · 상세와 같은 판정 재료를
+    싣는다(화면이 같은 `deriveFailureAction`으로 «발행 중 · 완료 · 실패 · 다시 시도»를 고른다). `processing_kind` = 목록 · 상세와 같은
+    `derive_processing_kind`(게이트 상세는 버전 발행 상태를 안 보므로 컨테이너 대기도 «발행 중»)."""
+
+    processing_kind: str | None = None
+
+
 class GateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -445,6 +453,9 @@ class GateResponse(BaseModel):
     # 단건 `GET /gates/{id}`만 채운다(목록은 None — 게이트마다 조회하는 N+1을 만들지 않는다). 뉴스레터 게이트가 아니거나
     # 아직 명령이 없으면 None.
     newsletter_send_command: NewsletterSendCommandSummary | None = None
+    # story #4336 AC4 — 외부 발행 게이트의 발행 명령 상태(발행 중 · 완료 · 실패 · 다시 시도). 단건 `GET /gates/{id}`만 채운다(목록 None ·
+    # N+1 0). 이 게이트 id로 만든 채널 · 사이트 발행 명령이 없으면 None(레시피 무범위 게이트는 명령이 범위 게이트에 묶여 None).
+    publish_command: PublishCommandSummary | None = None
     # story #4044(0333)가 Gate ORM 컬럼(models/gate.py)만 추가하고 이 응답 스키마 등재를
     # 빠뜨려 API가 항상 None을 냈다 — sealed_ads_*/sealed_newsletter_* PR2 재발 클래스와
     # 동형(story #4072가 그 클래스 자체를 회귀가드로 봉인). generation_budget 전용 sealing —
@@ -1140,6 +1151,55 @@ async def _authorize_gate_approve_equivalent(
             )
 
 
+
+async def _enrich_latest_author_kind(session: AsyncSession, responses: list, gates: list) -> None:
+    """story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7(«마지막 수정 주체»)의 입력. sealed_content_body의 작성자(봉인 시점)가 아니라
+    초안의 **지금** 최신 버전 author_kind. external_publish 게이트만(`neutral_facts.draft_id` — 사이트 · 채널 초안 둘 다 심는다).
+    독립 1회 배치 · N+1 0. 목록(list_gates)과 단건(get_gate_endpoint)이 같이 부른다.
+
+    story #4336(PO 라이브 03:55Z) — 예전엔 목록에서만 채우고 **SitePostVersion만** 봐서, 단건 상세는 늘 None · 채널 초안 게이트도 늘 None이라
+    게이트 화면 «마지막 수정 주체 · —»였다. 이제 둘 다 채우고, 사이트 버전에 없는 초안 id는 채널 버전에서 찾는다."""
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.site_post_version import SitePostVersion
+
+    latest_author_draft_ids: dict[uuid.UUID, uuid.UUID] = {}
+    for resp, g in zip(responses, gates):
+        if g.gate_type != "external_publish":
+            continue
+        raw_draft_id = (g.neutral_facts or {}).get("draft_id")
+        if not raw_draft_id:
+            continue
+        try:
+            latest_author_draft_ids[resp.id] = uuid.UUID(str(raw_draft_id))
+        except ValueError:
+            continue
+    if not latest_author_draft_ids:
+        return
+    draft_ids = set(latest_author_draft_ids.values())
+    latest_author_kind_by_draft_id: dict[uuid.UUID, str] = {}
+    for version_model in (SitePostVersion, ChannelPostVersion):
+        remaining = draft_ids - set(latest_author_kind_by_draft_id)
+        if not remaining:
+            break
+        latest_version_ids = (
+            select(version_model.draft_id, func.max(version_model.version).label("max_version"))
+            .where(version_model.draft_id.in_(remaining))
+            .group_by(version_model.draft_id)
+            .subquery()
+        )
+        author_rows = (await session.execute(
+            select(version_model.draft_id, version_model.author_kind).join(
+                latest_version_ids,
+                (version_model.draft_id == latest_version_ids.c.draft_id)
+                & (version_model.version == latest_version_ids.c.max_version),
+            )
+        )).all()
+        latest_author_kind_by_draft_id.update({did: kind for did, kind in author_rows})
+    for resp in responses:
+        draft_id = latest_author_draft_ids.get(resp.id)
+        if draft_id is not None:
+            resp.latest_author_kind = latest_author_kind_by_draft_id.get(draft_id)
+
 @router.get("", response_model=list[GateResponse])
 async def list_gates(
     work_item_id: uuid.UUID | None = Query(default=None),
@@ -1305,47 +1365,7 @@ async def list_gates(
             if g.sealed_doc_id is not None:
                 resp.sealed_doc_title = sealed_doc_title_by_id.get(g.sealed_doc_id)
 
-    # story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체")의 입력.
-    # sealed_content_body의 작성자(봉인 시점, approved 뒤 편집이면 옛 버전에 묶임)가
-    # 아니라 draft의 **지금** 최신 버전 author_kind다 — sealed_doc_ids 배치(위)와 동일
-    # 선례(독립 1회 배치·N+1 0). external_publish 게이트만 대상(gate_type 축) — neutral_
-    # facts.draft_id는 site_posts.py::submit_site_post_draft/_reseal_gate_on_new_version이
-    # 문자열로 심는다(_reseal_gate_on_new_version:509 그라운딩 確認).
-    latest_author_draft_ids: dict[uuid.UUID, uuid.UUID] = {}
-    for resp, g in zip(responses, gates):
-        if g.gate_type != "external_publish":
-            continue
-        raw_draft_id = (g.neutral_facts or {}).get("draft_id")
-        if not raw_draft_id:
-            continue
-        try:
-            latest_author_draft_ids[resp.id] = uuid.UUID(str(raw_draft_id))
-        except ValueError:
-            continue
-    if latest_author_draft_ids:
-        from app.models.site_post_version import SitePostVersion
-
-        latest_version_ids = (
-            select(
-                SitePostVersion.draft_id,
-                func.max(SitePostVersion.version).label("max_version"),
-            )
-            .where(SitePostVersion.draft_id.in_(set(latest_author_draft_ids.values())))
-            .group_by(SitePostVersion.draft_id)
-            .subquery()
-        )
-        author_rows = (await session.execute(
-            select(SitePostVersion.draft_id, SitePostVersion.author_kind).join(
-                latest_version_ids,
-                (SitePostVersion.draft_id == latest_version_ids.c.draft_id)
-                & (SitePostVersion.version == latest_version_ids.c.max_version),
-            )
-        )).all()
-        latest_author_kind_by_draft_id = {did: kind for did, kind in author_rows}
-        for resp in responses:
-            draft_id = latest_author_draft_ids.get(resp.id)
-            if draft_id is not None:
-                resp.latest_author_kind = latest_author_kind_by_draft_id.get(draft_id)
+    await _enrich_latest_author_kind(session, responses, gates)
 
     # story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — sealed_destination_
     # connection_id(위, Gate 실 컬럼)가 non-null인 행의 실제 channel(예:
@@ -1965,6 +1985,33 @@ async def get_gate_endpoint(
                 id=command.id, status=command.status, failure_kind=command.failure_kind, reason_code=command.reason_code,
                 next_attempt_at=command.next_attempt_at, reason_reset_at=command.reason_reset_at,
                 command_retryable=viewer_can_retry(command, viewer_is_human=viewer_is_human),
+            )
+    # story #4336 — 목록과 같은 «마지막 수정 주체»(예전엔 단건에서 안 채워 늘 «—»).
+    await _enrich_latest_author_kind(session, [resp], [gate])
+    # story #4336 AC4 — 외부 발행 게이트의 발행 명령(가장 최근 1). 이 게이트 id로 만든 채널 · 사이트 발행 명령만(조직 조건 포함).
+    if gate.gate_type == "external_publish":
+        from app.models.publication_command import PublicationCommand
+        from app.services.publication_command import derive_processing_kind, viewer_can_retry
+
+        publish_command = (await session.execute(
+            select(PublicationCommand)
+            .where(
+                PublicationCommand.org_id == org_id,
+                PublicationCommand.gate_id == gate.id,
+                PublicationCommand.content_kind.in_(("channel_post", "site_post")),
+                PublicationCommand.operation == "publish",
+            )
+            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if publish_command is not None:
+            viewer_is_human = (await resolve_member(auth, org_id, session)).type == "human"
+            resp.publish_command = PublishCommandSummary(
+                id=publish_command.id, status=publish_command.status, failure_kind=publish_command.failure_kind,
+                reason_code=publish_command.reason_code, next_attempt_at=publish_command.next_attempt_at,
+                reason_reset_at=publish_command.reason_reset_at,
+                command_retryable=viewer_can_retry(publish_command, viewer_is_human=viewer_is_human),
+                processing_kind=derive_processing_kind(publish_command, None),
             )
     # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
     if gate.gate_type == MERGE_GATE_TYPE:

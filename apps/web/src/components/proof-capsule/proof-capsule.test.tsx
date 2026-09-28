@@ -568,3 +568,29 @@ describe('ProofCapsule — story #3054 serif 포인트(claim→Verified 전이�
     expect(markup).not.toContain('font-serif');
   });
 });
+
+// story #4336(PO 03:55Z) — «에이전트 주장 · 완료했다고 말해요» 눈썹이 게이트 종류와 무관하게 늘 붙어, 사람이 상신한 외부 발행 게이트에도 떴다.
+// 호출부가 claimLabel로 가른다: 생략 = 기본 눈썹(에이전트 완료 주장 자리 그대로) · null = 눈썹 없음(낱말은 유나가 정할 때까지 비움).
+describe('ProofCapsule full — claim 눈썹(claimLabel)', () => {
+  const EYEBROW = (koMessages.proofCapsule as { claim: { label: string } }).claim.label;
+
+  it('⭐생략하면 기본 눈썹(에이전트 완료 주장) 그대로', () => {
+    const html = renderWithIntl(<ProofCapsule {...BASE} />);
+    expect(html).toContain(EYEBROW);
+    expect(html).toContain('data-testid="proof-capsule-claim-label"');
+  });
+
+  it('⭐글을 넘기면 그 눈썹(외부 발행 게이트 «발행 승인 · 이대로 발행할지 결정해요») · 기본 눈썹은 없음', () => {
+    const label = (koMessages.proofCapsule as { claim: { publishApprovalLabel: string } }).claim.publishApprovalLabel;
+    const html = renderWithIntl(<ProofCapsule {...BASE} claimLabel={label} />);
+    expect(html).toContain(label);
+    expect(html).not.toContain(EYEBROW);
+  });
+
+  it('⭐null이면 눈썹 없음 · claim 본문은 그대로', () => {
+    const html = renderWithIntl(<ProofCapsule {...BASE} claimLabel={null} />);
+    expect(html).not.toContain(EYEBROW);
+    expect(html).not.toContain('data-testid="proof-capsule-claim-label"');
+    expect(html).toContain(BASE.claim);
+  });
+});

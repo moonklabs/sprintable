@@ -232,6 +232,18 @@ export interface GateItem {
     /** story #4290 — 사람이 지금 이 발송 명령을 «다시 시도»할 수 있는가(서버 한 판정 `human_retryable` · 재시도 엔드포인트와 같은 값). */
     command_retryable?: boolean;
   } | null;
+  // story #4336 AC4 — 외부 발행(external_publish) 게이트의 발행 명령(가장 최근 1) 요약. 단건 `GET /gates/{id}`만 채운다(목록 · 다른 gate_type null).
+  // processing_kind = 채널 초안 목록 · 상세와 같은 BE 한 판정(`derive_processing_kind`) — 화면이 같은 deriveFailureAction으로 «발행 중»을 고른다.
+  publish_command?: {
+    id: string;
+    status: string;
+    failure_kind: string | null;
+    reason_code: string | null;
+    next_attempt_at: string | null;
+    reason_reset_at: string | null;
+    command_retryable?: boolean;
+    processing_kind?: string | null;
+  } | null;
   // story #4044(0333)/#4072(BE 응답스키마 누락 fix, 페드루 PO 確定 2026-09-19) —
   // generation_budget 전용 sealing(sealed_ads_*/sealed_newsletter_*와 동일 선례).
   // 다른 gate_type은 전부 undefined/null. #4072 前엔 BE GateResponse에 이 필드가

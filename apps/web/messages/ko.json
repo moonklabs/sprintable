@@ -366,6 +366,7 @@
   "proofCapsule": {
     "claim": {
       "label": "에이전트 주장 · 완료했다고 말해요",
+      "publishApprovalLabel": "발행 승인 · 이대로 발행할지 결정해요",
       "executor": "실행 {name}",
       "now": "지금: <b>{now}</b>",
       "running": "실행 중"
@@ -5702,7 +5703,6 @@
     "recipeApprovalVersionLabel": "버전",
     "recipeApprovalSealedHashLabel": "봉인 해시",
     "recipeApprovalSealedVersionMissing": "이 승인이 어느 본문을 봉인했는지 확인할 수 없어요 — 아래는 마지막으로 봉인된 본문이에요",
-    "recipeApprovalLatestAuthorLabel": "마지막 수정 주체",
     "recipeApprovalDestinationLabel": "목적지",
     "recipeApprovalDestinationHostedSite": "호스팅 블로그",
     "recipeApprovalScheduledAtLabel": "예약 발행",

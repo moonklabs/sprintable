@@ -366,6 +366,7 @@
   "proofCapsule": {
     "claim": {
       "label": "Claim · Agent says done",
+      "publishApprovalLabel": "Publish approval · Decide whether to publish as is",
       "executor": "By {name}",
       "now": "Now: <b>{now}</b>",
       "running": "Running"
@@ -5702,7 +5703,6 @@
     "recipeApprovalVersionLabel": "Version",
     "recipeApprovalSealedHashLabel": "Sealed hash",
     "recipeApprovalSealedVersionMissing": "We can't confirm which body this approval sealed — below is the last sealed body",
-    "recipeApprovalLatestAuthorLabel": "Last edited by",
     "recipeApprovalDestinationLabel": "Destination",
     "recipeApprovalDestinationHostedSite": "Hosted blog",
     "recipeApprovalScheduledAtLabel": "Scheduled to publish",
