@@ -37,12 +37,7 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.fixture(autouse=True)
-async def _dispose_global_engine_after_test():
-    yield
-    from app.core.database import engine as _global_engine
-
-    await _global_engine.dispose()
+# story #4395 — 전역 엔진 drain → dispose는 conftest가 destructive async 테스트 전부에 주입한다(파일별 fixture 걷음).
 
 
 @pytest.fixture(autouse=True)

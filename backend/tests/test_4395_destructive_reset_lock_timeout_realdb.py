@@ -108,13 +108,14 @@ def test_reset_failure_names_the_full_test_behind_a_tagged_global_engine_session
 def test_tag_keeps_the_prefix_and_hash_and_clips_by_bytes_without_splitting_a_character():
     """63바이트(NAMEDATALEN) 안 · 접두와 해시는 늘 남고 · 한글도 글자 중간에서 안 끊는다 · 해시로 전체 nodeid를 되찾는다."""
     long_name = "test_overlapping_crons_handle_each_step_run_once_even_when_an_item_hook_commits"  # 79자(test_4228 실제 이름)
-    tag = conftest_module._global_engine_test_tag("f00d42", long_name, "_logged")
+    tag = conftest_module._global_engine_test_tag("f00d42", long_name, "_route_dispatch_bg")
     assert len(tag.encode("utf-8")) <= 63, tag
-    assert tag.startswith("ge|f00d42|test_overlapping_crons"), tag
+    # 태스크가 함수보다 앞 — 긴 함수 이름에 잘려도 태스크는 온전히 보인다(첫 CI 표본에서 태스크가 잘려 안 보였음).
+    assert tag.startswith("ge|f00d42|_route_dispatch_bg|test_overlapping_crons"), tag
     korean = conftest_module._global_engine_test_tag("f00d42", "테스트_" * 30, "t")
     assert len(korean.encode("utf-8")) <= 63 and "\ufffd" not in korean, korean
     short = conftest_module._global_engine_test_tag("f00d42", "test_short", "_logged")
-    assert short == "ge|f00d42|test_short|_logged", short
+    assert short == "ge|f00d42|_logged|test_short", short
 
 
 @pytest.mark.anyio
@@ -130,6 +131,72 @@ async def test_global_engine_connections_carry_the_current_destructive_test_name
             name = (await db.execute(text("SELECT current_setting('application_name')"))).scalar_one()
         assert name.startswith(conftest_module.GLOBAL_ENGINE_TEST_TAG_PREFIX), name
         assert conftest_module._resolve_global_engine_test_tag(name) == request.node.nodeid, name
-        assert f"|{request.node.name}"[:20] in name, name
+        parts = name.split("|")  # ge|해시|태스크|함수 — 함수는 63바이트에서 잘려 빠질 수 있어도 해시로 되살아난다(위 단언)
+        assert len(parts) >= 3 and parts[2], name
     finally:
         await global_engine.dispose()
+
+
+# ── story #4395: conftest drain(배경 작업) → dispose ──
+
+async def _idle_in_tx_tagged() -> int:
+    from sqlalchemy import create_engine as _ce
+
+    eng = _ce(conftest_module._sync_url(_REAL_DB_URL))
+    try:
+        with eng.connect() as conn:
+            return conn.execute(text(
+                "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                "AND state = 'idle in transaction' AND starts_with(application_name, :tag)"
+            ), {"tag": conftest_module.GLOBAL_ENGINE_TEST_TAG_PREFIX}).scalar_one()
+    finally:
+        eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_destructive_async_tests_get_the_drain_fixture_injected(request):
+    assert "_drain_and_dispose_global_engine_for_destructive_tests" in request.fixturenames
+
+
+@pytest.mark.anyio
+async def test_drain_fails_naming_a_background_task_stuck_inside_a_transaction():
+    """양성 대조: 전역 엔진 세션에서 SELECT 뒤 트랜잭션을 연 채 멈춘 배경 작업(CI 표본의 모양)을 일부러 남긴다 → drain은 상한에서
+    **삼키지 않고** 그 작업 이름으로 실패하고, 작업을 취소해 트랜잭션을 닫는다(idle in transaction 0).
+    뮤테이션: conftest 주입을 빼면 이 작업은 테스트 뒤에도 남아 다음 테스트 리셋이 lock_timeout 이름 RED로 멈춘다."""
+    import asyncio
+
+    from app.core.database import async_session_factory
+    from app.services.pg_pubsub import fire_and_forget
+
+    started, never = asyncio.Event(), asyncio.Event()
+
+    async def _stuck_dispatch_4395():
+        async with async_session_factory() as db:
+            await db.execute(text("SELECT 1"))
+            started.set()
+            await never.wait()
+
+    fire_and_forget(_stuck_dispatch_4395())
+    await asyncio.wait_for(started.wait(), timeout=10)
+    assert await _idle_in_tx_tagged() == 1
+    with pytest.raises(pytest.fail.Exception, match="_stuck_dispatch_4395"):
+        await conftest_module.drain_global_background_work(timeout=0.5)
+    assert await _idle_in_tx_tagged() == 0
+
+
+@pytest.mark.anyio
+async def test_drain_waits_for_a_slow_but_finishing_task():
+    """음성 대조: 늦게라도 끝나는 배경 작업은 기다렸다 통과(실패 없음)."""
+    import asyncio
+
+    from app.core.database import async_session_factory
+    from app.services.pg_pubsub import fire_and_forget
+
+    async def _slow_4395():
+        async with async_session_factory() as db:
+            await db.execute(text("SELECT 1"))
+            await asyncio.sleep(0.2)
+
+    fire_and_forget(_slow_4395())
+    await conftest_module.drain_global_background_work(timeout=5)
+    assert await _idle_in_tx_tagged() == 0
