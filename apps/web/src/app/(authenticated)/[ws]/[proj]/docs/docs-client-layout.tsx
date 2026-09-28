@@ -167,8 +167,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const [isCreating, setIsCreating] = useState(false);
 
+  // story #4385(까디르 codex HIGH · PO 10:07Z) — 트리 요청 세대. 새로 받기(필터 바뀜 · 다시 시도 · 다시 읽기)마다 올리고, 이어 받기는
+  // 지금 세대를 싣는다. 응답이 올 때 세대가 바뀌었으면 버린다 — 옛 필터의 늦은 쪽이 새 목록에 붙지 않게.
+  const treeGenRef = useRef(0);
   const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
+    const gen = cursor ? treeGenRef.current : ++treeGenRef.current;
+    if (!cursor) {
+      // 새로 받기면 옛 cursor · hasMore를 곧바로 걷는다 — 새 응답 전에 «더 보기»가 새 태그 + 옛 cursor로 나가지 않게.
+      setDocsNextCursor(null);
+      setDocsHasMore(false);
+    }
     // story #3784(페드루 짚음 10:02Z·10:11Z 재검토) — 재시도(에러 배너의 「다시 시도」
     // 포함)가 이전 실패 신호를 그대로 물고 있지 않도록, 시도 시작 시 먼저 걷는다(성공하면
     // 그대로 false·실패하면 catch가 다시 켠다). 로딩 조건은 «fetch 中»이 아니라 «지금 보여줄
@@ -188,6 +197,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       const res = await fetchWithAuth(`/api/docs?${fetchParams.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch tree');
       const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null; totalCount?: number | null } };
+      if (gen !== treeGenRef.current) return;  // 그 사이 새로 받기가 시작됨 — 옛 세대 응답은 버린다.
       if (cursor) {
         setTree((prev) => [...prev, ...(data || [])]);
       } else {
@@ -198,14 +208,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       setDocsTotal(meta?.totalCount ?? null);
       hasContentRef.current = (data?.length ?? 0) > 0;
     } catch {
+      if (gen !== treeGenRef.current) return;
       // tree fetch failed — keep existing
       setLoadError(true);
       // 실패 뒤 재시도 때는 다시 로딩을 세워야 한다(카디르 재현) — hasContentRef를 걷어
       // 위 setLoading(true) 조건이 다음 호출에서 막히지 않게 한다.
       hasContentRef.current = false;
     } finally {
-      setLoading(false);
-      setDocsLoadingMore(false);
+      if (gen === treeGenRef.current) {
+        setLoading(false);
+        setDocsLoadingMore(false);
+      }
     }
   }, [projectId]);
 
