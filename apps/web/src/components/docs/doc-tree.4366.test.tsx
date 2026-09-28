@@ -69,14 +69,14 @@ const d = (id: string, parent_id: string | null, sort_order: number, is_folder =
 //   F(펼침) ─ c1 · c2      a(문서)
 const DOCS = [d('F', null, 0, true), d('c1', 'F', 0), d('c2', 'F', 1), d('a', null, 1)];
 
-async function mount(docs = DOCS, saved = true) {
+async function mount(docs = DOCS, saved = true, filtered = false) {
   const onMove = vi.fn<(plan: DocMovePlan) => Promise<boolean>>(async () => saved);
   const onReorder = vi.fn<(plan: DocMovePlan) => Promise<boolean>>(async () => saved);
   const onMoveDenied = vi.fn();
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <DocTree docs={docs} selectedSlug={null} onSelect={() => {}} onMove={onMove} onReorder={onReorder} onMoveDenied={onMoveDenied} projectId="p1" />
+        <DocTree docs={docs} selectedSlug={null} onSelect={() => {}} onMove={onMove} onReorder={onReorder} onMoveDenied={onMoveDenied} projectId="p1" filtered={filtered} />
       </NextIntlClientProvider>,
     );
   });
@@ -320,3 +320,28 @@ describe('pointerRowCollision — 겨눈 행 = 포인터가 있는 행(story #43
     expect(run(null)).toEqual([]);
   });
 });
+
+// story #4376(유나 4766 반려) — 실효 부모 한 규칙 · 태그 필터 중 옮기기 끔.
+describe('DocTree 끌어 떨굼 — 부모가 목록에 없는 문서 · 태그 필터(story #4376)', () => {
+  // 트리: F(펼침) ─ c1 · c2 · a(뿌리 문서) · o(부모 gone — 지워짐 · 목록에 없음 → 뿌리에 그림)
+  const WITH_ORPHAN = [...DOCS, d('o', 'gone', 2)];
+
+  it('⭐뿌리에 그린 문서(부모 없음) 뒤에 놓으면 요청 parent_id = null(뿌리) — 숨은 부모 id를 싣지 않는다', async () => {
+    const { onMove, onReorder } = await mount(WITH_ORPHAN);
+    const y = rowTop('o') + ROW - 4;  // o 행 아래 절반 → o 뒤
+    await drop('a', 'o', y);
+    const plans = [...onReorder.mock.calls, ...onMove.mock.calls].map(([plan]) => plan);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({ docId: 'a', parentId: null, afterId: 'o' });
+    expect(onMove).not.toHaveBeenCalled();  // 같은 부모(뿌리) 안 재정렬 — 예전엔 부모 'gone'으로 옮기기(onMove)였다
+  });
+
+  it('⭐태그 필터가 켜져 있으면 끌어 놓아도 저장 0 · tag-filter-active 알림', async () => {
+    const { onMove, onReorder, onMoveDenied } = await mount(DOCS, true, true);
+    await drop('a', 'F', rowTop('F') + ROW / 2);
+    expect(onMove).not.toHaveBeenCalled();
+    expect(onReorder).not.toHaveBeenCalled();
+    expect(onMoveDenied).toHaveBeenCalledWith('tag-filter-active');
+  });
+});
+

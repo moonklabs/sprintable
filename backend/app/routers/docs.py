@@ -114,6 +114,11 @@ def _get_repo_read(
     return DocRepository(session, org_id)
 
 
+# story #4376 — 트리 한 번에 받는 상한. dev 최대 프로젝트 1,065개(요약 557B/개 · gzip 약 55KB · 서버 약 18ms, 로컬 실측).
+# 이보다 큰 프로젝트만 has_more로 이어 받는다(FE가 «N / 총량»과 더 보기를 보인다).
+_TREE_CAP = 5000
+
+
 def _doc_page_envelope(docs: list, limit: int) -> dict:
     """story #2191: #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body meta).
     docs 는 이미 limit+1 개까지 조회된 상태로 들어온다(호출부에서 overfetch)."""
@@ -139,6 +144,14 @@ async def list_docs(
     ids: str | None = Query(default=None, description="comma-separated doc ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
     limit: int = Query(default=500, ge=1, le=1000),
     cursor: str | None = Query(default=None, description="(sort_order,id) 복합 커서 — 이전 페이지 meta.next_cursor 값 그대로"),
+    tree: bool = Query(
+        default=False,
+        # story #4376 — 사이드바 문서 트리: 한 번에(상한까지 · limit 무시) + meta.total. 상한을 넘는 프로젝트만 커서로 이어 받는다.
+        description=(
+            f"Sidebar doc tree: every live doc of the project (or of the tag filter) in one response, up to {_TREE_CAP} "
+            "(limit is ignored), with meta.total. Projects over the cap continue with has_more / next_cursor."
+        ),
+    ),
     response: Response = None,  # type: ignore[assignment]
     repo: DocRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
@@ -207,6 +220,25 @@ async def list_docs(
         if response is not None:
             response.headers["X-Result-Count"] = str(len(data))
         return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
+
+    # story #4376 — FastAPI 경유 없이 직접 부르는 기존 테스트는 Query(...) 센티널을 받는다(위 ids 주석과 같은 함정).
+    tree = tree if isinstance(tree, bool) else False
+    if tree and project_id:
+        # 트리는 층 구분 없는 평면 목록을 20개씩 받아, 방금 만든 문서 · 폴더가 뒤 쪽(uuid 순)에 떨어지면 새로고침 뒤 트리에서 사라졌다
+        # (dev 1,065개 · 54쪽 · 부모가 뒤 쪽인 자식 37개). 트리 전체를 한 번에 — 형제 · 부모가 늘 같이 온다. 정렬 · 커서 규약은 그대로.
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+        if tag_list:
+            docs = await repo.search_by_tags(project_id, tag_list, limit=_TREE_CAP + 1, cursor=cursor, summary_only=True)
+        else:
+            docs = await repo.list(limit=_TREE_CAP + 1, cursor=cursor, project_id=project_id, summary_only=True)
+        envelope = _doc_page_envelope(docs, _TREE_CAP)
+        # 총량: 한 번에 다 왔으면 받은 수 그대로(문장 추가 0) · 상한을 넘을 때만 따로 센다.
+        envelope["meta"]["total"] = (
+            await repo.count_live(project_id, tag_list) if envelope["meta"]["has_more"] or cursor else len(envelope["data"])
+        )
+        if response is not None:
+            response.headers["X-Result-Count"] = str(len(envelope["data"]))
+        return envelope
 
     if tags and project_id:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]

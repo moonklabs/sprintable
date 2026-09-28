@@ -26,7 +26,7 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
-import { applyDocMove, placedFromSiblings, planDocMove, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
+import { applyDocMove, placedFromSiblings, planDocMove, withEffectiveParents, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
 import { applyReorderResult, saveDocOrder } from '@/components/docs/lib/doc-reorder-api';
 
 // story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
@@ -79,6 +79,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [docsHasMore, setDocsHasMore] = useState(false);
   const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
+  // story #4376 — 트리 총량(tree 요청 meta.totalCount · #3761 정본). 상한을 넘는 프로젝트에서만 «받은 수 / 총량»으로 보인다.
+  const [docsTotal, setDocsTotal] = useState<number | null>(null);
   const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -177,15 +179,15 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     if (!cursor && !hasContentRef.current) setLoading(true);
     setLoadError(false);
     try {
-      // story #2191 — "view=tree"는 죽은 파라미터였다(/api/docs가 그 값을 아예 안 읽어
-      // 항상 무커서 일반 목록 분기로 떨어졌다). #2540 이후 BE/FE 둘 다 커서를 실제로
-      // 지원하므로 이 파라미터를 지운다 — tags 유무와 무관하게 같은 커서 경로를 탄다.
-      const fetchParams = new URLSearchParams({ project_id: projectId, limit: '20' });
+      // story #4376 — 트리는 한 번에(tree=true · BE 상한 5,000까지) + 총량. 예전엔 층 구분 없는 평면 목록을 20개씩 받아
+      // 방금 만든 문서 · 폴더가 뒤 쪽(uuid 순)에 떨어지면 새로고침 뒤 트리에서 사라졌고(dev 1,065개 · 54쪽), 부모가 뒤 쪽인
+      // 자식은 부모가 올 때까지 안 보였다. 한 번에 받으면 형제 · 부모가 늘 같이 온다 — 상한을 넘는 프로젝트만 «더 보기»로 이어 받는다.
+      const fetchParams = new URLSearchParams({ project_id: projectId, tree: 'true' });
       if (tags?.length) fetchParams.set('tags', tags.join(','));
       if (cursor) fetchParams.set('cursor', cursor);
       const res = await fetchWithAuth(`/api/docs?${fetchParams.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch tree');
-      const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
+      const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null; totalCount?: number | null } };
       if (cursor) {
         setTree((prev) => [...prev, ...(data || [])]);
       } else {
@@ -193,6 +195,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       }
       setDocsHasMore(meta?.hasMore ?? false);
       setDocsNextCursor(meta?.nextCursor ?? null);
+      setDocsTotal(meta?.totalCount ?? null);
       hasContentRef.current = (data?.length ?? 0) > 0;
     } catch {
       // tree fetch failed — keep existing
@@ -244,7 +247,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const selectedTagsRef = useRef(selectedTags);
   useEffect(() => { selectedTagsRef.current = selectedTags; });
   const handleMenuMove = useCallback((docId: string, action: DocMoveAction): Promise<MenuMoveResult> => {
-    const plan = planDocMove(treeRef.current, docId, action);
+    // story #4376(유나 4766 반려) — 트리가 그린 모양(실효 부모)대로 짠다: 부모가 목록에 없는 문서는 뿌리 기준(숨은 부모 id를 요청에 싣지 않음).
+    const plan = planDocMove(withEffectiveParents(treeRef.current), docId, action);
     if (!plan.ok) return Promise.resolve({ plan, placed: null });
     const next = applyDocMove(treeRef.current, plan);
     treeRef.current = next;
@@ -272,9 +276,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     return job;
   }, [fetchTree, addToast, t]);
 
-  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
+  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active' | 'tag-filter-active') => {
     if (reason === 'circular') addToast({ title: t('moveCircularError'), type: 'error' });
     else if (reason === 'sort-mode-active') addToast({ title: t('moveSortModeActiveError'), type: 'warning' });
+    else if (reason === 'tag-filter-active') addToast({ title: t('moveTagFilterActive'), type: 'warning' });
     else addToast({ title: t('movePermissionError'), type: 'warning' });
   }, [addToast, t]);
 
@@ -637,10 +642,13 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 moreLabel={(count) => t('groupMore', { count })}
               />
             ) : (
-              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} onMenuMove={handleMenuMove} hasMore={docsHasMore} />
+              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} onMenuMove={handleMenuMove} hasMore={docsHasMore} filtered={selectedTags.length > 0} />
             )}
             {viewMode === 'folders' && docsHasMore && (
               <div className="px-2 py-1">
+                {docsTotal !== null && (
+                  <p className="px-2 pb-1 text-center text-[11px] text-muted-foreground">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
+                )}
                 <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}
                 </Button>

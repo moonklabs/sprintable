@@ -174,9 +174,29 @@ export function docMoveAnnouncement(docs: MovableDoc[], plan: Extract<MenuMovePl
  * - 맨 위면 위로 · 맨 아래면 아래로도 끈다(수동 보기에서도).
  * - 폴더로 이동은 정렬과 무관하게 켜 둔다(옮길 폴더가 있을 때).
  */
-export function menuMoveState<T extends MovableDoc>(docs: T[], docId: string, sortMode: 'manual' | 'title' | 'updated_at', hasMore = false, compare: (a: T, b: T) => number = compareServerOrder): {
-  up: boolean; down: boolean; sortLocked: boolean; downUnloaded: boolean; targets: MoveTarget[];
+/**
+ * story #4376(유나 4766 반려) — **실효 부모** 한 규칙: 부모가 이 목록에 없는 문서(부모가 지워짐 · 태그 필터로 부모가 빠짐)는 뿌리 문서로 본다.
+ * 트리는 그런 문서를 뿌리에 그리므로, 끌어 놓기 계획 · «⋮» 위로/아래로/옮기기도 같은 목록으로 짜야 뿌리 기준이 된다 — 예전엔 그리기만 뿌리이고
+ * 계획은 숨은 부모 id를 요청에 실어, 부모가 지워졌으면 reorder 404, 태그 필터 중이면 보이지 않는 진짜 폴더로 들어갔다.
+ * 바뀐 문서가 없으면 같은 배열을 돌려준다(메모 · 참조 비교 그대로).
+ */
+export function withEffectiveParents<T extends { id: string; parent_id: string | null }>(docs: T[]): T[] {
+  const ids = new Set(docs.map((d) => d.id));
+  let changed = false;
+  const out = docs.map((d) => {
+    if (!d.parent_id || ids.has(d.parent_id)) return d;
+    changed = true;
+    return { ...d, parent_id: null };
+  });
+  return changed ? out : docs;
+}
+
+export function menuMoveState<T extends MovableDoc>(docs: T[], docId: string, sortMode: 'manual' | 'title' | 'updated_at', hasMore = false, compare: (a: T, b: T) => number = compareServerOrder, filtered = false): {
+  up: boolean; down: boolean; sortLocked: boolean; filterLocked: boolean; downUnloaded: boolean; targets: MoveTarget[];
 } {
+  // story #4376(유나 · PO 확정) — 태그 필터가 켜진 동안(걸러 낸 부분 보기)엔 옮기기 전부 끔: 보이는 형제만으로 순서를 저장하면 안 보이는 형제
+  // 사이로 들어간다. 까닭 줄은 정렬 까닭보다 먼저.
+  if (filtered) return { up: false, down: false, sortLocked: false, filterLocked: true, downUnloaded: false, targets: [] };
   const manual = sortMode === 'manual';
   const b = moveBounds(docs, docId);
   // 아래로 = 다음 형제 뒤. 받은 형제 중 마지막인데 트리에 아직 안 받은 문서가 있으면(hasMore), 다음 형제가 안 받은 자리일 수 있어 끈다(PO 23:01Z).
@@ -185,5 +205,5 @@ export function menuMoveState<T extends MovableDoc>(docs: T[], docId: string, so
   const lastLoaded = siblings.length > 0 && siblings[siblings.length - 1].id === docId;
   const downUnloaded = manual && hasMore && lastLoaded;
   // downUnloaded면 받은 형제 중 마지막이라 b.down이 이미 거짓이다(«아래로»를 끄는 건 moveBounds) — downUnloaded는 까닭 줄을 고르는 데만 쓴다(러너 e M18 동등).
-  return { up: manual && b.up, down: manual && b.down, sortLocked: !manual, downUnloaded, targets: moveTargets(docs, docId, compare) };
+  return { up: manual && b.up, down: manual && b.down, sortLocked: !manual, filterLocked: false, downUnloaded, targets: moveTargets(docs, docId, compare) };
 }

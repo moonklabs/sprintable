@@ -39,12 +39,14 @@ type TreeDoc = { id: string; parent_id: string | null; sort_order: number };
 const captured: {
   docs?: TreeDoc[];
   hasMore?: boolean;
+  filtered?: boolean;
   onMenuMove?: (docId: string, action: DocMoveAction) => Promise<MenuMoveResult>;
 } = {};
 vi.mock('@/components/docs/doc-tree', () => ({
   DocTree: (props: typeof captured) => {
     captured.docs = props.docs;
     captured.hasMore = props.hasMore;
+    captured.filtered = props.filtered;
     captured.onMenuMove = props.onMenuMove;
     return <div data-testid="doc-tree-mock" />;
   },
@@ -285,3 +287,30 @@ describe('DocsClientLayout — «⋮» 옮기기 저장(story #4348)', () => {
     expect(new URL(getUrls.at(-1)!, 'http://x').searchParams.get('tags')).toBe('alpha');
   });
 });
+
+// story #4376(유나 4766 반려) — 호출부 계획도 트리가 그린 모양(실효 부모)대로: 부모가 목록에 없는 문서를 «⋮»로 옮기면 뿌리 기준 ·
+// 요청에 숨은 부모 id를 싣지 않는다(부모가 지워졌으면 reorder 404, 태그 필터 중이면 보이지 않는 폴더로 들어가던 것).
+describe('DocsClientLayout — «⋮» 옮기기 · 부모가 목록에 없는 문서 · 태그 필터(story #4376)', () => {
+  it('부모가 목록에 없는 문서 위로: 뿌리 형제 사이 · POST parent_id = null(숨은 부모 id 아님)', async () => {
+    stubFetch(false, [base('a', 10), base('b', 20, { parent_id: 'gone' }), base('c', 30)]);
+    await mount();
+    const p = move('b', { kind: 'up' });
+    await flush();
+    expect(posts.map((x) => x.body)).toEqual([{ doc_id: 'b', parent_id: null, after_id: null }]);
+    await posts[0].respond(200, { data: { doc: { id: 'b', parent_id: null, sort_order: 1 }, siblings: [{ id: 'b', sort_order: 1 }, { id: 'a', sort_order: 2 }, { id: 'c', sort_order: 3 }] } });
+    await expect(p).resolves.toMatchObject({ plan: { ok: true, docId: 'b' } });
+  });
+
+  it('태그를 고르지 않았으면 DocTree에 filtered = false · 태그를 고르면 true(옮기기 끔)', async () => {
+    stubFetch(false, [base('a', 10, { tags: ['spec'] }), base('b', 20)]);
+    await mount();
+    expect(captured.filtered).toBe(false);
+    const tagToggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.docs.tagFilter));
+    await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const chip = [...container.querySelectorAll('button')].find((b) => b.textContent === '#spec');
+    await act(async () => { chip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(captured.filtered).toBe(true);
+  });
+});
+

@@ -3718,7 +3718,9 @@
         "end": "End"
       },
       "toggleDefaultTitle": "Toggle title"
-    }
+    },
+    "treeLoadedOfTotal": "Showing {loaded, number} of {total, number}",
+    "moveTagFilterActive": "You can't reorder or move docs while a tag filter is on — turn the filter off first"
   },
   "rewards": {
     "title": "Rewards",

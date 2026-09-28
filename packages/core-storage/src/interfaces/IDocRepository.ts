@@ -71,6 +71,8 @@ export interface DocListFilters extends PaginationOptions {
   tags?: string[];
   q?: string;
   ids?: string[];
+  /** story #4376 — 사이드바 트리: 프로젝트(태그 필터면 그 태그) 문서를 한 번에(BE 상한까지 · limit 무시) + total. */
+  tree?: boolean;
 }
 
 // story #2191(#2231 규약 A) — BE가 has_more/next_cursor를 body meta로 직접 계산해 낸다
@@ -82,6 +84,8 @@ export interface DocPageResult {
   items: DocSummary[];
   hasMore: boolean;
   nextCursor: string | null;
+  /** story #4376 — tree 요청일 때만: 조건에 맞는 문서 총수(한 번에 다 오면 items 길이와 같다). 그 밖엔 없음. */
+  total?: number | null;
 }
 
 export interface IDocRepository {

@@ -2,7 +2,7 @@
 
 import { dropZoneFor, planDrop, type DocMovePlan, type DropZone } from './doc-move-plan';
 import { DocRenameDialog } from './doc-rename-dialog';
-import { createContext, useContext, useId, useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { createContext, useContext, useId, useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { pickEulReulJosa } from '@/lib/korean-particle';
@@ -19,7 +19,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
 import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 import { Button } from '@/components/ui/button';
-import { docMoveAnnouncement, menuMoveState, type DocMoveAction, type MenuMoveResult } from './lib/doc-move';
+import { docMoveAnnouncement, menuMoveState, withEffectiveParents, type DocMoveAction, type MenuMoveResult } from './lib/doc-move';
 
 // story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율).
 function StatusDot({ status }: { status: string | undefined }) {
@@ -138,7 +138,7 @@ const DOC_MOVE_ANNOUNCE_KEY: Record<string, string> = {
   topLevel: 'docTreeMovedToTopLevel',
 };
 
-const DocMoveCtx = createContext<{ requestMove: (docId: string, action: DocMoveAction) => void; hasMore: boolean } | null>(null);
+const DocMoveCtx = createContext<{ requestMove: (docId: string, action: DocMoveAction) => void; hasMore: boolean; filtered: boolean } | null>(null);
 
 interface DocTreeProps {
   docs: Doc[];
@@ -147,7 +147,7 @@ interface DocTreeProps {
   // story #4366(까디르) — 저장이 됐는지 돌려준다(실패해도 resolve — 알림 · 트리 다시 읽기는 저장 함수 몫). 펼침은 성공일 때만.
   onReorder?: (plan: DocMovePlan) => Promise<boolean>;
   onMove?: (plan: DocMovePlan) => Promise<boolean>;
-  onMoveDenied?: (reason: 'circular' | 'no-permission' | 'sort-mode-active') => void;
+  onMoveDenied?: (reason: 'circular' | 'no-permission' | 'sort-mode-active' | 'tag-filter-active') => void;
   onRename?: (docId: string, newTitle: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
   onAddChild?: (parentId: string) => Promise<void>;
@@ -169,6 +169,8 @@ interface DocTreeProps {
   onMenuMove?: (docId: string, action: DocMoveAction) => Promise<MenuMoveResult>;
   /** 아직 안 받은 문서 페이지가 있다 — 받은 형제 중 마지막 문서의 «아래로»를 끈다(다음 형제가 안 받은 자리일 수 있음). */
   hasMore?: boolean;
+  /** story #4376 — 태그 필터가 켜져 있으면 옮기기(끌기 · «⋮» 이동) 전부 끔. */
+  filtered?: boolean;
 }
 
 function TreeNode({
@@ -276,9 +278,10 @@ function TreeNode({
   const [pickerOpen, setPickerOpen] = useState(false);
   const sortNoteId = useId();
   const unloadedNoteId = useId();
+  const filterNoteId = useId();
   const pickerTitleId = useId();
   // 고르개 순서 = 트리 보기와 같은 비교(유나 #4730 — 깊이 우선 · 들여쓰기).
-  const moveState = moveCtx && contextMenuOpen ? menuMoveState(allDocs, doc.id, sortMode, moveCtx.hasMore, (a, b) => compareDocsForSort(a, b, sortMode)) : null;
+  const moveState = moveCtx && contextMenuOpen ? menuMoveState(allDocs, doc.id, sortMode, moveCtx.hasMore, (a, b) => compareDocsForSort(a, b, sortMode), moveCtx.filtered) : null;
   const openMenu = useCallback(() => { setPickerOpen(false); setContextMenuOpen(true); }, []);
   // 고르개 줄 이름 표(줄마다 `{moveTargetTitles.get(target.id)}`로 그림 — 행마다 갈리는 라벨을 가드가 알아보는 «루프 필드로 표 조회» 모양:
   // verify:no-new-repeated-row-action-names). 폴더 제목뿐(«· ID» 꼬리 없음)이라 한 덩어리 truncate가 맞다 — 꼬리 붙은 행 라벨(RowName 가드의 …Labels)과 다른 것.
@@ -462,8 +465,8 @@ function TreeNode({
                 <Button type="button" variant="ghost" role="menuitem" onClick={handleRename} className={DOC_MENU_ITEM}>{t('docTreeRename')}</Button>
                 {moveState ? (
                   <>
-                    <Button type="button" variant="ghost" role="menuitem" data-move="up" aria-disabled={!moveState.up || undefined} aria-describedby={moveState.sortLocked ? sortNoteId : undefined} onClick={() => runMove({ kind: 'up' }, moveState.up)} className={DOC_MENU_ITEM}>{t('docTreeMoveUp')}</Button>
-                    <Button type="button" variant="ghost" role="menuitem" data-move="down" aria-disabled={!moveState.down || undefined} aria-describedby={moveState.sortLocked ? sortNoteId : moveState.downUnloaded ? unloadedNoteId : undefined} onClick={() => runMove({ kind: 'down' }, moveState.down)} className={DOC_MENU_ITEM}>{t('docTreeMoveDown')}</Button>
+                    <Button type="button" variant="ghost" role="menuitem" data-move="up" aria-disabled={!moveState.up || undefined} aria-describedby={moveState.filterLocked ? filterNoteId : moveState.sortLocked ? sortNoteId : undefined} onClick={() => runMove({ kind: 'up' }, moveState.up)} className={DOC_MENU_ITEM}>{t('docTreeMoveUp')}</Button>
+                    <Button type="button" variant="ghost" role="menuitem" data-move="down" aria-disabled={!moveState.down || undefined} aria-describedby={moveState.filterLocked ? filterNoteId : moveState.sortLocked ? sortNoteId : moveState.downUnloaded ? unloadedNoteId : undefined} onClick={() => runMove({ kind: 'down' }, moveState.down)} className={DOC_MENU_ITEM}>{t('docTreeMoveDown')}</Button>
                     {moveState.targets.some((x) => !x.current) && (
                       <Button type="button" variant="ghost" role="menuitem" data-move="into" onClick={() => setPickerOpen(true)} className={DOC_MENU_ITEM}>{t('docTreeMoveInto')}</Button>
                     )}
@@ -472,8 +475,10 @@ function TreeNode({
                 {isFolder && <Button type="button" variant="ghost" role="menuitem" onClick={handleAddChild} className={DOC_MENU_ITEM}>{t('docTreeAddChild')}</Button>}
                 {isFolder && <Button type="button" variant="ghost" role="menuitem" onClick={handleAddChildFolder} className={DOC_MENU_ITEM}>{t('docTreeAddChildFolder')}</Button>}
                 <Button type="button" variant="ghost" role="menuitem" onClick={handleDelete} className={DOC_MENU_ITEM_DESTRUCTIVE}>{t('docTreeDelete')}</Button>
-                {/* 까닭 줄은 하나만 — 정렬 까닭이 이기고, 아니면 «더 보기로 더 불러오면»(유나 확정). */}
-                {moveState?.sortLocked ? (
+                {/* 까닭 줄은 하나만 — 태그 필터 까닭 · 정렬 까닭 · «더 보기로 더 불러오면» 순(유나 확정 · story #4376 태그 필터 추가). */}
+                {moveState?.filterLocked ? (
+                  <p id={filterNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('moveTagFilterActive')}</p>
+                ) : moveState?.sortLocked ? (
                   <p id={sortNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('moveSortModeActiveError')}</p>
                 ) : moveState?.downUnloaded ? (
                   <p id={unloadedNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('docTreeMoveDownUnloaded')}</p>
@@ -583,13 +588,18 @@ export const pointerRowCollision: CollisionDetection = ({ droppableContainers, d
   return best ? [{ id: best.id, data: { droppableContainer: best.container, value: best.distance } }] : [];
 };
 
-export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, onAddChildFolder, emptyFolderLabel, projectId, sortMode = 'manual', onMenuMove, hasMore = false }: DocTreeProps) {
+export function DocTree({ docs: rawDocs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, onAddChildFolder, emptyFolderLabel, projectId, sortMode = 'manual', onMenuMove, hasMore = false, filtered = false }: DocTreeProps) {
   const tDocs = useTranslations('docs');
+  // story #4376 — 부모가 이 목록에 없는 문서(부모가 지워짐 · 태그 필터로 부모가 빠짐)도 뿌리에 보인다(예전엔 아무 데도 안 그려져 사라졌다).
+  // 유나 4766 반려: 그리기만 뿌리이고 끌어 놓기 · «⋮» 계획은 숨은 부모 기준이었다 → 실효 부모 한 규칙(withEffectiveParents)으로 만든 목록 하나를
+  // 그리기 · 끌기 계획 · 메뉴 상태 · 옮기기 알림이 같이 쓴다(호출부 onMenuMove 계획도 같은 함수 · docs-client-layout.tsx).
+  const docs = useMemo(() => withEffectiveParents(rawDocs), [rawDocs]);
   const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => compareDocsForSort(a, b, sortMode));
   // story #2167: 이름순/수정일순 보기에서는 드래그 재정렬을 막는다 — sort_order 기반 드롭
   // 위치 계산이 화면 순서와 안 맞아 엉뚱한 곳에 꽂히는 것을 막기 위함(수동 순서 자체는
   // 안전하게 보존되지만, 사용자가 보는 순서와 실제 재정렬 결과가 어긋나는 혼란을 원천 차단).
-  const dragEnabled = sortMode === 'manual';
+  // story #4376 — 태그 필터가 켜진 동안(걸러 낸 부분 보기)도 끈다(PO 확정): 보이는 형제만으로 순서를 저장하면 안 보이는 형제 사이로 들어간다.
+  const dragEnabled = sortMode === 'manual' && !filtered;
   // story #1988(C): 순수 PointerSensor는 모바일 터치 스크롤을 드래그로 하이재킹한다 —
   // kanban-board.tsx 0d142311 fix와 동일하게 터치는 드래그 활성화 자체를 배제.
   const sensors = useTouchSafePointerSensor(5);
@@ -631,7 +641,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
     if (row) row.focus();
     if (row || pending.settled) pendingFocusRef.current = null;
   });
-  const moveCtxValue = onMenuMove ? { requestMove, hasMore } : null;
+  const moveCtxValue = onMenuMove ? { requestMove, hasMore, filtered } : null;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   // 까디르(4752) — 자동 스크롤이 도는 중에 놓으면, 놓는 순간 다시 판정할 때 over.rect는 그 순간의 스크롤인데 화면의 표시는 직전 렌더 것이라
@@ -700,7 +710,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
     clearDrag();
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    if (!dragEnabled) { onMoveDenied?.('sort-mode-active'); return; }
+    if (!dragEnabled) { onMoveDenied?.(filtered ? 'tag-filter-active' : 'sort-mode-active'); return; }
 
     const activeDoc = docs.find((d) => d.id === active.id);
     if (!activeDoc) return;
@@ -720,7 +730,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
     // 접힌 폴더 «안으로» 떨구면 그 폴더를 펼친다 — 옮긴 문서가 폴더 끝에 보이게(예전엔 접힌 채라 트리에서 그냥 사라졌다).
     // 저장이 실패하면(문서는 제자리) 펼치지 않는다 — 까디르(4752).
     if (saved && target.zone === 'into' && !isExpanded(target.overId)) expandFolders([target.overId]);
-  }, [docs, onReorder, onMove, onMoveDenied, dragEnabled, clearDrag, isExpanded, expandFolders]);
+  }, [docs, onReorder, onMove, onMoveDenied, dragEnabled, filtered, clearDrag, isExpanded, expandFolders]);
 
   const activeDoc = activeId ? docs.find((d) => d.id === activeId) ?? null : null;
 

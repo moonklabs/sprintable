@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.models.doc import Doc
 from app.repositories.base import BaseRepository
@@ -35,14 +36,29 @@ def parse_doc_cursor(cursor: object) -> tuple[int, uuid.UUID] | None:
         raise HTTPException(status_code=400, detail="Invalid cursor format") from exc
 
 
+
+# story #4376(까디르 codex HIGH · PO dev 실측 08:36Z) — 사이드바 트리는 요약(DocSummaryResponse)만 싣는데 select(Doc)이 본문(content) ·
+# search_vector(본문 전체의 tsvector)까지 읽어 버렸다(dev 1,065개 · 본문 합 9.4MB · 문서함을 열 때마다). 트리 경로만 요약이 실제로 읽는
+# 칸으로 좁힌다(is_folder = doc_type · canonical_slug = slug · snippet은 트리에서 안 채움). 다른 경로(단건 · 검색)는 그대로.
+def doc_summary_columns():
+    from app.models.doc import Doc
+
+    return (
+        Doc.id, Doc.project_id, Doc.parent_id, Doc.title, Doc.slug, Doc.slug_locked, Doc.icon, Doc.sort_order,
+        Doc.doc_type, Doc.status, Doc.tags, Doc.created_at, Doc.updated_at,
+    )
+
 class DocRepository(BaseRepository[Doc]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Doc, session, org_id)
 
     async def list(
-        self, limit: int = 500, cursor: str | None = None, *, project_ids: list[uuid.UUID] | None = None, **filters: Any
+        self, limit: int = 500, cursor: str | None = None, *, project_ids: list[uuid.UUID] | None = None,
+        summary_only: bool = False, **filters: Any
     ) -> list[Doc]:  # type: ignore[override]
         q = select(Doc).where(self._org_filter(), Doc.deleted_at.is_(None))
+        if summary_only:
+            q = q.options(load_only(*doc_summary_columns()))
         if project_ids is not None:
             # story #4350 PR 3(까디르 HIGH) — project 없는 목록은 caller의 접근 가능 프로젝트 문서만(SQL · 빈 집합 = 0건).
             q = q.where(Doc.project_id.in_(project_ids))
@@ -147,8 +163,19 @@ class DocRepository(BaseRepository[Doc]):
         result = await self.session.execute(q)
         return list(result.scalars().all())
 
+    async def count_live(self, project_id: uuid.UUID, tags: list[str] | None = None) -> int:
+        """story #4376 — 트리 총량: 프로젝트의 살아 있는 문서 수(태그를 주면 그 태그를 모두 가진 문서 수 · search_by_tags와 같은 조건)."""
+        from sqlalchemy import Text, cast, func
+        from sqlalchemy.dialects.postgresql import ARRAY
+
+        q = select(func.count()).select_from(Doc).where(self._org_filter(), Doc.project_id == project_id, Doc.deleted_at.is_(None))
+        if tags:
+            q = q.where(Doc.tags.contains(cast(tags, ARRAY(Text))))
+        return (await self.session.execute(q)).scalar_one()
+
     async def search_by_tags(
         self, project_id: uuid.UUID, tags: list[str], limit: int = 500, cursor: str | None = None,
+        *, summary_only: bool = False,
     ) -> list[Doc]:
         """tags 배열이 주어진 태그를 모두 포함하는 docs 조회 (@> 연산자).
 
@@ -164,6 +191,8 @@ class DocRepository(BaseRepository[Doc]):
             Doc.deleted_at.is_(None),
             Doc.tags.contains(cast(tags, ARRAY(Text))),
         )
+        if summary_only:
+            q = q.options(load_only(*doc_summary_columns()))
         parsed = parse_doc_cursor(cursor)
         if parsed is not None:
             q = q.where(tuple_(Doc.sort_order, Doc.id) > tuple_(*parsed))

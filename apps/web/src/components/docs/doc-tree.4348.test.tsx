@@ -48,7 +48,7 @@ afterEach(async () => {
 const calls: Array<{ docId: string; action: DocMoveAction; settle: (ok: boolean, placed?: DocMovePlaced | null) => Promise<void> }> = [];
 const harness: { setDocs: (next: TestDoc[]) => void } = { setDocs: () => {} };
 
-function Harness({ initial, sortMode, hasMore, withMove }: { initial: TestDoc[]; sortMode: DocSortMode; hasMore: boolean; withMove: boolean }) {
+function Harness({ initial, sortMode, hasMore, withMove, filtered = false }: { initial: TestDoc[]; sortMode: DocSortMode; hasMore: boolean; withMove: boolean; filtered?: boolean }) {
   const [docs, setDocs] = useState(initial);
   useEffect(() => { harness.setDocs = setDocs; }, []);
   const onMenuMove = (docId: string, action: DocMoveAction) => new Promise<MenuMoveResult>((resolve) => {
@@ -65,16 +65,16 @@ function Harness({ initial, sortMode, hasMore, withMove }: { initial: TestDoc[];
   });
   return (
     <DocTree docs={docs} selectedSlug={null} onSelect={() => {}} onDelete={async () => {}} onRename={async () => {}} projectId="p1" sortMode={sortMode}
-      onMenuMove={withMove ? onMenuMove : undefined} hasMore={hasMore} />
+      onMenuMove={withMove ? onMenuMove : undefined} hasMore={hasMore} filtered={filtered} />
   );
 }
 
-function mount(initial: TestDoc[], { sortMode = 'manual', hasMore = false, locale = 'ko', withMove = true }: { sortMode?: DocSortMode; hasMore?: boolean; locale?: 'ko' | 'en'; withMove?: boolean } = {}) {
+function mount(initial: TestDoc[], { sortMode = 'manual', hasMore = false, locale = 'ko', withMove = true, filtered = false }: { sortMode?: DocSortMode; hasMore?: boolean; locale?: 'ko' | 'en'; withMove?: boolean; filtered?: boolean } = {}) {
   calls.length = 0;
   act(() => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <Harness initial={initial} sortMode={sortMode} hasMore={hasMore} withMove={withMove} />
+        <Harness initial={initial} sortMode={sortMode} hasMore={hasMore} withMove={withMove} filtered={filtered} />
       </NextIntlClientProvider>,
     );
   });
@@ -396,6 +396,28 @@ describe('옮기기 항목 = 디자인 Button(ghost) · 같은 메뉴 줄 모양
     click(moveItem('into'));
     expect(check(items())).toEqual(base); // 고르개 줄도 같은 정의
     expect([...seen]).toEqual(expect.arrayContaining([KO.docTreeRename, KO.docTreeMoveUp, KO.docTreeMoveDown, KO.docTreeMoveInto, KO.docTreeAddChild, KO.docTreeAddChildFolder, KO.docTreeDelete]));
+  });
+});
+
+// story #4376(유나 4766 반려 · PO 확정) — 태그 필터 중 «⋮» 옮기기 끔 · 부모가 목록에 없는 문서는 뿌리 형제로.
+describe('«⋮» 옮기기 — 태그 필터 · 부모가 목록에 없는 문서(story #4376)', () => {
+  it('태그 필터 중: 위로 · 아래로 꺼지고 까닭 = 태그 필터 문구 하나 · 폴더로 이동 없음 · 눌러도 옮기지 않음', () => {
+    mount([...THREE, doc('f', 40, { is_folder: true })], { filtered: true, hasMore: true, sortMode: 'title' });
+    open('b');
+    expect(moveItem('up').getAttribute('aria-disabled')).toBe('true');
+    expect(moveItem('down').getAttribute('aria-disabled')).toBe('true');
+    expect(describedText(moveItem('up'))).toBe(KO.moveTagFilterActive);
+    expect(notes().map((p) => p.textContent)).toEqual([KO.moveTagFilterActive]);  // 정렬 · 더 보기 까닭보다 먼저 · 하나만
+    expect(menu()!.querySelector('[data-move="into"]')).toBeNull();
+    click(moveItem('up'));
+    expect(calls).toHaveLength(0);
+  });
+
+  it('부모가 목록에 없는 문서는 뿌리 형제 사이에서 위로 · 아래로가 켜진다(예전엔 형제 0이라 둘 다 꺼짐)', () => {
+    mount([doc('a', 10), doc('b', 20, { parent_id: 'gone' }), doc('c', 30)]);
+    open('b');
+    expect(moveItem('up').hasAttribute('aria-disabled')).toBe(false);
+    expect(moveItem('down').hasAttribute('aria-disabled')).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 // story #4348 — 문서 옮기기 계산(키보드 · 터치 «⋮» 메뉴 · 끌기와 같은 결과). 저장 API와 무관한 순수 함수.
 import { describe, expect, it } from 'vitest';
-import { applyDocMove, docMoveAnnouncement, menuMoveState, moveBounds, moveTargets, placedFromSiblings, planDocMove, type MovableDoc, type MoveTarget } from './doc-move';
+import { applyDocMove, docMoveAnnouncement, menuMoveState, moveBounds, moveTargets, placedFromSiblings, planDocMove, withEffectiveParents, type MovableDoc, type MoveTarget } from './doc-move';
 import { planMoveInto, planReorder, reorderRequestBody, siblingsInServerOrder } from '../doc-move-plan';
 
 // 루트: a(0) · b(0) · c(0) — sort_order가 전부 0(대부분의 실데이터) · id로 갈림. f는 폴더(자식 f1 · f2), g는 f 안 폴더.
@@ -152,11 +152,11 @@ describe('docMoveAnnouncement — 옮긴 뒤 aria-live 알림(키 · 값)', () =
 
 describe('menuMoveState — «⋮» 메뉴 항목 상태(정렬 모드 · 경계 · 폴더)', () => {
   it('수동 보기: 경계만 끔 · 폴더 목록', () => {
-    expect(menuMoveState(DOCS, 'b', 'manual')).toEqual({ up: true, down: true, sortLocked: false, downUnloaded: false, targets: [row(null, 0, true), row('f', 1), row('g', 2)] });
+    expect(menuMoveState(DOCS, 'b', 'manual')).toEqual({ up: true, down: true, sortLocked: false, filterLocked: false, downUnloaded: false, targets: [row(null, 0, true), row('f', 1), row('g', 2)] });
     expect(menuMoveState(DOCS, 'a', 'manual')).toMatchObject({ up: false, down: true, sortLocked: false });
   });
   it('이름순 · 수정일순: 위로 · 아래로 끔(까닭 = 정렬) · 폴더로는 그대로', () => {
-    expect(menuMoveState(DOCS, 'b', 'title')).toEqual({ up: false, down: false, sortLocked: true, downUnloaded: false, targets: [row(null, 0, true), row('f', 1), row('g', 2)] });
+    expect(menuMoveState(DOCS, 'b', 'title')).toEqual({ up: false, down: false, sortLocked: true, filterLocked: false, downUnloaded: false, targets: [row(null, 0, true), row('f', 1), row('g', 2)] });
     expect(menuMoveState(DOCS, 'b', 'updated_at')).toMatchObject({ up: false, down: false, sortLocked: true });
   });
 });
@@ -180,3 +180,18 @@ describe('같은 길 — 메뉴 옮기기 본문 = 끌기 계획 본문', () => 
     expect(reorderRequestBody(ok(planDocMove(DOCS, 'f1', { kind: 'into', parentId: null })).placement)).toEqual(reorderRequestBody(planMoveInto('f1', null)));
   });
 });
+
+// story #4376(유나 4766 반려) — 실효 부모 한 규칙 · 태그 필터 중 옮기기 끔.
+describe('withEffectiveParents · menuMoveState(filtered)(story #4376)', () => {
+  it('부모가 목록에 없는 문서만 parent_id = null · 바뀐 것이 없으면 같은 배열(참조 그대로)', () => {
+    const docs = [{ id: 'f', parent_id: null }, { id: 'c', parent_id: 'f' }, { id: 'o', parent_id: 'gone' }];
+    expect(withEffectiveParents(docs)).toEqual([{ id: 'f', parent_id: null }, { id: 'c', parent_id: 'f' }, { id: 'o', parent_id: null }]);
+    const intact = [{ id: 'f', parent_id: null }, { id: 'c', parent_id: 'f' }];
+    expect(withEffectiveParents(intact)).toBe(intact);
+  });
+
+  it('태그 필터 중이면 위로 · 아래로 · 폴더로 전부 끔(까닭 = 필터 · 정렬 · 더 보기보다 먼저)', () => {
+    expect(menuMoveState(DOCS, 'b', 'title', true, undefined, true)).toEqual({ up: false, down: false, sortLocked: false, filterLocked: true, downUnloaded: false, targets: [] });
+  });
+});
+
