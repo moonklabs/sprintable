@@ -279,7 +279,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     assert "BACKEND_REQUEST_TIMEOUT_SECONDS" in keys and "PUBLICATION_WORKER_SCHEDULER_DEADLINE_SECONDS" in keys
     # story #4397 — push_devices_by_user(push by person across orgs · dev on, prod off) 1필드 신설로 131→132.
     assert "PUSH_DEVICES_BY_USER" in keys
-    assert len(keys) == 132
+    # story #4398 — edge_client_ip_secret 1필드 신설(프런트가 정한 사용자 IP를 믿을 공유 비밀 · 빈 값 = 헤더 불신)로 132→133.
+    assert "EDGE_CLIENT_IP_SECRET" in keys
+    assert len(keys) == 133
 
 
 def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():

@@ -10,6 +10,7 @@ import { backendSignal, BFF_BACKEND_TIMEOUT_MS, classifyBackendAbort } from '@/l
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
 import { formatRouteTiming, isServerTimingEnabled, logRouteTiming, routeKindForPath, startRouteTimer, withServerTiming, type RouteTimer } from '@/lib/server-timing';
 import { bffEnvelopeError } from '@/lib/bff-envelope-error';
+import { edgeClientIpHeaders } from '@/lib/client-ip';
 
 // story #2499 — 이 파일이 packages/storage-api/src/utils.ts와 완전 동일한 mapApiError/
 // fastapiCall 사본을 따로 갖고 있어(#2488에서 같은 버그를 두 곳에 각각 고쳐야 했다),
@@ -112,6 +113,8 @@ async function proxyToFastapiImpl(
     const v = request.headers.get(h);
     if (v) headers[h] = v;
   }
+  // story #4398 — 요청 상한이 셀 사용자 IP를 여기서 한 번 정해 비밀과 함께 싣는다(client-ip.ts). 비밀이 없으면 안 싣는다.
+  Object.assign(headers, edgeClientIpHeaders(request.headers));
   // story #3786 후속(유나 실측·페드루 그라운딩 2026-09-10) — getLocale()(쿠키→
   // Accept-Language 헤더→기본값 순, src/i18n/request.ts)이 앱 화면이 실제로 그리는
   // 그 언어를 그대로 돌려준다 — 화면과 BE 응답 언어가 갈리지 않게 항상 싣는다.

@@ -35,8 +35,19 @@ limiter = Limiter(
 # 단일 인스턴스라 분산 보장이 애초에 불필요, 오늘 동작과 동일.
 # wrap_exceptions=True — 원 redis-py 예외(ConnectionError 등)를 limits.errors.StorageError
 # 로 통일해, main.py 의 전용 핸들러가 백엔드 종류와 무관하게 503 으로 fail-closed 처리한다.
+def _rate_key_by_client_ip(request: Request) -> str:
+    """story #4398 1단계 — `_rate_key`와 같되 IP는 `client_ip`(프런트가 정한 사용자 IP · 아니면 앞단이 붙인 접속 주소)로.
+    전 사용자 합산으로 묶일 때 가장 무거운 Redis 전역 둘(set-password/request · resend-verification)부터 옮긴다 — 공유 limiter는 2단계."""
+    from app.core.client_ip import client_ip
+
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer sk_live_"):
+        return f"api_key:{auth[7:37]}"
+    return client_ip(request)
+
+
 resend_verification_limiter = Limiter(
-    key_func=_rate_key,
+    key_func=_rate_key_by_client_ip,
     storage_uri=settings.redis_url or "memory://",
     storage_options={"wrap_exceptions": True},
     enabled=not _TESTING,

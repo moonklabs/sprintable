@@ -14,6 +14,8 @@
  */
 import { backendSignal, BFF_BACKEND_TIMEOUT_MS, classifyBackendAbort } from '@/lib/backend-signal';
 import { bffEnvelopeError } from '@/lib/bff-envelope-error';
+import { edgeClientIpHeaders } from '@/lib/client-ip';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 export interface BackendFetchInit extends Omit<RequestInit, 'signal'> {
   /** 원 요청 — 브라우저가 끊으면 백엔드 호출도 끊는다(`timeLimitOnly`면 안 넘긴다). 요청 스코프가 없으면 null. */
@@ -28,11 +30,40 @@ const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
 // 본문을 여기서 풀어(압축 해제된 채) 다시 싣는다 — 원래 길이 · 압축 표시는 거짓이 된다.
 const DROP_HEADERS = ['content-encoding', 'content-length', 'transfer-encoding'];
 
+/**
+ * story #4398 — 백엔드로 가는 호출에만 사용자 IP 두 헤더(`client-ip.ts`)를 싣는다. 원 요청이 안 넘어오면 요청 스코프의 헤더를 읽고,
+ * 그것도 없으면(요청 밖) 아무것도 안 싣는다 — 백엔드는 자기 앞단의 접속 주소로 센다.
+ */
+async function withEdgeClientIp(
+  url: string, headers: HeadersInit | undefined, request: Request | null,
+): Promise<HeadersInit | undefined> {
+  if (!url.startsWith(fastapiBaseUrl())) return headers;
+  let incoming: Pick<Headers, 'get'> | null = request?.headers ?? null;
+  if (!incoming) {
+    try {
+      const { headers: requestHeaders } = await import('next/headers');
+      incoming = await requestHeaders();
+    } catch {
+      incoming = null;
+    }
+  }
+  const extra = edgeClientIpHeaders(incoming);
+  if (Object.keys(extra).length === 0) return headers;
+  // 부르는 쪽이 준 모양을 지킨다(평범한 객체는 평범한 객체로 — 호출부 · 테스트가 `init.headers['…']`로 읽는다).
+  if (headers instanceof Headers || Array.isArray(headers)) {
+    const out = new Headers(headers);
+    for (const [k, v] of Object.entries(extra)) out.set(k, v);
+    return out;
+  }
+  return { ...(headers ?? {}), ...extra };
+}
+
 export async function backendFetch(url: string, init: BackendFetchInit = {}): Promise<Response> {
   const { request = null, timeoutMs = BFF_BACKEND_TIMEOUT_MS, timeLimitOnly = false, ...rest } = init;
   const signal = backendSignal(timeLimitOnly ? null : request, timeoutMs);
   try {
-    const res = await fetch(url, { ...rest, signal });
+    const requestHeaders = await withEdgeClientIp(url, rest.headers, request);
+    const res = await fetch(url, { ...rest, ...(requestHeaders === rest.headers ? {} : { headers: requestHeaders }), signal });
     const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.arrayBuffer();
     const headers = new Headers(res.headers);
     for (const h of DROP_HEADERS) headers.delete(h);
