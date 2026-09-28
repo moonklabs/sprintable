@@ -6,6 +6,10 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { AgentApiKeyManager } from './agent-api-key-manager';
 
+// story #4359(까디르 4740) — 실패 toast는 늘 ko 키(원인 영어 Error 메시지는 로그로만) → toast를 손에 쥔다.
+const addToast = vi.fn();
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast }) }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -169,7 +173,7 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     const generateBtn = Array.from(document.querySelectorAll('button'))
-      .find((b) => b.textContent === 'Generate API Key');
+      .find((b) => b.textContent === koMessages.settings.agentApiKeyGenerate); // story #4359 — ko 문구
     expect(generateBtn).toBeTruthy();
     await act(async () => { generateBtn?.click(); await Promise.resolve(); await Promise.resolve(); });
 
@@ -209,12 +213,83 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     });
 
     const generateBtn = Array.from(document.querySelectorAll('button'))
-      .find((b) => b.textContent === 'Generate API Key');
+      .find((b) => b.textContent === koMessages.settings.agentApiKeyGenerate); // story #4359 — ko 문구
     await act(async () => { generateBtn?.click(); await Promise.resolve(); await Promise.resolve(); });
 
     expect(capturedBody).toBeTruthy();
     const parsed = JSON.parse(capturedBody as unknown as string) as { expires_at?: string | null };
     expect('expires_at' in parsed).toBe(true);
     expect(parsed.expires_at).toBeNull();
+  });
+});
+
+// [SID:4311 PR 3] 머리 줄은 목록 라벨(같은 이름 둘이면 «· ID 앞 8자») · 없으면 agentName 그대로.
+describe('AgentApiKeyManager — 머리 줄 라벨([SID:4311 PR 3])', () => {
+  it('agentLabel이 오면 머리 줄에 그 라벨 · 안 오면 agentName', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="aaaa1111-1" agentName="봇" agentLabel="봇 · aaaa1111" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('h3')?.textContent).toBe(koMessages.settings.agentApiKeyListTitle.replace('{name}', '봇 · aaaa1111')); // story #4359 — ko 머리 줄
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="aaaa1111-1" agentName="봇" />
+        </NextIntlClientProvider>,
+      );
+    });
+    expect(document.querySelector('h3')?.textContent).toBe(koMessages.settings.agentApiKeyListTitle.replace('{name}', '봇')); // story #4359 — ko 머리 줄
+  });
+});
+
+
+// story #4359(까디르 4740 ①②) — 이 파일에 남아 있던 보이는 영어: 실패 toast가 영어 `error.message`를 그대로 보여 줌 ·
+// 목록 줄(마지막 사용 · 무효화 · 만료 · N일 뒤 만료) · 생성 창 복사 버튼 — 모두 ko 키로.
+describe('AgentApiKeyManager — 보이는 영어 0(story #4359)', () => {
+  async function render(keys: unknown[] | null) {
+    addToast.mockClear();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => (keys === null
+      ? new Response('boom', { status: 500 })
+      : new Response(JSON.stringify({ data: keys }), { status: 200 }))));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐불러오기 실패 toast 본문 = ko 키(영어 «Failed to load API keys» 아님) · 원인은 로그로', async () => {
+    await render(null);
+    const errorToast = addToast.mock.calls.map((c) => c[0] as { type: string; body: string }).find((x) => x.type === 'error');
+    expect(errorToast?.body).toBe(koMessages.settings.agentApiKeyLoadFailed);
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('⭐목록 줄 — 마지막 사용 · 무효화 · 만료 날짜가 ko 문구 · 영어 낱말 0', async () => {
+    const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    const later = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
+    const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    await render([
+      { ...apiKeyFixture(['read']), id: 'k1', last_used_at: past, expires_at: soon },
+      { ...apiKeyFixture(['read']), id: 'k2', revoked_at: past },
+      { ...apiKeyFixture(['read']), id: 'k3', expires_at: later },
+      { ...apiKeyFixture(['read']), id: 'k4', expires_at: past },
+    ]);
+    const text = container.textContent ?? '';
+    expect(text).toContain('마지막 사용');
+    expect(text).toContain('무효화');
+    expect(text).toMatch(/3일 뒤 만료/);
+    expect(text).toContain('만료 ');
+    expect(text).toContain('만료됨');
+    expect(text).not.toMatch(/Last used|Revoked|Expire/);
   });
 });

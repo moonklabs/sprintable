@@ -3,7 +3,7 @@ import { HypothesisService } from '@/services/hypothesis';
 import { createHypothesisRepository } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -12,7 +12,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 

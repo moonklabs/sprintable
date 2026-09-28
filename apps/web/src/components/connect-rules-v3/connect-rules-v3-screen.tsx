@@ -1,0 +1,150 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { fetchMe } from '@/lib/me-client';
+import { ConnectRulesV3Agents } from './connect-rules-v3-agents';
+import { ConnectRulesV3Channels } from './connect-rules-v3-channels';
+import { ConnectRulesV3Rules } from './connect-rules-v3-rules';
+import { ConnectRulesV3Events } from './connect-rules-v3-events';
+import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
+import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
+import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
+import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
+
+/**
+ * story #3982(E-UX-OVERHAUL·「연결·규칙」 구현 2/N·FE) — 시안 ⑤ 그대로. A(외부 발행
+ * 일시 중지) 절은 #4363(#3953) 착지 뒤 별도 rebase로 추가(AC7) — 이 PR엔 없음.
+ *
+ * org_id는 (authenticated) 밖이라 DashboardContext가 없다 — agent-management-tab.tsx가
+ * 이미 하는 `/api/me` 1콜(story #4184부터 `fetchMe()` 공유 요청)에서 org_id만 뽑는다(새 BE 0).
+ *
+ * story #4004 — nav 렌더(목적지·활성/호버/포커스 스타일)는 공유
+ * `NavV3ItemList`가, story #4006 — nav 칸의 폭·접힘은 공유 `NavV3Sidebar`가 전담한다.
+ * 이 화면 자신은 목적지 문자열·`w-[216px]` 리터럴을 안 가진다.
+ */
+
+function ConnectRulesV3Topbar() {
+  const t = useTranslations('connectRulesV3');
+  return (
+    <div className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-card px-5" data-testid="connect-rules-v3-topbar">
+      <div className="flex h-[34px] max-w-[420px] flex-1 items-center gap-2 rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
+        <span>{t('searchPlaceholder')}</span>
+      </div>
+    </div>
+  );
+}
+
+// PO CHANGES-r3-1(2026-09-17) — `/api/me`는 이 화면에서 org_id 해소용으로 이미 1회
+// 부른다. `role`도 같은 응답에 실려 오므로 여기서 함께 뽑아 하위 절(에이전트)로
+// prop 전달 — 그 절이 같은 콜을 중복하지 않게 한다(첫 화면 콜 예산 ≤6 준수).
+function useMe() {
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  // story #4019(PO 確定 2026-09-17) — OAuthResultBanner의 CHANNEL_APP_CREDENTIALS_MISSING
+  // 분기는 owner|admin 폭(isAdmin)이 아니라 owner 단독(isOwnerStrict)을 요구한다(레거시
+  // channels/page.tsx:1142 `isOwnerStrict = currentRole === 'owner'`와 동일 근거 —
+  // 앱 자격 등록이 owner 전용). 같은 /api/me 응답의 role을 한 번 더 갈라 낸다(새 콜 0).
+  const [isOwnerStrict, setIsOwnerStrict] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadError(false);
+    fetchMe()
+      .then((res) => (res.ok ? res.json() as Promise<{ data?: { org_id?: string; role?: string } }> : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((json) => {
+        if (cancelled) return;
+        const id = json.data?.org_id;
+        if (id) {
+          setOrgId(id);
+          setIsAdmin(json.data?.role === 'admin' || json.data?.role === 'owner');
+          setIsOwnerStrict(json.data?.role === 'owner');
+        } else {
+          setLoadError(true);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoadError(true); });
+    return () => { cancelled = true; };
+  }, [retryNonce]);
+
+  return { orgId, isAdmin, isOwnerStrict, loadError, retry: () => setRetryNonce((n) => n + 1) };
+}
+
+export function ConnectRulesV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Flags }) {
+  const t = useTranslations('connectRulesV3');
+  const tc = useTranslations('common');
+  const { orgId, isAdmin, isOwnerStrict, loadError, retry } = useMe();
+  // story #4006 AC8 — 좁은 폭 하단 탭 배지. 이 화면은 today-v3-screen.tsx와 같은 제약
+  // (team_member_id 없음, SSE 구독 없음) — 마운트 스냅숏 근사치.
+  const chatUnreadTotal = useChatUnreadTotal();
+
+  return (
+    <div className="v3-shell-root flex h-screen min-h-0 flex-col bg-muted/20" data-testid="connect-rules-v3-screen">
+      <div className="flex min-h-0 flex-1">
+        <NavV3Sidebar flags={flags} activeKey="connectRules" />
+        <div className="flex min-w-0 flex-1 flex-col">
+        <ConnectRulesV3Topbar />
+        <div className="min-h-0 flex-1 overflow-auto p-6">
+          <div className="mx-auto max-w-[720px] space-y-8">
+            <div>
+              <h1 className="mb-1 text-[22px] font-bold tracking-tight text-foreground">{t('pageTitle')}</h1>
+              <p className="text-sm text-muted-foreground">{t('pageDescription')}</p>
+            </div>
+
+            {loadError ? (
+              <div className="flex flex-col items-center gap-3 py-10 text-center">
+                <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
+                <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
+              </div>
+            ) : !orgId ? (
+              <div className="space-y-3" data-testid="connect-rules-v3-loading">
+                <Skeleton className="h-24" />
+                <Skeleton className="h-24" />
+              </div>
+            ) : (
+              <>
+                <section aria-label={t('agentsSectionTitle')}>
+                  <div className="mb-2.5 flex items-baseline gap-2.5">
+                    <h2 className="text-sm font-semibold text-foreground">{t('agentsSectionTitle')}</h2>
+                    <span className="text-[11px] text-muted-foreground">{t('agentsSectionHint')}</span>
+                  </div>
+                  <ConnectRulesV3Agents isAdmin={isAdmin} />
+                </section>
+
+                <section aria-label={t('channelsSectionTitle')}>
+                  <div className="mb-2.5 flex items-baseline gap-2.5">
+                    <h2 className="text-sm font-semibold text-foreground">{t('channelsSectionTitle')}</h2>
+                    <span className="text-[11px] text-muted-foreground">{t('channelsSectionHint')}</span>
+                  </div>
+                  <ConnectRulesV3Channels orgId={orgId} isOwnerStrict={isOwnerStrict} />
+                </section>
+
+                <section aria-label={t('rulesSectionTitle')}>
+                  <div className="mb-2.5 flex items-baseline gap-2.5">
+                    <h2 className="text-sm font-semibold text-foreground">{t('rulesSectionTitle')}</h2>
+                    <span className="text-[11px] text-muted-foreground">{t('rulesSectionHint')}</span>
+                  </div>
+                  <ConnectRulesV3Rules orgId={orgId} />
+                </section>
+
+                <section aria-label={t('eventsAutomationSectionTitle')}>
+                  <div className="mb-2.5 flex items-baseline gap-2.5">
+                    <h2 className="text-sm font-semibold text-foreground">{t('eventsAutomationSectionTitle')}</h2>
+                  </div>
+                  <ConnectRulesV3Events orgId={orgId} />
+                </section>
+              </>
+            )}
+          </div>
+        </div>
+        </div>
+      </div>
+      <MobileTabBar chatUnreadTotal={chatUnreadTotal} navV3Flags={flags} />
+    </div>
+  );
+}

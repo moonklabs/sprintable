@@ -66,7 +66,7 @@ class AgentSessionRepository:
                 AgentSession.project_id == project_id,
                 AgentSession.deleted_at.is_(None),
             )
-            .order_by(AgentSession.last_activity_at.desc())
+            .order_by(AgentSession.last_activity_at.desc(), AgentSession.id.desc())
             .limit(min(limit, 100))
         )
         if agent_id:

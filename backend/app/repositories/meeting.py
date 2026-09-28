@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select, update
@@ -27,14 +28,24 @@ class MeetingRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list(self, **filters: Any) -> list[Meeting]:
+    async def list(
+        self, *, date_from: datetime | None = None, date_to: datetime | None = None, limit: int | None = None, **filters: Any,
+    ) -> list[Meeting]:
         q = select(Meeting).where(
             self._project_filter(),
             Meeting.deleted_at.is_(None),
         )
+        # story #4329 — 날짜 범위(양 끝 포함). 오프셋 확인은 라우터(`aware_datetime_query`)가 한다.
+        if date_from is not None:
+            q = q.where(Meeting.date >= date_from)
+        if date_to is not None:
+            q = q.where(Meeting.date <= date_to)
         for attr, val in filters.items():
             q = q.where(getattr(Meeting, attr) == val)
-        q = q.order_by(Meeting.date.desc())
+        # story #4329(까디르) — 같은 시각 회의가 여럿이면 순서가 매번 달라 limit 경계가 흔들린다 → id로 끊는다.
+        q = q.order_by(Meeting.date.desc(), Meeting.id.desc())
+        if limit is not None:
+            q = q.limit(limit)
         result = await self.session.execute(q)
         return list(result.scalars().all())
 

@@ -83,14 +83,14 @@ describe('deriveLoopQueueItems', () => {
     expect(items[0]!.crossProjectLabel).toBe('other-proj');
   });
 
-  it('slug 맵에 없는 project_id는 bare path로 폴백한다(지어내지 않음)', () => {
+  it('slug 맵에 없는 project_id는 경로를 지어내지 않고 그 project_id를 `?p=`로(#4231 4차)', () => {
     const items = deriveLoopQueueItems(
       [raw({ work_item_type: 'epic', work_item_id: 'g1', reason: 'measure_after_overdue', project_id: 'p-unknown' })],
       t,
       { orgSlug: 'moonklabs', activeProjectId: 'p-active' },
       {},
     );
-    expect(items[0]!.href).toBe('/flow?view=flow&goal=g1');
+    expect(items[0]!.href).toBe('/flow?view=flow&goal=g1&p=p-unknown'); // #4231 4차 — slug는 몰라도 항목의 project_id는 안다(지어내지 않음)
     expect(items[0]!.crossProjectLabel).toBeNull();
   });
 

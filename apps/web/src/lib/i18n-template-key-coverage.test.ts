@@ -25,9 +25,16 @@
 //      BE `/api/v2/mcp/toolset-catalog`가 SSOT라 그룹 키가 백엔드에서 늘어날 수 있다.
 //      현재 알려진 17개(폴백 상수 `toolset-catalog.ts`) 전량은 아래 표로 커버되지만,
 //      새 그룹이 백엔드에만 추가되면 컴파일 타임으로 못 잡는 자리로 남는다.
+//
+// story #3732(2026-09-22) — TEMPLATE_KEY_TABLE 자체는 lib/i18n-template-key-table.ts로
+// 이관(이 파일 옛 주석이 이미 예고한 verify-no-unused-i18n-keys.ts 재사용처가 plain tsx
+// CLI에서 이 .test.ts를 직접 import하면 아래 describe/it가 vitest 러너 밖에서 즉시
+// 실행돼 깨지기 때문 — 값 복제 0, SSOT 위치만 이동). 이 테스트는 그 표를 re-import해
+// 그대로 검증한다.
 import { describe, expect, it } from 'vitest';
 import ko from '../../messages/ko.json';
 import en from '../../messages/en.json';
+import { TEMPLATE_KEY_TABLE } from './i18n-template-key-table';
 
 function hasKey(messages: unknown, dotted: string): boolean {
   const parts = dotted.split('.');
@@ -38,41 +45,6 @@ function hasKey(messages: unknown, dotted: string): boolean {
   }
   return typeof cur === 'string';
 }
-
-// [prefix, values[], sourceOfTruth] — sourceOfTruth는 그 값 집합을 어디서 실제로 확인했는지
-// (다음 사람이 재검증할 때 다시 읽을 자리).
-// ⛔이 표는 손으로 갱신해야 한다(PO 리뷰, 2026-07-27) — 정적 스캔이 아니라 하드코딩이라,
-// 새 템플릿 조합 키(`t(\`prefix_${var}\`)` 형태)를 만들면 이 표가 조용히 낡는다. 그 상태로는
-// 가드가 계속 초록인데 새 키만 화면에 그대로 뜬다 — 새 조합 키를 추가할 때 반드시 여기 항목을
-// 같이 추가할 것.
-// story #3728 — export되어 verify-no-unused-i18n-keys.ts(reverse-key 가드)가 재사용한다.
-// 이 표에 등록된 조합 키는 "사용됨"으로 간주(정적 스캔이 못 보는 동적 조합의 알려진
-// 유한 부분집합) — 복제 0, 소비처가 이 표 하나를 SSOT로 같이 본다.
-export const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
-  ['proofCapsule.risk.', ['low', 'medium', 'high'], 'proof-capsule.tsx RISK_KEY 값 타입'],
-  ['gateConfig.work_', ['done', 'merge'], 'gate-level-matrix.tsx WORK_TYPES'],
-  ['gateConfig.actor_', ['agent', 'human'], 'gate-level-matrix.tsx ACTOR_TYPES'],
-  ['standup.reviewType_', ['comment', 'approve', 'request_changes'], 'standup-feedback-dialog.tsx StandupReviewType'],
-  ['agentRuns.billingMode_', ['managed', 'byom'], 'agent-runs-list.tsx AgentRun.llm_provider'],
-  ['agentRuns.status_', ['queued', 'held', 'running', 'hitl_pending', 'completed', 'failed', 'abandoned'], 'agent-runs-list.tsx AgentRun.status(story #3680 — abandoned 추가)'],
-  ['agentRuns.failureDisposition_', ['retry_scheduled', 'retry_launched', 'retry_exhausted', 'non_retryable'], 'agent-runs-list.tsx AgentRun.failure_disposition'],
-  ['agents.toolPermissions.groups.', ['core', 'stories', 'tasks', 'sprints', 'epics', 'chat', 'docs', 'analytics', 'retro', 'standup', 'meetings', 'notifications', 'webhooks', 'rewards', 'audit', 'agent_runs', 'admin'], 'toolset-catalog.ts 폴백 그룹(BE가 SSOT — ②로 별도 명시)'],
-  ['loops.entityType', ['Loop', 'Hypothesis', 'Decision'], 'context-pack-panel.tsx entity_type 타입'],
-  ['loops.aiConfidenceLevel_', ['high', 'medium', 'low'], 'ai-attribution.tsx AiConfidence'],
-  ['canvas.responsivePreview', ['Desktop', 'Tablet', 'Mobile'], 'artifact-expand-dialog.tsx PreviewBreakpoint'],
-  ['canvas.galleryAxis', ['Epic', 'Story', 'Sprint', 'Doc'], 'artifact-gallery.ts GalleryAxis'],
-  ['canvas.galleryFormat', ['Html', 'Tree', 'Image'], 'canvas.ts ArtifactFormat'],
-  ['glance.phrase.', ['notStarted', 'justStarted', 'underway', 'almostThere', 'wrappingUp'], 'glance.ts derivePhrase() 반환값'],
-  ['loops.status', ['Draft', 'Briefing', 'Generating', 'Deciding', 'Executing', 'Measuring', 'Closed', 'Abandoned'], 'loop-status-badge.tsx LoopStatus'],
-  ['settings.notification_category_', ['story', 'task', 'sprint', 'system'], 'settings/page.tsx NOTIFICATION_CATEGORIES'],
-  ['settings.event_', ['story', 'story_assigned', 'task', 'task_assigned', 'task_completed', 'sprint_closed', 'info', 'warning', 'system', 'standup_reminder', 'reward', 'invitation'], 'settings/page.tsx NOTIFICATION_CATEGORIES[].types'],
-  // story #3728(unused-key 역방향 가드 착수 중 발견) — recruiter-client.tsx WakeMethodBody의
-  // `t.rich(\`kitOrientingWakeBody_${method}\`, ...)`가 애초에 이 표에 등록된 적이 없던
-  // 진짜 사각(이 가드 자신의 미검출 갭). 'unknown'은 별도 분기(kitOrientingWakeBodyUnknown,
-  // 위 t('...') 정적 호출로 이미 잡힘)라 여기 값 목록에서 제외 — RuntimeWakeMethod(services/
-  // recruit.ts)의 나머지 5값. 5키 전부 ko/en에 이미 존재 확認(신규 추가 아님).
-  ['recruiter.kitOrientingWakeBody_', ['channel-plugin', 'channel-plugin-marketplace', 'connector-host', 'connector-sidecar', 'connector-sdk'], 'services/recruit.ts RuntimeWakeMethod(\'unknown\' 제외 — 별도 분기)'],
-];
 
 describe('i18n 템플릿 리터럴 조합 키 커버리지 — 정적 가드 사각지대의 유한 부분집합 (#2228)', () => {
   it('전개된 조합 키가 전부 ko.json·en.json 양쪽에 존재한다', () => {

@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAccountSwitcher } from '@/hooks/use-account-switcher';
 import { memberDisplayLabel } from '@/lib/member-display';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ProfileMenuProps {
   // story #3775 — OAuth 신규 가입은 display_name을 안 채우는 게 정직한 경로(3758 確定)라
@@ -62,6 +63,7 @@ function Avatar({ url, label, className }: { url?: string | null; label: string;
 }
 
 export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const tn = useTranslations('nav');
   // story #3775 — useAccountSwitcher(아래)에 넘길 표시명을 미리 정해야 해서 그 훅이
   // 돌려주는 tc보다 먼저 이 자리에서 한 번 더 bind한다(같은 ns, next-intl에 이중 호출
@@ -131,12 +133,12 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
             항목이 사라진다(재노출 조건 자체가 불필요 — 상태가 곧 표시). 기존 「설정」
             항목과 같은 형·같은 경로(/settings), 새 길 0. */}
         {!hasName && (
-          <DropdownMenuItem render={<Link href="/settings" />}>
+          <DropdownMenuItem render={<Link href={flatHref('/settings')} />}>
             <UserPen className="size-4" />
             {t('setName')}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem render={<Link href="/settings" />}>
+        <DropdownMenuItem render={<Link href={flatHref('/settings')} />}>
           <Settings className="size-4" />
           {tn('settings')}
         </DropdownMenuItem>

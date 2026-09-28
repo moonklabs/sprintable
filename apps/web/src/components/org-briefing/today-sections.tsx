@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { formatCount } from '@/components/content/generation-budget-indicator';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import {
   hrefForNeedsMeItem,
   type NeedsMeState,
@@ -16,6 +16,8 @@ import {
   type TodayPublished,
   type TodayUsage,
 } from './derive-today';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 
 // story #3831(UX-v3·FE 3·오늘) — 낱말 표 §① 상태 3어(PO 確定 2026-09-13 09:43Z) 매핑.
 // 돈·외부 발송 구분은 pill로 안 가른다(API가 그 축을 모른다, gap3 판정 그대로) — 필요하면
@@ -34,10 +36,18 @@ const AGENT_STATUS_KEY: Record<string, string> = {
 };
 
 function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
+  // story #4231 · #4241 — flat 링크 `?p=` · 게이트 상세는 결재 자신의 프로젝트(hrefForNeedsMeItem이 실음 · 보존) · 결재함 큐는 현재 프로젝트
+  const flatHref = useFlatHref();
   const t = useTranslations('orgBriefing');
   const meta = STATE_META[item.state];
   const Icon = meta.icon;
-  const href = hrefForNeedsMeItem(item);
+  // 대상-프로젝트: hrefForNeedsMeItem은 결재 자기 프로젝트(item.projectId)를 싣고, 현재 p(flatHref)는 결재함 큐 · 프로젝트 모를 때의 폴백에만 쓴다.
+  const href = hrefForNeedsMeItem(item, flatHref);
+  // story #4231 — 대화는 항목과 다른 프로젝트에 있을 수 있다(BE가 태그된 대화를 조직 안에서 고른다) → 대화 자기 프로젝트.
+  const conversationHref = (conversationId: string, conversationProjectId: string | null) => (conversationProjectId
+    ? withProjectParam(`/chats/${conversationId}`, conversationProjectId)
+    // 대상-프로젝트: 옛 응답(conversation_project_id 없음)일 때만 현재 p로 폴백.
+    : flatHref(`/chats/${conversationId}`));
   return (
     <div className="flex items-start gap-3 border-t border-border px-3 py-3 first:border-t-0">
       <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -71,7 +81,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
         {/* story #3831 AC4 — conversation_id 있는 행만 「대화 열기」(3828 develop 착지,
             라이브 dev-app은 배포 86 뒤 반영). 있으면 짓지 않고 실 id로만 연다. */}
         {item.conversationId ? (
-          <Link href={`/chats/${item.conversationId}`} className="text-[11px] text-primary hover:underline">
+          <Link href={conversationHref(item.conversationId, item.conversationProjectId)} className="text-[11px] text-primary hover:underline">
             {t('conversationOpenLink')}
           </Link>
         ) : null}
@@ -158,8 +168,11 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
   const t = useTranslations('orgBriefing');
   // 페드루 PO CHANGES(2026-09-14 00:58Z, PR #4256) — channel_kind가 BE 코드값 그대로
   // (youtube·hosted_site 등) 새던 결함, 채널 연결/콘텐츠 화면이 이미 쓰는 표시명 맵
-  // (channel-label.ts, 'content' 네임스페이스에도 등재돼 있음)을 재사용 — 새 낱말 0.
-  const tContent = useTranslations('content');
+  // (channel-label.ts)을 재사용 — 새 낱말 0.
+  // story #3742(디디, 근본 처방) — channelLabel()이 useChannelLabel() 훅으로 바뀌며
+  // channelConnect 네임스페이스를 내부에서 스스로 고정한다(예전엔 tContent를 넘겨
+  // 'content' 네임스페이스의 복제 키를 썼다 — 그 복제분 자체가 이 스토리로 걷혔다).
+  const channelLabel = useChannelLabel();
   const locale = useLocale();
   const isEmpty = published.count === 0 && usage.platform.length === 0;
   return (
@@ -181,7 +194,7 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
               {published.byChannel.length > 0 ? (
                 <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
                   {published.byChannel
-                    .map((c) => `${channelLabel(c.channelKind, tContent)} ${formatCount(c.count, locale)}`)
+                    .map((c) => `${channelLabel(c.channelKind)} ${formatCount(c.count, locale)}`)
                     .join(' · ')}
                 </p>
               ) : null}
@@ -189,7 +202,7 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
           ) : null}
           {usage.platform.map((p) => (
             <Card key={p.connectionId} className="p-3.5">
-              <p className="text-[11px] text-muted-foreground">{channelLabel(p.channelKind, tContent)}</p>
+              <p className="text-[11px] text-muted-foreground">{channelLabel(p.channelKind)}</p>
               <p className="mt-1 text-lg font-semibold text-foreground">
                 {formatCount(p.used, locale)}/{formatCount(p.limit, locale)}
               </p>

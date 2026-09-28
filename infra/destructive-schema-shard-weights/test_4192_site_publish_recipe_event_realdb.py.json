@@ -1,0 +1,1 @@
+{"file": "tests/test_4192_site_publish_recipe_event_realdb.py", "sec": 70.0, "provisional": true, "source": "story #4192(미르코, 2026-09-23) — 로컬 raw pytest 6건 11.2s 실측을 CI 배율(~6x, story #3383 관례)로 보수 반영한 잠정값 · CI 첫 run 샤드 실측으로 교체 예정 — provisional:true(story #4152/#4159 관례)"}

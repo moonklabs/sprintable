@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { memberLookup } from '@/lib/member-display';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   Shield, ShieldCheck, ShieldX, RotateCcw, Pencil, History, User, ChevronDown,
@@ -18,7 +20,9 @@ import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk'
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
+import { useFieldDraft } from '@/hooks/use-field-draft';
 
 /**
  * E-DG S28 + 24f5ae18/34360c54 — doc decision gate UI(doc 상세 상단). S24 hypothesis-gate-badge 어휘 미러·신규 토큰 0.
@@ -52,6 +56,8 @@ interface AuditEvent {
   key: string;
   kind: AuditKind;
   name: string;
+  // [SID:4286] 이름이 폴백(«이름 없는 구성원» · «알 수 없는 구성원»)이면 «님» 없는 문장 키로(유나 결정 4).
+  nameFallback?: boolean;
   at: string;
   version?: number;
   note?: string | null;
@@ -79,6 +85,7 @@ export function DocGateSection({
   onTransitioned: () => void;
 }) {
   const t = useTranslations('docs');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const { currentTeamMemberId } = useDashboardContext();
@@ -88,7 +95,8 @@ export function DocGateSection({
   const [busy, setBusy] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false); // 기본 접힘(본문 우선·이력 secondary)
   const [rejectOpen, setRejectOpen] = useState(false);
-  const [note, setNote] = useState('');
+  // story #4370 — 반려 사유(여러 줄)는 게이트별 초안: 페이지를 떠났다 와도 남고, 보이는 «취소»와 반려 성공에서만 지운다.
+  const [note, setNote, clearNoteDraft] = useFieldDraft({ surface: 'doc-gate-reject', targetId: gate?.id ?? null, field: 'reason' }, '');
   // story #6c89e40d(페드루 PO 판정 2026-08-17, ⓑ) — doc_approval이 ⓐ항목(하위 처방)으로 high 세트에 명시
   // 등재되며 usesSignatureFlow가 항상 true가 되므로, 결재함 카드(approvals-queue.tsx)와
   // 동일 패턴(canonical GateSignatureApproval을 Dialog로) 그대로 배선한다 — 새 UI 발명 0.
@@ -109,7 +117,8 @@ export function DocGateSection({
     const [gates, revsJson, membersJson] = await Promise.all([
       fetchWithAuth(`/api/gates?work_item_id=${docId}&work_item_type=doc`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       fetchWithAuth(`/api/docs/${docId}/revisions`).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
-      fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      // [SID:4300] 이름만 쓰는 표 — 비활성 에이전트도 «목록이 거른 것»이라 비활성까지 싣는 조직 원천(떠난 사람은 BE 4303 대기).
+      fetchWithAuth(ORG_NAMES_URL).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
     ]);
     if (signal?.aborted) return;
     const gs = (Array.isArray(gates) ? gates : []) as GateItem[];
@@ -137,7 +146,10 @@ export function DocGateSection({
   const isDraft = status === 'draft';
   // 자격 = gate.can_approve(BE per-caller·rule A: human+has_project_access+not-author). FE=가시성·실 authz=BE 403.
   const isApprover = status === 'pending' && gate?.can_approve === true;
-  const resolveName = (id: string | null | undefined) => (id ? (memberNames[id] ?? id.slice(0, 6)) : '—');
+  // [SID:4286] 구성원 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원». 이름 표는 게이트 · 개정 목록과
+  // 같은 load(Promise.all)에서 함께 채워져, 이름을 찾는 시점엔 늘 다 불러온 상태(불러오는 중 갈래 없음 → loaded: true).
+  const resolveNameInfo = (id: string | null | undefined) => (id ? memberLookup(memberNames, id, tc, { loaded: true }) : null);
+  const resolveName = (id: string | null | undefined) => (id ? (resolveNameInfo(id)?.label ?? '') : '—');
   // story #3493 — gate.resolved_at·ev.at은 "기록"(정본 formatRelativeTime).
   const fmtDate = (s: string | undefined) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
 
@@ -181,7 +193,7 @@ export function DocGateSection({
       const json = await res.json().catch(() => null) as {
         data?: Array<{ id: string; user_id: string | null; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member' }>;
       } | null;
-      const { options, hasDuplicateNames } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId);
+      const { options, hasDuplicateNames } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId, { unnamed: tc('memberUnnamed') });
       setApproverOptions(options);
       setApproverHasDuplicateNames(hasDuplicateNames);
     } catch {
@@ -226,27 +238,29 @@ export function DocGateSection({
   const submitReject = async () => {
     if (!currentTeamMemberId) return;
     const { ok } = await gateTransition({ status: 'rejected', resolver_id: currentTeamMemberId, note: note.trim() || null });
-    if (ok) { setRejectOpen(false); setNote(''); } // 실패 시 모달 유지·재시도 허용
+    if (ok) { setRejectOpen(false); clearNoteDraft(); } // 실패 시 모달 유지·재시도 허용
   };
 
   // story #6c89e40d(ⓑ) — GateSignatureApproval 하나가 승인/반려 둘 다 담당(canonical과 동형).
   // approve만 evidence_viewed=true(canSign 게이팅 자체가 열람 확인 — gates/[id]/page.tsx와 동일 근거).
-  const sigApprove = async (reason: string) => {
-    if (!currentTeamMemberId) return;
+  const sigApprove = async (reason: string): Promise<boolean> => {
+    if (!currentTeamMemberId) return false;
     setSigError(null);
     const { ok, error } = await gateTransition({
       status: 'approved', resolver_id: currentTeamMemberId, note: reason.trim() || null, evidence_viewed: true,
     });
     if (ok) setSigOpen(false); else setSigError(error ?? null);
+    return ok;  // story #4370 — 성공이면 서명 사유 초안을 지운다
   };
 
-  const sigReject = async (reason: string) => {
-    if (!currentTeamMemberId) return;
+  const sigReject = async (reason: string): Promise<boolean> => {
+    if (!currentTeamMemberId) return false;
     setSigError(null);
     const { ok, error } = await gateTransition({
       status: 'rejected', resolver_id: currentTeamMemberId, note: reason.trim() || null,
     });
     if (ok) setSigOpen(false); else setSigError(error ?? null);
+    return ok;
   };
 
   // audit 타임라인 이벤트(display 병합): revision = 검토요청/재검토요청, gate resolution = 승인/반려(+사유).
@@ -256,15 +270,16 @@ export function DocGateSection({
       key: `rev-${rev.id}`,
       kind: i === 0 ? 'request' : 'resubmit',
       name: resolveName(rev.created_by),
+      nameFallback: resolveNameInfo(rev.created_by)?.fallback ?? false,
       at: rev.created_at ?? '',
       version: i + 1,
     });
   });
   if (gate && gate.resolved_at) {
     if (gate.status === 'approved' || gate.status === 'confirmed') {
-      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', name: resolveName(gate.resolver_id), at: gate.resolved_at });
+      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', name: resolveName(gate.resolver_id), nameFallback: resolveNameInfo(gate.resolver_id)?.fallback ?? false, at: gate.resolved_at });
     } else if (gate.status === 'rejected' || gate.status === 'denied') {
-      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', name: resolveName(gate.resolver_id), at: gate.resolved_at, note: gate.resolution_note });
+      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', name: resolveName(gate.resolver_id), nameFallback: resolveNameInfo(gate.resolver_id)?.fallback ?? false, at: gate.resolved_at, note: gate.resolution_note });
     }
   }
   auditEvents.sort((a, b) => b.at.localeCompare(a.at)); // 최신 우선
@@ -281,7 +296,7 @@ export function DocGateSection({
           <span className="grid size-6 shrink-0 place-items-center text-muted-foreground">
             <Shield className="size-4" />
           </span>
-          <span className="min-w-0 flex-1 text-xs text-muted-foreground">{t('docGateRequestReviewHint')}</span>
+          <span className="min-w-0 flex-1 break-keep text-xs text-muted-foreground">{t('docGateRequestReviewHint')}</span>
           <Button
             size="sm"
             variant="default"
@@ -300,11 +315,11 @@ export function DocGateSection({
       {isDraft && approverPickerOpen ? (
         <div className="space-y-1.5">
           {approverError ? (
-            <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">{approverError}</p>
+            <p role="alert" aria-live="assertive" className="break-keep text-[11px] text-foreground">{approverError}</p>
           ) : null}
           {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
           {approverHasDuplicateNames ? (
-            <p role="alert" className="text-[11px] text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
+            <p role="alert" className="break-keep text-[11px] text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
           ) : null}
           <OperatorDropdownSelect
             value={selectedApprover}
@@ -366,7 +381,7 @@ export function DocGateSection({
             </>
           ) : state === 'pending' ? (
             /* ② pending + author/비자격자 = 검토자 응답 대기(액션 없음·self-approval 금지). */
-            <span className="text-xs text-muted-foreground">
+            <span className="break-keep text-xs text-muted-foreground">
               {t('docGateAwaitingGeneric')}
             </span>
           ) : state === 'confirmed' && gate ? (
@@ -395,7 +410,7 @@ export function DocGateSection({
       {state === 'denied' ? (
         <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive-tint p-2.5">
           <p className="text-xs font-medium text-foreground">{t('docGateDeniedReason')}</p>
-          <p className="whitespace-pre-wrap text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
+          <p className="whitespace-pre-wrap break-keep [overflow-wrap:anywhere] text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <span className="inline-flex items-center gap-1"><User className="size-3" />{resolveName(gate?.resolver_id)}</span>
             {gate?.resolved_at ? <span>· {fmtDate(gate.resolved_at)}</span> : null}
@@ -430,13 +445,13 @@ export function DocGateSection({
                       <AIcon className="size-2.5" />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-xs text-foreground">
-                        {t('docGateAuditBy', { name: ev.name, action: t(am.labelKey) })}
+                      <p className="break-keep text-xs text-foreground">
+                        {t(ev.nameFallback ? 'docGateAuditByFallback' : 'docGateAuditBy', { name: ev.name, josa: pickIGaJosa(ev.name), action: t(am.labelKey) })}
                         {ev.version ? <span className="text-muted-foreground"> (v{ev.version})</span> : null}
                       </p>
                       <p className="mt-px text-[10.5px] text-muted-foreground">{fmtDate(ev.at)}</p>
                       {ev.note?.trim() ? (
-                        <p className="mt-1 whitespace-pre-wrap rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
+                        <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
                       ) : null}
                     </div>
                   </li>
@@ -455,16 +470,16 @@ export function DocGateSection({
               <ShieldX className="size-4 shrink-0 text-destructive" />
               <DialogTitle className="text-sm font-semibold">{t('docGateRejectModalTitle')}</DialogTitle>
             </div>
-            <label className="mb-1.5 block text-[11.5px] text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
+            <label className="mb-1.5 block break-keep text-[11.5px] text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
             <textarea
               rows={3}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder={t('docGateRejectReasonPlaceholder')}
-              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full resize-none break-keep rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRejectOpen(false)}>{t('cancel')}</Button>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => { clearNoteDraft(); setRejectOpen(false); }}>{t('cancel')}</Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -494,9 +509,11 @@ export function DocGateSection({
               gate={gate}
               resolving={busy}
               error={sigError}
-              onApprove={(reason) => void sigApprove(reason)}
-              onReject={(reason) => void sigReject(reason)}
+              onApprove={(reason) => sigApprove(reason)}
+              onReject={(reason) => sigReject(reason)}
               compact
+              // story #4370 — 창을 닫아도 사유 초안은 남는다. 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
+              onCancel={() => setSigOpen(false)}
             />
           </DialogContent>
         </Dialog>

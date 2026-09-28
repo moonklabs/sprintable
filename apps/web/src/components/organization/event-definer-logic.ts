@@ -4,6 +4,7 @@
 // event_definition_registry.py)과 반드시 일치해야 게이트를 통과한다(그라운딩: 두 정규식·
 // routing 2택·action_auth 화이트리스트 전부 그 파일 직접 대조).
 import type { BlockTemplate, BlockTemplateBlock } from '@/lib/block-template';
+import { LEGACY_UNNAMED_HEADER } from '@/lib/platform-preset-copy';
 
 export type DefinerFormat = 'cycle' | 'signal' | 'measure';
 
@@ -140,12 +141,13 @@ function withAssigneeMemberField(
   required: string[],
   samplePayload: Record<string, unknown>,
   routing: DefinerRouting,
+  sampleText: SampleText,
 ): { properties: Record<string, unknown>; required: string[]; samplePayload: Record<string, unknown> } {
   if (routing !== 'assign_on_publish') return { properties, required, samplePayload };
   return {
     properties: { ...properties, [ASSIGNEE_MEMBER_ID_FIELD]: { type: 'string' } },
     required: [...required, ASSIGNEE_MEMBER_ID_FIELD],
-    samplePayload: { ...samplePayload, [ASSIGNEE_MEMBER_ID_FIELD]: '예시 멤버 id' },
+    samplePayload: { ...samplePayload, [ASSIGNEE_MEMBER_ID_FIELD]: sampleText(ASSIGNEE_MEMBER_ID_FIELD) },
   };
 }
 
@@ -173,18 +175,39 @@ function buildFieldsBlock(fields: DefinerField[]): BlockTemplateBlock | null {
   return { type: 'fields', fields: valid.map((f) => ({ label: f.name, value: `{{payload.${f.name}}}` })) };
 }
 
-function extraFieldsSample(fields: DefinerField[]): Record<string, unknown> {
+/** story #4257 — 폼이 만드는 기본 단계 문장 = 플랫폼 씨앗 문장(platform-preset-copy.ts SEED_STAGE_TEXTS의 payload.stage 문장). */
+export const FORM_DEFAULT_STAGE_TEXT = '**{{payload.stage}}** 로 넘어갔습니다';
+/** story #4257 전 머리말을 비운 채 저장하면 남던 자리 표시 — 정의는 lib/platform-preset-copy.ts(표시 층도 같은 값을 안다). */
+export { LEGACY_UNNAMED_HEADER } from '@/lib/platform-preset-copy';
+
+/** story #4257 — 미리보기 예시 문자열(«예시 {name}» · 로케일 문구 `organization.definerSampleValue`). 순수 함수라 호출부(t 보유)가 넘긴다 —
+ * 필수 인자라 한국어 고정 문자열로 조용히 떨어지는 기본값이 없다. */
+export type SampleText = (name: string) => string;
+
+/** story #4257(유나 · PO 확定) — «뜻을 아는 필드는 사람 말, 이름만 아는 필드는 그 이름». 플랫폼이 뜻을 아는 필드만 자기 문구 종류를 돌려준다
+ * (그 밖 — 작성자가 지은 필드 · resolution_note 같은 플랫폼 필드 — 는 null → «예시 {name}»). 문구는 useSampleText(use-sample-text.ts)가 붙인다 —
+ * 미리보기 두 표면(정의 요약 · 정의 만들기)이 그 훅 하나를 써서 같은 필드는 같은 예시값이 된다. */
+export type SampleValueKind = 'summary' | 'source' | 'member';
+
+export function sampleValueKind(name: string): SampleValueKind | null {
+  if (name === 'summary') return 'summary';
+  if (name === 'source') return 'source';
+  if (name === ASSIGNEE_MEMBER_ID_FIELD) return 'member';
+  return null;
+}
+
+function extraFieldsSample(fields: DefinerField[], sampleText: SampleText): Record<string, unknown> {
   const sample: Record<string, unknown> = {};
   for (const f of fields) {
     if (!f.name.trim() || !validateFieldName(f.name)) continue;
-    sample[f.name] = f.type === 'number' ? 0 : f.type === 'boolean' ? true : f.type === 'date' ? new Date(0).toISOString() : `예시 ${f.name}`;
+    sample[f.name] = f.type === 'number' ? 0 : f.type === 'boolean' ? true : f.type === 'date' ? new Date(0).toISOString() : sampleText(f.name);
   }
   return sample;
 }
 
 /** 사이클형 — §2 서식① 그대로: stage enum + 추가 필드 → payload_schema, header+text("**{현재
  * stage}**로 넘어갔습니다")+fields → block_template. */
-export function deriveCycle(state: DefinerFormState, orgSlug: string): DerivedDefinition {
+export function deriveCycle(state: DefinerFormState, orgSlug: string, sampleText: SampleText): DerivedDefinition {
   const validStages = state.stages.filter((s) => s.name.trim() && s.slug.trim());
   const stageSlugs = validStages.map((s) => s.slug);
   const { properties: fieldProps, required: fieldRequired } = fieldsToProperties(state.fields);
@@ -192,8 +215,9 @@ export function deriveCycle(state: DefinerFormState, orgSlug: string): DerivedDe
   const withMember = withAssigneeMemberField(
     { stage: { type: 'string', enum: stageSlugs }, ...fieldProps },
     ['stage', ...fieldRequired],
-    { stage: sampleStage, ...extraFieldsSample(state.fields) },
+    { stage: sampleStage, ...extraFieldsSample(state.fields, sampleText) },
     state.routing,
+    sampleText,
   );
   const payload_schema = {
     type: 'object',
@@ -205,8 +229,9 @@ export function deriveCycle(state: DefinerFormState, orgSlug: string): DerivedDe
   const fieldsBlock = buildFieldsBlock(state.fields);
   const block_template: BlockTemplate = {
     blocks: [
-      { type: 'header', text: state.name || '(이름 없음)' },
-      { type: 'text', text: '단계 **{{payload.stage}}** 로 넘어갔습니다.' },
+      { type: 'header', text: state.name },
+      // story #4257(PO 11:27Z) — 플랫폼이 넣어 주는 기본 단계 문장은 씨앗 문장(SEED_STAGE_TEXTS)과 글자가 같아야 표시할 때 보는 사람의 언어로 바뀐다.
+      { type: 'text', text: FORM_DEFAULT_STAGE_TEXT },
       ...(fieldsBlock ? [fieldsBlock] : []),
     ],
   };
@@ -221,21 +246,21 @@ export function deriveCycle(state: DefinerFormState, orgSlug: string): DerivedDe
 }
 
 /** 신호형 — §2 서식②: kind + (선택)summary → payload_schema, header+text. */
-export function deriveSignal(state: DefinerFormState, orgSlug: string): DerivedDefinition {
+export function deriveSignal(state: DefinerFormState, orgSlug: string, sampleText: SampleText): DerivedDefinition {
   const kinds = state.signalKinds.map((k) => k.trim()).filter(Boolean);
   const { properties: fieldProps, required: fieldRequired } = fieldsToProperties(state.fields);
   const properties: Record<string, unknown> = { kind: { type: 'string', enum: kinds.length > 0 ? kinds : ['default'] }, ...fieldProps };
   const required = ['kind', ...fieldRequired];
   if (state.includeSummary) { properties.summary = { type: 'string' }; }
-  const samplePayloadBase: Record<string, unknown> = { kind: kinds[0] ?? 'default', ...extraFieldsSample(state.fields) };
-  if (state.includeSummary) samplePayloadBase.summary = '예시 요약';
-  const withMember = withAssigneeMemberField(properties, required, samplePayloadBase, state.routing);
+  const samplePayloadBase: Record<string, unknown> = { kind: kinds[0] ?? 'default', ...extraFieldsSample(state.fields, sampleText) };
+  if (state.includeSummary) samplePayloadBase.summary = sampleText('summary');
+  const withMember = withAssigneeMemberField(properties, required, samplePayloadBase, state.routing, sampleText);
   const payload_schema = { type: 'object', properties: withMember.properties, required: withMember.required, additionalProperties: false };
   const samplePayload = withMember.samplePayload;
   const signalFieldsBlock = buildFieldsBlock(state.fields);
   const block_template: BlockTemplate = {
     blocks: [
-      { type: 'header', text: state.name || '(이름 없음)' },
+      { type: 'header', text: state.name },
       { type: 'text', text: state.includeSummary ? '{{payload.summary}}' : '**{{payload.kind}}**' },
       ...(signalFieldsBlock ? [signalFieldsBlock] : []),
     ],
@@ -251,16 +276,16 @@ export function deriveSignal(state: DefinerFormState, orgSlug: string): DerivedD
 }
 
 /** 측정형 — §2 서식③: metric_value(필수) + metric_unit?/source? → payload_schema. */
-export function deriveMeasure(state: DefinerFormState, orgSlug: string): DerivedDefinition {
+export function deriveMeasure(state: DefinerFormState, orgSlug: string, sampleText: SampleText): DerivedDefinition {
   const { properties: fieldProps, required: fieldRequired } = fieldsToProperties(state.fields);
   const properties: Record<string, unknown> = { metric_value: { type: 'number' }, ...fieldProps };
   const required = ['metric_value', ...fieldRequired];
   if (state.includeMetricUnit) properties.metric_unit = { type: 'string' };
   if (state.includeSource) properties.source = { type: 'string' };
-  const samplePayloadBase: Record<string, unknown> = { metric_value: 42, ...extraFieldsSample(state.fields) };
+  const samplePayloadBase: Record<string, unknown> = { metric_value: 42, ...extraFieldsSample(state.fields, sampleText) };
   if (state.includeMetricUnit) samplePayloadBase.metric_unit = '%';
-  if (state.includeSource) samplePayloadBase.source = '예시 출처';
-  const withMember = withAssigneeMemberField(properties, required, samplePayloadBase, state.routing);
+  if (state.includeSource) samplePayloadBase.source = sampleText('source');
+  const withMember = withAssigneeMemberField(properties, required, samplePayloadBase, state.routing, sampleText);
   const payload_schema = { type: 'object', properties: withMember.properties, required: withMember.required, additionalProperties: false };
   const samplePayload = withMember.samplePayload;
   const fieldsBlock: { label: string; value: string }[] = [{ label: '측정치', value: state.includeMetricUnit ? '{{payload.metric_value}} {{payload.metric_unit}}' : '{{payload.metric_value}}' }];
@@ -268,7 +293,7 @@ export function deriveMeasure(state: DefinerFormState, orgSlug: string): Derived
   for (const f of state.fields) { if (f.name.trim() && validateFieldName(f.name)) fieldsBlock.push({ label: f.name, value: `{{payload.${f.name}}}` }); }
   const block_template: BlockTemplate = {
     blocks: [
-      { type: 'header', text: state.name || '(이름 없음)' },
+      { type: 'header', text: state.name },
       { type: 'fields', fields: fieldsBlock },
     ],
   };
@@ -282,10 +307,17 @@ export function deriveMeasure(state: DefinerFormState, orgSlug: string): Derived
   };
 }
 
-export function deriveDefinition(state: DefinerFormState, orgSlug: string): DerivedDefinition {
-  if (state.format === 'cycle') return deriveCycle(state, orgSlug);
-  if (state.format === 'signal') return deriveSignal(state, orgSlug);
-  return deriveMeasure(state, orgSlug);
+/** story #4257(PO 11:27Z) — 카드 머리말 이름: 폼의 머리말(#definer-name)이 비면 이벤트 이름(저장 필수값)으로. 둘 다 비었을 때의 자리 표시는
+ * 호출부가 미리보기에서만 로케일 문구로 넘긴다(저장값엔 자리 표시가 남지 않는다). */
+export function withHeaderName(state: DefinerFormState, fallbackName: string): DefinerFormState {
+  const own = state.name.trim();
+  return own ? state : { ...state, name: fallbackName.trim() };
+}
+
+export function deriveDefinition(state: DefinerFormState, orgSlug: string, sampleText: SampleText): DerivedDefinition {
+  if (state.format === 'cycle') return deriveCycle(state, orgSlug, sampleText);
+  if (state.format === 'signal') return deriveSignal(state, orgSlug, sampleText);
+  return deriveMeasure(state, orgSlug, sampleText);
 }
 
 // PO 라이브 실측(review_changes 2차) — 수정 진입 시 이벤트 이름이 매번 "이름 없음"으로
@@ -296,7 +328,8 @@ function extractNameFromBlockTemplate(block_template: Record<string, unknown> | 
   if (!Array.isArray(blocks) || blocks.length === 0) return '';
   const first = blocks[0] as { type?: string; text?: string } | undefined;
   if (first?.type !== 'header' || typeof first.text !== 'string') return '';
-  return first.text === '(이름 없음)' ? '' : first.text;
+  // 옛 저장값 — 머리말을 비운 채 저장하면 '(이름 없음)'이 저장되던 시절(story #4257 전)의 자리 표시는 계속 빈 이름으로 알아본다.
+  return first.text === LEGACY_UNNAMED_HEADER ? '' : first.text;
 }
 
 // AC3 — JSON→폼 왕복. 폼이 표현할 수 있는 정확한 모양(이 파일의 derive* 함수들이 만드는 것과

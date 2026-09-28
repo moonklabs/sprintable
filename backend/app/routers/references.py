@@ -38,7 +38,7 @@ from typing import NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -174,11 +174,15 @@ async def create_reference(
         # story #2267(C-9): relation이 유니크 인덱스에 추가돼 이 목록도 같이 늘어야 매치한다 —
         # 이 라우트는 relation을 안 채우므로(위 .values() 참조) 컬럼 기본값 'none'이 그대로
         # 적용된다("본문 참조", 이 라우트의 명시적 멘션 생성 용도 그대로).
+        # story #4051 — `literal(..., literal_execute=True)` 필수(mention_parser.py::
+        # reconcile_entity_references docstring 참조) — bind parameter로 두면 같은
+        # prepared statement가 5회 넘게 실행돼 PostgreSQL이 제네릭 플랜으로 전환하는 순간
+        # 이 partial index와 매치가 깨진다(실측 확認).
         index_elements=[
             Reference.source_type, Reference.source_field, Reference.source_id,
             Reference.target_type, Reference.target_id, Reference.form, Reference.relation,
         ],
-        index_where=Reference.form != "proof",
+        index_where=Reference.form != literal("proof", literal_execute=True),
     ).returning(Reference.id)
     inserted_id = (await session.execute(stmt)).scalar_one_or_none()
     await session.commit()

@@ -75,6 +75,9 @@ export function useDocSync<TDoc = { updated_at: string }>({
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [lastSavedSnapshot, setLastSavedSnapshot] = useState(currentSnapshot);
   const [baselineUpdatedAt, setBaselineUpdatedAt] = useState(serverUpdatedAt);
+  // story #4339(AC7) — 기준선이 어느 문서의 것인지. 문서가 바뀐 뒤 기준선이 잡히기 전(아래 setTimeout 0 한 틱)엔 새 내용을 옛 기준선과
+  // 비교해 dirty가 됐다 → 'unsaved' 예약 · 자동 저장 예약(기준선 없이 부르면 FIX-2가 거절해 'error'). 그 틱은 dirty가 아니다.
+  const [baselineDocId, setBaselineDocId] = useState(docId);
 
   const previousDocIdRef = useRef(docId);
   const previousServerUpdatedAtRef = useRef(serverUpdatedAt);
@@ -109,6 +112,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
     const timer = window.setTimeout(() => {
       setLastSavedSnapshot(currentSnapshotRef.current);
       setBaselineUpdatedAt(serverUpdatedAt);
+      setBaselineDocId(docId);
       setStatus('idle');
     }, 0);
 
@@ -131,7 +135,21 @@ export function useDocSync<TDoc = { updated_at: string }>({
     return () => window.clearTimeout(timer);
   }, [editing, serverUpdatedAt]);
 
-  const isDirty = editing && currentSnapshot !== lastSavedSnapshot;
+  const isDirty = editing && baselineDocId === docId && currentSnapshot !== lastSavedSnapshot;
+  const isDirtyRef = useRef(isDirty);
+  useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
+  const savePayloadRef = useRef(savePayload);
+  useEffect(() => { savePayloadRef.current = savePayload; }, [savePayload]);
+  const docIdRef = useRef(docId);
+  useEffect(() => { docIdRef.current = docId; }, [docId]);
+
+  // story #4339(AC7 · 유나 실측) — 깨끗한 기준 = 편집기가 이 문서를 연 뒤 처음 다듬은 직렬화. 저장된 문자열을 기준으로 두면(API로 만든
+  // 문서처럼 편집기 출력과 모양이 다른 본문) 한 글자 쓰고 지워도 영원히 dirty였다. 편집기가 편집 없이 다듬을 때(onNormalize) 그 값을
+  // 기준으로 삼는다 — 쓰기 없음. 이미 dirty(사용자가 입력 중)면 건드리지 않는다.
+  const adoptNormalized = useCallback((override: Record<string, unknown>) => {
+    if (isDirtyRef.current) return;
+    setLastSavedSnapshot(JSON.stringify({ ...savePayloadRef.current, ...override }));
+  }, []);
 
   useEffect(() => {
     if (!editing || savingRef.current || conflictRef.current || remoteChangedRef.current || !isDirty) return;
@@ -142,6 +160,14 @@ export function useDocSync<TDoc = { updated_at: string }>({
 
     return () => window.clearTimeout(timer);
   }, [editing, isDirty]);
+
+  // story #4339(AC7) — 'unsaved'는 dirty일 때만 참이다. 위 타이머는 dirty가 풀려도(기준선이 같은 틱에 잡힘 · 입력했다가 되돌림)
+  // 이미 예약된 채 실행돼 «저장 표시 변경사항 있음 + 저장 버튼 바뀐 것 없음»을 남겼다 → dirty가 아니면 dirty 직전 상태로 되돌린다.
+  const settledStatusRef = useRef<SaveStatus>('idle');
+  useEffect(() => {
+    if (status === 'idle' || status === 'saved') settledStatusRef.current = status;
+    if (status === 'unsaved' && !isDirty) setStatus(settledStatusRef.current);
+  }, [isDirty, status]);
 
   const save = useCallback(async (options?: { force?: boolean; payloadOverride?: Record<string, unknown> }) => {
     if (!docId || savingRef.current) return false;
@@ -171,6 +197,16 @@ export function useDocSync<TDoc = { updated_at: string }>({
 
     savingRef.current = true;
     setStatus('saving');
+    // story #4339(까디르) — 응답이 늦게 와서 그 사이 다른 문서로 옮겼으면 이 응답은 앞 문서 몫이다: 새 문서의 기준선 · updated_at ·
+    // onSaved를 덮지 않는다(새 문서가 dirty로 잘못 뜨거나 옛 동시성 기준으로 PATCH하던 자리).
+    const requestDocId = docId;
+    // 응답을 적용하는 모든 자리(성공 · 409 · non-OK · 실패)는 await가 끝날 때마다 이 확인을 거친다 — 그 사이 다른 문서로 옮겼으면
+    // 이 응답은 앞 문서 몫이라 새 문서의 상태(status · 기준선 · updated_at · onSaved)를 건드리지 않는다(까디르 P2).
+    const staleResponse = () => {
+      if (docIdRef.current === requestDocId) return false;
+      savingRef.current = false;
+      return true;
+    };
 
     try {
       const res = await fetch(`/api/docs/${docId}`, {
@@ -182,18 +218,21 @@ export function useDocSync<TDoc = { updated_at: string }>({
           force_overwrite: isForce || undefined,
         }),
       });
+      if (staleResponse()) return false;
 
       if (res.status === 409) {
-        conflictRef.current = true;
-        remoteChangedRef.current = false;
         // BE conflict body: { error: { code: 'DOC_CONFLICT', current_updated_at } }. Adopt the
         // server's current updated_at as the new baseline so an acknowledged retry reconciles
         // against the live version instead of conflicting again (151e05f1 CP2).
+        let current: string | undefined;
         try {
           const conflictBody = await res.json() as { error?: { current_updated_at?: string } };
-          const current = conflictBody.error?.current_updated_at;
-          if (current) setBaselineUpdatedAt(current);
+          current = conflictBody.error?.current_updated_at;
         } catch { /* malformed conflict body — still surface the conflict */ }
+        if (staleResponse()) return false;
+        conflictRef.current = true;
+        remoteChangedRef.current = false;
+        if (current) setBaselineUpdatedAt(current);
         setStatus('conflict');
         savingRef.current = false;
         return false;
@@ -206,6 +245,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
       }
 
       const json = await res.json();
+      if (staleResponse()) return false;
       const { doc: savedDoc, updatedAt: nextUpdatedAt } = unwrapDocResponse<TDoc>(json);
       // A response with no `updated_at` cannot establish a baseline — treating it as
       // success would re-arm the exact unguarded-overwrite loop this story fixes, so
@@ -225,6 +265,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
       savingRef.current = false;
       return true;
     } catch {
+      if (staleResponse()) return false;
       setStatus('error');
       savingRef.current = false;
       return false;
@@ -279,5 +320,6 @@ export function useDocSync<TDoc = { updated_at: string }>({
     isDirty,
     save,
     clearSyncAlerts,
+    adoptNormalized,
   };
 }

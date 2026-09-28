@@ -69,7 +69,7 @@ async def test_resubmit_required_guard_does_not_fire_for_non_site_post_gate_type
         id=uuid.uuid4(), user_id=uuid.uuid4(), name="h", type="human", role="owner", org_id=uuid.uuid4(),
     )
 
-    async def _fake_transition(session, org_id, gid, status, resolver_id, note, *, pending_deliveries=None):
+    async def _fake_transition(session, org_id, gid, status, resolver_id, note, *, pending_deliveries=None, reviewed_draft=None):
         return MagicMock(id=gid, status="approved")
 
     gate = MagicMock()

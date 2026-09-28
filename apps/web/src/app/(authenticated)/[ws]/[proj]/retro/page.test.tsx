@@ -159,3 +159,13 @@ describe('RetroPage — 오래 멈춘 phase 배지 렌더(story #2413)', () => {
     expect(container.innerHTML).not.toContain('같은 단계');
   });
 });
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+describe('RetroPage — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    stubFetch([{ id: 'r1', title: '회고제목', phase: 'action', created_at: '2020-01-01T00:00:00Z', updated_at: '2020-01-02T00:00:00Z' }]);
+    await mount();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+});

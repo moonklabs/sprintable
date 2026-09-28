@@ -5,19 +5,23 @@ import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useLocale, useTranslations } from 'next-intl';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { LabelChip } from '@/components/ui/label-chip';
 import { MaterialChip } from '@/components/ui/material-chip';
 import { cn } from '@/lib/utils';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { memberDisplayLabel } from '@/lib/member-display';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 
 // #1942 재작업(까심 REQUEST_CHANGES): 카드-상대 flip(left-0/right-0)은 보드가 가로스크롤이라
@@ -47,6 +51,8 @@ function getEpicDotClass(epicId: string): string {
   return EPIC_DOT_CLASSES[hash % EPIC_DOT_CLASSES.length]!;
 }
 
+// story #4284 — 구성원 이름은 nullable. 이름 없는 구성원은 머리글자 대신 사람 아이콘(유나 4286 판정 — «?» 머리글자 → 사람 아이콘),
+// 전체 라벨(«이름 없는 구성원»)은 title로. 라벨 앞 두 자(«이름»)를 머리글자로 쓰면 실명처럼 읽힌다.
 function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
@@ -129,6 +135,7 @@ interface StoryCardProps {
 
 export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false, className, getStatusLabel }: StoryCardProps) {
   const t = useTranslations('board');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
@@ -525,7 +532,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 ) : null}
               </div>
             ) : null}
-            <div className="flex items-center justify-between gap-2">
+            {/* [SID:4300 · 유나 4682 PASS 비차단] 담당 아바타(h-6)가 조직 보충 뒤 늦게 붙으면 이 줄이 20 → 24px로 늘어 카드가 +4px 흔들렸다(390 · 95.2 → 99.2).
+                아바타 줄 높이(24px)를 처음부터 잡아 둔다 — 채워진 모양과 같은 높이라 겉모습은 그대로. */}
+            <div className="flex min-h-6 items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 {assigneeList.length > 0 ? (
                   <div className="flex -space-x-1.5">
@@ -540,9 +549,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                             ? cn('border-proof-blue/30', AGENT_MARK_FILL_CLASS)
                             : 'border-border bg-muted text-muted-foreground',
                         )}
-                        title={m.name}
+                        title={memberDisplayLabel(m.name, tc)}
                       >
-                        {getInitials(m.name)}
+                        {m.name ? getInitials(m.name) : <UnnamedMemberIcon type={m.type} />}
                         {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
                         {m.type === 'agent' && (
                           <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
@@ -575,16 +584,18 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   <TrustSeal
                     variant="verified"
                     humanName={verifiedBy.name}
+                    humanLabel={verifiedBy.name ? undefined : memberDisplayLabel(null, tc)}
                     when={story.human_verified_at ? formatRelativeTime(story.human_verified_at, locale, displayTimezone) : ''}
                   />
                 ) : story.status === 'done' && trustStage === 'claimed' ? (
-                  <TrustSeal variant="claimed" agentInitial={trustAgent ? getInitials(trustAgent.name) : undefined} />
+                  <TrustSeal variant="claimed" agentInitial={trustAgent?.name ? getInitials(trustAgent.name) : undefined} />
                 ) : null}
                 {story.story_points != null ? (
                   <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
                 ) : null}
-                {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존) */}
-                <span className="flex items-center gap-1.5 opacity-100 transition focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존).
+                    story #4345 — 기준을 폭(sm:)에서 «호버가 되는가»(pointer-fine)로: 640 이상 태블릿(터치)에서 늘 투명하던 것을 닫는다. */}
+                <span className={cn('flex items-center gap-1.5 transition', HOVER_REVEAL)}>
                   {lastExecution ? (
                     <span
                       title={[
@@ -606,7 +617,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       onClick={(e) => void handleKickoff(e)}
                       disabled={triggering}
                       title={t('kickoff')}
-                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
+                      // story #4345 — 누르는 자리 24×24(-m-0.5로 카드 줄 높이 무변 · 아이콘 그대로).
+                      className={cn('-m-0.5 h-5 w-5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition', HOVER_REVEAL_HIT, HOVER_REVEAL_FOCUS_RING)}
                     >
                       {triggering ? (
                         <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
@@ -717,6 +729,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         title={t('deleteStoryDialogTitle')}
         description={t.rich('deleteStoryDialogBody', {
           title: story.title,
+          // story #4120 — 조사를 문자열에 고정하지 않고 렌더 시점에 결정적으로 고른다.
+          josa: pickEulReulJosa(story.title),
           b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
         })}
         cancelLabel={t('cancel')}

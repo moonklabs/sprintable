@@ -187,3 +187,25 @@ describe('Alert variant 라이트 대비 통일 (story #2513)', () => {
     expect(new Set(borderTintOnly).size).toBe(variants.length);
   });
 });
+
+// story 08852117 — 공용 Alert 제목 · 설명은 한국어를 낱말 단위로 줄바꿈(break-keep)하고, 띄어쓰기 없는 긴 글은 여전히 끊는다
+// ([overflow-wrap:anywhere]). 쓰는 화면이 따로 안 붙여도 기본값으로.
+describe('AlertTitle · AlertDescription — 낱말 단위 줄바꿈(story 08852117)', () => {
+  it('두 부품 기본 클래스에 break-keep과 [overflow-wrap:anywhere]가 같이 있다 · 호출처 className과 합쳐져도 남는다', async () => {
+    await act(async () => {
+      root.render(
+        <Alert>
+          <AlertTitle data-testid="t">알림을 보내지 못했어요</AlertTitle>
+          <AlertDescription data-testid="d" className="space-y-2">잠시 뒤 다시 시도해 주세요</AlertDescription>
+        </Alert>,
+      );
+    });
+    for (const id of ['t', 'd']) {
+      const cls = container.querySelector(`[data-testid="${id}"]`)!.className.split(/\s+/);
+      expect(cls).toContain('break-keep');
+      expect(cls).toContain('[overflow-wrap:anywhere]');
+    }
+    expect(container.querySelector('[data-testid="d"]')!.className).toContain('space-y-2');
+  });
+});
+

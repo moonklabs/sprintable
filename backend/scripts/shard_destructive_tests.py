@@ -34,11 +34,29 @@ elapsed/weight 중앙값 배율을 구해 60초 판정선을 스케일한다(느
 늘어 오탐이 안 나고, 러너가 정상인데 그 파일 하나만 느려진 진짜 회귀는 배율이 1 근처라
 그대로 잡힌다). unweighted 파일은 이 배율 표본·판정 대상 모두에서 제외 — 그쪽은 이미
 `--meta-out`의 unweighted 초과 가드(#3392)가 별도로 담당한다.
+
+story #4152(CI·결정성, 페드루 PO 確定 2026-09-22) — 위 #3396의 «같은 run 상대» 정규화가
+러너 부하 노이즈에 취약함이 실사고 2건으로 드러났다: PR#4351 run 35696793719 shard(2)에서
+이 PR과 무관한 `test_3502_insights_board.py`(FE h1 파일 9개뿐인 PR, 백엔드 파일 0)가
+261s(그 run의 정규화 판정선 187.7s 초과)로 RED — 재실행만으로 초록(=거짓 RED). PR#4355
+shard(6)에서도 자기 신규 테스트 `test_3804_prod_promotion_bridge_0354a.py`가 80s(판정선
+71.2s 초과)로 RED — 재실행만으로 초록. 둘 다 코드 결함이 아니라 그 run 자체의 러너
+부하였다(#3396 자신의 정규화가 있어도 표본 전체가 같이 튀면 못 걸러낸다).
+
+`_check_elapsed_mode`(실제 CI 판정 경로)를 이제 `slow_files_absolute`(아래, 파일 자신의
+등재 weight × 배수를 절대 기준으로, PR의 diff 밖 파일은 경고만)로 바꾼다. #3396/#3636의
+run-relative 함수들(`weighted_ratios`·`normalized_slow_threshold_sec`·
+`slow_files_normalized`·`warned_only_files_normalized`·`HEAVY_FILE_OWN_WEIGHT_FAIL_
+MULTIPLIER`)은 실사고 이력(PR#3753·test_2813 2건)을 고정한 회귀가드 가치가 있어 삭제하지
+않고 그대로 둔다 — 더는 `_check_elapsed_mode`가 부르는 판정 경로가 아니다(이 문단이 그
+사실의 단일 출처).
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 import re
 import statistics
 import subprocess
@@ -57,6 +75,16 @@ BACKEND_DIR = REPO_ROOT / "backend"
 # 성질이다(merge 드라이버 설정과 완전히 무관 — 이번 재설계의 핵심). 자주 안 바뀌는
 # 메타(`_snapshot_policy`·`_drift_remeasure_procedure`·`measured_at`)는 여전히 이
 # 디렉터리 밖 별도 `.meta.json`에 둔다(드물게 손으로만 바뀌므로 충돌 위험이 낮다).
+#
+# story #4152(CI·결정성, 페드루 PO CHANGES-2) — **신규 파일 첫 등재 관례**: CI 첫 run
+# 전 로컬 추정치로 weight를 등재할 때는 `"provisional": true`를 반드시 같이 넣는다
+# (구조화 필드만 신뢰 — `provisional_files_in()` 참고). `source` 필드에 "잠정값" 같은
+# 자유문만 적고 `provisional: true`를 빠뜨리면 AC4의 절대 기준 제외가 걸리지 않아
+# 그 파일의 **첫 CI run 자체가 거짓 RED**로 떨어질 수 있다(예: story #4149가
+# 2026-09-22 처음 등재한 `test_4149_mention_approver_and_publish_outcome_realdb.py.
+# json`은 `source`에 "잠정값"이라고만 적고 `provisional: true`는 안 넣은 실사례 — 값
+# 자체는 참고할 만하나 이 관례의 반례로 남겨 둔다). 실측이 쌓이면(대개 다음 #3558/
+# #3642 재측정 사이클) `provisional` 필드를 지우고 실측 sec로 교체한다.
 WEIGHTS_DIR = REPO_ROOT / "infra" / "destructive-schema-shard-weights"
 WEIGHTS_META_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.meta.json"
 
@@ -170,6 +198,28 @@ def entries_missing_source(entries: list[dict]) -> list[str]:
     값의 진위는 검증 안 함(존재 자체만, story 23bf1913의 unweighted_files_in()과
     동형 관례)."""
     return [e["file"] for e in entries if not str(e.get("source", "")).strip()]
+
+
+# story #4159 — 396건 중 332건이 source에 이 자유문 표현을 쓰면서도 구조화 `provisional`
+# 키가 없어 #4152 AC4(provisional_files_in, 구조화 필드만 신뢰)의 절대-가드 제외가 안 걸린
+# 실사고(test_4101, PR 4381 shard 10 — sec:10.0 잠정값인데 RED). 자유문 텍스트 자체를
+# 신뢰하진 않는다(#4152의 "구조화 필드만" 원칙 그대로 유지 — provisional 판정 자체는
+# 여전히 `provisional_files_in()`만 본다) — 이 목록은 오직 "이 문구를 쓰면서 그 구조화
+# 표시를 빠뜨렸는가"라는 **등재 규율** 축이다(source 필수화·23bf1913 unweighted 가드와
+# 동형 존재-체크, 값의 진위는 검증 안 함).
+_TENTATIVE_SOURCE_MARKERS: tuple[str, ...] = ("잠정", "추정", "실측 전")
+
+
+def entries_missing_provisional_flag(entries: list[dict]) -> list[str]:
+    """story #4159 — source에 `_TENTATIVE_SOURCE_MARKERS` 중 하나라도 있는데
+    `provisional: true`가 없는 항목의 file 목록. `provisional: true`가 이미 있으면
+    (구조화 표시 존재) 그 source에 같은 단어가 남아 있어도(예: "이전 잠정값을 대체" 같은
+    과거형 서술) 무해 — 검사 축은 오직 "새로 이 문구를 쓰면서 표시를 빠뜨렸는가"뿐이다."""
+    return [
+        e["file"] for e in entries
+        if e.get("provisional") is not True
+        and any(marker in str(e.get("source", "")) for marker in _TENTATIVE_SOURCE_MARKERS)
+    ]
 
 
 def check_staleness(
@@ -319,6 +369,246 @@ def warned_only_files_normalized(
     return sorted(over_threshold - set(slow))
 
 
+# story #4152(CI·결정성, 페드루 PO 確定 2026-09-22) — «같은 run 상대» 정규화(#3396)를
+# `_check_elapsed_mode`의 실제 판정 경로에서 은퇴시키고, 파일 자신의 등재 weight(shard-
+# weights sec — main 이력의 대리값. #3558/#3642가 이미 드리프트로 그 값을 실측에 맞게
+# 계속 갱신 中이라 새 N-run 이력 저장소를 따로 만들 필요가 없다, 발명 0) × 배수를 절대
+# 기준으로 쓴다. "이 run이 느렸나"가 아니라 "이 파일이 자기 역사 대비 느려졌나"를 묻는
+# 축이라 run 전체 표본과 무관하게 파일 단위로 즉시 계산 가능하다. 2.5를 고른 이유:
+# HEAVY_FILE_OWN_WEIGHT_FAIL_MULTIPLIER(#3636, 3.0)보다 살짝 좁혀 «절대 기준 자체가
+# 유일한 방어선»이 됐을 때도(diff-scoping 밖 unrelated 파일은 이제 이 축만 본다) 여전히
+# 유효한 판정력을 유지한다 — 3.0과 비교해 특별히 새 근거가 필요할 만큼 크게 다르지 않은
+# 값이라 카드 확定값(AC1) 그대로 채택.
+ABSOLUTE_SLOW_MULTIPLIER = 2.5
+
+
+def absolute_slow_threshold_sec(
+    weight: float, *, multiplier: float = ABSOLUTE_SLOW_MULTIPLIER, base_seconds: float = 60.0,
+) -> float:
+    """story #4152(AC1/AC3) — 파일 자신의 등재 weight × multiplier, #3383 AC5의 60초
+    절대 최저선은 무변(AC3 — 가벼운 파일이 그 최저선 밑에서 튀어도 여전히 60초 자체는
+    최소 방어선)."""
+    return max(weight * multiplier, base_seconds)
+
+
+# story #4206(까디르 P1 · PO 결정 2026-09-23 09:45Z) — 러너 배율 상한. 상한이 없으면 코드발 전역 둔화(conftest·공용
+# 픽스처가 모든 파일을 3·5배 느리게)도 대조군 중앙값을 같이 올려 판정선이 따라 올라가 RED 0이 된다. 1.5 근거: 오늘
+# RED 20건 픽스처는 상한 1.22 이상이면 전부 통과로 유지되고(최대 관측 배율은 2.07이었지만 20건을 막는 데는 1.5로 충분),
+# 상한 밖 전역 둔화는 다시 RED로 잡힌다. ⚠️남는 한계(수치): 판정선 = 등재 weight × 2.5(ABSOLUTE_SLOW_MULTIPLIER) × 배율
+# (≤1.5)라 코드발 전역 둔화는 등재값의 3.75배를 넘어야 RED다 — 그 아래는 이 가드가 못 잡고, 배율이
+# RUNNER_FACTOR_WARN(1.3)을 넘으면 잡 요약에 경고 줄로만 보인다.
+RUNNER_FACTOR_CAP = 1.5
+RUNNER_FACTOR_WARN = 1.3
+
+
+def runner_speed_factor(
+    elapsed_by_file: dict[str, float],
+    weights: dict[str, float],
+    *,
+    exclude: frozenset[str] = frozenset(),
+    provisional_files: frozenset[str] = frozenset(),
+    cap: float | None = RUNNER_FACTOR_CAP,
+) -> float:
+    """story #4206 — 이 run의 러너 속도 배율. 같은 샤드의 **판정 대상이 아닌** 파일(`exclude` = 변경 파일 밖,
+    provisional 제외)을 대조군으로 elapsed/weight 중앙값을 낸다. 절대 임계를 **올리기만** 한다(1.0 미만은 1.0 —
+    빠른 러너가 판정선을 좁히지 않게). 대조군이 MIN_RATIO_SAMPLE 미만이면 1.0(#3396 AC3와 같은 폴백).
+
+    #3396(같은 run 상대 비교)을 되살리는 게 아니다: 그때는 모든 파일을 run 중앙값과 비교해 무관 파일 하나가 튀어도
+    RED였다. 여기선 RED 후보가 여전히 «변경 파일»(#4152 AC2)뿐이고, 무관 파일은 러너가 얼마나 느렸나를 재는 자로만
+    쓴다 — 변경 파일만 혼자 느려진 진짜 회귀(대조군은 정상 속도)는 배율 1 근처라 그대로 RED."""
+    control = {
+        f: e for f, e in elapsed_by_file.items() if f not in exclude and f not in provisional_files
+    }
+    ratios = weighted_ratios(control, weights)
+    if len(ratios) < MIN_RATIO_SAMPLE:
+        return 1.0
+    factor = max(1.0, statistics.median(ratios))
+    return min(factor, cap) if cap is not None else factor
+
+
+def provisional_files_in(entries: list[dict]) -> frozenset[str]:
+    """story #4152(AC4) — `provisional: true`로 구조화 등재된 항목만(자유문 "잠정값"
+    텍스트 파싱 0 — story #3465의 `source` 필수화와 동형으로 구조화 필드만 신뢰).
+    첫 CI run 전 로컬 추정치는 절대 기준 계산에서 제외한다(잠정값은 기준 계산에서
+    제외 — 카드 확定): 실측이 쌓이면 #3558(ratio_outliers)/#3642(drift streak)이 이미
+    "등재값 대 실측" 갱신을 전담하므로(새 로직 0) 이 축은 그 갱신 前까지 가양성만
+    안 내는 게 목적이다."""
+    return frozenset(e["file"] for e in entries if e.get("provisional") is True)
+
+
+def parse_changed_files(text: str) -> frozenset[str]:
+    """story #4152(AC2) — `git diff --name-only` 1줄=1파일 형식을 그대로 읽는다(기존
+    elapsed 파일의 tab-separated 관례와는 다른 축 — 이쪽은 파일명 1개뿐이라 단순 split)."""
+    return frozenset(line.strip() for line in text.splitlines() if line.strip())
+
+
+# story #4163 — classify_backend_test_diff_scope.sh가 줄1=__ALL__일 때 줄2로 내는
+# "변경된 backend/app/**.py" 목록을 dotted 모듈 경로로 바꾸고, 그 모듈을 정적으로
+# import하는 destructive_schema 테스트 파일을 찾는다. 오늘(2026-09-22) PR#4527(app
+# 코드 1파일 변경)이 러너 부하 시간대에 무관 테스트 4개를 RED로 죽인 실사고 — __ALL__
+# 폴백 자체(코드 변경이 있으면 안전측으로 전부 RED 후보)는 유지하되, "전부"를 "PR이
+# 바꾼 테스트 + 그 app 변경을 실제로 참조하는 테스트"로 좁힌다. 나머지 초과는 기존
+# WARN 축(slow_files_absolute)으로 그대로 흡수 — 새 판정 로직 발명 0, 여기서 하는
+# 일은 오직 changed_files 인자에 넣을 "narrowed 목록"을 만드는 것뿐이다.
+def changed_app_files_to_modules(changed_app_files: frozenset[str]) -> frozenset[str]:
+    """`app/routers/other.py` → `app.routers.other`, `app/services/__init__.py` →
+    `app.services`(패키지 자신). `.py` 아닌 항목은 무시(방어적 — 호출부가 이미
+    `.py`만 넘기지만 이중 안전)."""
+    modules: set[str] = set()
+    for f in changed_app_files:
+        if not f.endswith(".py"):
+            continue
+        parts = f[: -len(".py")].split("/")
+        if parts and parts[-1] == "__init__":
+            parts = parts[:-1]
+        if parts:
+            modules.add(".".join(parts))
+    return frozenset(modules)
+
+
+def _module_import_patterns(module: str) -> list[re.Pattern[str]]:
+    """`module` 하나에 대한 "이 테스트가 이 모듈을 참조하는가" 정적 패턴 2종:
+    ①직접(`import app.x.y` / `from app.x.y import ...`) ②부모 패키지에서 멤버로
+    (`from app.x import y` — `y.py`가 `app/x/`에 있는 흔한 이 레포 관례).
+    ⚠️ 못 잡는 것(정적 대조 한계, #3948 AC㉠-㉤ 관례 그대로 문서화): 멀티라인
+    괄호 import(`from app.x import (\\n    y,\\n)`)는 ②축에서 한 줄 안에 leaf가
+    있어야 매치 — 이 레포 실측 관례(단일 줄 import 압도 다수)상 영향 미미."""
+    escaped = re.escape(module)
+    patterns = [
+        re.compile(rf"\bimport\s+{escaped}\b"),
+        re.compile(rf"\bfrom\s+{escaped}\s+import\b"),
+    ]
+    if "." in module:
+        parent, leaf = module.rsplit(".", 1)
+        # 한 줄 안에서만 매치(MULTILINE의 `.`가 줄바꿈을 안 건너뛰므로 안전 —
+        # DOTALL을 쓰면 이 import 문 뒤 파일 전체에서 leaf 단어가 우연히 또 나타나도
+        # 오탐한다, 최초 구현에서 이 함정을 실측으로 발견해 정정).
+        patterns.append(
+            re.compile(rf"^\s*from\s+{re.escape(parent)}\s+import\s+.*\b{re.escape(leaf)}\b", re.MULTILINE)
+        )
+    return patterns
+
+
+def test_files_depending_on_modules(
+    modules: frozenset[str], test_files: list[str], backend_dir: Path = BACKEND_DIR,
+) -> list[str]:
+    """`test_files`(discover_files() 산출 상대경로, `tests/...`) 중 `modules`(dotted
+    app 경로 집합) 어느 하나라도 정적으로 참조하는 파일만 골라 정렬 반환. `modules`가
+    비면 빈 목록(narrowing할 재료가 없다는 뜻 — 호출부가 폴백 여부를 판단)."""
+    if not modules:
+        return []
+    all_patterns = [p for m in modules for p in _module_import_patterns(m)]
+    depends: list[str] = []
+    for f in test_files:
+        try:
+            source = (backend_dir / f).read_text()
+        except OSError:
+            continue
+        if any(p.search(source) for p in all_patterns):
+            depends.append(f)
+    return sorted(depends)
+
+
+def slow_files_absolute(
+    elapsed_by_file: dict[str, float],
+    weights: dict[str, float],
+    *,
+    provisional_files: frozenset[str] = frozenset(),
+    changed_files: frozenset[str] | None = None,
+    multiplier: float = ABSOLUTE_SLOW_MULTIPLIER,
+    base_seconds: float = 60.0,
+    runner_factor: float = 1.0,
+) -> tuple[list[str], list[str]]:
+    """story #4152(AC1/AC2/AC3/AC4) — `_check_elapsed_mode`의 실제 판정 함수(순수 —
+    AC2가 요구하는 단위 테스트 대상). weighted 파일만 대상(unweighted는 #3392가 전담,
+    무변). provisional(AC4)은 절대 기준 계산 자체에서 빠진다 — red에도 warn에도 안
+    실린다(등재값을 못 믿는 축이므로 이 게이트 자체가 no-op, #3558의 별도 등재값
+    대조 경고는 그대로 살아 있다).
+
+    나머지 중 threshold(파일 weight×multiplier, #3383 AC5의 60초 최저선 포함) 초과
+    파일은: `changed_files`가 None(호출측이 diff 정보를 안 줬을 때의 안전측 폴백 —
+    회귀 0, `--changed-files` 인자 생략 시의 예전 동작 그대로 전부 RED 후보)이거나
+    그 파일이 `changed_files` 안에 있으면 RED(AC2 — 변경 파일이거나 PR이 신설한
+    테스트, git diff가 신규 파일도 목록에 올리므로 별도 처리 불요), 아니면 WARN
+    (AC2 — 무관 파일 초과는 경고, 잡은 초록 유지). 반환 (red 정렬·warn 정렬).
+
+    story #4206 — RED 판정선만 `runner_factor`(`runner_speed_factor`, 기본 1.0 = 예전 그대로)만큼 올린다. 절대
+    임계는 넘었지만 러너 배율이 흡수한 변경 파일은 WARN(가시성 — 무관 파일 WARN과 같은 축, 낡은 등재값 신호 유지)."""
+    red: list[str] = []
+    warn: list[str] = []
+    for f, elapsed in elapsed_by_file.items():
+        if f not in weights or f in provisional_files:
+            continue
+        threshold = absolute_slow_threshold_sec(weights[f], multiplier=multiplier, base_seconds=base_seconds)
+        if elapsed <= threshold:
+            continue
+        is_changed = changed_files is None or f in changed_files
+        (red if is_changed and elapsed > threshold * max(1.0, runner_factor) else warn).append(f)
+    return sorted(red), sorted(warn)
+
+
+# story #4283 — 한 번 재실행으로 확인한 뒤에만 RED. 7일 실측(성공 run 17개 · 파일당 표본 17): 파일 하나가 같은
+# 샤드 대조군은 정상(배율 1.05~1.14)인데 혼자 중앙값의 3.4~3.8배로 튀는 일이 판정 1회당 약 0.2%. #4163 narrowing이
+# 허브 모듈(routers/events.py) 변경에 후보를 65~154개로 늘리니 PR당 14~26% → 하루 3~4회 거짓 RED(테스트 전부 통과).
+# PR이 테스트를 실제로 느리게 만들었다면 재실행에서도 넘으므로(결정적) 여전히 RED — 가드 목적은 그대로다.
+# 후보가 이 수를 넘으면 단발 튐이 아니라 광범위 둔화로 보고 재실행 없이 바로 RED(재실행 비용 상한 겸).
+CONFIRM_RERUN_MAX_FILES = 5
+
+
+def confirmed_slow_files(
+    suspects: list[str],
+    rerun_elapsed: dict[str, float],
+    weights: dict[str, float],
+    *,
+    runner_factor: float = 1.0,
+) -> tuple[list[str], list[str]]:
+    """story #4283 — 첫 판정 RED 후보(`suspects`) 중 재실행 경과도 같은 판정선(등재 weight 절대 기준 × 첫 run의
+    러너 배율)을 넘은 파일만 RED. 재실행 기록이 없는 후보는 RED(안전측 — 재실행이 못 돈 파일을 초록으로 넘기지 않는다).
+    반환 (confirmed 정렬 · cleared 정렬)."""
+    confirmed: list[str] = []
+    cleared: list[str] = []
+    for f in suspects:
+        threshold = absolute_slow_threshold_sec(weights[f]) * max(1.0, runner_factor)
+        again = rerun_elapsed.get(f)
+        (confirmed if again is None or again > threshold else cleared).append(f)
+    return sorted(confirmed), sorted(cleared)
+
+
+# story #4283(AC4 미달 · PO 2026-09-28 07:26Z) — import 확장으로만 들어온 테스트(#4163 narrowing: PR이 바꾼 app 모듈을
+# import해서 «변경 파일»로 세진 테스트)는 **하나가 튀었다고 RED로 하지 않는다**. 같은 허브를 import하는 테스트는 12샤드에 퍼져
+# 있어(app/routers/events.py: destructive 78개 · 샤드당 2~11) PR이 허브를 정말 느리게 만들면 여러 러너(샤드)에서 같이 넘는다 ·
+# 러너 한 대가 튀면 그 샤드 안에 갇힌다. 그래서 (재실행 확인까지 거친 뒤) 넘은 import 확장 파일이 **서로 다른 샤드 2개 이상**에
+# 있을 때만 RED — 판정은 전 샤드 산출물을 보는 --audit-durations에서.
+# 근거(최근 성공 PR run 40개 · 파일 판정 17,335회 · 이 모듈의 판정 함수 그대로 재판정 · 2026-09-27 22:14Z~09-28 06:33Z):
+# 판정선 초과 3회 · 한 run 최대 2개 — 그 2개는 같은 샤드(run 36379829374 샤드 8 · 배율 1.00) · 서로 다른 샤드 동시 초과 0/40.
+# 한계(PO 확정 · 알고 받은 대가): 허브 변경이 import 테스트 **하나만** 느리게 하거나 느려진 것들이 **한 샤드에만** 몰리면 이 가드는
+# 못 잡는다(WARN으로만 보인다). 직접 바꾼 테스트 파일은 예전 그대로 단일 절대 판정 + 재실행 확인.
+IMPORT_EXPANDED_MIN_SHARDS = 2
+
+
+def import_expanded_cross_shard_red(
+    over_by_shard: dict[int, list[str]], *, min_shards: int = IMPORT_EXPANDED_MIN_SHARDS,
+) -> list[int]:
+    """story #4283 — 샤드별 «판정선을 넘은 import 확장 파일» 목록에서 넘은 파일이 있는 샤드가 `min_shards`개 이상이면 그
+    샤드 번호들(정렬)을, 아니면 빈 목록(= RED 아님)을 돌려준다. 순수 함수."""
+    shards = sorted(shard for shard, files in over_by_shard.items() if files)
+    return shards if len(shards) >= min_shards else []
+
+
+def _write_import_over(path: Path | None, files: list[str]) -> None:
+    if path is not None:
+        path.write_text("".join(f"{f}\n" for f in sorted(files)))
+
+
+def _warn_import_over(files: list[str], *, confirmed: bool) -> None:
+    for f in files:
+        print(
+            f"::warning::러너 정규화 가드(story #4283) — {f}는 이 PR이 바꾼 app 모듈을 import해서 들어온 테스트(직접 변경 아님) — "
+            f"{'재실행에서도' if confirmed else '1차에서'} 판정선을 넘었지만 샤드 하나의 튐으로는 RED 아님. 서로 다른 샤드 "
+            f"{IMPORT_EXPANDED_MIN_SHARDS}개 이상에서 같이 넘으면 Audit(--audit-durations)이 RED로 판정한다."
+        )
+
+
 def partition(files: list[str], weights: dict[str, float], shard_count: int) -> tuple[list[list[str]], list[float]]:
     """greedy LPT — 무거운 순으로 정렬해 매번 «지금 가장 가벼운 샤드」에 넣는다.
     ⭐이 함수는 무손실이다(모든 파일이 정확히 하나의 샤드에 들어간다) —
@@ -348,6 +638,43 @@ def _parse_elapsed_file(path: Path) -> dict[str, float]:
         file_name, _, elapsed = line.partition("\t")
         result[file_name] = float(elapsed)
     return result
+
+
+def read_elapsed_strict(path: Path, *, expected: list[str] | None = None) -> tuple[dict[str, float], list[str]]:
+    """story #4283(까디르 P1 — 기록 fail-open) — 판정에 쓰는 경과 기록을 믿기 전에 검사한다. `NaN`은 어떤 비교도 False라
+    판정선을 절대 안 넘고, 음수 · 빈 파일 · 빠진 파일도 «느린 게 없다»로 읽혀 초록이 된다. 반환 (경과 · 문제 목록) —
+    문제가 하나라도 있으면 호출측이 RED. 문제: 파일 없음 · 숫자 아님 · 유한 아님 · 음수 · 기록 0줄 · `expected`에 있는데
+    기록 없음."""
+    if not path.exists():
+        return {}, [f"경과 기록 파일 없음: {path}"]
+    result: dict[str, float] = {}
+    problems: list[str] = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        file_name, _, raw = line.partition("\t")
+        try:
+            value = float(raw)
+        except ValueError:
+            problems.append(f"{file_name}: 경과가 숫자가 아님({raw!r})")
+            continue
+        if not math.isfinite(value):
+            problems.append(f"{file_name}: 경과가 유한수가 아님({raw!r})")
+        elif value < 0:
+            problems.append(f"{file_name}: 경과가 음수({raw!r})")
+        else:
+            result[file_name] = value
+    if not result and not problems:
+        problems.append(f"경과 기록 0줄: {path}")
+    for f in expected or []:
+        if f not in result and not any(p.startswith(f"{f}:") for p in problems):
+            problems.append(f"{f}: 경과 기록 없음(돌았어야 하는 파일)")
+    return result, problems
+
+
+def _print_record_problems(problems: list[str], *, what: str) -> None:
+    for p in problems:
+        print(f"::error::러너 정규화 가드 {what} 기록 이상(story #4283 — 판정 불가라 RED): {p}")
 
 
 # story #3558(CI·소형) — shard(5) 22분29초 사례(2026-09-06, #3910 CI): 원인이 신규
@@ -383,11 +710,32 @@ def ratio_outliers(
     return outliers
 
 
-def write_durations_json(elapsed_by_file: dict[str, float], out_path: Path, *, shard: int) -> None:
+def write_durations_json(
+    elapsed_by_file: dict[str, float], out_path: Path, *, shard: int, import_over: list[str] | None = None,
+) -> None:
     """story #3558 AC1 — 샤드별 순수 pytest 소요(DB 준비 제외, `_parse_elapsed_file`과
     같은 값)를 JSON 산출물로 낸다. ci.yml이 이 파일을 `actions/upload-artifact`로
-    올린다(shard-durations-{shard})."""
-    out_path.write_text(json.dumps({"shard": shard, "durations": elapsed_by_file}, indent=2, sort_keys=True))
+    올린다(shard-durations-{shard}).
+
+    story #4283 — `import_over`(이 샤드에서 판정선을 넘은 import 확장 파일)를 같이 싣는다 — Audit이 전 샤드를 모아 교차 샤드로
+    판정한다. 생략(None)이면 키를 안 쓴다(예전 산출물 모양 그대로)."""
+    payload: dict = {"shard": shard, "durations": elapsed_by_file}
+    if import_over is not None:
+        payload["import_expanded_over"] = sorted(import_over)
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def load_import_over_by_shard(artifact_dir: Path) -> dict[int, list[str]]:
+    """story #4283 — 산출물마다 `import_expanded_over`(없으면 빈 목록)를 샤드 번호별로 모은다."""
+    out: dict[int, list[str]] = {}
+    for p in sorted(artifact_dir.glob("*.json")) if artifact_dir.is_dir() else []:
+        try:
+            data = json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("shard"), int):
+            out[data["shard"]] = [str(f) for f in data.get("import_expanded_over") or []]
+    return out
 
 
 def load_present_shard_numbers(artifact_dir: Path) -> set[int]:
@@ -499,9 +847,24 @@ def _audit_durations_mode(
 
     if drift_state_path is not None:
         state = _load_drift_state(drift_state_path)
+        margin_streaks = state["margin_streaks"]
         if run_id is not None and state["run_id"] == run_id:
             streaks = state["streaks"]  # 같은 run 재시도 — 무변경 write-through.
         else:
+            margin_streaks = update_margin_streaks(
+                margin_streaks, guard_margin_collapsed(measured, weights, provisional_files_in(load_raw_entries())),
+            )
+            fired = drift_warnings(margin_streaks)
+            for f in fired:
+                threshold = absolute_slow_threshold_sec(weights[f])
+                print(
+                    f"::warning::절대 가드 판정 여유 붕괴(story #4283): {f} — {DRIFT_STREAK_THRESHOLD}run 연속 "
+                    f"판정선 {threshold:.1f}s(등재 {weights[f]:.1f}s×{ABSOLUTE_SLOW_MULTIPLIER:.1f}, 60초 최저선)가 "
+                    f"실측({measured[f]:.1f}s)의 {GUARD_MARGIN_WARN:.1f}배 미만 — 이 파일이 조금만 튀어도 거짓 RED가 난다. "
+                    "infra/destructive-schema-shard-weights/ 등재값을 CI 실측 중앙값으로 갱신하라."
+                )
+                margin_streaks[f] = 0  # 1회 경고 뒤 리셋(#3642 drift 축과 같은 스팸 방지).
+            _summarize_margin_collapse(fired, measured, weights)
             streaks = update_drift_streaks(state["streaks"], outliers)
             for f in drift_warnings(streaks):
                 print(
@@ -511,7 +874,7 @@ def _audit_durations_mode(
                     "weights/ 재측정 필요."
                 )
                 streaks[f] = 0  # story #3642 AC3 — 1회 경고 뒤 리셋(매 run 반복 스팸 방지).
-        _save_drift_state(drift_state_path, run_id=run_id, streaks=streaks)
+        _save_drift_state(drift_state_path, run_id=run_id, streaks=streaks, margin_streaks=margin_streaks)
 
     if not outliers:
         print(f"OK: 등재값 대조 — 산출물 {len(measured)}건 중 2배/0.5배 이탈 0건(story #3558)", file=sys.stderr)
@@ -523,6 +886,25 @@ def _audit_durations_mode(
                 f"등재 {o['weight_sec']:.1f}s(×{o['ratio']:.2f}) — infra/destructive-schema-shard-weights/ 재측정 검토."
             )
         print(f"경고 {len(outliers)}건(산출물 {len(measured)}건 중) — 실패 아님, story #3558 AC2", file=sys.stderr)
+
+    # story #4283(AC4 · PO 07:26Z) — import 확장으로만 들어온 테스트의 판정선 초과는 샤드에서 RED로 하지 않고 여기서 모아 본다:
+    # 서로 다른 샤드 IMPORT_EXPANDED_MIN_SHARDS개 이상에서 같이 넘었으면 허브가 정말 느려진 것 → RED. 한 샤드 안이면 러너 튐 → WARN.
+    import_over = load_import_over_by_shard(artifact_dir)
+    red_shards = import_expanded_cross_shard_red(import_over)
+    if red_shards:
+        detail = " · ".join(f"샤드 {s}: {', '.join(import_over[s])}" for s in red_shards)
+        print(
+            f"::error::러너 정규화 가드 교차 샤드 초과(story #4283): 이 PR이 바꾼 app 모듈을 import하는 테스트가 서로 다른 샤드 "
+            f"{len(red_shards)}개에서 같이 판정선을 넘음 — 러너 한 대의 튐이 아니라 그 모듈이 느려진 모양. {detail}"
+        )
+        exit_code = 1
+    elif any(import_over.values()):
+        only = next(s for s, files in import_over.items() if files)
+        print(
+            f"::warning::러너 정규화 가드(story #4283) — import 확장 테스트 초과가 샤드 {only} 하나에만 있음"
+            f"({', '.join(import_over[only])}) — 러너 한 대의 튐으로 보고 RED 아님(서로 다른 샤드 "
+            f"{IMPORT_EXPANDED_MIN_SHARDS}개 이상이면 RED)."
+        )
 
     if expected_shard_count is not None:
         missing = missing_shards(load_present_shard_numbers(artifact_dir), expected_count=expected_shard_count)
@@ -572,6 +954,50 @@ def update_drift_streaks(streaks: dict[str, int], outliers: list[dict]) -> dict[
     return {f: streaks.get(f, 0) + 1 for f in over_files}
 
 
+# story #4283 — #3558 대조 경고(2배/0.5배)는 run마다 ~185건(과소 47 · 과대 138)이라 묻혔다: test_3808(등재 3.9s ·
+# CI 중앙값 36s)이 그 속에서 17run 내내 경고를 받고도 남아 거짓 RED를 냈다. 이 축은 «절대 가드가 곧 거짓 RED를 낼
+# 파일»만 — 판정선(등재 weight×2.5, 60초 최저선)이 실측의 2배 미만 — 3run 연속일 때만 경고한다(단발 튐 거름).
+# 7일 실측 대조(성공 run 17개를 시간순 재생): 갱신 전 등재값이면 8개 파일이 3~5번째 run에 발화, 갱신 뒤엔 0개.
+GUARD_MARGIN_WARN = 2.0
+
+
+def guard_margin_collapsed(
+    measured: dict[str, float], weights: dict[str, float], provisional_files: frozenset[str] = frozenset(),
+) -> list[str]:
+    """story #4283 — 이번 run 실측 대비 절대 가드 판정선의 여유가 `GUARD_MARGIN_WARN`배 미만인 파일(정렬).
+    provisional은 절대 가드 자체가 안 보므로 제외."""
+    return sorted(
+        f for f, elapsed in measured.items()
+        if f in weights and f not in provisional_files and elapsed > 0
+        and absolute_slow_threshold_sec(weights[f]) / elapsed < GUARD_MARGIN_WARN
+    )
+
+
+def update_margin_streaks(streaks: dict[str, int], collapsed: list[str]) -> dict[str, int]:
+    """story #4283 — `update_drift_streaks`와 같은 규칙(이번 run에 걸린 파일만 +1, 나머지는 리셋)."""
+    return {f: streaks.get(f, 0) + 1 for f in collapsed}
+
+
+def _summarize_margin_collapse(fired: list[str], measured: dict[str, float], weights: dict[str, float]) -> None:
+    """story #4283 — 발화한 파일을 잡 요약(GITHUB_STEP_SUMMARY) 표로도 — annotation 목록에 묻히지 않게."""
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not fired or not summary:
+        return
+    lines = [
+        "### ⚠️ 절대 가드 판정 여유 붕괴(story #4283) — 등재 weight 갱신 필요",
+        "",
+        "| 파일 | 등재 weight | 판정선 | 이번 실측 | 여유 |",
+        "|---|---|---|---|---|",
+    ]
+    for f in fired:
+        threshold = absolute_slow_threshold_sec(weights[f])
+        lines.append(
+            f"| `{f}` | {weights[f]:.1f}s | {threshold:.1f}s | {measured[f]:.1f}s | {threshold / measured[f]:.2f}배 |"
+        )
+    with open(summary, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
 def drift_warnings(streaks: dict[str, int], *, threshold: int = DRIFT_STREAK_THRESHOLD) -> list[str]:
     """threshold 이상 연속인 파일만(정렬 — 재현성)."""
     return sorted(f for f, n in streaks.items() if n >= threshold)
@@ -587,59 +1013,232 @@ def _load_drift_state(path: Path) -> dict:
     구버전(플랫 {file: count} 상태 파일)도 read하면 streaks로 그대로 승격
     (run_id=None — 다음 저장부터 새 모양)."""
     if not path.exists():
-        return {"run_id": None, "streaks": {}}
+        return {"run_id": None, "streaks": {}, "margin_streaks": {}}
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
-        return {"run_id": None, "streaks": {}}
+        return {"run_id": None, "streaks": {}, "margin_streaks": {}}
     if "streaks" not in data:
-        return {"run_id": None, "streaks": data}
-    return {"run_id": data.get("run_id"), "streaks": data.get("streaks", {})}
+        return {"run_id": None, "streaks": data, "margin_streaks": {}}
+    return {
+        "run_id": data.get("run_id"), "streaks": data.get("streaks", {}),
+        "margin_streaks": data.get("margin_streaks", {}),
+    }
 
 
-def _save_drift_state(path: Path, *, run_id: str | None, streaks: dict[str, int]) -> None:
+def _save_drift_state(
+    path: Path, *, run_id: str | None, streaks: dict[str, int], margin_streaks: dict[str, int] | None = None,
+) -> None:
+    """story #4283 — `margin_streaks`는 비어 있지 않을 때만 싣는다(옛 모양 상태 파일과 그대로 호환)."""
+    payload: dict = {"run_id": run_id, "streaks": streaks}
+    if margin_streaks:
+        payload["margin_streaks"] = margin_streaks
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"run_id": run_id, "streaks": streaks}, indent=2, sort_keys=True))
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
-def _check_elapsed_mode(elapsed_path: Path) -> int:
-    """story #3396 — ci.yml의 pytest 루프가 이 샤드의 모든 파일을 다 돈 뒤 한 번
-    호출한다(중앙값은 그 run 전체 표본이 있어야 나온다 — 파일 단위 즉시 판정이 애초에
-    불가능한 가드다)."""
-    elapsed_by_file = _parse_elapsed_file(elapsed_path)
+def _warn_runner_factor(raw_factor: float, applied: float) -> None:
+    """story #4206(PO 결정) — 배율이 RUNNER_FACTOR_WARN을 넘으면 크게 보이게: annotation + 잡 요약(GITHUB_STEP_SUMMARY).
+    1.0~1.5배 전역 둔화는 판정선이 흡수하므로(RED 아님) 이 줄이 그 둔화를 사람에게 보이는 유일한 자리다."""
+    message = (
+        f"⚠️ 러너 속도 배율 {raw_factor:.2f}(적용 {applied:.2f}, 상한 {RUNNER_FACTOR_CAP}) — 이 샤드의 무관 파일이 등재값보다 "
+        f"{raw_factor:.2f}배 느렸다. 러너 부하일 수도, 코드발 전역 둔화(conftest·공용 픽스처)일 수도 있다 — "
+        f"{RUNNER_FACTOR_CAP}배 이하 전역 둔화는 이 가드가 RED로 못 잡는다."
+    )
+    print(f"::warning::{message}")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(f"\n## {message}\n")
+
+
+# story #4283 — `--check-elapsed --suspects-out`이 «재실행으로 확인할 후보가 있다»를 알리는 종료 코드(1=RED와 구분).
+CONFIRM_RERUN_EXIT = 3
+
+
+def _print_absolute_red(
+    red: list[str], elapsed_by_file: dict[str, float], weights: dict[str, float], runner_factor: float,
+) -> None:
+    for f in red:
+        threshold = absolute_slow_threshold_sec(weights[f]) * runner_factor
+        print(
+            f"::error::러너 정규화 절대 가드 초과(story #4152): {f} "
+            f"({elapsed_by_file[f]:.0f}s > {threshold:.1f}s — 등재 weight×{ABSOLUTE_SLOW_MULTIPLIER:.1f}"
+            f"×러너 {runner_factor:.2f} 절대 기준, 변경 파일이거나 diff 정보 없음)"
+        )
+
+
+def _judge_runner_factor(
+    elapsed_by_file: dict[str, float], weights: dict[str, float], *,
+    changed_files: frozenset[str] | None, provisional: frozenset[str],
+) -> tuple[float, float]:
+    """story #4206 — 판정 대상이 아닌 파일(변경 파일 밖)로 이 러너가 얼마나 느렸나를 재 임계를 올린다. diff 정보가
+    없으면(전부 판정 대상) 샤드 전체가 대조군 — 러너 부하로 샤드 전체가 느려진 날의 거짓 RED를 막는다.
+    반환 (적용 배율 · 상한 전 실측 배율). story #4283 — --confirm-elapsed도 첫 run 배율을 같은 식으로 다시 낸다."""
+    exclude = changed_files or frozenset()
+    applied = runner_speed_factor(elapsed_by_file, weights, exclude=exclude, provisional_files=provisional)
+    raw = runner_speed_factor(elapsed_by_file, weights, exclude=exclude, provisional_files=provisional, cap=None)
+    return applied, raw
+
+
+def _confirm_elapsed_mode(
+    elapsed_path: Path, rerun_path: Path, suspects_path: Path, *, changed_files_path: Path | None = None,
+    direct_files_path: Path | None = None, import_over_out_path: Path | None = None,
+) -> int:
+    """story #4283 — 1차 초과 후보(`suspects_path`)를 재실행한 경과(`rerun_path`)로 확인한다. 판정선은 1차 run과 같다
+    (등재 weight 절대 기준 × 1차 run의 러너 배율 — 재실행 표본은 몇 개뿐이라 배율을 새로 못 잰다). 두 번 다 넘은 파일만
+    RED. 재실행에서 내려온 파일은 두 값을 `::warning::`으로 남긴다(PO 조건 — 조용히 넘기지 않는다)."""
+    suspects = sorted(parse_changed_files(suspects_path.read_text())) if suspects_path.exists() else []
+    elapsed_by_file, first_problems = read_elapsed_strict(elapsed_path)
+    rerun_elapsed, rerun_problems = read_elapsed_strict(rerun_path, expected=suspects)
+    if not suspects:
+        rerun_problems.append(f"재실행 후보 목록이 비었거나 없음: {suspects_path}")
+    if first_problems or rerun_problems:
+        _print_record_problems(first_problems, what="1차")
+        _print_record_problems(rerun_problems, what="재실행")
+        return 1
     weights = load_weights()
-    slow, threshold, sample_size = slow_files_normalized(elapsed_by_file, weights)
-
-    # story #3636 — weight×3.0 여유축에 막혀 FAIL에서 빠진 파일도 조용히 넘기지 않고
-    # WARN으로 남긴다(가시성 — story #3558 ratio_outliers와 동형 관례).
-    for f in warned_only_files_normalized(elapsed_by_file, weights, threshold, slow):
+    provisional = provisional_files_in(load_raw_entries())
+    changed_files = (
+        parse_changed_files(changed_files_path.read_text()) if changed_files_path is not None else None
+    )
+    runner_factor, _ = _judge_runner_factor(
+        elapsed_by_file, weights, changed_files=changed_files, provisional=provisional,
+    )
+    confirmed, cleared = confirmed_slow_files(suspects, rerun_elapsed, weights, runner_factor=runner_factor)
+    # story #4283(AC4 · PO 07:26Z) — 재실행에서도 넘은 파일 중 import 확장으로만 들어온 것은 샤드 RED가 아니라 적어 두고
+    # 교차 샤드 판정(Audit)에 맡긴다. 직접 바꾼 테스트는 예전 그대로 RED.
+    direct_files = parse_changed_files(direct_files_path.read_text()) if direct_files_path is not None else None
+    if direct_files is not None and changed_files is not None:
+        import_confirmed = [f for f in confirmed if f not in direct_files]
+        confirmed = [f for f in confirmed if f in direct_files]
+        _write_import_over(import_over_out_path, import_confirmed)
+        _warn_import_over(import_confirmed, confirmed=True)
+    for f in cleared:
+        threshold = absolute_slow_threshold_sec(weights[f]) * runner_factor
         print(
-            f"::warning::러너 정규화 가드 — {f} 임계값({threshold:.1f}s) 초과했지만 자기 weight"
-            f"({weights[f]:.1f}s)×{HEAVY_FILE_OWN_WEIGHT_FAIL_MULTIPLIER:.1f} 이내라 WARN만(story #3636): "
-            f"{elapsed_by_file[f]:.0f}s"
+            f"::warning::러너 정규화 가드(story #4283) — {f} 1차 {elapsed_by_file.get(f, 0):.0f}s > 판정선 "
+            f"{threshold:.1f}s였지만 재실행 {rerun_elapsed[f]:.0f}s로 내려옴 — 단발 튐으로 보고 RED 아님(잡 초록 유지). "
+            "두 값이 계속 벌어지면 이 파일 자체의 편차를 보라."
         )
-
-    if sample_size < MIN_RATIO_SAMPLE:
-        print(
-            f"러너 정규화 표본 {sample_size}개 < {MIN_RATIO_SAMPLE} — 절대 {threshold:.0f}초로 폴백(story #3396 AC3)",
-            file=sys.stderr,
-        )
-    else:
-        print(
-            f"러너 정규화 판정선: {threshold:.1f}초(표본 {sample_size}개 · 중앙값 배율 "
-            f"×{threshold / 60.0:.2f}, story #3396 AC1)",
-            file=sys.stderr,
-        )
-
-    if slow:
-        for f in slow:
+    if confirmed:
+        for f in confirmed:
+            again = rerun_elapsed.get(f)
             print(
-                f"::error::러너 정규화 60초 가드 초과(story #3396): {f} "
-                f"({elapsed_by_file[f]:.0f}s > {threshold:.1f}s — 같은 run의 다른 파일 대비로도 무거워졌다)"
+                f"재실행 확인(story #4283): {f} 1차 {elapsed_by_file.get(f, 0):.0f}s · 재실행 "
+                f"{'기록 없음' if again is None else f'{again:.0f}s'} — 둘 다 판정선 초과",
+                file=sys.stderr,
             )
+        _print_absolute_red(confirmed, elapsed_by_file, weights, runner_factor)
+        return 1
+    print(f"OK: 러너 정규화 가드 — 1차 초과 {len(cleared)}개 전부 재실행에서 판정선 안(story #4283)", file=sys.stderr)
+    return 0
+
+
+def _check_elapsed_mode(
+    elapsed_path: Path, *, changed_files_path: Path | None = None, suspects_out_path: Path | None = None,
+    expected_files_path: Path | None = None, direct_files_path: Path | None = None, import_over_out_path: Path | None = None,
+) -> int:
+    """story #4152 — ci.yml의 pytest 루프가 이 샤드의 모든 파일을 다 돈 뒤 한 번
+    호출한다. #3396의 run-relative 중앙값 정규화 대신 `slow_files_absolute`(파일 자신의
+    등재 weight×AC1 배수, AC2 diff-scoping·AC4 provisional 제외)로 판정한다.
+
+    story #4283 — `suspects_out_path`가 주어지고 RED 후보가 `CONFIRM_RERUN_MAX_FILES` 이하면 RED 대신 후보를 그
+    파일에 쓰고 `CONFIRM_RERUN_EXIT`을 돌려준다(호출측이 재실행 뒤 `--confirm-elapsed`로 확정). 생략하면 예전 그대로.
+
+    story #4283(까디르 P1) — 경과 기록은 `read_elapsed_strict`로 읽는다(NaN · 음수 · 0줄 · `expected_files_path`에 있는데
+    기록 없음 = RED).
+
+    story #4283(AC4 · PO 07:26Z) — `direct_files_path`(이 PR이 직접 바꾼 테스트)가 주어지면 `changed_files` 중 그 밖 파일은
+    import 확장으로만 들어온 것 — 재실행 확인 후보로는 같이 올리되(exit 3), 재실행 없이 판정하는 길에서는 RED 대신
+    `import_over_out_path`에 적고 WARN(교차 샤드 판정은 --audit-durations). 생략하면 예전 그대로(전부 직접 변경 취급)."""
+    _write_import_over(import_over_out_path, [])
+    expected = (
+        [f for f in expected_files_path.read_text().splitlines() if f.strip()]
+        if expected_files_path is not None and expected_files_path.exists() else None
+    )
+    elapsed_by_file, problems = read_elapsed_strict(elapsed_path, expected=expected)
+    if expected_files_path is not None and expected is None:
+        problems.append(f"돌았어야 하는 파일 목록이 없음: {expected_files_path}")
+    if problems:
+        _print_record_problems(problems, what="1차")
+        return 1
+    weights = load_weights()
+    provisional = provisional_files_in(load_raw_entries())
+    changed_files = (
+        parse_changed_files(changed_files_path.read_text()) if changed_files_path is not None else None
+    )
+
+    runner_factor, raw_factor = _judge_runner_factor(
+        elapsed_by_file, weights, changed_files=changed_files, provisional=provisional,
+    )
+    print(
+        f"러너 속도 배율(story #4206 — 대조군 elapsed/weight 중앙값, 1.0 미만은 1.0 · 상한 {RUNNER_FACTOR_CAP}): "
+        f"실측 {raw_factor:.2f} → 적용 {runner_factor:.2f}",
+        file=sys.stderr,
+    )
+    if raw_factor > RUNNER_FACTOR_WARN:
+        _warn_runner_factor(raw_factor, runner_factor)
+
+    red, warn = slow_files_absolute(
+        elapsed_by_file, weights, provisional_files=provisional, changed_files=changed_files,
+        runner_factor=runner_factor,
+    )
+
+    for f in warn:
+        threshold = absolute_slow_threshold_sec(weights[f])
+        is_changed = changed_files is None or f in changed_files
+        reason = (
+            f"러너 배율 {runner_factor:.2f}로 흡수(story #4206 — 판정선 {threshold * runner_factor:.1f}s)"
+            if is_changed else "이 PR의 변경 파일 밖(AC2)"
+        )
+        print(
+            f"::warning::러너 정규화 가드(story #4152) — {f} 절대 임계({threshold:.1f}s, "
+            f"등재 weight {weights[f]:.1f}s×{ABSOLUTE_SLOW_MULTIPLIER:.1f}) 초과했지만 {reason}: "
+            f"{elapsed_by_file[f]:.0f}s — RED 아님(잡 초록 유지)."
+        )
+
+    if changed_files is None:
+        print(
+            "diff 정보 없음(--changed-files 미지정) — 전부 changed 취급(회귀 0, story #4152 안전측 폴백)",
+            file=sys.stderr,
+        )
+
+    direct_files = parse_changed_files(direct_files_path.read_text()) if direct_files_path is not None else None
+    import_red = (
+        [f for f in red if f not in direct_files] if direct_files is not None and changed_files is not None else []
+    )
+
+    if red and suspects_out_path is not None and len(red) <= CONFIRM_RERUN_MAX_FILES:
+        # story #4283 — 한 표본으로 판정하지 않는다: 호출측(ci.yml)이 이 파일들만 한 번 더 돌린 뒤 --confirm-elapsed로 판정.
+        suspects_out_path.write_text("".join(f"{f}\n" for f in red))
+        for f in red:
+            threshold = absolute_slow_threshold_sec(weights[f]) * runner_factor
+            print(
+                f"러너 정규화 절대 가드 1차 초과(story #4283 — 재실행으로 확인): {f} "
+                f"({elapsed_by_file[f]:.0f}s > {threshold:.1f}s, 러너 {runner_factor:.2f})",
+                file=sys.stderr,
+            )
+        return CONFIRM_RERUN_EXIT
+
+    if import_red:
+        # story #4283 — 재실행 없이 판정하는 길(후보가 상한을 넘었거나 --suspects-out 없음)에서도 import 확장 파일은 샤드에서
+        # RED로 하지 않는다: 적어 두고 교차 샤드 판정(Audit)에 맡긴다.
+        _write_import_over(import_over_out_path, import_red)
+        _warn_import_over(import_red, confirmed=False)
+        red = [f for f in red if f not in import_red]
+
+    if red:
+        if suspects_out_path is not None:
+            print(
+                f"1차 초과 {len(red)}개 > {CONFIRM_RERUN_MAX_FILES}(story #4283) — 단발 튐이 아니라 광범위 둔화로 보고 "
+                "재실행 없이 RED.",
+                file=sys.stderr,
+            )
+        _print_absolute_red(red, elapsed_by_file, weights, runner_factor)
         return 1
 
-    print(f"OK: 러너 정규화 가드 통과({sample_size}개 표본 기준)", file=sys.stderr)
+    print(f"OK: 러너 정규화 가드(절대 기준, story #4152) 통과 — 무관 파일 경고 {len(warn)}건", file=sys.stderr)
     return 0
 
 
@@ -703,17 +1302,84 @@ def main() -> int:
              "always()라 result=success로 끝나, --shard-result만으로는(§3653) 이 케이스가 "
              "업로드 결함과 구분이 안 됐다.",
     )
+    ap.add_argument(
+        "--changed-files", type=Path, default=None,
+        help="story #4152(AC2) — --check-elapsed와 함께 쓴다. `git diff --name-only` "
+             "1줄=1파일 텍스트 파일 — 이 목록 밖에서 절대 임계를 넘은 파일은 RED가 아니라 "
+             "WARN(잡 초록 유지). 생략하면 diff 정보 없음으로 간주해 전부 RED 후보(회귀 0, "
+             "예전 동작 그대로).",
+    )
+    ap.add_argument(
+        "--resolve-app-module-dependents", type=str, default=None, metavar="APP_FILES",
+        help="story #4163 — classify_backend_test_diff_scope.sh 줄2(공백 구분 "
+             "backend/app/**.py 목록)를 그대로 받아, discover_files()(SSOT) 중 그 모듈을 "
+             "정적으로 참조하는 테스트 파일을 한 줄에 하나씩 stdout으로 낸다. ci.yml이 이 "
+             "출력을 --changed-files 입력 파일로 그대로 저장해 --check-elapsed에 넘긴다 "
+             "(__ALL__ 모드 RED 범위를 «변경 app 모듈을 참조하는 테스트»로 좁히는 용도 — "
+             "그 밖 파일의 절대 임계 초과는 기존 WARN 축이 그대로 흡수).",
+    )
+    ap.add_argument(
+        "--suspects-out", type=Path, default=None,
+        help="story #4283 — --check-elapsed와 함께 쓴다. RED 후보가 CONFIRM_RERUN_MAX_FILES 이하면 RED 대신 후보를 "
+             "이 파일에 한 줄씩 쓰고 exit 3(호출측이 그 파일만 재실행한 뒤 --confirm-elapsed로 확정). 초과면 예전대로 RED.",
+    )
+    ap.add_argument(
+        "--confirm-elapsed", nargs=3, type=Path, default=None, metavar=("ELAPSED", "RERUN_ELAPSED", "SUSPECTS"),
+        help="story #4283 — 1차 elapsed · 재실행 elapsed · 후보 목록으로 확정 판정(두 번 다 판정선을 넘은 파일만 RED). "
+             "--changed-files는 1차 판정과 같은 값을 넘긴다(러너 배율 대조군이 같아야 한다).",
+    )
+    ap.add_argument(
+        "--direct-files", type=Path, default=None,
+        help="story #4283(AC4) — --check-elapsed · --confirm-elapsed와 함께 쓴다. 이 PR이 **직접** 바꾼 테스트 목록(한 줄에 "
+             "하나). --changed-files 중 이 밖 파일은 import 확장으로만 들어온 것 — 판정선을 넘어도 샤드 RED가 아니라 "
+             "--import-over-out에 적고 WARN(교차 샤드 판정은 --audit-durations). 생략하면 예전 그대로(전부 직접 변경).",
+    )
+    ap.add_argument(
+        "--import-over-out", type=Path, default=None,
+        help="story #4283 — --check-elapsed · --confirm-elapsed가 판정선을 넘은 import 확장 파일을 한 줄씩 쓰는 곳.",
+    )
+    ap.add_argument(
+        "--import-over", type=Path, default=None,
+        help="story #4283 — --elapsed-to-json과 함께 쓴다. --import-over-out 파일을 읽어 산출물에 import_expanded_over로 싣는다"
+             "(파일이 없으면 빈 목록).",
+    )
+    ap.add_argument(
+        "--expected-files", type=Path, default=None,
+        help="story #4283 — --check-elapsed와 함께 쓴다. 이 샤드가 돌렸어야 하는 파일 목록(한 줄에 하나) — 경과 기록에 "
+             "빠진 파일이 있으면 판정 불가로 RED.",
+    )
     args = ap.parse_args()
 
+    if args.confirm_elapsed is not None:
+        elapsed_in, rerun_in, suspects_in = args.confirm_elapsed
+        return _confirm_elapsed_mode(
+            elapsed_in, rerun_in, suspects_in, changed_files_path=args.changed_files,
+            direct_files_path=args.direct_files, import_over_out_path=args.import_over_out,
+        )
+
+    if args.resolve_app_module_dependents is not None:
+        modules = changed_app_files_to_modules(frozenset(args.resolve_app_module_dependents.split()))
+        for f in test_files_depending_on_modules(modules, discover_files()):
+            print(f)
+        return 0
+
     if args.check_elapsed is not None:
-        return _check_elapsed_mode(args.check_elapsed)
+        return _check_elapsed_mode(
+            args.check_elapsed, changed_files_path=args.changed_files, suspects_out_path=args.suspects_out,
+            expected_files_path=args.expected_files, direct_files_path=args.direct_files,
+            import_over_out_path=args.import_over_out,
+        )
 
     if args.elapsed_to_json is not None:
         elapsed_in, json_out = args.elapsed_to_json
         if args.shard is None:
             print("--elapsed-to-json은 --shard가 필수", file=sys.stderr)
             return 2
-        write_durations_json(_parse_elapsed_file(elapsed_in), json_out, shard=args.shard)
+        import_over = (
+            sorted(parse_changed_files(args.import_over.read_text()))
+            if args.import_over is not None and args.import_over.exists() else ([] if args.import_over is not None else None)
+        )
+        write_durations_json(_parse_elapsed_file(elapsed_in), json_out, shard=args.shard, import_over=import_over)
         return 0
 
     if args.audit_durations is not None:

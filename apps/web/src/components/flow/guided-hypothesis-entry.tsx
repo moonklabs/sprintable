@@ -28,7 +28,7 @@ export function GuidedHypothesisEntry({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(false);
 
-  const handleSubmit = async (value: { statement: string; metric: string; target: number; direction: 'up' | 'down' }) => {
+  const handleSubmit = async (value: { statement: string; metric: string; target: number; direction: 'up' | 'down' }): Promise<boolean> => {
     setSubmitting(true);
     setError(false);
     try {
@@ -41,8 +41,10 @@ export function GuidedHypothesisEntry({
       const json = await res.json() as { data: Hypothesis };
       setOpen(false);
       onCreated(json.data);
+      return true;
     } catch {
       setError(true);
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -50,7 +52,7 @@ export function GuidedHypothesisEntry({
 
   const form = (
     <>
-      <GuidedHypothesisForm submitting={submitting} onSubmit={handleSubmit} onCancel={() => setOpen(false)} />
+      <GuidedHypothesisForm submitting={submitting} onSubmit={handleSubmit} onCancel={() => setOpen(false)} projectId={projectId} />
       {error ? <p className="pt-1 text-xs text-destructive">{t('guidedError')}</p> : null}
     </>
   );

@@ -16,6 +16,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 }));
 
 import ContentRulesPage from './page';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -144,7 +145,9 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
     // story #3747 CHANGES(§11-2 정본 formatScheduledAt) — "MM-DD HH:mm TZ" 꼴(브라우저
     // toLocaleString 아님). TZ는 테스트 실행 환경에 따라 달라 정규식으로만 pin.
-    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} .+ · 송윤재/);
+    // story #4280 — 화면은 표시 시간대(resolveDisplayTimezone · 조직 tz 없으면 실행 기계 TZ)로 그리고 표기도 보는 사람에 따라 붙거나 생략된다.
+    // 날짜(09-07)를 박아 두면 LA처럼 음의 오프셋 기계에서 09-06이 되어 깨졌다(develop부터) — 기대값을 화면과 같은 포맷터로 만든다.
+    expect(header.textContent).toBe(`마지막 변경 ${formatScheduledAt('2026-09-07T00:00:00Z', resolveDisplayTimezone().tz).display} · 송윤재`);
   });
 
   it('⭐아직 한 번도 규칙을 안 정한 조직(row 자체가 없음) — 「아직 정한 적 없습니다」(빈 줄 아님)', async () => {
@@ -159,7 +162,7 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     stubFetch({ updatedByName: null });
     await mount('owner');
     const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
-    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} /);
+    expect(header.textContent).toBe(`마지막 변경 ${formatScheduledAt('2026-09-07T00:00:00Z', resolveDisplayTimezone().tz).display}`);
   });
 
   it('⭐member는 행 액션(고치기/정하기) 버튼이 없고 값은 그대로 본다(secret 아님)', async () => {
@@ -236,6 +239,18 @@ describe('ContentRulesPage — UTM 자동 부착 3통(story #3747ⓒ, utm_rules 
     expect(status).toContain(koMessages.contentRules.utmRulesEnabledOnLabel);
     expect(status).toContain('sprintable');
     expect(status).toContain('social');
+  });
+
+  // [SID:4282 · 유나 비차단] flex 칸이면 좁은 폭에서 «켜짐»과 세부가 두 칸으로 갈린다 → 한 문단(inline 흐름) · 점과 글자 사이 mr-1.5.
+  it('켜짐 상태는 flex 칸이 아니라 한 문단으로 흐른다', async () => {
+    stubFetch({ rules: { ...RULES_V1, utm_rules: { enabled: true, default_source: 'sprintable', default_medium: 'social', campaign_from: 'campaign_slug', content_from: 'draft_id' } } });
+    await mount('owner');
+    const el = container.querySelector('[data-testid="content-rules-utm-rules-status"]') as HTMLElement;
+    const cls = el.className.split(/\s+/);
+    expect(cls).not.toContain('flex');
+    expect(cls).not.toContain('inline-flex');
+    const dot = el.querySelector('span[aria-hidden="true"]') as HTMLElement;
+    expect(dot.className.split(/\s+/)).toEqual(expect.arrayContaining(['inline-block', 'mr-1.5']));
   });
 });
 
@@ -405,7 +420,7 @@ describe('ContentRulesPage — 행 저장(story #3747 AC2)', () => {
     const text = banner!.textContent ?? '';
     const prefixIdx = text.indexOf(koMessages.contentRules.contentRulesUndoFailedPrefix);
     const reasonIdx = text.indexOf(
-      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel),
+      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel).replace('{josa}', '을'), // story #4120 — 톤=ㄴ받침 → 을
     );
     expect(prefixIdx).toBeGreaterThanOrEqual(0);
     expect(reasonIdx).toBeGreaterThan(prefixIdx);
@@ -431,9 +446,35 @@ describe('ContentRulesPage — 행 저장(story #3747 AC2)', () => {
 
     const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
     expect(banner?.textContent).toContain(
-      koMessages.contentRules.versionConflictFieldSelfOtherTab.replace('{field}', koMessages.contentRules.toneLabel),
+      koMessages.contentRules.versionConflictFieldSelfOtherTab.replace('{field}', koMessages.contentRules.toneLabel).replace('{josa}', '을'), // story #4120
     );
     expect(banner?.textContent).not.toContain('유나');
+  });
+
+  // story #4120(PO 실측, 2026-09-21) — 누가 바꿨는지 모를 때(updated_by 자체가 없음) 떨어지는
+  // versionConflictFieldFact 갈래는 이 파일에 기존 커버리지가 0이었다. 「이/가」 조사 pin.
+  it('⭐충돌 상대를 모름(updated_by 없음) — 「「{field}」이(가) 바뀌었어요」 갈래', async () => {
+    stubFetch({
+      onPut: () => ({ status: 409, body: { code: 'CONTENT_RULES_VERSION_CONFLICT', current_version: 4, updated_by: null } }),
+      getAfterConflict: { rules: { ...RULES_V1, tone: '서버가 먼저 바꾼 톤' }, version: 4 },
+    });
+    await mount('owner');
+    await expandRow('tone');
+    const toneInput = container.querySelector('#content-rules-tone') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(toneInput, '내가 고친 톤');
+      toneInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { rowSaveButton().click(); });
+    await flush();
+
+    const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
+    // story #4120 — "톤"=ㄴ받침 → "이".
+    expect(banner?.textContent).toContain(
+      koMessages.contentRules.versionConflictFieldFact.replace('{field}', koMessages.contentRules.toneLabel).replace('{josa}', '이'),
+    );
+    expect(banner?.textContent).not.toContain('이(가)');
   });
 
   it('403 CONTENT_RULES_ADMIN_ONLY — 그 행 안에 인라인 오류', async () => {
@@ -474,7 +515,7 @@ describe('ContentRulesPage — 겹침 기반 낙관적 잠금(story #3747ⓐ, �
 
     const banner = container.querySelector('[data-testid="content-rules-version-conflict"]');
     expect(banner?.textContent).toContain(
-      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel),
+      koMessages.contentRules.versionConflictFieldWithName.replace('{name}', '유나').replace('{field}', koMessages.contentRules.toneLabel).replace('{josa}', '을'), // story #4120 — 톤=ㄴ받침 → 을
     );
     // 재시도 안 함 — 서버측 값(tone)으로 화면이 갈아끼워진다.
     expect(row('tone').textContent).toContain('서버가 먼저 바꾼 톤');

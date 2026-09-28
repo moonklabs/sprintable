@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findSubtleAlpha, scanContent, scanRepo, CLOSED_FAMILIES } from './verify-no-subtle-alpha-bg';
+import { measureFsReads } from './test-utils/fs-work';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 
@@ -60,9 +61,11 @@ describe('scanContent — AST literal extraction only (story #2710 lesson)', () 
 });
 
 describe('repo state (story #2420 destructive pilot)', () => {
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-  // 재현 5회 = 1013·1183·1055·1468·1394ms 중 최댓값 1468ms → ×3 ≈ 4404ms → 4500ms로 반올림).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('has zero closed-family subtle alpha bg across src (destructive fully migrated to bg-destructive-tint)', () => {
-    expect(scanRepo(SRC_ROOT)).toEqual([]);
-  }, 4500);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(SRC_ROOT));
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
+    expect(__scan).toEqual([]);
+  });
 });

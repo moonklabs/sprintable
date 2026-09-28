@@ -3,8 +3,12 @@ import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeNextPath } from '@/lib/auth/session-redirect';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { resolveAppUrl } from '@/services/app-url';
 import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
+import { backendSignal, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 // e-mobile-oauth-native-handoff-contract §2: returnUrl = 검증된 App Link. dev/prod 도메인·서명
@@ -119,7 +123,9 @@ async function handleCallback(request: Request, provider: string, code: string |
     if (!spAt) {
       return NextResponse.redirect(`${origin}/settings?link_error=SESSION_EXPIRED`);
     }
-    const linkRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/${provider}/link/callback`, {
+    const linkRes = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/oauth/${provider}/link/callback`, {
+      // story #4320 — OAuth 코드 교환 · 연결 · 인계 발급(한 번 쓰는 값) — 브라우저가 끊어도 끝까지. 시간 제한만(외부 API 연쇄라 60초).
+      timeLimitOnly: true, timeoutMs: BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${spAt}` },
       body: JSON.stringify({ provider, code, state }),
@@ -141,7 +147,9 @@ async function handleCallback(request: Request, provider: string, code: string |
   const attrReferrer = cookieStore.get('sp_attr_ref')?.value;
 
   // FastAPI OAuth callback
-  const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/callback`, {
+  const fastapiRes = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/oauth/callback`, {
+    // story #4320 — OAuth 코드 교환 · 연결 · 인계 발급(한 번 쓰는 값) — 브라우저가 끊어도 끝까지. 시간 제한만(외부 API 연쇄라 60초).
+    timeLimitOnly: true, timeoutMs: BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -178,7 +186,9 @@ async function handleCallback(request: Request, provider: string, code: string |
     const internalSecret = process.env['FIREBASE_BFF_INTERNAL_SECRET'];
     // story #3121 AC1 — return_uri는 고정 매핑으로 계산(클라 입력 아님). APP_LINK_ORIGIN()은
     // 기존 App Link 리다이렉트 목적지 계산과 동일 출처(아래 returnUrl 참조) — 새 소스 안 만든다.
-    const issueRes = await fetch(`${FASTAPI_URL()}/api/v2/internal/auth/oauth-handoff/issue`, {
+    const issueRes = await backendFetch(`${FASTAPI_URL()}/api/v2/internal/auth/oauth-handoff/issue`, {
+      // story #4320 — OAuth 코드 교환 · 연결 · 인계 발급(한 번 쓰는 값) — 브라우저가 끊어도 끝까지. 시간 제한만(외부 API 연쇄라 60초).
+      timeLimitOnly: true, timeoutMs: BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -210,8 +220,14 @@ async function handleCallback(request: Request, provider: string, code: string |
 
   // AC3: 세션 만료로 OAuth 재로그인한 경우 작업 경로 복귀(safeNextPath 가드)·없으면 홈(chat).
   // story #3179(S3c) 후속(추가 실측 발견) — /dashboard 폐합, 홈=chat 재조준.
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
+  // readNavV3FlagsFromEnv() 한 곳으로, 목적지 문자열은 resolveNavV3Destinations() 한
+  // 곳으로만 — 여기서 '/chat'·'/chats' 리터럴을 다시 조립하지 않는다.
+  const navV3FlagsForCallback = readNavV3FlagsFromEnv();
   const destinationUrl = new URL(
-    inviteToken ? `${origin}/chats` : `${origin}${safeNextPath(nextCookie)}`,
+    inviteToken
+      ? `${origin}${resolveNavV3Destinations(navV3FlagsForCallback).chats.path}`
+      : `${origin}${safeNextPath(nextCookie, navV3FlagsForCallback)}`,
   );
   // story #3204 — register/page.tsx(email 경로)와 동일 파라미터로 발화 지점을 하나로
   // 모은다(google-analytics.tsx route-change effect가 소비). is_new_user=false(로그인)면

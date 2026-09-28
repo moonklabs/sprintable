@@ -11,6 +11,9 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.conftest import grant_org_projects
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -82,16 +85,18 @@ async def _seed_org(session):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+async def _seed_agent(session, org_id, project_id, *, name="담롱", grant: bool = False):
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, agent_member_id=m.id)
     return m.id
 
 
-async def _seed_human(session, org_id, *, role="owner"):
+async def _seed_human(session, org_id, *, role="owner", grant: bool = False):
     from app.models.project import OrgMember
     from app.models.user import User
 
@@ -101,6 +106,8 @@ async def _seed_human(session, org_id, *, role="owner"):
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
     session.add(om)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, user_id=user.id)
     return user.id
 
 
@@ -202,7 +209,7 @@ async def test_publication_id_null_when_no_publication_yet():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_connection(s, org_id)
 
@@ -260,7 +267,7 @@ async def test_publication_id_matches_latest_channel_publication_row_after_publi
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_pub = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_pub.status_code == 200, r_pub.text
 
                 async with Session() as s:

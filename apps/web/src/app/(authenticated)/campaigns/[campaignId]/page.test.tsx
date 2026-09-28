@@ -89,7 +89,7 @@ describe('CampaignDetailPage(story 1db41045)', () => {
 
     const variantItem = container.querySelector('[data-testid="campaign-detail-variant-item"]');
     expect(variantItem?.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/cp-1');
-    expect(variantItem?.textContent).toContain(koMessages.content.channelThreads);
+    expect(variantItem?.textContent).toContain(koMessages.channelConnect.channelThreads);
   });
 
   it('소속 원문이 0건이면 안내 문구만 보인다', async () => {

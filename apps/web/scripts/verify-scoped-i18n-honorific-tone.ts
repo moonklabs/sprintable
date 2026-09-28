@@ -26,7 +26,7 @@
  * `SCOPED_NAMESPACES`·`honorific-scope/*.json`·`loadHonorificScopeDir`·
  * `checkScopedNamespaceMinimums`(네임스페이스별 leaf 하한)는 전량 삭제 — 대신 ko.json
  * **전체** leaf 수 하한 하나(`checkTotalLeafFloor`, 대량 삭제·로더 고장 감지)로 대체됐다.
- * `SCOPED_KEYS`(104개)는 삭제하지 않았다 — story #3877 원 표의 count-lock 회귀 테스트와
+ * `SCOPED_KEYS`(104개 · story #4231 3차 (b)에서 죽은 orgBriefing 5키를 빼 99개)는 삭제하지 않았다 — story #3877 원 표의 count-lock 회귀 테스트와
  * per-story 전용 테스트 파일(`*.3903/3921/3923.test.ts`)이 여전히 참조하는 레거시
  * 데이터이자, `findHonorificToneInScopedKeys`의 기본 인자 값으로 남아있다(더 이상 어떤
  * 필터링도 하지 않는다 — 이제 "스코프"는 언제나 ko.json 전체다).
@@ -44,7 +44,7 @@ const MESSAGES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const KO_FILE = 'ko.json';
 
 // story #3877 AC1 표(doc 5590a4c5 §4①) 94키 + AC4 orgBriefing 9키 + AC5 docs.emptyDescription
-// 1키 = 104키. story #3927(전역 스캔 승격) 이후로는 더 이상 어떤 필터링에도 쓰이지 않는
+// 1키 = 104키(story #4231 3차 (b) — 죽은 orgBriefing decide*/signal*Context 5키 삭제로 99키). story #3927(전역 스캔 승격) 이후로는 더 이상 어떤 필터링에도 쓰이지 않는
 // 레거시 데이터다 — findHonorificToneInScopedKeys의 기본 인자 값 + 회귀 count-lock 테스트
 // + per-story 전용 테스트 파일(3903/3921/3923)의 "이 실 사고 키는 SCOPED_KEYS 정적 목록
 // 안에 없었다"는 역사적 증거로만 남는다. 새 키를 추가하지 않는다(전역 스캔이 이미 본다).
@@ -113,11 +113,6 @@ export const SCOPED_KEYS = [
   'orgBriefing.clusterUnclosedOutcomeMissingTitle',
   'orgBriefing.clusterUnclosedOverdueGoalTitle',
   'orgBriefing.clusterUnclosedOverdueHypothesisTitle',
-  'orgBriefing.decideBlockerContext',
-  'orgBriefing.decideGateContext',
-  'orgBriefing.decideReviewContext',
-  'orgBriefing.signalAgentStuckContext',
-  'orgBriefing.signalBlockerContext',
   'orgBriefing.signalHypothesisFalsifiedTitle',
   'retro.addActionFailed',
   'retro.addItemFailed',
@@ -224,8 +219,11 @@ export interface TotalLeafFloorViolation {
 // 목적이라 네임스페이스 단위로 쪼갤 이유가 없다(오히려 매 네임스페이스 PR마다 파일 편집을
 // 요구하던 구조 자체가 이 스토리가 없애려는 결함이었다). 실측(develop 46652946e, 2026-09-15
 // 13:xxZ, #4316·#4333 着地 뒤) 74ns·leaf수는 이 파일 자기 테스트에 실 수치로 고정 —
-// 하한은 그 실측치의 ~80%(3916 관례 그대로, 자연 증감은 통과하되 대량 삭제는 fail-loud).
-export const MIN_TOTAL_LEAF_COUNT = 4363;
+// 하한은 그 실측치의 ~80%(3916 관례 그대로 — 대량 삭제는 fail-loud).
+// 재측정(story #4343 · 2026-09-27 00:02Z · develop 22e2dd44c + #4723 576d0aa74 위 실측 6233 leaf):
+// 4363(5454의 80%) → 4986(6233 × 0.8). ko leaf가 하한/0.7(≈7123)을 넘게 늘면 자기 테스트의 비 검사가
+// 다시 재측정을 요구한다(의도된 신호 — 하한이 실측과 멀어지면 대량 삭제를 못 잡기 때문).
+export const MIN_TOTAL_LEAF_COUNT = 4986;
 
 /** ko.json 전체 leaf 수가 하한을 밑도는지 검사하는 순수 함수 — 위반이면 길이 1 배열,
  * 아니면 빈 배열(다른 판정 함수들과 같은 결, main()이 반환값으로 exit 여부를 결정). */
@@ -352,7 +350,22 @@ export interface AdnominalTerminalFinding {
   value: string;
 }
 
-const ADNOMINAL_TERMINAL_RE = /[가-힣](는|인)\.(\s|$)/;
+const ADNOMINAL_TERMINAL_RE = /([가-힣]+)(는|인)\.(\s|$)/g;
+
+// story #4203(유나 확정 문안 «할 일 → 진행 중 → 완료 확인.»·«제출 → 검토 → 승인.») — «확인»·«승인»은 관형형
+// 어미 '인'이 아니라 '인'으로 끝나는 한자어 명사다(명사형 종결은 이 제품의 설명 두 마디 꼴 «흐름. ~에 적합.»).
+// 예외는 **낱말 전체 일치**로만 — 까디르 QA(PR #4566): 끝 두 글자만 보면 «회원인.»·«지원인.»·«명확인.» 같은 진짜 관형형
+// «~인.»이 «원인»·«확인»에 걸려 통과했다. 새 명사가 필요하면 이 표에 한 줄(사유: 명사형 종결 문안).
+const NOUNS_ENDING_IN_IN = new Set(['확인', '승인', '재승인', '미확인']);
+
+function hasAdnominalTerminal(value: string): boolean {
+  for (const m of value.matchAll(ADNOMINAL_TERMINAL_RE)) {
+    const word = m[1]! + m[2]!;
+    if (m[2] === '인' && NOUNS_ENDING_IN_IN.has(word)) continue;
+    return true;
+  }
+  return false;
+}
 
 export function findPersonaAdnominalTerminal(
   ko: Record<string, unknown>,
@@ -364,7 +377,7 @@ export function findPersonaAdnominalTerminal(
     if (typeof value !== 'string') continue;
     // '~는 것' / '~인 것' 등 정당한 관형형+의존명사는 마침표가 아니라 뒤에 명사가 오므로
     // 위 정규식에 안 걸린다.
-    if (ADNOMINAL_TERMINAL_RE.test(value)) findings.push({ key, value });
+    if (hasAdnominalTerminal(value)) findings.push({ key, value });
   }
   return findings;
 }

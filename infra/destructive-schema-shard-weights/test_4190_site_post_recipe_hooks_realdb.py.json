@@ -1,0 +1,1 @@
+{"file": "tests/test_4190_site_post_recipe_hooks_realdb.py", "sec": 50.0, "source": "story #4283(AC4 · PO 2026-09-28 07:27Z) — CI 실측 중앙값으로 갱신(등재 28.0 → 50.0s): 최근 성공 PR run 40개(2026-09-27 22:14Z~09-28 06:33Z) shard-durations 산출물 · 표본 40 · 최대 93.0s. 옛 등재값이 중앙값÷1.25보다 작아 판정선이 실측보다 좁았다(선 70.0 → 125.0s). provisional 표시 해제 — CI 실측 중앙값이 생겨 절대 판정 대상(까디르 QA 2026-09-28 07:56Z)."}

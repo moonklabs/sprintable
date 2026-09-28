@@ -10,10 +10,12 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOve
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { MenuSearchInput } from '@/components/ui/menu-search-input';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,12 +31,13 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { KanbanColumn } from './kanban-column';
 import { KanbanTrustColumn } from './kanban-trust-column';
 import { KanbanListView } from './kanban-list-view';
-import { KanbanSkeleton } from './kanban-skeleton';
+import { KanbanColumnsSkeleton, KanbanListRowsSkeleton, KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
 import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberDisplayLabel, memberNameById, memberRowLabels } from '@/lib/member-display';
 
 /**
  * 터치는 드래그를 절대 시작하지 않게 — pointerType !== 'touch'만 드래그 활성(0d142311 prod 재발 근본 fix).
@@ -141,6 +144,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 동일 패턴 — orgSyncVersion을 트리거 effect 의존성에 얹는다.
   const orgSyncVersion = useOrgSyncVersion();
   const t = useTranslations('board');
+  // story #4284 — 이름 없는 구성원 표시(common.memberUnnamed · lib/member-display).
+  const tc = useTranslations('common');
   const locale = useLocale();
   const { addToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
@@ -150,9 +155,27 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [transitionErrorNonce, bumpTransitionErrorNonce] = useRenderNonce();
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [sprints, setSprints] = useState<KanbanSprint[]>([]);
+  // story #4171 — sprints는 첫 그림 뒤에 온다. 그 사이·실패 시 칩이 «전체 스프린트»로 거짓말하지 않게.
+  const [sprintsStatus, setSprintsStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   const [members, setMembers] = useState<KanbanMember[]>([]);
+  // story #4284(유나 판정) — 담당자 필터의 행 라벨. 이름 없는 구성원이 같은 묶음(사람 · 에이전트)에 둘 이상이면 «이름 없는 구성원 · id 앞 8자»로
+  // 가른다(멘션 목록과 같은 memberRowLabels · 이 목록엔 역할이 안 보여 늘 id 꼬리). 검색 전 전체 묶음으로 매겨 검색해도 라벨이 안 바뀐다.
+  const assigneeRowLabels = new Map([
+    ...memberRowLabels(members.filter((m) => m.type !== 'agent'), tc, () => ''),
+    ...memberRowLabels(members.filter((m) => m.type === 'agent'), tc, () => ''),
+  ]);
+  const assigneeRowLabel = (m: KanbanMember) => assigneeRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc);
+  // [SID:4300] 프로젝트 구성원 목록을 한 번이라도 받아 봤는지(성공 · 실패 모두) — 이름표 조직 범위 보충의 «없음» 판단 시점.
+  // `loading`에 묶지 않는다: 다시 불러오는 동안 조직 이름이 잠깐 빠졌다 돌아오는 깜빡임을 안 만든다.
+  const [membersLoaded, setMembersLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
+  // story #4307(유나 · PO 10:42Z) — 첫 불러오기가 끝났는지. 전면 스켈레톤(툴바까지 갈아끼움)은 첫 불러오기에만 — 그 뒤 스프린트 · 담당자 필터로
+  // 다시 불러올 때는 툴바를 그대로 둔다(예전엔 툴바째 사라져 필터 버튼으로 돌아갈 초점이 body로 빠지고 보드 전체가 깜빡였다).
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  // story #4307(PO 10:51Z) — 스토리 목록(보드 몸통) 불러오기 실패. 예전엔 5xx면 빈 컬럼(«스토리 없음»이라는 거짓)이, 망 오류면 옛 필터의
+  // 카드가 새 필터 칩 아래 그대로 남았다. 실패면 컬럼 자리에 오류 + «다시 시도»(busy는 풀림). 늦게 실패한 옛 요청은 runId로 무시.
+  const [storiesLoadFailed, setStoriesLoadFailed] = useState(false);
   // CB-S4: status별 total count + cursor
   const [columnTotals, setColumnTotals] = useState<Record<string, number>>({});
   const [columnCursors, setColumnCursors] = useState<Record<string, string | null>>({});
@@ -174,8 +197,16 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // `cancelled` 클로저를 못 쓴다(재실행을 트리거할 의존성 배열이 없다) — 대신 클릭마다
   // 증가시키는 요청 순번으로 "가장 최근 클릭의 응답만 반영"을 흉내낸다.
   const storyTasksRequestRef = useRef(0);
+  // story #4171 — fetchData 실행 순번. 새 실행이 시작되면 이전 실행의 늦은 결과를 버린다.
+  const fetchRunRef = useRef(0);
 
   const selectedSprintId = searchParams.get('sprint_id') ?? '';
+  // story #4171 — 목록은 이미 selectedSprintId로 필터돼 떠 있다. sprints 목록이 오기 전엔 «불러오는
+  // 중», 실패·목록에 없음이면 «선택한 스프린트»(필터가 걸려 있다는 사실은 그대로 말한다).
+  const sprintChipLabel = !selectedSprintId
+    ? t('allSprints')
+    : sprints.find((s) => s.id === selectedSprintId)?.title
+      ?? (sprintsStatus === 'loading' ? t('sprintChipLoading') : t('sprintChipSelected'));
   const selectedEpicId = searchParams.get('epic_id') ?? '';
   const selectedAssigneeId = searchParams.get('assignee_id') ?? '';
 
@@ -212,7 +243,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     else params.delete(key);
     const storyId = searchParams.get('story');
     if (storyId) params.set('story', storyId);
-    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+    router.replace(`/${wsSlug}/${projSlug}/flow${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
   }, [router, searchParams, wsSlug, projSlug]);
 
   // BOARD-03: done 컬럼 collapse 상태
@@ -275,15 +306,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
   const epicMap: Record<string, string> = {};
   for (const e of epics) epicMap[e.id] = e.title;
-  const memberMap: Record<string, KanbanMember> = {};
+  const projectMemberMap: Record<string, KanbanMember> = {};
   for (const m of members) {
-    memberMap[m.id] = m;
+    projectMemberMap[m.id] = m;
     const userId = (m as unknown as { user_id?: string | null }).user_id;
-    if (userId) memberMap[userId] = m;
+    if (userId) projectMemberMap[userId] = m;
   }
 
   // CB-S4: status별 stories fetch helper
-  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null }> => {
+  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null; ok: boolean }> => {
     const params = new URLSearchParams();
     if (projectId) params.set('project_id', projectId);
     if (selectedSprintId) params.set('sprint_id', selectedSprintId);
@@ -292,7 +323,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     params.set('limit', status === 'done' ? '10' : '20');
     if (cursor) params.set('cursor', cursor);
     const res = await fetchWithAuth(`/api/stories?${params}`);
-    if (!res.ok) return { stories: [], total: 0, nextCursor: null };
+    if (!res.ok) return { stories: [], total: 0, nextCursor: null, ok: false };
     // RC: 헤더 대신 JSON body meta에서 cursor/total 읽기 (proxy 헤더 strip 방지)
     // story #3761 후속(카디르 QA 지적, PR#4109 검수 中 발견) — 은퇴한 `total` 대신 정본
     // `totalCount` 읽기. 이 status 기반 호출은 buildCursorPageMeta 경로(pagination.ts)를
@@ -303,7 +334,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const stories = json.data ?? [];
     const nextCursor = json.meta?.nextCursor ?? null;
     const total = json.meta?.totalCount ?? stories.length;
-    return { stories, total, nextCursor };
+    return { stories, total, nextCursor, ok: true };
   }, [projectId, selectedSprintId, selectedAssigneeId]);
 
   // E-POLISH (story 23ea0e1d): columnTotals는 fetchData에서 단 1회 세팅되므로
@@ -330,6 +361,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 있으면 그 문구로 컬럼 헤더 텍스트만 치환하고, 없으면(오버라이드 미설정) 기존
   // t(col.i18nKey) 그대로(회귀 0).
   const domainLabels = useOrgDomainLabels(orgId, locale);
+  // [SID:4300] 이름표 = 프로젝트 범위 + 카드에 보이는 id(담당 · 검증자)가 거기 없을 때만 조직 범위(첫 화면 뒤 · 없을 때만 — PO 決).
+  // 권한이 회수된 담당자 · 다른 프로젝트 에이전트가 카드에서 조용히 빠지던 것을 이름으로 채운다. 담당자 «고르는» 목록(members)은
+  // 프로젝트 범위 그대로. OrgMember는 KanbanMember와 같은 모양({id, name, type, runtime_type} · #4284 뒤 name nullable).
+  const boardNames = useMemberNameFallback(
+    orgId, projectMemberMap,
+    stories.flatMap((s) => [s.assignee_id, ...(s.assignee_ids ?? []), s.human_verified_by]),
+    membersLoaded,
+  );
+  const memberMap = boardNames.memberMap as Record<string, KanbanMember>;
 
   // story #2137 — 카드(stories 배열)와 상세 패널(selectedStory)이 별도 state라, SSE 패치를
   // stories에만 적용하면 패널만 옛값에 고정된다(#2384·#2130과 같은 클래스의 3번째 재발 — 이번엔
@@ -400,27 +440,110 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   });
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const sprintParams = projectId ? `?project_id=${projectId}` : '';
-      const epicParams = new URLSearchParams();
-      if (projectId) epicParams.set('project_id', projectId);
-      epicParams.set('limit', '20');
-      const memberParams = projectId ? `?project_id=${projectId}` : '';
+    const runId = ++fetchRunRef.current;
+    const stale = () => runId !== fetchRunRef.current;
+    const sprintParams = projectId ? `?project_id=${projectId}` : '';
+    const epicParams = new URLSearchParams();
+    if (projectId) epicParams.set('project_id', projectId);
+    epicParams.set('limit', '20');
+    const memberParams = projectId ? `?project_id=${projectId}` : '';
+    let storyIds: string[] = [];
 
+    setLoading(true);
+    setSprintsStatus('loading');
+    // story #4275(E-MOBILE-SPEED · 민 기기 실측 +0.53~0.74초) — 부수 요청 중 1단 결과(story id)가 필요 없는 넷은 1단과
+    // **같이** 출발한다. 의존 표(PR 본문): sprints(project_id) · dependencies/graph(인자 없음) · labels · item-labels(인자
+    // 없음) · gates(pending · story) — 1단 응답 값을 안 쓴다. 실행 요약 · 라인 상태만 story id가 필요해 1단 뒤에 남는다.
+    // 각 갈래는 제 실패만 삼키고(non-critical), 새 fetchData가 시작됐으면 늦게 온 결과로 새 상태를 덮지 않는다.
+    // 유나 design(PR #4552) — 카드 높이를 바꾸는 배지(실행 요약·라인 상태·의존·라벨·대기 게이트)는 갈래마다 따로 반영하면
+    // 카드가 여러 번 밀린다(390폭 최대 137px) — 출발만 당기고 반영은 아래에서 전부 모은 뒤 한 번에. 스프린트는 카드가 아니라
+    // 필터 칩이라 오는 대로.
+    const sprintsLeg = (async () => {
+      try {
+        const sprintsRes = await fetchWithAuth(`/api/sprints${sprintParams}`);
+        if (!sprintsRes.ok) { if (!stale()) setSprintsStatus('failed'); return; }
+        const json = await sprintsRes.json();
+        if (!stale()) { setSprints(json.data); setSprintsStatus('loaded'); }
+      } catch {
+        // non-critical — 스프린트 필터 칩 드롭다운만 비어 있다(칩 라벨은 «선택한 스프린트»).
+        if (!stale()) setSprintsStatus('failed');
+      }
+    })();
+    const graphLeg = (async (): Promise<Record<string, string[]> | null> => {
+      try {
+        const graphRes = await fetchWithAuth('/api/dependencies/graph?item_type=story');
+        if (!graphRes.ok) return null;
+        const graphJson = await graphRes.json() as { edges?: DependencyEdge[] };
+        const map: Record<string, string[]> = {};
+        for (const edge of graphJson.edges ?? []) {
+          if (edge.dep_type === 'blocks') {
+            if (!map[edge.to_id]) map[edge.to_id] = [];
+            map[edge.to_id].push(edge.from_id);
+          }
+        }
+        return map;
+      } catch {
+        return null; // non-critical
+      }
+    })();
+    // 라벨 정의와 스토리-라벨 연결은 서로 독립이라 함께 부르고, 짝짓기만 둘 다 온 뒤에 한다.
+    const labelsLeg = (async (): Promise<{ labels: LabelData[]; byStory: Record<string, LabelData[]> | null } | null> => {
+      try {
+        const [labelsRes, ilRes] = await Promise.all([
+          fetchWithAuth('/api/labels'),
+          fetchWithAuth('/api/item-labels?item_type=story').catch(() => null),
+        ]);
+        if (!labelsRes.ok) return null;
+        const labelsJson = await labelsRes.json() as LabelData[];
+        if (!ilRes?.ok) return { labels: labelsJson, byStory: null };
+        const itemLabels = await ilRes.json() as { item_id: string; label_id: string }[];
+        const map: Record<string, LabelData[]> = {};
+        for (const il of itemLabels) {
+          const label = labelsJson.find((l) => l.id === il.label_id);
+          if (label) (map[il.item_id] ??= []).push(label);
+        }
+        return { labels: labelsJson, byStory: map };
+      } catch {
+        return null; // non-critical
+      }
+    })();
+    const gatesLeg = (async (): Promise<Record<string, { id: string; gate_type: string; status: string }[]> | null> => {
+      try {
+        const gatesRes = await fetchWithAuth('/api/gates?status=pending&work_item_type=story');
+        if (!gatesRes.ok) return null;
+        const gatesJson = await gatesRes.json() as GateItem[];
+        const gmap: Record<string, { id: string; gate_type: string; status: string }[]> = {};
+        for (const g of gatesJson) {
+          if (!gmap[g.work_item_id]) gmap[g.work_item_id] = [];
+          gmap[g.work_item_id].push({ id: g.id, gate_type: g.gate_type, status: g.status });
+        }
+        return gmap;
+      } catch {
+        return null; // non-critical
+      }
+    })();
+    try {
       // CB-S4: status별 5회 독립 호출
       // story #3519(§16-7 2부, PO 確定 2026-09-05) — storyResults(보드의 실제 몸통, 주)와
-      // sprintsRes/epicsRes/membersRes(부수, ok?채움:방치)가 같은 Promise.all에 미격리로
-      // 묶여 있어, 부수 셋 중 하나가 네트워크단 reject하면 보드 주 데이터까지 조용히 텅
-      // 비었다(finally가 setLoading(false)는 걸어 무한 스켈레톤은 아니지만, 데이터 손실은
-      // 그대로). 부수 셋만 leg별로 격리한다.
+      // epicsRes/membersRes(부수, ok?채움:방치)가 같은 Promise.all에 미격리로 묶여 있어,
+      // 부수 하나가 네트워크단 reject하면 보드 주 데이터까지 조용히 텅 비었다 — 부수만 leg별로 격리한다.
+      // story #4171(E-MOBILE-SPEED) — 스켈레톤은 카드 몸통(stories 5 · 카드의 goal 제목 · 담당자
+      // 이름)만 기다린다. 예전엔 여기에 sprints(필터 칩 드롭다운 전용)가 같이 묶이고, 그 뒤 배지용
+      // 6건이 순차로 줄 서 있어 목록이 전부 끝날 때까지 스켈레톤이었다(첫 화면 호출 폭포의 꼬리).
       const statuses = COLUMNS.map((c) => c.id);
-      const [storyResults, sprintsRes, epicsRes, membersRes] = await Promise.all([
-        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
-        fetchWithAuth(`/api/sprints${sprintParams}`).catch(() => null),
+      const [storyResults, epicsRes, membersRes] = await Promise.all([
+        // story #4307 — 망 오류(throw)도 실패로 모은다(예전엔 그대로 새어 옛 카드가 남았다).
+        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))).catch(() => null),
         fetchWithAuth(`/api/goals?${epicParams.toString()}`).catch(() => null),
         fetchWithAuth(`/api/members${memberParams}`).catch(() => null),
       ]);
+      if (stale()) return;
+      if (!storyResults || storyResults.some((r) => !r.ok)) {
+        // 늦게 실패한 옛 요청은 위 stale 판정으로 이미 빠졌다 — 여기 온 건 지금 조건의 실패.
+        setStoriesLoadFailed(true);
+        return;
+      }
+      setStoriesLoadFailed(false);
 
       const allStories: KanbanStory[] = [];
       const newTotals: Record<string, number> = {};
@@ -433,102 +556,71 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       setStories(allStories);
       setColumnTotals(newTotals);
       setColumnCursors(newCursors);
+      storyIds = allStories.map((s) => s.id);
 
-      const storyIds = allStories.map((s) => s.id);
-      if (sprintsRes?.ok) { const json = await sprintsRes.json(); setSprints(json.data); }
-      if (epicsRes?.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
-      if (membersRes?.ok) { const json = await membersRes.json(); setMembers(json.data); }
-
-      if (projectId && storyIds.length > 0) {
-        try {
-          const summaryParams = new URLSearchParams({ project_id: projectId });
-          for (const sid of storyIds) summaryParams.append('story_ids', sid);
-          const summaryRes = await fetchWithAuth(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
-          if (summaryRes.ok) {
-            const summaryJson = await summaryRes.json() as Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
-            setExecutionMap(summaryJson);
-          }
-        } catch {
-          // non-critical — skip silently
-        }
+      // 본문 파싱도 await라 그 사이 새 실행(프로젝트·org 전환)이 시작될 수 있다 — 파싱 뒤에도 가드.
+      if (epicsRes?.ok) {
+        const json = await epicsRes.json();
+        if (stale()) return;
+        setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null);
       }
-
-      // S11 ①: workflow-line 상태 배치(보드 카드 badge)·N+1 0(1 fetch/200건·chunk·silent 캡 없음). storyIds 기준.
-      if (storyIds.length > 0) {
-        try {
-          const chunks: string[][] = [];
-          for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
-          const results = await Promise.all(chunks.map((chunk) =>
-            fetchWithAuth(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
-              .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
-              .catch(() => []),
-          ));
-          const lmap: Record<string, LineStatusSummary> = {};
-          for (const arr of results) for (const s of arr) lmap[s.story_id] = s;
-          setStoryLineMap(lmap);
-        } catch {
-          // non-critical — line badge 없으면 카드는 기존대로 렌더.
-        }
+      if (membersRes?.ok) {
+        const json = await membersRes.json();
+        if (stale()) return;
+        setMembers(json.data);
       }
-
-      try {
-        const graphRes = await fetchWithAuth('/api/dependencies/graph?item_type=story');
-        if (graphRes.ok) {
-          const graphJson = await graphRes.json() as { edges?: DependencyEdge[] };
-          const map: Record<string, string[]> = {};
-          for (const edge of graphJson.edges ?? []) {
-            if (edge.dep_type === 'blocks') {
-              if (!map[edge.to_id]) map[edge.to_id] = [];
-              map[edge.to_id].push(edge.from_id);
-            }
-          }
-          setBlockedByMap(map);
-        }
-      } catch {
-        // non-critical
-      }
-
-      try {
-        const labelsRes = await fetchWithAuth('/api/labels');
-        if (labelsRes.ok) {
-          const labelsJson = await labelsRes.json() as LabelData[];
-          setOrgLabels(labelsJson);
-          try {
-            const ilRes = await fetchWithAuth('/api/item-labels?item_type=story');
-            if (ilRes.ok) {
-              const itemLabels = await ilRes.json() as { item_id: string; label_id: string }[];
-              const map: Record<string, LabelData[]> = {};
-              for (const il of itemLabels) {
-                const label = labelsJson.find((l) => l.id === il.label_id);
-                if (label) (map[il.item_id] ??= []).push(label);
-              }
-              setStoryLabelsMap(map);
-            }
-          } catch {
-            // non-critical
-          }
-        }
-      } catch {
-        // non-critical
-      }
-
-      try {
-        const gatesRes = await fetchWithAuth('/api/gates?status=pending&work_item_type=story');
-        if (gatesRes.ok) {
-          const gatesJson = await gatesRes.json() as GateItem[];
-          const gmap: Record<string, { id: string; gate_type: string; status: string }[]> = {};
-          for (const g of gatesJson) {
-            if (!gmap[g.work_item_id]) gmap[g.work_item_id] = [];
-            gmap[g.work_item_id].push({ id: g.id, gate_type: g.gate_type, status: g.status });
-          }
-          setStoryGatesMap(gmap);
-        }
-      } catch {
-        // non-critical
-      }
+      setMembersLoaded(true);
     } finally {
-      setLoading(false);
+      if (!stale()) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
+    if (stale()) return;
+
+    // 첫 그림 뒤 — story id가 필요한 두 갈래(실행 요약 · 라인 상태)만 여기서 출발한다. 나머지 넷은 위에서 1단과
+    // 함께 이미 나가 있다(story #4275).
+
+    const summaryLeg = (async (): Promise<Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }> | null> => {
+      if (!projectId || storyIds.length === 0) return null;
+      try {
+        const summaryParams = new URLSearchParams({ project_id: projectId });
+        for (const sid of storyIds) summaryParams.append('story_ids', sid);
+        const summaryRes = await fetchWithAuth(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
+        return summaryRes.ok ? await summaryRes.json() : null;
+      } catch {
+        return null; // non-critical — skip silently
+      }
+    })();
+    // S11 ①: workflow-line 상태 배치(보드 카드 badge)·N+1 0(1 fetch/200건·chunk·silent 캡 없음). storyIds 기준.
+    const lineLeg = (async (): Promise<Record<string, LineStatusSummary> | null> => {
+      if (storyIds.length === 0) return null;
+      try {
+        const chunks: string[][] = [];
+        for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
+        const results = await Promise.all(chunks.map((chunk) =>
+          fetchWithAuth(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
+            .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
+            .catch(() => []),
+        ));
+        const lmap: Record<string, LineStatusSummary> = {};
+        for (const arr of results) for (const s of arr) lmap[s.story_id] = s;
+        return lmap;
+      } catch {
+        return null; // non-critical — line badge 없으면 카드는 기존대로 렌더.
+      }
+    })();
+
+    const [summary, lineMap, blockedBy, labels, gates] = await Promise.all([summaryLeg, lineLeg, graphLeg, labelsLeg, gatesLeg]);
+    if (!stale()) {
+      // 한 번에(같은 틱의 setState들은 React가 한 렌더로 묶는다) — 카드 높이가 한 번만 바뀐다.
+      if (summary) setExecutionMap(summary);
+      if (lineMap) setStoryLineMap(lineMap);
+      if (blockedBy) setBlockedByMap(blockedBy);
+      if (labels) { setOrgLabels(labels.labels); if (labels.byStory) setStoryLabelsMap(labels.byStory); }
+      if (gates) setStoryGatesMap(gates);
+    }
+    await sprintsLeg;
   }, [projectId, fetchStoriesByStatus]);
 
   // CB-S4: 컬럼별 "더 보기" 핸들러
@@ -620,7 +712,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     setAutoComposeNonce((n) => n + 1);
     const params = new URLSearchParams(searchParams.toString());
     params.delete('view');
-    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+    router.replace(`/${wsSlug}/${projSlug}/flow${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
   }, [searchParams, router, wsSlug, projSlug]);
 
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
@@ -695,8 +787,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const titleMatch = s.title?.toLowerCase().includes(q);
-      const assigneeName = s.assignee_id ? memberMap[s.assignee_id]?.name?.toLowerCase() : '';
-      const assigneeMatch = assigneeName?.includes(q);
+      // story #4284 — 원시 name만 보면 이름 없는 담당자는 보이는 라벨(«이름 없는 구성원»)로 못 찾았다 — 카드 · 필터와 같은 라벨로 찾는다.
+      const assigneeName = s.assignee_id ? memberNameById(memberMap, s.assignee_id, tc, '').toLowerCase() : '';
+      const assigneeMatch = assigneeName !== '' && assigneeName.includes(q);
       if (!titleMatch && !assigneeMatch) return false;
     }
     return true;
@@ -1202,7 +1295,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const activeStory = activeId ? stories.find((s) => s.id === activeId) : null;
   const dragStatus = activeStory?.status ?? null;
 
-  if (loading) return <KanbanSkeleton />;
+  // story #4307(유나 확정) — 전면 스켈레톤은 첫 불러오기만. 다시 불러오는 동안은 툴바 · 필터 버튼이 남고 컬럼(목록) 자리만 같은 스켈레톤 부품 +
+  // aria-busy(툴바엔 안 검). 도중에 또 바꾸면 마지막 조건 응답만 반영된다(fetchData의 runId · stale 판정).
+  if (loading && !hasLoadedOnce) return <KanbanSkeleton />;
+  const refetching = loading && hasLoadedOnce;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -1264,7 +1360,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   }`}
                 >
                   <span className="max-w-[80px] truncate">
-                    {selectedSprintId ? (sprints.find((s) => s.id === selectedSprintId)?.title ?? t('allSprints')) : t('allSprints')}
+                    {sprintChipLabel}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
                 </Button>
@@ -1272,17 +1368,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             />
             <DropdownMenuContent align="start" className="w-56">
               <div className="p-1">
-                <Input
-                  autoFocus
+                <MenuSearchInput
                   value={sprintSearch}
                   onChange={(e) => setSprintSearch(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder={t('searchSprints')}
                   className="h-7 text-xs"
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="focus-inset max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto" tabIndex={-1}>
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
                     <span className="flex-1">{t('allSprints')}</span>
@@ -1333,17 +1427,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             />
             <DropdownMenuContent align="start" className="w-56">
               <div className="p-1">
-                <Input
-                  autoFocus
+                <MenuSearchInput
                   value={epicSearch}
                   onChange={(e) => setEpicSearch(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder={t('searchEpics')}
                   className="h-7 text-xs"
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="focus-inset max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto" tabIndex={-1}>
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
                     <span className="flex-1">{t('allEpics')}</span>
@@ -1386,7 +1478,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   }`}
                 >
                   <span className="max-w-[80px] truncate">
-                    {selectedAssigneeId ? (members.find((m) => m.id === selectedAssigneeId)?.name ?? t('allAssignees')) : t('allAssignees')}
+                    {/* story #4284 — 이름 없는 구성원을 골랐을 때 «모든 담당자»로 뜨던 것(거르고 있는데 안 거른다고 보임) → «이름 없는 구성원». */}
+                    {selectedAssigneeId ? (() => {
+                      const selected = members.find((m) => m.id === selectedAssigneeId);
+                      return selected ? assigneeRowLabel(selected) : t('allAssignees');
+                    })() : t('allAssignees')}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
                 </Button>
@@ -1394,17 +1490,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             />
             <DropdownMenuContent align="start" className="w-56">
               <div className="p-1">
-                <Input
-                  autoFocus
+                <MenuSearchInput
                   value={assigneeSearch}
                   onChange={(e) => setAssigneeSearch(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder={t('searchAssignees')}
                   className="h-7 text-xs"
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="focus-inset max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto" tabIndex={-1}>
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
                     <span className="flex-1">{t('allAssignees')}</span>
@@ -1413,8 +1507,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 </DropdownMenuGroup>
                 {(() => {
                   const q = assigneeSearch.toLowerCase();
-                  const humans = members.filter((m) => m.type !== 'agent' && m.name.toLowerCase().includes(q));
-                  const agents = members.filter((m) => m.type === 'agent' && m.name.toLowerCase().includes(q));
+                  // story #4284 — 이름이 null인 구성원에서 `m.name.toLowerCase()`가 throw해 일감 보드 전체가 오류 화면이었다. 보이는 라벨로 찾는다.
+                  const matches = (m: KanbanMember) => assigneeRowLabel(m).toLowerCase().includes(q);
+                  // 라벨을 행 데이터에 실어 `{m.label}`로 그린다(행마다 다른 글자 — verify:no-new-repeated-row-action-names).
+                  const humans = members.filter((m) => m.type !== 'agent' && matches(m)).map((m) => ({ ...m, label: assigneeRowLabel(m) }));
+                  const agents = members.filter((m) => m.type === 'agent' && matches(m)).map((m) => ({ ...m, label: assigneeRowLabel(m) }));
                   const hasResults = humans.length > 0 || agents.length > 0;
                   if (!hasResults) {
                     return <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('noResults')}</div>;
@@ -1427,7 +1524,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                           <DropdownMenuLabel className="text-xs text-muted-foreground">{t('filterMembers')}</DropdownMenuLabel>
                           {humans.map((m) => (
                             <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
-                              <span className="flex-1 truncate">{m.name}</span>
+                              <span className="flex-1 truncate">{m.label}</span>
                               {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
                             </DropdownMenuItem>
                           ))}
@@ -1439,7 +1536,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                           <DropdownMenuLabel className="text-xs text-muted-foreground">{t('filterAgents')}</DropdownMenuLabel>
                           {agents.map((m) => (
                             <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
-                              <span className="flex-1 truncate">{m.name}</span>
+                              <span className="flex-1 truncate">{m.label}</span>
                               {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
                             </DropdownMenuItem>
                           ))}
@@ -1475,17 +1572,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               />
               <DropdownMenuContent align="start" className="w-56">
                 <div className="p-1">
-                  <Input
-                    autoFocus
+                  <MenuSearchInput
                     value={labelSearch}
                     onChange={(e) => setLabelSearch(e.target.value)}
-                    onKeyDown={(e) => e.stopPropagation()}
                     placeholder={t('searchLabels')}
                     className="h-7 text-xs"
                   />
                 </div>
                 <DropdownMenuSeparator />
-                <div className="focus-inset max-h-[50vh] overflow-y-auto">
+                <div className="focus-inset max-h-[50vh] overflow-y-auto" tabIndex={-1}>
                   <DropdownMenuGroup>
                     <DropdownMenuItem onClick={() => setSelectedLabelIds([])}>
                       <span className="flex-1">{t('allLabels')}</span>
@@ -1622,8 +1717,18 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         </div>
       </div>
 
-      {/* Content area */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Content area — story #4307: 다시 불러오는 동안 컬럼(목록) 자리만 스켈레톤 · aria-busy. */}
+      <div
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        aria-busy={refetching || undefined}
+        data-testid="kanban-content-area"
+      >
+        {refetching ? (viewMode === 'list' ? <KanbanListRowsSkeleton /> : <KanbanColumnsSkeleton />) : storiesLoadFailed ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="alert" data-testid="kanban-load-error">
+            <p className="text-sm text-muted-foreground">{t('boardLoadFailed')}</p>
+            <Button size="sm" variant="outline" onClick={() => void fetchData()} data-testid="kanban-load-retry">{tc('retry')}</Button>
+          </div>
+        ) : (<>
         {stories.length === 0 ? (
           // story bb78f14b(doc resource-view-firsttouch-identity-pattern §4 "보드" 행 — ⚠️과함
           // 주의 명시): 다른 4뷰(5요소)와 달리 여기는 3요소로 축소(아이콘+headline+CTA, explainer
@@ -1809,10 +1914,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           </DndContext>
         )}
         </div>
+        </>)}
       </div>
 
-      {/* Load more */}
-      {nextCursor || epicsNextCursor ? (
+      {/* Load more — story #4307: 다시 불러오는 동안엔 옛 커서라 숨긴다. */}
+      {!refetching && (nextCursor || epicsNextCursor) ? (
         <div className="flex flex-shrink-0 flex-wrap items-center justify-center gap-2 border-t border-border/80 p-2">
           {nextCursor ? (
             <Button
@@ -1877,6 +1983,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           tasksTotalCount={storyTasksTotalCount}
           tasksLoading={storyTasksLoading}
           memberMap={memberMap}
+          // [SID:4300 · 까디르 4682 ①] 명단을 받기 전엔 «알 수 없는 구성원» 대신 빈 칸 — 딥링크(?story=)로 보드와 패널이 함께 열릴 때
+          // 패널 기본값(true)이면 명단이 오기 전에 거짓 «알 수 없는»이 먼저 섰다가 이름으로 바뀌었다.
+          memberMapLoaded={membersLoaded}
           members={members}
           getStatusLabel={domainLabels.statusLabel}
           getEntityTypeLabel={domainLabels.entityTypeLabel}

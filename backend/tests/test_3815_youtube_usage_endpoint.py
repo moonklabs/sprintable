@@ -253,7 +253,7 @@ async def test_connection_response_privacy_locked_false_when_audit_complete(monk
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            owner_id = await _seed_human(s, org_id)
+            owner_id = await _seed_human(s, org_id, grant=True)
             await _seed_youtube_connection(s, org_id, owner_id=owner_id, channel="youtube_sandbox")
 
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)

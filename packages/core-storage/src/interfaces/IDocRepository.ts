@@ -18,6 +18,8 @@ export interface Doc {
   created_by: string;
   created_at: string;
   updated_at: string;
+  /** story #4313 — 본문 위키 링크 {적힌 slug → 지금 slug}(같은 프로젝트의 살아 있는 문서 · 옛 slug는 지금 slug로 · slug 단건 조회에서만). */
+  wiki_link_targets?: Record<string, string> | null;
 }
 
 export interface DocSummary {
@@ -30,6 +32,8 @@ export interface DocSummary {
   sort_order: number;
   is_folder: boolean;
   updated_at: string;
+  /** story #4313 — BE slug 단건 경로만 채운다(다건 경로는 null). */
+  wiki_link_targets?: Record<string, string> | null;
 }
 
 export interface CreateDocInput {
@@ -67,6 +71,8 @@ export interface DocListFilters extends PaginationOptions {
   tags?: string[];
   q?: string;
   ids?: string[];
+  /** story #4376 — 사이드바 트리: 프로젝트(태그 필터면 그 태그) 문서를 한 번에(BE 상한까지 · limit 무시) + total. */
+  tree?: boolean;
 }
 
 // story #2191(#2231 규약 A) — BE가 has_more/next_cursor를 body meta로 직접 계산해 낸다
@@ -78,6 +84,8 @@ export interface DocPageResult {
   items: DocSummary[];
   hasMore: boolean;
   nextCursor: string | null;
+  /** story #4376 — tree 요청일 때만: 조건에 맞는 문서 총수(한 번에 다 오면 items 길이와 같다). 그 밖엔 없음. */
+  total?: number | null;
 }
 
 export interface IDocRepository {

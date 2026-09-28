@@ -17,6 +17,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
+import { copyTextSafely } from '@/lib/clipboard';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -35,10 +36,12 @@ interface ApiKey {
 interface AgentApiKeyManagerProps {
   agentId: string;
   agentName: string;
+  /** [SID:4311 PR 3] 머리 줄에만 쓰는 목록 라벨(같은 이름 둘이면 «· ID 앞 8자» · 이름 빔 = «이름 없는 에이전트»). 에이전트에게 보내는 온보딩 문구는 agentName 그대로. */
+  agentLabel?: string;
   onNewKey?: (apiKey: string, mcpConfig?: string | null) => void;
 }
 
-export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKeyManagerProps) {
+export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -65,6 +68,10 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   };
   const [copiedOnboarding, setCopiedOnboarding] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+  // story #3986 CHANGES(페드루 PO C2) — 헤더의 「온보딩 메시지 복사」는 다이얼로그가
+  // 닫혀 있을 때도 쓸 수 있는데, 그 메시지 본문은 이 화면 어디에도 안 떠 있다.
+  // 실패했을 때만 본문을 선택 가능하게 노출한다.
+  const [copyFailedOnboardingMessage, setCopyFailedOnboardingMessage] = useState<string | null>(null);
   const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
   // story #2416 — 개별 키 revoke의 native confirm() 대체. null=닫힘, 아니면 대상 키 id.
   const [revokeKeyId, setRevokeKeyId] = useState<string | null>(null);
@@ -86,15 +93,17 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       const result = await response.json() as { data?: ApiKey[] };
       setApiKeys(result.data ?? []);
     } catch (error) {
+      console.error('[agent-api-key] load failed', error);
       addToast({
         type: 'error',
-        title: 'Error',
-        body: error instanceof Error ? error.message : 'Failed to load API keys',
+        title: tc('error'),
+        // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
+        body: t('agentApiKeyLoadFailed'),
       });
     } finally {
       setLoading(false);
     }
-  }, [agentId, addToast]);
+  }, [agentId, addToast, t, tc]);
 
   // Load API keys on mount
   useEffect(() => {
@@ -120,10 +129,12 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       onNewKey?.(rawKey, mcpConfigStr);
       await loadApiKeys();
     } catch (error) {
+      console.error('[agent-api-key] generate failed', error);
       addToast({
         type: 'error',
-        title: 'Error',
-        body: error instanceof Error ? error.message : 'Failed to generate API key',
+        title: tc('error'),
+        // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
+        body: t('agentApiKeyGenerateFailed'),
       });
     } finally {
       setLoading(false);
@@ -161,60 +172,48 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       await loadApiKeys();
       addToast({
         type: 'success',
-        title: 'Success',
-        body: 'API key revoked successfully',
+        title: t('agentApiKeyRevokedTitle'),
+        body: t('agentApiKeyRevokedBody'),
       });
     } catch (error) {
+      console.error('[agent-api-key] revoke failed', error);
       addToast({
         type: 'error',
-        title: 'Error',
-        body: error instanceof Error ? error.message : 'Failed to revoke API key',
+        title: tc('error'),
+        // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
+        body: t('agentApiKeyRevokeFailed'),
       });
     } finally {
       setLoading(false);
     }
   };
 
-  const writeToClipboard = async (text: string): Promise<void> => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+  // story #3986(클래스 «거짓 성공 표시») — 이 파일의 writeToClipboard(execCommand
+  // 폴백+실패 시 throw)가 선례였다. 공용 lib/clipboard.ts::copyTextSafely로
+  // 일반화됐으니(발명 0, 로직 그대로) 여기 로컬 사본은 걷는다.
+  const copyToClipboard = async (text: string) => {
+    const result = await copyTextSafely(text);
+    if (!result.ok) {
+      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: tc('copyFailedSelectManually') });
       return;
     }
-    const prev = document.activeElement as HTMLElement | null;
-    const el = document.createElement('textarea');
-    el.value = text;
-    el.setAttribute('readonly', '');
-    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px';
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
-    el.setSelectionRange(0, el.value.length);
-    const ok = document.execCommand('copy');
-    document.body.removeChild(el);
-    prev?.focus();
-    if (!ok) throw new Error('execCommand copy failed');
-  };
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await writeToClipboard(text);
-      setCopiedKey(true);
-      addToast({ type: 'success', title: 'Copied', body: 'API key copied to clipboard' });
-      window.setTimeout(() => setCopiedKey(false), 1500);
-    } catch {
-      addToast({ type: 'error', title: 'Copy failed', body: t('agentApiKeyClipboardFailBody') });
-    }
+    setCopiedKey(true);
+    addToast({ type: 'success', title: t('agentApiKeyCopiedTitle'), body: t('agentApiKeyCopiedBody') });
+    window.setTimeout(() => setCopiedKey(false), 1500);
   };
 
   const copyOnboardingMessage = async (apiKey: string, mcpConfig?: string | null) => {
-    try {
-      await writeToClipboard(buildOnboardingMessage(apiKey, mcpConfig));
-      setCopiedOnboarding(true);
-      addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
-      window.setTimeout(() => setCopiedOnboarding(false), 1500);
-    } catch {
-      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: t('agentApiKeyClipboardFailBody') });
+    const message = buildOnboardingMessage(apiKey, mcpConfig);
+    const result = await copyTextSafely(message);
+    if (!result.ok) {
+      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: tc('copyFailedSelectManually') });
+      setCopyFailedOnboardingMessage(message);
+      return;
     }
+    setCopyFailedOnboardingMessage(null);
+    setCopiedOnboarding(true);
+    addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
+    window.setTimeout(() => setCopiedOnboarding(false), 1500);
   };
 
   const activeKeys = apiKeys.filter((k) => !k.revoked_at);
@@ -224,15 +223,15 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     <SectionCard className="p-6">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold">API Keys - {agentName}</h3>
+          <h3 className="text-lg font-semibold">{t('agentApiKeyListTitle', { name: agentLabel ?? agentName })}</h3>
           <p className="text-sm text-muted-foreground">
-            Manage API keys for agent authentication
+            {t('agentApiKeyListDescription')}
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex gap-2">
             <Button variant="outline" onClick={loadApiKeys} disabled={loading}>
-              Refresh
+              {t('agentApiKeyRefresh')}
             </Button>
             <Button
               variant="outline"
@@ -254,9 +253,19 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
               }}
               disabled={loading}
             >
-              Generate API Key
+              {t('agentApiKeyGenerate')}
             </Button>
           </div>
+          {copyFailedOnboardingMessage ? (
+            <textarea
+              readOnly
+              value={copyFailedOnboardingMessage}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+              rows={4}
+              data-testid="agent-api-key-copy-failed-raw-onboarding-message"
+            />
+          ) : null}
         </div>
       </div>
 
@@ -287,7 +296,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       </div>
 
       {apiKeys.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No API keys generated yet</p>
+        <p className="text-sm text-muted-foreground">{t('agentApiKeyEmpty')}</p>
       ) : (
         <div className="space-y-2">
           {apiKeys.map((key) => (
@@ -313,10 +322,9 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                     decay시키면 안 됨(음수 diff가 clamp돼 "지금"으로 오표시) — §11-2
                     정본(formatScheduledAt)으로 절대 표기. */}
                 <p className="text-xs text-muted-foreground">
-                  Created: {formatRelativeTime(key.created_at, locale, displayTimezone)}
-                  {key.last_used_at &&
-                    ` • Last used: ${formatRelativeTime(key.last_used_at, locale, displayTimezone)}`}
-                  {key.revoked_at && ` • Revoked: ${formatRelativeTime(key.revoked_at, locale, displayTimezone)}`}
+                  {t('agentApiKeyCreatedAt', { time: formatRelativeTime(key.created_at, locale, displayTimezone) })}
+                  {key.last_used_at && <>{' · '}{t('agentApiKeyLastUsedAt', { time: formatRelativeTime(key.last_used_at, locale, displayTimezone) })}</>}
+                  {key.revoked_at && <>{' · '}{t('agentApiKeyRevokedAt', { time: formatRelativeTime(key.revoked_at, locale, displayTimezone) })}</>}
                 </p>
                 {key.expires_at && !key.revoked_at && (() => {
                   const expiresDate = new Date(key.expires_at);
@@ -327,10 +335,10 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   return (
                     <p className={`text-xs mt-0.5 ${isExpired ? 'text-destructive font-medium' : isWarning ? 'text-warning-strong font-medium' : 'text-muted-foreground'}`}>
                       {isExpired
-                        ? `Expired ${expiresDisplay}`
+                        ? t('agentApiKeyExpiredAt', { date: expiresDisplay })
                         : isWarning
-                          ? `⚠ Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${expiresDisplay})`
-                          : `Expires: ${expiresDisplay}`}
+                          ? <><span aria-hidden="true">⚠ </span>{t('agentApiKeyExpiresInDays', { days: daysLeft, date: expiresDisplay })}</>
+                          : t('agentApiKeyExpiresAt', { date: expiresDisplay })}
                     </p>
                   );
                 })()}
@@ -342,7 +350,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   onClick={() => setRevokeKeyId(key.id)}
                   disabled={loading}
                 >
-                  Revoke
+                  {t('agentApiKeySingleRevokeConfirmCta')}
                 </Button>
               )}
             </div>
@@ -386,15 +394,15 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       <Dialog open={newKeyDialog} onOpenChange={setNewKeyDialog}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>API Key Generated</DialogTitle>
+            <DialogTitle>{t('agentApiKeyGeneratedTitle')}</DialogTitle>
             <DialogDescription>
-              Copy this API key now. It will only be shown once.
+              {t('agentApiKeyShownOnce')}
             </DialogDescription>
           </DialogHeader>
           {generatedKey && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label htmlFor="generated-api-key" className="text-sm font-medium leading-none text-foreground select-none">API Key</label>
+                <label htmlFor="generated-api-key" className="text-sm font-medium leading-none text-foreground select-none">{t('agentApiKeyFieldLabel')}</label>
                 <div className="flex gap-2">
                   <Input
                     id="generated-api-key"
@@ -404,12 +412,12 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   />
                   <Button onClick={() => void copyToClipboard(generatedKey)} className="gap-1.5 shrink-0">
                     {copiedKey ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                    {copiedKey ? 'Copied!' : 'Copy'}
+                    {copiedKey ? t('agentApiKeyKeyCopiedLabel') : t('agentApiKeyCopyKeyCta')}
                   </Button>
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
-                Use this key in the Authorization header:
+                {t('agentApiKeyHeaderHint')}
                 <code className="block mt-1 p-2 bg-muted rounded text-xs break-all">
                   Authorization: Bearer {generatedKey}
                 </code>
@@ -442,7 +450,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                 setGeneratedKey(null);
               }}
             >
-              Done
+              {t('agentApiKeyDone')}
             </Button>
           </DialogFooter>
         </DialogContent>

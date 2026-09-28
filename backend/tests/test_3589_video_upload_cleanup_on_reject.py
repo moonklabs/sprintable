@@ -25,6 +25,8 @@ import os
 
 import pytest
 
+from tests.test_3554_instagram_reels import confirm_video_and_wait
+
 from tests.test_620beefc_channel_post_image_upload import (
     _CHANNEL_MEDIA_BUCKET,
     _client_for,
@@ -160,10 +162,7 @@ async def test_video_confirm_duration_exceeded_deletes_object(monkeypatch):
             object_path = _object_path_for_video(org_id, draft_id)
             raw = _build_mp4(duration_seconds=95.0, **_VALID_9_16)
             await _put_raw_object(object_path, raw, content_type="video/mp4")
-            r = await client.post(
-                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-                json={"object_path": object_path},
-            )
+            r = await confirm_video_and_wait(client, org_id, draft_id, object_path)
         assert r.status_code == 422, r.text
         assert r.json()["error"]["code"] == "CHANNEL_VIDEO_DURATION_EXCEEDED"
         assert delete_calls == [object_path]
@@ -192,10 +191,7 @@ async def test_video_confirm_aspect_ratio_rejected_deletes_object(monkeypatch):
             object_path = _object_path_for_video(org_id, draft_id)
             raw = _build_mp4(duration_seconds=10.0, width=1280, height=720)  # 16:9, 9:16 아님
             await _put_raw_object(object_path, raw, content_type="video/mp4")
-            r = await client.post(
-                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-                json={"object_path": object_path},
-            )
+            r = await confirm_video_and_wait(client, org_id, draft_id, object_path)
         assert r.status_code == 422, r.text
         assert r.json()["error"]["code"] == "CHANNEL_VIDEO_ASPECT_RATIO_REJECTED"
         assert delete_calls == [object_path]
@@ -224,10 +220,7 @@ async def test_video_confirm_codec_unsupported_deletes_object(monkeypatch):
             object_path = _object_path_for_video(org_id, draft_id)
             raw = _build_mp4(duration_seconds=10.0, codec=b"vp09", **_VALID_9_16)
             await _put_raw_object(object_path, raw, content_type="video/mp4")
-            r = await client.post(
-                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-                json={"object_path": object_path},
-            )
+            r = await confirm_video_and_wait(client, org_id, draft_id, object_path)
         assert r.status_code == 422, r.text
         assert r.json()["error"]["code"] == "CHANNEL_VIDEO_CODEC_UNSUPPORTED"
         assert delete_calls == [object_path]
@@ -256,10 +249,7 @@ async def test_video_confirm_unparsable_deletes_object(monkeypatch):
             object_path = _object_path_for_video(org_id, draft_id)
             raw = b"not a real mp4 file at all"
             await _put_raw_object(object_path, raw, content_type="video/mp4")
-            r = await client.post(
-                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-                json={"object_path": object_path},
-            )
+            r = await confirm_video_and_wait(client, org_id, draft_id, object_path)
         assert r.status_code == 422, r.text
         assert r.json()["error"]["code"] == "CHANNEL_VIDEO_UNPARSABLE"
         assert delete_calls == [object_path]
@@ -297,10 +287,7 @@ async def test_video_confirm_requires_single_cover_deletes_object(monkeypatch):
             object_path = _object_path_for_video(org_id, draft_id)
             raw = _build_mp4(duration_seconds=10.0, **_VALID_9_16)
             await _put_raw_object(object_path, raw, content_type="video/mp4")
-            r = await client.post(
-                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-                json={"object_path": object_path},
-            )
+            r = await confirm_video_and_wait(client, org_id, draft_id, object_path)
         assert r.status_code == 422, r.text
         assert r.json()["error"]["code"] == "CHANNEL_VIDEO_REQUIRES_SINGLE_COVER"
         assert delete_calls == [object_path]

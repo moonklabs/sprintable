@@ -43,7 +43,7 @@ async def _conversation_has_human(db: AsyncSession, conversation_id: uuid.UUID) 
         .where(
             ConversationParticipant.conversation_id == conversation_id,
             is_human_member_condition(ConversationParticipant.member_id),
-        )
+        ).order_by(ConversationParticipant.member_id)
         .limit(1)
     )).scalar_one_or_none()
     return row is not None

@@ -22,7 +22,7 @@
         "categories:seo": ["warn", {"minScore": 0.9}],
         "first-contentful-paint": ["warn", {"maxNumericValue": 2000}],
         "largest-contentful-paint": ["warn", {"maxNumericValue": 3000}],
-        "cumulative-layout-shift": ["warn", {"maxNumericValue": 0.1}],
+        "cumulative-layout-shift": ["error", {"maxNumericValue": 0.1}],
         "total-blocking-time": ["warn", {"maxNumericValue": 300}],
         "speed-index": ["warn", {"maxNumericValue": 3000}],
         "resource-summary:script:size": ["warn", {"maxNumericValue": 300000}],

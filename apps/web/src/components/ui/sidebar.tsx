@@ -51,6 +51,11 @@ type SidebarContextProps = {
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
 
+// [SID:4288 · 까디르 4653 P2 재판정] 데스크톱 오프캔버스로 접히면 컨테이너가 음수 left/right로 화면 밖이다 — 그 안 링크 · 버튼이 Tab
+// 순서에 남지 않게 **내용 칸(머리 · 내용 · 바닥)만** inert. 컨테이너 통째에 걸면 그 안의 SidebarRail(다시 펴기 · 크기 조절)까지 죽는다
+// (inert는 자손이 풀 수 없다). 팔레트(CommandPalette)는 포털 · ⌘K는 window keydown이라 영향 없음.
+const SidebarOffcanvasHiddenContext = React.createContext(false)
+
 function useSidebar() {
   const context = React.useContext(SidebarContext)
   if (!context) {
@@ -163,6 +168,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
+  const tNav = useTranslations("nav") // story #4359 — 모바일 시트의 화면 읽기용 제목 · 설명
   const { isMobile, state, openMobile, setOpenMobile, isResizing } = useSidebar()
 
   if (collapsible === "none") {
@@ -197,8 +203,8 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+            <SheetTitle>{tNav("mobileSidebarTitle")}</SheetTitle>
+            <SheetDescription>{tNav("mobileSidebarDescription")}</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -240,16 +246,19 @@ function Sidebar({
         )}
         {...props}
       >
-        <div
-          data-sidebar="sidebar"
-          data-slot="sidebar-inner"
-          // story #2969 §2 PR-3(doc proofline-system-layer-2969) — floating variant shadow-sm
-          // 제거(§1.2: 인라인 표면은 그림자 대신 라인 — 기존 ring-1 ring-sidebar-border가 이미
-          // 그 hairline 역할을 겸하고 있어 대체 없이 제거만으로 충분).
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
-        >
-          {children}
-        </div>
+        {/* 오프캔버스로 접힘(화면 밖) → 머리 · 내용 · 바닥이 inert(컨텍스트). 아이콘 접힘(collapsible=icon)은 화면 안이라 그대로. */}
+        <SidebarOffcanvasHiddenContext.Provider value={state === "collapsed" && collapsible === "offcanvas"}>
+          <div
+            data-sidebar="sidebar"
+            data-slot="sidebar-inner"
+            // story #2969 §2 PR-3(doc proofline-system-layer-2969) — floating variant shadow-sm
+            // 제거(§1.2: 인라인 표면은 그림자 대신 라인 — 기존 ring-1 ring-sidebar-border가 이미
+            // 그 hairline 역할을 겸하고 있어 대체 없이 제거만으로 충분).
+            className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          >
+            {children}
+          </div>
+        </SidebarOffcanvasHiddenContext.Provider>
       </div>
     </div>
   )
@@ -384,8 +393,10 @@ function SidebarInput({
 }
 
 function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
+  const offcanvasHidden = React.useContext(SidebarOffcanvasHiddenContext)
   return (
     <div
+      inert={offcanvasHidden}
       data-slot="sidebar-header"
       data-sidebar="header"
       className={cn("flex flex-col gap-2 p-2", className)}
@@ -395,8 +406,10 @@ function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
+  const offcanvasHidden = React.useContext(SidebarOffcanvasHiddenContext)
   return (
     <div
+      inert={offcanvasHidden}
       data-slot="sidebar-footer"
       data-sidebar="footer"
       className={cn("flex flex-col gap-2 p-2", className)}
@@ -420,8 +433,10 @@ function SidebarSeparator({
 }
 
 function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
+  const offcanvasHidden = React.useContext(SidebarOffcanvasHiddenContext)
   return (
     <div
+      inert={offcanvasHidden}
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(
@@ -542,7 +557,8 @@ const sidebarMenuButtonVariants = cva(
       variant: {
         default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         outline:
-          "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
+          // story #4325 — 토큰은 완성된 색이라 hsl()로 감싸면 그림자 값 전체가 무효(링이 안 보임) → var() 그대로.
+          "bg-background shadow-[0_0_0_1px_var(--sidebar-border)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_var(--sidebar-accent)]",
       },
       size: {
         default: "h-8 text-sm",
@@ -626,8 +642,9 @@ function SidebarMenuAction({
       {
         className: cn(
           "absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 after:absolute after:-inset-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 lg:after:hidden [&>svg]:size-4 [&>svg]:shrink-0",
+          // story #4345 — 숨김 기준을 폭(lg:)만이 아니라 «호버가 되는가»(pointer-fine)로: lg 이상 터치 태블릿에서 늘 투명하던 것을 닫는다.
           showOnHover &&
-            "group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 lg:opacity-0",
+            "group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 pointer-fine:lg:opacity-0",
           className
         ),
       },

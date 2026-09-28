@@ -84,10 +84,11 @@ def test_set_emit_hook_wired_in_dispatch():
 
 
 def test_clear_emit_hook_wired_in_send_message():
-    """send_message 가 clear_working 호출하는지 소스 가드(원본 conversation_id 기준)."""
+    """send_message 가 clear_working 호출하는지 소스 가드(원본 conversation_id 기준). story #4230 — 본체가
+    `send_message_core`로 옮겨졌다(엔드포인트 `send_message`는 그 얇은 래퍼)."""
     import inspect
-    from app.routers.conversations import send_message
-    src = inspect.getsource(send_message)
+    from app.routers.conversations import send_message_core
+    src = inspect.getsource(send_message_core)
     assert "chat_presence.clear_working" in src
 
 

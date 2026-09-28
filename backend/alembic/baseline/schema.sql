@@ -418,10 +418,15 @@ END) STORED,
     restored_memory_count integer,
     memory_diagnostics jsonb,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    cancel_requested_by uuid,
+    cancel_requested_at timestamp with time zone,
+    cancel_reason text,
+    cancel_ack_at timestamp with time zone,
+    cancel_outcome text,
     CONSTRAINT agent_runs_failure_disposition_check CHECK (((failure_disposition = ANY (ARRAY['retry_scheduled'::text, 'retry_launched'::text, 'retry_exhausted'::text, 'non_retryable'::text])) OR (failure_disposition IS NULL))),
     CONSTRAINT agent_runs_llm_provider_check CHECK ((llm_provider = ANY (ARRAY['managed'::text, 'byom'::text]))),
     CONSTRAINT agent_runs_llm_provider_key_check CHECK ((llm_provider_key = ANY (ARRAY['openai'::text, 'anthropic'::text, 'google'::text, 'groq'::text, 'openai-compatible'::text]))),
-    CONSTRAINT agent_runs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'held'::text, 'running'::text, 'hitl_pending'::text, 'completed'::text, 'failed'::text, 'abandoned'::text])))
+    CONSTRAINT agent_runs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'held'::text, 'running'::text, 'hitl_pending'::text, 'completed'::text, 'failed'::text, 'abandoned'::text, 'cancel_requested'::text, 'cancelled'::text, 'cancelled_unacknowledged'::text])))
 );
 
 

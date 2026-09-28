@@ -9,7 +9,9 @@ import { formatKrw, AUTOMATION_PACK, STORAGE_PACK } from './pricing-data';
 
 export type PackKind = 'automation' | 'storage';
 
-function QuantityStepper({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (next: number) => void }) {
+// [SID:4375] − · + 는 아이콘만이라 접근 이름을 팩 이름과 함께(팩 둘이 한 화면 — 이름이 같으면 못 가른다).
+function QuantityStepper({ pack, value, min, max, onChange }: { pack: string; value: number; min: number; max: number; onChange: (next: number) => void }) {
+  const t = useTranslations('pricingPlans');
   return (
     <div className="inline-flex items-center overflow-hidden rounded-md border border-border">
       <Button
@@ -18,6 +20,7 @@ function QuantityStepper({ value, min, max, onChange }: { value: number; min: nu
         className="rounded-none"
         disabled={value <= min}
         onClick={() => onChange(Math.max(min, value - 1))}
+        aria-label={t('packQtyDecrease', { pack })}
       >
         <Minus className="h-3.5 w-3.5" />
       </Button>
@@ -28,6 +31,7 @@ function QuantityStepper({ value, min, max, onChange }: { value: number; min: nu
         className="rounded-none"
         disabled={value >= max}
         onClick={() => onChange(Math.min(max, value + 1))}
+        aria-label={t('packQtyIncrease', { pack })}
       >
         <Plus className="h-3.5 w-3.5" />
       </Button>
@@ -58,7 +62,7 @@ export function PricingPacks({ onBuyPack }: { onBuyPack: (kind: PackKind, quanti
             {t('automationPackDesc', { price: formatKrw(AUTOMATION_PACK.priceKrwPerPack) })}
           </p>
           <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-            <QuantityStepper value={automationQty} min={1} max={AUTOMATION_PACK.maxPacks} onChange={setAutomationQty} />
+            <QuantityStepper pack={t('automationPackTitle')} value={automationQty} min={1} max={AUTOMATION_PACK.maxPacks} onChange={setAutomationQty} />
             <span className="text-sm font-semibold">{formatKrw(AUTOMATION_PACK.priceKrwPerPack * automationQty)}</span>
             <Button variant="default" size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onBuyPack('automation', automationQty)}>
               {t('buyPack')}
@@ -75,7 +79,7 @@ export function PricingPacks({ onBuyPack }: { onBuyPack: (kind: PackKind, quanti
             {t('storagePackDesc', { price: formatKrw(STORAGE_PACK.priceKrwPerPack) })}
           </p>
           <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-            <QuantityStepper value={storageQty} min={1} max={STORAGE_PACK.maxPacks} onChange={setStorageQty} />
+            <QuantityStepper pack={t('storagePackTitle')} value={storageQty} min={1} max={STORAGE_PACK.maxPacks} onChange={setStorageQty} />
             <span className="text-sm font-semibold">{formatKrw(STORAGE_PACK.priceKrwPerPack * storageQty)}</span>
             <Button variant="default" size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onBuyPack('storage', storageQty)}>
               {t('buyPack')}

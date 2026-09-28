@@ -12,7 +12,8 @@ import { CalendarGrid, type CalendarChannel } from '@/components/content/calenda
 import { UnscheduledLane } from '@/components/content/unscheduled-lane';
 import { CalendarRangeControls } from '@/components/content/calendar-range-controls';
 import { defaultCalendarRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
-import { channelConnectionIdentityLabel } from '@/lib/channel-label';
+import { channelConnectionIdentityLabel, useChannelLabel } from '@/lib/channel-label';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3422(Phase1·마케팅운영, doc §11 T8/T9) — 채널 포스트 캘린더. ③ 조립 조각 —
@@ -34,8 +35,10 @@ interface ChannelConnectionSummary {
 }
 
 export default function ChannelPostCalendarPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId, orgTimezone } = useDashboardContext();
   const t = useTranslations('content');
+  const channelLabel = useChannelLabel();
 
   // story #3422 B1(페드루 PO 재판정) — range 경계는 display tz 기준이어야 한다(UTC
   // 자정 기준이면 KST 등 양의 오프셋 tz에서 첫/끝 열이 부분 표본이 된다 —
@@ -71,8 +74,8 @@ export default function ChannelPostCalendarPage() {
   }, [orgId]);
 
   const channels: CalendarChannel[] = useMemo(
-    () => connections.map((c) => ({ connectionId: c.id, label: channelConnectionIdentityLabel(c, t) })),
-    [connections, t],
+    () => connections.map((c) => ({ connectionId: c.id, label: channelConnectionIdentityLabel(c, channelLabel) })),
+    [connections, channelLabel],
   );
 
   return (
@@ -80,7 +83,7 @@ export default function ChannelPostCalendarPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <h1 className="font-heading text-lg font-medium text-foreground">{t('channelPostsCalendarPageTitle')}</h1>
-          <Link href="/content/channel-posts" className="text-sm text-muted-foreground underline underline-offset-4" data-testid="channel-posts-list-link">
+          <Link href={flatHref('/content/channel-posts')} className="text-sm text-muted-foreground underline underline-offset-4" data-testid="channel-posts-list-link">
             {t('channelPostsCalendarBackToListCta')}
           </Link>
         </div>

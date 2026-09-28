@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff, Bot, Bell, Info, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Bell, Bot, CheckCheck, ChevronDown, ChevronRight, Inbox as InboxIcon, Info, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +12,7 @@ import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast } from '@/components/ui/toast';
-import { fetchWithAuth } from '@/lib/db/client';
+import { inboxNotificationsUrl, inboxWorkflowExecutionsUrl, takePrefetchedOrFetch, type InboxPrefetchScope } from '@/components/inbox/inbox-prefetch';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
@@ -24,6 +24,9 @@ import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic
 import type { EventPreviewHelpers } from '@/components/chat/event-block-card';
 import { composeNotificationDisplay, type Notification } from './inbox-notification-display';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { formatAtLeast } from '@/lib/format-at-least';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { InboxTopBarTitle, useInboxTabLabels } from '@/components/nav/flat-tab-top-bar';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
@@ -161,27 +164,34 @@ function AgentJoinedDetailPanel({
 // story #2195 — 기본(notifications) 탭이 서버 하드코딩 limit=50 + 커서 없음으로 51번째부터
 // 조용히 잘렸다. BE(#2538, 규약 A)가 이제 has_more/next_cursor를 body meta로 낸다 —
 // cursor를 실어 보내고 그 meta를 그대로 다음 요청에 이어 붙인다.
-async function fetchInboxNotifications(typeFilter: string, cursor?: string | null) {
-  const params = new URLSearchParams();
-  if (typeFilter) params.set('type', typeFilter);
-  if (cursor) params.set('cursor', cursor);
+async function fetchInboxNotifications(typeFilter: string, cursor: string | null | undefined, scope: InboxPrefetchScope) {
 
-  // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!res.ok=>null) 알림
-  // 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
-  const res = await fetchWithAuth(`/api/notifications?${params}`);
-  if (!res.ok) return null;
+  // story #4295 — 예외 처리가 없어 망 오류 · 깨진 JSON이면 여기서 던졌고, 부르는 쪽(load · 더 보기)의 로딩 상태가 되돌려지지 않아
+  // 알림 목록이 영원히 «불러오는 중» · «더 보기»가 눌린 채로 막혔다. 이제 실패는 전부 null(부르는 쪽이 실패로 다룬다) — 던지지 않는다.
+  // 선출발 응답(#4276)을 넘겨받은 경우도 같다 — 그 요청이 실패(거부 · !ok · 깨진 JSON)면 같은 null로 같은 실패 상자.
+  try {
+    // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!res.ok=>null) 알림
+    // 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
+    // story #4276 — inbox/loading.tsx가 먼저 출발시킨 1쪽 요청이 있으면 그 응답을 한 번 넘겨받는다(규칙은 inbox-prefetch.ts).
+    const res = await takePrefetchedOrFetch(inboxNotificationsUrl(typeFilter, cursor), scope);
+    if (!res.ok) return null;
 
-  const json = await res.json();
-  return {
-    notifications: (json.data ?? []) as Notification[],
-    unreadCount: (json.meta?.unreadCount ?? 0) as number,
-    hasMore: (json.meta?.hasMore ?? false) as boolean,
-    nextCursor: (json.meta?.nextCursor ?? null) as string | null,
-  };
+    const json = await res.json();
+    return {
+      notifications: (json.data ?? []) as Notification[],
+      unreadCount: (json.meta?.unreadCount ?? 0) as number,
+      hasMore: (json.meta?.hasMore ?? false) as boolean,
+      nextCursor: (json.meta?.nextCursor ?? null) as string | null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export default function InboxPage() {
   const router = useRouter();
+  // story #4226 — 인박스 내부 탭 이동도 `?p=`를 싣는다(셸의 착지 정규화 router.replace = 현재 페이지 RSC 재요청 0).
+  const flatHref = useFlatHref();
   const searchParams = useSearchParams();
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
@@ -201,6 +211,11 @@ export default function InboxPage() {
   // 자체의 실제 산출 로직은 그대로, 안정화만 추가).
   const displayTimezone = useMemo(() => resolveDisplayTimezone().tz, []);
   const { currentTeamMemberId, projectId, orgId } = useDashboardContext();
+  // story #4276 — 선출발 응답을 넘겨받을 때 범위 대조용(알림 콜백들의 의존성은 그대로 두려고 ref로).
+  const prefetchScopeRef = useRef<InboxPrefetchScope>({ memberId: currentTeamMemberId, projectId });
+  useEffect(() => {
+    prefetchScopeRef.current = { memberId: currentTeamMemberId, projectId };
+  }, [currentTeamMemberId, projectId]);
   // story #3903 AC2 — composeEventPreviewLine의 domainLabels 재료(org 커스텀 status
   // 라벨 오버라이드). chat-list-view.tsx의 기존 재사용 패턴과 동형.
   const domainLabels = useOrgDomainLabels(orgId, locale);
@@ -214,15 +229,13 @@ export default function InboxPage() {
   // 둘 다 이 어긋남에서 발생). 탭마다 전용 키로 갈라(notificationsTabLabel/attentionTabLabel/
   // cage.gateTabLabel="결재함"으로 개명) 헤더가 항상 **현재 활성 탭의 진짜 이름**을 보여주게
   // 한다 — 탭을 이동해도 헤더가 거짓말하지 않는다.
-  const INBOX_TABS = [
-    { key: 'attention', label: t('attentionTabLabel') },
-    { key: 'notifications', label: t('notificationsTabLabel') },
-    { key: 'gates', label: tCage('gateTabLabel') },
-  ] as const;
-  const activeTabLabel = INBOX_TABS.find((tab) => tab.key === activeTab)?.label ?? t('notificationsTabLabel');
+  // story #4326 — 탭 이름 표는 상단바 제목 · 로딩 폴백과 한 곳(flat-tab-top-bar)에서 읽는다(폴백 글자가 화면과 갈리지 않게).
+  const INBOX_TABS = useInboxTabLabels();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  // story #4295 — 첫 쪽을 못 불러왔으면 «알림 없음»(거짓 0건)이 아니라 실패 + 다시 시도.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -236,9 +249,11 @@ export default function InboxPage() {
 
   const refreshNotifications = useCallback(async () => {
     if (pagedBeyondFirst) return;
-    const result = await fetchInboxNotifications('');
+    const result = await fetchInboxNotifications('', null, prefetchScopeRef.current);
+    // 폴링 실패는 조용히(보고 있던 목록을 그대로 둔다) — 첫 쪽 실패 뒤 폴링이 성공하면 실패 표시를 걷는다.
     if (!result) return;
 
+    setLoadFailed(false);
     setNotifications(result.notifications);
     setUnreadCount(result.unreadCount);
     setHasMore(result.hasMore);
@@ -248,43 +263,69 @@ export default function InboxPage() {
   const loadMoreNotifications = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
-    const result = await fetchInboxNotifications('', nextCursor);
-    if (result) {
-      setNotifications((prev) => [...prev, ...result.notifications]);
-      setHasMore(result.hasMore);
-      setNextCursor(result.nextCursor);
-      setPagedBeyondFirst(true);
+    try {
+      const result = await fetchInboxNotifications('', nextCursor, prefetchScopeRef.current);
+      if (result) {
+        setNotifications((prev) => [...prev, ...result.notifications]);
+        setHasMore(result.hasMore);
+        setNextCursor(result.nextCursor);
+        setPagedBeyondFirst(true);
+      } else {
+        // story #4295 — 실패를 알린다(버튼은 그대로 남아 다시 누르면 다시 시도).
+        addToast({ title: tCommon('loadMoreFailed'), type: 'error' });
+      }
+    } finally {
+      setLoadingMore(false);
     }
-    setLoadingMore(false);
-  }, [nextCursor, loadingMore]);
+  }, [nextCursor, loadingMore, addToast, tCommon]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      const result = await fetchInboxNotifications('');
-      if (!cancelled && result) {
+  // 첫 쪽 불러오기 — 마운트 때와 «다시 시도»가 같이 쓴다. `isCancelled`는 마운트 effect가 언마운트 뒤 상태를 안 쓰게.
+  // story #4295(까디르) — 순번으로 늦게 온 옛 응답은 버린다(늦은 실패가 성공을 덮지 않게). 진행 중 표시(ref)는 가장 최근 호출의
+  // finally에서 푼다 — «다시 시도»는 그걸 보고 연타를 막는다(아래 retryFirstPage). 마운트 effect는 막지 않는다: 개발 모드 StrictMode의
+  // 이중 effect에서 첫 호출이 취소된 채 진행 중이라, 막으면 두 번째 호출이 출발하지 않아 영원히 «불러오는 중»이 된다.
+  const firstPageInFlightRef = useRef(false);
+  const firstPageSeqRef = useRef(0);
+  const loadFirstPage = useCallback(async (isCancelled: () => boolean = () => false) => {
+    firstPageInFlightRef.current = true;
+    const seq = ++firstPageSeqRef.current;
+    const stale = () => isCancelled() || seq !== firstPageSeqRef.current;
+    setLoading(true);
+    setLoadFailed(false);
+    try {
+      const result = await fetchInboxNotifications('', null, prefetchScopeRef.current);
+      if (stale()) return;
+      if (result) {
         setNotifications(result.notifications);
         setUnreadCount(result.unreadCount);
         setHasMore(result.hasMore);
         setNextCursor(result.nextCursor);
+      } else {
+        setLoadFailed(true);
       }
-      if (!cancelled) setLoading(false);
+    } finally {
+      if (seq === firstPageSeqRef.current) firstPageInFlightRef.current = false;
+      if (!stale()) setLoading(false);
     }
+  }, []);
+  const retryFirstPage = useCallback(() => {
+    if (firstPageInFlightRef.current) return;
+    void loadFirstPage();
+  }, [loadFirstPage]);
 
-    void load();
+  useEffect(() => {
+    let cancelled = false;
+    void loadFirstPage(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadFirstPage]);
 
   useEffect(() => {
     if (!currentTeamMemberId || !projectId) return;
-    const params = new URLSearchParams({ project_id: projectId, member_id: currentTeamMemberId, limit: '10' });
     // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(r.ok?...:null) 워크플로우
-    // 실행 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
-    fetchWithAuth(`/api/workflow-executions?${params.toString()}`)
+    // 실행 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다(선출발 응답도 같은 fetchWithAuth).
+    // story #4276 — inbox/loading.tsx가 먼저 출발시킨 같은 요청이 있으면 그 응답을 한 번 넘겨받는다.
+    takePrefetchedOrFetch(inboxWorkflowExecutionsUrl(projectId, currentTeamMemberId), { memberId: currentTeamMemberId, projectId })
       .then((r) => r.ok ? r.json() : null)
       .then((json) => {
         if (json?.items) setWorkflowExecs(json.items as WorkflowExecItem[]);
@@ -301,19 +342,27 @@ export default function InboxPage() {
     return () => clearInterval(interval);
   }, [currentTeamMemberId, refreshNotifications]);
 
-  const setNotificationReadState = async (id: string, currentIsRead: boolean, nextIsRead: boolean) => {
-    if (currentIsRead === nextIsRead) return;
+  // story #4295 — 응답을 안 보고 읽음으로 바꾸던 자리(서버가 실패해도 화면은 읽음 · 망 오류면 처리 안 된 거부). 벨(handleMarkRead ·
+  // story #3637)과 같은 문구로 실패를 알리고 화면은 그대로 둔다. 망 오류도 실패로 친다.
+  // `silent`: 묶음처럼 여러 건을 한 번에 처리하는 호출부가 결과를 모아 토스트를 한 번만 띄우도록(4648 PO 검토).
+  const setNotificationReadState = async (id: string, currentIsRead: boolean, nextIsRead: boolean, opts: { silent?: boolean } = {}): Promise<boolean> => {
+    if (currentIsRead === nextIsRead) return true;
 
-    await fetch('/api/notifications', {
+    const ok = await fetch('/api/notifications', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, is_read: nextIsRead }),
-    });
+    }).then((res) => res.ok, () => false);
+    if (!ok) {
+      if (!opts.silent) addToast({ title: t('markReadFailed'), type: 'error' });
+      return false;
+    }
 
     setNotifications((prev) => prev.map((notification) => (
       notification.id === id ? { ...notification, is_read: nextIsRead } : notification
     )));
     setUnreadCount((prev) => (nextIsRead ? Math.max(0, prev - 1) : prev + 1));
+    return true;
   };
 
   const toggleRead = async (id: string, currentIsRead: boolean) => {
@@ -337,11 +386,16 @@ export default function InboxPage() {
   };
 
   const markAllRead = async () => {
-    await fetch('/api/notifications', {
+    // story #4295 — 위와 같은 부류(응답 안 봄) · 벨 handleMarkAllRead와 같은 문구.
+    const ok = await fetch('/api/notifications', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ markAllRead: true }),
-    });
+    }).then((res) => res.ok, () => false);
+    if (!ok) {
+      addToast({ title: t('markAllReadFailed'), type: 'error' });
+      return;
+    }
     setNotifications((prev) => prev.map((notification) => ({ ...notification, is_read: true })));
     setUnreadCount(0);
   };
@@ -455,7 +509,10 @@ export default function InboxPage() {
   // 항목별 구체 참조 칩+CTA(아래 렌더)로 실제 대상을 고르게 한다.
   const openGroup = async (group: Extract<InboxItem, { kind: 'group' }>) => {
     const unread = group.notifications.filter((n) => !n.is_read);
-    await Promise.all(unread.map((n) => setNotificationReadState(n.id, n.is_read, true)));
+    // story #4295(PO 검토) — 건마다 토스트를 띄우면 묶음 크기만큼(generic 묶음은 121건까지) 같은 토스트가 쏟아졌다. 조용히 처리해 결과를
+    // 모으고, 하나라도 실패면 한 번만. 실패한 건은 setNotificationReadState가 화면을 안 바꿔 안 읽음 그대로 남는다.
+    const results = await Promise.all(unread.map((n) => setNotificationReadState(n.id, n.is_read, true, { silent: true })));
+    if (results.includes(false)) addToast({ title: t('markReadFailed'), type: 'error' });
     if (group.groupKind === 'status_change' && group.latest.href) {
       router.push(group.latest.href);
     } else if (group.groupKind === 'generic') {
@@ -466,30 +523,30 @@ export default function InboxPage() {
   return (
     <>
       <TopBarSlot
-        title={
-          <div className="flex items-center gap-2">
-            <h1 className="text-sm font-medium">{activeTabLabel}</h1>
-            {unreadCount > 0 ? (
-              <span className="text-sm tabular-nums text-muted-foreground">{unreadCount}</span>
-            ) : null}
-          </div>
-        }
+        title={<InboxTopBarTitle tab={activeTab} unreadCount={unreadCount} />}
         actions={
-          <Button variant="glass" size="sm" onClick={markAllRead} disabled={unreadCount === 0}>
-            {t('markAllRead')}
+          // story #4277 — 402폭에서 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 상단바가 가로로 넘쳤다(409/402). 스프린트 상단바 관례:
+          // 폰은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
+          <Button variant="glass" size="sm" onClick={markAllRead} disabled={unreadCount === 0} aria-label={t('markAllRead')}>
+            <CheckCheck className="size-4 sm:hidden" aria-hidden="true" />
+            <span className="hidden sm:inline">{t('markAllRead')}</span>
           </Button>
         }
         showContextChip
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          이 탭 콘텐츠 영역(알림 탭은 리스트+상세 split, 각자 독립 overflow-y-auto)이 자기
+          높이를 잃는다 — 여기서 직접 앵커(h-[calc(100svh-var(--shell-chrome-h))] — story
+          #4131, --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT). */}
+      <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-hidden">
         {/* 탭 — 오늘(Attention Queue) / 알림 / 결재함(게이트). AQ는 전용 뷰로 병행 추가(기존 탭 대체 아님). */}
         <div className="flex shrink-0 border-b border-border/80 px-4">
           {INBOX_TABS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
-              onClick={() => router.replace(`/inbox${key === 'notifications' ? '' : `?tab=${key}`}`, { scroll: false })}
+              onClick={() => router.replace(flatHref(`/inbox${key === 'notifications' ? '' : `?tab=${key}`}`), { scroll: false })}
               className={`border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
                 activeTab === key
                   ? 'border-primary text-foreground'
@@ -557,6 +614,14 @@ export default function InboxPage() {
                   <div key={i} className="h-14 animate-pulse rounded-lg bg-muted" />
                 ))}
               </div>
+            ) : loadFailed ? (
+              // story #4295 — 못 불러온 것은 «알림 없음»과 다른 사실 — 결재 큐(gate-inbox-load-error)와 같은 모양 · 다시 시도.
+              <div className="mx-3 mt-2 rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center" data-testid="inbox-notifications-load-error">
+                <p className="text-sm text-foreground">{t('notificationsLoadError')}</p>
+                <Button variant="outline" size="sm" className="mt-2" onClick={retryFirstPage}>
+                  {tCommon('retry')}
+                </Button>
+              </div>
             ) : notifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
                 <p className="text-sm text-muted-foreground">{t('noNotifications')}</p>
@@ -599,16 +664,19 @@ export default function InboxPage() {
                                     {/* f2ec5395 fix: 카운트 칩을 truncate <p> 밖 shrink-0 형제로 — 긴 title 잘려도 칩 항상 표시 */}
                                     <div className="flex min-w-0 flex-1 items-center gap-1.5">
                                       <p className={`min-w-0 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
-                                        {item.latest.title}
+                                        {/* story #4281(까디르 P2) — 묶음 머리도 단일 행과 같은 표시 변환(`[종류]` · 기계 사유 원문 0). */}
+                                        {composeNotificationDisplay(item.latest, t, eventPreviewHelpers).title}
                                       </p>
                                       {/* story #2023 ⓑ: 카운트 칩=L5(시스템 상태), 브랜드 아님 */}
                                       {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                                       {/* story #0d1c69f3(v2 4호) — generic 그룹은 status_change와 다른 문구(반복
                                           알림 건수일 뿐 "상태 변경" 의미가 아니다)를 쓴다. */}
                                       <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+                                        {/* story #4302(유나 판정) — 묶음 수는 불러온 쪽 안의 수다(전체 아님). 더 불러올 쪽이 남았으면 «48+건».
+                                            en 복수형 키는 `+`를 숫자에 못 붙여 형제 키(statusChangeCountAtLeast). */}
                                         {item.groupKind === 'status_change'
-                                          ? t('statusChangeCount', { count: item.count })
-                                          : t('notificationGroupCount', { count: item.count })}
+                                          ? (hasMore ? t('statusChangeCountAtLeast', { count: item.count }) : t('statusChangeCount', { count: item.count }))
+                                          : t('notificationGroupCount', { count: formatAtLeast(item.count, hasMore) })}
                                       </span>
                                     </div>
                                     <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.latest.created_at)}</span>
@@ -621,7 +689,7 @@ export default function InboxPage() {
                                 {item.notifications.map((n, idx) => (
                                   <div key={n.id} className="flex items-center gap-2 text-xs">
                                     <span className={`size-1.5 shrink-0 rounded-full ${idx === 0 ? 'bg-success' : 'bg-muted-foreground/40'}`} />
-                                    <span className="min-w-0 flex-1 truncate text-foreground">{n.title}</span>
+                                    <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
                                     <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
                                   </div>
                                 ))}
@@ -647,7 +715,7 @@ export default function InboxPage() {
                                           {n.reference_id.slice(0, 8)}
                                         </span>
                                       ) : (
-                                        <span className="min-w-0 flex-1 truncate text-foreground">{n.title}</span>
+                                        <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
                                       )}
                                       <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
                                       {n.href ? (

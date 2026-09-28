@@ -17,6 +17,8 @@ Gemini 피벗(2026-07-03, 선생님/PO 지시): moonklabs org GCP credit이 Vert
 전부 무변경(llm_client.py 참고)."""
 from __future__ import annotations
 
+import asyncio
+
 import json
 import logging
 import math
@@ -146,7 +148,7 @@ async def _top_voted_item_texts(session: AsyncSession, session_id: uuid.UUID) ->
     rows = (await session.execute(
         select(RetroItem)
         .where(RetroItem.session_id == session_id, RetroItem.parent_item_id.is_(None))
-        .order_by(RetroItem.vote_count.desc(), RetroItem.created_at.desc())
+        .order_by(RetroItem.vote_count.desc(), RetroItem.created_at.desc(), RetroItem.id.desc())
         .limit(_TOP_ITEMS_LIMIT)
     )).scalars().all()
     return [f"[{i.category}] {i.text} ({i.vote_count}표)" for i in rows]
@@ -198,7 +200,8 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
 
     raw = None
     try:
-        raw = generate_text(prompt, response_schema=_SYNTHESIS_SCHEMA)
+        # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+        raw = await asyncio.to_thread(generate_text, prompt, response_schema=_SYNTHESIS_SCHEMA)
     except Exception as exc:  # noqa: BLE001 — 예외도 "실패"로 수렴(None), 여기서 삼키지 않음.
         logger.warning("retro synthesize: LLM 호출 실패: %s", exc)
 
@@ -266,7 +269,8 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
 
     raw = None
     try:
-        raw = generate_text(prompt, response_schema=_NEXT_HYPOTHESES_SCHEMA)
+        # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+        raw = await asyncio.to_thread(generate_text, prompt, response_schema=_NEXT_HYPOTHESES_SCHEMA)
     except Exception as exc:  # noqa: BLE001
         logger.warning("retro recommend_next: LLM 호출 실패: %s", exc)
     if not raw:
@@ -323,3 +327,49 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
         # 빈 배열을 "정답"으로 저장하지 않는다(기존 캐시 보존).
         return None
     return candidates
+
+
+# ─── story #4336 PR2 ②(PO 04:32Z) — 회고 종합/추천은 늘 LLM(25s × 2 · 순차)이라 요청에서 떼어 작업(retro_synthesis)으로 ───────────
+# 라우트는 권한 · «종합 먼저»(409)만 요청 안에서 보고 작업을 넣는다. 아래가 워커가 하는 일 — 예전 라우트 본문 그대로(실패 본문 · 저장 규칙 같음).
+
+RETRO_GENERATION_MODES = ("synthesis", "synthesize", "recommend_next")
+
+
+class RetroGenerationError(Exception):
+    """요청이 받았을 상태 · 본문 그대로(작업 실패 본문)."""
+
+    def __init__(self, status_code: int, detail: dict) -> None:
+        super().__init__(detail.get("code"))
+        self.status_code = status_code
+        self.detail = detail
+
+
+async def run_retro_generation(db: AsyncSession, *, org_id: uuid.UUID, session_id: uuid.UUID, mode: str) -> None:
+    """mode: synthesis(종합 → 추천 · 추천 실패는 종합을 살림) · synthesize(종합만) · recommend_next(추천만 · 종합 선행 필수).
+    생성이 None이면 저장하지 않고(좋은 캐시를 빈 결과로 덮지 않음 — #1863) 예전과 같은 502 본문을 던진다."""
+    from app.repositories.retro import RetroSessionRepository
+    # 실패 본문은 라우트 파일의 한 정본(예전 요청이 받던 그 본문 · 요청 안 409도 같은 것을 씀).
+    from app.routers.retros import RECOMMENDATION_FAILED_DETAIL, SYNTHESIS_FAILED_DETAIL, SYNTHESIS_REQUIRED_DETAIL
+
+    repo = RetroSessionRepository(db, org_id)
+    session = await repo.get(session_id)
+    if session is None:
+        raise RetroGenerationError(404, {"code": "RETRO_SESSION_NOT_FOUND", "message": str(session_id)})
+    if mode == "recommend_next":
+        from app.routers.retros import _has_valid_synthesis  # 라우트와 같은 한 판정(아이템 모양까지)
+
+        if not _has_valid_synthesis(session.synthesis):
+            raise RetroGenerationError(409, SYNTHESIS_REQUIRED_DETAIL)
+        result = await recommend_next(session.synthesis)
+        if result is None:
+            raise RetroGenerationError(502, RECOMMENDATION_FAILED_DETAIL)
+        await repo.update(session_id, next_hypotheses=result)
+        return
+    sresult = await synthesize(db, session)
+    if sresult is None:
+        raise RetroGenerationError(502, SYNTHESIS_FAILED_DETAIL)
+    updated = await repo.update(session_id, synthesis=sresult)
+    if mode == "synthesis" and updated is not None:
+        nresult = await recommend_next(updated.synthesis)
+        if nresult is not None:
+            await repo.update(session_id, next_hypotheses=nresult)

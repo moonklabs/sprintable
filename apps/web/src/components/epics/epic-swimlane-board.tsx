@@ -14,7 +14,6 @@ import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-pa
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useToast } from '@/components/ui/toast';
-import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import {
   COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS,
   type KanbanEpic, type KanbanMember, type KanbanStory, type TrustColumnId,
@@ -553,7 +552,6 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
     <>
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('epicSwimlaneTitle')}</h1>} showContextChip />
       <div className="space-y-3 p-4">
-        <WorkspaceFrameTabs active="epic" />
 
         {loading ? (
           <div className="p-4 text-sm text-muted-foreground">

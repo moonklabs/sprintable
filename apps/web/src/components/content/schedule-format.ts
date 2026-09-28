@@ -28,15 +28,42 @@ export function toDateKey(iso: string, tz: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 }
 
-/** doc §11-2 정본 형태 — "MM-DD HH:mm {TZ}" + UTC 보조줄. tz가 브라우저 폴백이면
- * isOrgTimezone=false로 소비부가 "브라우저 시간대" 안내를 따로 붙일 수 있게 한다. */
-export function formatScheduledAt(iso: string, tz: string): { display: string; utcNote: string } {
+/** 이 런타임(= 보는 사람의 브라우저)의 시간대. 서버에서 부르면 서버 시간대라 «보는 사람»이 아니다 — 서버 컴포넌트는 null을 넘긴다. */
+function runtimeTimezone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+}
+
+/** «GMT+9» · «GMT-7» · «GMT+5:30» · UTC는 «GMT» — `shortOffset`은 로케일과 무관하게 같은 모양이 되도록 en-US로 고정(유나 판정 · ko/en 같게). */
+function offsetLabel(date: Date, tz: string): string {
+  const raw = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(date).find((p) => p.type === 'timeZoneName')?.value ?? '';
+  // 오프셋 0은 ICU 판마다 «GMT» · «GMT+0»으로 갈린다(브라우저 «GMT» · 이 저장소 Node «GMT+0» 실측) — «GMT» 하나로.
+  return /^GMT[+-]0(:00)?$/.test(raw) ? 'GMT' : raw;
+}
+
+/** doc §11-2 정본 형태 — "MM-DD HH:mm[ {오프셋}]" + UTC 보조줄. tz가 브라우저 폴백이면
+ * isOrgTimezone=false로 소비부가 "브라우저 시간대" 안내를 따로 붙일 수 있게 한다.
+ *
+ * story #4280(유나 판정 · 스토리 본문 «유나 판단») — 시간대 표기: 표시 시간대가 보는 사람과 **그 시각에 같은 오프셋**이면 생략하고,
+ * 다르면 `shortOffset`(«GMT+9»)을 붙인다. 이름이 아니라 오프셋으로 비교한다(Asia/Seoul과 Asia/Tokyo는 같은 +9라 생략).
+ * 예전 `timeZoneName: 'short'`는 로케일마다 섞였다(en-US에서 LA면 «PDT» · 서울이면 «GMT+9»). `viewerTz`: 기본은 이 런타임의 시간대,
+ * 보는 사람을 모르는 서버 렌더는 null → 항상 붙인다. */
+export function formatScheduledAt(
+  iso: string,
+  tz: string,
+  viewerTz: string | null = runtimeTimezone(),
+): { display: string; utcNote: string } {
   const date = new Date(iso);
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short',
+    timeZone: tz, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatToParts(date);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-  const display = `${get('month')}-${get('day')} ${get('hour')}:${get('minute')} ${get('timeZoneName')}`;
+  const sameOffsetAsViewer = viewerTz !== null && tzOffsetMs(date, tz) === tzOffsetMs(date, viewerTz);
+  const time = `${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+  const display = sameOffsetAsViewer ? time : `${time} ${offsetLabel(date, tz)}`;
   const utcNote = `= ${iso.slice(5, 16).replace('T', ' ')} UTC`;
   return { display, utcNote };
 }
@@ -113,4 +140,33 @@ export function shiftCalendarRange(
     from: zonedWallClockToIso(fromKey, 0, 0, 0, 0, tz),
     to: zonedWallClockToIso(toKey, 23, 59, 59, 999, tz),
   };
+}
+
+// story #4280(민 기기 · 배포 27) — 활동 로그 기본 기간이 `toISOString().slice(0, 10)`(UTC 날짜)로 잡혀 KST 00~09시에 끝 날짜가 «어제»였다.
+// 날짜 입력칸(YYYY-MM-DD)을 쓰는 화면의 «오늘»과 «그 날의 시작 · 끝 시각»도 이 파일의 tz 산술로 — 위 캘린더와 같은 원칙(이 파일이 tz↔UTC의 유일한 출처).
+
+/** tz 기준 «오늘»의 날짜 키(YYYY-MM-DD). */
+export function todayDateKey(tz: string, now: Date = new Date()): string {
+  return toDateKey(now.toISOString(), tz);
+}
+
+/** 날짜 입력칸 기본값 — tz 기준 «오늘로부터 pastDays일 전 ~ 오늘»(둘 다 YYYY-MM-DD). */
+export function defaultPastDaysDateRange(tz: string, pastDays: number, now: Date = new Date()): { from: string; to: string } {
+  const to = todayDateKey(tz, now);
+  return { from: addCalendarDays(to, -pastDays), to };
+}
+
+/** 날짜 키 둘(YYYY-MM-DD)을 tz 기준 «from 날 00:00 ~ to 날 23:59:59.999»의 UTC ISO로. BE는 오프셋 없는 시각을 UTC로 읽으니
+ * (`2026-09-25T00:00:00` = KST 09:00) 날짜 입력칸 값을 조회 경계로 보낼 때는 이 값을 쓴다. 빈 키는 null. */
+export function dateKeysToInstants(fromKey: string, toKey: string, tz: string): { from: string | null; to: string | null } {
+  return {
+    from: fromKey ? zonedWallClockToIso(fromKey, 0, 0, 0, 0, tz) : null,
+    to: toKey ? zonedWallClockToIso(toKey, 23, 59, 59, 999, tz) : null,
+  };
+}
+
+/** iso가 tz에서 속한 날짜에 달력일 days를 더한 날의 자정(tz)을 UTC ISO로. 팀 활동 «더 보기»가 7일씩 과거로 갈 때 ms 산술(168시간) 대신
+ * 쓴다 — 서머타임 전환 주에도 정확히 그 tz의 자정에 선다(story #4280 · 까디르 검수 P3). */
+export function shiftDayStartIso(iso: string, tz: string, days: number): string {
+  return zonedWallClockToIso(addCalendarDays(toDateKey(iso, tz), days), 0, 0, 0, 0, tz);
 }

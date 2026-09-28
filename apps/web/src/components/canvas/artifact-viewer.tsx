@@ -1,8 +1,9 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, Clock, Download, Import, Maximize2, MessageCircle, Pencil, Sparkles } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { Button } from '@/components/ui/button';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactExpandDialog } from './artifact-expand-dialog';
 import { ArtifactVersionRail } from './artifact-version-rail';
@@ -20,7 +21,10 @@ import type { SpecPin } from '@/services/canvas-spec-pins';
 
 interface ArtifactViewerProps {
   artifact: VisualArtifact;
+  /** story #4343 — 버전 목록 전부(`mergeVersionSummaries`). 실물이 아직 없는 항목(`contentLoaded: false`)은 고를 때 `loadVersion`으로 받는다. */
   versions: ArtifactVersion[];
+  /** story #4343 — 이전 버전 실물 받기(`GET /{id}/versions/{n}`). 없으면 실물 없는 버전은 «불러오지 못했어요»로 둔다. */
+  loadVersion?: (versionNumber: number) => Promise<ArtifactVersion | null>;
   memberMap?: Record<string, MemberRef>;
   /** C2 — 좌표 앵커 스레드는 스테이지에 핀 오버레이. element 앵커는 후속(실 artifact tree
    * 좌표 유도 필요 — 지금은 좌표 앵커만 오버레이). 헤더 아래 스레드 목록 패널도 이 prop으로
@@ -43,7 +47,8 @@ interface ArtifactViewerProps {
   onReplyThread?: (threadId: string, body: string) => void;
   /** story #2725 — 새 좌표 스레드 생성(핀 추가 모드에서 캔버스 픽 → 작성). 생략하면 헤더
    * 배지가 토글 불가한 순수 카운트 표시로 폴백(onResolveThread/onReplyThread와 동일 옵션 규약). */
-  onCreateThread?: (anchorXPercent: number, anchorYPercent: number, body: string) => void;
+  /** 성공이면 true — 작성 칸 초안을 그때만 지운다(story #4370). */
+  onCreateThread?: (anchorXPercent: number, anchorYPercent: number, body: string) => Promise<boolean>;
   /** C4-S8 정본화 — 승인은 새 UI 없이 기존 GateInbox가 처리(§1), 여기선 제안만. 선택된
    * 버전에 이미 대기 중인 제안이 있으면 pendingCanonicalizeVersion === selectedVersion. */
   pendingCanonicalizeVersion?: number | null;
@@ -57,10 +62,11 @@ interface ArtifactViewerProps {
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
 export function ArtifactViewer({
-  artifact, versions, memberMap = {}, threads, nodes = [], specPins, onEnterEdit, onResolveThread, onReplyThread,
+  artifact, versions, loadVersion, memberMap = {}, threads, nodes = [], specPins, onEnterEdit, onResolveThread, onReplyThread,
   onCreateThread, pendingCanonicalizeVersion, onProposeCanonical, className,
 }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
+  const tc = useTranslations('common');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
   const [expandOpen, setExpandOpen] = useState(false);
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
@@ -75,7 +81,57 @@ export function ArtifactViewer({
   // story d72db00a — ArtifactStage의 콘텐츠 레이어에 직접 꽂힌다(contentRef prop 경유),
   // 뷰어 크롬 wrapper가 아니다 — PNG export가 크롬 없이 아트보드 전체 프레임만 캡처하도록.
   const captureTargetRef = useRef<HTMLDivElement>(null);
-  const activeVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
+  // story #4373 — 쓰기 칸이 붙을 draft 핀.
+  const draftPinRef = useRef<HTMLElement | null>(null);
+  // story #4343 — 레일 · 고르개로 고른 이전 버전은 목록 요약뿐(`contentLoaded: false`)이라, 처음 고르는 순간 실물을 받아 둔다(한 번만).
+  // 받는 중은 따로 적지 않는다(«실물이 필요한데 아직 없음»이 곧 받는 중) — 한 번만 부르게 부른 버전은 ref에 적는다.
+  const [fetchedVersions, setFetchedVersions] = useState<Record<number, ArtifactVersion | 'failed'>>({});
+  const requestedVersionsRef = useRef(new Set<number>());
+  // 까디르 · 유나(4723) — «다시 시도»를 누르면 그 버튼이 사라지며(받는 중으로 바뀜) 키보드 초점이 body로 떨어졌다 → 스테이지 칸(받는 중 · 실물이
+  // 번갈아 서는 늘 있는 자리 · tabIndex -1)으로 옮긴다. 실물이 서면 그 자리에 남고, **다시 실패하면 새 «다시 시도» 버튼으로** 돌려준다
+  // (그사이 사용자가 초점을 다른 데로 옮겼으면 건드리지 않는다).
+  const stageRegionRef = useRef<HTMLDivElement>(null);
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+  const retryFocusRef = useRef<number | null>(null);
+  const loadVersionRef = useRef(loadVersion);
+  useEffect(() => { loadVersionRef.current = loadVersion; });
+  const listedVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
+  const fetched = listedVersion ? fetchedVersions[listedVersion.version] : undefined;
+  const needsContent = listedVersion?.contentLoaded === false;
+  useEffect(() => {
+    if (!needsContent || !listedVersion || fetched) return;
+    const n = listedVersion.version;
+    const load = loadVersionRef.current;
+    if (!load || requestedVersionsRef.current.has(n)) return;
+    requestedVersionsRef.current.add(n);
+    void load(n).then(
+      (v) => setFetchedVersions((cur) => ({ ...cur, [n]: v ?? 'failed' })),
+      () => setFetchedVersions((cur) => ({ ...cur, [n]: 'failed' })),
+    );
+  }, [needsContent, listedVersion, fetched]);
+  const activeVersion = !needsContent ? listedVersion : typeof fetched === 'object' ? fetched : undefined;
+  const versionLoadFailed = needsContent && (fetched === 'failed' || !loadVersion);
+  useEffect(() => {
+    const n = retryFocusRef.current;
+    if (n === null || listedVersion?.version !== n) return;
+    if (versionLoadFailed) {
+      retryFocusRef.current = null;
+      if (document.activeElement === stageRegionRef.current) retryButtonRef.current?.focus();
+    } else if (activeVersion) {
+      retryFocusRef.current = null; // 실물이 섰다 — 초점은 스테이지 칸에 그대로
+    }
+  }, [versionLoadFailed, activeVersion, listedVersion]);
+  // 유나(4723) — 한 번 실패한 버전이 «부른 적 있음» 표시 때문에 다시 안 불려 늘 «못 했어요»였다 → 그 버전만 표시를 지우고 다시 부른다.
+  const retryVersion = (n: number) => {
+    retryFocusRef.current = n;
+    stageRegionRef.current?.focus();
+    requestedVersionsRef.current.delete(n);
+    setFetchedVersions((cur) => {
+      const next = { ...cur };
+      delete next[n];
+      return next;
+    });
+  };
   const selectedThread = threads?.find((th) => th.id === selectedThreadId) ?? null;
   const selectedThreadDescription = selectedThread?.anchor.element_id
     ? (nodes.find((n) => n.id === selectedThread.anchor.element_id)?.description ?? null)
@@ -96,10 +152,11 @@ export function ArtifactViewer({
     setPinAddMode(false);
     setDraftPin({ x: xPercent, y: yPercent });
   }
-  function handleComposeSubmit(body: string) {
-    if (!draftPin) return;
-    onCreateThread?.(draftPin.x, draftPin.y, body);
+  async function handleComposeSubmit(body: string): Promise<boolean> {
+    if (!draftPin || !onCreateThread) return false;
+    const pin = draftPin;
     setDraftPin(null);
+    return onCreateThread(pin.x, pin.y, body);
   }
   function handleComposeCancel() {
     setDraftPin(null);
@@ -109,15 +166,18 @@ export function ArtifactViewer({
     <div className={className}>
       {/* story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card. */}
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--elev-card)]">
-        <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
-          <span className="truncate text-sm font-semibold text-foreground">{artifact.title}</span>
-          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+        {/* [SID:4362] 좁은 폭(390/360 스토리 패널)에서 머리 한 줄에 다 안 들어가면 줄을 넘긴다(제목 줄 / 조작 줄). 예전엔 nowrap 한 줄이라
+         * 조작 글자가 한 글자씩 세로로 쌓이고(한글은 글자마다 끊을 수 있어 최소 폭 = 한 글자) 제목은 0~8px로 눌렸다.
+         * 제목 = 줄어들 수 있게(min-w-0 · 말줄임) · 조작 = 줄지 않고 안 꺾임(shrink-0 · whitespace-nowrap). 넓으면 예전과 같은 한 줄. */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 border-b border-border px-4 py-3">
+          <span className="min-w-0 max-w-full truncate text-sm font-semibold text-foreground">{artifact.title}</span>
+          <span className="shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
             {artifact.format}
           </span>
           {/* story 64010b05 §5 — provenance는 신뢰(투명성) 축이지 감시 축이 아니다. 낙인/경고색
            * 0(muted 중립), created엔 라벨 자체가 없다(무표시=디폴트). */}
           {artifact.source === 'imported' ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <Import className="h-3 w-3" aria-hidden />
               {t('provenanceImportedBadge')}
             </span>
@@ -130,7 +190,7 @@ export function ArtifactViewer({
           <select
             value={selectedVersion}
             onChange={(e) => setSelectedVersion(Number(e.target.value))}
-            className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             {[...versions].sort((a, b) => b.version - a.version).map((v) => (
               <option key={v.id} value={v.version}>v{v.version}</option>
@@ -143,14 +203,14 @@ export function ArtifactViewer({
             <button
               type="button"
               onClick={() => setExpandOpen(true)}
-              className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <Maximize2 className="h-3 w-3" aria-hidden />
               {t('viewerExpandAction')}
             </button>
           ) : null}
           {artifact.anchor_version != null ? (
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-success/85">
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] font-semibold text-success/85">
               <Check className="h-3 w-3" strokeWidth={2.6} aria-hidden />
               {t('anchorBadge', { version: artifact.anchor_version })}
             </span>
@@ -159,7 +219,7 @@ export function ArtifactViewer({
            * 이미 대기 중인 제안이 있으면 제안 버튼을 숨긴다(중복 제안 방지). */}
           {!isViewingAnchor && onProposeCanonical ? (
             pendingCanonicalizeVersion === selectedVersion ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+              <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] font-medium text-muted-foreground">
                 <Clock className="h-3 w-3" aria-hidden />
                 {t('canonicalizePendingBadge')}
               </span>
@@ -167,14 +227,14 @@ export function ArtifactViewer({
               <button
                 type="button"
                 onClick={() => onProposeCanonical(selectedVersion)}
-                className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] font-semibold text-foreground hover:bg-muted"
+                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-[11px] font-semibold text-foreground hover:bg-muted"
               >
                 <Sparkles className="h-3 w-3" aria-hidden />
                 {t('proposeCanonicalAction')}
               </button>
             )
           ) : null}
-          <span className="ml-auto flex items-center gap-3 text-muted-foreground">
+          <span className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap text-muted-foreground">
             {artifact.format === 'tree' && onEnterEdit ? (
               <button
                 type="button"
@@ -220,7 +280,18 @@ export function ArtifactViewer({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
-          <div className="relative min-w-0 bg-muted/20 p-4">
+          <div ref={stageRegionRef} tabIndex={-1} data-stage-region="" className="relative min-w-0 bg-muted/20 p-4 outline-none">
+            {!activeVersion && needsContent ? (
+              // story #4343 — 이전 버전 실물을 받는 중 · 못 받음(빈 캔버스로 «그 버전이 비었다»는 거짓을 그리지 않는다).
+              <div data-version-loading={versionLoadFailed ? 'failed' : 'loading'} className="flex h-[320px] w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                <p role={versionLoadFailed ? 'alert' : 'status'}>{versionLoadFailed ? t('versionLoadFailed') : tc('loading')}</p>
+                {versionLoadFailed && loadVersion && listedVersion ? (
+                  <Button ref={retryButtonRef} type="button" variant="outline" size="sm" onClick={() => retryVersion(listedVersion.version)}>
+                    {tc('retry')}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             {activeVersion ? (
               <div className="h-[320px] w-full">
                 <ArtifactStage
@@ -263,23 +334,28 @@ export function ArtifactViewer({
                        * 항상 노출(핀 추가 자체가 항상 latest 버전 대상이라 selectedVersion과
                        * 무관 — BE CREATE는 버전 개념 없이 artifact 스코프, spec pin과 다른 계약). */}
                       {draftPin ? (
-                        <>
-                          <AnchorPin
-                            number={null}
-                            state="draft"
-                            className="absolute z-10"
-                            style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
-                          />
-                          <CommentComposePopover
-                            onSubmit={handleComposeSubmit}
-                            onCancel={handleComposeCancel}
-                            style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
-                          />
-                        </>
+                        <AnchorPin
+                          ref={draftPinRef}
+                          number={null}
+                          state="draft"
+                          className="absolute z-10"
+                          style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
+                        />
                       ) : null}
                     </>
                   }
                 />
+                {/* story #4373 — 쓰기 칸은 무대(확대 변환 · 잘라내기 조상) 밖: body 포털 + fixed로 핀 사각형 아래(모자라면 위)에 붙고
+                  * 창 안으로 민다 · pan/zoom으로 핀이 움직이면 따라간다. 예전엔 변환 안에 그려 무대 10%면 22×10px로 작아졌고,
+                  * 무대 크기 층에 두면 좁은 곁 패널(무대 61px)에서 칸이 잘려 단추가 안 눌렸다. */}
+                {draftPin ? (
+                  <CommentComposePopover
+                    onSubmit={handleComposeSubmit}
+                    onCancel={handleComposeCancel}
+                    draftTargetId={artifact.id}
+                    anchorRef={draftPinRef}
+                  />
+                ) : null}
               </div>
             ) : null}
             {/* story #3377 — 인라인 스테이지는 pan/드래그 설계 보존을 위해 클릭을 안 받는다

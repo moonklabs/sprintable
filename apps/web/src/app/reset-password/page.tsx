@@ -79,7 +79,7 @@ export default function ResetPasswordPage() {
       <div className="flex min-h-screen items-center justify-center bg-muted">
         <div className="text-center space-y-4">
           <p className="text-sm text-destructive">{t('invalidLink')}</p>
-          <Link href="/forgot-password" className="text-sm text-brand hover:text-brand/80">{t2('forgotPassword')}</Link>
+          <Link href="/forgot-password" className="text-sm text-brand-text hover:text-brand-text/85">{t2('forgotPassword')}</Link>
         </div>
       </div>
     );

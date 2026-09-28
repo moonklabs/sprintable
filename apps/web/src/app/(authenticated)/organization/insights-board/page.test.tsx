@@ -73,6 +73,20 @@ async function mount() {
   await flush();
 }
 
+// story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z) — 댓글·후속 조치·원본과 대조가
+// 행 상세(펼침) 안으로 옮겨졌다. 아래 헬퍼로 "그 행을 펼친 뒤" 같은 testid를
+// 찾는다 — selector 범위만 바뀌고 각 테스트의 단언(찾는 문구·href·상태)은 무수정.
+async function expandRow(rowEl: Element) {
+  const toggle = rowEl.querySelector('[data-testid="insights-board-row-expand-toggle"]') as HTMLElement;
+  await act(async () => { toggle.click(); });
+  await flush();
+}
+
+async function expandFirstRow() {
+  const row = container.querySelector('[data-testid="insights-board-row"]') as HTMLElement;
+  await expandRow(row);
+}
+
 async function openMenuAndClick(triggerTestId: string, itemText: string) {
   const trigger = container.querySelector(`[data-testid="${triggerTestId}"]`) as HTMLElement;
   await act(async () => {
@@ -192,7 +206,7 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     stubFetch({});
     await mount();
 
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     expect(rows).toHaveLength(3);
 
     // Row A: d1=null(미스케줄) · d7=captured, 기본 지표(views)=0(정상 캡처값 — null 아님).
@@ -246,9 +260,10 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     stubFetch({ page1: [{ ...ROW_A, published_at: recentPublishedAt }] });
     await mount();
 
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     const publishedCell = rows[0]!.querySelector('[data-testid="insights-board-published-at"]');
-    expect(publishedCell?.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2} /);
+    // story #4280 — 시간대 표기는 보는 사람(실행 기계 TZ)과 같은 오프셋이면 생략 · 다르면 «GMT±N»이라 기계 TZ에 따라 붙거나 안 붙는다 — 표기는 선택으로 둔다(표기 규칙 자체는 schedule-format.test.ts 진리표가 고정).
+    expect(publishedCell?.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}(?: GMT\S*)?$/);
     expect(publishedCell?.textContent).not.toMatch(/전|그저께|어제|오늘/);
   });
 });
@@ -358,6 +373,27 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     expect(laterCall).not.toBeUndefined();
   });
 
+  // story #4231 2차 · 까디르 QA(d5b64e7dc [P2]) — 현재 주소를 복사해 쿼리를 바꿀 때 옛 `p`가 남으면 «이미 실은 p 보존» 규칙이
+  // 전환 대기 목표 대신 옛 프로젝트를 박는다(4585 부류). 복사본의 p는 지우고 목표 프로젝트를 싣는다.
+  it('⭐쿼리 갱신 — 현재 주소의 옛 p(proj-A) 대신 전환 대기 목표(proj-B)를 싣는다', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('p=proj-A&sort=d1'));
+    stubFetch({});
+    await mount();
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    await act(async () => { setPendingProjectTarget('proj-B'); });
+    try {
+      await openMenuAndClick('insights-board-metric-trigger', koMessages.content.insightMetricSpend);
+      const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
+      const q = new URLSearchParams(lastUrl.split('?')[1]);
+      expect(q.get('p')).toBe('proj-B');
+      expect(q.getAll('p')).toHaveLength(1);
+      expect(q.get('metric')).toBe('spend');
+      expect(q.get('sort')).toBe('d1');
+    } finally {
+      await act(async () => { setPendingProjectTarget(null); });
+    }
+  });
+
   // story #3583(페드루 PO 確定 2026-09-06) — GA4 유입 지표 2개가 선택기에 더해졌다
   // (열 추가가 아니라 이 선택기의 지표 축 확장 — DEFAULT_METRIC은 그대로 views).
   it('⭐지표 선택기에 유입 세션·유입 사용자가 있고, 고르면 metric 쿼리가 갈아끼워진다', async () => {
@@ -366,6 +402,41 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     await openMenuAndClick('insights-board-metric-trigger', koMessages.content.insightMetricInflowSessions);
     const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
     expect(lastUrl).toContain('metric=inflow_sessions');
+  });
+
+  // story #4014 CHANGES(페드루 PO 지적, 2026-09-17) — d1/d7 카드 라벨(<1024)이 표
+  // <th>와 다른 문구를 쓰면(하드코딩 등) 지표를 바꿨을 때 한쪽만 갱신되는 드리프트가
+  // 생긴다. 두 값(views→clicks)으로 갈아끼우며 표·카드 라벨이 매번 같이 바뀌는지 직접
+  // 단언(ResponsiveDataTable 자체는 이미 "header 재사용"을 pin했지만, 이 화면이 실제로
+  // 그 header에 동적 라벨을 올바로 실어 보내는지는 페이지 단에서 별도로 확認해야 한다).
+  it('⭐지표를 바꾸면 표 <th>와 카드 라벨(d1/d7)이 항상 같이 바뀐다(단일 정본 — header 재사용)', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('metric=views'));
+    stubFetch({});
+    await mount();
+
+    const viewsLabel = koMessages.content.insightMetricViews;
+    const clicksLabel = koMessages.content.insightMetricClicks;
+
+    const tableD1Th = [...container.querySelectorAll('table th')].find((th) => th.textContent?.includes(viewsLabel));
+    expect(tableD1Th, '표 D1 <th>가 views 라벨을 포함해야 함').not.toBeUndefined();
+    const cardD1Label = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(viewsLabel));
+    expect(cardD1Label, '카드 D1 라벨이 views 라벨을 포함해야 함').not.toBeUndefined();
+
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('metric=clicks'));
+    await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
+    await flush();
+
+    // 옛 라벨(views)은 이제 D1/D7 열 자리(표·카드 둘 다)에서 사라지고 clicks로 대체돼야
+    // 한다 — 한쪽만 갱신되면(카드가 하드코딩이었다면) 여기서 잡힌다.
+    const tableD1ThAfter = [...container.querySelectorAll('table th')].find((th) => th.textContent?.includes(clicksLabel));
+    expect(tableD1ThAfter, '지표 전환 뒤 표 D1 <th>가 clicks 라벨로 바뀌어야 함').not.toBeUndefined();
+    const cardD1LabelAfter = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(clicksLabel));
+    expect(cardD1LabelAfter, '지표 전환 뒤 카드 D1 라벨이 clicks 라벨로 바뀌어야 함').not.toBeUndefined();
+    const staleCardLabel = [...container.querySelectorAll('[data-testid="responsive-data-table-cards"] p')]
+      .find((p) => p.textContent?.includes(viewsLabel));
+    expect(staleCardLabel, '지표 전환 뒤에도 카드에 옛(views) 라벨이 남아있으면 드리프트').toBeUndefined();
   });
 
   it('필터/정렬/방향이 이미 걸린 URL로 진입하면 그 값 그대로(+window 항상 포함) fetch 쿼리에 실린다', async () => {
@@ -447,14 +518,14 @@ describe('InsightsBoardPage — 더 보기 누적(story #3503)', () => {
   it('has_more면 더 보기 버튼이 뜨고, 누르면 새 행이 «교체»가 아니라 «추가»된다', async () => {
     stubFetch({ page1: [ROW_A], page1HasMore: true, page1NextCursor: 'cursor-1', page2: [ROW_B] });
     await mount();
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]')).toHaveLength(1);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]')).toHaveLength(1);
 
     const loadMoreBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.insightsBoard.loadMore) as HTMLButtonElement;
     expect(loadMoreBtn).not.toBeUndefined();
     await act(async () => { loadMoreBtn.click(); });
     await flush();
 
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     expect(rows).toHaveLength(2);
     expect(container.textContent).toContain('글 A');
     expect(container.textContent).toContain('글 B');
@@ -466,12 +537,14 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
     useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, currentMemberType: 'agent' });
     stubFetch({});
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-follow-up-button"]')).toBeNull();
   });
 
   it('doc a0da40c9 §21-5(유나 2026-09-05) — 제목 입력이 「[유형] {원문 제목}」으로 미리 채워지고, 유형을 바꾸면 갈아끼워진다', async () => {
     stubFetch({});
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -487,6 +560,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
   it('PO REQUEST(2026-09-05, PR#3853 재리뷰) — 사람이 직접 고친 제목은 유형을 바꿔도 소리 없이 안 지워진다', async () => {
     stubFetch({});
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -506,9 +580,10 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
     expect(titleInput.value).toBe('내가 직접 쓴 제목');
   });
 
-  it('⭐성공 경로 — 만들면 story_id로 /board?story= 링크가 뜬다(getEntityHref 재사용)', async () => {
+  it('⭐성공 경로 — 만들면 story_id로 /flow?story= 링크가 뜬다(getEntityHref 재사용)', async () => {
     stubFetch({ followUp: () => ({ status: 201, body: { story_id: 'story-99' } }) });
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -519,12 +594,13 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
 
     const link = document.querySelector('[data-testid="follow-up-success-link"]') as HTMLAnchorElement;
     expect(link).not.toBeNull();
-    expect(link.getAttribute('href')).toBe('/board?story=story-99');
+    expect(link.getAttribute('href')).toBe('/flow?story=story-99');
   });
 
   it('403 FOLLOW_UP_CREATE_HUMAN_ONLY — 알려진 코드의 사람 말 문구가 뜬다', async () => {
     stubFetch({ followUp: () => ({ status: 403, body: { detail: { code: 'FOLLOW_UP_CREATE_HUMAN_ONLY', message: 'human only' } } }) });
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -537,6 +613,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
   it('404 publication 없음(플레인 문자열 detail) — 서버 원문이 그대로 뜬다(지어내지 않는다)', async () => {
     stubFetch({ followUp: () => ({ status: 404, body: { detail: 'publication을 찾을 수 없습니다: pub-404' } }) });
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -549,6 +626,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
   it('422 FOLLOW_UP_INVALID_KIND — 알려진 코드의 사람 말 문구가 뜬다', async () => {
     stubFetch({ followUp: () => ({ status: 422, body: { detail: { code: 'FOLLOW_UP_INVALID_KIND', message: 'bad kind' } } }) });
     await mount();
+    await expandFirstRow();
     const btn = container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
@@ -567,6 +645,7 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
   it('① site_post 행 — "해당 없음"(댓글 축 자체가 없다)', async () => {
     stubFetch({ page1: [{ ...ROW_B, comments_supported: false, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')?.textContent).toBe('해당 없음');
   });
 
@@ -575,6 +654,7 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
   it('② channel_publication인데 채널이 댓글 수집 미지원 — "채널 미제공"(①과 다른 문구·다른 testid)', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: false, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-not-applicable"]')).toBeNull();
     expect(container.querySelector('[data-testid="insights-board-comments-channel-unsupported"]')?.textContent).toBe('채널 미제공');
   });
@@ -582,18 +662,21 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
   it('③ comments_supported=true인데 last_collected_at=null — "아직 수집 전"(0건과 다른 문구)', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: null, comments_count: null, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-uncollected"]')?.textContent).toBe('아직 수집 전');
   });
 
   it('④-a 수집됨·0건 — 이제 "댓글 0"으로 적는다(미수집과 신호로 갈렸으므로 §22-7 원칙이 선다)', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 0, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-text"]')?.textContent).toBe('댓글 0');
   });
 
   it('④-b 수집됨·n건·draft_id 있음 — /content/channel-posts/{draft_id} 링크', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 5, channel_post_draft_id: 'draft-42' }] });
     await mount();
+    await expandFirstRow();
     const link = container.querySelector('[data-testid="insights-board-comments-link"]') as HTMLAnchorElement;
     expect(link?.textContent).toBe('댓글 5');
     expect(link?.getAttribute('href')).toBe('/content/channel-posts/draft-42');
@@ -602,6 +685,7 @@ describe('InsightsBoardPage — 댓글 칸 네 갈래(story #3517)', () => {
   it('④-c 수집됨·n건·draft_id 없음(BE 예외 케이스) — 링크 없이 수만', async () => {
     stubFetch({ page1: [{ ...ROW_A, comments_supported: true, comments_last_collected_at: '2026-09-05T10:00:00Z', comments_count: 5, channel_post_draft_id: null }] });
     await mount();
+    await expandFirstRow();
     expect(container.querySelector('[data-testid="insights-board-comments-link"]')).toBeNull();
     expect(container.querySelector('[data-testid="insights-board-comments-text"]')?.textContent).toBe('댓글 5');
   });
@@ -613,11 +697,19 @@ describe('InsightsBoardPage — ?highlight로 들어온 행 강조(story #3617)'
   it('?highlight=pub-b — 그 행에 scrollIntoView가 불리고 강조 클래스가 붙는다', async () => {
     const scrollIntoViewMock = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoViewMock;
+    // story #4014 — ResponsiveDataTable이 표 <tr>·카드 <div> 둘 다 항상 DOM에 두므로
+    // (AC5/6) 실 브라우저에선 offsetParent로 "지금 보이는 쪽"만 스크롤 대상으로 고른다
+    // (production 코드 참고). jsdom은 레이아웃을 계산하지 않아 offsetParent가 항상
+    // null이라 실측을 흉내낸다(둘 다 "보인다"로 — 어느 쪽이 골라지든 이 테스트의
+    // 단언(강조 표시+scrollIntoView 호출 여부)엔 무관).
+    Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+      configurable: true, get: () => document.body,
+    });
     useSearchParamsMock.mockReturnValue(new URLSearchParams('highlight=pub-b'));
     stubFetch({});
     await mount();
 
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     const highlighted = [...rows].find((r) => r.getAttribute('data-highlighted') === 'true');
     expect(highlighted).not.toBeUndefined();
     expect(scrollIntoViewMock).toHaveBeenCalled();
@@ -627,7 +719,7 @@ describe('InsightsBoardPage — ?highlight로 들어온 행 강조(story #3617)'
     useSearchParamsMock.mockReturnValue(new URLSearchParams());
     stubFetch({});
     await mount();
-    const rows = container.querySelectorAll('[data-testid="insights-board-row"]');
+    const rows = container.querySelectorAll('table [data-testid="insights-board-row"]');
     expect([...rows].some((r) => r.getAttribute('data-highlighted') === 'true')).toBe(false);
   });
 
@@ -647,10 +739,11 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
   it('channel_publication 행(A·C)에만 버튼이 있고, site_post 행(B)엔 없다', async () => {
     stubFetch({});
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
-    expect(rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
-    expect(rows[1]!.querySelector('[data-testid="insights-board-reconcile-button"]')).toBeNull();
-    expect(rows[2]!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
+    await expandRow(rows[0]!); await expandRow(rows[1]!); await expandRow(rows[2]!);
+    expect(rows[0]!.nextElementSibling?.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+    expect(rows[1]!.nextElementSibling?.querySelector('[data-testid="insights-board-reconcile-button"]')).toBeNull();
+    expect(rows[2]!.nextElementSibling?.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
   });
 
   it('누르면 진행 中 비활성 상태를 거쳐 결과가 행 아래 한 줄로 뜬다(지표별 일치/불일치/미측정)', async () => {
@@ -665,8 +758,9 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
       }),
     });
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
-    const btn = rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
+    await expandFirstRow();
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
+    const btn = rows[0]!.nextElementSibling!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
 
     await act(async () => { btn.click(); });
@@ -686,8 +780,9 @@ describe('InsightsBoardPage — 원본과 대조 행 액션(story #3620)', () =>
       reconcile: () => ({ status: 409, body: { detail: { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: 'raw' } } }),
     });
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
-    const btn = rows[0]!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
+    await expandFirstRow();
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
+    const btn = rows[0]!.nextElementSibling!.querySelector('[data-testid="insights-board-reconcile-button"]') as HTMLButtonElement;
     await act(async () => { btn.click(); });
     await flush();
 
@@ -711,7 +806,7 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
   const ROW_BLOCKED = {
     publication_id: 'pub-bl', kind: 'channel_publication', channel: 'threads', work_item_id: 'wi-bl',
     title: '글 BL', published_at: '2026-09-01T00:00:00Z', external_url: null, connection_id: 'conn-2',
-    d1: null, d7: null, command_status: 'blocked',
+    d1: null, d7: null, command_status: 'blocked', failure_kind: 'connection',
   };
   // 뮤테이션 대조 — dead_letter/blocked가 아닌 다른 command_status는(자동으로 풀리는
   // 갈래거나 이 화면엔 안 실리는 failure_kind가 필요한 갈래라) 배지가 안 떠야 한다.
@@ -744,6 +839,14 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
     expect(badge!.textContent).toBe(koMessages.content.channelPostsFailureBlocked);
   });
 
+  it('blocked + 사유 모름 행 — 보드도 사유를 지어내지 않는다: 중립 머리(story #4305 · 까디르)', async () => {
+    const { failure_kind: _omit, ...unknownRow } = ROW_BLOCKED;
+    stubFetch({ page1: [unknownRow] });
+    await mount();
+    const badge = container.querySelector('[data-testid="insights-board-row"] [data-testid="channel-post-failure-badge"]');
+    expect(badge?.textContent).toBe(koMessages.content.channelPostsFailureBlockedUnknown);
+  });
+
   // 뮤테이션 대조 — BE 필드(command_status)가 응답에서 빠지면(undefined) 배지도 0.
   it('뮤테이션 대조 — command_status 자체가 없으면(BE 필드 누락 시뮬) 배지가 안 뜬다', async () => {
     const { command_status: _omit, ...rowWithoutField } = ROW_DEAD_LETTER;
@@ -757,7 +860,7 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
   it('pending·voided는 배지가 안 뜬다(이 보드엔 failure_kind/reasonCode가 없어 그 갈래는 애초에 판정 불가)', async () => {
     stubFetch({ page1: [ROW_PENDING, ROW_VOIDED] });
     await mount();
-    const rows = [...container.querySelectorAll('[data-testid="insights-board-row"]')];
+    const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     expect(rows[0]!.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
     expect(rows[1]!.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
   });
@@ -766,14 +869,20 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
     stubFetch({ page1: [ROW_DEAD_LETTER] });
     await mount();
     const row = container.querySelector('[data-testid="insights-board-row"]')!;
-    expect(row.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
+    await expandRow(row);
+    expect(row.nextElementSibling!.querySelector('[data-testid="insights-board-reconcile-button"]')).not.toBeNull();
   });
 
-  // ①② — 배지도 버튼도 없을 때 그 자리 자체가 남지 않는다(빈 flex div가 gap만
-  // 먹는 회귀 방지). site_post 행(canReconcile=false)이면서 command_status가 없는
-  // 행으로 재는다 — canCreateFollowUp은 useDashboardContext mock의
-  // currentMemberType='human'이라 기본 true인 만큼, agent로 바꿔 버튼 축까지 끈다.
-  it('①② 배지도 행동 버튼도 없으면 그 td가 완전히 빈다(빈 wrapper 노드 0)', async () => {
+  // ① — 배지가 없을 때 그 wrapper div 자체가 안 남는다(빈 div가 margin만 먹는
+  // 회귀 방지). story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z)로 후속 조치·
+  // 원본과 대조 버튼이 행 상세로 옮겨가 Actions 칸엔 이제 배지(조건부)+펼침
+  // 토글(항상)만 남는다 — "칸이 완전히 빈다"는 옛 불변식은 토글이 항상 있어
+  // 더는 성립하지 않는다(칸 자체가 아니라 «배지 유무»가 지금의 불변식). site_post
+  // 행(canReconcile=false)이면서 command_status가 없는 행으로 재는다 —
+  // canCreateFollowUp은 useDashboardContext mock의 currentMemberType='human'이라
+  // 기본 true인 만큼, agent로 바꿔 버튼 축까지 끈다(행 상세 안 버튼 유무는 이
+  // 테스트의 관심사가 아니다 — Actions 칸 자체만 본다).
+  it('① 배지가 없으면 Actions 칸엔 펼침 토글 1개만(배지 wrapper div는 없다)', async () => {
     useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, currentMemberType: 'agent' });
     const rowNoActionsNoBadge = {
       publication_id: 'pub-none', kind: 'site_post', channel: 'hosted_site', work_item_id: 'wi-none',
@@ -783,10 +892,11 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
     stubFetch({ page1: [rowNoActionsNoBadge] });
     await mount();
     const row = container.querySelector('[data-testid="insights-board-row"]')!;
-    // story #3806(PR5 조각⑥) — 광고비 칸이 comments 뒤·actions 앞에 신설돼 actions는
-    // 이제 8번째(index 7) 열이다(제목·채널·발행·d1·d7·댓글·광고비·행동).
-    const actionCell = row.querySelectorAll('td')[7] as HTMLElement;
-    expect(actionCell.children.length).toBe(0);
+    // story #3979 CHANGES — 댓글 열이 빠져 Actions는 이제 7번째(index 6) 열이다
+    // (제목·채널·발행·d1·d7·광고비·행동).
+    const actionCell = row.querySelectorAll('td')[6] as HTMLElement;
+    expect(actionCell.children.length).toBe(1);
+    expect(actionCell.querySelector('[data-testid="insights-board-row-expand-toggle"]')).not.toBeNull();
   });
 });
 
@@ -818,8 +928,8 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
   it('기본값(묶음=없음)은 무회귀 — 그룹 헤더 행이 안 뜨고 기존처럼 행마다 하나씩', async () => {
     stubFetch({ page1: [GROUPABLE_ROW_IG, GROUPABLE_ROW_FB, GROUPABLE_ROW_THREADS] });
     await mount();
-    expect(container.querySelectorAll('[data-testid="insights-board-group-header"]').length).toBe(0);
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]').length).toBe(3);
+    expect(container.querySelectorAll('table [data-testid="insights-board-group-header"]').length).toBe(0);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]').length).toBe(3);
   });
 
   it('묶음=소재 — 같은 asset_sha256s[0]을 공유하는 IG·FB가 한 그룹(대표=sha256 앞 8자)으로, 단일 소재(threads)는 별도 그룹으로 묶인다', async () => {
@@ -835,10 +945,10 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
     await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
     await flush();
 
-    const headers = [...container.querySelectorAll('[data-testid="insights-board-group-header"]')];
+    const headers = [...container.querySelectorAll('table [data-testid="insights-board-group-header"]')];
     expect(headers).toHaveLength(2);
     expect(headers[0]!.querySelector('[data-testid="insights-board-group-label"]')?.textContent).toBe('abcdefab');
-    expect(container.querySelectorAll('[data-testid="insights-board-row"]').length).toBe(3);
+    expect(container.querySelectorAll('table [data-testid="insights-board-row"]').length).toBe(3);
   });
 
   it('묶음=훅 — hook_key가 null인 FB는 「미분류」(docs 재사용) 그룹으로, IG·threads는 hook-A 그룹으로 합쳐진다', async () => {
@@ -852,10 +962,23 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
     await act(async () => { root.render(wrap(<InsightsBoardPage />)); });
     await flush();
 
-    const headers = [...container.querySelectorAll('[data-testid="insights-board-group-header"]')];
+    const headers = [...container.querySelectorAll('table [data-testid="insights-board-group-header"]')];
     const labels = headers.map((h) => h.querySelector('[data-testid="insights-board-group-label"]')?.textContent);
     expect(labels).toEqual(['hook-A', koMessages.docs.indexCategoryUncategorized]);
     const hookAHeader = headers[0]!;
     expect(hookAHeader.textContent).toContain(koMessages.insightsBoard.groupMemberCount.replace('{n}', '2'));
+  });
+});
+
+// story #4278(유나 결정 ③) — 셸 메뉴 «결과»(구역 이름)를 눌러 온 화면이라 머리가 «결과 › 성과 보드»로 이어진다(메뉴 이름 · 제목 키는
+// 그대로). 뮤테이션: PageHeader의 eyebrow를 빼면 RED.
+describe('InsightsBoardPage — 머리의 구역 표시(story #4278)', () => {
+  it('⭐h1 «성과 보드» 바로 위에 구역 «결과»', async () => {
+    stubFetch({ page1: [] });
+    await mount();
+    const h1 = [...container.querySelectorAll('h1')].find((el) => el.textContent === koMessages.insightsBoard.pageTitle);
+    expect(h1).toBeTruthy();
+    expect(h1!.parentElement!.textContent).toContain(koMessages.nav.navResults);
+    expect(h1!.previousElementSibling?.textContent).toBe(koMessages.nav.navResults);
   });
 });

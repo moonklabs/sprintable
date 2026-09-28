@@ -8,6 +8,7 @@ import { useHideOnScroll } from '@/lib/use-hide-on-scroll';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
+import type { DocMovePlan } from '@/components/docs/doc-move-plan';
 import { DocAutoGroups } from '@/components/docs/doc-auto-groups';
 import { RecentsSection } from '@/components/docs/recents-section';
 import { useRecentDocs } from '@/components/docs/use-recent-docs';
@@ -20,10 +21,13 @@ import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
 import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
-import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
+import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
+import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { applyDocMove, placedFromSiblings, planDocMove, withEffectiveParents, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
+import { applyReorderResult, saveDocOrder } from '@/components/docs/lib/doc-reorder-api';
 
 // story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
 // 낼 때 실제 서버 cap과 어긋나지 않게 한 곳에서만 선언한다.
@@ -75,6 +79,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [docsHasMore, setDocsHasMore] = useState(false);
   const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
+  // story #4376 — 트리 총량(tree 요청 meta.totalCount · #3761 정본). 상한을 넘는 프로젝트에서만 «받은 수 / 총량»으로 보인다.
+  const [docsTotal, setDocsTotal] = useState<number | null>(null);
   const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -161,8 +167,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const [isCreating, setIsCreating] = useState(false);
 
+  // story #4385(까디르 codex HIGH · PO 10:07Z) — 트리 요청 세대. 새로 받기(필터 바뀜 · 다시 시도 · 다시 읽기)마다 올리고, 이어 받기는
+  // 지금 세대를 싣는다. 응답이 올 때 세대가 바뀌었으면 버린다 — 옛 필터의 늦은 쪽이 새 목록에 붙지 않게.
+  const treeGenRef = useRef(0);
   const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
+    const gen = cursor ? treeGenRef.current : ++treeGenRef.current;
+    if (!cursor) {
+      // 새로 받기면 옛 cursor · hasMore를 곧바로 걷는다 — 새 응답 전에 «더 보기»가 새 태그 + 옛 cursor로 나가지 않게.
+      setDocsNextCursor(null);
+      setDocsHasMore(false);
+    }
     // story #3784(페드루 짚음 10:02Z·10:11Z 재검토) — 재시도(에러 배너의 「다시 시도」
     // 포함)가 이전 실패 신호를 그대로 물고 있지 않도록, 시도 시작 시 먼저 걷는다(성공하면
     // 그대로 false·실패하면 catch가 다시 켠다). 로딩 조건은 «fetch 中»이 아니라 «지금 보여줄
@@ -173,15 +188,16 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     if (!cursor && !hasContentRef.current) setLoading(true);
     setLoadError(false);
     try {
-      // story #2191 — "view=tree"는 죽은 파라미터였다(/api/docs가 그 값을 아예 안 읽어
-      // 항상 무커서 일반 목록 분기로 떨어졌다). #2540 이후 BE/FE 둘 다 커서를 실제로
-      // 지원하므로 이 파라미터를 지운다 — tags 유무와 무관하게 같은 커서 경로를 탄다.
-      const fetchParams = new URLSearchParams({ project_id: projectId, limit: '20' });
+      // story #4376 — 트리는 한 번에(tree=true · BE 상한 5,000까지) + 총량. 예전엔 층 구분 없는 평면 목록을 20개씩 받아
+      // 방금 만든 문서 · 폴더가 뒤 쪽(uuid 순)에 떨어지면 새로고침 뒤 트리에서 사라졌고(dev 1,065개 · 54쪽), 부모가 뒤 쪽인
+      // 자식은 부모가 올 때까지 안 보였다. 한 번에 받으면 형제 · 부모가 늘 같이 온다 — 상한을 넘는 프로젝트만 «더 보기»로 이어 받는다.
+      const fetchParams = new URLSearchParams({ project_id: projectId, tree: 'true' });
       if (tags?.length) fetchParams.set('tags', tags.join(','));
       if (cursor) fetchParams.set('cursor', cursor);
       const res = await fetchWithAuth(`/api/docs?${fetchParams.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch tree');
-      const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
+      const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null; totalCount?: number | null } };
+      if (gen !== treeGenRef.current) return;  // 그 사이 새로 받기가 시작됨 — 옛 세대 응답은 버린다.
       if (cursor) {
         setTree((prev) => [...prev, ...(data || [])]);
       } else {
@@ -189,16 +205,20 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       }
       setDocsHasMore(meta?.hasMore ?? false);
       setDocsNextCursor(meta?.nextCursor ?? null);
+      setDocsTotal(meta?.totalCount ?? null);
       hasContentRef.current = (data?.length ?? 0) > 0;
     } catch {
+      if (gen !== treeGenRef.current) return;
       // tree fetch failed — keep existing
       setLoadError(true);
       // 실패 뒤 재시도 때는 다시 로딩을 세워야 한다(카디르 재현) — hasContentRef를 걷어
       // 위 setLoading(true) 조건이 다음 호출에서 막히지 않게 한다.
       hasContentRef.current = false;
     } finally {
-      setLoading(false);
-      setDocsLoadingMore(false);
+      if (gen === treeGenRef.current) {
+        setLoading(false);
+        setDocsLoadingMore(false);
+      }
     }
   }, [projectId]);
 
@@ -212,29 +232,67 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     setTreeDrawerOpen(false);
   }, [router, pushRecent, wsSlug, projSlug]);
 
-  const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
-    setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, sort_order: newSortOrder } : doc)));
-    try {
-      const res = await fetch(`/api/docs/${docId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort_order: newSortOrder }) });
-      // story #3637(유나 silent-failure-sweep-3632) — 낙관 순서변경이 실패하면 fetchTree()로
-      // 조용히 원복되던 자리(형제 kanban-board.tsx:1074처럼 문장까지 낸다).
-      if (!res.ok) { addToast({ title: t('reorderFailed'), type: 'error' }); await fetchTree(); }
-    } catch { addToast({ title: t('reorderFailed'), type: 'error' }); await fetchTree(); }
+  // story #4353 — 재정렬 · 폴더로 옮기기 한 길(`POST /api/docs/reorder`). 예전 PATCH {sort_order}는 그 한 문서 값만 바꿔 형제가 0
+  // 동률이면 무동작이었다. 서버가 새 부모의 형제 번호를 한 번에 다시 매기고 그 번호를 돌려준다 — 화면은 그 번호를 그대로 반영한다
+  // (낙관 추측 번호 없음). 실패하면 문장을 내고 트리를 다시 읽는다(story #3637과 같은 축).
+  // story #4348 — 저장은 어댑터 한 곳(`lib/doc-reorder-api.ts` saveDocOrder · 응답 {doc, siblings} 해석 · 오류 갈래) — 끌기(여기)와 «⋮» 메뉴(아래)가 같은 길.
+  // story #4366(까디르) — 저장이 됐는지 돌려준다(트리는 접힌 폴더 «안으로» 떨굼 뒤 성공일 때만 펼친다).
+  const placeDoc = useCallback(async (plan: DocMovePlan, failedTitle: string): Promise<boolean> => {
+    const result = await saveDocOrder(plan);
+    if (!result.ok) { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); return false; }
+    setTree((prev) => applyReorderResult(prev, result));
+    return true;
+  }, [fetchTree, addToast]);
+
+  const handleReorder = useCallback((plan: DocMovePlan) => placeDoc(plan, t('reorderFailed')), [placeDoc, t]);
+  const handleMove = useCallback((plan: DocMovePlan) => placeDoc(plan, t('moveFailed')), [placeDoc, t]);
+
+  // story #4348 — «⋮» 위로 · 아래로 · 폴더로. 화면엔 바로 옮기고(낙관) 저장은 상대 이동 API(/api/docs/reorder) 하나로.
+  // - 저장은 한 줄로 보낸다: 앞 이동이 서버에 닿은 뒤 다음을 보내야 after_id가 서버에서도 같은 자리를 가리킨다.
+  // - 응답(서버 번호)을 반영한 위에 아직 안 닿은 뒤 이동들을 다시 얹는다 — 앞 응답이 뒤 이동의 낙관 순서를 되돌리지 않게.
+  // - 실패(409 낡은 순서 포함) = moveFailed + 서버 트리 다시 읽기(끌기 이동과 같은 규칙) · 줄에 선 뒤 이동은 보내지 않는다(없던 자리를 기준으로 짠 것).
+  const treeRef = useRef(tree);
+  useEffect(() => { treeRef.current = tree; });
+  const moveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const moveSeqRef = useRef(0);
+  const pendingMovesRef = useRef(new Map<number, Extract<MenuMovePlan, { ok: true }>>());
+  // 까디르 #4730 P3 — 실패 뒤 다시 읽기는 **지금** 고른 태그로(저장 중에 태그를 바꿨으면 시작 때 태그로 읽어 필터와 목록이 어긋났다).
+  const selectedTagsRef = useRef(selectedTags);
+  useEffect(() => { selectedTagsRef.current = selectedTags; });
+  const handleMenuMove = useCallback((docId: string, action: DocMoveAction): Promise<MenuMoveResult> => {
+    // story #4376(유나 4766 반려) — 트리가 그린 모양(실효 부모)대로 짠다: 부모가 목록에 없는 문서는 뿌리 기준(숨은 부모 id를 요청에 싣지 않음).
+    const plan = planDocMove(withEffectiveParents(treeRef.current), docId, action);
+    if (!plan.ok) return Promise.resolve({ plan, placed: null });
+    const next = applyDocMove(treeRef.current, plan);
+    treeRef.current = next;
+    setTree(next);
+    const seq = ++moveSeqRef.current;
+    const pending = pendingMovesRef.current;
+    pending.set(seq, plan);
+    const job = moveChainRef.current.then(async (): Promise<MenuMoveResult> => {
+      if (!pending.has(seq)) return null;
+      const result = await saveDocOrder(plan.placement);
+      pending.delete(seq);
+      if (result.ok) {
+        const later = [...pending.values()];
+        setTree((prev) => later.reduce<Doc[]>((acc, p) => applyDocMove(acc, p), applyReorderResult(prev, result)));
+        // 알림의 «N개 중 M번째»는 응답의 새 부모 형제 전부로 센다(불러온 20개가 아니라 · 까디르 #4730 P3).
+        return { plan, placed: placedFromSiblings(result.doc, result.siblings) };
+      }
+      pending.clear();
+      addToast({ title: t('moveFailed'), type: 'error' });
+      const tags = selectedTagsRef.current;
+      await fetchTree(tags.length ? tags : undefined);
+      return null;
+    });
+    moveChainRef.current = job.catch(() => undefined);
+    return job;
   }, [fetchTree, addToast, t]);
 
-  const handleMove = useCallback(async (docId: string, newParent: string | null, newSortOrder: number) => {
-    setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, parent_id: newParent, sort_order: newSortOrder } : doc)));
-    try {
-      const res = await fetch(`/api/docs/${docId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: newParent, sort_order: newSortOrder }) });
-      // story #3637 — 이동 실패도 동일(circular/permission/sort-mode 거부와 다른 축 — 이건
-      // 거부가 아니라 시도 자체가 서버에서 실패한 경우).
-      if (!res.ok) { addToast({ title: t('moveFailed'), type: 'error' }); await fetchTree(); }
-    } catch { addToast({ title: t('moveFailed'), type: 'error' }); await fetchTree(); }
-  }, [fetchTree, addToast, t]);
-
-  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
+  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active' | 'tag-filter-active') => {
     if (reason === 'circular') addToast({ title: t('moveCircularError'), type: 'error' });
     else if (reason === 'sort-mode-active') addToast({ title: t('moveSortModeActiveError'), type: 'warning' });
+    else if (reason === 'tag-filter-active') addToast({ title: t('moveTagFilterActive'), type: 'warning' });
     else addToast({ title: t('movePermissionError'), type: 'warning' });
   }, [addToast, t]);
 
@@ -353,20 +411,24 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   // 자체가 안 바뀌고 release 시점에만 커밋되므로 — useSwipeDrawer 참고). Tab 트랩+Esc+반환만.
   const drawerTrapRef = useFocusTrap(treeDrawerOpen, closeDrawer);
 
-  const topBarTitle = useMemo(
-    () => <h1 className="text-sm font-medium">{t('title')}</h1>,
-    [t]
-  );
+  // story #3945(#3942 배포 92 디자인 감사) — TopBarSlot의 이 브레드크럼 라벨을 <h1>로
+  // 쓰면 docs-index.tsx(:170)·[slug]/view/page.tsx(:150)의 «진짜» 페이지 제목 h1과
+  // 겹쳐 한 페이지에 h1이 2개가 됐다(헤딩 위계 위반). 이 라벨은 상단바 크롬(현재
+  // 위치 표시)이지 페이지 본문의 제목이 아니라 비-헤딩(<p>)으로 낮춘다 — 시각(className)
+  // 무변, 실제 페이지 h1은 아래 두 소비처가 그대로 유지한다.
+  const topBarTitle = useMemo(() => <DocsTopBarTitle />, []);
   const topBarActions = useMemo(
     () => (
+      // story #4277(민 기기 #5) — 402폭에서 «새 폴더» · «새 문서» 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 알림 벨을 화면 밖으로
+      // 밀었다. 스프린트 상단바와 같은 관례: 폰(sm 미만)은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 늘 유지.
       <div className="flex items-center gap-1.5">
-        <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting}>
-          <FolderPlus className="mr-1.5 h-3.5 w-3.5" />
-          {t('newFolder')}
+        <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')}>
+          <FolderPlus className="h-3.5 w-3.5 sm:mr-1.5" />
+          <span className="hidden sm:inline">{t('newFolder')}</span>
         </Button>
-        <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}>
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          {isCreating ? t('loading') : t('newDoc')}
+        <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating} aria-label={isCreating ? t('loading') : t('newDoc')}>
+          <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+          <span className="hidden sm:inline">{isCreating ? t('loading') : t('newDoc')}</span>
         </Button>
       </div>
     ),
@@ -593,10 +655,14 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 moreLabel={(count) => t('groupMore', { count })}
               />
             ) : (
-              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} />
+              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} onMenuMove={handleMenuMove} hasMore={docsHasMore} filtered={selectedTags.length > 0} />
             )}
-            {viewMode === 'folders' && docsHasMore && (
+            {/* story #4385 — 두 보기 모두(예전엔 «폴더 보기»만 · develop부터): 상한을 넘는 프로젝트에서 «묶음 보기»도 나머지를 이어 받는다. */}
+            {docsHasMore && (
               <div className="px-2 py-1">
+                {docsTotal !== null && (
+                  <p className="px-2 pb-1 text-center text-[11px] text-muted-foreground">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
+                )}
                 <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}
                 </Button>
@@ -620,8 +686,15 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         showContextChip={!currentSlug}
       />
 
-      {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes.
+          story #4130 — 셸(dashboard-shell.tsx)의 ContextualPanelLayout 열이 이제 내용 높이로
+          자란다(min-h-0 제거, #4121 게이트 상세 sticky 픽스). 이 split(사이드바 aside +
+          section)은 각자 독립 overflow-y-auto라 뷰포트 기준 고정 높이가 있어야 한다 — 셸이
+          더 이상 그 캡을 주지 않으므로 여기서 직접 앵커(h-[calc(100svh-var(--shell-chrome-h))]
+          — story #4131, --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한
+          SSOT). ActivationChecklistBanner가 뜬 상태에서는 그만큼 못 미쳐(페이지 스크롤로
+          보정되는 수준, 기능 파손 아님) — PO 라이브에서 그 상태 육안 확認 요청. */}
+      <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 overflow-hidden">
         {/* Desktop sidebar — hidden on mobile */}
         {/* PR#3391 QA(카디르, codex 교차검증) — overflow-y만 있고 overflow-x 처리가
             없어 긴 로케일 문자열(영문 정렬 라벨 등)이 넘칠 구조였다. 소스(정렬 토글 row)를
@@ -650,7 +723,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               'sticky top-12 z-20 transition-transform',
               '[transition-duration:var(--gnb-hide-duration)]',
               '[transition-timing-function:var(--gnb-hide-easing)]',
-              gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))]',
+              // [SID:4288] 스크롤로 숨은 채 Tab 초점이 들어오면 다시 보인다(내용은 늘 닿아야 해서 inert가 아니라 focus-within).
+              gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))] focus-within:translate-y-0',
             )}
           >
             <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] min-w-0 max-w-full items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label={t('openDocTree')}>
@@ -697,7 +771,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
           }}
-          aria-hidden={drawerProgress === 0}
+          {...closedDrawerProps(drawerProgress, treeDrawerOpen)}
         >
           <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
             <span className="text-sm font-medium text-foreground">{t('title')}</span>

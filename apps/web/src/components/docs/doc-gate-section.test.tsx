@@ -133,6 +133,13 @@ describe('DocGateSection — story #3004(선생님 정책 확定) draft 상신�
     return fetchMock;
   }
 
+  it('draft 검토 안내는 낱말 단위로 줄을 바꾼다(story #4363 · 좁은 폭에서 낱말 중간 꺾임)', async () => {
+    await renderDraftSection();
+    const hint = Array.from(container.querySelectorAll('span')).find((el) => el.textContent === koMessages.docs.docGateRequestReviewHint);
+    expect(hint, '안내 문구가 렌더된다').toBeTruthy();
+    expect(hint?.classList.contains('break-keep')).toBe(true);
+  });
+
   it('"검토 요청" 클릭이 즉시 전이 대신 결재자 픽커를 연다(전이 fetch 미발생)', async () => {
     const fetchMock = await renderDraftSection();
     const reqBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.docs.docGateRequestReview));
@@ -283,3 +290,29 @@ describe('DocGateSection — high-risk(risk_grade=high) 승인은 서명 플로�
     expect(body.note).toBe('근거 확인함');
   });
 });
+
+// story #4370 — 문서 게이트 서명 창: 닫아도 사유 초안은 남고, 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
+describe('DocGateSection — 서명 창 «취소»는 사유 초안을 지운다(story #4370)', () => {
+  it('사유를 쓰고 «취소» → 창이 닫히고 · 다시 열면 빈 칸', async () => {
+    await renderSection(gate({}));
+    const openSig = async () => {
+      const approveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인'));
+      await act(async () => { approveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    };
+    const cancelLabel = (koMessages.cage as unknown as Record<string, string>).cancel;
+    const reason = () => document.body.querySelector<HTMLTextAreaElement>('[data-slot="dialog-content"] #gate-sig-reason');
+    await openSig();
+    const el = reason()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, '버릴 사유');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const cancel = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[data-slot="dialog-content"] button')).find((b) => b.textContent?.trim() === cancelLabel)!;
+    await act(async () => { cancel.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(reason()).toBeNull();
+    await openSig();
+    expect(reason()!.value).toBe('');
+  });
+});
+

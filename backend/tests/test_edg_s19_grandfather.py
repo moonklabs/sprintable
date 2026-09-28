@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 import pytest
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+# story #4270 — step run project_id는 필수(폴백 제거). 실제 호출처처럼 엔터티 project_id를 넘긴다(라인 정의는 org 수준 그대로).
+_ENTITY_PROJECT = uuid.uuid4()
 
 # story 8236bbc3: create_all(+drop_all)로 자체 스키마를 직접 다룸 — 공유 alembic-migrated
 # DB 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
@@ -192,7 +194,7 @@ async def test_engine_grandfathered_first_transition_not_blocked(monkeypatch):
 
         # 첫 transition: grandfather 소비 → plain(비차단)
         d1 = await evaluate_line_for_transition(
-            s, org_id=org, project_id=None, entity_type="story", entity_id=sid,
+            s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=sid,
             from_status="in-progress", to_status="in-review")
         assert d1.mode == "plain_transition" and d1.proceeds  # board freeze 0
         # marker applied(소비됨)
@@ -201,7 +203,7 @@ async def test_engine_grandfathered_first_transition_not_blocked(monkeypatch):
 
         # 2nd transition: marker 없음 → 정상 거버닝(advisory record·grandfather plain 아님)
         d2 = await evaluate_line_for_transition(
-            s, org_id=org, project_id=None, entity_type="story", entity_id=sid,
+            s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=sid,
             from_status="in-progress", to_status="in-review")
         assert d2.mode == "advisory_only" and d2.step_run_id is not None  # 거버닝됨
     await engine.dispose()
@@ -230,14 +232,14 @@ async def test_duplicate_markers_consume_closes_all_plain_exactly_once(monkeypat
         await s.commit()
 
         d1 = await evaluate_line_for_transition(
-            s, org_id=org, project_id=None, entity_type="story", entity_id=sid,
+            s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=sid,
             from_status="in-progress", to_status="in-review")
         assert d1.mode == "plain_transition"  # 첫 transition grandfather(비차단)
         assert len(await _markers(s, org, sid, "grandfathered")) == 0  # ⭐둘 다 closed
         assert len(await _markers(s, org, sid, "grandfathered_applied")) == 2
         # 2nd transition: open marker 0 → grandfather plain 아님·정상 거버닝
         d2 = await evaluate_line_for_transition(
-            s, org_id=org, project_id=None, entity_type="story", entity_id=sid,
+            s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=sid,
             from_status="in-progress", to_status="in-review")
         assert d2.mode == "advisory_only" and d2.step_run_id is not None
     await engine.dispose()

@@ -544,6 +544,63 @@ async def test_today_needs_me_conversation_id_null_when_caller_not_participant_r
         await engine.dispose()
 
 
+async def test_today_needs_me_conversation_project_id_is_the_conversations_own_project_realdb():
+    """story #4231 — 태그된 대화가 work_item과 **다른 프로젝트**에 있으면 conversation_project_id는 대화 쪽 프로젝트
+    (FE 딥링크가 현재 p · work_item 프로젝트가 아니라 대화 자기 프로젝트로 가게)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, )
+            other_project = await _make_project(s, org.id, name="Q")
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id, org_role="owner")
+
+            from app.models.pm import Story
+            from app.models.workflow_line import WorkflowLineStepRun, WorkflowLineStepApproval
+
+            story = Story(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="승인 대상3", status="in-progress")
+            s.add(story)
+            await s.commit()
+            run_row = WorkflowLineStepRun(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id,
+                entity_type="story", entity_id=story.id,
+                from_status="in-review", to_status="done", status="pending", mode="enforcing",
+                effective_gate_type="qa", correlation_id=uuid.uuid4(), transition_id=uuid.uuid4().hex,
+            )
+            s.add(run_row)
+            await s.commit()
+            s.add(WorkflowLineStepApproval(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id,
+                step_run_id=run_row.id, approval_group_id=uuid.uuid4(),
+                approver_member_id=caller_id, approver_member_type="human",
+                kind="approver", blocking=True, status="pending",
+            ))
+            await s.commit()
+
+            # 캐폴러가 참여한 대화지만 **다른 프로젝트**의 대화에서 story를 태그.
+            conv = await _make_conversation(s, org.id, other_project.id, member_ids=[caller_id])
+            await _make_conversation_message(
+                s, conv.id, caller_id,
+                msg_metadata={"work_item": {"type": "story", "id": str(story.id)}},
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/today")
+            assert resp.status_code == 200, resp.text
+            item = next(i for i in resp.json()["needs_me"] if i["work_item"]["id"] == str(story.id))
+            assert item["conversation_id"] == str(conv.id)
+            assert item["conversation_project_id"] == str(other_project.id), "대화 자기 프로젝트여야(work_item 프로젝트 아님)"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 async def test_today_agent_progress_conversation_id_null_when_caller_not_participant_realdb():
     """페드루 PO 리뷰 CHANGES(PR #4253) — agent_progress 행도 같은 원칙."""
     from app.main import app

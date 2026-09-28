@@ -15,14 +15,17 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 import { canEditOrgMemberRole, orgRoleLabel } from '@/lib/org-member-role';
+import { memberDisplayLabel } from '@/lib/member-display';
+import { copyTextSafely } from '@/lib/clipboard';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 interface OrgMember {
   id: string;
   user_id: string | null;
-  name: string;
+  name: string | null;
   email?: string;
   role: 'owner' | 'admin' | 'member';
   joined_at?: string;
@@ -79,6 +82,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+  // story #3986 CHANGES(페드루 PO C2) — 초대 목록 행은 invite_url 자체를 화면에
+  // 안 그린다(버튼 title에만 있음). 실패했을 때만 선택 가능하게 노출한다.
+  const [copyFailedInviteUrl, setCopyFailedInviteUrl] = useState<string | null>(null);
 
   const canManage = currentRole === 'owner' || currentRole === 'admin';
   // story #3491(페드루 PO 確定) — canEditOrgMemberRole의 자기 자신 판정에 필요.
@@ -91,7 +97,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       fetchWithAuth('/api/org-members').catch(() => null),
       fetchWithAuth(`/api/organizations/${orgId}/invites`).catch(() => null),
       fetchWithAuth('/api/projects').catch(() => null),
-      fetchWithAuth('/api/me').catch(() => null),
+      fetchMe().catch(() => null),
     ]);
     if (meRes?.ok) {
       const json = await meRes.json() as { data?: { user_id?: string | null } };
@@ -106,7 +112,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setMembers((raw.data ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id,
-        name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? '?',
+        // [SID:4286] 이름 칸 폴백 — 이메일 앞부분 · user_id 조각 · 날것 «?»를 이름으로 지어내지 않는다(선생님 상수
+        // «이메일은 이름 칸에 안 싣는다» · 3755번 AC1). 이름이 없으면 null 그대로 두고 그릴 때 memberDisplayLabel로.
+        name: m.name?.trim() || null,
         email: m.email ?? undefined,
         role: m.role,
         joined_at: m.created_at,
@@ -242,16 +250,21 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     );
   }
 
+  // story #3986(클래스 «거짓 성공 표시») — 이 자리는 이미 성공/실패를 가르고
+  // 있었다(회귀 대상은 아님), 공용 헬퍼로 일반화만(발명 0) + 낱말 정본 통일
+  // (유나 지시 2026-09-17 02:47Z — orgMemberClipboardCopyFailed 걷음).
   const handleCopyInviteLink = async (inviteId: string, url: string | undefined) => {
     if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopiedInviteId(inviteId);
-      setTimeout(() => setCopiedInviteId(null), 1500);
-    } catch {
+    const result = await copyTextSafely(url);
+    if (!result.ok) {
       bumpActionMessageNonce();
-      setActionMessage({ type: 'error', text: t('orgMemberClipboardCopyFailed') });
+      setActionMessage({ type: 'error', text: tc('copyFailedSelectManually') });
+      setCopyFailedInviteUrl(url);
+      return;
     }
+    setCopyFailedInviteUrl(null);
+    setCopiedInviteId(inviteId);
+    setTimeout(() => setCopiedInviteId(null), 1500);
   };
 
   return (
@@ -316,6 +329,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                             <button
                               type="button"
                               onClick={() => toggleInviteProject(p.id)}
+                              aria-pressed={selected}
                               className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition ${
                                 selected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
                               }`}
@@ -357,6 +371,15 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           <AlertDescription>{actionMessage.text}</AlertDescription>
         </Alert>
       )}
+      {copyFailedInviteUrl && (
+        <input
+          readOnly
+          value={copyFailedInviteUrl}
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+          data-testid="org-members-copy-failed-raw-invite-url"
+        />
+      )}
 
       {/* 멤버 목록 */}
       <SectionCard>
@@ -383,7 +406,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
             return (
               <MemberRow
                 key={member.id}
-                name={member.name}
+                name={memberDisplayLabel(member.name, tc)}
                 email={member.email}
                 className="border-0 rounded-none bg-transparent"
                 meta={member.joined_at ? t('orgMemberJoinedMeta', { time: formatRelativeTime(member.joined_at, locale, displayTimezone) }) : undefined}
@@ -447,7 +470,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         return (
           <RemoveOrgMemberDialog
             open
-            member={{ id: target.id, name: target.name, email: target.email }}
+            member={{ id: target.id, name: memberDisplayLabel(target.name, tc), email: target.email }}
             onCancel={() => setRemoveDialogMemberId(null)}
             onConfirm={async () => {
               await handleRemove(target.id);

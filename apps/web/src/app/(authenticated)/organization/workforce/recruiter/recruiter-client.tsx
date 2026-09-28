@@ -1,8 +1,10 @@
 'use client';
 
+import { VerifyPromptCopyFailedPanel } from '@/app/onboarding/verify-prompt-copy-failed-panel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { memberOptionLabels } from '@/lib/member-display';
 import {
   Check, CheckCircle2, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
   Palette, Cog, Search, ClipboardList, Briefcase, IdCard, RotateCw, Loader2,
@@ -13,14 +15,19 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { useChatsHref } from '@/app/dashboard/dashboard-shell';
 import { cn } from '@/lib/utils';
-import { pickEulReulJosa } from '@/lib/korean-particle';
+import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from '@/services/recruit';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { copyTextSafely } from '@/lib/clipboard';
+import { buildCodexConfigToml } from '@/lib/codex-mcp-config';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -115,6 +122,29 @@ export function resolveVerifyGuideKey(
   return transport === 'http' ? 'verifyGuideMcp' : 'verifyGuideMcpStdio';
 }
 
+/**
+ * story #4180(E-PROD-ESC·온보딩) — Codex CLI는 `.mcp.json`을 읽지 않는다(`.codex/config.toml`
+ * TOML, learn.chatgpt.com/docs/extend/mcp?surface=cli 실측 2026-09-23). BE `mcp_config`는 여전히
+ * JSON(SSOT, `agent_onboarding_config.py`)이라 값 생성은 그대로 두고, 이 화면(채용 결과 카드)이
+ * 렌더할 때만 파일명·포맷을 런타임별로 가른다 — 다른 런타임은 이 함수 반환값이 그대로
+ * `.mcp.json`(기존과 byte-identical)이라 무회귀.
+ */
+export function resolveMcpConfigFilename(runtime: string): string {
+  return runtime === 'codex' ? 'config.toml' : '.mcp.json';
+}
+
+// 유나 design·PO 처방(PR 4542) — 에이전트 전용 키가 든 조각이라 전역(~/.codex) 경로는 안내하지
+// 않는다. 신뢰 버튼명은 Codex 앱·버전마다 달라(CLI 0.153.4 실측 «Yes, continue») 이름 대신
+// 행동으로 쓴다 — 버튼명을 i18n에 박지 말 것.
+const CODEX_PATH_NOTE_PARAMS = { path: '.codex/config.toml' };
+
+/** resolveMcpConfigFilename과 같은 가드(runtime==='codex') — 파일명·본문 포맷이 한 조건에서
+ * 갈라지므로 한쪽만 바뀌는 회귀(파일명은 config.toml인데 본문은 여전히 JSON 등)를 막기 위해
+ * 별도 함수로 뽑아 직접 테스트한다(이 파일 컴포넌트 전체 마운트 테스트는 없다는 기존 관례). */
+export function buildMcpConfigText(mcpConfig: McpConfigBundle, runtime: string): string {
+  return runtime === 'codex' ? buildCodexConfigToml(mcpConfig) : JSON.stringify(mcpConfig, null, 2);
+}
+
 export interface RoleGroup {
   label: string;
   roles: RoleTemplateSummary[];
@@ -184,19 +214,26 @@ function CopyDownloadButtons({
   content, filename, copied, onCopied,
 }: { content: string; filename: string; copied: boolean; onCopied: () => void }) {
   const t = useTranslations('recruiter');
+  const tc = useTranslations('common');
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패를 삼키고 피드백 자체가
+  // 없었다(성공 표시는 원래 onCopied가 있을 때만 — 로직 유지, 실패만 새로 알린다).
+  const [copyFailed, setCopyFailed] = useState(false);
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(content);
-      onCopied();
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(content);
+    if (!result.ok) {
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 3000);
+      return;
     }
+    setCopyFailed(false);
+    onCopied();
   };
   return (
     <div className="flex shrink-0 items-center gap-1.5">
       <Button variant="outline" size="sm" onClick={() => void handleCopy()}>
         {copied ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
       </Button>
+      {copyFailed ? <span role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</span> : null}
       <Button variant="outline" size="sm" onClick={() => downloadTextFile(filename, content)}>
         <Download className="h-3.5 w-3.5" />{t('download')}
       </Button>
@@ -291,6 +328,9 @@ interface RecruiterClientProps {
 }
 
 export function RecruiterClient({ projectId, showTopBar = true, onExit }: RecruiterClientProps) {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
+  // story #4017(PO 확定 2026-09-17) — 아래 「완료」 CTA(/chats)를 목적지 모듈로.
+  const chatsHref = useChatsHref();
   // S25(ae844d74): 카탈로그·recruit이 소비할 활성 UI locale — locale-switcher가 쿠키 전환 후 풀
   // 리로드하므로 마운트 시점 값이면 충분(별도 리스너 불필요).
   const locale = useLocale();
@@ -364,10 +404,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [equipError, setEquipError] = useState<string | null>(null);
   const [equipResult, setEquipResult] = useState<{
     name: string;
-    mcp_config: Record<string, unknown> | null;
+    mcp_config: McpConfigBundle | null;
     api_key: string | null;
   } | null>(null);
   const [equipMcpCopied, setEquipMcpCopied] = useState(false);
+  const [equipMcpCopyFailed, setEquipMcpCopyFailed] = useState(false);
   // story #2433(B) — OrgAgentCreate(POST /api/agents) 스키마엔 runtime_type이 없어(recruit 경로와
   // 달리 생성 호출 하나로 못 묶는다) 생성 직후 PATCH /api/team-members/{id}(관리화면이 쓰는 것과
   // 같은 경로)로 반영한다. 이 PATCH가 실패해도 키·MCP config는 이미 유효하므로 결과 화면 자체는
@@ -394,7 +435,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       });
       if (res.ok) {
         const json = (await res.json()) as {
-          data?: { id?: string; mcp_config?: Record<string, unknown> | null; api_key?: string | null };
+          data?: { id?: string; mcp_config?: McpConfigBundle | null; api_key?: string | null };
         };
         const agentId = json.data?.id;
         if (agentId) {
@@ -431,13 +472,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
   const handleCopyEquipMcp = async () => {
     if (!equipResult?.mcp_config) return;
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(equipResult.mcp_config, null, 2));
-      setEquipMcpCopied(true);
-      setTimeout(() => setEquipMcpCopied(false), 2000);
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(buildMcpConfigText(equipResult.mcp_config, runtime));
+    if (!result.ok) {
+      setEquipMcpCopyFailed(true);
+      setTimeout(() => setEquipMcpCopyFailed(false), 3000);
+      return;
     }
+    setEquipMcpCopyFailed(false);
+    setEquipMcpCopied(true);
+    setTimeout(() => setEquipMcpCopied(false), 2000);
   };
 
   // STEP 3(Full 경로) — runtime + agent(G1). equip-skip은 이 스텝을 건너뛰고 STEP2 이후 바로 생성한다.
@@ -610,8 +653,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         // 흐름은 현재 프로젝트 스코프라 새로 만들기(scope_mode=projects)와 동일하게 project_id 로 스코프.
         const res = await fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`);
         if (!res.ok) return;
-        const json = (await res.json()) as { data?: Array<{ id: string; name: string; type: string }> };
-        setExistingAgents((json.data ?? []).filter((m) => m.type === 'agent').map((m) => ({ id: m.id, name: m.name })));
+        const json = (await res.json()) as { data?: Array<{ id: string; name: string; type: string; runtime_type?: string | null }> };
+        // story #3994 — 「시스템 발행」에 채용 역할을 붙이는 것 자체가 의미 없다(연결
+        // 대상이 아닌 내부 멤버) — 고르는 자리에서 제외.
+        setExistingAgents(
+          (json.data ?? [])
+            .filter((m) => m.type === 'agent' && !isSystemPublisher(m.runtime_type))
+            .map((m) => ({ id: m.id, name: m.name })),
+        );
       } catch {
         setExistingAgents([]);
       }
@@ -806,9 +855,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     }
   };
 
+  // story #4180 — Codex는 TOML(`.codex/config.toml`), 그 외 런타임은 기존 JSON(`.mcp.json`)
+  // 그대로. BE mcp_config 값 자체는 무변경 — 이 화면의 재직렬화(포맷)만 runtime으로 가른다.
+  const mcpConfigFilename = resolveMcpConfigFilename(runtime);
   const mcpConfigText = useMemo(
-    () => (recruitResult ? JSON.stringify(recruitResult.mcp_config, null, 2) : ''),
-    [recruitResult],
+    () => (recruitResult ? buildMcpConfigText(recruitResult.mcp_config, runtime) : ''),
+    [recruitResult, runtime],
   );
 
   // story d82c1092: equip-skip은 3단계(직무·스코프·완료)만 쓴다 — STEP3을 "완료"로 재라벨.
@@ -1003,6 +1055,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                           key={project.id}
                           type="button"
                           onClick={() => toggleScopeProject(project.id)}
+                          aria-pressed={selected}
                           className={cn(
                             'rounded-md border px-4 py-4 text-left transition',
                             selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
@@ -1128,7 +1181,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">{t('agentSelectPlaceholder')}</option>
-                      {(existingAgents ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      {((agents) => { const labels = memberOptionLabels(agents.map((a) => ({ ...a, type: 'agent' })), tc); return agents.map((a) => <option key={a.id} value={a.id}>{labels.get(a.id)}</option>); })(existingAgents ?? [])}
                     </select>
                   )}
                   <p className="flex items-start gap-1.5 text-xs text-info">
@@ -1199,7 +1252,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     {/* story #2362(2026-07-31) — 여기 있던 「이 포트로 접속하세요」 안내는
                         죽은 안내였다(fakechat은 다이얼아웃 방식, 포트를 안 쓴다). 이 화면이
                         이미 쥔 위 키가 그대로 fakechat이 필요로 하는 그 키라 재사용한다. */}
-                    <div className="space-y-1 pt-1 text-xs text-muted-foreground">
+                    {/* story #4240 — 같은 안내 문구(①②③)라 같은 분절 방지(break-keep). */}
+                    <div className="space-y-1 pt-1 text-xs text-muted-foreground break-keep">
                       <p className="flex flex-wrap items-center gap-1.5">
                         <Badge variant="info">SSE</Badge>
                         {tSettings('agentFakechatEnvKeyInstruction')}
@@ -1216,13 +1270,23 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 {equipResult.mcp_config ? (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-foreground">{t('equipMcpConfigLabel')}</p>
+                      {/* story #4180(카디르 QA CHANGES) — equip-skip도 같은 renderRuntimePicker를
+                          렌더해(#2433 B) Codex 선택이 가능하다 — STEP4와 같은 파일명·포맷 분기. */}
+                      <p className="text-xs font-medium text-foreground">
+                        {t('equipMcpConfigLabel')} <span className="font-mono font-normal text-foreground">{mcpConfigFilename}</span>
+                      </p>
                       <Button variant="glass" size="sm" onClick={() => void handleCopyEquipMcp()}>
                         {equipMcpCopied ? <><Check className="size-3" />{t('copied')}</> : <>{t('copy')}</>}
                       </Button>
                     </div>
+                    {equipMcpCopyFailed ? <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p> : null}
+                    {runtime === 'codex' && (
+                      <p className="text-xs text-foreground">
+                        {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
+                      </p>
+                    )}
                     <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                      {JSON.stringify(equipResult.mcp_config, null, 2)}
+                      {buildMcpConfigText(equipResult.mcp_config, runtime)}
                     </pre>
                   </div>
                 ) : null}
@@ -1273,7 +1337,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {recruitResult.mcp_config
                           ? (RUNTIME_CONNECT_CLI[runtime]
                               ? <ConnectCliBody command={RUNTIME_CONNECT_CLI[runtime]} />
-                              : t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName }))
+                              : t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName, filename: mcpConfigFilename }))
                           : t('kitOrientingConnectBodyConnector')}
                       </p>
                     </div>
@@ -1335,7 +1399,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       {/* story #2648(boss 08-14 재현·PO 특定) — guideFilename(SPRINTABLE_ONBOARDING.md)이
                           공백 없는 장토큰이라 word-break 부재 시 카드 라운드 경계를 뚫고 밖으로 샌다.
                           alert.tsx/toast.tsx/chat-bubble.tsx가 쓰는 [overflow-wrap:anywhere] 관례를 그대로. */}
-                      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('kitOrientingGuideBody', { filename: guideFilename })}</p>
+                      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('kitOrientingGuideBody', { filename: guideFilename, josa: pickEulReulJosa(guideFilename) })}</p>
                     </div>
                   </div>
                 </div>
@@ -1352,7 +1416,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               <Alert variant="warning">
                 <AlertDescription className="flex items-start gap-2">
                   <span aria-hidden>🔑</span>
-                  <span><b>{t('keyOnceTitle')}</b> {recruitResult.mcp_config ? t('keyOnceBody') : t('keyOnceBodyNoMcp')}</span>
+                  <span><b>{t('keyOnceTitle')}</b> {recruitResult.mcp_config ? t('keyOnceBody', { filename: mcpConfigFilename }) : t('keyOnceBodyNoMcp')}</span>
                 </AlertDescription>
               </Alert>
 
@@ -1362,10 +1426,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               {recruitResult.mcp_config ? (
                 <div className="overflow-hidden rounded-md border border-border">
                   <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
-                    <span className="font-mono text-xs text-foreground">📄 .mcp.json <span className="text-muted-foreground">{t('mcpFileNote')}</span></span>
+                    <span className="font-mono text-xs text-foreground">📄 {mcpConfigFilename} <span className="text-muted-foreground">{t('mcpFileNote')}</span></span>
                     <CopyDownloadButtons
                       content={mcpConfigText}
-                      filename=".mcp.json"
+                      filename={mcpConfigFilename}
                       copied={copiedMcp}
                       onCopied={() => {
                         setCopiedMcp(true);
@@ -1375,6 +1439,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       }}
                     />
                   </div>
+                  {/* story #4180 — 다운로드 filename은 브라우저가 경로 구분자를 못 담아(Blob
+                      다운로드가 "/"를 살리지 못함) "config.toml" 평문으로만 받는다. 실제 저장
+                      위치(.codex/config.toml)는 별도 문장으로 명시 — AC1(공식 스키마·경로 안내). */}
+                  {runtime === 'codex' && (
+                    <p className="border-b border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-foreground">
+                      {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
+                    </p>
+                  )}
                   <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
                 </div>
               ) : (
@@ -1397,8 +1469,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   {/* story 5ea9bafe(P1-b): "전달하세요"만으론 HOW가 없다는 유나 UX 지적 — 런타임-aware
                       구체적 방법(MCP-native=작업폴더에 두고 읽으라 지시 / 커넥터=수동 연결 完 後 전달). */}
                   {recruitResult.mcp_config
-                    ? t('guideFileDeliveryNoteMcp', { filename: guideFilename, promptFile: runtimePromptFileConvention })
-                    : t('guideFileDeliveryNoteConnector', { filename: guideFilename })}
+                    ? t('guideFileDeliveryNoteMcp', {
+                        filename: guideFilename, promptFile: runtimePromptFileConvention,
+                        josa: pickEulReulJosa(guideFilename),
+                        promptJosa: pickEunNeunJosa(runtimePromptFileConvention ?? ''),
+                      })
+                    : t('guideFileDeliveryNoteConnector', { filename: guideFilename, josa: pickEulReulJosa(guideFilename) })}
                 </p>
                 <pre className="max-h-64 overflow-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
               </div>
@@ -1475,13 +1551,22 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   실원인이었다(검증은 실제 tool 호출로만 완료됨). 대기 문구를 지우고 "지금 할 일"을
                   복사 가능한 한 줄로 그 자리에 쥐여 준다. */}
               {rail.showVerifyExamplePrompt && (
-                <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
-                  <span className="min-w-0 truncate text-foreground">
-                    {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
-                  </span>
-                  <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
-                    {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
-                  </Button>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
+                    <span className="min-w-0 truncate text-foreground">
+                      {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
+                    </span>
+                    <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0" data-testid="recruiter-verify-prompt-copy">
+                      {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+                    </Button>
+                  </div>
+                  {/* story #4372 — 복사가 실패해도 버튼만 «복사»로 남던 자리(훅의 copyVerifyPromptFailed를 안 읽음). 온보딩 연결 화면과 같은 패널. */}
+                  <VerifyPromptCopyFailedPanel
+                    failed={rail.copyVerifyPromptFailed}
+                    onDismiss={rail.dismissCopyVerifyPromptFailed}
+                    promptText={t('verifyExamplePrompt')}
+                    rawTestId="recruiter-verify-prompt-raw"
+                  />
                 </div>
               )}
 
@@ -1545,7 +1630,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     `/flow?view=list`로 흡수. 라벨("보드에서 보기")은 목적지 콘텐츠(칸반)가
                     그대로라 안 바꿨다 — bare href는 proxy.ts MIGRATED_RESOURCES 안전망이
                     org/project 쿠키로 해소한다. */}
-                <Link href="/flow?view=list" className="shrink-0 text-xs font-semibold text-primary hover:underline">{t('viewInBoard')} →</Link>
+                <Link href={flatHref('/flow?view=list')} className="shrink-0 text-xs font-semibold text-primary hover:underline">{t('viewInBoard')} →</Link>
               </div>
 
               <p className="flex items-start gap-1.5 text-xs text-info">
@@ -1555,8 +1640,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
-                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. */}
-                <Link href="/chats" onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
+                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. */}
+                <Link href={chatsHref} onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
               </div>
             </div>
           )}

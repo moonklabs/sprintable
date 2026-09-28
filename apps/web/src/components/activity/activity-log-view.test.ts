@@ -58,7 +58,7 @@ function tc(key: string): string {
 describe('auditActorProps (story #2923 AQ4 — actor_type을 human/agent prop으로 정확히 갈라 넘긴다)', () => {
   it('routes actor_type=agent through the agent prop, not human', () => {
     const props = auditActorProps(item({ actor_id: 'm-1', actor_name: '미르코', actor_type: 'agent' }), tc);
-    expect(props.agent).toEqual({ name: '미르코', initial: '미' });
+    expect(props.agent).toEqual({ name: '미르코' });
     expect(props.human).toBeUndefined();
   });
 
@@ -85,13 +85,14 @@ describe('auditActorProps (story #2923 AQ4 — actor_type을 human/agent prop으
   // (actor_id 유무를 안 보고 actor_name 유무만 봤다) — 이젠 「이름 없는 구성원」으로 정직하게 뜬다.
   it('⭐actor_id는 있는데 actor_name이 null이면(실존 구성원, display_name 미설정) 「이름 없는 구성원」으로 뜬다 — 빈 슬롯 아님', () => {
     const props = auditActorProps(item({ actor_id: 'm-4', actor_name: null, actor_type: 'human' }), tc);
-    expect(props.human).toEqual({ name: '이름 없는 구성원', role: 'human' });
+    // [SID:4286 · 까디르 P2] 머리글자 자리(name)는 null(→ 사람 아이콘) · 읽는 글자는 label — «이름»을 머리글자로 그리지 않는다.
+    expect(props.human).toEqual({ name: null, label: '이름 없는 구성원', role: 'human' });
     expect(props.agent).toBeUndefined();
   });
 
   it('⭐같은 상황(actor_id 있음·actor_name null)이 agent면 agent 슬롯에 같은 폴백이 뜬다', () => {
     const props = auditActorProps(item({ actor_id: 'm-5', actor_name: null, actor_type: 'agent' }), tc);
-    expect(props.agent).toEqual({ name: '이름 없는 구성원', initial: '이' });
+    expect(props.agent).toEqual({ name: null, label: '이름 없는 구성원' });
     expect(props.human).toBeUndefined();
   });
 });

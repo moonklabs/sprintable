@@ -25,6 +25,7 @@ import { SidebarMenuButton } from '@/components/ui/sidebar';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
 import { useUnifiedSwitcher, withSwitchedSlugs, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #2076: 로직(withSwitchedSlugs 포함)이 hooks/use-unified-switcher.ts로 이동했다 —
 // 사이드바(UnifiedSwitcher, ≥1024)와 신규 ContextSwitcherChip(top-bar 칩+바텀시트, <1024)이
@@ -57,6 +58,7 @@ export function UnifiedSwitcher({
   currentProjectId,
   className,
 }: UnifiedSwitcherProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('nav');
   const tCommon = useTranslations('common');
   const tSettings = useTranslations('settings');
@@ -99,7 +101,7 @@ export function UnifiedSwitcher({
               </DropdownMenuLabel>
               <button
                 type="button"
-                onClick={() => { window.location.href = '/settings?tab=organization'; }}
+                onClick={() => { window.location.href = flatHref('/settings?tab=organization'); }}
                 className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                 aria-label={t('switcherOrgSettingsAria')}
               >
@@ -242,7 +244,8 @@ export function UnifiedSwitcher({
               <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>
             )}
             <DialogFooter>
-              <DialogClose render={<Button type="button" variant="ghost" disabled={s.creating}>{tCommon('cancel')}</Button>} />
+              {/* story #4370 — 보이는 «취소»는 폼 초안을 버린다(✕ · 바깥 · Esc 닫힘은 남긴다). */}
+              <DialogClose render={<Button type="button" variant="ghost" disabled={s.creating} onClick={s.clearNewProjectDraft}>{tCommon('cancel')}</Button>} />
               <Button type="submit" disabled={!s.newProjectName.trim() || s.creating}>
                 {s.creating ? tCommon('creating') : t('switcherCreateButton')}
               </Button>

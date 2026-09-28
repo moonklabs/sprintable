@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from datetime import datetime
 
@@ -79,6 +80,24 @@ _SHRINK_BLOCK_THRESHOLD = 0.5
 _SHRINK_BLOCK_MIN_LOST_CHARS = 100
 
 
+# story #4313 — 본문의 위키 링크 후보: 마크다운 «[[slug]]» · «[[slug|보이는 글]]»과 에디터가 쓴 위키 링크 span의 `data-slug="…"`.
+# 후보의 상위집합만 뽑는다(코드 블록 안 제외 같은 문맥 판정은 FE 렌더러 몫 — 여기서 더 뽑아도 FE가 링크로 안 쓴다).
+# 한 문서 후보 상한 200(비정상적으로 큰 본문이 IN 목록을 키우지 않게).
+_WIKI_LINK_CANDIDATE_RE = re.compile(r'\[\[([^\[\]|\n]{1,200})(?:\|[^\[\]\n]*)?\]\]|data-slug="([^"\n]{1,200})"')
+_WIKI_LINK_CANDIDATE_LIMIT = 200
+
+
+def wiki_link_slug_candidates(content: str | None) -> list[str]:
+    seen: dict[str, None] = {}
+    for m in _WIKI_LINK_CANDIDATE_RE.finditer(content or ""):
+        slug = (m.group(1) or m.group(2) or "").strip()
+        if slug:
+            seen.setdefault(slug, None)
+            if len(seen) >= _WIKI_LINK_CANDIDATE_LIMIT:
+                break
+    return list(seen)
+
+
 def _get_repo(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_project_scoped_org_id),
@@ -93,6 +112,11 @@ def _get_repo_read(
     org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> DocRepository:
     return DocRepository(session, org_id)
+
+
+# story #4376 — 트리 한 번에 받는 상한. dev 최대 프로젝트 1,065개(요약 557B/개 · gzip 약 55KB · 서버 약 18ms, 로컬 실측).
+# 이보다 큰 프로젝트만 has_more로 이어 받는다(FE가 «N / 총량»과 더 보기를 보인다).
+_TREE_CAP = 5000
 
 
 def _doc_page_envelope(docs: list, limit: int) -> dict:
@@ -120,6 +144,14 @@ async def list_docs(
     ids: str | None = Query(default=None, description="comma-separated doc ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
     limit: int = Query(default=500, ge=1, le=1000),
     cursor: str | None = Query(default=None, description="(sort_order,id) 복합 커서 — 이전 페이지 meta.next_cursor 값 그대로"),
+    tree: bool = Query(
+        default=False,
+        # story #4376 — 사이드바 문서 트리: 한 번에(상한까지 · limit 무시) + meta.total. 상한을 넘는 프로젝트만 커서로 이어 받는다.
+        description=(
+            f"Sidebar doc tree: every live doc of the project (or of the tag filter) in one response, up to {_TREE_CAP} "
+            "(limit is ignored), with meta.total. Projects over the cap continue with has_more / next_cursor."
+        ),
+    ),
     response: Response = None,  # type: ignore[assignment]
     repo: DocRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
@@ -182,9 +214,31 @@ async def list_docs(
         # 일반 list/tree/search 분기는 enrich 안 함(다건 N+1 회피·페이로드 과확장 금지).
         # story #2191: 단건 lookup이라 페이지네이션 대상이 아님 — has_more는 구조적으로 항상 False.
         data = [await _enrich_doc_summary(doc, repo.session)] if doc else []
+        if doc is not None:
+            # story #4313 — 본문 위키 링크 후보 → 지금 slug(살아 있는 문서 · alias 해소). FE가 여기 든 것만 링크 · 요청 추가 0.
+            data[0].wiki_link_targets = await repo.resolve_wiki_link_targets(doc.project_id, wiki_link_slug_candidates(doc.content))
         if response is not None:
             response.headers["X-Result-Count"] = str(len(data))
         return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
+
+    # story #4376 — FastAPI 경유 없이 직접 부르는 기존 테스트는 Query(...) 센티널을 받는다(위 ids 주석과 같은 함정).
+    tree = tree if isinstance(tree, bool) else False
+    if tree and project_id:
+        # 트리는 층 구분 없는 평면 목록을 20개씩 받아, 방금 만든 문서 · 폴더가 뒤 쪽(uuid 순)에 떨어지면 새로고침 뒤 트리에서 사라졌다
+        # (dev 1,065개 · 54쪽 · 부모가 뒤 쪽인 자식 37개). 트리 전체를 한 번에 — 형제 · 부모가 늘 같이 온다. 정렬 · 커서 규약은 그대로.
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+        if tag_list:
+            docs = await repo.search_by_tags(project_id, tag_list, limit=_TREE_CAP + 1, cursor=cursor, summary_only=True)
+        else:
+            docs = await repo.list(limit=_TREE_CAP + 1, cursor=cursor, project_id=project_id, summary_only=True)
+        envelope = _doc_page_envelope(docs, _TREE_CAP)
+        # 총량: 한 번에 다 왔으면 받은 수 그대로(문장 추가 0) · 상한을 넘을 때만 따로 센다.
+        envelope["meta"]["total"] = (
+            await repo.count_live(project_id, tag_list) if envelope["meta"]["has_more"] or cursor else len(envelope["data"])
+        )
+        if response is not None:
+            response.headers["X-Result-Count"] = str(len(envelope["data"]))
+        return envelope
 
     if tags and project_id:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
@@ -202,11 +256,17 @@ async def list_docs(
         return envelope
 
     filters: dict = {}
+    scope: list[uuid.UUID] | None = None
     if project_id:
         filters["project_id"] = project_id
+    else:
+        # story #4350 PR 3(까디르 HIGH · SEC-S8) — project_id 없이 부르면 org 전체 문서(제목 · 본문 요약)가 나갔다 → 접근 가능 프로젝트만.
+        from app.services.project_auth import accessible_project_ids_in_org
+
+        scope = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
     if doc_type:
         filters["doc_type"] = doc_type
-    docs = await repo.list(limit=limit + 1, cursor=cursor, **filters)
+    docs = await repo.list(limit=limit + 1, cursor=cursor, project_ids=scope, **filters)
     envelope = _doc_page_envelope(docs, limit)
     if response is not None:
         response.headers["X-Result-Count"] = str(len(envelope["data"]))
@@ -317,7 +377,6 @@ class DocPreviewResponse(BaseModel):
     title: str
     icon: str | None = None
     slug: str
-    embed_chain: list[str] = []
     # #2168 PR-①: 크로스프로젝트 doc 링크가 "링크 자신이 속한 project 를 실어 나르는" 처방이라
     # 받는 쪽(FE embed-card)이 "현재 프로젝트"를 추측하지 않고 이 doc 의 실제 project 로 직행할
     # 수 있어야 한다 — project_id(2차 조회 스코프용) + org_slug/project_slug(경로 세그먼트,
@@ -347,7 +406,7 @@ async def get_doc_preview(
     except ValueError:
         stmt = select(Doc).where(Doc.slug == q, Doc.org_id == repo.org_id, Doc.deleted_at.is_(None))
 
-    result = await db.execute(stmt.limit(1))
+    result = await db.execute(stmt.order_by(Doc.created_at, Doc.id).limit(1))
     doc = result.scalar_one_or_none()
 
     if doc is not None:
@@ -368,7 +427,7 @@ async def get_doc_preview(
             fallback_stmt = select(Doc).where(Doc.id == doc_uuid2, Doc.deleted_at.is_(None))
         except ValueError:
             fallback_stmt = select(Doc).where(Doc.slug == q, Doc.deleted_at.is_(None))
-        fallback = await db.execute(fallback_stmt.limit(1))
+        fallback = await db.execute(fallback_stmt.order_by(Doc.created_at, Doc.id).limit(1))
         doc = fallback.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -407,7 +466,6 @@ async def get_doc_preview(
         title=doc.title,
         icon=doc.icon,
         slug=doc.slug,
-        embed_chain=[],
         project_id=doc.project_id,
         org_slug=org_slug,
         project_slug=project_slug,
@@ -458,6 +516,135 @@ async def get_doc(
     # doc 상세(detail view)만 enrich: 담당자 member 요약 + 수정이력 요약 동봉(FE 이중 fetch 제거).
     # create/update/transition 은 write-path 라 plain(추가 쿼리 0·기존 테스트 broad-mock 무파손).
     return await _enrich_doc_response(doc, session)
+
+
+async def _guard_doc_parent_write(
+    session: AsyncSession, *, project_id: uuid.UUID, doc_id: uuid.UUID, new_parent_id: uuid.UUID | None,
+) -> None:
+    """story #4353(까디르 4736 P2 ①②) — 문서의 부모를 쓰는 **모든** 길(reorder · PATCH {parent_id})이 부르는 한 검사.
+
+    1. 프로젝트 단위 advisory lock(트랜잭션 끝까지) — 동시 두 이동이 서로의 순환 검사를 지나치지 못하게. 잠금 순서는 늘
+       프로젝트 → 형제 묶음(reorder만 묶음을 더 잡음) — 한 방향이라 교착 없음.
+    2. 자기 자신을 부모로 → 400 `DOC_REORDER_INVALID`.
+    3. 부모가 없거나 다른 프로젝트 → 404(`_assert_doc_parent_in_project`).
+    4. 새 부모의 조상 사슬에 이 문서가 있으면(자기 자손 밑) → 400 `DOC_REORDER_CYCLE` — 잠금 뒤에 읽으므로 사이에 옮겨진 것도 본다."""
+    from sqlalchemy import text as sa_text
+
+    await session.execute(sa_text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"doc-tree-move:{project_id}"})
+    if new_parent_id is None:
+        return
+    if new_parent_id == doc_id:
+        raise HTTPException(status_code=400, detail={"code": "DOC_REORDER_INVALID", "message": "doc cannot be its own parent or anchor"})
+    await _assert_doc_parent_in_project(session, project_id, new_parent_id)
+    cursor_id: uuid.UUID | None = new_parent_id
+    seen: set[uuid.UUID] = set()
+    while cursor_id is not None and cursor_id not in seen:
+        if cursor_id == doc_id:
+            raise HTTPException(status_code=400, detail={"code": "DOC_REORDER_CYCLE", "message": "cannot move a doc under its own descendant"})
+        seen.add(cursor_id)
+        cursor_id = (await session.execute(select(Doc.parent_id).where(Doc.id == cursor_id))).scalar_one_or_none()
+
+
+class DocReorderRequest(BaseModel):
+    """story #4353 — 문서 하나를 부모 아래 형제 순서의 한 자리로(재정렬 · 폴더로 옮기기 한 길). 형제 번호는 서버가 안다.
+
+    `after_id`: 그 형제 **바로 뒤** · `null` = 맨 앞 · **생략 = 맨 끝**(폴더로 옮기기 기본). 생략과 null을 가르므로
+    `model_fields_set`으로 읽는다."""
+
+    doc_id: uuid.UUID
+    parent_id: uuid.UUID | None = None
+    after_id: uuid.UUID | None = None
+
+
+class DocReorderDocOut(BaseModel):
+    id: uuid.UUID
+    parent_id: uuid.UUID | None
+    sort_order: int
+
+
+class DocReorderSiblingOut(BaseModel):
+    id: uuid.UUID
+    sort_order: int
+
+
+class DocReorderResponse(BaseModel):
+    doc: DocReorderDocOut
+    siblings: list[DocReorderSiblingOut]
+
+
+@router.post("/reorder", response_model=DocReorderResponse)
+async def reorder_doc(
+    body: DocReorderRequest,
+    repo: DocRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> DocReorderResponse:
+    """story #4353 — 형제 순서를 한 트랜잭션으로 다시 매긴다. 예전 `PATCH /{id} {sort_order}`는 그 한 문서 값만 바꿔
+    형제 번호가 0 동률(dev 1,305개 중 1,295개)이면 끌어도 순서가 안 바뀌었다(새로고침하면 id 순으로 돌아감).
+
+    - 새 부모의 형제 묶음을 advisory lock으로 잠그고(프로젝트 + 부모 키) 0부터 다시 매긴다 — 동시 두 재정렬도 번호 중복 · 누락 0.
+      옛 부모 쪽 남은 형제는 건드리지 않는다(틈은 무해).
+    - `updated_at`은 그대로 둔다(순서는 내용 편집이 아니다 — 형제를 편집 중인 사람에게 거짓 DOC_CONFLICT가 나지 않게).
+    - 오류: 400 모양(자기 자신을 부모 · after_id = doc_id) · 400 순환(자기 자손 밑으로) · 409 after_id가 그 부모의 형제가 아님 ·
+      404 doc · 부모 · after 중 하나라도 없거나 접근 불가(없는 것과 같게 — 403으로 존재를 알리지 않는다)."""
+    from sqlalchemy import text as sa_text
+    from sqlalchemy import update as sa_update
+
+    from app.services.project_auth import has_project_access
+
+    after_given = "after_id" in body.model_fields_set
+    if body.parent_id == body.doc_id or (after_given and body.after_id == body.doc_id):
+        raise HTTPException(status_code=400, detail={"code": "DOC_REORDER_INVALID", "message": "doc cannot be its own parent or anchor"})
+
+    doc = (await session.execute(
+        select(Doc).where(Doc.id == body.doc_id, Doc.org_id == repo.org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc is None or not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
+        raise HTTPException(status_code=404, detail="Doc not found")
+    project_id = doc.project_id
+
+    # 까디르(4736 P2 ①) — 부모를 쓰는 이동은 **늘** 프로젝트 잠금 뒤 순환 검사(잠금 전에 읽은 parent_id로 «같은 부모»를 가르면 그 사이
+    # 옮겨진 문서를 놓쳤다). reorder는 늘 parent_id를 쓰므로 늘 잡는다(사람 속도라 비용 무시).
+    await _guard_doc_parent_write(session, project_id=project_id, doc_id=doc.id, new_parent_id=body.parent_id)
+
+    lock_key = f"doc-siblings:{project_id}:{body.parent_id or 'root'}"
+    await session.execute(sa_text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": lock_key})
+
+    parent_filter = Doc.parent_id.is_(None) if body.parent_id is None else Doc.parent_id == body.parent_id
+    sibling_ids = list((await session.execute(
+        select(Doc.id).where(
+            Doc.org_id == repo.org_id, Doc.project_id == project_id, parent_filter,
+            Doc.deleted_at.is_(None), Doc.id != doc.id,
+        ).order_by(Doc.sort_order, Doc.id)
+    )).scalars().all())
+
+    if after_given and body.after_id is not None and body.after_id not in sibling_ids:
+        anchor_project = (await session.execute(
+            select(Doc.project_id).where(Doc.id == body.after_id, Doc.org_id == repo.org_id, Doc.deleted_at.is_(None))
+        )).scalar_one_or_none()
+        if anchor_project != project_id:
+            raise HTTPException(status_code=404, detail="Anchor doc not found")
+        raise HTTPException(status_code=409, detail={"code": "DOC_REORDER_ANCHOR_NOT_SIBLING", "message": "after_id is not a sibling under that parent"})
+
+    if not after_given:
+        ordered = [*sibling_ids, doc.id]
+    elif body.after_id is None:
+        ordered = [doc.id, *sibling_ids]
+    else:
+        i = sibling_ids.index(body.after_id)
+        ordered = [*sibling_ids[: i + 1], doc.id, *sibling_ids[i + 1:]]
+
+    for position, doc_id in enumerate(ordered):
+        values: dict = {"sort_order": position, "updated_at": Doc.updated_at}
+        if doc_id == doc.id:
+            values["parent_id"] = body.parent_id
+        await session.execute(sa_update(Doc).where(Doc.id == doc_id).values(**values).execution_options(synchronize_session=False))
+    await session.commit()
+
+    return DocReorderResponse(
+        doc=DocReorderDocOut(id=doc.id, parent_id=body.parent_id, sort_order=ordered.index(doc.id)),
+        siblings=[DocReorderSiblingOut(id=i, sort_order=p) for p, i in enumerate(ordered)],
+    )
 
 
 @router.patch("/{id}", response_model=DocResponse)
@@ -526,7 +713,9 @@ async def update_doc(
             )
 
     if "parent_id" in data:
-        await _assert_doc_parent_in_project(session, doc.project_id, data["parent_id"])
+        # 까디르(4736 P2 ②) — PATCH의 parent_id도 reorder와 같은 검사(프로젝트 잠금 · 자기 참조 · 자손 = 순환). 예전엔 프로젝트 소속만
+        # 봐 `{parent_id: 자기}` · 자손 지정으로 순환이 커밋돼 문서가 트리에서 사라졌다(MCP sprintable_update_doc로 에이전트도 닿는 길).
+        await _guard_doc_parent_write(session, project_id=doc.project_id, doc_id=doc.id, new_parent_id=data["parent_id"])
 
     # story #2874(하드닝): slug/slug_locked도 아래서 setattr 직접 대신 data에 모아 뒀다가
     # update_with_cas() 한 SQL 문으로 함께 반영한다 — 필드 적용을 두 단계(setattr 여기 +
@@ -618,7 +807,7 @@ async def update_doc(
         cutoff_sq = (
             select(DocRevision.created_at)
             .where(DocRevision.doc_id == id)
-            .order_by(DocRevision.created_at.desc())
+            .order_by(DocRevision.created_at.desc(), DocRevision.id.desc())
             .offset(50)
             .limit(1)
             .scalar_subquery()
@@ -843,7 +1032,7 @@ async def list_doc_comments(
     q = select(DocComment).where(
         DocComment.doc_id == id,
         DocComment.org_id == repo.org_id,
-    ).order_by(DocComment.created_at.asc()).limit(limit)
+    ).order_by(DocComment.created_at.asc(), DocComment.id).limit(limit)
     result = await db.execute(q)
     return [DocCommentResponse.model_validate(r) for r in result.scalars()]
 
@@ -891,7 +1080,7 @@ async def list_doc_revisions(
     q = select(DocRevision).where(
         DocRevision.doc_id == id,
         DocRevision.org_id == repo.org_id,
-    ).order_by(DocRevision.created_at.desc()).limit(limit)
+    ).order_by(DocRevision.created_at.desc(), DocRevision.id.desc()).limit(limit)
     result = await db.execute(q)
     return [DocRevisionResponse.model_validate(r) for r in result.scalars()]
 

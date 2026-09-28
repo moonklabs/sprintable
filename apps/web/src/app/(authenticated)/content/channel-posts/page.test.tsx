@@ -21,6 +21,9 @@ const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock:
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
+  // story #4017 — OFF 상태 테스트라 레거시 값 그대로(실 훅의 navV3Flags undefined 분기와 동형).
+  useChatsHref: () => '/chats',
+  useConnectRulesHref: (fallback: string) => fallback,
 }));
 
 // story #3744 — ⋯ 행 메뉴의 「승인 요청 보기」가 useRouter().push()로 이동한다
@@ -236,7 +239,7 @@ describe('ChannelPostListPage (story #3402)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain(koMessages.content.channelThreads);
+    expect(container.textContent).toContain(koMessages.channelConnect.channelThreads);
     expect(container.textContent).toContain('v2');
     // story #3744 — 원작성 주체는 최종수정과 같으면 부제로 강등돼 안 보인다(content/
     // page.tsx와 동형 판단) — latest_author_kind='human'만 있고 origin은 없어 이
@@ -312,13 +315,21 @@ describe('ChannelPostListPage (story #3402)', () => {
     });
 
     it('⭐command_status=blocked — 사유만(버튼 0, §17-13 규율 그대로)', async () => {
-      stubFetch([{ ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'blocked' }]);
+      stubFetch([{ ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'blocked', failure_kind: 'connection' }]);
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
 
       const badge = container.querySelector('[data-testid="channel-post-failure-badge"]');
       expect(badge?.textContent).toBe(koMessages.content.channelPostsFailureBlocked);
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    });
+
+    it('command_status=blocked + 사유 모름 — 목록도 사유를 지어내지 않는다: 중립 머리(story #4305 · 까디르)', async () => {
+      stubFetch([{ ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'blocked' }]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureBlockedUnknown);
     });
 
     // 페드루 실측(2026-09-09, PR 코멘트) — "processing만으로 빨갛게 칠하진 않는다".
@@ -336,6 +347,25 @@ describe('ChannelPostListPage (story #3402)', () => {
 
       const badge = container.querySelector('[data-testid="channel-post-failure-badge"]');
       expect(badge?.textContent).toBe(koMessages.content.channelPostsFailureProcessing);
+    });
+
+    it('⭐#4336 AC4 — 목록도 상세와 같은 두 상태: 워커 대기면 «발행하고 있어요», 예산 밖이면 사유 문장(«실패» 아님)', async () => {
+      stubFetch([
+        { ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'pending', processing_kind: 'publishing' },
+      ]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsPublishingNotice);
+
+      stubFetch([
+        { ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL' },
+      ]);
+      await act(async () => { root.unmount(); root = createRoot(container); });
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsPublishStuckNotice);
     });
 
     it('command_status 계약 필드 자체가 없음(구 계약) — 배지를 안 그린다(지어내지 않음)', async () => {
@@ -358,7 +388,7 @@ describe('ChannelPostListPage (story #3402)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain(`${koMessages.content.channelThreads} · v2`);
+    expect(container.textContent).toContain(`${koMessages.channelConnect.channelThreads} · v2`);
   });
 
   it('⭐text_preview 계약 필드 존재(착지 後) — 본문 미리보기가 첫 열에 보인다', async () => {
@@ -369,6 +399,25 @@ describe('ChannelPostListPage (story #3402)', () => {
     await flush();
 
     expect(container.textContent).toContain('마케팅 자동화가 실제로 아끼는 시간은…');
+  });
+
+  // story #4277(민 기기 15번) — 402폭 카드에서 제목이 말줄임 없이 잘렸다: 인라인 <a>에 걸린 `truncate`는 말줄임표를 못 그리고 카드 제목 칸의
+  // 두 줄 말줄임(line-clamp-2)도 한 줄로 막았다. 카드(lg 미만)엔 한 줄 강제 0 · 표(lg 이상)에서만 block+truncate.
+  it('⭐4277 15번 — 목록 제목 링크는 lg 이상에서만 한 줄 말줄임(카드에선 칸의 두 줄 말줄임에 맡김)', async () => {
+    stubFetch([{ ...DRAFT_A, text_preview: '리허설 ⑤-2 · 계보 앵커 확認 (재발행 경로 : 아주 긴 제목이 카드 폭을 넘는다)', text_length: 363 }]);
+    await act(async () => {
+      root.render(wrap(<ChannelPostListPage />));
+    });
+    await flush();
+
+    const links = [...container.querySelectorAll('a')].filter((a) => a.textContent?.startsWith('리허설 ⑤-2'));
+    expect(links.length).toBeGreaterThan(0);
+    for (const a of links) {
+      const tokens = a.className.split(/\s+/);
+      expect(tokens).not.toContain('truncate');
+      expect(tokens).toContain('lg:truncate');
+      expect(tokens).toContain('lg:block');
+    }
   });
 
   it('로드 실패 — 오류 알림을 보인다', async () => {
@@ -646,7 +695,8 @@ describe('ChannelPostListPage (story #3402)', () => {
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
 
-      const buttons = [...container.querySelectorAll('button')].filter(
+      // story #4014 — 표·카드 DOM이 항상 둘 다 있어(AC5/6) 표 쪽만 스코프.
+      const buttons = [...container.querySelectorAll('table button')].filter(
         (el) => el.textContent === koMessages.content.approvalRequestViewCta,
       );
       expect(buttons).toHaveLength(2);
@@ -757,7 +807,8 @@ describe('ChannelPostListPage (story #3402)', () => {
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
 
-      const triggers = container.querySelectorAll('[data-testid="channel-post-row-actions-trigger"]');
+      // story #4014 — 표·카드 DOM이 항상 둘 다 있어(AC5/6) 표 쪽만 스코프.
+      const triggers = container.querySelectorAll('table [data-testid="channel-post-row-actions-trigger"]');
       expect(triggers).toHaveLength(2);
       const labels = [...triggers].map((b) => b.getAttribute('aria-label'));
       expect(labels[0]).not.toBeNull();

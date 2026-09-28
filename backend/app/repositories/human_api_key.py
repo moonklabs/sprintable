@@ -31,7 +31,7 @@ class HumanApiKeyRepository:
         result = await self.session.execute(
             select(HumanApiKey)
             .where(HumanApiKey.member_id == member_id)
-            .order_by(HumanApiKey.created_at.desc())
+            .order_by(HumanApiKey.created_at.desc(), HumanApiKey.id.desc())
         )
         return list(result.scalars().all())
 

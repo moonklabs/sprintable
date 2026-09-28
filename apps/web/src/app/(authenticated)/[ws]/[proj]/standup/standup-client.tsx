@@ -25,6 +25,12 @@ import {
   type StandupStorySummary,
 } from '@/components/standup/standup-types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { actorRowLabels, memberLookup } from '@/lib/member-display';
+import { storyAssigneeChipLabels } from '@/components/standup/story-assignee-label';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { memberRowLabels } from '@/lib/member-display';
+import { sprintScreenUrls, takeSprintScreenOrFetch } from '@/components/sprints/sprint-screen-prefetch';
 
 interface BridgedStory {
   id: string;
@@ -121,6 +127,7 @@ interface StandupClientProps {
 // story a539c649 S3a: projectId 는 이제 서버 layout(headers() 경유 resolve 결과)이 prop 으로
 // 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
 export default function StandupPage({ projectId, embedded = false }: StandupClientProps) {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   const t = useTranslations('standup');
   const tc = useTranslations('common');
   // story #3878(§⑤ 낱말 드리프트) — story.status(canonical slug)를 t() 없이 그대로
@@ -138,14 +145,16 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     const key = storyStatusKeyMap[slug];
     return key ? tBoard(key) : slug;
   };
-  const { currentTeamMemberId, projectMemberships } = useDashboardContext();
+  const { currentTeamMemberId, projectMemberships, orgId } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
   const [entries, setEntries] = useState<StandupEntryRow[]>([]);
   const [members, setMembers] = useState<StandupMemberRow[]>([]);
   const [feedback, setFeedback] = useState<StandupFeedbackRow[]>([]);
   // S3(51447ca0): Missing = org 기준(get_missing projection) — 조직 1회 미작성 멤버
-  const [missingMembers, setMissingMembers] = useState<{ id: string; name: string }[]>([]);
+  // story #4298 — BE `[{id, name}]`(name은 모르면 null · 이메일 폴백 0). 조회 실패는 빈 목록과 다른 사실이라 따로 든다.
+  const [missingMembers, setMissingMembers] = useState<{ id: string; name: string | null }[]>([]);
+  const [missingFailed, setMissingFailed] = useState(false);
   const [activeSprint, setActiveSprint] = useState<StandupSprintSummary | null>(null);
   const [stories, setStories] = useState<StandupStorySummary[]>([]);
   const [done, setDone] = useState('');
@@ -187,24 +196,42 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     return map;
   }, [feedback]);
 
+  // [SID:4300] 막힘 모음 작성자 이름 = 오늘 명단 표(조직 범위 · 활성만) + 거기 없는 작성자만 비활성까지 싣는 조직 원천으로 보충.
+  const blockerAuthorIds = useMemo(() => entries.filter((entry) => Boolean(entry.blockers?.trim())).map((entry) => entry.author_id), [entries]);
+  const blockerNames = useMemberNameFallback(orgId, memberNameById, blockerAuthorIds, !loading);
+
   // A2(9f27af8f): 블로커 롤업 — 기존 entries에서 파생, 신규 fetch 0.
-  const blockerEntries = useMemo(() => (
-    entries
+  const blockerEntries = useMemo(() => {
+    const rows = entries
       .filter((entry) => Boolean(entry.blockers?.trim()))
       .map((entry) => ({
         authorId: entry.author_id,
-        name: memberNameById[entry.author_id] ?? t('unknown'),
+        // [SID:4300] 이름이 빈 구성원을 «알 수 없음»으로 쓰던 자리 — #4284 계약대로 표에 있는데 이름 빔 = «이름 없는 구성원»,
+        // 표에 없음 = «알 수 없는 구성원». 조직 보충을 받는 동안은 빈 글자.
+        name: memberLookup(blockerNames.memberMap, entry.author_id, tc, { loaded: blockerNames.loaded })?.label ?? '',
         blockers: entry.blockers as string,
-      }))
-  ), [entries, memberNameById, t]);
+      }));
+    // [SID:4311 PR 2] 같은 이름 작성자 둘이 한 모음에 서면 갈리게(행위자 라벨 · 꼬리 규칙 한 곳).
+    const labels = actorRowLabels(rows.map((row) => ({ id: row.authorId, label: row.name })));
+    return rows.map((row) => ({ ...row, name: labels.get(row.authorId) ?? row.name }));
+  }, [entries, blockerNames.memberMap, blockerNames.loaded, tc]);
 
   const humanMembers = useMemo(() => members.filter((member) => member.type === 'human'), [members]);
   const agentMembers = useMemo(() => members.filter((member) => member.type === 'agent'), [members]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const humanRowLabels = useMemo(() => memberRowLabels(humanMembers, tc, () => ''), [humanMembers, tc]);
+  const agentRowLabels = useMemo(() => memberRowLabels(agentMembers, tc, () => ''), [agentMembers, tc]);
+  const missingRowLabels = useMemo(() => memberRowLabels(missingMembers, tc, () => ''), [missingMembers, tc]);
   const totalTasks = useMemo(() => stories.reduce((sum, story) => sum + story.task_count, 0), [stories]);
   const doneTasks = useMemo(() => stories.reduce((sum, story) => sum + story.done_task_count, 0), [stories]);
   const currentEntry = currentTeamMemberId ? entryByAuthorId[currentTeamMemberId] : undefined;
   // a9e67531(PO 트림): picker 후보는 scoped stories만 — cross-board plan story를 picker 후보로 늘리는 것은
   // selection(write) 측이라 Track E v3 브릿지 모달 영역(PO AC 後 별건). #1689는 순수 read/render fix로 한정.
+  // [SID:4311 PR 3] 스토리 담당 칩(스프린트 목록 · 계획 고르기 — 같은 스토리 묶음) — 담당 없음 · 이름 빔 · 표에 없음을 가르고 같은 이름 둘은 꼬리.
+  const assigneeChipLabel = useMemo(
+    () => storyAssigneeChipLabels(stories, memberNameById, tc, tBoard('unassigned'), { loaded: !loading }),
+    [stories, memberNameById, tc, tBoard, loading],
+  );
   const storyPickerStories = useMemo(() => stories.slice().sort((left, right) => {
     const leftPriority = left.assignee_id === currentTeamMemberId ? 0 : 1;
     const rightPriority = right.assignee_id === currentTeamMemberId ? 0 : 1;
@@ -252,9 +279,18 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
       try {
         // d9847ef0: org-level(항상) — standup entries(project_id 생략→org_id scoped 전체)·members(org-level).
         // standalone org write 진입(프로젝트 미선택)에서도 작성/조회 가능.
+        // story #4328 — 첫 화면 요청은 **한 물결**로: 스탠드업 · 구성원과 (프로젝트 안이면) 활성 스프린트 · 피드백 · 미작성을 같이 출발시킨다
+        // (예전엔 앞 둘을 기다린 뒤에야 뒤 셋이 출발 — 뒤 셋은 앞 결과가 필요 없다). 스프린트 화면이 먼저 출발시킨 응답은 한 번 넘겨받는다.
+        const scope = { memberId: currentTeamMemberId, projectId };
+        const projectLegs = projectId ? [
+          takeSprintScreenOrFetch(sprintScreenUrls.activeSprints(projectId), scope),
+          takeSprintScreenOrFetch(sprintScreenUrls.feedback(projectId, date), scope),
+          // missing은 부수 — 망 오류(reject)여도 주 데이터를 막지 않게 leg 자체를 격리(story #3519).
+          takeSprintScreenOrFetch(sprintScreenUrls.missing(projectId, date), scope).catch(() => null),
+        ] as const : null;
         const [entriesRes, membersRes] = await Promise.all([
-          fetchWithAuth(`/api/standup?date=${date}`),
-          fetchWithAuth(`/api/team-members`),
+          takeSprintScreenOrFetch(sprintScreenUrls.entries(date), scope),
+          takeSprintScreenOrFetch(sprintScreenUrls.members(), scope),
         ]);
 
         const [entriesData, membersData] = await Promise.all([
@@ -265,7 +301,8 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         // d9847ef0: project-scoped(projectId 있을 때만) — sprints·feedback·missing·sprint stories.
         // missing은 get_missing_standups가 project_id REQUIRED라 project context 필수(BE 무변경).
         let feedbackData: StandupFeedbackRow[] = [];
-        let missingList: { id: string; name: string }[] = [];
+        let missingList: { id: string; name: string | null }[] = [];
+        let missingLoadFailed = false;
         let sprint: StandupSprintSummary | null = null;
         let storySummaries: StandupStorySummary[] = [];
         let nextStoriesCursor: string | null = null;
@@ -276,11 +313,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           // Promise.all 안에 있었다. missingRes의 fetch 자체가 네트워크단 reject(HTTP
           // status가 아니라)하면 이 Promise.all 전체가 던져 주 데이터 둘도 같이 못
           // 얻었다 — 주석과 코드가 어긋난 결함. missingRes만 leg 자체를 격리한다.
-          const [sprintsRes, feedbackRes, missingRes] = await Promise.all([
-            fetchWithAuth(`/api/sprints?project_id=${projectId}&status=active`),
-            fetchWithAuth(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
-            fetchWithAuth(`/api/standup/missing?project_id=${projectId}&date=${date}`).catch(() => null),
-          ]);
+          const [sprintsRes, feedbackRes, missingRes] = await Promise.all(projectLegs!);
 
           const [sprintsData, fbData] = await Promise.all([
             readJsonDataOrThrow<StandupSprintSummary[]>(sprintsRes, 'sprints'),
@@ -289,8 +322,10 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           feedbackData = fbData;
 
           // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
-          const missingJson = await missingRes?.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
-          missingList = missingRes?.ok ? (missingJson?.data?.missing ?? []) : [];
+          // story #4298 — BE는 `[{id, name}]` 배열(BFF가 data로 감쌈). 예전엔 없는 `data.missing`을 읽어 늘 빈 칸이었다.
+          const missingJson = await missingRes?.json().catch(() => null) as { data?: { id: string; name: string | null }[] } | null;
+          if (missingRes?.ok && Array.isArray(missingJson?.data)) missingList = missingJson.data;
+          else missingLoadFailed = true;
 
           sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
 
@@ -333,6 +368,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         setMembers(uniqueMembers);
         setFeedback(feedbackData);
         setMissingMembers(missingList);
+        setMissingFailed(missingLoadFailed);
         setActiveSprint(sprint);
         setStories(storySummaries);
         setStoriesNextCursor(nextStoriesCursor);
@@ -350,7 +386,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     return () => {
       cancelled = true;
     };
-  }, [date, projectId, refreshToken, t]);
+  }, [date, projectId, refreshToken, t, currentTeamMemberId]);
 
   const humanMembersSorted = useMemo(() => {
     if (!currentTeamMemberId) return humanMembers;
@@ -391,7 +427,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     try {
       // S2(1c2be9db): org-level write — project_id 생략 시 BE가 author 접근 프로젝트로 auto-link.
       // 하루 한 번 작성하면 접근한 모든 프로젝트 뷰에 projection 된다(재타이핑 제거).
-      const response = await fetch('/api/standup', {
+      const response = await fetchWithAuth('/api/standup', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -416,17 +452,18 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   }
 
   async function createFeedback(input: { standup_entry_id: string; review_type: StandupReviewType; feedback_text: string }) {
-    const response = await fetch('/api/standup/feedback', {
+    // story #4298 — 신원(조직 · 작성자)은 서버가 인증 문맥에서 채운다. 보는 프로젝트만 함께 보낸다(서버가 접근권 검증 · 없으면 엔트리의 것).
+    const response = await fetchWithAuth('/api/standup/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, ...(projectId ? { project_id: projectId } : {}) }),
     });
     if (!response.ok) throw new Error('Failed to create feedback');
     setRefreshToken((value) => value + 1);
   }
 
   async function updateFeedback(feedbackId: string, input: { review_type?: StandupReviewType; feedback_text?: string }) {
-    const response = await fetch(`/api/standup/feedback/${feedbackId}`, {
+    const response = await fetchWithAuth(`/api/standup/feedback/${feedbackId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
@@ -436,7 +473,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   }
 
   async function deleteFeedback(feedbackId: string) {
-    const response = await fetch(`/api/standup/feedback/${feedbackId}`, {
+    const response = await fetchWithAuth(`/api/standup/feedback/${feedbackId}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete feedback');
@@ -471,11 +508,17 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
 
   return (
     <>
+      {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          아래 목록의 로컬 min-h-0/flex-1/overflow-y-auto 경계를 걷어냈다 — 그 대신 이
+          헤더 블록들(두 분기 다)을 sticky top-0로 고정해 이전과 같이 스크롤해도 항상
+          보이게 한다(#4125가 이미 증명한 sticky 메커니즘 재사용 — embedded 분기는 가장
+          가까운 스크롤 조상이 sprints-client.tsx의 자기 h-[calc(100svh-var(--shell-chrome-h))]
+          래퍼(story #4131)가 되므로 sticky가 그 기준으로 자연히 맞는다). */}
       {embedded ? (
         // story #3845(§①⑤) — sprints-client.tsx가 자기 TopBarSlot(제목 "스프린트")을 이미
         // 소유하므로 여기서 또 TopBarSlot을 마운트하면 싱글톤 컨텍스트를 뺏어 제목이
         // 뒤바뀐다(top-bar-slot.tsx 싱글톤 주석 참고) — 절 헤딩+날짜 네비 한 줄로 대체.
-        <div className="space-y-1 border-b border-border/80 px-6 py-3">
+        <div className="sticky top-0 z-10 space-y-1 border-b border-border/80 bg-background px-6 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-foreground">{t('embeddedHeading')}</h2>
             <div className="flex flex-wrap items-center gap-1.5">{dateNavControls}</div>
@@ -495,13 +538,13 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           />
 
           {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-4 py-2 lg:hidden">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-background px-4 py-2 lg:hidden">
             {dateNavControls}
           </div>
         </>
       )}
 
-      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="focus-inset flex flex-col">
         {headerBadges.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-6 py-3">
             {headerBadges.map((badge) => (
@@ -568,7 +611,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                                   <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                                 </div>
                                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                  <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                  <Badge variant="chip">{assigneeChipLabel(story.assignee_id)}</Badge>
                                   <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
                                 </div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
@@ -788,7 +831,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                                             <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                                           </div>
                                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                            <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                            <Badge variant="chip">{assigneeChipLabel(story.assignee_id)}</Badge>
                                             <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
                                           </div>
                                         </div>
@@ -803,7 +846,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                                 // 프로젝트 있으나 활성 스프린트 0: 빈 selector가 "없음"으로 오인되던 것 — 안내 + 활성화 CTA.
                                 <div className="space-y-1.5">
                                   <p className="text-sm text-muted-foreground">{t('storyPickerEmptyNoSprint')}</p>
-                                  <Link href="/sprints" className="inline-block text-xs font-medium text-primary hover:underline">{t('storyPickerManageSprints')}</Link>
+                                  <Link href={flatHref('/sprints')} className="inline-block text-xs font-medium text-primary hover:underline">{t('storyPickerManageSprints')}</Link>
                                 </div>
                               ) : (
                                 <p className="text-sm text-muted-foreground">{t('noSprintStories')}</p>
@@ -825,6 +868,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                         <StandupBoardCard
                           key={member.id}
                           member={member}
+                          rowLabel={humanRowLabels.get(member.id) ?? member.name}
                           entry={entry}
                           feedback={memberFeedback}
                           isCurrentUser={isCurrentUser}
@@ -856,6 +900,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                         <StandupBoardCard
                           key={member.id}
                           member={member}
+                          rowLabel={agentRowLabels.get(member.id) ?? member.name}
                           entry={entry}
                           feedback={memberFeedback}
                           isCurrentUser={false}
@@ -869,7 +914,14 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
               ) : null}
 
               {/* S3(51447ca0): Missing — org 1회 작성 기준 미작성 멤버(프로젝트별 아님) */}
-              {!loading && missingMembers.length > 0 ? (
+              {/* story #4298 — 조회 실패는 «아무도 안 빠짐»(칸 없음)과 다른 사실 — 문장으로 말한다. */}
+              {!loading && missingFailed ? (
+                <section className="space-y-2">
+                  <h2 className="text-sm font-semibold text-foreground">{t('missingOrgStandup')}</h2>
+                  <p className="text-xs text-muted-foreground" data-testid="standup-missing-load-failed">{t('missingLoadFailed')}</p>
+                </section>
+              ) : null}
+              {!loading && !missingFailed && missingMembers.length > 0 ? (
                 <section className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold text-foreground">{t('missingOrgStandup')}</h2>
@@ -878,7 +930,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                   <div className="rounded-xl border border-dashed border-border bg-muted/40 p-4">
                     <div className="flex flex-wrap gap-1.5">
                       {missingMembers.map((m) => (
-                        <Badge key={m.id} variant="outline">{m.name}</Badge>
+                        <Badge key={m.id} variant="outline">{missingRowLabels.get(m.id)}</Badge>
                       ))}
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">{t('missingOrgHint')}</p>
@@ -890,7 +942,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                 <EmptyState title={t('noMembers')} description={t('noMembersDescription')} />
               ) : null}
 
-              {projectId ? <StandupHistorySection projectId={projectId} memberNameById={memberNameById} /> : null}
+              {projectId ? <StandupHistorySection projectId={projectId} memberNameById={memberNameById} memberNamesLoaded={!loading} /> : null}
             </>
           ) : null}
         </div>

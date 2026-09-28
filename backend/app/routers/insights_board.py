@@ -83,6 +83,14 @@ class InsightsBoardRow(BaseModel):
     # PublicationCommand 행) — 새 낱말 0. 수집 상태 축(d1/d7·comments_*)과는 다른
     # 축이라 섞지 않는다(필터 대상 아님 — 행 배지 전용). site_post 행은 항상 null.
     command_status: str | None = None
+    # story #4264(까디르 codex P2 · PO 18:51Z) — 채널 포스트 목록(ChannelPostDraftListItem)과 같은 이름 · 같은 뜻의 실패 필드 넷.
+    # 예전엔 command_status만 내려 «나갔을 수 있음»(needs_check) 문장 · 승인/예산 사유 문장이 이 보드에서만 안 떴다.
+    failure_kind: str | None = None
+    next_retry_at: str | None = None
+    command_reason_code: str | None = None
+    command_reason_reset_at: str | None = None
+    # story #4290(까디르 QA ④) — 목록 · 상세와 같은 한 판정(보는 사람이 지금 «다시 시도»할 수 있는가 · `viewer_can_retry`).
+    command_retryable: bool = False
     # story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
     # 이 publication에 홍보 요청이 없으면 None(FE가 「해당 없음」으로 렌더 — 값을
     # 지어내지 않는다). paid_snapshots_only()로 organic 지표(d1/d7)와 원천부터
@@ -102,7 +110,26 @@ class InsightsBoardAdsBoostView(BaseModel):
     run_status: str | None
 
 
+class PublishedInWindowChannelView(BaseModel):
+    channel_kind: str
+    count: int
+
+
+class PublishedInWindowView(BaseModel):
+    count: int
+    by_channel: list[PublishedInWindowChannelView]
+    since: datetime
+
+
+class ViewsInWindowView(BaseModel):
+    sum: int
+    captured_rows: int
+    total_rows: int
+
+
 class InsightsBoardResponse(BaseModel):
+    # story #4351 PR B — 행 · 수의 범위(접근이 제한된 caller = "accessible_projects" · owner/admin = "org").
+    scope: Literal["org", "accessible_projects"] = "org"
     rows: list[InsightsBoardRow]
     has_more: bool
     next_cursor: str | None
@@ -114,6 +141,14 @@ class InsightsBoardResponse(BaseModel):
     # 아니다). FE 셀(insights-board-metric-cell.tsx)이 inflow_* 지표 null의 원인을
     # 이 값으로 가른다 — 「지표 키 이름」만으로 단정하던 결함의 처방.
     ga4_connection_status: Literal["not_connected", "needs_reauth", "connected"]
+    # story #3978(「결과」 §7 갭 #1) — "나간 글" 기간 카운트. today_service.py::
+    # resolve_published_since와 같은 판정식(「오늘」과 같은 함수). 채널 연결이 org에
+    # 0개면 null(발행 개념 자체가 아직 없음 — 지어내지 않는다), 있으면 0건도 실 0.
+    published_in_window: PublishedInWindowView | None = None
+    # story #3978 CHANGES(페드루 PO 추가 AC) — "조회" 요약. rows[]는 페이지네이션이라
+    # FE 합산이 한 페이지 합이 되는 문제 처방 — 창 안 전체 D+7 organic captured views
+    # 합계(페이지 무관). captured_rows==0(창 안 캡처 0건)이면 null(미측정).
+    views_in_window: ViewsInWindowView | None = None
 
 
 class MeasuredMetricValue(BaseModel):
@@ -165,6 +200,12 @@ class OrgAdsCostSummaryView(BaseModel):
     captured_spend_minor: int | None
     remaining_minor: int | None
     cap_reached_count: int
+    # story #3987(2026-09-17, 페드루 PO 確定) — approved_boost_count==0만으로
+    # "미측정"을 판정하면 광고 계정을 이미 연결한 조직에도 "연결하러 가기"가
+    # 뜨는 결함(승인된 boost가 없을 뿐 연결은 됐다). `ga4_connection_status`와
+    # 같은 3값 모양(org_cost_summary.py::_derive_ads_connection_status) —
+    # additive, 기존 필드·소비처 무변경.
+    connection_status: Literal["not_connected", "needs_reauth", "connected"]
 
 
 class PaidSpendDailyPointView(BaseModel):
@@ -235,12 +276,18 @@ async def get_insights_board_endpoint(
 ) -> InsightsBoardResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
+    # story #4290(까디르 QA ④) — 행의 command_retryable은 보는 쪽 기준(재시도는 사람만).
+    viewer_is_human = (await resolve_member(_auth, org_id, db)).type == "human"
 
     try:
+        from app.services.project_auth import restricted_accessible_project_ids
+
         result = await list_insights_board(
             db, org_id=org_id, window=window, channel=channel, status=status,
             sort=sort, sort_dir=sort_dir, cursor=cursor, limit=limit,
-            work_item_id=work_item_id, include_deleted=include_deleted,
+            work_item_id=work_item_id, include_deleted=include_deleted, viewer_is_human=viewer_is_human,
+            # story #4351 PR B(⑤ 읽기) — 접근이 제한된 caller는 접근 가능 프로젝트의 발행 행 · 수만(owner/admin = None).
+            project_ids=await restricted_accessible_project_ids(db, uuid.UUID(str(_auth.user_id)), org_id),
         )
     except InsightsBoardInvalidWindowError as exc:
         raise HTTPException(
@@ -284,6 +331,7 @@ async def create_publication_follow_up_endpoint(
         result = await create_publication_follow_up(
             db, org_id=org_id, publication_id=publication_id, kind=body.kind,
             title=body.title, note=body.note, requested_by_member_id=resolved.id,
+            caller_user_id=uuid.UUID(auth.user_id),
         )
     except FollowUpPublicationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"publication을 찾을 수 없습니다: {exc}") from exc
@@ -311,8 +359,17 @@ async def reconcile_publication_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await resolve_member(auth, org_id, db)
+    # story #4351(쓰기 IDOR · PO 2026-09-26) — 접근 못 하는 프로젝트의 발행물에 대조 행을 쓰지 않는다. 응답은 «없는 발행물»과
+    # 똑같이(409 INSIGHT_PUBLICATION_NOT_FOUND) — 다르게 돌려주면 그 발행물이 있다는 게 샌다.
+    from app.services.insights_board import caller_can_access_publication
+
+    from app.services.publication_reconciliation import publication_not_found
 
     try:
+        if not await caller_can_access_publication(
+            db, org_id=org_id, publication_id=publication_id, user_id=uuid.UUID(auth.user_id),
+        ):
+            raise publication_not_found(publication_id)
         record = await reconcile_publication(
             db, org_id=org_id, publication_id=publication_id, requested_by_member_id=resolved.id,
         )

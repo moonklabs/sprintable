@@ -89,10 +89,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount(userName?: string) {
+async function mount(userName?: string, navV3Flags?: { todayV3Enabled: boolean; chatV3Enabled: boolean; connectRulesV3Enabled: boolean }) {
   await act(async () => {
     root.render(withProviders(
-      <AppSidebar projectMemberships={[]} chatUnreadTotal={0} userName={userName} />,
+      <AppSidebar projectMemberships={[]} chatUnreadTotal={0} userName={userName} navV3Flags={navV3Flags} />,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -104,10 +104,11 @@ async function mount(userName?: string) {
 // 「보드」→「일감」으로, 「결과」는 org-insights-board(path 무변)가 「성과 보드」→「결과」로
 // 리라벨된다(라벨키만 갈림, navResults 신설 — orgInsightsBoard 재사용 시 insight-snapshot-
 // block.tsx의 다른 문맥 CTA까지 같이 바뀌는 걸 피함). 「연결·규칙」만 진짜 라벨 그룹(하위
-// 채널 연결/콘텐츠 규칙 2항목, 라벨·path 둘 다 무변) — 나머지 3(오늘·일감·결과)은 항목
+// 채널 연결/콘텐츠 규칙 2항목, 라벨·path 둘 다 무변 — story #4116(2026-09-21)이 채널
+// 연결의 형제 화면 「연산 커넥터」를 그 사이에 신설, 3항목으로) — 나머지 3(오늘·일감·결과)은 항목
 // 하나뿐인 헤더리스 그룹(옛 'settings' 그룹과 동형 관례, 접기 토글 없음). 「대화」는 이
 // 배열 밖 CHAT_CENTER_ITEM 그대로(라벨만 "채팅"→"대화"). 나머지 17항목(goals·loops·
-// standup·retro·docs·artifacts·storage·activity·org-trust·org-memory·content·channel-
+// standup·retro·docs·artifacts·storage·activity·org-trust·org-memory(#4183에서 제거)·content·channel-
 // posts·org-members·org-workforce·org-roles·org-events·inbox·settings)은 사이드바에서
 // 빠지고 LEGACY_NAV_ITEMS로 이관(커맨드 팔레트·모바일 /more 「그 밖의 화면」이 1급
 // 진입점, 별도 스위트에서 검증) — path는 전부 불변(북마크·딥링크 무손상).
@@ -115,7 +116,7 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: null, labels: ['오늘'] },
   { labelKey: null, labels: ['일감'] },
   { labelKey: null, labels: ['결과'] },
-  { labelKey: 'zoneConnectRules', labels: ['채널 연결', '콘텐츠 규칙'] },
+  { labelKey: 'zoneConnectRules', labels: ['채널 연결', '연산 커넥터', '콘텐츠 규칙'] },
   // story #3836(UX-v3·셸 후속) — 「더보기」(LEGACY_GROUP_ID)는 기본 접힘(AC1)이라 이
   // 테스트(expandAllGroups가 'connect-rules'만 편다)에선 항목이 DOM에 없다 — 그룹
   // 자체(라벨+토글)는 렌더된다는 사실만 여기서 잠그고, 내용물은 전용 스위트에서.
@@ -125,11 +126,15 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
 // 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다. 5항목(챗 center 제외 4 + 챗 center 1,
 // 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그 구멍을 닫는다.
+// story #4003 — flag OFF(이 스위트의 기본 렌더 조건, navV3Flags 미전달)에서 5항목
+// 전부 지금 develop과 바이트 동일(회귀 0). 「일감」의 flag-aware work-list 전환은
+// 별도 describe(하단 "v3 nav 단일 소스" 스위트)가 ON 케이스로 검증.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '오늘': '/org-briefing',
   '일감': '/flow',
   '결과': '/organization/insights-board',
   '채널 연결': '/organization/channels',
+  '연산 커넥터': '/organization/generation-connectors',
   '콘텐츠 규칙': '/organization/content-rules',
 };
 
@@ -430,16 +435,17 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
 
 // story #3844(PO 지적 2026-09-14 07:53Z, 캡처 3 라이브 눈확認로 발견) — 「일감」(id 'board')이
 // resourceLink('flow') 단일 경로만 알아 WorkspaceFrameTabs가 그 위에 얹은 나머지 탭
-// (work-list·sprints·epics·retro)에선 사이드바가 비활성으로 떨어졌다. 처방: resourceLink에
-// WORKSPACE_FRAME_TAB_PATHS(workspace-frame-tabs.tsx SSOT)를 extraActivePaths로 넘긴다 —
-// 탭을 하나 늘리면 이 판정도 하드코딩 없이 자동으로 늘어난다.
-const EXPECTED_WORKSPACE_FRAME_TAB_PATHS = ['work-list', 'flow', 'sprints', 'epics', 'retro'];
+// (work-list·sprints·epics·retro·hypotheses)에선 사이드바가 비활성으로 떨어졌다. 처방:
+// resourceLink에 WORKSPACE_FRAME_TAB_PATHS(workspace-frame-tabs.tsx SSOT)를
+// extraActivePaths로 넘긴다 — 탭을 하나 늘리면 이 판정도 하드코딩 없이 자동으로 늘어난다.
+// story #3989(「일감」 흡수 3/N) — 「가설」 탭(경로 hypotheses) 합류로 5→6개.
+const EXPECTED_WORKSPACE_FRAME_TAB_PATHS = ['work-list', 'flow', 'sprints', 'epics', 'retro', 'hypotheses'];
 
 describe('AppSidebar — 「일감」 활성 판정은 WorkspaceFrameTabs 경로 SSOT에서 파생(story #3844)', () => {
   // ⭐되돌리면 RED — WorkspaceFrameTabs에 탭이 추가/삭제됐는데 이 표를 안 갱신하면(또는
   // app-sidebar.tsx가 그 SSOT를 다시 안 읽으면) 여기서 먼저 잡힌다. 아래 it.each는 이 표를
   // 하드코딩 소스로 쓰므로, 이 대조 자체가 "표류 감지"의 유일한 자리다.
-  it('WORKSPACE_FRAME_TAB_PATHS가 정확히 5개다(work-list·flow·sprints·epics·retro)', async () => {
+  it('WORKSPACE_FRAME_TAB_PATHS가 정확히 6개다(work-list·flow·sprints·epics·retro·hypotheses)', async () => {
     const { WORKSPACE_FRAME_TAB_PATHS } = await import('@/components/workspace/workspace-frame-tabs');
     expect(WORKSPACE_FRAME_TAB_PATHS).toEqual(EXPECTED_WORKSPACE_FRAME_TAB_PATHS);
   });
@@ -508,3 +514,78 @@ describe('AppSidebar — story #3775 셸 결함(userName 빈 값이어도 Profil
     expect(setNameItem).toBeFalsy();
   });
 });
+
+// story #4003(E-UX-OVERHAUL·셸 통합 2/N) — navV3Flags prop이 실제로 렌더된 href까지
+// 전파되는지(nav-config.ts::resolveNavGroups/resolveChatCenterItem 소비 배선 확認).
+// 결정 로직 자체(플래그 8조합 표)는 nav-v3-destinations.test.ts·nav-config-v3-flags
+// .test.ts가 전담 — 여기선 "prop을 실제로 넘기면 화면이 바뀌는가"만.
+describe('AppSidebar — v3 nav 단일 소스(story #4003) 플래그 배선', () => {
+  it('⭐navV3Flags 미전달(OFF 기본값) — 지금 develop과 바이트 동일 href', async () => {
+    expandAllGroups();
+    await mount();
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayLink?.getAttribute('href')).toBe('/org-briefing');
+  });
+
+  it('todayV3Enabled — 「오늘」 href가 /today로 바뀐다', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false });
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayLink?.getAttribute('href')).toBe('/today');
+  });
+
+  it('connectRulesV3Enabled — 연결·규칙 그룹에 통합 항목이 앞에 추가되고 옛 2항목도 그대로 보인다(옛 진입점 유지)', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
+    const links = [...container.querySelectorAll('a')];
+    const v3Link = links.find((a) => a.getAttribute('href') === '/connect-rules');
+    expect(v3Link).toBeDefined();
+    expect(links.some((a) => a.getAttribute('href') === '/organization/channels')).toBe(true);
+    expect(links.some((a) => a.getAttribute('href') === '/organization/content-rules')).toBe(true);
+  });
+
+  // CHANGES(페드루 PO, PR#4386 1차 리뷰) — 「일감」은 어느 단일 플래그에도 안 걸려있어
+  // 셋 중 하나만 켜도(여기선 connectRulesV3Enabled) work-list로 전환되는지 확認 —
+  // 반대로 셋 다 OFF면 위 「navV3Flags 미전달」 테스트와 동형으로 /flow 그대로.
+  it('임의 플래그 하나(connectRulesV3Enabled)만 ON이어도 「일감」이 work-list로 바뀐다(단일 플래그 의존 0)', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
+    const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    expect(workLink?.getAttribute('href')).toBe('/work-list');
+  });
+});
+
+// [SID:4288 · 까디르 4653 P2 재판정] 데스크톱 오프캔버스로 접힌 사이드바 — 내용 칸은 inert지만 ⌘K 팔레트는 열린다(window keydown ·
+// 팔레트는 포털이라 inert 밖) · 레일은 inert 밖이라 다시 펼 수 있다.
+describe('AppSidebar — 오프캔버스로 접힌 상태에서 ⌘K · 레일([SID:4288])', () => {
+  async function mountCollapsed() {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <SidebarProvider defaultOpen={false}>
+            <AppSidebar projectMemberships={[]} chatUnreadTotal={0} />
+          </SidebarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('접힘 → 내용 칸 inert · ⌘K로 팔레트가 열리고 inert 밖 · 레일도 inert 밖', async () => {
+    stubMatchMedia(); stubFetch(); stubLocalStorage();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    await mountCollapsed();
+    expect(container.querySelector('[data-slot="sidebar-content"]')?.hasAttribute('inert')).toBe(true);
+    const rail = container.querySelector('[data-sidebar="rail"]');
+    expect(rail).not.toBeNull();
+    expect(rail!.closest('[inert]')).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.closest('[inert]')).toBeNull();
+  });
+});
+

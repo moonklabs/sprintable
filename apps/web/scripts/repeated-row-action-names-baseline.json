@@ -19,7 +19,7 @@
     "app/(authenticated)/inbox/page.tsx": 4,
     "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx": 4,
     "app/(authenticated)/settings/page.tsx": 9,
-    "app/invite/page.tsx": 1,
+    "app/invite/invite-client.tsx": 1,
     "components/agents/agent-api-key-manager.tsx": 1,
     "components/agents/agent-runs-list.tsx": 1,
     "components/agents/messaging-policy-section.tsx": 1,

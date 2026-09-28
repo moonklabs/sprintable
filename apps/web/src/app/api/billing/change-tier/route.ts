@@ -1,9 +1,15 @@
 import { proxyToFastapiWrapped } from '@/lib/fastapi-proxy';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 /**
  * POST /api/billing/change-tier — 유료→유료 상향(story #2880/#2906②). checkout과 같은
  * 이유로 이 프록시를 거친다(X-Org-Id 인터셉터+CSP connect-src, checkout/route.ts 참고).
  */
 export async function POST(request: Request): Promise<Response> {
-  return proxyToFastapiWrapped(request, '/api/v2/org-subscriptions/change-tier');
+  return proxyToFastapiWrapped(request, '/api/v2/org-subscriptions/change-tier', {
+    // story #4320(까디르 QA ③) — 요금제 변경(청구 · 부분 환불) — 끊으면 다시 누를 때 이중 청구 — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+    timeLimitOnly: true,
+    // 까디르 QA ① — 백엔드 최악(결제 사슬)은 프런트 한도를 넘는다 → 한도 안 천장 · 결과는 주문번호 조회로 확정(후속 카드). 근거는 표.
+    timeoutMs: LONG_ROUTES.billingChangeTier.bffMs,
+  });
 }

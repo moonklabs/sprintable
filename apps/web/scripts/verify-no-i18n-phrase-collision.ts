@@ -413,9 +413,17 @@ export const EXEMPT_PAIRS = new Set<string>([
   // agentMember="에이전트"(행 안 배지 라벨, 보간 없음) <-> agentToggleAriaLabel
   // ("{n}번째 에이전트 {label}") — 배지는 시각 요소, aria-label은 그 옆 토글
   // 버튼의 보조기술 전용 이름이라 화면상 겹쳐 읽힐 자리가 없다.
-  'organization.eventRowActionAriaLabel <-> organization.eventsTitle',
-  // eventsTitle="이벤트"(섹션 제목) <-> eventRowActionAriaLabel("{n}번째 이벤트
-  // 정의 {label}") — 위 commentsSectionTitle류와 동형(섹션 제목 vs 행 aria-label).
+  // story #4049(E-RECIPE-1 ①) — events/page.tsx가 마케팅 적용 성공 토스트에
+  // eventApplySuccessToast("배정 {count}건 저장 완료")를 새로 쓰면서 같은 파일 안
+  // eventEditSubmit("저장", 기존 EventFormDialog 저장 버튼)과 부분문자열로 겹친다.
+  // 토스트(적용 다이얼로그 제출 뒤 비동기로 잠깐 뜸)와 정의 수정 다이얼로그의 저장
+  // 버튼(별개 다이얼로그, 별개 트리거)은 화면에 동시에 설 자리가 없다 — docs.title
+  // <-> docs.indexDocCount류와 동형(짧은 낱말이 다른 문장 속에 자연스럽게 재등장).
+  'organization.eventApplySuccessToast <-> organization.eventEditSubmit',
+  // story #4043 Tier1(2026-09-19) — eventsTitle/eventRowActionAriaLabel이 "이벤트"→
+  // "레시피"/"워크플로우"로 낱말 정정되며 원래의 부분문자열 충돌이 사라졌다(죽은 예외,
+  // scanRepository 실측 확認 — organization.eventRowActionAriaLabel <->
+  // organization.eventsTitle 항목 자체를 제거).
   'goals.indexCountActive <-> goals.statusActive',
   'goals.indexCountDone <-> goals.statusDone',
   // story #3698(IA·후속) — goals.outcomeLabel <-> goals.trustRailOutcomeJudged 항목은 여기
@@ -733,6 +741,51 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 실수로 낳은 근접 중복이 아니다).
   'chats.approvalRequestEscalationReason <-> eventCard.reasonLabel',
   'chats.approvalRequestResolutionNote <-> eventCard.reasonLabel',
+  // story #4116(CI RED, 페드루 PO 지적 2026-09-21) — organization.gcRevokeAriaLabel
+  // ("{n}번째 연산 커넥터 {label} 해지", 해지 버튼 접근 이름, story #3592 §22-18 정본 —
+  // channels/page.tsx::channelRowActionAriaLabel과 동형)이 같은 파일의 gcTitle("연산
+  // 커넥터", 화면 제목)·gcRevokeAction("해지", 그 버튼의 보이는 라벨)을 부분문자열로
+  // 품는다. 위 comments*AriaLabel 6건(2026-09-07 등재)과 정확히 같은 클래스 — aria-label은
+  // 스크린리더 전용이라 사람 눈에는 항상 시각적 라벨(gcTitle·gcRevokeAction) 아니면
+  // 보조기술 이름(gcRevokeAriaLabel) 중 하나만 보인다("화면에서 겹쳐 보인다"가 구조적으로
+  // 성립하지 않음). gcRevokeAriaLabel이 그 행의 보이는 라벨("해지")과 화면 제목("연산
+  // 커넥터")을 그대로 품는 건 AC11이 요구하는 그 자체(보조기술 이름이 실제로 무엇을
+  // 가리키는지 전달)라 겹치는 게 정상.
+  'organization.gcRevokeAriaLabel <-> organization.gcTitle',
+  'organization.gcRevokeAction <-> organization.gcRevokeAriaLabel',
+  // story #4117(CI RED, 페드루 PO 판정 2026-09-21) — organization.gcRevokedAt("해지
+  // 시각 {time}", 등록/해지 시각 행)이 같은 파일의 gcRevokeAction("해지", 해지 버튼
+  // 라벨)을 부분문자열로 품는다. page.tsx 렌더 조건이 서로 배타적이라(gcRevokedAt은
+  // `c.status === 'revoked' && c.revoked_at`일 때만, gcRevokeAction 버튼은
+  // `isOwnerOrAdmin && c.status === 'active'`일 때만 그림) 두 문구가 같은 행에
+  // 같이 서지 않는다 — #4116 gcRevokeAriaLabel 짝과 같은 자리(화면에서 실제로
+  // 겹쳐 보일 표면 자체가 없음).
+  'organization.gcRevokeAction <-> organization.gcRevokedAt',
+  // story #4120(2026-09-21) — guideFileDeliveryNoteMcp에 {josa}/{promptJosa} 파라미터가
+  // 늘며 이 가드의 세그먼트 경계가 바뀌어 새로 걸렸다. 실제 겹침은 recruiter.back("이전",
+  // 위저드 STEP1~4 뒤로가기 버튼 라벨)과 guideFileDeliveryNoteMcp 문장 안의 "에이전트에게"
+  // 낱말이 "이전"을 부분문자열로 우연히 품는 것뿐(에이전트≠이전, 관련 없는 낱말의
+  // 음절 겹침) — docs.title<->docs.indexDocCount류와 동형(짧은 낱말이 완전히 다른
+  // 뜻의 긴 낱말 속 음절로 재등장). "이전" 버튼과 이 안내문이 같은 화면(STEP5)에 같이
+  // 서도 헷갈릴 표면이 아니다(하나는 버튼 라벨, 하나는 본문 문장 속 낱말 조각).
+  'recruiter.back <-> recruiter.guideFileDeliveryNoteMcp',
+  // story #4015(§③ 색↔사람 할 일·유나·PO 확定 2026-09-17) — 새 발행-실패 안내 문구 3쌍.
+  // 셋 다 한 화면에 «동시에» 안 뜨거나(상호 배타·코드로 확認) 의도적 보간이라 겹쳐 읽힐
+  // 자리가 없다(#2352·#2365의 «두 문구가 나란히 헷갈린다» 모양 아님). GRANDFATHER 아님.
+  //   ① 재발행 안내는 deriveFailureAction=undefined 갈래에서만 뜬다
+  //      (page.tsx:2641 `if (failureAction !== undefined) return null` 뒤 :2654),
+  //      「다시 시도」 확認 버튼(channelPostsRetryConfirmAction)은 FailureActionBadge
+  //      (:2331 `failureAction && …` 게이트)의 onRetryClick(:2346)이 여는 ConfirmDialog
+  //      (:2370) — 배지가 서려면 failureAction이 «정의»돼야 하니 undefined 갈래인 재발행
+  //      안내와 상호 배타(한 화면 동시 X).
+  'content.channelPostsPublicationFailedRepublishNotice <-> content.channelPostsRetryConfirmAction',
+  //   ② 둘 다 publicationFailed 알림의 command_status별 분기(page.tsx:2646-2655 삼항)라
+  //      렌더당 정확히 하나만 뜬다(상호 배타).
+  'content.channelPostsPublicationFailedNotice <-> content.channelPostsPublicationFailedRepublishNotice',
+  //   ③ 재발행 안내가 발행 버튼 이름을 «의도적으로» {action}에 보간한다(page.tsx:2654,
+  //      `t(view.isRepublish ? 'publishRepublishCta' : 'publishCta')` — 안내 속 이름이
+  //      실제 버튼 텍스트와 «같은 키»여야 하는 게 목적, #4015 CHANGES 2) — 겹침이 설계다.
+  'content.channelPostsPublicationFailedRepublishNotice <-> content.publishCta',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

@@ -18,13 +18,13 @@ function baseWorkList(): WorkList {
       {
         goalId: 'g1', title: '목표1', isActive: true, doneCount: 0, totalCount: 2, assignedCount: 1, delegatedCount: 1, hypothesisCount: 1,
         stories: [
-          { storyId: 's1', title: '스토리1', hypothesisIds: ['h1'], rows: [baseRow({ id: 't1', isDelegated: false }), baseRow({ id: 't2', isDelegated: true })] },
+          { storyId: 's1', title: '스토리1', status: 'in-progress', hypothesisIds: ['h1'], rows: [baseRow({ id: 't1', isDelegated: false }), baseRow({ id: 't2', isDelegated: true })] },
         ],
       },
       {
         goalId: 'g2', title: '목표2', isActive: false, doneCount: 0, totalCount: 1, assignedCount: 1, delegatedCount: 0, hypothesisCount: 0,
         stories: [
-          { storyId: 's2', title: '스토리2', hypothesisIds: [], rows: [baseRow({ id: 't3', isDelegated: false })] },
+          { storyId: 's2', title: '스토리2', status: 'in-progress', hypothesisIds: [], rows: [baseRow({ id: 't3', isDelegated: false })] },
         ],
       },
     ],

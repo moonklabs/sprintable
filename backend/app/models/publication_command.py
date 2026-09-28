@@ -21,8 +21,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Text, UniqueConstraint, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -60,6 +60,21 @@ class PublicationCommand(Base):
             "initiated_by IS NULL OR initiated_by IN ('scheduler', 'human')",
             name="ck_publication_commands_initiated_by",
         ),
+        # story #4258(까디르 4621 codex P2 · PO 12:38Z) — 0405 마이그의 정본 미러(이름 일치 유지 · create_all 기반 테스트가
+        # 이 제약 · 인덱스를 보게).
+        CheckConstraint(
+            "stop_notice_state IS NULL OR stop_notice_state IN ('pending', 'sent')",
+            name="ck_publication_commands_stop_notice_state",
+        ),
+        Index(
+            "ix_publication_commands_stop_notice_pending", "id",
+            postgresql_where=text("stop_notice_state = 'pending'"),
+        ),
+        # story #4287 — 0408 마이그의 정본 미러. 멈춘 in_progress 회수 쓸기(틱마다)가 in_progress 행만 집어 본다.
+        Index(
+            "ix_publication_commands_in_progress_claimed", "claimed_at",
+            postgresql_where=text("status = 'in_progress'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -92,6 +107,9 @@ class PublicationCommand(Base):
     # 사유만 — 그 외 reason_code는 계속 null, 지어내지 않는다). apply_command_failure()
     # 참고.
     reason_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4336(PO 05:24Z 조건 2 · 0411) — 워커의 공급자 호출 전 검사가 걸렸을 때 요청이 돌려줬을 오류 본문(코드 · 숫자 · 풀리는
+    # 시각) 그대로. 화면이 즉시 발행 응답과 같은 배너를 그린다. 다시 대기열에 오르거나 끝나면 비운다.
+    failure_detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # 'connection'|'needs_check'|'transient' — 유나 design §11-5.
     failure_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     dead_letter_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -102,6 +120,18 @@ class PublicationCommand(Base):
     # null=이 정보를 모르는 기존 행(이 컬럼 도입 전 데이터·다른 content_kind는
     # 채울 이유가 없어 계속 null로 둔다 — ads_boost의 boost_start만 채움).
     initiated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4258(까디르 4621 codex P2 · PO 12:38Z) — 레시피 멈춤 통지 표식. `apply_command_failure`가 dead_letter · 연결
+    # blocked로 **전이하는 같은 트랜잭션**에서 `pending`을 세우고, 워커가 행마다 자기 트랜잭션에서 «통지 발행 + `sent`»를 한
+    # 커밋으로 한다(사라짐 0 · 같은 멈춤 중복 0). 사람 재시도가 NULL로 되돌려, 다시 멈추면 새 통지다. NULL = 보낼 것 없음(이
+    # 컬럼 전의 옛 멈춤도 NULL — 소급하지 않는다).
+    stop_notice_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4287(PO 00:16Z) — 워커가 in_progress로 집은 시각. 회수 쓸기가 «상한 시간 넘게 집힌 채»를 이 값으로 잰다. NULL인
+    # in_progress는 이 칸이 생기기 전에 집힌 옛 행이라 «호출 전 확실»로 읽지 않는다(needs_check).
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4287 — 공급자 쓰기에 들어가기 직전 서비스 코드가 쓰고 **커밋**하는 영속 표식(집을 때 비운다). 워커가 도중에 죽어도
+    # 남아서, 회수가 «나갔는지 모름»(있음 → needs_check)과 «호출 전 확실»(없음 → 자동 재시도)을 가른다. 메모리 표시
+    # (`provider_call_mark`)는 프로세스와 함께 사라져 이 판정에 못 쓴다.
+    provider_call_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,

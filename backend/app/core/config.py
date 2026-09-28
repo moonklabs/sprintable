@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     db_pgbouncer: bool = False
     db_pgbouncer_pool_size: int = 25   # ⭐앱 동시성 수용(크게). PgBouncer가 Cloud SQL 커넥션을 묶어 안전.
     db_pgbouncer_max_overflow: int = 10
+    # story #4332 — 요청마다 «풀 체크아웃 대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(app/core/request_db_timing.py). 폴링 경로 때문에
+    # 양이 커서 환경 값으로만 켠다(dev 켬 · PO). 응답 헤더엔 어떤 경우에도 싣지 않는다(존재 여부 누출 · test_2261_c3).
+    db_timing_log_enabled: bool = False
+    # story #4336(PO 04:52Z) — 발행 명령 워커 틱 예산 = min(스케줄러 시한, 이 서비스의 요청 시한) − 여유(publication_command.py).
+    # 요청 시한은 배포가 Cloud Run `--timeout`과 같은 값을 넣는다(cloudbuild `_BACKEND_TIMEOUT`). 모르면 보수적으로 300(옛 prod 값).
+    backend_request_timeout_seconds: int = 300
+    # 스케줄러 시한은 infra/cloud-scheduler/jobs.json publication-commands.attempt_deadline과 같아야 한다(테스트 고정).
+    publication_worker_scheduler_deadline_seconds: int = 1800
 
     # story #2461(§6 봉합③ part2, PO 승인 2026-08-05): worker_engine(app/core/database.py)
     # 전용 풀 크기 — 위 db_pool_size 산식 갱신 주석 참조(신규 budget line, prod 재검산 필요).
@@ -136,6 +144,11 @@ class Settings(BaseSettings):
     # 1인에게만. 페드루군도 agent 멤버(email 축 없음)라 이메일 해소 대신 team_members.id를
     # 직접 주입(PO 본인 지시, 2026-08-31 — email 방식보다 견고).
     support_escalation_approver_member_id: str = ""
+
+    # story #4341 — 플랫폼 운영 알림(결제 늦은 성공 무효 · 확정 환불 실패 · 발행 예산 밖)을 받는 운영 대화 id. 빈 값 = 미설정 →
+    # 알림은 «전달 안 됨»(not_configured)을 돌려주고 pending으로 남아, 값이 들어오면 재시도가 보낸다(거짓 성공 0).
+    # 조직은 그 대화 행에서 읽는다(따로 적지 않는다 — 두 값이 어긋날 자리를 만들지 않게).
+    ops_alert_conversation_id: str = ""
 
     # CORS (쉼표 구분 origins, Cloud Run 환경변수 CORS_ORIGINS로 주입)
     cors_origins: str = "http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
@@ -365,6 +378,13 @@ class Settings(BaseSettings):
     # OAuth state(CSRF+org 바인딩+PKCE verifier+nonce+TTL) 서명 키 — github_app_state_secret과
     # 동형(별도 시크릿, auth.py의 로그인용 OAuth state 키와 분리·그라운딩 §9 "기본=분리" 확定).
     channel_oauth_state_secret: str = ""
+
+    # story #4101(#4095 그라운딩 doc c65ce586 §3-4·PO Q②병렬 확定, 2026-09-21) —
+    # org_generation_connectors.credentials(고객 소유 생성 모델 provider 자격) 암호화 키.
+    # channel_credential_encryption_key와 완전히 독립된 시크릿(도메인 분리 원칙 — 발행 채널
+    # 토큰 회전이 생성 커넥터 자격에 영향을 주지 않고 그 반대도 마찬가지). 같은 MultiFernet
+    # 회전 패턴(콤마구분 다건).
+    generation_connector_credential_encryption_key: str = ""
     # Threads(Meta) 서버 OAuth의 앱 id/secret은 env var가 **아니다**(페드루 PO 정정
     # 2026-09-03 08:40Z, 블루프린트 §8) — 조직별 자격은 channel_app_credentials 테이블,
     # SaaS 기본 공용 앱 자격은 platform_settings.threads_platform_app_id/

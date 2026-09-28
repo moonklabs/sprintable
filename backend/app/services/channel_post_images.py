@@ -42,6 +42,7 @@ from app.services.channel_posts import (
     get_channel_post_draft,
 )
 from app.services.storage import get_storage_provider
+from app.services.storage.deadline import with_storage_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,14 @@ class ChannelPostImageReorderInvalidSetError(Exception):
         super().__init__("image_ids가 현재 이미지 집합과 정확히 일치해야 합니다(누락·중복·불일치 없이)")
 
 
+# story #4336 PR2(PO 04:32Z) — 이미지 확인 · 가져오기는 요청 안에 둔다(작업화 X). 근거 = dev 백엔드 요청 로그 14일(09-14~09-28)
+# `import-image` 349건 p50 0.48s · p95 1.4s · 최대 9.3s · 45s 초과 0. 호출마다 시한을 걸고(아래) 요청 총 예산 40s(라우트)를 둔다.
+IMAGE_HEAD_SECONDS = 10.0
+IMAGE_DOWNLOAD_SECONDS = 20.0
+IMAGE_PUT_SECONDS = 20.0
+IMAGE_DELETE_SECONDS = 10.0
+
+
 def compute_image_seal_hash(ordered_final_sha256s: list[str]) -> str:
     """story #3550(Phase2, 페드루 PO 確定 2026-09-06 ①) — `ChannelPostVersion.
     image_sha256`(→`Gate.sealed_media_sha256`)에 담을 값. **N=1은 항등**(그 이미지의
@@ -297,14 +306,25 @@ async def import_channel_post_image(
     ext = _MIME_TO_EXT.get(content_type, "bin")
     object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)
     provider = get_storage_provider()
-    ok = await provider.put_object(bucket, object_path, image_bytes, content_type=content_type)
+    ok = await with_storage_deadline(
+        provider.put_object(bucket, object_path, image_bytes, content_type=content_type), seconds=IMAGE_PUT_SECONDS, what="put",
+    )
     if not ok:
         raise ChannelImageUploadFailedError(object_path=object_path)
 
-    return await confirm_channel_post_image_upload(
-        db, org_id=org_id, draft_id=draft_id, object_path=object_path,
-        member_id=member_id, member_kind=member_kind,
-    )
+    try:
+        return await confirm_channel_post_image_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=object_path,
+            member_id=member_id, member_kind=member_kind,
+        )
+    except Exception as exc:
+        # story #4352(까디르 P2 ③) — 이 객체는 서버가 방금 제 경로(`_object_path`)에 올린 것이라, confirm이 **커밋 전**에 거절하면
+        # (검사 구간 앞의 초안 없음 · 채널 미지원 · 장 수 초과 · 초안 버전 검사 포함) 어떤 행에도 안 걸린다 — 지운다(이미 지웠으면 무해).
+        # 커밋 중 · 뒤에서 난 예외(confirm이 표식을 단다)는 행이 객체를 가리킬 수 있어 지우지 않는다(남는 고아 < 끊긴 참조).
+        # 브라우저가 올린 경로(확정 라우트)는 경로 범위 확인 전이라 여기처럼 지우지 않는다(confirm 안의 정리가 맡음).
+        if not may_be_committed(exc):
+            await _discard_unreferenced_objects(provider, bucket, object_path, None)
+        raise
 
 
 def _derive_image(raw: bytes, *, adapter) -> tuple[bytes | None, str | None, int | None, int | None, str | None]:
@@ -382,6 +402,33 @@ def _derive_image(raw: bytes, *, adapter) -> tuple[bytes | None, str | None, int
     return derived_bytes, derived_content_type, work.width, work.height, out_format
 
 
+_MAY_BE_COMMITTED_ATTR = "channel_image_may_be_committed"
+
+
+def mark_may_be_committed(exc: BaseException) -> None:
+    """story #4352 — 이 예외는 confirm의 커밋 중 · 뒤에서 났다(행이 들어갔을 수 있음) → 업로드 객체를 지우면 끊긴 참조가 된다."""
+    try:
+        setattr(exc, _MAY_BE_COMMITTED_ATTR, True)
+    except Exception:  # noqa: BLE001 — 속성을 못 다는 예외(드묾) — may_be_committed 한계 참조
+        pass
+
+
+def may_be_committed(exc: BaseException) -> bool:
+    """confirm이 커밋 중 · 뒤 예외에 단 표식이 있으면 True. 한계: 속성을 못 다는 예외(`__slots__` 등)는 표식이 없어 False로 읽힌다 —
+    이 경로에서 나는 예외(SQLAlchemy · asyncpg · HTTPException)는 모두 속성을 받는다."""
+    return getattr(exc, _MAY_BE_COMMITTED_ATTR, False) is True
+
+
+async def _discard_unreferenced_objects(provider, bucket: str, object_path: str, derived_object_path: str | None) -> None:
+    """confirm이 거절될 때 어떤 행에도 안 걸린 업로드 객체(원본 · 파생)를 지운다. 정리 실패는 로그만(원래 거절을 가리지 않는다)."""
+    try:
+        await with_storage_deadline(provider.delete_object(bucket, object_path), seconds=IMAGE_DELETE_SECONDS, what="delete")
+        if derived_object_path is not None:
+            await with_storage_deadline(provider.delete_object(bucket, derived_object_path), seconds=IMAGE_DELETE_SECONDS, what="delete")
+    except Exception:
+        logger.exception("이미지 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
+
+
 async def confirm_channel_post_image_upload(
     db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, object_path: str,
     member_id: uuid.UUID, member_kind: str,
@@ -416,7 +463,7 @@ async def confirm_channel_post_image_upload(
         raise ChannelImagePathNotScopedError(object_path=object_path)
 
     provider = get_storage_provider()
-    size = await provider.head_object(bucket, object_path)
+    size = await with_storage_deadline(provider.head_object(bucket, object_path), seconds=IMAGE_HEAD_SECONDS, what="head")
     if size is None:
         raise ChannelImageObjectNotFoundError(object_path=object_path)
 
@@ -431,7 +478,7 @@ async def confirm_channel_post_image_upload(
         if size > _MAX_ORIGINAL_UPLOAD_BYTES:
             raise ChannelImageTooLargeError(size_bytes=size, max_bytes=_MAX_ORIGINAL_UPLOAD_BYTES)
 
-        raw = await provider.download_object(bucket, object_path)
+        raw = await with_storage_deadline(provider.download_object(bucket, object_path), seconds=IMAGE_DOWNLOAD_SECONDS, what="download")
         original_sha256 = hashlib.sha256(raw).hexdigest()
 
         try:
@@ -512,7 +559,10 @@ async def confirm_channel_post_image_upload(
         if derived_bytes is not None:
             ext = "png" if derived_content_type == "image/png" else "jpg"
             derived_object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)
-            ok = await provider.put_object(bucket, derived_object_path, derived_bytes, content_type=derived_content_type)
+            ok = await with_storage_deadline(
+                provider.put_object(bucket, derived_object_path, derived_bytes, content_type=derived_content_type),
+                seconds=IMAGE_PUT_SECONDS, what="put",
+            )
             if not ok:
                 raise ChannelImageUploadFailedError(object_path=derived_object_path)
             derived_sha256 = hashlib.sha256(derived_bytes).hexdigest()
@@ -520,13 +570,10 @@ async def confirm_channel_post_image_upload(
         final_sha256 = derived_sha256 or original_sha256
 
         latest = latest_for_cover_check
-    except Exception:
-        try:
-            await provider.delete_object(bucket, object_path)
-            if derived_object_path is not None:
-                await provider.delete_object(bucket, derived_object_path)
-        except Exception:
-            logger.exception("이미지 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
+    except BaseException:
+        # story #4336 PR2 ②(까디르 codex) — 요청 예산(40초 `asyncio.timeout`)이 끊으면 `CancelledError`(BaseException)라 예전 `except Exception`을
+        # 건너뛰어 올린 파생 객체가 고아로 남았다. 취소에도 정리하고(각 삭제는 자기 시한) 그대로 다시 던진다 — 예산 초과는 여전히 504.
+        await _discard_unreferenced_objects(provider, bucket, object_path, derived_object_path)
         raise
 
     # story #3554(Phase2, 페드루 PO 確定 2026-09-06③) — 이 draft에 영상이 이미
@@ -549,36 +596,49 @@ async def confirm_channel_post_image_upload(
         ordered_hashes = [img.final_sha256 for img in existing_images] + [final_sha256]
         composite_sha256 = compute_image_seal_hash(ordered_hashes)
 
-    new_version, _channel, _violations = await create_channel_post_draft_version(
-        db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
-        text=latest.text, link_url=latest.link_url,
-        author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
-    )
+    # story #4352(까디르 P2 ③) — 새 버전 쓰기(초안 버전 검사 포함)에서 거절돼도 올린 객체(원본 · 파생)가 어떤 행에도 안 걸린 채 남지 않게,
+    # **커밋 전**까지만 같은 정리로 감싼다(위 검사 구간의 정리와 한 도우미 · flush로 제약 위반도 여기서 드러냄). 커밋 · 그 뒤는 감싸지 않는다:
+    # 커밋이 실패로 보고돼도 실제로는 들어갔을 수 있고(연결 끊김), 커밋 뒤엔 행이 객체를 가리킨다 — 남는 고아 < 끊긴 참조(PO · 까디르 09-27).
+    try:
+        new_version, _channel, _violations = await create_channel_post_draft_version(
+            db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
+            text=latest.text, link_url=latest.link_url,
+            author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
+        )
 
-    if existing_video is not None:
-        db.add(_copy_video_row(existing_video, new_version_id=new_version.id))
-    else:
-        # story #3550(PO 確定 ②) — create_channel_post_draft_version()의 자체 carry-forward
-        # 훅(image_sha256이 sentinel일 때만 발동)은 여기서 안 탄다(위에서 합성값을 명시로
-        # 넘겼으므로) — 기존 이미지 행들을 새 version_id로 직접 복제한다(파일 재업로드·
-        # 재변환 없음, object_path·sha256·position 그대로 — 단일 이미지 carry-forward
-        # 패턴(channel_posts.py::create_channel_post_draft_version)을 N장으로 그대로 확장).
-        for existing in existing_images:
-            db.add(_copy_image_row(existing, new_version_id=new_version.id, new_position=existing.position))
+        if existing_video is not None:
+            db.add(_copy_video_row(existing_video, new_version_id=new_version.id))
+        else:
+            # story #3550(PO 確定 ②) — create_channel_post_draft_version()의 자체 carry-forward
+            # 훅(image_sha256이 sentinel일 때만 발동)은 여기서 안 탄다(위에서 합성값을 명시로
+            # 넘겼으므로) — 기존 이미지 행들을 새 version_id로 직접 복제한다(파일 재업로드·
+            # 재변환 없음, object_path·sha256·position 그대로 — 단일 이미지 carry-forward
+            # 패턴(channel_posts.py::create_channel_post_draft_version)을 N장으로 그대로 확장).
+            for existing in existing_images:
+                db.add(_copy_image_row(existing, new_version_id=new_version.id, new_position=existing.position))
 
-    image_row = ChannelPostImage(
-        id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=new_version.id, position=new_position,
-        original_object_path=object_path, original_sha256=original_sha256,
-        original_content_type=original_mime, original_bytes=size,
-        original_width=width, original_height=height,
-        derived_object_path=derived_object_path, derived_sha256=derived_sha256,
-        derived_content_type=derived_content_type, derived_bytes=len(derived_bytes) if derived_bytes else None,
-        derived_width=derived_width, derived_height=derived_height,
-        created_by=member_id,
-    )
-    db.add(image_row)
-    await db.commit()
-    await db.refresh(image_row)
+        image_row = ChannelPostImage(
+            id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=new_version.id, position=new_position,
+            original_object_path=object_path, original_sha256=original_sha256,
+            original_content_type=original_mime, original_bytes=size,
+            original_width=width, original_height=height,
+            derived_object_path=derived_object_path, derived_sha256=derived_sha256,
+            derived_content_type=derived_content_type, derived_bytes=len(derived_bytes) if derived_bytes else None,
+            derived_width=derived_width, derived_height=derived_height,
+            created_by=member_id,
+        )
+        db.add(image_row)
+        await db.flush()
+    except BaseException:  # 위와 같은 까닭 — 요청 예산 취소에도 올린 객체를 정리한다
+        await _discard_unreferenced_objects(provider, bucket, object_path, derived_object_path)
+        raise
+    try:
+        await db.commit()
+        await db.refresh(image_row)
+    except Exception as exc:
+        # 커밋 중 · 뒤의 실패 — 행이 이미 들어갔을 수 있다. 부르는 쪽(가져오기 입구)이 객체를 지우지 않게 표식을 단다.
+        mark_may_be_committed(exc)
+        raise
     return new_version, image_row
 
 

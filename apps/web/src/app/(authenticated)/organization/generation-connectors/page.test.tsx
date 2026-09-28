@@ -1,0 +1,484 @@
+// @vitest-environment jsdom
+//
+// story #4116(#4112 유나 시안 55a04e8d) — 연산 커넥터 설정 화면 계약 핀.
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import koMessages from '../../../../../messages/ko.json';
+
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement;
+let root: Root;
+
+function wrap(node: React.ReactNode) {
+  return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>;
+}
+
+const ORG_ID = 'org-1';
+
+function asRole(role: 'owner' | 'admin' | 'member') {
+  useDashboardContextMock.mockReturnValue({
+    orgId: ORG_ID,
+    orgMemberships: [{ orgId: ORG_ID, orgName: '뭉클랩', orgSlug: 'moonklabs', role }],
+    projectMemberships: [],
+  });
+}
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  asRole('admin');
+});
+
+afterEach(async () => {
+  await act(async () => { root.unmount(); });
+  container.remove();
+  vi.unstubAllGlobals();
+  vi.resetModules();
+});
+
+async function mount() {
+  const { default: OrganizationGenerationConnectorsPage } = await import('./page');
+  await act(async () => { root.render(wrap(<OrganizationGenerationConnectorsPage />)); });
+  await flush();
+}
+
+async function flush() {
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+}
+
+const CONNECTOR_ACTIVE = {
+  id: 'gen-1', provider_key: 'vertex_gemini', label: '메인 연산 커넥터',
+  model_config_json: { image: 'imagen-3', video: 'veo-2' }, location: 'global', status: 'active', created_by: 'm1',
+  created_at: '2026-09-01T00:00:00Z', revoked_at: null,
+};
+const CONNECTOR_REVOKED = {
+  id: 'gen-2', provider_key: 'vertex_gemini', label: '지난 캠페인 커넥터',
+  model_config_json: {}, location: 'global', status: 'revoked', created_by: 'm1',
+  created_at: '2026-08-01T00:00:00Z', revoked_at: '2026-09-02T00:00:00Z',
+};
+
+// React controlled input/textarea는 raw .value= 대입으로 onChange가 안 불린다(네이티브
+// setter를 직접 불러야 함, pasted-secret-connect-card.test.tsx와 동일 관례).
+function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+  setter.call(el, value);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function stubList(connectors: unknown[]) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`) && (!init || init.method === undefined)) {
+      return { ok: true, json: async () => ({ data: { connectors } }) };
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  }));
+}
+
+describe('OrganizationGenerationConnectorsPage — 목록·권한(AC1)', () => {
+  it('owner/admin — 목록 행(이름·provider 배지·상태칩)이 렌더되고 등록 버튼이 있다', async () => {
+    stubList([CONNECTOR_ACTIVE, CONNECTOR_REVOKED]);
+    await mount();
+
+    const rows = document.body.querySelectorAll('[data-testid="gc-row"]');
+    expect(rows.length).toBe(2);
+    expect(document.body.textContent).toContain('메인 연산 커넥터');
+    expect(document.body.textContent).toContain('vertex_gemini');
+    expect(document.body.querySelector('[data-status-chip="active"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-status-chip="revoked"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="gc-register-action"]')).toBeTruthy();
+    // 해지된 커넥터엔 해지 버튼이 없다(이미 revoked).
+    expect(document.body.querySelector('[data-testid="gc-revoke-gen-2"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="gc-revoke-gen-1"]')).toBeTruthy();
+  });
+
+  // story #4117 FE 라이더(#4112 시안 프레임① "등록 시각" 행, PR #4492가 착지시킨
+  // BE DTO created_at/revoked_at 소비) — "지금"을 고정해(channels/page.test.tsx
+  // story #3486 관례와 동형) 결정적으로 잰다.
+  it('행에 등록 시각이 보이고, 해지된 커넥터는 해지 시각도 같이 보인다', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-03T00:00:00Z'));
+    try {
+      stubList([CONNECTOR_ACTIVE, CONNECTOR_REVOKED]);
+      await mount();
+
+      expect(document.body.textContent).toContain('등록 시각');
+      expect(document.body.textContent).toContain('해지 시각');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('일반 멤버 — 등록/해지 버튼 0 + 사유 한 줄, 목록은 그대로 보인다', async () => {
+    asRole('member');
+    stubList([CONNECTOR_ACTIVE]);
+    await mount();
+
+    expect(document.body.textContent).toContain('메인 연산 커넥터'); // 목록은 전원 열람.
+    expect(document.body.querySelector('[data-testid="gc-register-action"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="gc-revoke-gen-1"]')).toBeNull();
+    const reason = document.body.querySelector('[data-testid="gc-owner-only-reason"]');
+    expect(reason?.textContent).toBe(koMessages.organization.gcOwnerOnlyReason);
+  });
+
+  it('빈 상태(0건) — owner/admin에겐 «첫 커넥터 등록» CTA', async () => {
+    stubList([]);
+    await mount();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcEmptyTitle);
+    expect(document.body.querySelector('[data-testid="gc-first-register-action"]')).toBeTruthy();
+    // 목록이 비었을 땐 PageHeader의 일반 등록 버튼은 안 뜬다(빈 상태 CTA가 대신함).
+    expect(document.body.querySelector('[data-testid="gc-register-action"]')).toBeNull();
+  });
+
+  it('목록 fetch 실패 — 에러+재시도, 재시도 성공하면 목록이 채워진다', async () => {
+    let shouldFail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        if (shouldFail) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: { connectors: [CONNECTOR_ACTIVE] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcListLoadError);
+    shouldFail = false;
+    const retryBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventApplyAgentsRetry)!;
+    await act(async () => { retryBtn.click(); });
+    await flush();
+    expect(document.body.textContent).toContain('메인 연산 커넥터');
+  });
+});
+
+describe('OrganizationGenerationConnectorsPage — 등록 폼(AC2)', () => {
+  it('제출 성공 — 폼이 닫히고 목록이 갱신된다', async () => {
+    let created = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`) && init?.method === 'POST') {
+        created = true;
+        return { ok: true, json: async () => ({ data: CONNECTOR_ACTIVE }) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return { ok: true, json: async () => ({ data: { connectors: created ? [CONNECTOR_ACTIVE] : [] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const registerBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-first-register-action"]')!;
+    await act(async () => { registerBtn.click(); });
+    await flush();
+    expect(document.body.querySelector('[data-testid="gc-register-form"]')).toBeTruthy();
+
+    const labelInput = document.body.querySelector<HTMLInputElement>('#gc-field-label')!;
+    const credInput = document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential')!;
+    await act(async () => {
+      setInputValue(labelInput, '메인 연산 커넥터');
+      setInputValue(credInput, '{"type":"service_account"}');
+    });
+
+    const submitBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-register-submit"]')!;
+    expect(submitBtn.disabled).toBe(false);
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(document.body.querySelector('[data-testid="gc-register-form"]')).toBeNull();
+    expect(document.body.textContent).toContain('메인 연산 커넥터');
+  });
+
+  it('자격 칸은 성공/실패 무관 제출 뒤 비워진다(다시 못 봄)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`) && init?.method === 'POST') {
+        return { ok: false, status: 422, json: async () => ({ error: { code: 'UNPROCESSABLE_ENTITY' } }) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const registerBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-first-register-action"]')!;
+    await act(async () => { registerBtn.click(); });
+    await flush();
+
+    const labelInput = document.body.querySelector<HTMLInputElement>('#gc-field-label')!;
+    const credInput = document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential')!;
+    await act(async () => {
+      setInputValue(labelInput, '메인 연산 커넥터');
+      setInputValue(credInput, '{"type":"service_account"}');
+    });
+    const submitBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-register-submit"]')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcErrorProviderUnsupported);
+    expect((document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential'))?.value).toBe('');
+  });
+
+  // story #4117 FE 라이더 — #4117-BE(PR #4492)가 이름 중복을 409
+  // {"code": "GENERATION_CONNECTOR_LABEL_DUPLICATE"}로 내도록 고쳤다(FastAPI
+  // HTTPException 관례대로 {"detail": {"code": ...}} 꼴로 프록시를 통과한다).
+  it('이름 중복 409 — gcErrorLabelDuplicate 문구로 분기한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`) && init?.method === 'POST') {
+        return {
+          ok: false, status: 409,
+          json: async () => ({ detail: { code: 'GENERATION_CONNECTOR_LABEL_DUPLICATE' } }),
+        };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const registerBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-first-register-action"]')!;
+    await act(async () => { registerBtn.click(); });
+    await flush();
+
+    const labelInput = document.body.querySelector<HTMLInputElement>('#gc-field-label')!;
+    const credInput = document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential')!;
+    await act(async () => {
+      setInputValue(labelInput, '메인 연산 커넥터');
+      setInputValue(credInput, '{"type":"service_account"}');
+    });
+    const submitBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-register-submit"]')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcErrorLabelDuplicate);
+    expect(document.body.textContent).not.toContain(koMessages.organization.gcErrorGeneric);
+    expect((document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential'))?.value).toBe('');
+  });
+});
+
+describe('OrganizationGenerationConnectorsPage — 해지 확認(AC2)', () => {
+  it('확認 없이 revoke 호출 0 — 해지 버튼 클릭만으로는 POST가 안 나간다', async () => {
+    const postCalls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') { postCalls.push(url); return { ok: true, json: async () => ({}) }; }
+      return { ok: true, json: async () => ({ data: { connectors: [CONNECTOR_ACTIVE] } }) };
+    }));
+    await mount();
+
+    const revokeBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-revoke-gen-1"]')!;
+    await act(async () => { revokeBtn.click(); });
+    await flush();
+
+    expect(postCalls).toHaveLength(0); // 다이얼로그만 뜨고 아직 호출 0.
+    // story #4117 FE 라이더 — pickEulReulJosa가 받침 유무를 판정해 "을(를)" raw
+    // 표기(#4096류 재발) 대신 정확한 조사 하나를 고른다. "커넥터"는 "터"로 끝나
+    // 받침이 없어 "를".
+    expect(document.body.textContent).toContain('메인 연산 커넥터를 해지할까요');
+    expect(document.body.textContent).not.toContain('을(를)');
+  });
+
+  // story #4117 FE 라이더(유나 4491 앵커 비차단) — 받침 있음/없음 2값 모두 올바른
+  // 조사를 고르는지(위 테스트는 받침 없음 1값뿐이라 별도로 받침 있음도 고정).
+  it('받침 있는 이름 — 해지 확認 제목이 "을"을 고른다', async () => {
+    const withBatchim = { ...CONNECTOR_ACTIVE, id: 'gen-3', label: '테스트폼' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return { ok: true, json: async () => ({}) };
+      return { ok: true, json: async () => ({ data: { connectors: [withBatchim] } }) };
+    }));
+    await mount();
+
+    const revokeBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-revoke-gen-3"]')!;
+    await act(async () => { revokeBtn.click(); });
+    await flush();
+
+    // "폼"은 ㅁ 받침이 있어 "을".
+    expect(document.body.textContent).toContain('테스트폼을 해지할까요');
+    expect(document.body.textContent).not.toContain('을(를)');
+  });
+
+  it('확認 다이얼로그에서 해지를 누르면 revoke 엔드포인트를 호출하고 목록을 갱신한다', async () => {
+    let revoked = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1/revoke` && init?.method === 'POST') {
+        revoked = true;
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return { ok: true, json: async () => ({ data: { connectors: [revoked ? { ...CONNECTOR_ACTIVE, status: 'revoked' } : CONNECTOR_ACTIVE] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const revokeBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="gc-revoke-gen-1"]')!;
+    await act(async () => { revokeBtn.click(); });
+    await flush();
+    const confirmBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.gcRevokeAction && b !== revokeBtn)!;
+    await act(async () => { confirmBtn.click(); });
+    await flush();
+
+    expect(revoked).toBe(true);
+    expect(document.body.querySelector('[data-status-chip="revoked"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="gc-revoke-gen-1"]')).toBeNull();
+  });
+});
+
+// story #4166(3호 실측, 2026-09-22) — 리전 변경 행 액션(AC4·AC5). owner/admin·
+// active 커넥터에만 select가 뜨고, 값을 바꾸면 즉시 PATCH가 나간다(등록 폼처럼
+// 별도 저장 버튼 없이 값 자체가 액션).
+describe('OrganizationGenerationConnectorsPage — 리전 변경 행 액션(#4166)', () => {
+  it('owner/admin·active — select가 보이고, 일반 멤버·revoked 행엔 기존 읽기전용 칩만 보인다', async () => {
+    stubList([CONNECTOR_ACTIVE, CONNECTOR_REVOKED]);
+    await mount();
+
+    expect(document.body.querySelector('[data-testid="gc-location-select-gen-1"]')).toBeTruthy();
+    // revoked 행은 여전히 읽기전용 칩.
+    expect(document.body.querySelector('[data-testid="gc-location-select-gen-2"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="gc-location-chip"]')).toBeTruthy();
+    // story #4166 CHANGES-1 — 등록 폼의 gcLocationHint를 목록 행에서도 재사용(AC3).
+    expect(document.body.textContent).toContain(koMessages.organization.gcLocationHint);
+  });
+
+  it('일반 멤버 — active 행에도 select 없이 읽기전용 칩만 보인다', async () => {
+    asRole('member');
+    stubList([CONNECTOR_ACTIVE]);
+    await mount();
+
+    expect(document.body.querySelector('[data-testid="gc-location-select-gen-1"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="gc-location-chip"]')).toBeTruthy();
+  });
+
+  it('select 값을 바꾸면 PATCH가 나가고 목록이 갱신된다', async () => {
+    let patchedBody: unknown;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1` && init?.method === 'PATCH') {
+        patchedBody = JSON.parse(init.body as string);
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: { connectors: [{ ...CONNECTOR_ACTIVE, location: patchedBody ? 'asia-northeast3' : 'global' }] },
+          }),
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')!;
+    await act(async () => {
+      select.value = 'asia-northeast3';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(patchedBody).toEqual({ location: 'asia-northeast3' });
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')?.value).toBe('asia-northeast3');
+  });
+
+  it('PATCH 실패 — 에러 문구가 뜨고 목록을 다시 불러온다', async () => {
+    let reloadCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1` && init?.method === 'PATCH') {
+        return { ok: false, status: 409, json: async () => ({ detail: { code: 'GENERATION_CONNECTOR_NOT_ACTIVE' } }) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        reloadCount += 1;
+        return { ok: true, json: async () => ({ data: { connectors: [CONNECTOR_ACTIVE] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+    const initialReloadCount = reloadCount;
+
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')!;
+    await act(async () => {
+      select.value = 'asia-northeast3';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcLocationChangeError);
+    expect(reloadCount).toBeGreaterThan(initialReloadCount); // 실패해도 목록을 다시 불러 실제 상태를 보여준다.
+  });
+
+  // story #4166 CHANGES-1(페드루 PO 리뷰) — catch 경로(네트워크 예외, PATCH 요청 자체가
+  // 던짐)에서 load()가 빠져 있던 실사고를 고정. non-ok 응답(위 테스트)과 별개 경로라
+  // 따로 표본을 둔다.
+  it('⭐PATCH 네트워크 예외(throw) — 에러 문구가 뜨고 목록을 다시 불러온다(non-ok와 별개 경로)', async () => {
+    let reloadCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1` && init?.method === 'PATCH') {
+        throw new Error('network down');
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        reloadCount += 1;
+        return { ok: true, json: async () => ({ data: { connectors: [CONNECTOR_ACTIVE] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+    const initialReloadCount = reloadCount;
+
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')!;
+    await act(async () => {
+      select.value = 'asia-northeast3';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcLocationChangeError);
+    expect(reloadCount).toBeGreaterThan(initialReloadCount);
+  });
+
+  // story #4166 CHANGES-1 — controlled select가 c.location(서버값)만 직접 참조하면
+  // 사용자가 고른 값이 PATCH 응답 전에는 화면에 안 보인다(낙관적 draft 없이는 "선택 즉시
+  // 반영"이 아니라 "응답 뒤에야 반영"). 응답이 늦게 오는(pending) 상황을 실측해 draft가
+  // 그 사이 select 값을 유지하는지 고정.
+  it('⭐PATCH 응답 대기 中에도 select가 방금 고른 값을 낙관적으로 보여준다(draft)', async () => {
+    let resolvePatch: (() => void) | undefined;
+    const patchPending = new Promise<void>((resolve) => { resolvePatch = resolve; });
+    let patched = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1` && init?.method === 'PATCH') {
+        await patchPending;
+        patched = true;
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: { connectors: [{ ...CONNECTOR_ACTIVE, location: patched ? 'asia-northeast3' : 'global' }] },
+          }),
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')!;
+    await act(async () => {
+      select.value = 'asia-northeast3';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    // PATCH가 아직 안 끝난 시점 — select는 서버값(global)이 아니라 방금 고른 값을 보여줘야 한다.
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')?.value).toBe('asia-northeast3');
+
+    await act(async () => { resolvePatch?.(); });
+    await flush();
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')?.value).toBe('asia-northeast3');
+  });
+});

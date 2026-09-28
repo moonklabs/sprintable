@@ -1,7 +1,12 @@
-"""story #3313(마케팅자동화·온보딩 결함) — block_template 없는 사이클형 정의의 stage 이벤트
-알림이 role/action·다음 stage·발행 예시·work item 참조 토큰을 싣는지(AC1/AC2) 실왕복 검증.
-block_template 있는 정의·stage_metadata 없는 비사이클형 정의는 바이트 동일 렌더(AC3, PO
-확定②로 두 갈래 다 커버)."""
+"""story #3313(마케팅자동화·온보딩 결함) — 사이클형 정의의 stage 이벤트 알림이 role/action·
+다음 stage·발행 예시·work item 참조 토큰을 싣는지(AC1/AC2) 실왕복 검증. stage_metadata 없는
+비사이클형 정의는 바이트 동일 렌더(AC3-②, 지어낼 stage_metadata 자체가 없다).
+
+⛔story #4076(2026-09-21) — AC3-①("block_template 있는 정의는 바이트 동일")은 폐기됐다.
+그 전제(block_template 있으면 FE P2 렌더러가 담당하니 이 plain body는 안 건드려도 된다)가
+틀렸다 — 멘션을 받는 에이전트는 block_template을 못 본다. 아래
+`test_definition_with_block_template_now_renders_self_describing_content`가 새 계약(자기
+설명 렌더가 block_template 유무와 무관하게 적용됨)을 pin한다."""
 from __future__ import annotations
 
 import json
@@ -64,6 +69,43 @@ async def _seed_org_project(session, *, slug="e3313"):
     await session.commit()
     project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
     session.add(project)
+    await session.commit()
+    return org.id, project.id
+
+
+async def _seed_org_project_with_owner(session, *, slug="e3313"):
+    """story #4076 — `stage_metadata[stage].gate` 선언이 있는 stage를 발행하면
+    `maybe_create_stage_gate`가 approver="org_owner"를 실제로 해소하려 한다(test_3312의
+    `_seed_org_with_owner`와 동형) — org owner가 없으면 UnknownApproverRoleError로 발행
+    자체가 죽는다(이 함수는 events.py의 try/except GenerationBudgetExceededError 밖이라
+    안 잡힘). 게이트 문구 테스트는 이 helper로 org를 세운다.
+
+    story #4153(2026-09-22, 페드루 PO 確定) — 이 헬퍼가 org_member만 만들고 members
+    앵커(`ensure_human_member`, #3635가 세운 정상 생성경로 choke point가 항상 부르는
+    바로 그 함수)를 빠뜨려, `dispatch_approval_request_cards`의 참여자 INSERT가
+    `conversation_participants_member_id_fkey` 위반으로 조용히 실패(WARNING만)하던
+    실사고 원인이었다(2026-09-22 PR#4523 shard4 로그). 제품 정상 경로(organizations.py
+    OSS bootstrap 등)와 동형으로 앵커를 호출 — 시드만 고쳐서 통과시키는 게 아니라
+    `_resolve_org_owner` 자체도 같은 이유로 방어적 self-heal을 얻었다(recipe_gate_
+    hooks.py, 같은 카드).
+
+    story #4157 — 위 FK 위반은 애초에 하네스 허상이었다(`conversation_participants.
+    member_id`의 team_members FK 자체가 실 DB엔 0092부터 없다). ORM 선언을 실 스키마에
+    맞춘 뒤로는 `ensure_human_member`의 `members` 쓰기만으로 이 하네스의 참여자 INSERT가
+    통과한다 — `TeamMember` 손시드(FK 워크어라운드)는 제거."""
+    from app.models.organization import Organization
+    from app.models.project import OrgMember, Project
+    from app.services.agent_anchor_sync import ensure_human_member
+
+    org = Organization(id=uuid.uuid4(), name="Org3313", slug=slug)
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=uuid.uuid4(), role="owner")
+    session.add(owner_member)
+    await session.commit()
+    await ensure_human_member(session, owner_member.id)
     await session.commit()
     return org.id, project.id
 
@@ -332,9 +374,11 @@ async def test_doc_work_item_now_resolves_to_reference_token():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_definition_with_block_template_renders_byte_identical_to_old_generic():
-    """⭐AC3-① — block_template이 있는 정의는 이 스토리 이전과 바이트 동일(회귀 0). P2(#2637)
-    FE 렌더러가 그 정의를 이미 담당하므로 이 plain body는 손대지 않는다."""
+async def test_definition_with_block_template_now_renders_self_describing_content():
+    """⭐story #4076 — AC3-①(옛 「block_template 있으면 바이트 동일」) 폐기를 직접 pin.
+    가드에서 `block_template is not None` 절을 되돌리면 이 테스트가 다시 제네릭 폴백만
+    받아 RED가 된다(뮤테이션 셀프체크 대상). block_template 필드 자체는 그대로 저장돼
+    있다는 것도 같이 확認(FE 카드 회귀 0 — 필드는 안 건드렸다는 근거)."""
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
@@ -343,14 +387,156 @@ async def test_definition_with_block_template_renders_byte_identical_to_old_gene
             story_id = await _seed_story(s, org_id, project_id)
             definition_key = await _seed_definition(
                 s, org_id, slug="e3313d",
-                stage_metadata={"monitor": {"role": "Scout", "action": "감지"}},
+                stage_metadata={
+                    "monitor": {"role": "Scout", "action": "감지"},
+                    "research": {"role": "Researcher", "action": "조사"},
+                },
                 block_template={"title": "템플릿 있음"},
             )
             payload = {"stage": "monitor", "work_item_type": "story", "work_item_id": str(story_id)}
             content, _resp = await _publish_and_get_content(
                 s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
             )
-            assert content == _generic_expected(definition_key, payload)
+            assert content != _generic_expected(definition_key, payload)
+            assert "- stage: monitor (Scout)" in content
+            assert "- 할 일: 감지" in content
+            assert "- 다음 단계: research (Researcher)" in content
+            assert "publish_event(" in content
+
+            from sqlalchemy import select
+            from app.models.event_definition import EventDefinition
+
+            row = (await s.execute(
+                select(EventDefinition).where(EventDefinition.key == definition_key)
+            )).scalar_one()
+            assert row.block_template == {"title": "템플릿 있음"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_current_stage_gate_shows_already_open_sentence_and_no_immediate_example():
+    """⭐story #4076 ④(스코프 B) — 지금 발행되는 stage 자체에 gate 선언이 있으면, 그
+    발행(=이 알림을 만드는 바로 그 발행)이 `maybe_create_stage_gate`로 이미 게이트를 열어
+    뒀다(events.py:1845 이하, routing 직후·메시지 발송 前). 다음 stage를 지금 발행하면
+    안 되므로(승인 대기 中) 즉시 발행 예시를 생략하고 "이미 열려 있습니다" 문구로 대체.
+    뮤테이션 셀프체크 대상: 이 gate 분기를 지우면 publish_event(가 다시 나타나 RED."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project_with_owner(s, slug="e3313h")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e3313h",
+                stage_metadata={
+                    "monitor": {
+                        "role": "Scout", "action": "감지",
+                        "gate": {"type": "checkpoint", "approver": "org_owner"},
+                    },
+                    "research": {"role": "Researcher", "action": "조사"},
+                },
+            )
+            payload = {"stage": "monitor", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "지금 사람 승인 게이트가 열려 있어요(승인자 역할: org 소유자)" in content
+            assert "preset.gate.verdict" in content
+            assert "- 다음 단계: research (Researcher)" in content
+            assert "publish_event(" not in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_next_stage_gate_keeps_example_and_appends_opens_on_publish_note():
+    """⭐story #4076 ④(스코프 A) — 지금 stage엔 gate가 없지만, 안내하는 다음 stage 자체에
+    gate 선언이 있으면 그 발행이 게이트를 여는 트리거다. 발행 예시를 빼면 에이전트가 게이트를
+    여는 방법 자체를 모르게 되므로(페드루 PO 지적) 예시는 그대로 두고 결과 안내만 덧붙인다.
+    뮤테이션 셀프체크 대상: 안내 문장을 지우면 이 assert만 RED(예시 자체는 안 깨짐)."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project_with_owner(s, slug="e3313i")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e3313i",
+                stage_metadata={
+                    "monitor": {"role": "Scout", "action": "감지"},
+                    "research": {
+                        "role": "Researcher", "action": "조사",
+                        "gate": {"type": "checkpoint", "approver": "org_owner"},
+                    },
+                },
+            )
+            payload = {"stage": "monitor", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "publish_event(" in content
+            assert "- 다음 단계: research (Researcher)" in content
+            assert "이 발행을 하면 사람 승인 게이트가 열려요" in content
+            assert "preset.gate.verdict" in content
+            assert "지금 사람 승인 게이트가 열려 있어요" not in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_next_stage_generation_budget_gate_seeds_example_with_sealed_field():
+    """⭐story #4085 AC1(리허설 1호 실측) — 다음 stage의 게이트가 generation_budget이면
+    발행 예시 payload에 estimated_cost_minor가 실값 예시로 채워지고, 바로 아래 그 값이
+    왜 필요한지 설명이 붙는다. 실사고: 이 필드가 예시에 없어 댄이 그대로 발행했다가
+    봉인 비용 없는 게이트가 열렸다(#4044 기존 "미설정이면 통과"는 예산 검사 규약이지
+    예시가 필드를 숨겨도 된다는 뜻이 아니었다). 뮤테이션 셀프체크 대상: 봉인필드 주입
+    로직을 지우면 estimated_cost_minor가 예시에서 사라져 RED."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project_with_owner(s, slug="e3313j")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e3313j",
+                stage_metadata={
+                    "structure_ok": {"role": "Director", "action": "구조 확인"},
+                    "structure_passed": {
+                        "role": "Creator", "action": "제작 착수",
+                        "gate": {"type": "generation_budget", "approver": "org_owner"},
+                    },
+                },
+                payload_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["stage", "work_item_type", "work_item_id"],
+                    "properties": {
+                        "stage": {"type": "string", "enum": ["structure_ok", "structure_passed"]},
+                        "work_item_type": {"type": "string"},
+                        "work_item_id": {"type": "string", "format": "uuid"},
+                        "estimated_cost_minor": {"type": ["integer", "null"]},
+                    },
+                },
+            )
+            payload = {"stage": "structure_ok", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            example_line = next(
+                line for line in content.splitlines()
+                if line.startswith("- 다음 단계로 넘기는 발행 예시: publish_event(")
+            )
+            example_json = example_line.removeprefix(
+                "- 다음 단계로 넘기는 발행 예시: publish_event("
+            ).removesuffix(")")
+            example = json.loads(example_json)
+            assert example["payload"]["stage"] == "structure_passed"
+            assert example["payload"]["estimated_cost_minor"] == 10_000
+            assert "estimated_cost_minor는 위 예시값이 아니라 실제 예상 비용" in content
+            assert "이 발행을 하면 사람 승인 게이트가 열려요" in content
     finally:
         await engine.dispose()
 
@@ -434,5 +620,206 @@ async def test_legacy_stage_metadata_missing_action_falls_back_without_crashing_
                 s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
             )  # KeyError 없이 여기까지 도달하는 것 자체가 핵심 단언.
             assert content == _generic_expected(definition_key, payload)
+    finally:
+        await engine.dispose()
+
+
+# ─── story #4088(E-RECIPE-1, PO 분담조정 2026-09-21 "2/2") — 리허설 1호 자기설명 멘션
+# 구멍 3종(도구·앵커 힌트). 전부 stage_metadata.capability.kind/gate.type 선언에서만
+# 유도(하드코딩 0) — 아래 3건이 각 트리거 신호를 직접 pin한다.
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_capability_kind_attach_video_shows_attach_tool_hint():
+    """⭐구멍① — stage_metadata[stage].capability.kind=="attach_video"면 산출물을
+    attach_channel_post_video로 초안에 첨부하라는 안내가 뜬다. 뮤테이션 셀프체크 대상:
+    _CAPABILITY_KIND_HINTS에서 "attach_video" 항목을 지우면 이 assert가 RED."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="e4088a")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e4088a",
+                stage_metadata={
+                    "editing": {
+                        "role": "Creator", "action": "편집 통일 패스",
+                        "capability": {"kind": "attach_video"},
+                    },
+                    "draft": {"role": "Creator", "action": "다음 단계"},
+                },
+                payload_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["stage", "work_item_type", "work_item_id"],
+                    "properties": {
+                        "stage": {"type": "string", "enum": ["editing", "draft"]},
+                        "work_item_type": {"type": "string"}, "work_item_id": {"type": "string", "format": "uuid"},
+                    },
+                },
+            )
+            payload = {"stage": "editing", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "영상은 attach_channel_post_video로 초안에 첨부해요." in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_capability_kind_generate_shows_master_cut_evidence_hint():
+    """⭐구멍② — stage_metadata[stage].capability.kind=="generate"(live_generation이 이미
+    쓰는 그 값)면 마스터컷 evidence(type=url·ref=live-run:master-cut) 안내가 뜬다."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="e4088b")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e4088b",
+                stage_metadata={
+                    "live_generation": {
+                        "role": "Compute", "action": "실탄 생성",
+                        "capability": {"kind": "generate"},
+                    },
+                    "verification": {"role": "Creator", "action": "검증"},
+                },
+                payload_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["stage", "work_item_type", "work_item_id"],
+                    "properties": {
+                        "stage": {"type": "string", "enum": ["live_generation", "verification"]},
+                        "work_item_type": {"type": "string"}, "work_item_id": {"type": "string", "format": "uuid"},
+                    },
+                },
+            )
+            payload = {"stage": "live_generation", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "type=url·ref=live-run:master-cut evidence를 남겨야 계보가 생겨요." in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_capability_kind_generate_also_shows_generation_connector_tool_hint():
+    """story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — capability.kind=="generate"
+    힌트에 get_generation_connector(플러그인 도구, sprintable-agent-plugins PR #52) 안내
+    문장이 마스터컷 evidence 문장과 나란히 뜬다(같은 키, 두 문장 — 서로 다른 사실 축)."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="e4111a")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e4111a",
+                stage_metadata={
+                    "live_generation": {
+                        "role": "Compute", "action": "실탄 생성",
+                        "capability": {"kind": "generate"},
+                    },
+                    "verification": {"role": "Creator", "action": "검증"},
+                },
+                payload_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["stage", "work_item_type", "work_item_id"],
+                    "properties": {
+                        "stage": {"type": "string", "enum": ["live_generation", "verification"]},
+                        "work_item_type": {"type": "string"}, "work_item_id": {"type": "string", "format": "uuid"},
+                    },
+                },
+            )
+            payload = {"stage": "live_generation", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "get_generation_connector로 org 커넥터 config·자격을 받아 자기 실행해요." in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_next_stage_external_publish_gate_shows_auto_satisfy_hint():
+    """⭐구멍③ — 다음 stage의 gate.type=="external_publish"면(gate_type 자체로 유도, stage
+    이름 하드코딩 0) 같은 스토리에 채널 초안을 제출하면 승인이 자동 충족된다는 안내가
+    기존 "게이트가 열려요" 문구 바로 뒤에 붙는다."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="e4088c")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e4088c",
+                stage_metadata={
+                    "editing": {"role": "Creator", "action": "편집"},
+                    "pending_approval": {
+                        "role": "Director", "action": "최종 승인",
+                        "gate": {"type": "external_publish", "approver": "org_owner"},
+                    },
+                },
+                payload_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["stage", "work_item_type", "work_item_id"],
+                    "properties": {
+                        "stage": {"type": "string", "enum": ["editing", "pending_approval"]},
+                        "work_item_type": {"type": "string"}, "work_item_id": {"type": "string", "format": "uuid"},
+                    },
+                },
+            )
+            payload = {"stage": "editing", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "이 발행을 하면 사람 승인 게이트가 열려요" in content
+            assert "같은 스토리에 채널 초안을 만들어 제출해 두면 사람 승인 한 번으로 자동 발행까지 이어져요." in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_gate_type_other_than_external_publish_does_not_show_auto_satisfy_hint():
+    """음성대조 — 다음 stage의 gate.type이 external_publish가 아니면(예: generation_budget)
+    자동충족 안내는 안 뜬다(구멍③이 gate_type 특정값에만 좁게 반응하는지)."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project_with_owner(s, slug="e4088d")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e4088d",
+                stage_metadata={
+                    "structure_ok": {"role": "Director", "action": "구조 확인"},
+                    "structure_passed": {
+                        "role": "Creator", "action": "제작 착수",
+                        "gate": {"type": "generation_budget", "approver": "org_owner"},
+                    },
+                },
+                payload_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["stage", "work_item_type", "work_item_id"],
+                    "properties": {
+                        "stage": {"type": "string", "enum": ["structure_ok", "structure_passed"]},
+                        "work_item_type": {"type": "string"}, "work_item_id": {"type": "string", "format": "uuid"},
+                        "estimated_cost_minor": {"type": ["integer", "null"]},
+                    },
+                },
+            )
+            payload = {"stage": "structure_ok", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "이 발행을 하면 사람 승인 게이트가 열려요" in content
+            assert "자동 발행까지 이어져요" not in content
     finally:
         await engine.dispose()

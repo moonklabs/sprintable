@@ -120,3 +120,62 @@ describe('useWorkListSelection', () => {
     expect(replaceCalls.at(-1)).toBe('/work-list?goal=g1');
   });
 });
+
+// [SID:4367] 한 Esc = 한 층 — 선택 해제(document Esc)는 상세 패널을 통째로 내린다. 패널 안 안쪽 층(실제 산출물 댓글 쓰기 칸)이
+// Esc로 자기를 닫고 preventDefault했으면 선택은 그대로 · 표시 없는 Esc(다른 곳)는 예전처럼 선택 해제(양성 대조).
+describe('useWorkListSelection — 안쪽이 쓴 Esc는 선택 해제 안 함([SID:4367])', () => {
+  it('선택된 채 댓글 쓰기 칸에서 Esc → 칸만 닫힘 · 선택 그대로 → 다른 곳 Esc → 선택 해제', async () => {
+    const { NextIntlClientProvider } = await import('next-intl');
+    const { CommentComposePopover } = await import('@/components/canvas/comment-compose-popover');
+    const koMessages = (await import('../../../messages/ko.json')).default;
+    searchParamsRef.current = new URLSearchParams('row=row-a');
+    const onCancel = vi.fn();
+    function WithCompose() {
+      const [selectedRowId] = useWorkListSelection();
+      return (
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <div data-testid="selected">{selectedRowId ?? 'none'}</div>
+          <button type="button" data-testid="plain">plain</button>
+          <CommentComposePopover onSubmit={async () => true} draftTargetId="a1" onCancel={onCancel} />
+        </NextIntlClientProvider>
+      );
+    }
+    await act(async () => { root.render(<WithCompose />); });
+    expect(selectedText()).toBe('row-a');
+    const esc = (t: EventTarget) => t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await act(async () => { esc(container.querySelector('textarea')!); });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(replaceCalls).toEqual([]);
+    await act(async () => { esc(container.querySelector('[data-testid="plain"]')!); });
+    expect(replaceCalls.at(-1)).toBe('/work-list');
+  });
+});
+
+// [SID:4369] 유나 규칙 — 상세 패널(`data-work-list-detail`) 안 글 있는 여러 줄 칸의 첫 Esc = 칸에서만(선택 · 글 그대로 · 초점 = 패널 뿌리) ·
+// 둘째 Esc = 선택 해제 · 조합 중 Esc = 아무것도 안 함.
+describe('useWorkListSelection — 여러 줄 칸 Esc 규칙([SID:4369])', () => {
+  function WithDetail() {
+    const [selectedRowId] = useWorkListSelection();
+    return (
+      <div>
+        <div data-testid="selected">{selectedRowId ?? 'none'}</div>
+        <aside data-work-list-detail="" tabIndex={-1} data-testid="detail"><textarea data-testid="reason" defaultValue="결재 사유 쓰던 글" /></aside>
+      </div>
+    );
+  }
+  it('칸 글 있음: 첫 Esc = 칸에서만 · 둘째 Esc = 선택 해제 · 조합 중 = 그대로', async () => {
+    searchParamsRef.current = new URLSearchParams('row=row-a');
+    await act(async () => { root.render(<WithDetail />); });
+    const reason = container.querySelector('[data-testid="reason"]') as HTMLTextAreaElement;
+    const esc = (t: EventTarget, init: KeyboardEventInit = {}) => t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init }));
+    reason.focus();
+    await act(async () => { esc(reason, { isComposing: true }); });
+    expect(replaceCalls).toEqual([]);
+    await act(async () => { esc(reason); });
+    expect(replaceCalls).toEqual([]);
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="detail"]'));
+    expect(reason.value).toBe('결재 사유 쓰던 글');
+    await act(async () => { esc(document.activeElement!); });
+    expect(replaceCalls.at(-1)).toBe('/work-list');
+  });
+});

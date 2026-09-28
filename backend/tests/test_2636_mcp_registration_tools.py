@@ -32,6 +32,7 @@ async def test_register_event_definition_posts_to_definitions_endpoint():
         mock_client.post = AsyncMock(side_effect=fake_post)
         out = await register_event_definition(RegisterEventDefinitionInput(
             key="org.acme.widget.made",
+            name="위젯 만듦",
             payload_schema={"type": "object", "additionalProperties": False},
             routing={
                 "escalation": {"kind": "server_derived", "target": "none"},
@@ -41,6 +42,8 @@ async def test_register_event_definition_posts_to_definitions_endpoint():
 
     assert calls[0][0] == "/api/v2/events/definitions"
     assert calls[0][1]["key"] == "org.acme.widget.made"
+    # story #4329 — 서버가 필수로 받는 name을 싣는다(예전엔 빠져 등록이 늘 422).
+    assert calls[0][1]["name"] == "위젯 만듦" and "description" not in calls[0][1]
     parsed = json.loads(out[0].text)
     assert parsed["id"] == "d1"
 
@@ -52,7 +55,7 @@ async def test_register_event_definition_error_surfaces():
     with patch("sprintable_mcp.tools.events.client") as mock_client:
         mock_client.post = AsyncMock(side_effect=Exception("invalid_definition: bad key"))
         out = await register_event_definition(RegisterEventDefinitionInput(
-            key="bad", payload_schema={}, routing={},
+            key="bad", name="Bad", payload_schema={}, routing={},
         ))
     assert "error" in out[0].text.lower()
 
@@ -92,7 +95,7 @@ def test_register_input_rejects_unknown_field_direct_construction():
     from sprintable_mcp.tools.events import RegisterEventDefinitionInput
 
     with pytest.raises(ValidationError):
-        RegisterEventDefinitionInput(key="k", payload_schema={}, routing={}, totally_bogus_arg=1)
+        RegisterEventDefinitionInput(key="k", name="K", payload_schema={}, routing={}, totally_bogus_arg=1)
 
 
 def test_update_input_rejects_unknown_field_direct_construction():

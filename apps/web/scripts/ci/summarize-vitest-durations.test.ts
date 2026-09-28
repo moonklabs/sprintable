@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { extractDurationEntries, formatTopTable } from './summarize-vitest-durations.mjs';
 
+// (story #4333 — «측정치×3» 시한 관례는 폐기 · 이 표는 느린 테스트를 찾는 관측용으로만 남는다.)
 // story #3904 — CI가 개별 테스트 duration을 로그에 안 남기던 갭(story #3902의 「측정치×3」
 // 이 CI 로그 실측 대신 로컬 5회 관측으로 대체된 원인) 처방. 이 파일은 순수 로직(extractDurationEntries·
 // formatTopTable)만 픽스처로 검증한다 — 파일 I/O·vitest 실 실행은 CI 워크플로 자체가 통합

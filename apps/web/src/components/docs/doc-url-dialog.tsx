@@ -48,7 +48,7 @@ export function DocUrlDialog({ open, onClose, currentSlug, title, onSubmit, labe
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{labels.editUrl}</DialogTitle>
-          <DialogDescription>{labels.urlDialogDesc}</DialogDescription>
+          <DialogDescription className="break-keep">{labels.urlDialogDesc}</DialogDescription>
         </DialogHeader>
         <DocUrlDialogForm
           currentSlug={currentSlug}
@@ -129,7 +129,7 @@ function DocUrlDialogForm({
         )}
 
         {suggestion ? (
-          <p className="text-xs text-warning-strong">
+          <p className="break-keep text-xs text-warning-strong">
             {labels.slugTaken} →{' '}
             <button
               type="button"
@@ -140,9 +140,9 @@ function DocUrlDialogForm({
             </button>
           </p>
         ) : invalid ? (
-          <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{labels.slugInvalid}</p>
+          <p className="break-keep text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{labels.slugInvalid}</p>
         ) : hasExistingSlug ? (
-          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+          <p className="flex items-center gap-1 break-keep text-xs text-muted-foreground">
             <Info className="size-3 shrink-0" />
             {labels.aliasNote}
           </p>

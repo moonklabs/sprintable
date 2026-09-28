@@ -61,9 +61,19 @@ async def publish_event(args: PublishEventInput) -> list[TextContent]:
                 type="text",
                 text=warning_line + json.dumps(result, indent=2, ensure_ascii=False, default=_default_serializer),
             )]
+        # story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §c) — 사람 역할 stage 발행은
+        # zero_reach_warning이 False로 오면서 이 notice가 같이 실린다(경고와 다른 접두
+        # "[안내]" — 경고가 아니라는 걸 에이전트가 즉시 구분하게, warning 분기와 동일 강조
+        # 관례만 재사용).
+        if isinstance(result, dict) and result.get("notice"):
+            notice_line = f"[안내] {result['notice']}\n\n"
+            return [TextContent(
+                type="text",
+                text=notice_line + json.dumps(result, indent=2, ensure_ascii=False, default=_default_serializer),
+            )]
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_event_definitions(args: ListEventDefinitionsInput) -> list[TextContent]:
@@ -76,11 +86,15 @@ async def list_event_definitions(args: ListEventDefinitionsInput) -> list[TextCo
     try:
         return ok(await client.get("/api/v2/events/definitions"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 class RegisterEventDefinitionInput(SprintableInput):
     key: str
+    # story #4329(까디르 ① 가드가 찾음) — 서버는 #3745부터 사람용 표시 이름을 필수로 받는다(비면 · key와 같으면 422). 예전엔
+    # 이 도구가 name을 안 보내 등록이 늘 422였다.
+    name: str
+    description: str | None = None
     payload_schema: dict
     routing: dict
 
@@ -107,11 +121,12 @@ async def register_event_definition(args: RegisterEventDefinitionInput) -> list[
     발행은 events 그룹입니다.
     """
     try:
-        return ok(await client.post("/api/v2/events/definitions", json={
-            "key": args.key, "payload_schema": args.payload_schema, "routing": args.routing,
-        }))
+        body: dict = {"key": args.key, "name": args.name, "payload_schema": args.payload_schema, "routing": args.routing}
+        if args.description is not None:
+            body["description"] = args.description
+        return ok(await client.post("/api/v2/events/definitions", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_event_definition(args: UpdateEventDefinitionInput) -> list[TextContent]:
@@ -131,4 +146,4 @@ async def update_event_definition(args: UpdateEventDefinitionInput) -> list[Text
     try:
         return ok(await client.patch(f"/api/v2/events/definitions/{args.definition_id}", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

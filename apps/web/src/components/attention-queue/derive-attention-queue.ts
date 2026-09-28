@@ -84,6 +84,20 @@ function unwrapEnvelope(json: unknown): unknown {
  * 항목은 claim/href를 지어낼 수 없으니 제외(no-fiction). `gate_pending`과 미지 kind는
  * KNOWN_KINDS 밖이라 자동 생략(exception-stream의 동일 원칙 재사용).
  */
+/** story #4382 — BE가 신호 kind별 100건에서 자른 kind 목록(`truncated_kinds`). 비어 있지 않으면 받은 목록이 전부가 아니다 — 남은 수를
+ * 정확한 수로 말하지 않는다(«N건 이상»). 필드가 없거나 모양이 다르면 false(예전 BE · 무회귀). */
+export function parseAttentionTruncated(json: unknown): boolean {
+  return parseAttentionTruncatedKinds(json).length > 0;
+}
+
+/** BE가 자른 신호 kind 목록(문자열만). 필드가 없거나 모양이 다르면 빈 목록(예전 BE · 무회귀). */
+export function parseAttentionTruncatedKinds(json: unknown): string[] {
+  const inner = unwrapEnvelope(json);
+  if (!isRecord(inner)) return [];
+  const kinds = inner['truncated_kinds'];
+  return Array.isArray(kinds) ? kinds.filter((k): k is string => typeof k === 'string') : [];
+}
+
 export function parseAttentionQueueSignals(json: unknown): BeAttentionItem[] {
   const inner = unwrapEnvelope(json);
   const rawItems = Array.isArray(inner) ? inner : isRecord(inner) ? inner['items'] : null;
@@ -147,9 +161,12 @@ export const BUCKET_BY_KIND: Record<AttentionKind, AttentionBucket> = {
  * 엣지 1개당 1행을 주므로 story_id별 집계해 실 차단 건수를 claim에 반영(v1 클라 파생과 동일
  * UX·집계 지점만 이동).
  */
+/** withProject — story #4231 4차: 보드(옛 자원 경로 · flat 목적지) 링크에 프로젝트를 싣는 함수(필수). 이 큐는 한 프로젝트의 신호라 호출처는
+ * 그 프로젝트를 싣는 함수를 넘긴다. */
 export function buildAttentionQueueFromBe(
   signals: BeAttentionItem[],
   t: AttentionQueueTranslator,
+  withProject: (href: string) => string,
 ): AttentionQueueItem[] {
   const items: AttentionQueueItem[] = [];
   const blockedByStory = new Map<string, { title: string; count: number; enteredAtMs: number | null }>();
@@ -189,14 +206,14 @@ export function buildAttentionQueueFromBe(
         id: `verify_fail-${sig.story_id}`, kind: 'verify_fail', bucket: BUCKET_BY_KIND.verify_fail, kindLabel: t('kindVerifyFail'),
         proofState: PROOF_STATE.verify_fail, claim: t('claimVerifyFail', { title: sig.title }),
         actor: null, actionLabel: t('actionRework'), actionTone: 'neutral',
-        href: `/board?story=${sig.story_id}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+        href: withProject(`/flow?story=${sig.story_id}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     } else if (sig.kind === 'merge_ready') {
       items.push({
         id: `merge_ready-${sig.story_id}`, kind: 'merge_ready', bucket: BUCKET_BY_KIND.merge_ready, kindLabel: t('kindMergeReady'),
         proofState: PROOF_STATE.merge_ready, claim: t('claimMergeReady', { title: sig.title }),
         actor: null, actionLabel: t('actionMerge'), actionTone: 'ready',
-        href: `/board?story=${sig.story_id}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+        href: withProject(`/flow?story=${sig.story_id}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     }
   }
@@ -206,7 +223,7 @@ export function buildAttentionQueueFromBe(
       id: `blocked-${storyId}`, kind: 'blocked', bucket: BUCKET_BY_KIND.blocked, kindLabel: t('kindBlocked'),
       proofState: PROOF_STATE.blocked, claim: t('claimBlocked', { title, count }),
       actor: null, actionLabel: t('actionCoordinate'), actionTone: 'neutral',
-      href: `/board?story=${storyId}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+      href: withProject(`/flow?story=${storyId}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
   for (const [storyId, { title, enteredAtMs, originKind }] of decisionNeededByStory) {
@@ -217,7 +234,7 @@ export function buildAttentionQueueFromBe(
       id: `decision_needed-${storyId}`, kind: 'decision_needed', bucket: originKind === 'gate_pending' ? 'GATE' : 'STEER', kindLabel: t('kindDecisionNeeded'),
       proofState: PROOF_STATE.decision_needed, claim: t('claimDecisionNeeded', { title }),
       actor: null, actionLabel: t('actionDecide'), actionTone: 'primary',
-      href: `/board?story=${storyId}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+      href: withProject(`/flow?story=${storyId}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
   return items;

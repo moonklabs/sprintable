@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import { pickEulReulJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -126,10 +127,10 @@ function InlineChip({ children, swatch }: { children: React.ReactNode; swatch?: 
   );
 }
 
-function StatusDot({ on }: { on: boolean }) {
+function StatusDot({ on, className }: { on: boolean; className?: string }) {
   return (
     <span
-      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full align-middle ${on ? 'bg-success' : 'bg-muted-foreground'}`}
+      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full align-middle ${on ? 'bg-success' : 'bg-muted-foreground'}${className ? ` ${className}` : ''}`}
       aria-hidden="true"
     />
   );
@@ -550,13 +551,14 @@ export default function ContentRulesPage() {
               <RuleRowShell
                 field="utm_rules" rules={rules} canEdit={canEditRules} expandedField={expandedField}
                 setExpandedField={setExpandedField} title={fieldTitle('utm_rules')}
+                // [SID:4282 · 유나 비차단] flex면 390에서 «켜짐»과 세부(· source … · medium …)가 두 칸으로 갈렸다 → 점을 글줄 안에 두고 한 문단으로 흐르게.
                 status={
-                  <span className="flex items-center gap-1.5 text-xs" data-testid="content-rules-utm-rules-status">
+                  <span className="text-xs" data-testid="content-rules-utm-rules-status">
                     {rules.utm_rules === null ? (
                       <span className="text-muted-foreground">{t('contentRulesNotSetLabel')}</span>
                     ) : (
                       <>
-                        <StatusDot on={rules.utm_rules.enabled} />
+                        <StatusDot on={rules.utm_rules.enabled} className="mr-1.5" />
                         {rules.utm_rules.enabled ? (
                           <>
                             {t('utmRulesEnabledOnLabel')}
@@ -714,10 +716,10 @@ export default function ContentRulesPage() {
               <AlertDescription>
                 {conflictField.viaUndo ? `${t('contentRulesUndoFailedPrefix')} ` : ''}
                 {conflictField.updatedByMemberId !== null && conflictField.updatedByMemberId === currentTeamMemberId
-                  ? t('versionConflictFieldSelfOtherTab', { field: fieldTitle(conflictField.field) })
+                  ? t('versionConflictFieldSelfOtherTab', { field: fieldTitle(conflictField.field), josa: pickEulReulJosa(fieldTitle(conflictField.field)) })
                   : conflictField.updatedByName
-                    ? t('versionConflictFieldWithName', { field: fieldTitle(conflictField.field), name: conflictField.updatedByName })
-                    : t('versionConflictFieldFact', { field: fieldTitle(conflictField.field) })}
+                    ? t('versionConflictFieldWithName', { field: fieldTitle(conflictField.field), name: conflictField.updatedByName, josa: pickEulReulJosa(fieldTitle(conflictField.field)) })
+                    : t('versionConflictFieldFact', { field: fieldTitle(conflictField.field), josa: pickIGaJosa(fieldTitle(conflictField.field)) })}
               </AlertDescription>
             </Alert>
           ) : null}

@@ -265,6 +265,14 @@ SOURCE_ONLY_TYPES: frozenset[str] = frozenset({"chat_message", "meeting"})
 # 역참조+멘션 자동감지)엔 TARGET_ONLY로 충분 — 검색 picker가 실증되면 그때 별도 스토리로 승격.
 TARGET_ONLY_TYPES: frozenset[str] = frozenset({"chat_message", "gate", "pull_request", "member"})
 
+# story #4141 — `reconcile_entity_references(target_types=...)` 호출부가 "완전지원 +
+# target-only 전부"를 열고 싶을 때 쓰는 합집합. conversations.py::_send_message(2889,
+# gate/pull_request/member 3종 명시 확장)가 이 조합을 literal로 이미 한 번 짰었다 —
+# evidence.py의 #4141 write-path(gate 핀)가 두 번째로 같은 조합이 필요해지면서 literal
+# 재타이핑 대신 여기 한 곳으로 합쳤다(두 곳이 각자 타이핑하면 TARGET_ONLY_TYPES에 멤버가
+# 늘 때 한쪽만 안 따라오는 드리프트가 남는다 — 이 파일이 이미 여러 번 겪은 그 클래스).
+WRITE_TARGET_TYPES_WITH_TARGET_ONLY: frozenset[str] = frozenset(ENTITY_RESOLVERS) | TARGET_ONLY_TYPES
+
 # TARGET_ONLY_TYPES 멤버의 존재판정 resolver. ENTITY_RESOLVERS와 분리된 이유는 위와 동일 —
 # 이 dict에 들어간다고 검색/MCP/project축 계약까지 진 것으로 오인되면 안 된다.
 #

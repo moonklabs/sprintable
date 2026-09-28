@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 
 export interface FacebookPageCandidate {
   page_id: string;
@@ -82,11 +82,12 @@ export function FacebookPageSelectCard({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  const channelLabel = useChannelLabel();
 
   // §5-2 규율 그대로(연결 시작과 같은 owner 전용 폭 — authorize_channel_connection이
   // 이미 owner만 통과시키므로 select도 그 연장선). 비활성이 아니라 안 그린다.
   if (!isOwner) {
-    return <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel, t) })}</p>;
+    return <p className="text-xs text-muted-foreground">{t('channelConnectOwnerOnlyReason', { channel: channelLabel(channel) })}</p>;
   }
 
   // §13-8③ — 0개는 두 원인(관리하는 페이지/계정 없음 · 목록 권한 미승인)을 하나로

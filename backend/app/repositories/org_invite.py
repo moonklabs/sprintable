@@ -101,7 +101,7 @@ class OrgInviteRepository:
                 OrgInvite.status == "pending",
                 OrgInvite.expires_at > now,
             )
-            .order_by(OrgInvite.created_at.desc())
+            .order_by(OrgInvite.created_at.desc(), OrgInvite.id.desc())
         )
         return list(result.scalars().all())
 

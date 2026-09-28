@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext, getOrgProjectAuthContext: getAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET, POST } from './route';

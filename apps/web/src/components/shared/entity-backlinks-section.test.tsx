@@ -100,18 +100,75 @@ describe('EntityBacklinksSection', () => {
   });
 
   it('빈 목록이면 수집범위를 실은 0건 문구를 보인다(미수집을 없음으로 표시하지 않는다)', async () => {
+    // story #4141 — evidence_free_text_reference는 BE가 더는 안 보낸다(evidence가 이제
+    // 정식 source_type이라 그 exclude 사유 자체가 소멸, backlinks.py 참조). 픽스처를 BE가
+    // 실제로 낼 수 있는 값(pr_sid_text_convention뿐)으로 되돌리고, evidence는 source_types
+    // 쪽에 새로 넣어 사람 낱말 매핑을 같이 확認한다.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [],
       meta: {
         next_cursor: null, has_more: false,
-        collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: ['pr_sid_text_convention', 'evidence_free_text_reference'] },
+        collection_scope: { source_types: ['chat_message', 'doc', 'evidence'], forms: 'all', excludes: ['pr_sid_text_convention'] },
       },
     }))));
     await render('story', 's1');
     expect(container.textContent).toContain('관찰된 참조 0건');
-    expect(container.textContent).toContain('chat_message');
-    expect(container.textContent).toContain('PR/커밋');
+    // story #4096(리허설 1호 실측) — source_types 원문 코드(내부어)는 안 보이고 사람 낱말로만.
+    expect(container.textContent).not.toContain('chat_message');
+    expect(container.textContent).toContain('대화');
+    expect(container.textContent).toContain('문서');
     expect(container.textContent).toContain('증거');
+    expect(container.textContent).toContain('PR/커밋');
+    // 조사 플레이스홀더(«참조은(는)»류)가 그대로 안 남고, 결정적으로 고른 조사(여기선 "PR/
+    // 커밋의 [SID:XXX] 텍스트 관례"의 «관례»=받침 없음 → "는")가 실제로 붙는다.
+    expect(container.textContent).not.toContain('은(는)');
+    expect(container.textContent).toContain('관례는 미수집');
+  });
+
+  it('source_types/excludes 매핑에 없는 미지 코드는 원문 코드 그대로 보인다(지어내지 않는다)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [],
+      meta: {
+        next_cursor: null, has_more: false,
+        collection_scope: { source_types: ['future_source_type'], forms: 'all', excludes: ['future_exclude_code'] },
+      },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('future_source_type');
+    expect(container.textContent).toContain('future_exclude_code');
+    // 받침 있는 미지 코드("_code"의 「e」는 한글이 아니므로 lastHangulChar가 한글만 훑는다 —
+    // 이 케이스는 완전 비한글이라 「는」으로 폴백(korean-particle.ts 관례).
+    expect(container.textContent).toContain('future_exclude_code는 미수집');
+  });
+
+  it('story #4141 — evidence·artifact 항목이 라벨·아이콘과 함께 실제로 렌더된다(source_type=doc/meeting/story와 동형)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [
+        {
+          id: 'r1', source_type: 'evidence', source_id: 'ev1', created_by: null,
+          created_at: '2026-09-22T00:00:00Z', relation: 'none', still_exists: true,
+          doc: null, message: null, meeting: null, story: null,
+          evidence: { id: 'ev1', title: '컨셉 브리프 v1' }, artifact: null,
+        },
+        {
+          id: 'r2', source_type: 'artifact', source_id: 'a1', created_by: null,
+          created_at: '2026-09-22T00:00:00Z', relation: 'none', still_exists: false,
+          doc: null, message: null, meeting: null, story: null,
+          evidence: null, artifact: { id: 'a1', title: '무드보드' },
+        },
+      ],
+      meta: { next_cursor: null, has_more: false, collection_scope: null },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('컨셉 브리프 v1');
+    expect(container.textContent).toContain('무드보드');
+    // still_exists=false인 artifact 항목만 «대상이 없어요» 배지가 붙는다(evidence 항목엔 없음).
+    const goneMatches = container.textContent?.match(/대상이 없어요/g) ?? [];
+    expect(goneMatches.length).toBe(1);
+    // 아이콘이 실제 DOM에 그려졌는지(각 li당 svg 1개 이상).
+    const items = container.querySelectorAll('li');
+    expect(items.length).toBe(2);
+    items.forEach((li) => expect(li.querySelector('svg')).not.toBeNull());
   });
 
   it('빈 목록에 살아있는 항목만 있으면 「대상이 없어요」가 안 뜬다(정상 케이스 오탐 방지)', async () => {
@@ -122,6 +179,87 @@ describe('EntityBacklinksSection', () => {
     await render('story', 's1');
     expect(container.textContent).toContain('살아있는 문서');
     expect(container.textContent).not.toContain('대상이 없어요');
+  });
+
+  // story #4091(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §c) — 이벤트 발행 메시지의 backlink
+  // 항목은 raw content_snippet(agent 채널용, «- stage: pending_approval (Director)»류) 대신
+  // BE가 얹은 message.event 구조화 필드를 recipe-stage-label.ts/gate-approver-label.ts
+  // SSOT로 재구성해서 보여준다.
+  it('이벤트 발행 메시지는 raw content_snippet 대신 「이름 · 단계 (역할) · 승인자」로 재구성된다(story #4091 AC3)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+        created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: {
+          id: 'm1', conversation_id: 'c1', sender: null,
+          content_snippet: '[이벤트] preset.marketing.video_production\n- stage: pending_approval (Director)',
+          event: {
+            definition_key: 'preset.marketing.video_production', name: '영상 제작(릴스·쇼츠)',
+            stage: 'pending_approval', role: 'Director', gate_type: 'external_publish', approver: 'org_owner',
+          },
+        },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('영상 제작(릴스·쇼츠)');
+    expect(container.textContent).toContain(koMessages.organization.recipeStageLabelPendingApproval);
+    expect(container.textContent).toContain(koMessages.organization.recipeGateApproverOrgOwner);
+    expect(container.textContent).not.toContain('pending_approval');
+    expect(container.textContent).not.toContain('org_owner');
+    expect(container.textContent).not.toContain('Director');
+    expect(container.textContent).not.toContain('preset.marketing.video_production');
+  });
+
+  it('gate_type이 없는 stage(게이트 자체가 없는 자리)는 승인자 세그먼트를 안 붙인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+        created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: {
+          id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '[이벤트] ...',
+          event: {
+            definition_key: 'preset.marketing.video_production', name: '영상 제작(릴스·쇼츠)',
+            stage: 'draft', role: 'Creator', gate_type: null, approver: null,
+          },
+        },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain(koMessages.organization.recipeStageLabelDraft);
+    expect(container.textContent).not.toContain(koMessages.organization.recipeGateApproverOrgOwner);
+    expect(container.textContent).not.toContain(koMessages.organization.recipeGateApproverUnknown);
+  });
+
+  it('정의를 못 찾은(삭제 등) 이벤트 메시지는 definition_key 원문으로 물러나되 role/approver는 지어내지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+        created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: {
+          id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '[이벤트] preset.gone.recipe',
+          event: { definition_key: 'preset.gone.recipe', name: null, stage: 'draft', role: null, gate_type: null, approver: null },
+        },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('preset.gone.recipe');
+    expect(container.textContent).toContain(koMessages.organization.recipeStageLabelDraft);
+  });
+
+  it('event가 없는 일반 멘션 메시지는 기존 content_snippet 그대로 렌더된다(회귀 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+        created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: { id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '일반 멘션 메시지', event: null },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('일반 멘션 메시지');
   });
 
   it('fetch 실패 시 조용히 아무것도 안 그린다(노이즈 0, 다른 애드온 섹션과 동형)', async () => {
@@ -192,6 +330,31 @@ describe('EntityBacklinksSection', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/api/docs/d1/backlinks', expect.anything());
       expect(container.textContent).toContain('문서를 가리킨 메시지');
+    });
+  });
+
+  // story #3949(E-UX-OVERHAUL·customer-zero·§①) — content_snippet이 메시지 원문 조각이라
+  // 마크다운 링크/entity 참조 토큰이 그대로 실릴 수 있다(본문 칩 렌더러를 안 거치는 자리).
+  // 실 레코드 fixture = PO 라이브 실측(b676dc29·대화 6a584f3e) 원문 형태 재현.
+  describe('story #3949 — chat_message content_snippet 평문화', () => {
+    it('⭐entity 참조 토큰이 든 스니펫은 라벨만 뜬다(원문 대괄호·href 노출 0)', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        data: [{
+          id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+          created_at: '2026-09-16T11:10:00Z', still_exists: true, doc: null,
+          message: {
+            id: 'm1', conversation_id: 'c1',
+            content_snippet: '[PO 픽스처 2·삭제예정] 같은 org 산출물 참조 [\\[PO 픽스처 산출물…\\]]'
+              + '(entity:artifact:c92d9614-1111-2222-3333-444455556666)',
+            sender: null,
+          },
+        }],
+        meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: [] } },
+      }))));
+      await render('story', 's1');
+      expect(container.textContent).toContain('[PO 픽스처 산출물…]');
+      expect(container.textContent).not.toContain('entity:artifact:');
+      expect(container.textContent).not.toContain('](');
     });
   });
 });

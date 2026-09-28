@@ -1,0 +1,269 @@
+"""story #4294 AC3 — 에이전트가 실제로 보는 MCP 도구 목록(설명 문자열)에 «기간 파라미터는 오프셋 필수»가 있어야 한다.
+
+PO 배포 30 판정: API는 오프셋 없는 일시에 422 `DATETIME_OFFSET_REQUIRED`를 잘 주는데, 규칙이 파이썬 docstring · 필드 주석에만 있어
+도구 목록에 안 닿았다(`_flat()`이 입력 모델 필드를 설명 없이 시그니처로 옮기므로 필드 주석은 스키마에도 없다).
+
+세 가드:
+1. 스냅샷 — 도구 목록에서 일시처럼 생긴 파라미터 전부를 분류와 함께 고정. 새 일시 파라미터가 생기면 분류하라고 RED.
+2. 설명 — «오프셋 필수»로 분류된 파라미터는 그 도구 설명에 `offset_required_note`(파라미터 이름 포함)가 있다.
+3. 층 대조 — BE가 `aware_datetime_query` · `require_aware`로 오프셋을 요구하는 쿼리 파라미터에 MCP 도구 핸들러가 값을 넘기면,
+   그 도구 파라미터는 «오프셋 필수»로 분류돼 있어야 한다(분류를 잘못 적어 2를 피하는 길을 막는다).
+"""
+from __future__ import annotations
+
+import inspect
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, ".")
+
+BACKEND = Path(__file__).resolve().parents[1]
+
+# 일시처럼 생긴 파라미터 이름(도구 목록 스캔용).
+TIME_LIKE = re.compile(r"^(since|until|from_?|to|start|end|before|after|date|date_[a-z]+|[a-z_]*_(at|date|from|to|since|until|timestamp|before|after))$")
+
+OFFSET_REQUIRED = "offset_required"  # BE 기간 쿼리 — 오프셋 없으면 422
+DATE_ONLY = "date_only"  # YYYY-MM-DD(시각 없음)
+CURSOR = "cursor"  # 서버가 발급한 값을 그대로 돌려줌
+# 아래 둘은 story #4330 뒤로 쓰는 곳이 없다(본문 일시도 오프셋 필수) — BE 본문이 오프셋을 안 요구하는 새 필드가 생길 때만 쓴다.
+CONCURRENCY_TOKEN = "concurrency_token"  # 서버가 준 updated_at을 그대로 돌려줌(낙관적 잠금)
+WRITE_TIMESTAMP = "write_timestamp"  # 기간 질의가 아니라 기록하는 값(본문)
+NOT_APPLIED_BY_SERVER = "not_applied_by_server"  # 서버가 읽지 않는 파라미터(별도 결함으로 PO 보고)
+
+SNAPSHOT: dict[str, dict[str, str]] = {
+    "sprintable_get_session_context": {"since": OFFSET_REQUIRED},
+    "sprintable_add_goal": {"target_date": DATE_ONLY},
+    "sprintable_update_goal": {"target_date": DATE_ONLY, "measure_after": OFFSET_REQUIRED},
+    "sprintable_add_epic": {"target_date": DATE_ONLY},
+    "sprintable_update_epic": {"target_date": DATE_ONLY, "measure_after": OFFSET_REQUIRED},
+    "sprintable_create_sprint": {"start_date": DATE_ONLY, "end_date": DATE_ONLY},
+    "sprintable_update_sprint": {"start_date": DATE_ONLY, "end_date": DATE_ONLY},
+    "sprintable_standup_missing": {"date": DATE_ONLY},
+    "sprintable_get_standup": {"date": DATE_ONLY},
+    "sprintable_save_standup": {"date": DATE_ONLY},
+    "sprintable_list_standup_entries": {"date": DATE_ONLY},
+    "sprintable_checkin_sprint": {"date": DATE_ONLY},
+    "sprintable_list_chat_messages": {"before": CURSOR},
+    "sprintable_check_notifications": {"before": CURSOR},
+    # story #4330 AC4 — 요청 본문의 일시도 `OffsetDatetime`이라 오프셋 없으면 422(쿼리와 같은 봉투). 기록하는 값 · 서버가 준
+    # 값을 돌려주는 동시성 토큰도 본문 필드라 같은 규칙 — 아래 층 대조(본문)가 BE 본문 모델과 맞춰 본다.
+    "sprintable_update_doc": {"expected_updated_at": OFFSET_REQUIRED},
+    "sprintable_create_meeting": {"date": OFFSET_REQUIRED},
+    "sprintable_update_meeting": {"date": OFFSET_REQUIRED},
+    "sprintable_emit_event": {"started_at": OFFSET_REQUIRED, "finished_at": OFFSET_REQUIRED},
+    "sprintable_update_run_status": {"started_at": OFFSET_REQUIRED, "finished_at": OFFSET_REQUIRED},
+    "sprintable_create_hypothesis": {"measure_after": OFFSET_REQUIRED},
+    "sprintable_update_hypothesis": {"measure_after": OFFSET_REQUIRED},
+    "sprintable_update_story": {"measure_after": OFFSET_REQUIRED},
+    # story #4329 — GET /api/v2/meetings가 date_from · date_to를 읽게 됐다(`aware_datetime_query`) → 오프셋 필수.
+    "sprintable_list_meetings": {"date_from": OFFSET_REQUIRED, "date_to": OFFSET_REQUIRED},
+}
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+async def _tool_list(monkeypatch) -> dict[str, tuple[str, set[str]]]:
+    from sprintable_mcp import server as srv
+
+    monkeypatch.setattr(srv.settings, "mcp_transport", "stdio")  # stdio = 범위 거름 없이 등록 도구 전부
+    tools = await srv.mcp.list_tools()
+    return {t.name: (t.description or "", set((t.input_schema or {}).get("properties", {}))) for t in tools}
+
+
+def time_like_params(tools: dict[str, tuple[str, set[str]]]) -> dict[str, set[str]]:
+    out = {name: {p for p in props if TIME_LIKE.match(p)} for name, (_desc, props) in tools.items()}
+    return {name: params for name, params in out.items() if params}
+
+
+def missing_notes(tools: dict[str, tuple[str, set[str]]], snapshot: dict[str, dict[str, str]]) -> list[str]:
+    from sprintable_mcp.datetime_params import offset_required_note
+
+    missing = []
+    for name, params in snapshot.items():
+        required = sorted(p for p, kind in params.items() if kind == OFFSET_REQUIRED)
+        if required and offset_required_note(*required) not in tools.get(name, ("", set()))[0]:
+            missing.append(f"{name}:{','.join(required)}")
+    return missing
+
+
+def guarded_be_queries() -> dict[str, set[str]]:
+    """BE 라우터 prefix → 오프셋을 요구하는 쿼리 파라미터 이름."""
+    out: dict[str, set[str]] = {}
+    for path in (BACKEND / "app" / "routers").glob("*.py"):
+        src = path.read_text(encoding="utf-8")
+        params = set(re.findall(r'aware_datetime_query\(\s*"([^"]+)"', src)) | set(re.findall(r'require_aware\([^)]*param="([^"]+)"', src))
+        prefix = re.search(r'APIRouter\(\s*prefix="([^"]+)"', src)
+        if params and prefix:
+            out.setdefault(prefix.group(1), set()).update(params)
+    return out
+
+
+# 값 자리: `args.x` 그대로 또는 한 겹 감싼 것(`str(args.x)` · `args.x.isoformat()`).
+_ARG = r'(?:\w+\()?args\.(\w+)'
+# 쿼리 키 → MCP 인자를 잇는 모양(story #4329 까디르 P3 — 첨자 대입만 보던 것을 넓힘):
+_FORWARD_SHAPES = (
+    re.compile(r'\w+\[\s*["\'](\w+)["\']\s*\]\s*=\s*' + _ARG),  # params["k"] = args.x
+    re.compile(r'["\'](\w+)["\']\s*:\s*' + _ARG),  # {"k": args.x} — dict 리터럴 · update({...})
+    re.compile(r'[(,]\s*(\w+)\s*=\s*' + _ARG),  # update(k=args.x) · dict(k=args.x) · helper(k=args.x)
+    re.compile(r'["\'](\w+)["\']\s*,\s*' + _ARG),  # helper(params, "k", args.x)
+)
+
+
+def handler_forwards(src: str, guarded: dict[str, set[str]]) -> set[str]:
+    """핸들러 소스가 오프셋 요구 BE 쿼리로 넘기는 MCP 인자 이름(쿼리 키 → args.x의 x)."""
+    paths = [m.group(1).split("{")[0] for m in re.finditer(r'client\.(?:get|get_with_headers)\(\s*f?"([^"]+)"', src)]
+    forwarded = {(k, a) for shape in _FORWARD_SHAPES for k, a in shape.findall(src)}
+    out: set[str] = set()
+    for prefix, params in guarded.items():
+        if any(p.startswith(prefix) for p in paths):
+            out |= {arg for key, arg in forwarded if key in params}
+    return out
+
+
+def _offset_checked(ann, checked: bool = False) -> bool:
+    """본문 필드 타입에 `OffsetDatetime`의 오프셋 검사가 붙었나(`OffsetDatetime | None`처럼 합집합 안쪽 `Annotated` 포함)."""
+    import typing
+
+    from app.core.datetime_query import _require_offset
+
+    origin = typing.get_origin(ann)
+    if origin is typing.Annotated:
+        base, *meta = typing.get_args(ann)
+        return _offset_checked(base, checked or any(getattr(m, "func", None) is _require_offset for m in meta))
+    args = typing.get_args(ann)
+    return any(_offset_checked(a, checked) for a in args) if args else checked
+
+
+def guarded_be_bodies() -> list[tuple[set[str], re.Pattern[str], set[str]]]:
+    """story #4330 — (메서드들, 경로 정규식, 오프셋을 요구하는 본문 최상위 필드) — 실제 FastAPI 라우트에서 읽는다."""
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    out = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or route.body_field is None:
+            continue
+        model = route.body_field.field_info.annotation
+        fields = getattr(model, "model_fields", {})
+        offset = {name for name, f in fields.items() if _offset_checked(f.annotation)}
+        if offset:
+            out.append((set(route.methods), re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", route.path_format) + "$"), offset))
+    return out
+
+
+def handler_body_targets(src: str) -> list[tuple[str, str]]:
+    """핸들러가 본문을 보내는 (메서드, 경로) — `client.post(f"/api/v2/goals/{args.goal_id}", json=…)` → ("POST", "/api/v2/goals/X")."""
+    return [(m.upper(), re.sub(r"\{[^}]+\}", "X", path)) for m, path in re.findall(r'client\.(post|patch|put)\(\s*f?"([^"]+)"', src)]
+
+
+def body_offset_args(src: str, time_like: set[str], bodies) -> set[str]:
+    """도구의 일시 파라미터 중, 핸들러가 부르는 BE 라우트의 본문에서 오프셋을 요구하는 필드와 이름이 같은 것."""
+    out: set[str] = set()
+    for method, path in handler_body_targets(src):
+        for methods, pattern, fields in bodies:
+            if method in methods and pattern.match(path):
+                out |= time_like & fields
+    return out
+
+
+# ── 1. 스냅샷 ──────────────────────────────────────────────────────────────
+@pytest.mark.anyio
+async def test_tool_list_time_like_params_match_snapshot(monkeypatch):
+    actual = time_like_params(await _tool_list(monkeypatch))
+    expected = {name: set(params) for name, params in SNAPSHOT.items()}
+    assert actual == expected, "일시 파라미터가 바뀌었다 — SNAPSHOT에 분류(오프셋 필수 · 날짜만 · 커서 …)를 적고, 오프셋 필수면 도구 설명에 offset_required_note를 붙인다"
+
+
+# ── 2. 설명 ────────────────────────────────────────────────────────────────
+@pytest.mark.anyio
+async def test_offset_required_params_are_named_in_the_tool_description(monkeypatch):
+    tools = await _tool_list(monkeypatch)
+    assert missing_notes(tools, SNAPSHOT) == []
+    from app.core import datetime_query as be
+
+    for name, params in (("sprintable_get_session_context", ("since",)), ("sprintable_list_meetings", ("date_from", "date_to"))):
+        desc = tools[name][0]
+        # BE 문구를 직접 대조(까디르 P3) — BE 설명 · 힌트가 바뀌면 MCP 도구 목록이 옛 문구라 RED.
+        assert be.OFFSET_REQUIRED_DESCRIPTION in desc and be.OFFSET_HINT in desc and be.DATETIME_OFFSET_REQUIRED in desc, name
+        assert all(f"`{p}`" in desc for p in params), name
+
+
+def test_mcp_copies_match_backend_verbatim():
+    """MCP는 `app.*`를 import 못 하는 별도 프로세스라 사본을 둔다 — 코드 · 설명 · 힌트 셋 다 BE와 글자 그대로."""
+    from app.core import datetime_query as be
+    from sprintable_mcp import datetime_params as mcp
+
+    assert (mcp.DATETIME_OFFSET_REQUIRED, mcp.OFFSET_REQUIRED_DESCRIPTION, mcp.OFFSET_HINT) == (
+        be.DATETIME_OFFSET_REQUIRED, be.OFFSET_REQUIRED_DESCRIPTION, be.OFFSET_HINT,
+    )
+
+
+# ── 3. 층 대조 ─────────────────────────────────────────────────────────────
+def test_every_mcp_arg_reaching_a_guarded_be_query_is_classified_offset_required():
+    from sprintable_mcp.server import _TOOL_DEFS
+
+    guarded = guarded_be_queries()
+    assert guarded.get("/api/v2/session-context") == {"since"}, guarded  # 스캔이 실제로 BE를 읽는지(공허 통과 방지)
+    assert guarded.get("/api/v2/meetings") == {"date_from", "date_to"}, guarded
+    wrong = []
+    for name, _doc, _cls, fn in _TOOL_DEFS:
+        for arg in handler_forwards(inspect.getsource(fn), guarded):
+            if SNAPSHOT.get(name, {}).get(arg) != OFFSET_REQUIRED:
+                wrong.append(f"{name}:{arg}")
+    assert wrong == []
+
+
+def test_every_mcp_arg_sent_into_an_offset_checked_be_body_field_is_classified_offset_required(monkeypatch):
+    """story #4330 AC4 — 층 대조(본문): MCP 도구가 부르는 BE 라우트의 본문 필드가 `OffsetDatetime`이면 그 이름의 도구 파라미터는
+    «오프셋 필수»로 분류돼 있어야 한다(= 2번 가드로 도구 설명 한 줄이 강제된다)."""
+    from sprintable_mcp.server import _TOOL_DEFS
+
+    bodies = guarded_be_bodies()
+    assert any(pattern.match("/api/v2/meetings") and "date" in fields for _m, pattern, fields in bodies), "스캔이 실제 BE 본문을 읽는지"
+    wrong = []
+    for name, _doc, cls, fn in _TOOL_DEFS:
+        time_like = {p for p in cls.model_fields if TIME_LIKE.match(p)}
+        for arg in body_offset_args(inspect.getsource(fn), time_like, bodies):
+            if SNAPSHOT.get(name, {}).get(arg) != OFFSET_REQUIRED:
+                wrong.append(f"{name}:{arg}")
+    assert wrong == []
+
+
+# ── 양성 대조 ───────────────────────────────────────────────────────────────
+def test_controls_catch_missing_note_new_param_and_misclassification():
+    from sprintable_mcp.datetime_params import offset_required_note
+
+    with_note = {"t": ("설명." + offset_required_note("since"), {"since"})}
+    without_note = {"t": ("설명.", {"since"})}
+    snap = {"t": {"since": OFFSET_REQUIRED}}
+    assert missing_notes(with_note, snap) == []
+    assert missing_notes(without_note, snap) == ["t:since"]
+    assert missing_notes({"t": ("설명." + offset_required_note("until"), {"since"})}, snap) == ["t:since"]  # 다른 파라미터 이름이면 안 됨
+
+    assert time_like_params({"t": ("", {"since", "limit", "created_before", "window_start_at", "offset"})}) == {"t": {"since", "created_before", "window_start_at"}}
+
+    guarded = {"/api/v2/activity-logs": {"from", "to"}}
+    src = 'params = {}\n    if args.from_:\n        params["from"] = args.from_\n    return await client.get("/api/v2/activity-logs", params=params)'
+    assert handler_forwards(src, guarded) == {"from_"}
+    assert handler_forwards(src.replace("activity-logs", "stories"), guarded) == set()
+
+    bodies = [({"POST", "PUT"}, re.compile(r"^/api/v2/meetings(/[^/]+)?$"), {"date"})]
+    assert body_offset_args('return ok(await client.put(f"/api/v2/meetings/{args.meeting_id}", json=body))', {"date"}, bodies) == {"date"}
+    assert body_offset_args('return ok(await client.patch(f"/api/v2/meetings/{args.meeting_id}", json=body))', {"date"}, bodies) == set()  # 메서드 다름
+    assert body_offset_args('return ok(await client.post("/api/v2/stories", json=body))', {"date"}, bodies) == set()  # 경로 다름
+
+    # 넘김 모양 셋(까디르 P3) — 각각 잡혀야 한다.
+    call = '\n    return await client.get("/api/v2/activity-logs", params=params)'
+    assert handler_forwards('params = {"from": args.from_, "limit": args.limit}' + call, guarded) == {"from_"}  # dict 리터럴
+    assert handler_forwards('params = {}\n    params.update(to=str(args.until))' + call, guarded) == {"until"}  # update(k=…)
+    assert handler_forwards('params.update({"to": args.until})' + call, guarded) == {"until"}  # update({…})
+    assert handler_forwards('params = {}\n    _put(params, "from", args.since)' + call, guarded) == {"since"}  # 도우미 경유
+    # 음성: 보호 안 된 키로 넘기면 안 잡힌다.
+    assert handler_forwards('params = {"limit": args.limit}\n    params.update(q=args.q)' + call, guarded) == set()

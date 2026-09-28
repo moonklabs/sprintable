@@ -1,0 +1,1 @@
+{"file": "tests/test_4132_channel_connection_status_realdb.py", "sec": 10.7, "source": "story-4132(2026-09-22, 신규 파일 — 8건). test-4110 선례(shard-weights/test_4110_generation_connector_read_realdb.py.json)와 동일 방법론 — 로컬 raw pytest 전체 wall time 실측(10.06~10.74s, throwaway pgvector:pg15) 그대로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}

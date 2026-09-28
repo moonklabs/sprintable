@@ -77,7 +77,7 @@ describe('CommentConvertToTaskDialog', () => {
     await act(async () => { submitBtn.click(); });
     expect(onSubmit).toHaveBeenCalledWith({ title: '[댓글] 9월 소식지', note: '' });
     const link = document.querySelector('[data-testid="comments-convert-success-link"]') as HTMLAnchorElement;
-    expect(link?.getAttribute('href')).toBe('/board?story=s-42');
+    expect(link?.getAttribute('href')).toBe('/flow?story=s-42');
   });
 
   it('제출 실패 — 에러 문구가 뜨고 폼은 그대로 남는다', async () => {

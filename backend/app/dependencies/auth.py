@@ -848,12 +848,14 @@ async def get_project_scoped_org_id(
     if not project_id:
         return base_org_id
 
-    from app.models.project import Project
+    # story #4299: project의 org와 접근 판정(has_project_access와 같은 SSOT predicate)을 한 SQL · 한 세션으로 읽는다.
+    # 판정은 스코프 org(base_org_id) 기준 — 아래에서 project org가 그와 다르면 판정과 무관하게 403이고, 같으면
+    # has_project_access(…, project_org_id)와 같은 값이다.
+    from app.services.project_auth import project_org_and_access
     async with async_session_factory() as db:
-        result = await db.execute(
-            select(Project.org_id).where(Project.id == project_id)
+        project_org_id, allowed = await project_org_and_access(
+            db, uuid.UUID(auth.user_id), project_id, base_org_id,
         )
-        project_org_id = result.scalar_one_or_none()
     if not project_org_id:
         return base_org_id
 
@@ -873,9 +875,6 @@ async def get_project_scoped_org_id(
     #   - owner/admin은 rowless 접근 유지 (OSS fresh install, team_members 미생성 포함)
     #   - grant-only 휴먼(project_access)도 project 접근 허용 (740e3b7e 에픽403 해소)
     #   - 동일 org 내 다른 project 미멤버 우회 방지(project 스코프)는 그대로 유지
-    from app.services.project_auth import has_project_access
-    async with async_session_factory() as db:
-        allowed = await has_project_access(db, uuid.UUID(auth.user_id), project_id, project_org_id)
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1131,6 +1130,31 @@ async def get_current_user_streaming(
     )
 
 
+async def resolve_request_org_id(
+    auth: AuthContext, x_org_id: str | None, request: Request | None,
+) -> uuid.UUID | None:
+    """요청의 «현재 org» 규칙 — X-Org-Id 헤더가 있으면 그 org(가입 확인, 아니면 403),
+    없으면 JWT app_metadata.org_id, 둘 다 없으면 None. 형식 오류는 400.
+
+    story #4178(PO CHANGES) — /events/stream과 /auth/me가 이 한 함수를 공유한다. 예전엔
+    /auth/me가 JWT org만 봐서, 헤더로 org B를 고른 다중 org 사용자가 /auth/me의 org A 기준
+    org_member_id로 스트림에 붙으면 404가 났다(이번 에스컬레이션과 같은 부류). None 처리는
+    호출부 몫 — 스트림은 400, /auth/me는 «무 org여도 200» 계약대로 그대로 None."""
+    jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
+    raw = x_org_id or jwt_org_id
+    if not raw:
+        return None
+    try:
+        org_id = uuid.UUID(str(raw))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
+
+    if x_org_id:
+        async with async_session_factory() as db:
+            await _verify_org_membership(auth.user_id, org_id, db, request)
+    return org_id
+
+
 async def get_verified_org_id_streaming(
     auth: AuthContext = Depends(get_current_user_streaming),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
@@ -1145,21 +1169,12 @@ async def get_verified_org_id_streaming(
     if request is not None:
         _check_api_key_scope(auth, request.method, request.url.path)
 
-    jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
-    raw = x_org_id or jwt_org_id
-    if not raw:
+    org_id = await resolve_request_org_id(auth, x_org_id, request)
+    if org_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="org_id required (X-Org-Id header or JWT app_metadata)",
         )
-    try:
-        org_id = uuid.UUID(str(raw))
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
-
-    if x_org_id:
-        async with async_session_factory() as db:
-            await _verify_org_membership(auth.user_id, org_id, db, request)
 
     jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
     if not jwt_project_id and x_project_id:

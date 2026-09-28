@@ -140,6 +140,10 @@ async def test_project_binding_wins_over_org_wide_in_read_view():
             )
             assert resp.bindings == {"step_1": str(project_agent)}
     finally:
+        # story #4233(CI 35943916027) — 공유 DB에 org_id NULL 플랫폼 정의를 남기지 않는다(플랫폼 짝 가드가 셈).
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM event_definitions WHERE key = 'preset.axis2c.recipe_test' AND org_id IS NULL"))
         await engine.dispose()
 
 
@@ -175,6 +179,10 @@ async def test_no_project_id_returns_org_wide_only():
             )
             assert resp.bindings == {"step_1": str(org_wide_agent)}
     finally:
+        # story #4233(CI 35943916027) — 공유 DB에 org_id NULL 플랫폼 정의를 남기지 않는다(플랫폼 짝 가드가 셈).
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM event_definitions WHERE key = 'preset.axis2c.recipe_test' AND org_id IS NULL"))
         await engine.dispose()
 
 
@@ -204,6 +212,10 @@ async def test_unassigned_stage_absent_from_response():
             )
             assert "step_2" not in resp.bindings
     finally:
+        # story #4233(CI 35943916027) — 공유 DB에 org_id NULL 플랫폼 정의를 남기지 않는다(플랫폼 짝 가드가 셈).
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM event_definitions WHERE key = 'preset.axis2c.recipe_test' AND org_id IS NULL"))
         await engine.dispose()
 
 
@@ -232,4 +244,8 @@ async def test_no_project_access_rejected_404():
                 )
             assert ei.value.status_code == 404
     finally:
+        # story #4233(CI 35943916027) — 공유 DB에 org_id NULL 플랫폼 정의를 남기지 않는다(플랫폼 짝 가드가 셈).
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM event_definitions WHERE key = 'preset.axis2c.recipe_test' AND org_id IS NULL"))
         await engine.dispose()

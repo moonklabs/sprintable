@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findHardcodedAriaLabels, scanRepository } from './verify-no-hardcoded-aria-label';
+import { measureFsReads } from './test-utils/fs-work';
 
 describe('findHardcodedAriaLabels — 단위(패턴 자체)', () => {
   it('aria-label={`Move ${item} up`} 를 잡는다', () => {
@@ -19,9 +20,11 @@ describe('findHardcodedAriaLabels — 단위(패턴 자체)', () => {
 });
 
 describe('story #3557 회귀가드 — 전수 스캔 0건', () => {
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-  // 재현 5회 = 97·88·228·68·102ms 중 최댓값 228ms → ×3 ≈ 684ms → 1000ms로 반올림).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('새 FAIL은 없다(#3557이 알려진 3곳을 전부 고친 뒤의 clean-slate)', () => {
-    expect(scanRepository()).toEqual([]);
-  }, 1000);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
+    expect(__scan).toEqual([]);
+  });
 });

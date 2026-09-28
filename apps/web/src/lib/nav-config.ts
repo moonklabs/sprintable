@@ -2,14 +2,15 @@ import {
   Award,
   BookOpen,
   Bot,
-  Brain,
   ClipboardList,
+  Cpu,
   FileText,
   FlaskConical,
   GalleryVerticalEnd,
   HardDrive,
   Inbox,
   Layers,
+  Link2,
   ListChecks,
   MessageSquare,
   Newspaper,
@@ -22,6 +23,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
+import { resolveNavV3Destinations, type NavV3Flags } from './nav-v3-destinations';
 
 // story #2681(모바일 IA S1, doc mobile-ia-full-completion-2678) — 데스크톱 GNB(app-sidebar.tsx)와
 // 모바일 /more 허브(S2에서 착수)가 「한 정의」에서 파생되도록 이 파일이 그 SSOT다. 두 벌 목적지
@@ -150,10 +152,48 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     labelKey: 'zoneConnectRules',
     items: [
       { id: 'org-channels', labelKey: 'orgChannels', descriptionKey: 'descOrgChannels', icon: Share2, kind: 'static', path: '/organization/channels', scope: 'org' },
+      // story #4116(#4112 유나 시안 55a04e8d) — 채널 연결의 형제 화면. «연결»(계정 링크)과
+      // «커넥터»(자격 등록)는 용어 구분이 곧 메커니즘 구분(유나 canon, §8) — 통일 대신 병치.
+      { id: 'org-generation-connectors', labelKey: 'orgGenerationConnectors', descriptionKey: 'descOrgGenerationConnectors', icon: Cpu, kind: 'static', path: '/organization/generation-connectors', scope: 'org' },
       { id: 'org-content-rules', labelKey: 'orgContentRules', descriptionKey: 'descOrgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules', scope: 'org' },
     ],
   },
 ];
+
+// story #4003(E-UX-OVERHAUL·셸 통합 2/N) — 3998 결함②/4002 그라운딩 처방. NAV_GROUPS
+// 자체는 그대로 둔다(command-palette.tsx 등 기존 소비처 무영향, path 불변 원칙과도
+// 부합) — 이 함수가 렌더 시점에만 5항목(오늘·일감·결과·연결·규칙, 대화는 별도
+// resolveChatCenterItem)의 목적지를 플래그로 덮어쓴다(복붙 규칙 0 — nav-v3-
+// destinations.ts 결정 함수 재사용, app-sidebar.tsx도 같은 함수를 그대로 쓴다).
+// CHANGES(페드루 PO, PR#4386 1차 리뷰) — 「일감」도 이 함수가 정한다: dest.work는
+// `{kind:'resource', path:'work-list'|'flow'}` **서술자**(org/project 접두 전)라
+// item.path(리소스 fragment)만 교체 — 실제 접두는 그대로 app-sidebar.tsx의
+// resourceLink()가 한다(그 헬퍼의 접두 로직 자체는 안 복붙, nav-v3-destinations.ts
+// 파일 상단 주석 참고). 「연결·규칙」 항목 ON이면 통합 v3 화면 링크를 옛 채널 연결·
+// 콘텐츠 규칙 2항목 **앞에 추가**한다(옛 진입점 제거 금지 원칙 — 대체가 아니라 병기).
+export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
+  const dest = resolveNavV3Destinations(flags);
+  return NAV_GROUPS.map((group): NavGroupConfig => {
+    if (group.id === 'now') {
+      return { ...group, items: group.items.map((item) => (item.id === 'org-briefing' ? { ...item, path: dest.today.path } : item)) };
+    }
+    if (group.id === 'dev') {
+      return { ...group, items: group.items.map((item) => (item.id === 'board' ? { ...item, path: dest.work.path } : item)) };
+    }
+    if (group.id === 'results') {
+      return { ...group, items: group.items.map((item) => (item.id === 'org-insights-board' ? { ...item, path: dest.results.path } : item)) };
+    }
+    if (group.id === 'connect-rules' && dest.connectRules) {
+      const v3Item: NavItemConfig = {
+        // story #4278(유나) — 구역 이름과 같은 «연결·규칙»이 구역 안에 또 있었다 → 이 항목은 «모아 보기»(구역 › 모아 보기).
+        id: 'connect-rules-v3', labelKey: 'connectRulesOverview', descriptionKey: 'descConnectRulesV3',
+        icon: Link2, kind: 'static', path: dest.connectRules.path, scope: 'org',
+      };
+      return { ...group, items: [v3Item, ...group.items] };
+    }
+    return group;
+  });
+}
 
 // story #3824 — 5항목 축소로 사이드바에서 빠지는 17개 목적지. 라우트는 전부 그대로
 // 살아있다(북마크·딥링크 무손상, path 불변) — 이 배열이 이제 이들의 1급 진입점
@@ -179,17 +219,22 @@ export const NAV_GROUPS: NavGroupConfig[] = [
 export const LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = [
   { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project', absorbTarget: 'work' },
   { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project', absorbTarget: 'work' },
-  { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project', absorbTarget: 'work' },
-  { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project', absorbTarget: 'work' },
+  // story #3989(「일감」 흡수 3/N) — 연결분(문서/산출물 탭)만 일감이고, 전수
+  // 라이브러리/갤러리(트리·검색)는 «조직 자산 전수 탐색» 축이라 일감과 다르다
+  // (PO 확定 — worklist-6item-absorption doc §검증1). work → knowledge로 이사.
+  { id: 'docs', labelKey: 'docs', descriptionKey: 'descDocs', icon: BookOpen, kind: 'resource', path: 'docs', scope: 'project', absorbTarget: 'knowledge' },
+  { id: 'artifacts', labelKey: 'artifacts', descriptionKey: 'descArtifacts', icon: GalleryVerticalEnd, kind: 'resource', path: 'artifacts', scope: 'project', absorbTarget: 'knowledge' },
   { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project', absorbTarget: 'knowledge' },
   { id: 'activity', labelKey: 'activity', descriptionKey: 'descActivity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project', absorbTarget: 'history' },
   { id: 'org-trust', labelKey: 'orgTrust', descriptionKey: 'descOrgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org', absorbTarget: 'connect' },
-  { id: 'org-memory', labelKey: 'orgMemory', descriptionKey: 'descOrgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org', absorbTarget: 'knowledge' },
   { id: 'content', labelKey: 'content', descriptionKey: 'descContent', icon: FileText, kind: 'static', path: '/content', scope: 'org', absorbTarget: 'work' },
   { id: 'channel-posts', labelKey: 'channelPosts', descriptionKey: 'descChannelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org', absorbTarget: 'work' },
-  { id: 'org-members', labelKey: 'orgMembers', descriptionKey: 'descOrgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org', absorbTarget: 'connect' },
+  // story #3985(E-UX-OVERHAUL·「연결·규칙」 흡수 2편, 페드루 PO 確定 2026-09-17) — 구성원·
+  // 권한은 「연결」이 아니라 「설정」 흡수 대상으로 재분류(사람 팀 관리 ≠ 에이전트·채널·규칙
+  // 배선, 온보딩 connect-step도 이미 `/settings?tab=members`로 보낸다). 경로 자체는 불변.
+  { id: 'org-members', labelKey: 'orgMembers', descriptionKey: 'descOrgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org', absorbTarget: 'settings' },
   { id: 'org-workforce', labelKey: 'workforce', descriptionKey: 'descWorkforce', icon: Bot, kind: 'static', path: '/organization/workforce', absorbTarget: 'connect' },
-  { id: 'org-roles', labelKey: 'orgRoles', descriptionKey: 'descOrgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org', absorbTarget: 'connect' },
+  { id: 'org-roles', labelKey: 'orgRoles', descriptionKey: 'descOrgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org', absorbTarget: 'settings' },
   { id: 'org-events', labelKey: 'orgEvents', descriptionKey: 'descOrgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org', absorbTarget: 'connect' },
   // story #1981 배지 축(inboxPendingCount)은 app-sidebar.tsx에 그대로 남는다(다음
   // 카드 #3823 「오늘」 배지가 재사용) — 이 항목 자체가 사이드바에서 빠져도 그
@@ -288,6 +333,12 @@ export const CHAT_CENTER_ITEM: NavItemConfig = {
   // 요구한다(팔레트 등 다른 소비처가 이 항목도 같은 타입으로 다룬다) — 값은 채운다.
   id: 'chats', labelKey: 'chats', descriptionKey: 'descChats', icon: MessageSquare, kind: 'static', path: '/chats', badgeKey: 'chats',
 };
+
+// story #4003 — CHAT_CENTER_ITEM의 flag-aware href(ON: /chat · OFF: 위 원본과 바이트
+// 동일 /chats). 라벨·아이콘·배지 등 나머지 필드는 무변(원본 그대로 spread).
+export function resolveChatCenterItem(flags: NavV3Flags): NavItemConfig {
+  return { ...CHAT_CENTER_ITEM, path: resolveNavV3Destinations(flags).chats.path };
+}
 
 // story #d986fd6c(IA·S4)의 «뷰포트 높이 역산 접힘» 전제(필요 높이(px) = 615.5 + 32×N)는
 // 이 스토리(#f81657f8, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고 접을 수 있게

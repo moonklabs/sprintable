@@ -23,6 +23,9 @@ const BLOCKED_BEFORE_PROVIDER_KINDS: ReadonlySet<SitePostApiErrorKind> = new Set
   'rate_limited', 'token_expired', 'connection_not_active', 'approver_role_missing',
   'permission', 'publish_in_progress', 'text_too_long', 'approval_required',
   'seal_missing', 'reapproval_required', 'resubmit_required', 'gate_already_held',
+  // story #4336(PO P2) — 입력 검사(YouTube 메타데이터 · 이어쓰기 · 초안 없음)와 조직 일시 중지는 전부 공급자 HTTP 호출 전 — 서버도
+  // 어댑터를 안 부른 것으로 적는다(원장 adapter_called=False). 예전엔 표 밖이라 «나갔는지 모름»으로 그렸다.
+  'validation', 'external_publish_paused',
 ]);
 
 /**

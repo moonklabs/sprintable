@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { DndContext } from '@dnd-kit/core';
 import koMessages from '../../../messages/ko.json';
@@ -177,5 +180,114 @@ describe('StoryCard — story #32dcc294 「다음: …」1급 라인(boy-scout �
       />,
     );
     expect(markup).not.toContain('다음:');
+  });
+});
+
+// story #4120(PO 실측, 2026-09-21) — deleteStoryDialogBody의 「{title}을(를)」 고정 조사가
+// story.title 받침 유무와 안 맞으면 비문이 된다. 위 블록들은 정적 렌더(다이얼로그는 열림
+// 상태에서만 그려짐)라 이 자리만 인터랙티브 마운트(createRoot+act)로 우클릭 메뉴 →
+// 삭제 클릭 → 확認 다이얼로그 본문을 실제로 연다.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+describe('StoryCard — deleteStoryDialogBody 조사(story #4120)', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
+  async function openDeleteConfirm(title: string) {
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DndContext>
+            <StoryCard story={story({ title })} onClick={() => {}} onDelete={() => {}} />
+          </DndContext>
+        </NextIntlClientProvider>,
+      );
+    });
+    const card = document.body.querySelector<HTMLDivElement>('[aria-haspopup="menu"]')!;
+    act(() => { card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })); });
+    const deleteMenuItem = [...document.body.querySelectorAll('button')]
+      .find((b) => b.textContent === koMessages.board.deleteStory)!;
+    act(() => { deleteMenuItem.click(); });
+  }
+
+  it('받침 없는 제목 → «를»', async () => {
+    await openDeleteConfirm('테스트 스토리');
+    expect(document.body.textContent).toContain('테스트 스토리를 삭제하면 되돌릴 수 없어요.');
+    expect(document.body.textContent).not.toContain('을(를)');
+  });
+
+  it('받침 있는 제목 → «을»', async () => {
+    await openDeleteConfirm('작업 항목');
+    expect(document.body.textContent).toContain('작업 항목을 삭제하면 되돌릴 수 없어요.');
+    expect(document.body.textContent).not.toContain('을(를)');
+  });
+});
+
+// story #4284 — 이름 없는 구성원(BE name null)은 머리글자 대신 사람 아이콘(User · 유나 판정 신원 폴백 한 벌) · title은 «이름 없는 구성원». 예전 타입이 거짓이라
+// null이면 `name.slice` throw 또는 빈 동그라미였다.
+describe('StoryCard — 이름 없는 담당자(story #4284)', () => {
+  it('⭐담당자 동그라미가 «?» · «이름» 머리글자가 아니라 사람 아이콘이고, title은 «이름 없는 구성원»', () => {
+    const markup = render(makeStory({ assignee_id: 'm-unnamed', assignee_ids: ['m-unnamed'] }), [{ id: 'm-unnamed', name: null, type: 'human' }]);
+    expect(markup).toContain(`title="${koMessages.common.memberUnnamed}"`);
+    expect(markup).toMatch(/lucide-user(?![-\w])/);
+    expect(markup).not.toContain('lucide-user-round');
+    expect(markup).not.toMatch(/>\?</);
+    expect(markup).not.toContain('>이름<');
+  });
+
+  it('⭐이름 없는 에이전트 담당자는 Bot 아이콘(사람 아이콘 + 에이전트 점으로 어긋나지 않게 · 유나 판정)', () => {
+    const markup = render(makeStory({ assignee_id: 'a-unnamed', assignee_ids: ['a-unnamed'] }), [{ id: 'a-unnamed', name: null, type: 'agent' }]);
+    expect(markup).toContain('lucide-bot');
+    expect(markup).not.toMatch(/lucide-user/);
+  });
+
+  it('실명 담당자는 그대로 머리글자', () => {
+    const markup = render(makeStory({ assignee_id: 'm-1', assignee_ids: ['m-1'] }), [{ id: 'm-1', name: 'Pedro', type: 'human' }]);
+    expect(markup).toContain('title="Pedro"');
+    expect(markup).toContain('>PE<');
+  });
+});
+
+// story #4284(PO 검토 ②) — 신원 이름(머리글자)엔 name(null이면 사람 아이콘) · 읽는 글자엔 label. 라벨을 이름 자리에 넘기면 «이름 없는 구성원»의 첫 글자가 머리글자가 된다.
+describe('StoryCard — 이름 없는 검증자 씰(story #4284)', () => {
+  it('⭐검증 씰 머리글자가 «이»가 아니라 사람 아이콘 · 글자는 «이름 없는 구성원»', () => {
+    const markup = renderToStaticMarkup(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <DndContext>
+          <StoryCard story={makeStory({ status: 'done', human_verified: true, human_verified_at: '2026-09-01T00:00:00Z' } as Partial<KanbanStory>)} verifiedBy={{ id: 'v1', name: null, type: 'human' }} onClick={() => {}} />
+        </DndContext>
+      </NextIntlClientProvider>,
+    );
+    expect(markup).toContain(koMessages.common.memberUnnamed);
+    expect(markup).not.toMatch(/>이</);
+    expect(markup).not.toContain('null');
+  });
+});
+
+
+// [SID:4300 · 유나 4682 PASS 비차단] 담당 아바타(h-6)가 조직 보충 뒤 늦게 붙으면 카드 아래 줄이 20 → 24px로 늘어 카드가 +4px 흔들렸다
+// (390 · 95.2 → 99.2). 줄이 처음부터 아바타 높이(min-h-6 = 24px)를 잡는지 — 아바타 없을 때(받는 중) · 있을 때 같은 줄.
+describe('StoryCard — 담당 아바타 줄 최소 높이([SID:4300])', () => {
+  const rowOf = (markup: string) => {
+    const d = document.createElement('div');
+    d.innerHTML = markup;
+    return d.querySelector('div.min-h-6.justify-between');
+  };
+  it('아바타 없을 때(받는 중) · 있을 때 모두 아래 줄이 min-h-6 · 아바타는 그 줄 안', () => {
+    expect(rowOf(render(makeStory({ story_points: 3 }))), '아바타 없는 카드의 아래 줄').not.toBeNull();
+    const withAvatar = rowOf(render(makeStory({ story_points: 3 }), [{ id: 'm1', name: '안나', type: 'human' } as KanbanMember]));
+    expect(withAvatar, '아바타 있는 카드의 아래 줄').not.toBeNull();
+    expect(withAvatar!.querySelector('div.h-6.w-6'), '아바타가 그 줄 안').not.toBeNull();
   });
 });

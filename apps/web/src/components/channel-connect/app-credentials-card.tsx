@@ -6,7 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import type { AppCredentialsPutResponse, AppCredentialsStatusResponse } from '@/components/channel-connect/types';
 
 /**
@@ -26,6 +26,7 @@ export function AppCredentialsCard({
   onSaved: () => void;
 }) {
   const t = useTranslations('channelConnect');
+  const channelLabel = useChannelLabel();
   const effectiveSource = credentials?.effective_source ?? 'none';
   // story #3743 CHANGES Ⓐ(페드루 PO, 2026-09-09 12:36Z) — 행의 다음 발("앱 자격
   // 등록")로 이 카드가 열릴 때 effectiveSource==='none'이 유일한 경로다(이미 등록된
@@ -71,7 +72,7 @@ export function AppCredentialsCard({
   return (
     <SectionCard>
       <SectionCardHeader>
-        <h2 className="text-sm font-semibold text-foreground">{t('appCredentialsTitle', { channel: channelLabel(channel, t) })}</h2>
+        <h2 className="text-sm font-semibold text-foreground">{t('appCredentialsTitle', { channel: channelLabel(channel) })}</h2>
       </SectionCardHeader>
       <SectionCardBody className="space-y-3">
         {effectiveSource === 'org' ? (

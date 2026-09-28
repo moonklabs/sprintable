@@ -24,3 +24,26 @@ beforeEach(() => {
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
 });
+
+// story #4184 — lib/me-client.ts의 진행 중 `/api/me` 요청이 같은 파일 안 테스트 사이로 새지
+// 않게 매 테스트 전에 비운다(모듈이 로드된 파일에서만 등록돼 있다 — 그 파일 이유는 me-client.ts).
+beforeEach(() => {
+  const reset = (globalThis as Record<symbol, unknown>)[Symbol.for('sprintable.resetMeClient')];
+  if (typeof reset === 'function') reset();
+});
+
+// story #4370 — 창 · 패널 여러 줄 칸의 폼 초안(`useFieldDraft`, sessionStorage `sprintable:field-draft:*`)이 같은 파일 안
+// 테스트 사이로 새지 않게 매 테스트 전에 그 키만 지운다(한 테스트가 쓴 글이 다음 테스트의 창을 미리 채우던 순서 의존 —
+// 이벤트 정의 창 테스트에서 실측). 다른 sessionStorage 키를 심는 테스트는 건드리지 않는다.
+beforeEach(() => {
+  if (typeof window === 'undefined') return;
+  try {
+    const store = window.sessionStorage;
+    for (let i = store.length - 1; i >= 0; i -= 1) {
+      const key = store.key(i);
+      if (key && key.startsWith('sprintable:field-draft:')) store.removeItem(key);
+    }
+  } catch {
+    // 저장소 접근 불가 환경 — 지울 것도 없다.
+  }
+});

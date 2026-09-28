@@ -133,3 +133,19 @@ describe('SettingsPage — 기본 알림 레벨 즉시 반영(story #3222)', () 
     expect(levelButton('전체').className).not.toContain('bg-primary');
   });
 });
+
+// [SID:4375] 이벤트 행마다 «앱 내» 토글이 빈 <span/>만 든 버튼이라 접근 이름 0이었다 → aria-labelledby = 행 이름(이벤트) + 열 머리(«앱 내»).
+describe('SettingsPage — 알림 «앱 내» 토글 접근 이름([SID:4375])', () => {
+  it('토글마다 이름 = 그 행 이벤트 이름 + «앱 내»(두 id가 실제로 풀림) · 행끼리 이름이 다르다', async () => {
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    const toggles = [...container.querySelectorAll<HTMLButtonElement>('button[aria-labelledby]')].filter((b) => b.getAttribute('aria-labelledby')!.includes('notif-col-in-app'));
+    expect(toggles.length).toBeGreaterThan(1);
+    const names = toggles.map((b) => b.getAttribute('aria-labelledby')!.split(' ').map((id) => document.getElementById(id)?.textContent?.trim() ?? '∅').join(' '));
+    for (const n of names) {
+      expect(n).not.toContain('∅');
+      expect(n.endsWith(koMessages.settings.notification_channel_in_app)).toBe(true);
+    }
+    expect(new Set(names).size).toBe(names.length);
+  });
+});

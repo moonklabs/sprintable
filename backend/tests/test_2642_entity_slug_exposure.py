@@ -152,6 +152,8 @@ async def test_story_list_and_get_carry_org_project_slug():
                 epic_ids=None, include_unassigned=False, done_within_days=None,
                 # story #3148: exclude_status 신규 Query 파라미터 — 위와 동일 이유로 명시.
                 exclude_status=None,
+                # story #4329: priority/no_assignee 신규 Query 파라미터 — 위와 동일 이유로 명시.
+                priority=None, no_assignee=False,
             )
             assert len(listed) == 1
             assert listed[0].org_slug == org.slug
@@ -207,6 +209,11 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
             await s.commit()
             agent_id = await _seed_agent(s, org.id, project1.id)
             await _seed_agent(s, org.id, project2.id)
+            # story #4350 — project 필터 없는 목록은 caller가 접근 가능한 프로젝트만 싣는다. 이 테스트는 slug 조회 수(N+1)를 보는
+            # 것이라 caller가 두 프로젝트 다 보게 grant를 하나 더 준다(예전엔 org 전체가 새어 나와 grant 없이도 5건이었다).
+            from app.models.project_access import ProjectAccess
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=project2.id, member_id=agent_id, permission="granted"))
+            await s.commit()
             for i in range(5):
                 s.add(Story(
                     id=uuid.uuid4(), org_id=org.id,
@@ -219,13 +226,17 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
             repo = StoryRepository(s, org.id)
             org_query_count = 0
             project_query_count = 0
+            slug_statements: list[str] = []
 
             def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
                 nonlocal org_query_count, project_query_count
                 low = statement.lower()
+                if "organizations.slug" in low or "projects.slug" in low:
+                    slug_statements.append(low)
                 if "from organizations" in low and "slug" in low:
                     org_query_count += 1
-                if "from projects" in low and "slug" in low and " in " in low:
+                # story #4299: org · project slug가 한 SQL(organizations LEFT JOIN projects ON projects.id IN (...)).
+                if "projects.slug" in low:
                     project_query_count += 1
 
             event.listen(engine.sync_engine, "before_cursor_execute", _before_cursor_execute)
@@ -240,6 +251,8 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
                     epic_ids=None, include_unassigned=False, done_within_days=None,
                     # story #3148: exclude_status 신규 Query 파라미터 — 위와 동일 이유로 명시.
                     exclude_status=None,
+                    # story #4329: priority/no_assignee 신규 Query 파라미터 — 위와 동일 이유로 명시.
+                    priority=None, no_assignee=False,
                 )
             finally:
                 event.remove(engine.sync_engine, "before_cursor_execute", _before_cursor_execute)
@@ -248,6 +261,7 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
             assert all(st.project_slug in ("proj-one", "proj-two") for st in listed)
             assert org_query_count == 1, f"org_slug 쿼리 {org_query_count}회(N+1 의심)"
             assert project_query_count == 1, f"project_slug 배치쿼리 {project_query_count}회(N+1 의심)"
+            assert len(slug_statements) == 1, f"slug를 읽는 SQL {len(slug_statements)}개 — story #4299에서 org · project를 한 SQL로 합쳤다"
     finally:
         await engine.dispose()
 

@@ -13,6 +13,7 @@ vi.mock('@/i18n/request', () => ({ getLocale: getLocaleMock }));
 
 import { proxyToFastapi, proxyToFastapiWithParams, proxyToFastapiWrapped, mapApiError } from './fastapi-proxy';
 import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 // story #3786 후속(2026-09-10) — 이 파일의 다른 describe 블록들은 Accept-Language와
 // 무관한 축을 검증하므로, 그 블록들에서 getLocale()이 매번 'en'을 주도록 파일 전역
@@ -430,5 +431,71 @@ describe('fastapi-proxy — 봉투가 사라지는 자리 전수 fix(story #3644
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('UPSTREAM_NON_JSON');
+  });
+});
+
+// story #4320 — 백엔드 fetch에 signal · 시간 제한이 없어, 브라우저가 끊어도 BFF → 백엔드 호출이 살아 있고 백엔드가 멈추면 BFF 요청이
+// 백엔드가 답할 때까지 붙잡혔다(이 블록의 «멈춘 백엔드» fetch는 signal이 끊기지 않으면 영영 안 끝난다 — 예전 코드면 테스트가 시간 초과).
+describe('fastapi-proxy — 백엔드 fetch 취소 · 시간 제한(story #4320)', () => {
+  /** signal이 끊길 때까지 안 끝나는 백엔드(멈춘 상류). 끊기면 fetch처럼 그 이유로 reject. */
+  const hangingBackend = () => vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+    const s = init?.signal;
+    if (!s) return; // signal이 없으면 영원히 대기 — 예전 모양.
+    if (s.aborted) { reject(s.reason); return; }
+    s.addEventListener('abort', () => reject(s.reason), { once: true });
+  }));
+
+  beforeEach(() => {
+    getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1' });
+  });
+
+  it('⭐백엔드가 멈추면 제한 시간에 끊고 503 UPSTREAM_TIMEOUT(연결 실패 UPSTREAM_UNREACHABLE과 다른 코드)', async () => {
+    global.fetch = hangingBackend() as unknown as typeof fetch;
+    const res = await proxyToFastapi(new Request('http://localhost/api/x'), '/api/v2/x', { timeoutMs: 30 });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe('UPSTREAM_TIMEOUT');
+  });
+
+  it('⭐원 요청이 끊기면(브라우저 4310 시간 초과 · 탭 닫기) 그 취소가 백엔드 fetch까지 간다', async () => {
+    const backend = hangingBackend();
+    global.fetch = backend as unknown as typeof fetch;
+    const controller = new AbortController();
+    const pending = proxyToFastapi(new Request('http://localhost/api/x', { signal: controller.signal }), '/api/v2/x', { timeoutMs: 60_000 });
+    await vi.waitFor(() => expect(backend).toHaveBeenCalledTimes(1));
+    const signal = (backend.mock.calls[0]![1] as RequestInit).signal!;
+    expect(signal.aborted).toBe(false);
+    controller.abort();
+    const res = await pending;
+    expect(signal.aborted).toBe(true);
+    expect(res.status).toBe(499);
+    expect((await res.json()).error.code).toBe('CLIENT_CLOSED_REQUEST');
+  });
+
+  it('기본 제한은 4310 브라우저 쪽과 같은 30초 · 라우트 옵션으로 늘린다(변환 계열 — 표 한 곳 · 프런트 한도 안 천장)', async () => {
+    const { BFF_BACKEND_TIMEOUT_MS, BFF_BACKEND_CONVERT_TIMEOUT_MS } = await import('./backend-signal');
+    const { FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS } = await import('./db/client');
+    expect(BFF_BACKEND_TIMEOUT_MS).toBe(FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS);
+    // story #4320(까디르 QA ①) — 예전 130초는 프런트 Cloud Run 60초에서 실제로 잘리던 잠복 — 표의 천장 안(55초).
+    expect(BFF_BACKEND_CONVERT_TIMEOUT_MS).toBe(LONG_ROUTES.attachmentConvert.bffMs);
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    global.fetch = vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
+    await proxyToFastapi(new Request('http://localhost/api/x'), '/api/v2/x');
+    await proxyToFastapi(new Request('http://localhost/api/x'), '/api/v2/x', { timeoutMs: BFF_BACKEND_CONVERT_TIMEOUT_MS });
+    expect(timeoutSpy.mock.calls.map((c) => c[0])).toEqual([30_000, LONG_ROUTES.attachmentConvert.bffMs]);
+    timeoutSpy.mockRestore();
+  });
+
+  it('연결 실패(시간 초과 · 취소 아님)는 그대로 UPSTREAM_UNREACHABLE', async () => {
+    global.fetch = vi.fn(async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch;
+    const res = await proxyToFastapi(new Request('http://localhost/api/x'), '/api/v2/x');
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe('UPSTREAM_UNREACHABLE');
+  });
+
+  it('WithParams · Wrapped도 같은 길을 탄다(한 fetch 자리)', async () => {
+    global.fetch = hangingBackend() as unknown as typeof fetch;
+    const a = await proxyToFastapiWithParams(new Request('http://localhost/api/x'), '/api/v2/x/[id]', { id: '1' }, { timeoutMs: 20 });
+    const b = await proxyToFastapiWrapped(new Request('http://localhost/api/x'), '/api/v2/x', { timeoutMs: 20 });
+    expect([a.status, b.status]).toEqual([503, 503]);
   });
 });

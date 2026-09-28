@@ -40,6 +40,14 @@ _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATAB
 pytestmark = pytest.mark.destructive_schema
 
 
+@pytest.fixture(autouse=True)
+def _full_access_caller_4351():
+    """story #4351 — list_gates · 결재함이 제한된 caller를 접근 가능 프로젝트로 좁힌다. 이 파일의 관심은 assigned_to_me · can_approve ·
+    정렬 · project_id 채움이라 caller를 «전체 접근(None)»으로 고정한다(범위 규칙 자체는 test_4351_gates_scope_realdb.py 실 PG)."""
+    with patch("app.services.project_auth.restricted_accessible_project_ids", AsyncMock(return_value=None)):
+        yield
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
@@ -139,8 +147,18 @@ async def test_non_doc_approvable_project_id_none_org_member_false():
 
 
 def _resp(g):
-    return SimpleNamespace(
-        id=g.id, work_item_type=g.work_item_type, work_item_id=g.work_item_id,
+    # story #4139(까디르 QA 실측, 페드루 PO 지시 2026-09-22) — SimpleNamespace는 GateResponse에
+    # 새 필드(이번엔 deferred_to_gate_id)가 늘 때마다 AttributeError로 재발하는 클래스(위
+    # _doc_gate/_story_gate가 이미 겪어 make_gate()로 옮긴 것과 동일 사고). 패치 대상 자체
+    # (`GateResponse.model_validate`)가 돌려주는 값이니 진짜 GateResponse여야 한다 —
+    # `model_construct()`(검증은 건너뛰되 미지정 필드는 모델 기본값으로 채움)로 만들면
+    # 다음 필드가 늘어도 이 테스트가 안 깨진다(반창고로 getattr 방어를 프로덕션에 넣는
+    # 대신, 목 객체를 실 모양으로 맞추는 게 근본 — 페드루 PO 지시).
+    from app.routers.gates import GateResponse
+
+    return GateResponse.model_construct(
+        id=g.id, org_id=g.org_id, work_item_type=g.work_item_type, work_item_id=g.work_item_id,
+        gate_type=g.gate_type, status=g.status, created_at=g.created_at, updated_at=g.updated_at,
         work_item_summary=None, can_approve=False,
     )
 
@@ -195,12 +213,18 @@ async def _call_list_gates(
     conv_batch.all.return_value = []
     session = AsyncMock()
     # execute call order: gates SELECT, [doc batch if fetch_ids], [story batch if story_ids],
-    # [conversation_id 배치 if resolved is not None and gates non-empty]
+    # [wf_line_version batch if any], [conversation_id 배치 if resolved is not None and gates non-empty]
     side_effects = [gates_result]
     if any(g.work_item_type == "doc" or g.gate_type == "doc_approval" for g in gates):
         side_effects.append(doc_batch)
     if any(g.work_item_type == "story" and g.gate_type != "doc_approval" for g in gates):
         side_effects.append(story_batch)
+    # story #4241 — list_gates가 wf_line_version(및 loop·hypothesis·epic·sprint) 게이트의 project_id도 배치 해소한다(종류당 IN 쿼리 1개).
+    # 이 파일의 org-level 게이트는 조직 단위 라인이라 project_id None 행을 돌려준다(실 DB와 같은 모양).
+    if any(g.work_item_type == "wf_line_version" for g in gates):
+        wf_batch = MagicMock()
+        wf_batch.all.return_value = [(g.work_item_id, None) for g in gates if g.work_item_type == "wf_line_version"]
+        side_effects.append(wf_batch)
     if not resolve_raises and gates:
         side_effects.append(conv_batch)
     session.execute = AsyncMock(side_effect=side_effects)

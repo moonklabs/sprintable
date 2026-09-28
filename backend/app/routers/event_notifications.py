@@ -162,9 +162,17 @@ class NotificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class NotificationListItem(NotificationResponse):
+    """story #4244 — 종 알림 목록 항목: 대상(source_entity)의 프로젝트와 문서 slug(목록 조회 때 배치 해소). events.project_id는 대상의
+    프로젝트가 아니다(사람 수신자 dispatched 이벤트는 수신자 멤버 행의 project_id — notification_dispatch.py). 표시·링크 전용."""
+
+    target_project_id: uuid.UUID | None = None
+    target_doc_slug: str | None = None
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.get("", response_model=list[NotificationResponse])
+@router.get("", response_model=list[NotificationListItem])
 async def list_notifications(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -172,7 +180,7 @@ async def list_notifications(
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
-) -> list[NotificationResponse]:
+) -> list[NotificationListItem]:
     """GET /api/v2/event-notifications — 현재 사용자의 알림 목록 (최신순).
 
     project_id 필터: 해당 프로젝트의 member_id로 조회 (multi-project 사용자 대응).
@@ -190,7 +198,15 @@ async def list_notifications(
         .offset(offset)
     )
     events = result.scalars().all()
-    return [NotificationResponse.model_validate(e) for e in events]
+    items = [NotificationListItem(**NotificationResponse.model_validate(e).model_dump()) for e in events]
+    from app.services.notification_targets import resolve_reference_targets
+    targets = await resolve_reference_targets(db, org_id, ((i.source_entity_type, i.source_entity_id) for i in items))
+    for i in items:
+        tgt = targets.get((i.source_entity_type, i.source_entity_id)) if i.source_entity_type and i.source_entity_id else None
+        if tgt is not None:
+            i.target_project_id = tgt.project_id
+            i.target_doc_slug = tgt.doc_slug
+    return items
 
 
 @router.get("/unread-count")

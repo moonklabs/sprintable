@@ -353,6 +353,16 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.org_members:delete_org_member": "org owner/admin 게이트·project 축 없음",
     "app.routers.org_members:update_org_member": "org owner/admin 게이트·project 축 없음",
     "app.routers.org_invites:revoke_org_invite": "org owner/admin 게이트·project 축 없음",
+    # story #4166 — path의 {connector_id}는 org_generation_connectors 행(org_id+label
+    # UNIQUE·project_id 컬럼 자체가 없음, channel_connections류와 동형 org-level 리소스).
+    # _require_org_admin(→_require_human)이 org 멤버십+role(owner|admin)을 검증하고
+    # update_org_generation_connector_location(get_org_generation_connector(org_id=,
+    # connector_id=))이 org_id로 스코프된 조회라 타 org 커넥터는 404 — project 스코프
+    # 검증이 애초에 무의미(ORG_ONLY 결, replace_channel_connection_credentials와 동일 근거).
+    "app.routers.org_generation_connectors:patch_generation_connector_location_endpoint": (
+        "org-level 리소스(project_id 컬럼 없음)·_require_org_admin org-scope 게이트·"
+        "get_org_generation_connector가 org_id로 스코프 조회(타 org 404)"
+    ),
     "app.routers.workflow_trigger_types:delete_trigger_type": "_is_org_admin/require_admin·project 축 없음",
     "app.routers.workflow_trigger_types:update_trigger_type": "동일 org-admin 게이트·project 축 없음",
     "app.routers.channel_connections:set_channel_app_credentials": (
@@ -389,6 +399,14 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.measurement_connections:ga4_disconnect_endpoint": (
         "_require_owner(→org owner) — ga4_connections는 project 축이 없는 org-level "
         "리소스(channel_connections:set_channel_app_credentials와 동형 ORG_ONLY 결)."
+    ),
+    # story #3953 — path의 {org_id}는 organizations 행 자신(external_publish_paused_at/
+    # _by/_reason 컬럼, project_id 축 자체가 없음, channel_connections:set_channel_app_
+    # credentials와 동형 ORG_ONLY 리소스). _require_owner(→_require_human)가 org
+    # 멤버십+role(owner)을 검증한다 — project 스코프 검증이 애초에 무의미.
+    "app.routers.channel_connections:put_external_publish_pause": (
+        "_require_owner(→org owner) — organizations 행 자신(project_id 축 없음, "
+        "channel_connections:set_channel_app_credentials와 동형 ORG_ONLY 결)."
     ),
 }
 

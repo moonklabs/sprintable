@@ -1,0 +1,233 @@
+"""story #4303(PO 06:39Z · 1안 + role `member` 고정) — 조직을 떠난 사람의 이름이 옛 기록에서 풀린다.
+
+떠남 = `delete_org_member`: org_members.deleted_at + members.is_active=false(이름은 남음) + project_access 삭제. 조직 범위
+`GET /api/v2/team-members?include_inactive=true`(4300 이름 훅의 조직 원천)는 에이전트는 비활성까지 싣는데 휴먼 갈래는 늘
+`om.deleted_at IS NULL`이라 떠난 사람만 빠졌다 → 옛 기록 작성 · 담당 · 승인 칸이 «알 수 없는 구성원».
+
+- `include_inactive=true`일 때만 떠난 사람도 싣는다 — 이름 · 종류만(user_id · avatar_url null · role `member` · is_active false).
+- 기본 로스터(`include_inactive` 없음) · `type=agent` · `/api/v2/members`는 그대로(고르기 목록에 섞이지 않음).
+- 다른 조직의 떠난 사람은 0.
+"""
+from __future__ import annotations
+
+import os
+import uuid
+from datetime import UTC, datetime
+
+import pytest
+
+_RAW_URL = os.environ.get("PARITY_TEST_DATABASE_URL") or os.environ.get("ALEMBIC_DATABASE_URL") or ""
+_ASYNC_URL = _RAW_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace(
+    "postgresql://", "postgresql+asyncpg://"
+)
+
+pytestmark = pytest.mark.skipif(not _ASYNC_URL, reason="real-DB URL 미설정 — skip")
+
+_LEFT_AT = datetime(2020, 1, 1, tzinfo=UTC)
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    yield
+    from app.core.database import engine as _global_engine
+
+    await _global_engine.dispose()
+
+
+async def _seed(session):
+    """조직 A: 호출자(owner) · 남은 사람 B · 떠난 사람 D(옛 역할 admin · 아바타 있음). 조직 B: 떠난 사람 X."""
+    from app.models.member import Member
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    ids: dict[str, uuid.UUID] = {}
+    orgs = {}
+    for key in ("a", "b"):
+        org = Organization(id=uuid.uuid4(), name=f"Org {key}", slug=f"org-{uuid.uuid4().hex[:8]}")
+        session.add(org)
+        await session.commit()
+        orgs[key] = org.id
+    people = (
+        ("caller", "a", "owner", "호출자", False),
+        ("stayer", "a", "member", "남은 사람", False),
+        ("departed", "a", "admin", "떠난 사람", True),
+        ("other_departed", "b", "member", "다른 조직의 떠난 사람", True),
+    )
+    for key, org_key, role, name, left in people:
+        uid = uuid.uuid4()
+        session.add(User(id=uid, email=f"{key}-{uid.hex[:8]}@test.com", hashed_password="x", display_name=name))
+        await session.commit()
+        om = OrgMember(id=uuid.uuid4(), org_id=orgs[org_key], user_id=uid, role=role, deleted_at=_LEFT_AT if left else None)
+        session.add(om)
+        await session.commit()
+        session.add(Member(
+            id=om.id, org_id=orgs[org_key], type="human", user_id=uid, name=name, is_active=not left,
+            avatar_url=f"https://example.test/{key}.png",
+        ))
+        await session.commit()
+        ids[key] = om.id
+        ids[f"{key}_user"] = uid
+    return orgs, ids
+
+
+async def _get(Session, orgs, ids, path: str):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.dependencies.auth import AuthContext, get_current_user
+    from app.main import app
+    from tests.conftest import override_db_and_read
+
+    async def _db():
+        async with Session() as s:
+            yield s
+
+    async def _auth():
+        return AuthContext(
+            user_id=str(ids["caller_user"]), email="caller@test", claims={"app_metadata": {"org_id": str(orgs["a"])}},
+        )
+
+    override_db_and_read(app, _db)
+    app.dependency_overrides[get_current_user] = _auth
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.get(path)
+        assert r.status_code == 200, r.text
+        return r.json()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_departed_member_names_only_with_include_inactive():
+    """AC1 · AC2 — include_inactive면 떠난 D가 이름만 실려 온다(user_id · avatar null · role member · is_active false) · 다른 조직의
+    떠난 X는 0 · 남은 사람 B 행은 그대로. 뮤테이션: 떠난 행 비우기를 빼면(옛 역할 · 아바타 · user_id 실림) RED."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            orgs, ids = await _seed(s)
+        rows = await _get(Session, orgs, ids, "/api/v2/team-members?include_inactive=true")
+        by_id = {r["id"]: r for r in rows}
+        departed = by_id[str(ids["departed"])]
+        assert (departed["name"], departed["type"], departed["is_active"]) == ("떠난 사람", "human", False)
+        assert (departed["user_id"], departed["avatar_url"], departed["role"]) == (None, None, "member")
+        assert "@" not in str(departed)
+        assert str(ids["other_departed"]) not in by_id
+        stayer = by_id[str(ids["stayer"])]
+        assert (stayer["is_active"], stayer["user_id"]) == (True, str(ids["stayer_user"]))
+
+        typed = await _get(Session, orgs, ids, "/api/v2/team-members?type=human&include_inactive=true")
+        assert str(ids["departed"]) in {r["id"] for r in typed}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_pickers_and_rosters_never_carry_departed_members():
+    """AC3 — 고르기 목록 · 로스터 원천엔 떠난 사람이 없다: 기본 team-members · `type=agent&include_inactive=true`(에이전트 관리)
+    · `/api/v2/members`. 뮤테이션: `include_departed`를 늘 켜면 기본 로스터에 D가 섞여 RED."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            orgs, ids = await _seed(s)
+        departed = str(ids["departed"])
+        for path in ("/api/v2/team-members", "/api/v2/team-members?type=agent&include_inactive=true", "/api/v2/members"):
+            rows = await _get(Session, orgs, ids, path)
+            items = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
+            seen = {str(r.get("id")) for r in items}
+            assert departed not in seen, path
+            # 공허 통과 방지 — 사람 목록인 두 원천은 남은 사람 B를 실제로 싣는다.
+            if "type=agent" not in path:
+                assert str(ids["stayer"]) in seen, (path, seen)
+    finally:
+        await engine.dispose()
+
+
+async def _seed_name_rows(session, orgs):
+    """story #4303(C안 · 마이그 0414) — 0075가 빠뜨린 떠난 사람의 이름 행(members.id = 옛 legacy id · user_id NULL · deleted_at 있음)을
+    조직 A · B에 하나씩(각각 같은 id의 team_members_legacy 휴먼 행과 함께), 0075가 사용자 없는 옛 행에 id 문자열을 name으로 넣은 모양
+    (user_id NULL · deleted_at NULL)을 A에 하나, 그리고 까디르 codex(04:03Z) — **이름 행과 같은 모양인데 옛 사람 id가 아닌** 행(계정 삭제 뒤
+    users가 지워져 FK SET NULL · name에 이메일이 남은 경우)을 A에 하나."""
+    from sqlalchemy import text
+
+    from app.models.member import Member
+
+    ids = {"name_row": uuid.uuid4(), "other_name_row": uuid.uuid4(), "orphan_user_row": uuid.uuid4(), "not_legacy_row": uuid.uuid4()}
+    session.add(Member(id=ids["name_row"], org_id=orgs["a"], type="human", user_id=None, name="옛 떠난 사람",
+                       is_active=False, deleted_at=_LEFT_AT))
+    session.add(Member(id=ids["other_name_row"], org_id=orgs["b"], type="human", user_id=None, name="다른 조직 옛 사람",
+                       is_active=False, deleted_at=_LEFT_AT))
+    session.add(Member(id=ids["orphan_user_row"], org_id=orgs["a"], type="human", user_id=None,
+                       name=str(ids["orphan_user_row"]), is_active=True))
+    session.add(Member(id=ids["not_legacy_row"], org_id=orgs["a"], type="human", user_id=None,
+                       name="deleted-user@example.test", is_active=False, deleted_at=_LEFT_AT))
+    await session.commit()
+    # 0414가 이름 행을 만드는 기준 = 같은 id의 옛 사람 행(team_members_legacy · 휴먼). 이름 행 둘만 짝이 있다.
+    for key, org_key in (("name_row", "a"), ("other_name_row", "b")):
+        project_id = uuid.uuid4()
+        await session.execute(text("INSERT INTO projects (id, org_id, name) VALUES (:id, :org, 'legacy')"), {"id": project_id, "org": orgs[org_key]})
+        await session.execute(text(
+            "INSERT INTO team_members_legacy (id, project_id, org_id, type, user_id, name) "
+            "VALUES (:id, :p, :o, 'human', (SELECT id FROM users LIMIT 1), 'legacy name')"
+        ), {"id": ids[key], "p": project_id, "o": orgs[org_key]})
+    await session.commit()
+    return ids
+
+
+@pytest.mark.anyio
+async def test_name_rows_resolve_in_org_names_and_lookup_only():
+    """C안 — 이름 행은 이름 풀이 두 곳(조직 로스터 include_inactive · BE lookup)에서만 이름으로 선다: 이름 · 종류만 · 다른 조직 0.
+    피커 · 기본 로스터 · 에이전트 관리 · /api/v2/members엔 0. 0075식 옛 행(user_id NULL · deleted_at NULL)은 id 문자열을 이름으로 안 낸다.
+    뮤테이션: 로스터 UNION을 빼면 이름 행이 빠져 RED · resolver의 name 폴백 조건을 넓히면 옛 행이 id 문자열 이름을 내 RED."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.services.member_resolver import _lookup_members_by_ids_anchor
+
+    engine = create_async_engine(_ASYNC_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            orgs, ids = await _seed(s)
+            rows_ = await _seed_name_rows(s, orgs)
+        name_row, other_row, orphan_row, not_legacy = (
+            str(rows_[k]) for k in ("name_row", "other_name_row", "orphan_user_row", "not_legacy_row")
+        )
+
+        names = {r["id"]: r for r in await _get(Session, orgs, ids, "/api/v2/team-members?include_inactive=true")}
+        row = names[name_row]
+        assert (row["name"], row["type"], row["is_active"]) == ("옛 떠난 사람", "human", False)
+        assert (row["user_id"], row["avatar_url"], row["role"]) == (None, None, "member")
+        assert other_row not in names
+        assert orphan_row not in names
+        # 같은 모양이어도 옛 사람 id가 아니면 로스터에 없다 — 이메일이 이름 자리로 나가지 않는다.
+        assert not_legacy not in names
+        assert "deleted-user@example.test" not in str(names)
+        # 4303 1안(org_members 떠난 사람)도 그대로 — 두 갈래가 함께 선다.
+        assert names[str(ids["departed"])]["name"] == "떠난 사람"
+
+        for path in ("/api/v2/team-members", "/api/v2/team-members?type=agent&include_inactive=true", "/api/v2/members"):
+            got = await _get(Session, orgs, ids, path)
+            items = got["items"] if isinstance(got, dict) and "items" in got else got
+            seen = {str(r.get("id")) for r in items}
+            assert name_row not in seen and other_row not in seen, path
+
+        async with Session() as s:
+            resolved = await _lookup_members_by_ids_anchor({rows_["name_row"], rows_["orphan_user_row"], rows_["not_legacy_row"]}, s)
+        hit = resolved[rows_["name_row"]]
+        assert (hit.name, hit.type, hit.user_id, hit.resolved) == ("옛 떠난 사람", "human", None, True)
+        assert hit.org_id == orgs["a"]
+        assert resolved[rows_["orphan_user_row"]].name is None
+        assert resolved[rows_["not_legacy_row"]].name is None
+    finally:
+        await engine.dispose()

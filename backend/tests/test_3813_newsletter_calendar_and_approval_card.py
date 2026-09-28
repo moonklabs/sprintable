@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_e4fc29fa_site_post_orchestration import _seed_org, _session_factory, _seed_default_role, _seed_agent
 from tests.test_3475_publishing_metrics import _seed_human, _client_for, _setup_org_scoped_app
 from tests.test_3806_ads_boost_gate import _seed_publication
@@ -169,7 +171,7 @@ async def test_calendar_schedule_axis_moves_from_publish_window_to_send_window_a
             await _approve_gate_directly(s, gate_id)
 
         async with _client_for(app) as client:
-            r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r_publish.status_code == 200, r_publish.text
         version_id = uuid.UUID(r_publish.json()["version_id"])
 

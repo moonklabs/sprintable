@@ -8,6 +8,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { useToast } from '@/components/ui/toast';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { disambiguateFallbackLabels, memberNameById } from '@/lib/member-display';
 
 interface UserBlockRow {
   blocked_member_id: string;
@@ -18,9 +19,12 @@ interface UserBlockRow {
 // section.tsx의 return-null-on-empty 선례 재사용 — 새 패턴 발명 금지).
 export function BlockedUsersSection() {
   const t = useTranslations('settings');
+  const tc = useTranslations('common');
   const { addToast } = useToast();
   const [rows, setRows] = useState<UserBlockRow[]>([]);
-  const [nameById, setNameById] = useState<Record<string, string>>({});
+  // [SID:4286 · 까디르 873bcf080] 값 = 구성원 행(이름은 null일 수 있음) · 조회 실패는 표에 안 넣는다(→ «알 수 없는 구성원»). 예전엔 이름 빔 · 실패 둘 다
+  // id를 이름 자리에 넣어 원시 UUID가 보였다.
+  const [memberMap, setMemberMap] = useState<Record<string, { name: string | null }>>({});
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -31,19 +35,19 @@ export function BlockedUsersSection() {
       const json = await res.json() as { data?: UserBlockRow[] };
       const list = json.data ?? [];
       setRows(list);
-      const missing = list.map((r) => r.blocked_member_id).filter((id) => !(id in nameById));
+      const missing = list.map((r) => r.blocked_member_id).filter((id) => !(id in memberMap));
       if (missing.length > 0) {
         const entries = await Promise.all(missing.map(async (id) => {
           try {
             const r = await fetchWithAuth(`/api/team-members/${id}`);
-            if (!r.ok) return [id, id] as const;
-            const j = await r.json() as { data?: { name?: string } };
-            return [id, j.data?.name ?? id] as const;
+            if (!r.ok) return null;
+            const j = await r.json() as { data?: { name?: string | null } };
+            return j.data ? [id, { name: j.data.name ?? null }] as const : null;
           } catch {
-            return [id, id] as const;
+            return null;
           }
         }));
-        setNameById((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+        setMemberMap((prev) => ({ ...prev, ...Object.fromEntries(entries.filter((e) => e !== null)) }));
       }
     } finally {
       setLoading(false);
@@ -69,6 +73,13 @@ export function BlockedUsersSection() {
 
   if (loading || rows.length === 0) return null;
 
+  // 목록 행이라 같은 폴백 글자가 서로 다른 사람 둘 이상이면 그 행에만 «· ID 앞 8자»(꼬리 규칙 한 곳 · tailSharedFallbacks).
+  const rowLabels = disambiguateFallbackLabels(rows.map((row) => ({
+    id: row.blocked_member_id,
+    label: memberNameById(memberMap, row.blocked_member_id, tc, tc('memberUnknown')),
+    fallback: !memberMap[row.blocked_member_id]?.name,
+  })));
+
   return (
     <SectionCard>
       <SectionCardHeader>
@@ -89,7 +100,7 @@ export function BlockedUsersSection() {
             <div key={row.blocked_member_id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
               <span className="flex items-center gap-2 text-sm text-foreground">
                 <ShieldOff className="h-4 w-4 text-muted-foreground" aria-hidden />
-                {nameById[row.blocked_member_id] ?? row.blocked_member_id}
+                {rowLabels.get(row.blocked_member_id)}
               </span>
               <Button
                 variant="outline"

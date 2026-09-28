@@ -44,7 +44,7 @@ async def _active_token(db: AsyncSession, org_id: uuid.UUID, doc_id: uuid.UUID) 
             DocShareToken.org_id == org_id,
             DocShareToken.doc_id == doc_id,
             DocShareToken.status == "active",
-        ).limit(1)
+        ).order_by(DocShareToken.created_at.desc(), DocShareToken.id.desc()).limit(1)
     )).scalar_one_or_none()
 
 

@@ -141,7 +141,7 @@ async def test_hold_non_pending_and_unhold_non_held_rejected():
 @pytest.mark.anyio
 async def test_sla_skips_held_step_run():
     """⭐SLA pause: held step_run 은 processor 가 skip(reminder/escalation 일시정지)."""
-    from app.services.workflow_sla_processor import process_sla  # noqa: F401
+    from tests.test_edg_s13_sla_processor import _run_sla
     from app.models.project import Project
     from app.models.pm import Story
     from app.models.workflow_line import WorkflowLineStepRun
@@ -161,7 +161,7 @@ async def test_sla_skips_held_step_run():
             started_at=datetime.now(timezone.utc) - timedelta(days=10),
             correlation_id=uuid.uuid4(), transition_id=uuid.uuid4().hex))
         await s.commit()
-        counts = await process_sla(s)
+        counts = await _run_sla(s)
         # held 는 skip(reminded/escalated 0)
         assert counts.get("reminded", 0) == 0 and counts.get("escalated", 0) == 0
         assert counts.get("skipped", 0) >= 1

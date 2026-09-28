@@ -7,5 +7,8 @@ import { proxyToFastapiWrapped } from '@/lib/fastapi-proxy';
  * `POST /api/v2/org-billing-keys/customer-key`(바디 없음) → `{customer_key}`, 멱등.
  */
 export async function POST(request: Request): Promise<Response> {
-  return proxyToFastapiWrapped(request, '/api/v2/org-billing-keys/customer-key');
+  return proxyToFastapiWrapped(request, '/api/v2/org-billing-keys/customer-key', {
+    // story #4320(까디르 QA ③) — 결제 고객 키를 새로 낸다 — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+    timeLimitOnly: true,
+  });
 }

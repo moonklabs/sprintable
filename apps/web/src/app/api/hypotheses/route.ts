@@ -3,14 +3,14 @@ import { HypothesisService } from '@/services/hypothesis';
 import { createHypothesisRepository } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 
 // Thin proxy over HypothesisService → wraps the BE raw response in an apiSuccess {data}
 // envelope (epics/route.ts pattern). The repository talks raw to FastAPI; this route is
 // the one place {data} is added, so the client consumer reads json.data (E1-S8 §9 / fc4d4264).
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 

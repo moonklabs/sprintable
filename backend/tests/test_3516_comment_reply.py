@@ -621,7 +621,7 @@ async def test_insights_board_carries_three_comment_signal_fields(monkeypatch):
             await refresh_comments_now(s, org_id=org_id, publication_id=pub.id)
 
             result = await list_insights_board(
-                s, org_id=org_id, window="30d", channel=None, status=None, sort="published_at", sort_dir="desc",
+                s, viewer_is_human=True, org_id=org_id, window="30d", channel=None, status=None, sort="published_at", sort_dir="desc",
                 cursor=None, limit=50,
             )
             row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
@@ -643,7 +643,7 @@ async def test_insights_board_comments_supported_false_for_unsupported_channel()
             _, _, _, pub = await _seed_full_publication_chain(s, org_id=org_id, project_id=project_id, channel="wordpress")
 
             result = await list_insights_board(
-                s, org_id=org_id, window="30d", channel=None, status=None, sort="published_at", sort_dir="desc",
+                s, viewer_is_human=True, org_id=org_id, window="30d", channel=None, status=None, sort="published_at", sort_dir="desc",
                 cursor=None, limit=50,
             )
             row = next(r for r in result["rows"] if r["publication_id"] == pub.id)

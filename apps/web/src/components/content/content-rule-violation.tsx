@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 
 /**
  * story #3472 2부(BE 3471/#3825 계약, 유나 §16-7 정본 2026-09-05) — 초안 create/
@@ -54,13 +55,17 @@ export function ContentRuleViolationList({
   testId: string;
   t: (key: string, values?: Record<string, string | number>) => string;
 }) {
+  // story #4017(PO 확定 2026-09-17) — v.settings_path와의 동등비교는 BE 계약 리터럴
+  // 그대로 유지(KNOWN_CONTENT_RULES_SETTINGS_PATH 불변 — 이건 BE가 실어 보내는 값과
+  // 맞대야 하는 판정축이라 v3 플래그와 무관). 렌더 href만 목적지 모듈로 교체.
+  const connectRulesHref = useConnectRulesHref(KNOWN_CONTENT_RULES_SETTINGS_PATH);
   return (
     <>
       {violations.map((v, i) => (
         <p key={`${v.code}-${i}`} className="text-xs text-muted-foreground" data-testid={testId}>
           {contentRuleViolationHint(v.code, v.value, t)}{' '}
           {v.settings_path === KNOWN_CONTENT_RULES_SETTINGS_PATH ? (
-            <Link href={v.settings_path} className="underline">{t('contentRuleLinkLabel')}</Link>
+            <Link href={connectRulesHref} className="underline">{t('contentRuleLinkLabel')}</Link>
           ) : null}
         </p>
       ))}

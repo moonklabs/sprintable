@@ -4,6 +4,8 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from limits.errors import StorageError
@@ -229,7 +231,7 @@ async def lifespan(app: FastAPI):
             await worker_engine.dispose()
 
 
-from app.routers import a2a, account, activation, activity_logs, admin_billing, admin_unhandled_errors, activity_stream, ads_boost, ads_boost_execution, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, channel_post_comments, channel_post_comment_replies, engagement_items, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, mcp, me, meetings, members, measurement_connections, merge_gate, newsletter_send, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, today, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, account, activation, activity_logs, admin_billing, background_jobs, admin_unhandled_errors, activity_stream, ads_boost, ads_boost_execution, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, channel_post_comments, channel_post_comment_replies, engagement_items, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, material_lineage, mcp, me, meetings, members, measurement_connections, merge_gate, newsletter_send, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_generation_connectors, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, today, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 # 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
 # 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
@@ -292,6 +294,21 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         content={"data": None, "error": error, "meta": None},
         headers=exc.headers,
     )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """story #4330 — 본문 일시가 오프셋 없어 `OffsetDatetime`에 걸린 오류만 쿼리(4294)와 같은 422 `DATETIME_OFFSET_REQUIRED`
+    봉투(`param` = 본문 경로 · `hint` 예시)로 바꾼다. 그 밖의 검증 오류는 FastAPI 기본 처리 그대로(형태 회귀 0)."""
+    from app.core.datetime_query import OFFSET_REQUIRED_ERROR_TYPE, offset_required_detail
+
+    for err in exc.errors():
+        if err.get("type") == OFFSET_REQUIRED_ERROR_TYPE:
+            loc = [str(part) for part in err.get("loc", ()) if part != "body"]
+            return await http_exception_handler(
+                request, HTTPException(status_code=422, detail=offset_required_detail(".".join(loc), request)),
+            )
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -383,6 +400,17 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 app.state.limiter = limiter
 
+# story #4389 — commit a write request's DB session **before** its response headers go out (was: in get_db's teardown, after the
+# response was sent). Added first = innermost user middleware: every response of the app (including exception-handler responses)
+# passes through it, and CORS / metering layers wrap the final status. See app/core/commit_before_response.py.
+from app.core.commit_before_response import CommitBeforeResponseMiddleware
+
+app.add_middleware(
+    CommitBeforeResponseMiddleware,
+    error_handler=unhandled_exception_handler,
+    replay_body_for=a2a.is_a2a_rpc_path,
+)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -419,6 +447,13 @@ from app.services.tool_call_recording import ToolCallRecordingMiddleware  # noqa
 
 app.add_middleware(ToolCallRecordingMiddleware)
 
+# story #4332 — 요청마다 풀 체크아웃 대기 · SQL 수 · SQL 합계 ms(로그 한 줄만 · 응답 헤더 0). 맨 바깥에 둬 모든 미들웨어의 SQL까지 센다.
+# 까디르 4697 ① — DB_TIMING_LOG_ENABLED가 켜진 경우에만 단다(꺼져 있으면 요청마다 드는 비용 0 · 엔진 쪽도 같은 판단 · database.py).
+from app.core.request_db_timing import RequestDbTimingMiddleware, timing_enabled  # noqa: E402
+
+if timing_enabled():
+    app.add_middleware(RequestDbTimingMiddleware)
+
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(activity_logs.router)
@@ -441,6 +476,7 @@ app.include_router(goals.router, prefix="/api/v2/epics", tags=["epics-deprecated
 app.include_router(hypotheses.router)
 app.include_router(loops.router)
 app.include_router(loop_measure_due.router)
+app.include_router(material_lineage.router)
 app.include_router(context_pack.router)
 app.include_router(dependencies.router)
 app.include_router(labels.router)
@@ -454,7 +490,9 @@ app.include_router(hitl_config.router)
 app.include_router(domain_labels.router)
 app.include_router(connectors.router)
 app.include_router(channel_connections.router)
+app.include_router(org_generation_connectors.router)
 app.include_router(channel_posts.router)
+app.include_router(background_jobs.router)  # story #4336 PR2 — 공용 작업 줄 상태 보기
 app.include_router(campaigns.router)
 app.include_router(content_rules.router)
 app.include_router(publishing_metrics.router)

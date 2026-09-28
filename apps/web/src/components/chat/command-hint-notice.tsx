@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ArrowRight, Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { runtimeLabel } from '@/lib/runtime-capabilities';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * S4 capability gate가 발신자 응답(`command_gate.blocked[]`)으로 돌려주는 차단 hint 1건.
@@ -22,6 +23,7 @@ export interface BlockedHint {
  * 참여자 버블(아바타+말풍선)과 구별되는 inset 시스템 notice — info 톤(에러 아닌 친절한 리디렉션).
  */
 export function CommandHintNotice({ hint }: { hint: BlockedHint }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // S8 #1: 런타임 표기 — claude-code→"Claude Code"·미등록→원값·null→"런타임 미설정"(i18n).
   const runtime = runtimeLabel(hint.runtime_type) ?? t('runtimeUnsetLabel');
@@ -36,7 +38,7 @@ export function CommandHintNotice({ hint }: { hint: BlockedHint }) {
           {t('commandBlockedAlt', { command: hint.command })}
         </p>
         <Link
-          href={`/organization/workforce/${hint.agent_id}`}
+          href={flatHref(`/organization/workforce/${hint.agent_id}`)}
           className="inline-flex items-center gap-1 rounded text-xs font-medium text-info underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {t('commandBlockedSettings')}

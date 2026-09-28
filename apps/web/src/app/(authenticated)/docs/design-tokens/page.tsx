@@ -10,7 +10,9 @@ export default function DesignTokensPage() {
   const brandGroup = colorGroups.find(g => g.label === 'Brand');
 
   return (
-    <div className="min-h-full overflow-y-auto px-6 py-8">
+    // story #4130 — 고정 툴바 없음, 로컬 스크롤 경계를 걷어내고 셸의 단일 스크롤러(:199)가
+    // 스크롤하게 둔다.
+    <div className="px-6 py-8">
       <div className="mx-auto max-w-4xl space-y-12">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Design Tokens</h1>

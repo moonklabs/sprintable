@@ -40,7 +40,7 @@ async def list_campaigns(db: AsyncSession, *, org_id: uuid.UUID) -> list[Campaig
     드롭다운 데이터원. org 전체·created_at desc(신규 campaign이 먼저 보이게) —
     페이지네이션 없음(org당 campaign 수가 작아 지금은 불요, 필요해지면 후속)."""
     return list((await db.execute(
-        select(Campaign).where(Campaign.org_id == org_id).order_by(Campaign.created_at.desc())
+        select(Campaign).where(Campaign.org_id == org_id).order_by(Campaign.created_at.desc(), Campaign.id.desc())
     )).scalars().all())
 
 
@@ -64,7 +64,7 @@ async def create_campaign(
 
 
 async def list_content_items_for_campaign(
-    db: AsyncSession, *, org_id: uuid.UUID, campaign_id: uuid.UUID,
+    db: AsyncSession, *, org_id: uuid.UUID, campaign_id: uuid.UUID, project_ids: list[uuid.UUID] | None,
 ) -> list[tuple[SitePostDraft, SitePostVersion]]:
     """이 campaign에 속한 content_item(SitePostDraft)과 각각의 최신 버전(title/lang
     표시용) — site_posts.list_site_post_drafts의 latest-version 조인 축과 동형(단,
@@ -88,6 +88,11 @@ async def list_content_items_for_campaign(
             & (SitePostVersion.version == latest_version_ids.c.max_version),
         )
         .where(SitePostDraft.org_id == org_id, SitePostDraft.campaign_id == campaign_id)
-        .order_by(SitePostVersion.created_at.desc())
+        .order_by(SitePostVersion.created_at.desc(), SitePostVersion.id.desc())
     )
+    if project_ids is not None:
+        # story #4351(까디르 P2) — 접근이 제한된 caller는 접근 가능 프로젝트 스토리의 글만 · SQL에서(다 읽고 거르지 않는다).
+        from app.models.pm import Story
+
+        stmt = stmt.where(SitePostDraft.work_item_id.in_(select(Story.id).where(Story.project_id.in_(project_ids))))
     return [(row[0], row[1]) for row in (await db.execute(stmt)).all()]

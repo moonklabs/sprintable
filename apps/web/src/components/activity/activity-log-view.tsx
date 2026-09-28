@@ -11,8 +11,10 @@ import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
-import { memberDisplayLabel } from '@/lib/member-display';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { actorRowLabels, memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
+import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { ActivityTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,15 +64,9 @@ const ACTION_FILTER_DEBOUNCE_MS = 300;
 // 실제 action 값들(예: "created", "updated_status")보다 압도적으로 넉넉한 상한.
 const ACTION_FILTER_MAX_LENGTH = 200;
 
-function getDefaultDates() {
-  const to = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - 7);
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
-}
+// story #4280 — 기본 기간(최근 7일)은 표시 시간대(조직 timezone → 없으면 브라우저) 기준 «오늘»으로. 예전 `toISOString().slice(0, 10)`는
+// UTC 날짜라 KST 00~09시에 끝 날짜가 «어제»였다(민 기기 · 9/25 02:49 KST에 «~ 9. 24.»).
+const DEFAULT_RANGE_PAST_DAYS = 7;
 
 // ─── Row skeleton ─────────────────────────────────────────────────────────────
 
@@ -107,7 +103,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     return () => clearTimeout(timer);
   }, [actionFilter]);
   const [entityTypeFilter, setEntityTypeFilter] = useState(ALL);
-  const [{ from: initFrom, to: initTo }] = useState(getDefaultDates);
+  const { orgTimezone } = useDashboardContext();
+  const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
+  const [{ from: initFrom, to: initTo }] = useState(() => defaultPastDaysDateRange(displayTimezone, DEFAULT_RANGE_PAST_DAYS));
   const [fromDate, setFromDate] = useState(initFrom);
   const [toDate, setToDate] = useState(initTo);
 
@@ -129,11 +127,14 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
       if (actorFilter !== ALL) p.set('actor_id', actorFilter);
       if (debouncedActionFilter !== ALL) p.set('action', debouncedActionFilter);
       if (entityTypeFilter !== ALL) p.set('entity_type', entityTypeFilter);
-      if (fromDate) p.set('from', `${fromDate}T00:00:00`);
-      if (toDate) p.set('to', `${toDate}T23:59:59`);
+      // story #4280 — 날짜 칸은 표시 시간대의 날짜라 경계도 그 시간대의 자정 · 자정 직전(오프셋 있는 UTC ISO)으로 보낸다.
+      // 예전 `${fromDate}T00:00:00`(오프셋 없음)은 BE가 UTC로 읽어 KST 첫날 00~09시를 빠뜨렸다.
+      const bounds = dateKeysToInstants(fromDate, toDate, displayTimezone);
+      if (bounds.from) p.set('from', bounds.from);
+      if (bounds.to) p.set('to', bounds.to);
       return p;
     },
-    [projectId, actorFilter, debouncedActionFilter, entityTypeFilter, fromDate, toDate],
+    [projectId, actorFilter, debouncedActionFilter, entityTypeFilter, fromDate, toDate, displayTimezone],
   );
 
   const fetchLogs = useCallback(
@@ -209,10 +210,14 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   // ─── Dropdown options ──────────────────────────────────────────────────────
 
+  // [SID:4286 · 유나 규칙] 드롭다운 선택지는 타입 표식이 없어 라벨이 타입을 대신 · 같은 라벨이 둘 이상이면 행 꼬리(한 규칙).
+  const actorLabelById = memberOptionLabels(members, tc);
   const actorOptions: SelectOption[] = [
     { value: ALL, label: t('filterAll') },
-    ...members.map((m) => ({ value: m.id, label: m.name ?? tc('unknown') })),
+    ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
+  // [SID:4311 PR 2 · 유나] 피드 행의 행위자 — actor_id마다 한 번 · 시스템 행 제외 · 불러온 줄들 안에서만 겹침 판정.
+  const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? memberDisplayLabel(item.actor_name, tc) : null })));
 
   const entityTypeOptions: SelectOption[] = [
     { value: ALL, label: t('filterAll') },
@@ -223,7 +228,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      <TopBarSlot title={<ActivityTopBarTitle />} showContextChip />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Filters */}
@@ -310,7 +315,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
           ) : (
             <div className="space-y-1.5">
               {items.map((item) => (
-                <ActivityRow key={item.id} item={item} />
+                <ActivityRow key={item.id} item={item} rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined} />
               ))}
               {offset + PAGE_SIZE < total && (
                 <div className="pt-3 text-center">
@@ -353,25 +358,33 @@ export function auditContextTooltip(item: ActivityLogItem): string | undefined {
 // `!item.actor_name`으로 뭉뚱그려져 있었다 — 전자는 실존 구성원이라 「이름 없는 구성원」으로
 // 정직하게 표시해야 하고, 후자는(액터 자체가 없음) 기존대로 빈 슬롯이 맞다. actor_id로 갈라
 // 구분한다.
-export function auditActorProps(item: ActivityLogItem, t: (key: string) => string): {
-  human?: { name: string; role: string };
-  agent?: { name: string; initial: string };
+// [SID:4286 · 까디르 P2] #4284 name/label 계약(ProofCapsule · shared/avatar) — 머리글자 · 아바타는 name 그대로(null → 아이콘), 읽는 글자는
+// label. 예전엔 null 이름을 «이름 없는 구성원» 글자로 바꿔 name에 넣어, 아바타가 그 글자의 앞 두 자(«이름»)를 머리글자로 그렸다(가짜 머리글자).
+// [SID:4311 PR 2] rowLabel = 목록이 actorRowLabels로 지은 행위자 라벨(같은 이름 둘이면 «· ID 앞 8자» 꼬리) — 읽는 글자(label)에만 싣고
+// 머리글자(name)는 그대로(유나).
+export function auditActorProps(item: ActivityLogItem, t: (key: string) => string, rowLabel?: string): {
+  human?: { name: string | null; label?: string; role: string };
+  agent?: { name: string | null; label?: string };
 } {
   if (!item.actor_id) return {}; // 진짜 액터 없음(시스템 액션) — 빈 슬롯 유지.
-  const name = memberDisplayLabel(item.actor_name, t);
-  if (item.actor_type === 'agent') return { agent: { name, initial: name.slice(0, 1) } };
-  return { human: { name, role: item.actor_type ?? 'human' } };
+  const name = item.actor_name || null;
+  const text = rowLabel || memberDisplayLabel(name, t);
+  const label = text === name ? {} : { label: text };
+  if (item.actor_type === 'agent') return { agent: { name, ...label } };
+  return { human: { name, ...label, role: item.actor_type ?? 'human' } };
 }
 
-function ActivityRow({ item }: { item: ActivityLogItem }) {
+function ActivityRow({ item, rowLabel }: { item: ActivityLogItem; rowLabel?: string }) {
   // story #3493 — 감사로그 created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)
   // 으로 통일. document.documentElement.lang 수동 판독도 useLocale()로 정리(같은 뜻,
   // 정본 훅 사용).
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  // story #4280 — 기간(위 ActivityLogView)과 같은 표시 시간대 축(조직 timezone 우선).
+  const { orgTimezone } = useDashboardContext();
+  const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
   const time = formatRelativeTime(item.created_at, locale, displayTimezone);
   const tc = useTranslations('common');
-  const { human, agent } = auditActorProps(item, tc);
+  const { human, agent } = auditActorProps(item, tc, rowLabel);
   return (
     <div title={auditContextTooltip(item)}>
       <ProofCapsule

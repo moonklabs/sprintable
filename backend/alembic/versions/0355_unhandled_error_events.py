@@ -2,18 +2,23 @@
 지속 흔적(unhandled_error_events). id=error_id(응답 봉투·로그 한 줄과 동일 값) —
 서버 발급 uuid4를 앱 코드가 그대로 싣는다(server_default 없음, 항상 명시 INSERT).
 
+story #3804(2026-09-16) 재부모화 — 0354a(prod 승격 재료 브릿지)를 0354 바로 뒤에
+선형으로 끼우면서 down_revision을 "0354"→"0354a"로 옮긴다(single head 유지, DDL
+무변경 — 순서 삽입만).
+
 Revision ID: 0355
-Revises: 0354
+Revises: 0354a
 Create Date: 2026-09-07
 """
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
+
 revision = "0355"
-down_revision = "0354"
+down_revision = "0354a"
 branch_labels = None
 depends_on = None
 

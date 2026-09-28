@@ -19,8 +19,10 @@ from app.models.embedding import Embedding
 from app.models.evidence import Evidence
 from app.models.event import Event
 from app.models.event_outbox import EventOutbox
+from app.models.background_job import BackgroundJob
 from app.models.delivery_job import DeliveryJob
 from app.models.channel_connection import ChannelConnection
+from app.models.org_generation_connector import OrgGenerationConnector
 from app.models.channel_app_credential import ChannelAppCredentials
 from app.models.channel_oauth_pending_selection import ChannelOAuthPendingSelection
 from app.models.ga4_connection import GA4Connection
@@ -39,6 +41,7 @@ from app.models.human_api_key import HumanApiKey
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.offering_version import OfferingVersion
+from app.models.operator_alert import OperatorAlert
 from app.models.grandfather_policy import GrandfatherPolicy
 from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.plan_tier_limit import PlanTierLimit
@@ -155,6 +158,8 @@ from app.models.publication_attempt import PublicationAttempt
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
 from app.models.ads_boost_run import AdsBoostRun
+from app.models.material_lineage import MaterialLineage
+from app.models.external_publish_pause_audit_log import ExternalPublishPauseAuditLog
 
 __all__ = [
     "RoleTemplate",
@@ -187,6 +192,7 @@ __all__ = [
     "BridgeUserMapping",
     "Embedding",
     "EventOutbox",
+    "BackgroundJob",
     "DeliveryJob",
     "Gate",
     "GateGithubCheckEvent",
@@ -203,6 +209,7 @@ __all__ = [
     "UsageMeter",
     "ApiKey",
     "OrgSubscription",
+    "OperatorAlert",
     "PricingVersion",
     "OfferingVersion",
     "GrandfatherPolicy",

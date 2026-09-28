@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CONNECTOR_BADGE_REGISTRY, runtimeLabel, RUNTIME_REGISTRY } from './runtime-capabilities';
+import { CONNECTOR_BADGE_REGISTRY, isSystemPublisher, runtimeLabel, RUNTIME_REGISTRY } from './runtime-capabilities';
 
 // story #3103(DS·후속, 3505 design 판정 필수) — runtimeLabel()의 미등록 폴백을
 // `?? key`(원값 보존)에서 `?? null`로 닫는다. registry 미등재 runtime_type이 raw key
@@ -39,5 +39,23 @@ describe('system-publisher 아이콘 자산 — 파비콘 대비 무변형(흰 �
     expect(markOf(symbolSvg).trim()).toBe(markOf(faviconSvg).trim());
     // 파생판에는 흰 배경 rect가 없어야 한다(디스크의 고정-라이트 배경이 그 역할을 대신함).
     expect(symbolSvg).not.toContain('<rect');
+  });
+});
+
+// story #3994(«거짓 경고» 클래스) — 공용 판정 1개. 자리마다 문자열 비교를 복제하면
+// 다음 사람이 오탈자로 다시 새는 결함 클래스라 이 함수 하나로 통일한다.
+describe('isSystemPublisher — 공용 판정(story #3994)', () => {
+  it('runtime_type이 system-publisher면 true', () => {
+    expect(isSystemPublisher('system-publisher')).toBe(true);
+  });
+
+  it('실 코딩 에이전트 런타임(예: claude-code)이면 false', () => {
+    expect(isSystemPublisher('claude-code')).toBe(false);
+  });
+
+  it('null/undefined/미등록 값이면 false(시스템 발행 취급 0 — 오탐 방지)', () => {
+    expect(isSystemPublisher(null)).toBe(false);
+    expect(isSystemPublisher(undefined)).toBe(false);
+    expect(isSystemPublisher('unknown-runtime-x')).toBe(false);
   });
 });

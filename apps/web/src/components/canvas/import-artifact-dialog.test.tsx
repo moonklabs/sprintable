@@ -40,7 +40,7 @@ afterEach(async () => {
 
 async function mount(onImport: (nodes: ArtifactNode[]) => Promise<boolean> = vi.fn(async () => true)) {
   await act(async () => {
-    root.render(wrap(<ImportArtifactDialog open onOpenChange={vi.fn()} onImport={onImport} />));
+    root.render(wrap(<ImportArtifactDialog open onOpenChange={vi.fn()} onImport={onImport} targetId="story-1" />));
   });
   return onImport;
 }

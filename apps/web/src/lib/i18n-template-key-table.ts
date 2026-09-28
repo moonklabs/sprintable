@@ -1,0 +1,66 @@
+// story #2228 — i18n-key-coverage 가드(#2210, i18n-key-coverage.test.ts)는 정적 문자열
+// 리터럴 키만 본다. "템플릿 리터럴로 조합해서 만드는" 키(`t(\`status_${s}\`)` 같은 자리)는
+// 정적 정규식으로 값을 못 구해 그 가드의 스캔 대상에서 빠진다.
+//
+// 2026-07-27 실측: apps/web/src 전체에서 그런 자리가 **55곳**(~20개 파일) — 바늘구멍이
+// 아니었다. 그 55곳 전부를 소스에서 직접 읽어 "그 변수가 실제로 가질 수 있는 값"을
+// TypeScript 유니온 타입·const 배열·순수함수의 반환값에서 전개했다(추측 금지 — 실제 값만).
+//
+// 결과: 아래 표로 커버되는 finite(유한) 자리 53곳 중 **2개 키가 실제로 누락**돼 있었다
+// (agentHitl.escalationMode_timeout_memo · escalationMode_timeout_memo_and_escalate —
+// agent-hitl-policy-editor.tsx의 타임아웃 클래스 에스컬레이션 모드 드롭다운, 지금 채움).
+// 나머지는 전부 존재 확인됨.
+//
+// 2026-07-27 후속(story #2235, managed agent 앞단 전량 삭제) — 위 53곳 중 agent-deployment-wizard.tsx·
+// agent-hitl-policy.ts·agent-deployment-console.ts 출처였던 항목(steps.*, agentHitl.*,
+// healthStateLabel_*/healthStateBody_*/recoveryCueTitle_*/recoveryCueBody_*)은 그 소스 파일 자체가
+// 삭제되며 표에서 함께 제거— 번역 키도 동일하게 삭제됨(전용 확인 후, 다른 화면 미사용).
+//
+// ⛔이 가드도 못 잡는 것 2곳(고의로 남김, "0~2곳이면 바늘구멍" 판정 — #2228 AC6):
+//   ① outcome-result-card.tsx의 `metric_${result.metric}` — `MetricDefinition.metric`이
+//      `string`(무제한)이고 `source`가 'ga4'|'manual'일 때 실제 GA4/수동 메트릭 이름은
+//      4개 내부 메트릭(velocity 등)과 무관한 임의 문자열이다. 이건 "키를 더 채우는" 문제가
+//      아니라 호출부 자체가 잘못됐다 — 별도 스토리 후보로 남긴다(이 파일에서 안 고침).
+//   ② tool-permission-picker.tsx·recruiter-client.tsx의 `toolPermissions.groups.${key}` —
+//      BE `/api/v2/mcp/toolset-catalog`가 SSOT라 그룹 키가 백엔드에서 늘어날 수 있다.
+//      현재 알려진 17개(폴백 상수 `toolset-catalog.ts`) 전량은 아래 표로 커버되지만,
+//      새 그룹이 백엔드에만 추가되면 컴파일 타임으로 못 잡는 자리로 남는다.
+//
+// story #3732(2026-09-22, i18n-template-key-coverage.test.ts에서 이관) — 이 표는 원래 그
+// 테스트 파일 안에 로컬 상수로 있었다. `verify-no-unused-i18n-keys.ts`(reverse-key 가드,
+// 이 표를 "사용됨"으로 간주할 SSOT로 재사용하기로 이 표 자신의 옛 주석이 이미 예고돼
+// 있었다)가 그 파일을 직접 import하면 `describe`/`it`가 vitest 러너 밖(plain tsx CLI)에서
+// 즉시 실행돼 깨진다 — 그래서 데이터만 이 비-테스트 모듈로 옮기고, 테스트 파일은 여기서
+// re-import해 원래 검증을 그대로 한다(값 복제 0, SSOT 위치만 이동).
+
+// [prefix, values[], sourceOfTruth] — sourceOfTruth는 그 값 집합을 어디서 실제로 확인했는지
+// (다음 사람이 재검증할 때 다시 읽을 자리).
+// ⛔이 표는 손으로 갱신해야 한다(PO 리뷰, 2026-07-27) — 정적 스캔이 아니라 하드코딩이라,
+// 새 템플릿 조합 키(`t(\`prefix_${var}\`)` 형태)를 만들면 이 표가 조용히 낡는다. 그 상태로는
+// 가드가 계속 초록인데 새 키만 화면에 그대로 뜬다 — 새 조합 키를 추가할 때 반드시 여기 항목을
+// 같이 추가할 것.
+export const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
+  ['proofCapsule.risk.', ['low', 'medium', 'high'], 'proof-capsule.tsx RISK_KEY 값 타입'],
+  ['gateConfig.work_', ['done', 'merge'], 'gate-level-matrix.tsx WORK_TYPES'],
+  ['gateConfig.actor_', ['agent', 'human'], 'gate-level-matrix.tsx ACTOR_TYPES'],
+  ['standup.reviewType_', ['comment', 'approve', 'request_changes'], 'standup-feedback-dialog.tsx StandupReviewType'],
+  ['agentRuns.billingMode_', ['managed', 'byom'], 'agent-runs-list.tsx AgentRun.llm_provider'],
+  ['agentRuns.status_', ['queued', 'held', 'running', 'hitl_pending', 'completed', 'failed', 'abandoned'], 'agent-runs-list.tsx AgentRun.status(story #3680 — abandoned 추가)'],
+  ['agentRuns.failureDisposition_', ['retry_scheduled', 'retry_launched', 'retry_exhausted', 'non_retryable'], 'agent-runs-list.tsx AgentRun.failure_disposition'],
+  ['agents.toolPermissions.groups.', ['core', 'stories', 'tasks', 'sprints', 'epics', 'chat', 'docs', 'analytics', 'retro', 'standup', 'meetings', 'notifications', 'webhooks', 'rewards', 'audit', 'agent_runs', 'admin'], 'toolset-catalog.ts 폴백 그룹(BE가 SSOT — ②로 별도 명시)'],
+  ['loops.entityType', ['Loop', 'Hypothesis', 'Decision'], 'context-pack-panel.tsx entity_type 타입'],
+  ['loops.aiConfidenceLevel_', ['high', 'medium', 'low'], 'ai-attribution.tsx AiConfidence'],
+  ['canvas.responsivePreview', ['Desktop', 'Tablet', 'Mobile'], 'artifact-expand-dialog.tsx PreviewBreakpoint'],
+  ['canvas.galleryAxis', ['Epic', 'Story', 'Sprint', 'Doc'], 'artifact-gallery.ts GalleryAxis'],
+  ['canvas.galleryFormat', ['Html', 'Tree', 'Image'], 'canvas.ts ArtifactFormat'],
+  ['glance.phrase.', ['notStarted', 'justStarted', 'underway', 'almostThere', 'wrappingUp'], 'glance.ts derivePhrase() 반환값'],
+  ['loops.status', ['Draft', 'Briefing', 'Generating', 'Deciding', 'Executing', 'Measuring', 'Closed', 'Abandoned'], 'loop-status-badge.tsx LoopStatus'],
+  ['settings.notification_category_', ['story', 'task', 'sprint', 'system'], 'settings/page.tsx NOTIFICATION_CATEGORIES'],
+  ['settings.event_', ['story', 'story_assigned', 'task', 'task_assigned', 'task_completed', 'sprint_closed', 'info', 'warning', 'system', 'standup_reminder', 'reward', 'invitation'], 'settings/page.tsx NOTIFICATION_CATEGORIES[].types'],
+  // story #3728(unused-key 역방향 가드 착수 중 발견) — recruiter-client.tsx WakeMethodBody의
+  // `t.rich(\`kitOrientingWakeBody_${method}\`, ...)`가 애초에 이 표에 등록된 적이 없던
+  // 진짜 사각(이 가드 자신의 미검출 갭). 'unknown'은 별도 분기(kitOrientingWakeBodyUnknown,
+  // 위 t('...') 정적 호출로 이미 잡힘)라 여기 값 목록에서 제외 — RuntimeWakeMethod(services/
+  // recruit.ts)의 나머지 5값. 5키 전부 ko/en에 이미 존재 확認(신규 추가 아님).
+  ['recruiter.kitOrientingWakeBody_', ['channel-plugin', 'channel-plugin-marketplace', 'connector-host', 'connector-sidecar', 'connector-sdk'], 'services/recruit.ts RuntimeWakeMethod(\'unknown\' 제외 — 별도 분기)'],
+];

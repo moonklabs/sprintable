@@ -5,11 +5,23 @@ import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
+import { guardEscClose } from "@/lib/inner-layer-esc"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
-function Sheet({ ...props }: SheetPrimitive.Root.Props) {
-  return <SheetPrimitive.Root data-slot="sheet" {...props} />
+// [SID:4367] 한 Esc = 한 층 — 안쪽 층이 쓴 Esc(preventDefault)면 이 시트의 Esc 닫기를 취소한다(inner-layer-esc.ts).
+// [SID:4369] 유나 규칙 — 조합 중 Esc · 글 있는 여러 줄 칸의 첫 Esc도 닫지 않는다(칸에서만 빠져나옴 · 둘째 Esc = 닫힘).
+function Sheet({ onOpenChange, ...props }: SheetPrimitive.Root.Props) {
+  return (
+    <SheetPrimitive.Root
+      data-slot="sheet"
+      onOpenChange={(open, details) => {
+        if (guardEscClose(open, details)) return;
+        onOpenChange?.(open, details);
+      }}
+      {...props}
+    />
+  )
 }
 
 function SheetTrigger({ ...props }: SheetPrimitive.Trigger.Props) {
@@ -52,7 +64,7 @@ function SheetContent({
   return (
     <SheetPortal>
       <SheetOverlay />
-      <SheetPrimitive.Popup
+      <SheetPrimitive.Popup data-modal-popup=""
         data-slot="sheet-content"
         data-side={side}
         // story #2969 §2 PR-4(doc proofline-system-layer-2969) — shadow-lg→--elev-overlay.

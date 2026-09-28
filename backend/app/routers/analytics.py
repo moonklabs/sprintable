@@ -197,6 +197,32 @@ async def get_pending_candidate_count(
     return PendingCandidateCountResponse.model_validate(result)
 
 
+_AGENT_STATS_BATCH_MAX = 200
+
+
+@router.get("/analytics/agent-stats/batch", response_model=dict[str, AgentStatsResponse])
+async def get_agent_stats_batch(
+    project_id: uuid.UUID = Query(...),
+    agent_ids: str = Query(..., description="comma-separated agent ids (max 200)"),
+    repo: AnalyticsRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict[str, AgentStatsResponse]:
+    """story #4185(E-MOBILE-SPEED) — 에이전트 성과 패널이 에이전트마다 단건(`/analytics/agent-stats`)을 따로 부르던
+    N+1을 한 번으로. 응답은 {agent_id: 지표} — 그 프로젝트의 에이전트가 아닌 id는 빠진다(단건의 404와 같은 판정).
+    단건 엔드포인트는 그대로 둔다(additive · 계산은 같은 한 벌)."""
+    await _assert_project_access(repo, auth, project_id)
+    try:
+        parsed_ids = list(dict.fromkeys(uuid.UUID(s.strip()) for s in agent_ids.split(",") if s.strip()))
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"code": "AGENT_IDS_INVALID"})
+    if not parsed_ids:
+        raise HTTPException(status_code=400, detail={"code": "AGENT_IDS_EMPTY"})
+    if len(parsed_ids) > _AGENT_STATS_BATCH_MAX:
+        raise HTTPException(status_code=400, detail={"code": "AGENT_IDS_TOO_MANY", "max": _AGENT_STATS_BATCH_MAX})
+    data = await repo.get_agent_stats_batch(project_id, parsed_ids)
+    return {str(aid): AgentStatsResponse.model_validate(stats) for aid, stats in data.items()}
+
+
 @router.get("/analytics/agent-stats", response_model=AgentStatsResponse)
 async def get_agent_stats(
     project_id: uuid.UUID = Query(...),

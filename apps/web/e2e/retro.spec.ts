@@ -24,8 +24,9 @@ test.describe('Sprint Retro E2E Tests', () => {
     // Navigate to retro page
     await page.goto(`${BASE_URL}/retro`);
     
-    // Wait for page to load
-    await page.waitForLoadState('networkidle');
+    // Wait for page to load.
+    // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거, h1/h2(목록 항상 렌더)로 대체.
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
   });
 
   test('TC1: Retro list page loads successfully', async ({ page }) => {
@@ -85,7 +86,9 @@ test.describe('Sprint Retro E2E Tests', () => {
     
     if (await firstSessionLink.isVisible()) {
       await firstSessionLink.click();
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       // Check if we're on a detail page (URL contains /retro/ and an ID)
       const url = page.url();
@@ -105,7 +108,9 @@ test.describe('Sprint Retro E2E Tests', () => {
     if (await firstSessionLink.isVisible()) {
       const href = await firstSessionLink.getAttribute('href');
       await page.goto(`${BASE_URL}${href}`);
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     }
     
     // Look for stepper steps
@@ -125,7 +130,9 @@ test.describe('Sprint Retro E2E Tests', () => {
     if (await firstSessionLink.isVisible()) {
       const href = await firstSessionLink.getAttribute('href');
       await page.goto(`${BASE_URL}${href}`);
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     }
     
     // Look for column headers
@@ -152,7 +159,9 @@ test.describe('Sprint Retro E2E Tests', () => {
     if (await firstSessionLink.isVisible()) {
       const href = await firstSessionLink.getAttribute('href');
       await page.goto(`${BASE_URL}${href}`);
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     }
     
     // Find input fields in the page
@@ -192,7 +201,9 @@ test.describe('Sprint Retro E2E Tests', () => {
     if (await firstSessionLink.isVisible()) {
       const href = await firstSessionLink.getAttribute('href');
       await page.goto(`${BASE_URL}${href}`);
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     }
     
     // Look for "Next Phase" or "Continue" button
@@ -212,7 +223,9 @@ test.describe('Sprint Retro E2E Tests', () => {
     if (await firstSessionLink.isVisible()) {
       const href = await firstSessionLink.getAttribute('href');
       await page.goto(`${BASE_URL}${href}`);
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     }
     
     // Check initial phase
@@ -236,9 +249,10 @@ test.describe('Sprint Retro E2E Tests', () => {
       }
     });
     
-    // Navigate and wait
+    // Navigate and wait.
+    // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거, h1/h2(목록 항상 렌더)로 대체.
     await page.goto(`${BASE_URL}/retro`);
-    await page.waitForLoadState('networkidle');
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
     
     if (consoleErrors.length > 0) {
       console.log('⚠ TC10: Console errors detected:');

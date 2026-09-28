@@ -182,13 +182,37 @@ def test_evaluate_reports_no_stale_when_baseline_matches_exactly():
     assert stale == []
 
 
-# ─── EXEMPT_FILES(story #3786, 페드루 PO 明示 2026-09-10 12:24Z) — 이름 붙은 유일 예외 ──
+# ─── EXEMPT_FILES(story #3786, 페드루 PO 明示 2026-09-10 12:24Z) — 이름 붙은 예외 ──
 
 
-def test_exempt_files_has_exactly_one_named_entry():
-    """무배제 원칙이 깨지지 않았는지 — 예외 세트가 정확히 1건(i18n_catalog.py)인지 고정.
-    누군가 조용히 더 추가하면(PO 승인 없이) 이 테스트가 잡는다."""
-    assert EXEMPT_FILES == frozenset({"app/services/i18n_catalog.py"})
+def test_exempt_files_has_exactly_two_named_entries():
+    """무배제 원칙이 깨지지 않았는지 — 예외 세트가 정확히 2건인지 고정. 누군가 조용히
+    더 추가하면(PO 승인 없이) 이 테스트가 잡는다.
+
+    story #4120(PO 승인 2026-09-21 18:28Z) — `app/utils/korean_particle.py` 추가,
+    무배제 원칙의 두 번째이자 마지막 예외. 근거: 예외 클래스는 "사용자 문장이 아닌 것"
+    (i18n_catalog.py = 문장의 정본 / korean_particle.py = 조사 낱말표, 둘 다 산문이
+    아니라 문법 요소를 담는 자리) — 조사 낱말표 한정. 아래
+    test_korean_particle_exemption_limited_to_josa_words가 그 한정을 트립와이어로
+    지킨다(문장이 이 파일에 섞여 들어오면 RED — 뒷문 방지)."""
+    assert EXEMPT_FILES == frozenset({"app/services/i18n_catalog.py", "app/utils/korean_particle.py"})
+
+
+def test_korean_particle_exemption_limited_to_josa_words():
+    """story #4120(PO 승인 2026-09-21 18:28Z) — korean_particle.py의 EXEMPT_FILES 등재는
+    "조사 낱말표"에 한정된 예외다(문장이 아님). 그 파일 안의 한글 리터럴이 전부 2음절
+    이하(조사만)인지 직접 검사해 — 누군가 이 파일에 실제 문장(사용자 안내 문구 등)을
+    몰래 더하면(같은 예외를 "산문 숨기기" 뒷문으로 쓰면) 이 테스트가 잡는다."""
+    backend_root = Path(__file__).resolve().parent.parent
+    particle_path = backend_root / "app" / "utils" / "korean_particle.py"
+    source = particle_path.read_text(encoding="utf-8")
+    violations = scan_source(source, "app/utils/korean_particle.py")
+    assert len(violations) > 0, "korean_particle.py에 한글 리터럴이 없다 — fixture 전제가 깨짐"
+    too_long = [v for v in violations if len(v.text) > 2]
+    assert too_long == [], (
+        f"korean_particle.py에 2음절을 넘는 한글 리터럴이 있다 — 조사 낱말표 한정을 벗어났다"
+        f"(문장이 섞여 들어왔을 수 있다, PO 재확認 필요): {too_long}"
+    )
 
 
 def test_scan_repo_excludes_i18n_catalog_but_still_catches_other_korean():

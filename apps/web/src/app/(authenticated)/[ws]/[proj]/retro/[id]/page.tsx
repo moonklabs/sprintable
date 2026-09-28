@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core';
 import { Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { actorRowLabels, memberLookup, memberOptionLabels } from '@/lib/member-display';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -15,6 +16,8 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { requestRetroSynthesis } from '@/lib/retro-synthesis-request';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useRetroRoute } from '../retro-context';
 import {
   RETRO_PHASE_TO_STAGE,
@@ -35,6 +38,8 @@ import { SprintCloseCockpit } from '@/components/retro/sprint-close-cockpit';
 import { EvidenceStrip } from '@/components/retro/evidence-strip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
+import { copyTextSafely } from '@/lib/clipboard';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -42,6 +47,11 @@ type VisibleStage = RetroVisibleStage;
 interface RetroMemberOption {
   id: string;
   name: string;
+  // story #3997 CHANGES(카디르 「고르는 자리」 전수, 페드루 확定 2026-09-17) — 회고 액션
+  // 배정 select에서 「시스템 발행」을 걸러내는 데 쓴다. 이름 칸(기존 배정 표시 · [SID:4300] actionNames
+  // 해소)는 이 필드로 안 거른다 — 여기서 걸러지는 건 아래 select 후보뿐.
+  type?: string;
+  runtime_type?: string | null;
 }
 
 const STAGE_ORDER = RETRO_STAGE_ORDER;
@@ -182,7 +192,7 @@ export default function RetroSessionPage() {
   const t = useTranslations('retro');
   const tc = useTranslations('common');
   const { projectId, wsSlug, projSlug } = useRetroRoute();
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, orgId } = useDashboardContext();
   const params = useParams<{ id: string }>();
   const sessionId = params.id;
 
@@ -196,6 +206,9 @@ export default function RetroSessionPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
+  // story #3986 CHANGES(페드루 PO C2) — 내보내기 markdown은 fetch 응답에만 있고
+  // 화면 어디에도 안 떠 있다. 복사 실패했을 때만 그 내용을 선택 가능하게 노출한다.
+  const [exportCopyFailedMarkdown, setExportCopyFailedMarkdown] = useState<string | null>(null);
   const [votedItemIds, setVotedItemIds] = useState<Set<string>>(new Set());
   const { addToast } = useToast();
 
@@ -272,20 +285,25 @@ export default function RetroSessionPage() {
   const [synthesis, setSynthesis] = useState<RetroSynthesis | null>(null);
   const [nextHypotheses, setNextHypotheses] = useState<RetroNextHypothesis[]>([]);
 
+  // story #4336 PR2 ②(PO 04:32Z) — 종합은 늘 작업(requestRetroSynthesis가 202 + 작업을 끝까지 기다림). 화면을 떠나면 묻기만 멈춘다.
+  const synthesisJobAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => synthesisJobAbortRef.current?.abort(), []);
+
   const handleGenerateSynthesis = useCallback(async (): Promise<boolean> => {
     if (!projectId) return false;
+    synthesisJobAbortRef.current?.abort();
+    const controller = new AbortController();
+    synthesisJobAbortRef.current = controller;
     try {
-      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { method: 'POST' });
-      if (!res.ok) return false;
-      const json = await res.json() as { data?: { synthesis?: RetroSynthesis; next_hypotheses?: RetroNextHypothesis[] } };
-      if (!json.data?.synthesis) return false;
-      setSynthesis(json.data.synthesis);
-      setNextHypotheses(json.data.next_hypotheses ?? []);
+      const result = await requestRetroSynthesis({ sessionId, projectId, orgId, signal: controller.signal });
+      if (!result) return false;
+      setSynthesis(result.synthesis);
+      setNextHypotheses(result.next_hypotheses);
       return true;
     } catch {
       return false;
     }
-  }, [projectId, sessionId]);
+  }, [orgId, projectId, sessionId]);
 
   const handleAdoptRecommendation = useCallback(async (rec: RetroNextHypothesis, statement: string): Promise<boolean> => {
     if (!projectId) return false;
@@ -314,20 +332,27 @@ export default function RetroSessionPage() {
 
   // B3(9f27af8f): 액션 담당자 선택용 멤버 목록 — org-level, 신규 fetch 1회.
   const [members, setMembers] = useState<RetroMemberOption[]>([]);
+  // [SID:4300] 담당자 목록을 받아 봤는지(성공 · 실패 모두) — 이름 칸 보충의 «없음» 판단 시점.
+  const [membersLoaded, setMembersLoaded] = useState(false);
   const [togglingActionId, setTogglingActionId] = useState<string | null>(null);
-  const memberNameById = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const member of members) map[member.id] = member.name;
-    return map;
-  }, [members]);
+  const memberTable = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members]);
+  const actionAssigneeIds = useMemo(() => actions.map((action) => action.assignee_id), [actions]);
+  const actionNames = useMemberNameFallback(orgId, memberTable, actionAssigneeIds, membersLoaded);
+  // [SID:4311 PR 2] 액션 담당 칩 줄 — 같은 이름 담당자 둘이면 «· ID 앞 8자»(담당자 id마다 한 번 · 꼬리 규칙 한 곳).
+  const actionAssigneeLabel = (id: string) => memberLookup(actionNames.memberMap, id, tc, { loaded: actionNames.loaded })?.label ?? '';
+  const actionAssigneeLabels = actorRowLabels(actions.map((action) => ({ id: action.assignee_id, label: action.assignee_id ? actionAssigneeLabel(action.assignee_id) : null })));
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetchWithAuth('/api/team-members');
-      if (!res.ok || cancelled) return;
-      const json = await res.json().catch(() => null) as { data?: RetroMemberOption[] } | null;
-      if (json?.data && !cancelled) setMembers(json.data);
+      try {
+        const res = await fetchWithAuth('/api/team-members');
+        if (!res.ok || cancelled) return;
+        const json = await res.json().catch(() => null) as { data?: RetroMemberOption[] } | null;
+        if (json?.data && !cancelled) setMembers(json.data);
+      } finally {
+        if (!cancelled) setMembersLoaded(true);
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -552,7 +577,15 @@ export default function RetroSessionPage() {
       // 동형 신규 1키.
       if (!res.ok) { addToast({ title: t('exportFailed'), type: 'error' }); return; }
       const json = await res.json() as { data: { markdown: string } };
-      await navigator.clipboard.writeText(json.data.markdown);
+      // story #3986(클래스 «거짓 성공 표시») — export 자체(fetch)와 클립보드 복사는
+      // 다른 실패축이다. 공용 헬퍼로 클립보드만 정직하게 갈라 정본 문구로 알린다.
+      const result = await copyTextSafely(json.data.markdown);
+      if (!result.ok) {
+        setExportCopyFailedMarkdown(json.data.markdown);
+        addToast({ title: tc('copyFailedSelectManually'), type: 'error' });
+        return;
+      }
+      setExportCopyFailedMarkdown(null);
       addToast({ title: t('exportCopied'), type: 'success' });
     } catch {
       addToast({ title: t('exportFailed'), type: 'error' });
@@ -609,7 +642,14 @@ export default function RetroSessionPage() {
             {session ? (
               <h1 className="text-sm font-medium">{session.title}</h1>
             ) : (
-              <Skeleton variant="text" className="h-4 w-32" />
+              <>
+                {/* story #3946(유나 확認·페드루 정정) — session이 아직 안 왔을 때 Skeleton은
+                    h1이 아니라 페이지 h1이 0개가 되던 gap. 시각 무변(sr-only) — 세션 제목은
+                    이 시점에 아직 모른다(지어내지 않는다), retro.title(목록 화면과 같은
+                    정본 키)로 자리만 채운다. */}
+                <h1 className="sr-only">{t('title')}</h1>
+                <Skeleton variant="text" className="h-4 w-32" />
+              </>
             )}
             {session && currentStage ? (
               <Badge variant={STAGE_VARIANTS[currentStage]}>
@@ -642,7 +682,22 @@ export default function RetroSessionPage() {
         }
       />
 
-      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {exportCopyFailedMarkdown ? (
+        <div className="space-y-1.5 border-b border-border p-3">
+          <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+          <textarea
+            readOnly
+            value={exportCopyFailedMarkdown}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+            rows={6}
+            data-testid="retro-export-copy-failed-raw-markdown"
+          />
+        </div>
+      ) : null}
+      {/* story #4130 — 고정 툴바 없음(TopBarSlot은 포털) — 로컬 스크롤 경계를 걷어내고
+          셸의 단일 스크롤러(:199)가 스크롤하게 둔다. */}
+      <div className="focus-inset flex flex-col">
         {/* E-SPRINT-LOOP FE(5feac498) — 셸(stepper 프레임)은 항상 렌더(핸드오프 §4①). session
             도착 전엔 중립 skeleton 칩(어느 단계인지 아직 모름)·도착 후 실제 상태로 hydrate. */}
         {session && currentStage ? (
@@ -825,11 +880,14 @@ export default function RetroSessionPage() {
                       {actions.map((action) => {
                         const isDone = action.status === 'done';
                         return (
-                          <div key={action.id} className="flex items-center gap-3 rounded-lg border border-border/60 bg-background px-3 py-2">
+                          // [SID:4311 PR 2 · 유나 390 실측] 담당 칩(nowrap)에 꼬리가 붙으면 폭이 커져 제목이 한두 글자씩 여러 줄로 깨졌다 → 줄 넘김 허용:
+                          // 제목이 12rem보다 좁아지면 칩이 제목 아래 줄로 내려간다(칩은 nowrap 그대로 · 꼬리 온전) · 넓은 화면은 한 줄 그대로.
+                          <div key={action.id} data-testid="retro-action-row" className="flex flex-wrap items-start gap-x-2 gap-y-1 rounded-lg border border-border/60 bg-background px-3 py-2">
                             <button
                               type="button"
                               role="checkbox"
                               aria-checked={isDone}
+                              aria-label={action.title}
                               onClick={() => void toggleActionStatus(action)}
                               disabled={togglingActionId === action.id}
                               className={cn(
@@ -839,11 +897,15 @@ export default function RetroSessionPage() {
                             >
                               {isDone ? <Check className="h-3.5 w-3.5" aria-hidden /> : null}
                             </button>
-                            <p className={cn('flex-1 text-sm', isDone ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                            <p className={cn('min-w-0 flex-1 basis-[12rem] break-keep text-sm', isDone ? 'text-muted-foreground line-through' : 'text-foreground')}>
                               {action.title}
                             </p>
                             <Badge variant="chip">
-                              {action.assignee_id ? (memberNameById[action.assignee_id] ?? t('actionUnassigned')) : t('actionUnassigned')}
+                              {/* [SID:4300] 배정됐는데 목록(활성만 · 배정 선택지)에 없던 담당자가 «미배정»으로 보이던 거짓 — 표에 있으면 이름(빔 =
+                                  «이름 없는 구성원»), 없으면 조직 범위(비활성 포함)로 보충, 그래도 없으면 «알 수 없는 구성원». 받는 동안 빈 칩. */}
+                              {action.assignee_id
+                                ? (actionAssigneeLabels.get(action.assignee_id) ?? actionAssigneeLabel(action.assignee_id))
+                                : t('actionUnassigned')}
                             </Badge>
                           </div>
                         );
@@ -865,9 +927,9 @@ export default function RetroSessionPage() {
                         />
                         <OperatorSelect value={newActionAssigneeId} onChange={(e) => setNewActionAssigneeId(e.target.value)} className="w-auto">
                           <option value="">{t('actionUnassigned')}</option>
-                          {members.map((member) => (
-                            <option key={member.id} value={member.id}>{member.name}</option>
-                          ))}
+                          {((pickable) => { const labels = memberOptionLabels(pickable, tc); return pickable.map((member) => (
+                            <option key={member.id} value={member.id}>{labels.get(member.id)}</option>
+                          )); })(members.filter((member) => !isSystemPublisher(member.runtime_type)))}
                         </OperatorSelect>
                         <Button
                           variant="hero"

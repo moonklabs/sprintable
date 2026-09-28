@@ -99,9 +99,12 @@ export function isInsideContext(resolvedRepoRel: string, prefixes: string[]): bo
   return prefixes.some((p) => p === '' || resolvedRepoRel === p || resolvedRepoRel.startsWith(p + '/'));
 }
 
-export function scanRepository(): { violations: EscapingImport[]; scanned: number; prefixes: string[] } {
+/** `files`는 **격리 루트 테스트 전용**(story #4333) — 기본은 apps/web 실 트리 전수. 테스트가 실 트리에 픽스처를 쓰지 않게 한다. */
+export function scanRepository(
+  { files: only }: { files?: string[] } = {},
+): { violations: EscapingImport[]; scanned: number; prefixes: string[] } {
   const prefixes = parseCopiedPrefixes(readFileSync(DOCKERFILE, 'utf8'));
-  const files = walk(APPS_WEB);
+  const files = only ?? walk(APPS_WEB);
   const violations: EscapingImport[] = [];
   for (const full of files) {
     const rel = path.relative(REPO_ROOT, full);

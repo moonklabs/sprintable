@@ -98,6 +98,13 @@ export interface InsightsBoardRow {
   // PublicationCommand 행) — 새 낱말 0. 수집 상태 축(d1/d7·comments_*)과는 다른
   // 축이라 필터 대상이 아니라 행 배지 전용. site_post 행은 항상 null.
   command_status: string | null;
+  // story #4264(까디르 codex P2 · PO 18:51Z) — 채널 포스트 목록과 같은 실패 필드. 옛 응답엔 없을 수 있어 선택.
+  failure_kind?: string | null;
+  next_retry_at?: string | null;
+  command_reason_code?: string | null;
+  command_reason_reset_at?: string | null;
+  /** story #4290(까디르 QA ④) — 서버 한 판정: 보는 사람이 지금 이 명령을 «다시 시도»할 수 있는가(`viewer_can_retry`). */
+  command_retryable?: boolean;
   // story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
   // 이 publication에 홍보 요청이 없으면 null(「해당 없음」 원천 — 지어내지 않는다).
   ads_boost: AdsBoostSummaryView | null;
@@ -116,6 +123,30 @@ export interface AdsBoostSummaryView {
 
 export type Ga4ConnectionStatus = 'not_connected' | 'needs_reauth' | 'connected';
 
+// story #3978(PR#4374, base=develop 기준 2026-09-17 미착지 — BE PR 브리프 헤더
+// 그대로 옮긴 계약, PublishedInWindowView/ViewsInWindowView) — #3979는 이 필드가
+// 응답에 없거나 null이어도(머지 순서 무관) 「미측정」으로 짓는다(옵셔널 취급).
+export interface PublishedInWindowChannel {
+  channel_kind: string;
+  count: number;
+}
+
+export interface PublishedInWindow {
+  count: number;
+  by_channel: PublishedInWindowChannel[];
+  since: string;
+}
+
+// story #3978 CHANGES(페드루 PO 추가 AC) — 페이지네이션(rows[])과 무관한 서버 합계.
+// captured_rows===0이면 BE가 null을 낸다(미측정) — FE가 rows[]를 합산하지 않는다
+// (한 페이지 합≠전체 합 결함 처방, PO 2026-09-17 00:52Z). sum은 **자연(organic)**
+// D+7 조회만(페드루 정정 2026-09-17 00:57Z) — 광고 조회는 이 필드에 안 실린다.
+export interface ViewsInWindow {
+  sum: number;
+  captured_rows: number;
+  total_rows: number;
+}
+
 export interface InsightsBoardResponse {
   rows: InsightsBoardRow[];
   has_more: boolean;
@@ -130,6 +161,12 @@ export interface InsightsBoardResponse {
   // 처방(insight_snapshots.py::_fetch_ga4_inflow_metrics는 연결이 살아 있어도
   // 처리 지연·해당 창 유입 0·일시 OAuthError로 null을 그대로 둘 수 있다).
   ga4_connection_status: Ga4ConnectionStatus;
+  // story #3978 — 둘 다 옵셔널(PR#4374 머지 순서 무관, 없으면 undefined로 온다는
+  // 뜻이 아니라 "이 키 자체가 응답에 없을 수 있다"는 FE측 방어 — BE 계약은 항상
+  // 키를 내지만(default None), #3979가 base=develop이라 그 PR의 머지 여부와
+  // 독립적으로 안전해야 한다).
+  published_in_window?: PublishedInWindow | null;
+  views_in_window?: ViewsInWindow | null;
 }
 
 export type InsightsBoardWindow = '7d' | '30d' | '90d';

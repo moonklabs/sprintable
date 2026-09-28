@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MutableRefObject, ReactNode, RefObject } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { ComponentProps, MouseEvent as ReactMouseEvent, MutableRefObject, ReactNode, RefObject } from 'react';
 import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
 import { detectEmbedService } from './extensions/embed-node';
 import { renderKatex } from './extensions/math-node';
@@ -18,8 +18,17 @@ import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 // story #2639 — 본문 entity: 참조 링크를 앱 내 엔티티로 잇는다(chat/story-panel과 동일 자산 재사용).
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { cardVariants } from '@/components/ui/card';
+import { buttonVariants } from '@/components/ui/button';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { fetchWithAuth } from '@/lib/db/client';
+import { copyTextSafely } from '@/lib/clipboard';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { useParams, useRouter } from 'next/navigation';
+import { docUrl } from './lib/doc-project-url';
+import { remarkWikiLinks } from './lib/remark-wiki-links';
+import { safeAttachmentDataUrl, safeHttpUrl } from './lib/safe-content-url';
+import { formatFileSize } from './extensions/file-node';
 
 interface DocContentRendererProps {
   content: string;
@@ -28,6 +37,9 @@ interface DocContentRendererProps {
   contentRef?: RefObject<HTMLDivElement | null>;
   codeCopyLabel?: string;
   codeCopiedLabel?: string;
+  /** story #3986(클래스 «거짓 성공 표시») — 실패해도 codeCopiedLabel을 그대로
+   * 보이던 결함 처방. 안 주면 영문 기본값("Copy failed"). */
+  codeCopyFailedLabel?: string;
   /** Public share viewer — render internal doc links as plain text (no navigation/traversal). */
   publicMode?: boolean;
   /** publicMode placeholder text for auth-gated attachments that can't render publicly. */
@@ -43,6 +55,13 @@ interface DocContentRendererProps {
   // 현재·미래 호출부 전부를 지키게 한다(테스트가 아니라 타입이 자).
   /** label shown in a page-embed card when the embedded doc has no title. */
   untitledEmbedLabel: string;
+  /** story #4313(유나 4673 판) — 페이지 임베드가 열리는 문서로 안 풀릴 때(없는 · 지운 문서) 카드 문구(에디터 임베드 오류 상태와 같은 «문서를 찾을 수 없어요»).
+   * 필수 — 옵셔널 + 영문 기본값이면 새 호출부가 빼먹어도 조용히 통과한다(untitledEmbedLabel과 같은 이유 · #3935). */
+  embedNotFoundLabel: string;
+  /** story #4324 — 일반 링크 임베드 주소가 http/https가 아니라 열지 않을 때 카드 문구(«이 링크는 열 수 없어요»). 필수(#3935와 같은 이유). */
+  unsafeLinkLabel: string;
+  /** story #4324 — 옛 첨부 본문 주소가 위험해 열지 않을 때 둘째 줄(«이 파일은 열 수 없어요»). 필수. */
+  unsafeFileLabel: string;
   /** label shown when a mermaid diagram fails to render. */
   mermaidRenderFailedLabel?: string;
   /** label shown while a mermaid diagram is rendering. */
@@ -58,7 +77,18 @@ interface DocContentRendererProps {
    * 눌림(full=17.66과 대비). 리더만 'full'로 옵트인 — 기본(미지정)은 기존 /92 그대로라
    * 공유 렌더러의 다른 소비처(에디터 프리뷰 등) 무접촉. */
   bodyEmphasis?: 'default' | 'full';
+  /** story #4313 — 본문 위키 링크 {적힌 slug → 지금 slug}(문서 상세 응답의 `wiki_link_targets` · 같은 프로젝트의 살아 있는 문서 · 옛 slug는
+   * 지금 slug로). 위키 링크 · 페이지 임베드는 여기 든 것만 문서 링크가 되고 주소는 지금 slug(alias 해소 왕복 0). 안 넘기면(이 값을 모르는
+   * 소비처) 늘 글자 그대로 · 비활성 카드 — 없는 문서로 가는 깨진 링크 0. */
+  wikiLinkTargets?: Readonly<Record<string, string>> | null;
 }
+
+// story #4309 · #4313 — 본문 위키 링크의 모양(HTML 포맷 DOM 조립 · 마크다운 렌더 둘 다 같은 것). 유나 4673 판: 본문 속 글자 링크라 **글자 크기 ·
+// 줄바꿈을 본문에서 물려받는다**(예전 `inline-flex text-sm px-1`은 16px 본문 속 14px 끊기지 않는 상자 — 06-23 문서 리디자인부터 · 1440에서 들쭉날쭉 빈틈 ·
+// 390 줄 간격 흔들림). 색은 링크 자신의 쪽에서 더 구체적인 선택자로 이긴다(유나 조정 14:00Z): `[&[data-doc-internal-link]]:…` =
+// `.cls[data-doc-internal-link]`(0,2,0) > 루트 `.root a`(0,1,1). 루트 `[&_a]` 링크 색(본문 링크 전체 · 디디 4315가 brand-soft → brand-text로 대비를 고침)이 선언 색을 덮어
+// 라이트 대비 1.25:1이던 것 — 루트 규칙은 여기서 안 건드리고, 4315가 루트 색을 바꿔도 위키 링크는 foreground로 남는다.
+const WIKI_LINK_CLASS = 'rounded-sm underline decoration-muted-foreground/40 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&[data-doc-internal-link]]:text-foreground [&[data-doc-internal-link]]:underline-offset-2';
 
 function normalizeHeadingForTitleCompare(s: string): string {
   return s.trim().replace(/^#+\s*/, '').replace(/\s+/g, ' ').toLowerCase();
@@ -91,7 +121,7 @@ function isLikelyDuplicateTitle(headingText: string, docTitle: string): boolean 
 // 마크다운 경로 sanitize 스키마 — rehype-sanitize 기본 스키마는 img/div 의 data-* 를 제거하므로
 // asset-ref(data-asset-id) + 파일첨부(data-type)가 리졸버까지 도달하지 못한다.
 // img(asset-ref 이미지) + div(fileAttachment·data-type/asset-ref/legacy data-file-data) 양쪽 허용 추가.
-const docMarkdownSanitizeSchema = {
+export const docMarkdownSanitizeSchema = {
   ...defaultSchema,
   attributes: {
     ...defaultSchema.attributes,
@@ -120,7 +150,20 @@ const docMarkdownSanitizeSchema = {
       'dataTitle',
       'dataIcon',
       'dataSlug',
+      // story #4323 — 렌더러가 읽는 콘텐츠 속성 중 빠져 있던 셋(RENDERER_CONTENT_ATTRIBUTES · 가드가 스키마와 대조): 일반 링크 임베드 주소 ·
+      // 수식 블록 원문 · 접기 블록 펼침 상태. 주소는 링크 · 틀을 만드는 자리에서 스킴을 거른다(safeHttpUrl).
+      'dataUrl',
+      'dataLatex',
+      'dataOpen',
+      // story #4339(유나 4708) — 두/세 열 수. 읽기 화면은 CSS([data-type="columnsBlock"][data-cols])로 칸을 나눈다 — 빠져 있어 마크다운 문서의
+      // 두 열이 한 열로 쌓였다.
+      'dataCols',
     ],
+    // story #4313 — 마크다운 속 에디터 위키 링크 span(`data-type="wikiLink"`)이 렌더러 `span` 컴포넌트까지 닿게 필요한 셋만(XSS 경계:
+    // data-* 글자뿐 · on* · style 등은 여전히 기본 스키마가 막음). 링크 여부는 렌더러가 실재 집합으로 판정.
+    span: [...(defaultSchema.attributes?.['span'] ?? []), 'dataType', 'dataSlug', 'dataTitle'],
+    // story #4313 — «[[slug]]» remark 플러그인이 만든 링크의 표지(렌더러 `a`가 이 값 + 실재 집합 + 같은 주소일 때만 클라이언트 이동).
+    a: [...(defaultSchema.attributes?.['a'] ?? []), 'dataDocInternalLink'],
   },
   // story #2639 — entity: 참조 링크(`[제목](entity:타입:id)`)의 href가 두 겹 필터에 지워지지
   // 않게 한다. rehype-sanitize의 protocols.href 허용목록에 'entity'만 추가로 열고
@@ -222,17 +265,46 @@ export function DocContentRenderer({
   contentRef,
   codeCopyLabel = 'Copy',
   codeCopiedLabel = 'Copied',
+  codeCopyFailedLabel = 'Copy failed',
   publicMode = false,
   publicAttachmentLabel = 'Attachment unavailable in public view',
   publicImageLabel = 'Image unavailable in public view',
   assetImageErrorLabel = 'This image could not be loaded',
   untitledEmbedLabel,
+  embedNotFoundLabel,
+  unsafeLinkLabel,
+  unsafeFileLabel,
   mermaidRenderFailedLabel = 'Render failed',
   mermaidRenderingLabel = 'Rendering...',
   mathRenderFailedLabel = 'KaTeX render failed',
   suppressLeadingTitle,
   bodyEmphasis = 'default',
+  wikiLinkTargets,
 }: DocContentRendererProps) {
+  // story #4309 — 본문의 문서 링크(위키 링크 · 페이지 임베드)는 진짜 `<a href>`다: 키보드 초점 · Enter · 새 탭(⌘/Ctrl · 가운데 클릭).
+  // 목적지는 처음부터 이 탭 주소의 `/{ws}/{proj}/docs/{slug}`(예전 `window.location.href = /docs/{slug}?p=` = 전체 새로고침 + 서버 307),
+  // 보통 클릭은 클라이언트 라우터로. ws/proj를 경로에서 모르는 자리만 flat + `?p=`(4231 · proxy 안전망).
+  const flatHref = useFlatHref();
+  const params = useParams<{ ws?: string; proj?: string }>();
+  const wsSlug = params?.ws;
+  const projSlug = params?.proj;
+  const docHref = useCallback(
+    (slug: string) => (wsSlug && projSlug ? docUrl(wsSlug, projSlug, slug) : flatHref(`/docs/${slug}`)),
+    [wsSlug, projSlug, flatHref],
+  );
+  const router = useRouter();
+  // DOM 조립 효과를 프로젝트 전환마다 다시 돌리지 않으려고 ref로 읽는다. 이미 만든 링크의 href는 아래 작은 효과가 새로 쓴다.
+  const docHrefRef = useRef(docHref);
+  const routerRef = useRef(router);
+  useEffect(() => { docHrefRef.current = docHref; routerRef.current = router; }, [docHref, router]);
+  // story #4331 — 토글 요약의 aria-controls가 가리킬 내용 id 앞자리(한 화면에 렌더러가 여럿이어도 겹치지 않게).
+  const toggleIdPrefix = useId();
+  // story #4313 — 실재 문서 slug 집합(없으면 빈 집합 = 어떤 위키 링크 · 임베드도 링크가 안 됨). 배열 모양이 매 렌더 새것이어도 값이 같으면 같은 집합.
+  // story #4313 — 적힌 slug → 지금 slug 대응(없으면 빈 대응 = 어떤 위키 링크 · 임베드도 링크가 안 됨). 객체가 매 렌더 새것이어도 값이 같으면 같은 대응.
+  const wikiLinkTargetKey = wikiLinkTargets ? JSON.stringify(Object.entries(wikiLinkTargets).sort(([a], [b]) => a.localeCompare(b))) : '[]';
+  const wikiLinkTargetMap = useMemo(() => new Map<string, string>(JSON.parse(wikiLinkTargetKey) as [string, string][]), [wikiLinkTargetKey]);
+  // `a` 컴포넌트가 표지(지금 slug)를 검증할 때 — 대응의 값(지금 slug) 집합.
+  const wikiLinkCurrentSlugs = useMemo(() => new Set(wikiLinkTargetMap.values()), [wikiLinkTargetMap]);
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
 
@@ -274,6 +346,7 @@ export function DocContentRenderer({
           wrapper.innerHTML = highlighted;
           // story #2165: 코드블럭은 전역 스크롤바 숨김 예외 — 가로로 잘린 줄을 알려야 한다.
           wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto scrollbar-visible';
+          wrapper.setAttribute('data-doc-part', 'code'); // story #4316 — 렌더러 부품(뿌리 본문 문단 · 링크 규칙 밖)
           if (pre.parentElement) pre.replaceWith(wrapper);
         }).catch(() => { /* fallback: keep original pre */ });
       });
@@ -286,29 +359,45 @@ export function DocContentRenderer({
         const pre = shell?.querySelector('pre');
         const text = pre?.textContent ?? '';
 
-        try {
-          if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(text);
-          }
-          button.textContent = codeCopiedLabel;
-          window.setTimeout(() => {
-            button.textContent = codeCopyLabel;
-          }, 1600);
-        } catch {
-          button.textContent = codeCopiedLabel;
-          window.setTimeout(() => {
-            button.textContent = codeCopyLabel;
-          }, 1600);
-        }
+        // story #3986(클래스 «거짓 성공 표시») — catch도 codeCopiedLabel(성공과
+        // 동일)을 보이던 결함. 공용 헬퍼로 성공/실패를 실제로 가른다. 코드
+        // 자체는 위 <pre>에 이미 선택 가능하게 떠 있어 별도 노출 블록은 불요.
+        const result = await copyTextSafely(text);
+        button.textContent = result.ok ? codeCopiedLabel : codeCopyFailedLabel;
+        window.setTimeout(() => {
+          button.textContent = codeCopyLabel;
+        }, 1600);
       };
 
       button.addEventListener('click', handleClick);
       return () => button.removeEventListener('click', handleClick);
     });
 
-    // Wiki link click handlers (viewer)
-    const wikiLinks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="wikiLink"]'));
+    // story #4309 — 보통 클릭(수정 키 없는 주 버튼)만 클라이언트 이동으로 가로챈다. ⌘/Ctrl/Shift/Alt 클릭 · 가운데 클릭(auxclick)은
+    // 브라우저 기본 동작(새 탭 · 새 창)에 맡긴다. Enter는 링크에 click을 쏘므로 같은 길을 탄다.
+    const handleInternalLinkClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const href = (event.currentTarget as HTMLAnchorElement).getAttribute('href');
+      if (!href) return;
+      event.preventDefault();
+      routerRef.current.push(href);
+    };
+    const makeInternalLink = (slug: string, className: string): HTMLAnchorElement => {
+      const link = document.createElement('a');
+      link.setAttribute('data-doc-internal-link', slug);
+      link.setAttribute('href', docHrefRef.current(slug));
+      link.className = className;
+      link.addEventListener('click', handleInternalLinkClick);
+      return link;
+    };
+
+    // Wiki link (viewer) — HTML 포맷만 여기서(dangerouslySetInnerHTML이라 React가 자식을 쥐지 않는다). 마크다운의 위키 링크 span은
+    // React가 노드를 쥐므로 DOM을 갈아끼우지 않고 렌더러 `span` 컴포넌트가 그린다(story #4313).
+    const wikiLinks = contentFormat === 'html' ? Array.from(root.querySelectorAll<HTMLElement>('[data-type="wikiLink"]')) : [];
     const wikiCleanup = wikiLinks.map((span) => {
+      // story #4313(까디르 P3) — 효과가 다시 돌 때(대응이 비거나 바뀜 · publicMode 전환) 이전에 만든 링크가 남지 않게 먼저 글자로 되돌린다.
+      const previousLink = span.querySelector(':scope > a[data-doc-internal-link]');
+      if (previousLink) span.replaceChildren(document.createTextNode(previousLink.textContent ?? ''));
       const slug = span.getAttribute('data-slug') ?? '';
       const title = span.getAttribute('data-title') ?? span.textContent ?? '';
       // Public share viewer: internal doc links are inert plain text — no navigation,
@@ -318,11 +407,19 @@ export function DocContentRenderer({
         span.removeAttribute('data-slug');
         return () => { /* no handler attached */ };
       }
-      span.className = 'inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground';
-      span.title = title;
-      const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
-      span.addEventListener('click', handleClick);
-      return () => span.removeEventListener('click', handleClick);
+      // story #4313 — 열리는 문서로 안 풀리면(slug 없음 · 대응 밖) 글자 그대로(없는 문서로 가는 깨진 링크 0). 풀리면 주소는 지금 slug.
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (!target) {
+        span.className = '';
+        return () => { /* no destination — plain text */ };
+      }
+      // 링크는 span 안에 둔다(span의 data-*는 다시 돌 때 찾는 표지 · 효과가 다시 돌면 링크를 새로 만든다).
+      span.className = '';
+      const link = makeInternalLink(target, WIKI_LINK_CLASS);
+      link.title = title;
+      link.textContent = span.textContent || title;
+      span.replaceChildren(link);
+      return () => link.removeEventListener('click', handleInternalLinkClick);
     });
 
     // Page embed handlers (viewer) — story #1996(no-sloppy): 에디터 NodeView(PageEmbedExtension
@@ -332,32 +429,60 @@ export function DocContentRenderer({
     // 문서에 박힌 정적 메타라 노출 자체는 meta-leak 아님·클릭 네비게이션만 authed 전용으로 제한).
     const pageEmbeds = Array.from(root.querySelectorAll<HTMLElement>('[data-page-embed]'));
     const pageEmbedCleanup = pageEmbeds.map((block) => {
+      block.setAttribute('data-doc-part', 'page-embed'); // story #4316 — 렌더러 부품(뿌리 본문 문단 · 링크 규칙 밖)
       const title = block.getAttribute('data-title') || '';
       const icon = block.getAttribute('data-icon') || '';
       const slug = block.getAttribute('data-slug') || '';
       const iconMarkup = icon
         ? `<span class="shrink-0 text-lg">${escapeHtmlText(icon)}</span>`
         : '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
-      block.className = publicMode || !slug
-        ? 'not-prose my-2 flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3'
-        : 'not-prose my-2 flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 transition-colors hover:bg-muted/40';
-      block.innerHTML = `
+      const displayTitle = title || `(${untitledEmbedLabel})`;
+      // story #4313 — 열리는 문서로 풀리면 지금 slug(옛 slug alias면 이름 바뀐 뒤의 것). 풀리지 않으면 undefined.
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      // story #4316 — 카드의 경로 줄은 링크 주소와 같은 **지금 slug**(예전엔 문서에 적힌 slug라 alias로 옮겨 간 문서면 옛 `/old-…`를 보여
+      // href와 다른 말을 했다). 대응을 모르는 자리(공개 보기 등)만 적힌 slug.
+      const shownSlug = target ?? slug;
+      const cardInner = `
         ${iconMarkup}
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium">${escapeHtmlText(title || `(${untitledEmbedLabel})`)}</p>
-          ${slug ? `<p class="truncate text-xs opacity-60">/${escapeHtmlText(slug)}</p>` : ''}
+          <p class="truncate text-sm font-medium">${escapeHtmlText(displayTitle)}</p>
+          ${shownSlug ? `<p class="truncate text-xs font-normal text-muted-foreground">/${escapeHtmlText(shownSlug)}</p>` : ''}
         </div>`;
       // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
-      // 유지하되 클릭 네비게이션만 뺀다.
-      if (publicMode || !slug) return () => { /* no handler attached */ };
-      const handleClick = () => { window.location.href = `/docs/${slug}`; };
-      block.addEventListener('click', handleClick);
-      return () => block.removeEventListener('click', handleClick);
+      // 유지하되 링크(이동)만 뺀다.
+      // 카드 표면은 공용 cardVariants(손코딩 카드 가드 · story #3164) — 링크 카드와 공개 보기의 비활성 카드가 같은 표면.
+      const embedCardClassName = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+      // story #4313 — 열리는 문서로 안 풀리면(대응 밖 · 없는 · 지운 문서) 작동하는 링크 카드와 같은 모양 · `/slug`를 보이지 않는다(유나 4673 판):
+      // 에디터 임베드 오류 상태처럼 경고 아이콘 + «문서를 찾을 수 없어요» + 흐린 제목. 풀리면 주소는 지금 slug.
+      if (!publicMode && slug && !target) {
+        block.className = cn('not-prose my-2', cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+        block.setAttribute('data-embed-state', 'not-found');
+        block.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm text-muted-foreground">${escapeHtmlText(embedNotFoundLabel)}</p>
+          ${title ? `<p class="truncate text-xs text-muted-foreground">${escapeHtmlText(title)}</p>` : ''}
+        </div>`;
+        return () => { /* no destination — not found */ };
+      }
+      if (publicMode || !target) {
+        block.className = cn('not-prose my-2', embedCardClassName);
+        block.innerHTML = cardInner;
+        return () => { /* no handler attached */ };
+      }
+      // story #4309 — 카드 전체가 링크 하나(접근 가능한 이름 = 문서 제목 · 경로 줄은 이름에 섞지 않는다).
+      block.className = 'not-prose my-2';
+      const link = makeInternalLink(target, cn(embedCardClassName, 'no-underline transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'));
+      link.setAttribute('aria-label', displayTitle);
+      link.innerHTML = cardInner;
+      block.replaceChildren(link);
+      return () => link.removeEventListener('click', handleInternalLinkClick);
     });
 
     // Math block rendering (viewer)
     const mathBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="mathBlock"]'));
     mathBlocks.forEach((block) => {
+      block.setAttribute('data-doc-part', 'math'); // story #4316
       const latex = block.getAttribute('data-latex') ?? block.textContent ?? '';
       if (!latex.trim()) return;
       void renderKatex(latex, true, mathRenderFailedLabel).then(({ html: katexHtml, error }) => {
@@ -386,10 +511,18 @@ export function DocContentRenderer({
     // Embed block handlers (viewer)
     const embedBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="embedBlock"]'));
     embedBlocks.forEach((block) => {
-      const url = block.getAttribute('data-url') ?? '';
-      if (!url) return;
-      const { type, embedUrl } = detectEmbedService(url);
+      block.setAttribute('data-doc-part', 'embed'); // story #4316 — 일반 링크 카드(`no-underline`)가 뿌리 밑줄에 지던 자리
+      if (!(block.getAttribute('data-url') ?? '').trim()) return;
+      // story #4324 — http/https만 링크 · 틀로. 그 밖(javascript: · data: · 상대 경로 등)은 주소를 글자로만 보인다(누를 수 있는 것 0).
+      // story #4338 — URL 속성은 읽는 자리에서 곧바로 도우미로(중간 변수 없이) — 가드가 «도우미 밖 읽기»를 잡는다.
+      const url = safeHttpUrl(block.getAttribute('data-url') ?? '');
       block.innerHTML = '';
+      if (!url) {
+        // 유나 스티어 — 날 주소는 화면에 싣지 않는다(공격 글자 노출 · 복사 유도 0) · 한 줄 «이 링크는 열 수 없어요».
+        block.innerHTML = inertCardHtml('link', null, unsafeLinkLabel);
+        return;
+      }
+      const { type, embedUrl } = detectEmbedService(url);
       if (type === 'youtube') {
         const wrapper = document.createElement('div');
         wrapper.className = 'aspect-video w-full overflow-hidden rounded-xl border border-border';
@@ -417,7 +550,9 @@ export function DocContentRenderer({
         a.href = url;
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
-        a.className = 'flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40 no-underline';
+        // story #4316(유나 결정) — 날 URL 한 줄 · 새 탭 외부 링크라 «누르는 것» 단서로 brand 글자색을 명시(밑줄은 없음 · 뿌리 본문 링크 규칙 밖이라 선언이 닿는다).
+        // story #4331 — 면은 첨부 카드 · 문서 임베드 카드와 같은 공용 subtle 카드(4684 결정 · 예전 손코딩 `rounded-xl border border-border bg-muted/20`).
+        a.className = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 text-sm text-brand-text transition-colors hover:bg-muted/40 no-underline');
         a.textContent = url;
         block.appendChild(a);
       }
@@ -426,37 +561,40 @@ export function DocContentRenderer({
     // File attachment download handlers (viewer)
     const fileBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="fileAttachment"]'));
     const fileCleanup = fileBlocks.map((block) => {
+      block.setAttribute('data-doc-part', 'file'); // story #4316
       const filename = block.getAttribute('data-filename') ?? 'file';
-      const data = block.getAttribute('data-file-data') ?? '';
+      // story #4324 — 옛 첨부 본문은 data: URL이면서 문서로 실행되지 않는 MIME일 때만 내려받기 링크로(javascript: 값을 a.href → a.click()으로 실행하지 않게).
+      const data = safeAttachmentDataUrl(block.getAttribute('data-file-data') ?? '') ?? '';
       const refAssetId = block.getAttribute('data-asset-id') ?? '';
-      const size = Number(block.getAttribute('data-size') ?? 0);
-      const sizeLabel = size < 1024 * 1024
-        ? `${(size / 1024).toFixed(1)} KB`
-        : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+      // story #4331(유나 17:38Z) — 크기 속성이 없거나 숫자가 아니면 크기 줄 없음(«0 B»는 «빈 파일»이라는 거짓 단정) · 있고 0이면 진짜 빈 파일 «0 B» ·
+      // 나머지는 공용 formatFileSize(1KB 미만 = 바이트 · 예전 인라인 계산은 12바이트를 «0.0 KB»로 뭉갰다).
+      const sizeLabel = attachmentSizeLabel(block.getAttribute('data-size'));
 
       // Public share viewer: attachments are auth-gated (private bucket + signed URL),
       // so they'd 401 here — render an inert placeholder (no leak, no broken render).
       if (publicMode) {
-        block.innerHTML = `
-          <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 opacity-70">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
-              <p class="text-xs opacity-60">${escapeHtmlText(publicAttachmentLabel)}</p>
-            </div>
-          </div>`;
+        block.innerHTML = inertCardHtml('file', filename, publicAttachmentLabel);
+        return () => {};
+      }
+      // story #4324 — 옛 첨부 본문이 위험한 주소(javascript: · data:text/html 등)이고 자산 참조도 없으면 열 수 없는 파일 — 이름 + «이 파일은 열 수 없어요» ·
+      // 누름 · 링크 0(유나 스티어 · 기존 «삭제됐거나 권한 없음» 안내는 이 경우 사실이 아니라 쓰지 않음).
+      if (!data && !refAssetId && (block.getAttribute('data-file-data') ?? '').trim()) {
+        block.innerHTML = inertCardHtml('file', filename, unsafeFileLabel);
         return () => {};
       }
 
+      // story #4331 — 누르는 자리는 진짜 button 요소(Tab 초점 · Enter/Space · 예전엔 click만 건 div라 키보드로 못 받았다). 다운로드 링크(a download)가 아닌
+      // 까닭: 링크는 Space로 안 눌리고, 자산 참조는 누른 뒤에야 서명 주소가 생긴다. 접근 가능한 이름 = 파일 이름 + 크기(속성 이스케이프).
       block.innerHTML = `
-        <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 cursor-pointer hover:bg-[hsl(var(--muted))]/40 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
-            <p class="text-xs opacity-60">${escapeHtmlText(sizeLabel)}</p>
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 opacity-50"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        </div>`;
+        <button type="button" aria-label="${escapeHtmlAttribute(sizeLabel ? `${filename} ${sizeLabel}` : filename)}" class="${ATTACHMENT_BUTTON_CLASS}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span class="block min-w-0 flex-1">
+            <span class="block truncate text-sm font-medium">${escapeHtmlText(filename)}</span>
+            ${sizeLabel ? `<span class="block text-xs font-normal text-muted-foreground">${escapeHtmlText(sizeLabel)}</span>` : ''}
+          </span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 opacity-50" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>`;
+      const button = block.querySelector('button')!;
 
       const handleClick = () => {
         // legacy(base64 data-url) — blob href 직접 다운로드(현 동작 유지).
@@ -481,8 +619,8 @@ export function DocContentRenderer({
           } catch { /* 서명 실패 — 무시(no leak). */ }
         })();
       };
-      block.addEventListener('click', handleClick);
-      return () => block.removeEventListener('click', handleClick);
+      button.addEventListener('click', handleClick);
+      return () => button.removeEventListener('click', handleClick);
     });
 
     // Public share viewer: images may point to auth-gated resources (401) — replace
@@ -491,6 +629,7 @@ export function DocContentRenderer({
       Array.from(root.querySelectorAll<HTMLImageElement>('img')).forEach((img) => {
         const alt = img.getAttribute('alt')?.trim();
         const placeholder = document.createElement('div');
+        placeholder.setAttribute('data-doc-part', 'image-placeholder'); // story #4316
         placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground';
         placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(alt || publicImageLabel)}</span>`;
         img.replaceWith(placeholder);
@@ -514,6 +653,7 @@ export function DocContentRenderer({
 
         const showError = () => {
           const placeholder = document.createElement('div');
+          placeholder.setAttribute('data-doc-part', 'image-placeholder'); // story #4316
           placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground';
           placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(altText || assetImageErrorLabel)}</span>`;
           img.replaceWith(placeholder);
@@ -546,16 +686,38 @@ export function DocContentRenderer({
     }
 
     // Toggle block click handlers (viewer)
+    // story #4331 — 요약은 글자 · 링크를 품은 블록이라 button 요소로 못 바꾼다 → 버튼 의미(role · Tab 초점 · Enter/Space) + 펼침 상태(aria-expanded) ·
+    // 가리키는 내용(aria-controls). 예전엔 click만 건 div라 키보드로 못 열고, 열림 · 닫힘을 읽어 주지도 않았다.
     const toggleSummaries = Array.from(root.querySelectorAll<HTMLElement>('[data-type="toggleSummary"]'));
-    const toggleCleanup = toggleSummaries.map((summary) => {
+    const toggleCleanup = toggleSummaries.map((summary, index) => {
+      const block = summary.closest<HTMLElement>('[data-type="toggleBlock"]');
+      if (!block) return () => {};
+      const contentEl = Array.from(block.children).find((el) => el.getAttribute('data-type') === 'toggleContent');
+      if (contentEl) {
+        if (!contentEl.id) contentEl.id = `${toggleIdPrefix}-toggle-${index}`;
+        summary.setAttribute('aria-controls', contentEl.id);
+      }
+      summary.setAttribute('role', 'button');
+      summary.tabIndex = 0;
+      const syncExpanded = () => summary.setAttribute('aria-expanded', String(block.getAttribute('data-open') === 'true'));
+      syncExpanded();
       const handleClick = () => {
-        const block = summary.closest<HTMLElement>('[data-type="toggleBlock"]');
-        if (!block) return;
         const isOpen = block.getAttribute('data-open') === 'true';
         block.setAttribute('data-open', String(!isOpen));
+        syncExpanded();
+      };
+      // 요약 자체에 초점이 있을 때만 — 안의 링크에서 누른 Enter는 링크 몫.
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.target !== summary || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        handleClick();
       };
       summary.addEventListener('click', handleClick);
-      return () => summary.removeEventListener('click', handleClick);
+      summary.addEventListener('keydown', handleKeyDown);
+      return () => {
+        summary.removeEventListener('click', handleClick);
+        summary.removeEventListener('keydown', handleKeyDown);
+      };
     });
 
     return () => {
@@ -566,13 +728,26 @@ export function DocContentRenderer({
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel]);
+  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, embedNotFoundLabel, unsafeLinkLabel, unsafeFileLabel, mathRenderFailedLabel, wikiLinkTargetMap, toggleIdPrefix]);
+
+  // story #4309 — 목적지(ws/proj · 프로젝트)가 바뀌면 이미 만든 본문 문서 링크의 href만 새로 쓴다(위 조립 효과는 다시 돌지 않는다).
+  useEffect(() => {
+    const root = internalRef.current;
+    if (!root) return;
+    root.querySelectorAll<HTMLAnchorElement>('a[data-doc-internal-link]').forEach((link) => {
+      link.setAttribute('href', docHref(link.getAttribute('data-doc-internal-link') ?? ''));
+    });
+  }, [docHref]);
 
   const decoratedHtml = useMemo(() => {
     const sanitized = sanitizeDocHtml(content);
     if (contentFormat !== 'html') return sanitized;
     return decorateHtmlContent(sanitized, headings, codeCopyLabel);
   }, [codeCopyLabel, content, contentFormat, headings]);
+  // story #4309 — React 19는 `dangerouslySetInnerHTML` 객체가 새것이면(문자열이 같아도) innerHTML을 다시 쓴다(react-dom updateProperties:
+  // `propKey !== lastProp` → setProp). 매 렌더 `{ __html }`을 새로 만들면 부모가 다시 그릴 때마다 위 효과가 붙인 것(문서 링크 · 임베드
+  // 카드 · 코드 강조 · 복사 버튼)이 원문으로 지워지고 효과는 다시 돌지 않는다. 본문이 바뀔 때만 새 객체.
+  const htmlInnerProp = useMemo(() => ({ __html: decoratedHtml }), [decoratedHtml]);
 
   // story #2021 후속(PO 리뷰): 이 components 객체를 매 렌더 인라인으로 새로 만들면
   // hast-util-to-jsx-runtime이 그 함수 참조를 그대로 React 엘리먼트 type으로 써서([[feedback:
@@ -586,12 +761,45 @@ export function DocContentRenderer({
   // 잃을 게 없고, headingIndex가 ReactMarkdown이 AST를 훑는 매 패스(=매 렌더)마다 0부터 다시
   // 매겨져야 하는데 메모이즈된 클로저에 넣으면 그 리셋이 깨진다 — 그래서 h1/h2/h3는 아래
   // components 병합 시 매 렌더 새로 만드는 채로 둔다(무해 remount).
+  // story #4313 — 마크다운 문서 링크의 클릭(4309 DOM 경로와 같은 규칙): 보통 클릭만 클라이언트 이동 · 수정 키 · 가운데 클릭은 브라우저.
+  const onDocLinkClick = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const href = event.currentTarget.getAttribute('href');
+    if (!href) return;
+    event.preventDefault();
+    routerRef.current.push(href);
+  }, []);
+  // 마크다운 «[[slug]]» · «[[slug|글]]» → 실재 문서만 링크(집합 · 주소가 바뀔 때만 새 플러그인 설정).
+  // story #4316(PO 15:03Z) — `data-doc-internal-link`는 렌더러가 스스로 붙이고 스스로 믿는 표지다. 마크다운 경로는 플러그인이 sanitize **전에** 만든
+  // 링크라 스키마가 이 속성을 통과시켜야 하는데, 그러면 글쓴이가 raw HTML로 같은 표지를 적을 수 있다. 그래서 플러그인 표지에 이 렌더러 인스턴스만
+  // 아는 nonce(useId · SSR/CSR 같은 값)를 붙이고, `a` 컴포넌트는 nonce가 맞는 표지만 문서 링크로 믿는다 — 흉내 낸 표지는 보통 링크로 그리고
+  // 속성은 DOM에 안 남는다.
+  const linkNonce = useId();
+  const remarkPlugins = useMemo(
+    () => [remarkGfm, [remarkWikiLinks, {
+      resolve: (slug: string) => wikiLinkTargetMap.get(slug) ?? null,
+      href: docHref,
+      marker: (target: string) => `${linkNonce}|${target}`,
+    }]] as NonNullable<Parameters<typeof ReactMarkdown>[0]['remarkPlugins']>,
+    [wikiLinkTargetMap, docHref, linkNonce],
+  );
+
   const stableMarkdownComponents = useMemo<Components>(() => ({
     // story #2639 — 본문 entity: 참조를 EntityChip으로 잇는다(chat/story-panel과 동일 상호작용:
     // 탭→엔티티 프리뷰 모달·그 안에 전체 열기 링크). getEntityHref가 story→/board?story=·
     // epic→/goals/·doc→/docs?id= 동일오리진 라우트를 준다(웹뷰서 SPA 착지·셸 무변경).
     // 매핑 없는 타입은 getEntityHref=null→모달만 뜨고(무동작 0), 비-UUID/asset은 평문 링크 폴백.
-    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+    a: (props) => {
+      const { href, children } = props as { href?: string; children?: ReactNode };
+      // story #4313 — «[[slug]]» 플러그인이 만든 문서 링크: 표지 slug가 실재 집합에 있고 주소가 그 문서 주소와 같을 때만(본문이 raw HTML로
+      // 같은 표지를 흉내 내도 다른 곳으로 가는 클라이언트 이동은 안 생긴다). publicMode는 평문.
+      const marker = (props as Record<string, unknown>)['data-doc-internal-link'];
+      // 플러그인이 만든 표지(`{nonce}|{지금 slug}`)만 믿는다 — 글쓴이가 적은 표지(nonce 없음)는 아래 보통 링크로 떨어지고 속성은 안 남는다.
+      if (typeof marker === 'string' && marker.startsWith(`${linkNonce}|`)) {
+        const internalSlug = marker.slice(linkNonce.length + 1);
+        if (publicMode || !wikiLinkCurrentSlugs.has(internalSlug) || href !== docHref(internalSlug)) return <span>{children}</span>;
+        return <a href={href} data-doc-internal-link={internalSlug} className={WIKI_LINK_CLASS} onClick={onDocLinkClick}>{children}</a>;
+      }
       // story #2888(S2a) — 파싱은 parseEntityRef SSOT(chat-bubble.tsx·embed-card.tsx와 공유).
       const ref = parseEntityRef(href);
       // asset은 story-detail-panel과 동일하게 칩 경로에서 제외한다(자산 임베드는 별 경로).
@@ -603,11 +811,23 @@ export function DocContentRenderer({
             entityType={ref.entityType}
             entityId={ref.entityId}
             label={String(children)}
-            href={getEntityHref(ref.entityType, ref.entityId)}
+            href={getEntityHref(ref.entityType, ref.entityId, flatHref)}
           />
         );
       }
       return <a href={href}>{children}</a>;
+    },
+    // story #4313 — 마크다운 속 에디터 위키 링크 span(`data-type="wikiLink"`): 실재 문서면 4309와 같은 링크 · 아니면 글자 그대로 ·
+    // publicMode는 4309 HTML 경로와 같은 비활성 평문. 그 밖의 span은 그대로.
+    span: (props) => {
+      const { node: _node, children, ...rest } = props as Record<string, unknown> & { node?: unknown; children?: ReactNode };
+      if (rest['data-type'] !== 'wikiLink') return <span {...(rest as ComponentProps<'span'>)}>{children}</span>;
+      const slug = typeof rest['data-slug'] === 'string' ? rest['data-slug'] : '';
+      const title = typeof rest['data-title'] === 'string' ? rest['data-title'] : undefined;
+      if (publicMode) return <span className="text-sm text-muted-foreground">{children}</span>;
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (!target) return <span>{children}</span>;
+      return <a href={docHref(target)} data-doc-internal-link={target} title={title} className={WIKI_LINK_CLASS} onClick={onDocLinkClick}>{children}</a>;
     },
     blockquote: ({ children }: { children?: ReactNode }) => <blockquote>{children}</blockquote>,
     img: (props) => {
@@ -644,12 +864,13 @@ export function DocContentRenderer({
             language={lang}
             copyLabel={codeCopyLabel}
             copiedLabel={codeCopiedLabel}
+            copyFailedLabel={codeCopyFailedLabel}
           />
         );
       }
       return <code>{children}</code>;
     },
-  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel]);
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel, flatHref, wikiLinkTargetMap, wikiLinkCurrentSlugs, docHref, onDocLinkClick, linkNonce]);
 
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
@@ -658,10 +879,16 @@ export function DocContentRenderer({
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
     // story #2967 — 다크 체감 눌림(/92=14.88 vs full=17.66, 둘 다 WCAG 통과지만 체감 차).
     // 리더만 bodyEmphasis='full' 옵트인 — 기본은 기존 /92 그대로(다른 소비처 무접촉).
-    bodyEmphasis === 'full' ? '[&_p]:leading-7 [&_p]:text-foreground' : '[&_p]:leading-7 [&_p]:text-foreground/92',
+    // story #4316 — 본문 문단 · 링크 규칙(`.root p` / `.root a` = 0,1,1)은 렌더러가 끼워 넣는 부품(`data-doc-part` · 임베드 카드 · 없는 문서 카드 ·
+    // 첨부 카드 · 자리 표시 · 수식 · 코드 감싸개) 안에는 걸지 않는다. 걸면 부품이 선언한 클래스(0,1,0)를 이겨 «흐림» · «밑줄 없음»이 안 닿았다
+    // (유나 4673 판 · 계산값 표). `:where()`로 감싸 특이도는 그대로(본문 문단 · 링크 모양 무변).
+    bodyEmphasis === 'full'
+      ? '[&_p:not(:where([data-doc-part],[data-doc-part]_*))]:leading-7 [&_p:not(:where([data-doc-part],[data-doc-part]_*))]:text-foreground'
+      : '[&_p:not(:where([data-doc-part],[data-doc-part]_*))]:leading-7 [&_p:not(:where([data-doc-part],[data-doc-part]_*))]:text-foreground/92',
     // story #2023 ⓒ(§5-2): 유틸 부재로 인한 var() 우회 참조를 정식 토큰으로 되돌림 — 문서 본문
     // 링크색, L1~L5 재분류 아님(콘텐츠 하이퍼링크는 서명·시스템상태 어느 축도 아님).
-    '[&_a]:text-brand-soft [&_a]:underline [&_a]:underline-offset-4',
+    // story #4315 — 글자는 brand-text(밝은 = brand-strong 7.05 · 어두운 = brand-soft 10.48). brand-soft는 옅은 틴트라 밝은 테마 1.25:1이었다.
+    '[&_a:not(:where([data-doc-part],[data-doc-part]_*))]:text-brand-text [&_a:not(:where([data-doc-part],[data-doc-part]_*))]:underline [&_a:not(:where([data-doc-part],[data-doc-part]_*))]:underline-offset-4',
     '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:bg-muted/30 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-muted-foreground',
     '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
     '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
@@ -682,7 +909,7 @@ export function DocContentRenderer({
     return (
       <div
         ref={setContentRef}
-        dangerouslySetInnerHTML={{ __html: decoratedHtml }}
+        dangerouslySetInnerHTML={htmlInnerProp}
         className={rootClassName}
       />
     );
@@ -695,7 +922,7 @@ export function DocContentRenderer({
   return (
     <div ref={setContentRef} className={rootClassName}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={remarkPlugins}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, docMarkdownSanitizeSchema]]}
         // story #2639 — entity: 스킴 보존(첫째 겹). 그 외는 기본 sanitize 유지 —
         // javascript:/data: 는 여전히 빈 문자열로 지워진다(뮤테이션 테스트로 고정).
@@ -758,15 +985,19 @@ function MermaidReadonlyBlock({ code, renderFailedLabel, renderingLabel }: { cod
 }
 
 function ShikiCodeBlock({
-  code, language, copyLabel, copiedLabel,
+  code, language, copyLabel, copiedLabel, copyFailedLabel,
 }: {
   code: string;
   language: string | null;
   copyLabel: string;
   copiedLabel: string;
+  copyFailedLabel: string;
 }) {
   const [html, setHtml] = useState('');
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패해도 무조건 setCopied
+  // (true)였다. 코드 자체는 아래 <pre>/<code>에 이미 선택 가능하게 떠 있다.
+  const [copyFailed, setCopyFailed] = useState(false);
 
   useEffect(() => {
     if (!code.trim()) return;
@@ -783,11 +1014,13 @@ function ShikiCodeBlock({
   }, [code, language]);
 
   const handleCopy = useCallback(async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(code);
-      }
-    } catch { /* unavailable */ }
+    const result = await copyTextSafely(code);
+    if (!result.ok) {
+      setCopyFailed(true);
+      window.setTimeout(() => setCopyFailed(false), 1600);
+      return;
+    }
+    setCopyFailed(false);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }, [code]);
@@ -800,7 +1033,7 @@ function ShikiCodeBlock({
           onClick={handleCopy}
           className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
         >
-          {copied ? copiedLabel : copyLabel}
+          {copyFailed ? copyFailedLabel : copied ? copiedLabel : copyLabel}
         </button>
       </div>
       {html ? (
@@ -821,14 +1054,88 @@ function ShikiCodeBlock({
 // content_format='html' doc을 마크다운 전용 렌더러(MdBody)에 먹여 태그가 텍스트로 그대로
 // 찍히던 결함을 고치며 이 sanitize 정본을 재사용한다(사본 분화 금지 — decorateHtmlContent의
 // TOC/코드카피 장식은 그 소비처 전용이라 안 가져감, 순수 sanitize만).
+/**
+ * story #4323 — 렌더러가 **문서 콘텐츠**(에디터가 만든 노드)에서 읽는 속성 전수. 렌더러 내부 표지(RENDERER_INTERNAL_MARKERS)의 짝.
+ * - 마크다운 경로: sanitize 스키마가 `elements`마다 이 속성을 통과시켜야 한다(아니면 1996 · 4323처럼 노드가 빈 칸) — 가드가 대조.
+ * - `url`: 링크 · 틀을 만드는 값이라 그 자리에서 스킴을 거른다 — `lib/safe-content-url.ts`(story #4324): http = `safeHttpUrl` · data = `safeAttachmentDataUrl`(허용 MIME의 data:만).
+ * - `htmlOnly`: HTML 포맷 경로에서만 읽는다(마크다운은 다른 부품이 처리) — 스키마 대상 아님.
+ */
+export const RENDERER_CONTENT_ATTRIBUTES: readonly { attr: string; elements: readonly string[]; readBy: string; url?: 'http' | 'data'; htmlOnly?: true }[] = [
+  { attr: 'data-type', elements: ['div', 'span'], readBy: 'node type (wikiLink · mathBlock · mathInline · embedBlock · fileAttachment · toggle*)' },
+  { attr: 'data-slug', elements: ['div', 'span'], readBy: 'wiki link / page embed target' },
+  { attr: 'data-title', elements: ['div', 'span'], readBy: 'wiki link / page embed title' },
+  { attr: 'data-icon', elements: ['div'], readBy: 'page embed icon (escaped as text)' },
+  { attr: 'data-page-embed', elements: ['div'], readBy: 'page embed marker' },
+  { attr: 'data-latex', elements: ['div'], readBy: 'math block source (falls back to text content)' },
+  { attr: 'data-url', elements: ['div'], readBy: 'generic embed URL (link card · YouTube/Figma frame)', url: 'http' },
+  { attr: 'data-filename', elements: ['div'], readBy: 'attachment filename' },
+  { attr: 'data-file-data', elements: ['div'], readBy: 'legacy attachment body (base64 data: URL · download link)', url: 'data' },
+  { attr: 'data-asset-id', elements: ['div', 'img'], readBy: 'attachment / asset image signed lookup' },
+  { attr: 'data-size', elements: ['div'], readBy: 'attachment size' },
+  { attr: 'data-open', elements: ['div'], readBy: 'toggle block open state' },
+  { attr: 'data-language', elements: ['pre'], readBy: 'HTML code block language (Shiki)', htmlOnly: true },
+];
+
+/**
+ * story #4316 — 렌더러 내부 표지(렌더러가 붙이고 · 렌더러가 읽는 것). 글쓴이 입력에서 걷는다(HTML: sanitizeDocHtml FORBID_ATTR · 마크다운: sanitize
+ * 스키마에 없음 / `data-doc-internal-link`는 플러그인 표지에 nonce).
+ * - data-doc-part: 부품 뿌리(효과) → 뿌리 본문 규칙이 제외 · data-doc-internal-link: 문서 링크 → `a` 검증 · href 새로 쓰기 · 색 선택자
+ * - data-doc-copy-button · data-doc-code-shell · data-doc-code-actions: 코드 블록(decorateHtmlContent는 sanitize **뒤**에 붙임 · ShikiCodeBlock) → 복사 처리기 · CSS
+ * - data-embed-state: 없는 문서 임베드 카드 · data-doc-asset-loading: 자산 이미지 로딩 자리.
+ */
+export const RENDERER_INTERNAL_MARKERS = [
+  'data-doc-part',
+  'data-doc-internal-link',
+  'data-doc-copy-button',
+  'data-doc-code-shell',
+  'data-doc-code-actions',
+  'data-embed-state',
+  'data-doc-asset-loading',
+] as const;
+
+// 첨부 카드 면(정상 · 공개 보기 · 열 수 없음 공통) — 공용 cardVariants(손코딩 카드 가드 · 링크 카드와 같은 subtle 면). 예전 `hsl(var(--border))`는
+// 토큰이 hex라 무효 색이었다(테두리가 글자색 · 배경 투명 — 유나 짚음 · 4324).
+const ATTACHMENT_CARD_SURFACE = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+
+// story #4331(PO 05:42Z) — 정상 첨부 카드의 button은 명령형 DOM 템플릿이라 React `Button`을 못 쓴다 → 디자인 Button의 클래스 토큰
+// (buttonVariants: 초점 링 · 누름 · 최소 크기 · 호버)을 그대로 입고, 면은 첨부 카드 면(뒤에 와서 테두리 · 배경 · 모서리가 이긴다) · 손으로 적는 건 배치뿐.
+const ATTACHMENT_BUTTON_CLASS = cn(buttonVariants({ variant: 'ghost' }), ATTACHMENT_CARD_SURFACE, 'h-auto w-full justify-start text-left whitespace-normal');
+
+/** story #4331(유나 결정) — 첨부 카드 크기 줄. 속성 없음 · 빈 글자 · 숫자 아님 · 음수 → '' (줄 없음) · 0 → «0 B» · 나머지 공용 formatFileSize. */
+export function attachmentSizeLabel(attr: string | null): string {
+  if (attr === null || attr.trim() === '') return '';
+  const bytes = Number(attr);
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  return formatFileSize(bytes);
+}
+
+// story #4324(유나 스티어) — 열 수 없는 콘텐츠의 비활성 카드: 공개 보기 첨부 자리와 같은 틀(같은 카드 면 + 아이콘 + 흐린 글자 · 링크 · 호버 · 초점 0).
+const INERT_FILE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+const INERT_LINK_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7"/><path d="M15 7h2a5 5 0 0 1 4 8"/><line x1="8" x2="12" y1="12" y2="12"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
+function inertCardHtml(icon: 'file' | 'link', title: string | null, note: string): string {
+  return `
+          <div class="${cn(ATTACHMENT_CARD_SURFACE, 'opacity-70')}">
+            ${icon === 'file' ? INERT_FILE_ICON : INERT_LINK_ICON}
+            <div class="min-w-0 flex-1">
+              ${title != null ? `<p class="truncate text-sm font-medium">${escapeHtmlText(title)}</p>` : ''}
+              <p class="${title != null ? 'text-xs opacity-60' : 'text-sm'}">${escapeHtmlText(note)}</p>
+            </div>
+          </div>`;
+}
+
+// story #4324 — URL 거름 도우미는 편집기 노드와 한 곳(`lib/safe-content-url.ts`)에서 — 여기선 기존 import 호환으로 다시 내보낸다.
+export { safeAttachmentDataUrl, safeHttpUrl } from './lib/safe-content-url';
+
 export function sanitizeDocHtml(content: string): string {
   const maybePurifier = DOMPurify as unknown as {
-    sanitize?: (value: string) => string;
-    default?: { sanitize?: (value: string) => string };
+    sanitize?: (value: string, config?: { FORBID_ATTR?: string[] }) => string;
+    default?: { sanitize?: (value: string, config?: { FORBID_ATTR?: string[] }) => string };
   };
 
   const sanitize = maybePurifier.sanitize ?? maybePurifier.default?.sanitize;
-  return sanitize ? sanitize(content) : '';
+  // story #4316(PO 15:03Z) — 렌더러가 스스로 붙이고 스스로 믿는 내부 표지는 글쓴이 입력에서 전부 걷는다(DOMPurify 기본은 data-*를 통과시킨다).
+  // 에디터가 정당하게 만드는 콘텐츠 속성(data-type · data-slug · data-title · data-open …)은 대상 아님. 마크다운 경로는 스키마가 막는다.
+  return sanitize ? sanitize(content, { FORBID_ATTR: [...RENDERER_INTERNAL_MARKERS] }) : '';
 }
 
 function decorateHtmlContent(content: string, headings: ReturnType<typeof extractDocHeadings>, codeCopyLabel: string): string {

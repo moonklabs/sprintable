@@ -63,6 +63,10 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "measure_destructive_durations_local.py",     # story #3383 — 로컬 1회성 재측정 도구
                                                    # (model_db_drift_audit.py와 동일 범주). 운영
                                                    # DB 무접속, throwaway 로컬 DB만 왕복.
+    "collect_ci_shard_durations.py",              # story #4159 — CI/로컬 1회성 재측정 도구
+                                                   # (measure_destructive_durations_local.py의
+                                                   # CI측 대응물, 동일 범주). gh CLI로 GitHub
+                                                   # Actions 아티팩트만 왕복 — 운영 DB 무접속.
     "verify_no_new_korean_user_strings.py",       # story #3779(1층) — CI lint 게이트(app/ 재귀
                                                    # AST 정적 스캔, 운영 DB 무접속).
     "verify_user_facing_tone.py",                 # story #3931(2층) — CI lint 게이트(app/ 재귀

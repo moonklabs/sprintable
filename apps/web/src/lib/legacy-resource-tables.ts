@@ -38,6 +38,12 @@ export const MIGRATED_RESOURCES: Record<string, string[]> = {
   // 키가 없어 404였다. 페이지 자체는 `[ws]/[proj]/work-list/page.tsx`에 실재 —
   // go-sprints/go-epics/go-retro와 동형으로 등록.
   'work-list': [],
+  // story #3989(v3 스택 rebase 시점 재실측, 2026-09-22) — command-palette.tsx의
+  // GUARD_ANCHOR_ITEMS 'go-hypotheses'가 작업 공간 없는 `/hypotheses`를 여는데 이
+  // 표에 키가 없어 404였다(go-work-list 선례 그대로 재현·처방). 페이지 자체는
+  // `[ws]/[proj]/hypotheses/page.tsx`에 실재 — 어느 PR 본문에도 없던 신규 처방(런북
+  // §7-4-8 예고 그대로).
+  hypotheses: [],
   // story #2016: 당시 8fc51517(B1 리네이밍)이 epics→goals 경로 리터럴을 RENAMED_RESOURCES에만
   // 반영하고 여기(MIGRATED_RESOURCES)엔 신 이름 'goals'를 안 넣어, bare `/goals`(신 이름 그대로
   // 오는 딥링크·북마크·검색결과)가 이 표에 키가 없어 즉시 404였다(호스트/쿠키 무관 실측 확認).

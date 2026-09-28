@@ -64,6 +64,14 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _stub_list_fields():
+    """story #4299 — 목록 · 단건 응답의 붙이기 칸은 한 SQL(`_attach_list_fields` · story_list_facts)로 읽는다. 이 파일은 mock 세션으로
+    라우터 배선만 보므로 그 한 문장을 빈 채움으로 둔다(칸 값 자체는 test_4299_story_list_facts_realdb가 실 PG로 대조)."""
+    with patch("app.routers.stories._attach_list_fields", new_callable=AsyncMock):
+        yield
+
+
 async def _client():
     from app.main import app
 
@@ -97,9 +105,13 @@ async def test_list_stories_200():
     try:
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [_mock_story()]
+        # story #4299: 목록은 (Story, count(*) over()) 행 — 전체 수를 같은 문장에서 읽는다.
+        mock_result.all.return_value = [(_mock_story(), 1)]
         # project_id query → get_project_scoped_org_id 의 project→org 조회. 실제 불변식
         # (project 는 스코프 org 소속)을 반영: 같은 org 여야 cross-org 가드(c6b82459) 통과.
         mock_result.scalar_one_or_none.return_value = ORG_ID
+        # story #4299: project org 조회 · 접근 판정이 한 SQL(project_org_and_access) — 한 행 (org, 접근 여부).
+        mock_result.one.return_value = (ORG_ID, True)
         session.execute = AsyncMock(return_value=mock_result)
 
         # story #2459: get_project_scoped_org_id가 전용 단명 세션(async_session_factory())을

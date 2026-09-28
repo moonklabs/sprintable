@@ -22,6 +22,14 @@ class MemberResponse(BaseModel):
     type: str
     role: str
     is_active: bool
+    # story #3997(3994 후속) — additive. FE의 새 대화 상대·담당자 선택 두 자리가
+    # isSystemPublisher(runtime_type)로 「시스템 발행」을 걸러내려면 이 값이 필요하다
+    # (기존 GET /api/team-members?type=agent가 이미 실어 보내던 필드, 이 엔드포인트만
+    # 없었다). 휴먼 행은 항상 None(TeamMember.runtime_type이 애초에 에이전트 전용
+    # 컬럼 — team.py:39 주석 "휴먼 NULL"과 동형). model_validate(agent)로 채워지는
+    # 두 에이전트 분기(project_id 있음/없음)는 TeamMember ORM이 이미 이 컬럼을
+    # 갖고 있어 코드 변경 없이 자동으로 채워진다.
+    runtime_type: str | None = None
 
 
 @router.get("", response_model=list[MemberResponse])

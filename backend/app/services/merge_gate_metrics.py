@@ -6,6 +6,7 @@ None(데이터 없음), 데이터 있고 num 0이면 0.0. throughput은 count(0=
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any
 
@@ -42,7 +43,14 @@ async def compute_merge_gate_metrics(
     project_id: uuid.UUID | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
+    story_project_ids: Collection[uuid.UUID] | None = None,
+    hidden_gate_ids: Collection[uuid.UUID] | None = None,
 ) -> dict[str, Any]:
+    """story #4350(PO 2026-09-26) — `story_project_ids` · `hidden_gate_ids`는 접근이 제한된 caller용: 스토리 축은 접근 가능 프로젝트로,
+    게이트 축은 «접근 불가 프로젝트에 속한 게이트»만 뺀다(어느 프로젝트에도 안 걸린 org 수준 게이트는 셈). 둘 다 None이면 옛 수 그대로
+    (전체 접근 caller — 라우터가 넘기지 않는다)."""
+    hidden = list(hidden_gate_ids) if hidden_gate_ids else []
+    scoped_projects = list(story_project_ids) if story_project_ids is not None else None
     # ── 1. merge_gate_coverage = (done & merge gate 보유)/(done story) ──────────
     cov = (
         select(
@@ -63,6 +71,8 @@ async def compute_merge_gate_metrics(
     cov = _window(cov, Story.updated_at, start, end)
     if project_id is not None:
         cov = cov.where(Story.project_id == project_id)
+    if scoped_projects is not None:
+        cov = cov.where(Story.project_id.in_(scoped_projects))
     cov_row = (await session.execute(cov)).one()
     merge_gate_coverage = _ratio(cov_row.num, cov_row.denom)
 
@@ -81,6 +91,8 @@ async def compute_merge_gate_metrics(
     vc = _window(vc, Participation.created_at, start, end)
     if project_id is not None:
         vc = vc.where(Story.project_id == project_id)
+    if scoped_projects is not None:
+        vc = vc.where(Story.project_id.in_(scoped_projects))
     vc_row = (await session.execute(vc)).one()
     verdict_coverage = _ratio(vc_row.num, vc_row.denom)
 
@@ -88,6 +100,8 @@ async def compute_merge_gate_metrics(
     tp = select(func.count(distinct(Gate.id))).where(
         Gate.org_id == org_id, Gate.gate_type == "merge", Gate.status == "auto_passed"
     )
+    if hidden:
+        tp = tp.where(Gate.id.not_in(hidden))
     tp = _window(tp, Gate.created_at, start, end)
     if project_id is not None:
         tp = tp.join(Story, Story.id == Gate.work_item_id).where(Story.project_id == project_id)
@@ -98,6 +112,8 @@ async def compute_merge_gate_metrics(
         (func.sum(func.extract("epoch", Gate.resolved_at - Gate.created_at)) / 60.0).label("minutes"),
         func.count(distinct(Gate.id)).label("cnt"),
     ).where(Gate.org_id == org_id, Gate.resolver_id.isnot(None), Gate.resolved_at.isnot(None))
+    if hidden:
+        hr = hr.where(Gate.id.not_in(hidden))
     hr = _window(hr, Gate.resolved_at, start, end)
     if project_id is not None:
         hr = hr.join(Story, Story.id == Gate.work_item_id).where(Story.project_id == project_id)
@@ -111,6 +127,8 @@ async def compute_merge_gate_metrics(
         .filter(Gate.neutral_facts["rubber_stamp_candidate"].astext == "true")
         .label("num"),
     ).where(Gate.org_id == org_id, Gate.status == "approved", Gate.resolver_id.isnot(None))
+    if hidden:
+        rs = rs.where(Gate.id.not_in(hidden))
     rs = _window(rs, Gate.resolved_at, start, end)
     if project_id is not None:
         rs = rs.join(Story, Story.id == Gate.work_item_id).where(Story.project_id == project_id)
@@ -132,6 +150,8 @@ async def compute_merge_gate_metrics(
             Gate.status.in_(_RESOLVED_MERGE_STATUSES),
         )
     )
+    if hidden:
+        rg = rg.where(Gate.id.not_in(hidden))
     rg = _window(rg, Gate.created_at, start, end)
     if project_id is not None:
         rg = rg.where(Story.project_id == project_id)

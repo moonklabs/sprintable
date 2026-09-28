@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { AgentRunsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { parseCursorMeta } from '@/lib/pagination';
 import {
   ALL_RUN_STATUS_FILTER,
@@ -205,7 +206,7 @@ export function AgentRunsList() {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      <TopBarSlot title={<AgentRunsTopBarTitle />} showContextChip />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Filters */}

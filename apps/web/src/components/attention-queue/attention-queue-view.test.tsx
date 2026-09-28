@@ -100,8 +100,9 @@ describe('AttentionQueueView — overflow anchor (story #2923 AQ3 + MEDIUM① GA
     await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('나머지는'));
+    const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('더 있어요'));
     expect(anchor).toBeTruthy();
+    expect(anchor!.textContent).toContain('— 결재 대기는 결재함에서'); // 유나 CHANGES — 숨은 행에 게이트가 있으면 자리는 결재함
     await act(async () => { anchor!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/inbox?tab=gates');
   });
@@ -120,10 +121,10 @@ describe('AttentionQueueView — overflow anchor (story #2923 AQ3 + MEDIUM① GA
     await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('나머지는'));
+    const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('더 있어요'));
     expect(anchor).toBeUndefined();
     // 앵커는 없지만 정직한 카운트 텍스트 자체는 여전히 뜬다(사라지지 않음 — 정보 손실 아님).
-    expect(container.textContent).toContain('나머지는');
+    expect(container.textContent).toContain('3건 더 있어요 — 처리되는 대로 여기 차례로 올라와요');
   });
 
   it('overflow = 0이면(캡 이내) 앵커·텍스트 둘 다 안 뜬다', async () => {
@@ -137,9 +138,9 @@ describe('AttentionQueueView — overflow anchor (story #2923 AQ3 + MEDIUM① GA
     await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('나머지는'));
+    const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('더 있어요'));
     expect(anchor).toBeUndefined();
-    expect(container.textContent).not.toContain('나머지는');
+    expect(container.textContent).not.toContain('더 있어요');
   });
 });
 
@@ -227,5 +228,56 @@ describe('AttentionQueueView — story #3099 빈 상태(모두 처리됨) 텍스
     expect(label?.className).not.toContain('text-proof-green');
     const icon = label?.querySelector('svg');
     expect(icon?.getAttribute('class')).toContain('text-proof-green');
+  });
+});
+
+describe('AttentionQueueView — story #4382 BE 잘림 신호(truncated_kinds)', () => {
+  async function mountWith(truncatedKinds: string[] | undefined) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/glance/attention')) {
+        const data: Record<string, unknown> = { items: manySignals(10) };
+        if (truncatedKinds) data['truncated_kinds'] = truncatedKinds;
+        return { ok: true, json: async () => ({ data }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { AttentionQueueView } = await import('./attention-queue-view');
+    await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐BE가 한 신호를 100건에서 잘랐으면 남은 수를 «3건 이상»으로만 말한다(정확한 수로 단정하지 않음)', async () => {
+    await mountWith(['needs_input']);
+    expect(container.textContent).toContain('3건 이상 더 있어요 — 처리되는 대로 여기 차례로 올라와요');
+  });
+
+  it('잘림이 없거나(빈 목록) 필드가 없으면(예전 BE) 예전 문장 그대로 «3건은»', async () => {
+    await mountWith([]);
+    expect(container.textContent).toContain('3건 더 있어요 — 처리되는 대로 여기 차례로 올라와요');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.resetModules();
+    await mountWith(undefined);
+    expect(container.textContent).toContain('3건 더 있어요 — 처리되는 대로 여기 차례로 올라와요');
+  });
+});
+
+describe('AttentionQueueView — story #4382 까디르 메모 ①(묶인 뒤 캡 이하여도 잘림은 보인다)', () => {
+  it('⭐gate_pending 101행이 스토리 6개로 묶여 넘침 0이어도 BE가 잘랐으면 «더 있을 수 있어요»', async () => {
+    const rows = Array.from({ length: 101 }, (_, i) => beItem({ kind: 'gate_pending', story_id: `s${i % 6}`, title: `게이트 ${i % 6}` }));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/glance/attention')) {
+        return { ok: true, json: async () => ({ data: { items: rows, truncated_kinds: ['gate_pending'] } }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { AttentionQueueView } = await import('./attention-queue-view');
+    await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    // 유나 CHANGES — 숨은 게이트가 있으니(gate_pending 잘림) 자리는 결재함 · 단추.
+    const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('더 있을 수 있어요'));
+    expect(anchor?.textContent).toBe('더 있을 수 있어요 — 결재 대기는 결재함에서');
+    expect(anchor?.querySelector('.break-keep')).not.toBeNull();
+    expect(container.textContent).not.toContain('0건');
   });
 });

@@ -114,8 +114,9 @@ describe('AC — 가드는 고의 합니다체 주입을 잡아낸다(양성대�
 });
 
 describe('SCOPED_KEYS — story #3877 AC1 표 count-lock(레거시, story #3927부터는 필터링에 안 쓰임)', () => {
-  it('정확히 104개(AC1 표 94 + AC4 orgBriefing 9 + 캡처 中 발견 1 — docs.emptyDescription)', () => {
-    expect(SCOPED_KEYS).toHaveLength(104);
+  // story #4231 3차 (b) — 죽은 orgBriefing 키 5개(decide*Context 3 · signal*Context 2)를 삭제해 AC4 몫이 9 → 4.
+  it('정확히 99개(AC1 표 94 + AC4 orgBriefing 4 + 캡처 中 발견 1 — docs.emptyDescription)', () => {
+    expect(SCOPED_KEYS).toHaveLength(99);
   });
 
   it('중복 키가 없다', () => {
@@ -127,7 +128,7 @@ describe('실 ko.json — 스코프 키 count-lock(SCOPED_KEYS 기본 인자 경
   const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
   const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
 
-  it('SCOPED_KEYS 104개 전부의 ko.json 값에 합니다체 0건(story #3877 AC2 전량 이관 확認)', () => {
+  it('SCOPED_KEYS 99개 전부의 ko.json 값에 합니다체 0건(story #3877 AC2 전량 이관 확認)', () => {
     expect(findHonorificToneInScopedKeys(ko)).toEqual([]);
   });
 
@@ -142,15 +143,15 @@ describe('실 ko.json — 스코프 키 count-lock(SCOPED_KEYS 기본 인자 경
     expect(findings).toContainEqual({ key: 'board.noStories', matches: ['습니다'], value: '스토리가 없습니다' });
   });
 
-  // 양성대조 ②(ㅂ니다 계열) — AC4 orgBriefing 9키 中 3키(decideGateContext 등)는 원래
-  // 「필요합니다」(모음어간+ㅂ니다) 형태라 습니다/십시오 리터럴이 없다 — NFD 처방이 실제로
-  // 이 자리에서 작동하는지 실 키로 확認(합성 아님).
-  it('양성대조 — orgBriefing.decideGateContext(ㅂ니다 계열)를 원래 값으로 되돌려도 RED가 된다', () => {
+  // 양성대조 ②(ㅂ니다 계열) — AC4 orgBriefing 키 中 decideGateContext 등 3키가 원래 「필요합니다」(모음어간+ㅂ니다) 형태라
+  // 습니다/십시오 리터럴이 없었다 — NFD 처방이 이 형태를 잡는지 확認. story #4231 3차 (b)에서 그 3키가 죽은 키로 삭제돼, 목록에 남은
+  // 실 orgBriefing 키에 같은 형태 값을 넣어 확認한다.
+  it('양성대조 — 남은 orgBriefing 키에 ㅂ니다 계열(「필요합니다」)을 넣으면 RED가 된다', () => {
     const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
-    (mutated.orgBriefing as Record<string, unknown>).decideGateContext = '승인이 필요합니다';
+    (mutated.orgBriefing as Record<string, unknown>).clusterUnclosedOverdueGoalTitle = '승인이 필요합니다';
     const findings = findHonorificToneInScopedKeys(mutated);
     expect(findings).toContainEqual({
-      key: 'orgBriefing.decideGateContext', matches: ['ㅂ니다'], value: '승인이 필요합니다',
+      key: 'orgBriefing.clusterUnclosedOverdueGoalTitle', matches: ['ㅂ니다'], value: '승인이 필요합니다',
     });
   });
 
@@ -199,7 +200,7 @@ describe('resolveEffectiveScopedKeys / flattenAllLeafKeys — 순수 함수(stor
     expect(effective).not.toContain('chats.arr');
   });
 
-  it('SCOPED_KEYS 크기보다 항상 크거나 같다(실 ko.json은 SCOPED_KEYS 104개보다 leaf가 훨씬 많다)', () => {
+  it('SCOPED_KEYS 크기보다 항상 크거나 같다(실 ko.json은 SCOPED_KEYS 99개보다 leaf가 훨씬 많다)', () => {
     const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
     const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
     expect(resolveEffectiveScopedKeys(ko).length).toBeGreaterThan(SCOPED_KEYS.length);
@@ -224,8 +225,10 @@ describe('checkTotalLeafFloor — 순수 함수(네임스페이스별 leaf 하�
     const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
     const actual = countAllLeaves(ko);
     expect(actual).toBeGreaterThanOrEqual(MIN_TOTAL_LEAF_COUNT);
-    // 하한이 실측치의 80% 근방이라는 것 자체를 고정(자연 증감은 통과, 대량 삭제는 fail-loud
-    // — 예를 들어 leaf가 반토막 나면 이 비율 자체가 깨져 이 테스트가 먼저 신호를 준다).
+    // 하한이 실측치의 80% 근방이라는 것 자체를 고정한다.
+    // - 줄면(대량 삭제): 비가 0.85를 넘거나 하한 아래로 떨어져 fail-loud(예: leaf가 반토막 나면 여기서 먼저 신호).
+    // - 늘면: ko leaf가 하한/0.7을 넘게 늘면 비가 0.7 아래로 내려가 이 검사가 하한 재측정을 요구한다(의도된 신호 —
+    //   하한이 실측과 멀어지면 대량 삭제 감지력이 약해지므로). 그때 MIN_TOTAL_LEAF_COUNT를 실측 × 0.8로 다시 매긴다.
     expect(MIN_TOTAL_LEAF_COUNT / actual).toBeGreaterThan(0.7);
     expect(MIN_TOTAL_LEAF_COUNT / actual).toBeLessThan(0.85);
   });
@@ -442,6 +445,24 @@ describe('story #3900 axis ① — 의문형 합니다체(습니까·ㅂ니까)'
 // story #3900 axis ② — findPersonaAdnominalTerminal(완결 어미 없는 관형형 '는'/'인'+마침표).
 // ---------------------------------------------------------------------------
 describe('findPersonaAdnominalTerminal — 순수 판정 함수(axis ②)', () => {
+  it("story #4203 — '인'으로 끝나는 한자어 명사(확인·승인)의 명사형 종결은 관형형이 아니다(오탐 0) · 관형형은 그대로", () => {
+    const ko = { p: {
+      a: '할 일 → 진행 중 → 완료 확인. 꾸준히 배포하는 팀에 적합.',
+      b: '제출 → 검토 → 승인. 두 번 확인하는 일에 적합.',
+      c: '재승인.',
+      d: '완료 확인. 이건 엣지인.',
+    } };
+    expect(findPersonaAdnominalTerminal(ko, ['p.a', 'p.b', 'p.c'])).toEqual([]);
+    expect(findPersonaAdnominalTerminal(ko, ['p.d'])).toEqual([{ key: 'p.d', value: ko.p.d }]);
+  });
+
+  it.each(['그 사람은 회원인.', '이건 지원인.', '결과가 명확인.'])(
+    "까디르 QA(PR #4566) — 명사 예외는 낱말 전체 일치만: %s(관형형 «~인.»)는 잡는다",
+    (value) => {
+      expect(findPersonaAdnominalTerminal({ p: { x: value } }, ['p.x'])).toEqual([{ key: 'p.x', value }]);
+    },
+  );
+
   it("'…되돌리는.'·'…엣지인.'(관형형+마침표 종결)를 잡는다", () => {
     const findings = findPersonaAdnominalTerminal(
       { p: { a: '연결을 되돌리는.', b: '이건 엣지인.' } },

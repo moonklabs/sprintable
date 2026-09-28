@@ -11,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { LoopCreateDialog } from './loop-create-dialog';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -108,9 +109,11 @@ describe('LoopCreateDialog 레시피 선택 (story #2792 — event_definitions �
     });
     await flush();
 
-    expect(document.body.textContent).toContain('기능 명세 및 AC 작성');
+    // story #4209 — 플랫폼 워크플로우 프리셋의 단계 설명은 원문(내부어 «AC»·«APPROVE/REJECT») 대신 로케일 문안.
+    expect(document.body.textContent).toContain(koMessages.recipePreset.workflowScrum3StepActionKickoff);
     expect(document.body.textContent).toContain('PO');
-    expect(document.body.textContent).toContain('AC 체크리스트 검증 후 APPROVE/REJECT');
+    expect(document.body.textContent).toContain(koMessages.recipePreset.workflowScrum3StepActionQaReview);
+    expect(document.body.textContent).not.toContain('APPROVE/REJECT');
   });
 
   it('제출 시 recipe_slug 필드에 선택된 정의의 key 값을 싣는다(필드명 유지, 값만 신규 key)', async () => {
@@ -158,5 +161,73 @@ describe('LoopCreateDialog 레시피 선택 (story #2792 — event_definitions �
 
     expect(submittedBody).not.toBeNull();
     expect(submittedBody!['recipe_slug']).toBe('preset.workflow.scrum_3step');
+  });
+});
+
+// story #4202 — 실행 만들기 드롭다운·미리보기도 플랫폼 마케팅 프리셋은 로케일 문안, 조직 정의는 원문.
+describe('LoopCreateDialog 레시피 선택 — 플랫폼 프리셋 이름·설명 로케일(story #4202)', () => {
+  const MARKETING = {
+    id: 'm1', key: 'preset.marketing.social_text_post', org_id: null,
+    name: 'SNS 텍스트 포스트', description: '초안부터 발행까지 5단계예요.',
+    payload_schema: { properties: { stage: { enum: ['draft', 'published'] } } },
+    stage_metadata: { draft: { role: '크리에이터', action: '초안' }, published: { role: '발행자', action: '발행' } },
+    enabled: true,
+  };
+  const ORG_SAME_KEY = { ...MARKETING, id: 'o1', key: 'org.acme.text', org_id: 'org-acme', name: '우리 텍스트 흐름', description: '우리 설명' };
+
+  it('en — 드롭다운 이름·선택 미리보기 설명이 영어, 조직 정의는 원문', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [MARKETING, ORG_SAME_KEY] };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="en" messages={enMessages} timeZone="Asia/Seoul">
+          <LoopCreateDialog projectId="proj-1" open onOpenChange={() => {}} onCreated={() => {}} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    const options = Array.from(document.body.querySelectorAll('#loop-create-recipe option')).map((o) => o.textContent);
+    expect(options).toContain(enMessages.recipePreset.socialTextPostName);
+    expect(options).not.toContain('SNS 텍스트 포스트');
+    expect(options).toContain('우리 텍스트 흐름');
+
+    const select = document.body.querySelector('#loop-create-recipe') as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'preset.marketing.social_text_post';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    expect(document.body.textContent).toContain(enMessages.recipePreset.socialTextPostDescription);
+    expect(document.body.textContent).not.toContain('초안부터 발행까지 5단계예요.');
+  });
+});
+
+// story #4203 — 워크플로우 프리셋: 시드 이름이 언어가 섞여 있어(«Kanban Flow») ko 화면에도 한국어 문안으로.
+describe('LoopCreateDialog 레시피 선택 — 워크플로우 프리셋 이름 로케일(story #4203)', () => {
+  const KANBAN = {
+    id: 'k1', key: 'preset.workflow.kanban', org_id: null,
+    name: 'Kanban Flow', description: '상태가 바뀔 때마다 팀에 알림.',
+    payload_schema: { properties: { stage: { enum: ['assign_step_1'] } } },
+    stage_metadata: { assign_step_1: { role: 'Worker', action: '작업' } },
+    enabled: true,
+  };
+  it.each([['ko', koMessages], ['en', enMessages]] as const)('%s — 드롭다운 이름이 로케일 문안(시드 «Kanban Flow» 0)', async (locale, messages) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [KANBAN] };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
+          <LoopCreateDialog projectId="proj-1" open onOpenChange={() => {}} onCreated={() => {}} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    const options = Array.from(document.body.querySelectorAll('#loop-create-recipe option')).map((o) => o.textContent);
+    expect(options).toContain(messages.recipePreset.workflowKanbanName);
+    expect(options).not.toContain('Kanban Flow');
   });
 });

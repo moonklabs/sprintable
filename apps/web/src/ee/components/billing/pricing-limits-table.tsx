@@ -74,7 +74,7 @@ export function PricingLimitsTable({ currentTier }: { currentTier: TierId }) {
                   key={tierId}
                   className={cn(
                     'px-3 py-2.5 text-right text-xs font-medium text-muted-foreground',
-                    tierId === currentTier && 'text-brand',
+                    tierId === currentTier && 'text-brand-text',
                   )}
                 >
                   {t(`tierName_${tierId}`)}

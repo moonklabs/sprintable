@@ -42,7 +42,8 @@ interface HypothesisGateBadgeProps {
   compact?: boolean;
 }
 
-export function HypothesisGateBadge({ hypothesis, gate, resolveName = (id) => id, resolverId = '', onResolved = () => {}, compact = false }: HypothesisGateBadgeProps) {
+// [SID:4286] resolveName 기본값이 id 전체를 이름으로 쓰던 것 — 기본은 빈 칸(이름 표를 가진 부모가 넘긴다).
+export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', resolverId = '', onResolved = () => {}, compact = false }: HypothesisGateBadgeProps) {
   const t = useTranslations('hypotheses');
   const [resolving, setResolving] = useState(false);
   const [rejectNote, setRejectNote] = useState<string | null>(null); // null=닫힘·string=반려 입력 中

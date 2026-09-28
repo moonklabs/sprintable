@@ -7,7 +7,10 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
  * Body: { api_key_id: string }
  */
 export async function POST(request: Request) {
-  const _r = await proxyToFastapi(request, '/api/v2/api-keys/rotate');
+  const _r = await proxyToFastapi(request, '/api/v2/api-keys/rotate', {
+    // story #4320(까디르 QA ③) — API 키를 회전(옛 키 폐기 · 새 키 발급) — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+    timeLimitOnly: true,
+  });
     if (!_r.ok) return _r;
     if (_r.status === 204) return apiSuccess({ ok: true });
     return apiSuccess(await _r.json());

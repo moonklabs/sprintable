@@ -23,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
 import { useDocsLayout } from '../docs-context';
 import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
@@ -31,7 +32,10 @@ import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { copyTextSafely } from '@/lib/clipboard';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { isOutsidePress } from '@/components/shared/anchored-popover';
 
 interface DocDetail {
   id: string;
@@ -81,6 +85,16 @@ export default function DocSlugPage() {
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [autosave, setAutosave] = useState(true);
   const [mdCopied, setMdCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 clipboard 실패를 삼키고도
+  // 무조건 setMdCopied(true)를 실행했다. 문서 내용은 에디터에 이미 선택 가능하게
+  // 떠 있어 별도 노출 블록은 불요 — 아이콘 버튼 title/aria-label만 실패 문구로.
+  const [mdCopyFailed, setMdCopyFailed] = useState(false);
+  // story #3986 CHANGES(페드루 PO C2·C3) — 에디터가 그리는 건 렌더링 결과지 markdown
+  // 원문이 아니다(html 문서는 변환 결과라 원문과 다르다). 실패했을 때만 실제로
+  // 클립보드에 보내려던 markdown을 선택 가능하게 보여준다.
+  const [mdCopyFailedRaw, setMdCopyFailedRaw] = useState<string | null>(null);
+  const mdCopyFailedPanelRef = useRef<HTMLDivElement>(null);
+  const mdCopyFailedClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -113,7 +127,7 @@ export default function DocSlugPage() {
   const shouldAutoDeriveSlug = selectedDoc !== null && !slugLocked && isUntitledSlug(selectedDoc.slug);
   const derivedSlug = shouldAutoDeriveSlug ? slugifyDocTitle(title) : '';
 
-  const { status: saveStatus, isDirty, save, clearSyncAlerts } = useDocSync<DocDetail>({
+  const { status: saveStatus, isDirty, save, clearSyncAlerts, adoptNormalized } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
     savePayload: derivedSlug
       ? { title, content, content_format: contentFormat, slug: derivedSlug, slug_locked: false }
@@ -123,6 +137,11 @@ export default function DocSlugPage() {
     autosave,
     onSaved: handleDocSaved,
   });
+
+  const handleNormalize = useCallback((value: string) => {
+    setContent(value);
+    adoptNormalized({ content: value });
+  }, [adoptNormalized]);
 
   const fetchDoc = useCallback(async () => {
     if (!projectId || !slug) return;
@@ -192,14 +211,39 @@ export default function DocSlugPage() {
 
   const handleCopyMarkdown = useCallback(async () => {
     const md = contentFormat === 'markdown' ? content : htmlToMarkdown(content);
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(md);
-      }
-    } catch { /* clipboard unavailable */ }
+    const result = await copyTextSafely(md);
+    if (!result.ok) {
+      setMdCopyFailed(true);
+      setMdCopyFailedRaw(md);
+      window.setTimeout(() => setMdCopyFailed(false), 3000);
+      return;
+    }
+    setMdCopyFailed(false);
+    setMdCopyFailedRaw(null);
     setMdCopied(true);
     window.setTimeout(() => setMdCopied(false), 1600);
   }, [content, contentFormat]);
+
+  // story #3986 CHANGES(페드루 PO 2회차) — mdCopyFailed(아이콘/aria용 3초 코스메틱
+  // 플래그)와 원문 노출 칸을 분리했다(패널 자체는 mdCopyFailedRaw만으로 뜬다). 손으로
+  // 고를 시간을 3초로 자르지 않되, 그렇다고 화면에 영영 안 사라지면 안 되니 다음
+  // 성공(핸들러 안)·바깥 클릭·Esc로 닫는다.
+  useEffect(() => {
+    if (mdCopyFailedRaw == null) return;
+    const onPointerDown = (e: MouseEvent) => {
+      // 이 화면은 포털 팝오버(목차 · 담당자 «더 보기»)를 품는다 — 바깥 판정은 공용 규칙 하나(#4349 PR 2 · 가드 outside-press).
+      if (isOutsidePress(mdCopyFailedPanelRef.current, e.target)) setMdCopyFailedRaw(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMdCopyFailedRaw(null);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [mdCopyFailedRaw]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedDoc || !projectId) return;
@@ -277,7 +321,7 @@ export default function DocSlugPage() {
   if (!selectedDoc) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground">{t('notFound')}</p>
+        <p className="break-keep text-sm text-muted-foreground">{t('notFound')}</p>
       </div>
     );
   }
@@ -285,15 +329,48 @@ export default function DocSlugPage() {
   const docActions = (
     <>
       <InlineSaveIndicator status={saveStatus} onAction={save} t={t} tc={tc} />
-      <button
-        type="button"
-        onClick={handleCopyMarkdown}
-        title={t('copyMarkdown')}
-        aria-label={t('copyMarkdown')}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-      >
-        {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={handleCopyMarkdown}
+          title={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
+          aria-label={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
+          className="hidden h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
+          data-testid="docs-toolbar-copy-markdown"
+        >
+          {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className={mdCopyFailed ? 'h-4 w-4 text-destructive' : 'h-4 w-4'} />}
+        </button>
+        {/* story #3986 CHANGES(페드루 PO C2·C3) — 아이콘 버튼만으론 실패가 안 보였다
+            (title·aria-label·아이콘 색만 바뀜 — 터치 기기는 title도 못 봄). 눈에 보이는
+            role=alert + markdown 원문 선택 칸을 드롭다운으로 띄운다. 패널 자체는
+            mdCopyFailed(3초 코스메틱)와 분리해 mdCopyFailedRaw만으로 뜬다 — 손으로
+            고를 시간을 3초로 자르지 않는다(다음 성공·바깥 클릭·Esc·✕로 닫는다). */}
+        {mdCopyFailedRaw != null ? (
+          <div ref={(el) => { mdCopyFailedPanelRef.current = el; mdCopyFailedClampRef(el); }} data-dropdown-panel="md-copy-failed" className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1rem)] space-y-1.5 rounded-md border border-border bg-popover p-2 shadow-md">
+            <div className="flex items-start justify-between gap-2">
+              <p role="alert" className="break-keep text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setMdCopyFailedRaw(null)}
+                aria-label={tc('close')}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </Button>
+            </div>
+            <textarea
+              readOnly
+              value={mdCopyFailedRaw}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full resize-none rounded border border-border bg-background p-1.5 font-mono text-xs text-foreground"
+              rows={4}
+              data-testid="docs-copy-markdown-failed-raw"
+            />
+          </div>
+        ) : null}
+      </div>
       {/* story #2967(선생님 실사용 판정 ⑤) — 인덱스 클릭 목적지를 리더→에디터로 되돌리며
           리더 진입점이 사라지면 안 되니 opt-in 명시 링크를 "..." 드롭다운에서 상단 아이콘
           버튼으로 승격(발견성). 목적지·라벨(t('preview'))은 기존 그대로 — 위치만 이동. */}
@@ -310,7 +387,8 @@ export default function DocSlugPage() {
         onClick={() => setShareDialogOpen(true)}
         title={ts('share')}
         aria-label={ts('share')}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        className="hidden h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
+        data-testid="docs-toolbar-share"
       >
         <Share2 className="h-4 w-4" />
       </button>
@@ -319,6 +397,18 @@ export default function DocSlugPage() {
           <MoreHorizontal className="h-4 w-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
+          {/* story #4361(유나 실측 390/360) — 도구 줄 오른쪽 무리가 편집 카드(overflow-hidden) 밖으로 밀려 폰에서 «공유» · «⋯»(360은
+              «마크다운 복사»까지)를 누를 길이 없었다. `lg` 미만(GNB가 모바일 모양인 폭 — 웹 규칙 `md` 금지)에서는 두 버튼을 도구 줄에서
+              빼고 이 메뉴 안에서 같은 동작 · 같은 이름으로. 복사 실패 패널은 버튼을 감싼 칸에 그대로 떠서 여기서 눌러도 보인다. */}
+          <DropdownMenuItem className="lg:hidden" onClick={() => void handleCopyMarkdown()} data-testid="docs-menu-copy-markdown">
+            <Copy className="mr-2 h-4 w-4" />
+            {t('copyMarkdown')}
+          </DropdownMenuItem>
+          <DropdownMenuItem className="lg:hidden" onClick={() => setShareDialogOpen(true)} data-testid="docs-menu-share">
+            <Share2 className="mr-2 h-4 w-4" />
+            {ts('share')}
+          </DropdownMenuItem>
+          {selectedDoc.doc_type !== 'sprint_report' && <DropdownMenuSeparator className="lg:hidden" />}
           {selectedDoc.doc_type !== 'sprint_report' && (
             <>
               <DropdownMenuItem onClick={() => setUrlDialogOpen(true)}>
@@ -369,6 +459,8 @@ export default function DocSlugPage() {
           projectId={projectId}
           onNavigate={handleNavigate}
           onChange={setContent}
+          // story #4339(AC7) — 편집 없이 편집기가 다듬은 값 = 깨끗한 기준(쓰기 없음) · 입력했다 지우면 이 값으로 돌아와 dirty가 풀린다.
+          onNormalize={handleNormalize}
           onContentFormatChange={setContentFormat}
           isDirty={isDirty}
           onSave={save}

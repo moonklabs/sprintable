@@ -4,6 +4,9 @@ import { buildActionCommands, type ActionCommandTranslator } from './command-pal
 import koMessagesRaw from '../../../messages/ko.json';
 import enMessagesRaw from '../../../messages/en.json';
 
+// story #4231 3차 — withProject(필수)는 이 테스트에선 주소 그대로(프로젝트 싣기 자체는 아래 전용 케이스가 잰다).
+const same = (href: string) => href;
+
 type LooseMessages = { [key: string]: string | LooseMessages };
 const koMessages = koMessagesRaw as unknown as LooseMessages;
 const enMessages = enMessagesRaw as unknown as LooseMessages;
@@ -12,7 +15,7 @@ const tEn = createTranslator({ locale: 'en', messages: enMessages, namespace: 'c
 
 describe('buildActionCommands — v1 inventory (route-first, no-fiction)', () => {
   it('without a story context, only the 2 project-scoped commands exist (delegate has no valid target — omitted, not fabricated)', () => {
-    const items = buildActionCommands(t);
+    const items = buildActionCommands(t, same);
     expect(items.map((i) => i.id)).toEqual(['action-gate-decision', 'action-recruit-agent']);
   });
 
@@ -20,7 +23,7 @@ describe('buildActionCommands — v1 inventory (route-first, no-fiction)', () =>
     // story #2224(선생님 정정 2026-07-30): targetRoute는 이제 호출부가 넘긴 boardHref를
     // 그대로 쓴다(하드코딩 아님) — /board 삭제 후 boardHref 자체가 이미 `?view=list`를
     // 포함하므로 story id는 `&`로 이어붙인다(path 위계 ws/proj 해소됨 케이스로 검증).
-    const items = buildActionCommands(t, { storyId: 's1', storyTitle: '웰컴 이메일 시안', boardHref: '/moonklabs/sprintable/flow?view=list' });
+    const items = buildActionCommands(t, same, { storyId: 's1', storyTitle: '웰컴 이메일 시안', boardHref: '/moonklabs/sprintable/flow?view=list' });
     expect(items[0]).toEqual(expect.objectContaining({
       id: 'action-delegate-story', targetRoute: '/moonklabs/sprintable/flow?view=list&story=s1', danger: false,
     }));
@@ -29,26 +32,26 @@ describe('buildActionCommands — v1 inventory (route-first, no-fiction)', () =>
   });
 
   it('falls back to bare /flow?view=list when ws/proj slug not yet resolved (proxy.ts MIGRATED_RESOURCES 안전망 대상)', () => {
-    const items = buildActionCommands(t, { storyId: 's1', storyTitle: 'x', boardHref: '/flow?view=list' });
+    const items = buildActionCommands(t, same, { storyId: 's1', storyTitle: 'x', boardHref: '/flow?view=list' });
     expect(items[0]!.targetRoute).toBe('/flow?view=list&story=s1');
   });
 
   it('gate decision routes to the gate inbox and is flagged as a danger (amber) command', () => {
-    const items = buildActionCommands(t);
+    const items = buildActionCommands(t, same);
     const gate = items.find((i) => i.id === 'action-gate-decision')!;
     expect(gate.targetRoute).toBe('/inbox?tab=gates');
     expect(gate.danger).toBe(true);
   });
 
   it('recruit-agent routes to the recruiter wizard and is not a danger command', () => {
-    const items = buildActionCommands(t);
+    const items = buildActionCommands(t, same);
     const recruit = items.find((i) => i.id === 'action-recruit-agent')!;
     expect(recruit.targetRoute).toBe('/organization/workforce/recruiter');
     expect(recruit.danger).toBe(false);
   });
 
   it('never fabricates the 3 unwired commands (stop run / re-collect evidence / STEER priority) — dead-path guard', () => {
-    const items = buildActionCommands(t, { storyId: 's1', storyTitle: 'x', boardHref: '/flow?view=list' });
+    const items = buildActionCommands(t, same, { storyId: 's1', storyTitle: 'x', boardHref: '/flow?view=list' });
     const ids = items.map((i) => i.id);
     expect(ids).not.toContain('action-stop-run');
     expect(ids).not.toContain('action-recollect-evidence');
@@ -56,8 +59,16 @@ describe('buildActionCommands — v1 inventory (route-first, no-fiction)', () =>
   });
 
   it('renders in English when given the en translator (ko/en parity)', () => {
-    const items = buildActionCommands(tEn, { storyId: 's1', storyTitle: 'Welcome email draft', boardHref: '/flow?view=list' });
+    const items = buildActionCommands(tEn, same, { storyId: 's1', storyTitle: 'Welcome email draft', boardHref: '/flow?view=list' });
     expect(items[0]!.label).toContain('Welcome email draft');
     expect(items.find((i) => i.id === 'action-recruit-agent')!.label).not.toBe('');
+  });
+});
+
+describe('buildActionCommands — flat 목적지는 withProject로 프로젝트를 싣는다(story #4231 3차)', () => {
+  it('게이트 결재 · 에이전트 모집 목적지가 withProject를 거친다', () => {
+    const items = buildActionCommands(t, (href) => `${href}${href.includes('?') ? '&' : '?'}p=proj-A`);
+    expect(items.find((i) => i.id === 'action-gate-decision')?.targetRoute).toBe('/inbox?tab=gates&p=proj-A');
+    expect(items.find((i) => i.id === 'action-recruit-agent')?.targetRoute).toBe('/organization/workforce/recruiter?p=proj-A');
   });
 });

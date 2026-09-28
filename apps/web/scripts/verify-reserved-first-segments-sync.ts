@@ -28,10 +28,18 @@ import { RESERVED_FIRST_SEGMENTS } from '../src/lib/route-resolve';
 // `pnpm vitest run`(CI) 사이에서 어긋난다(#2387이 실 CI에서 겪은 함정, PR #2774).
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const APP_ROOT = path.resolve(SRC_ROOT, 'app');
-const AUTHENTICATED_ROOT = path.resolve(APP_ROOT, '(authenticated)');
 
 function listTopLevelDirs(dir: string): string[] {
   return readdirSync(dir).filter((entry) => statSync(path.join(dir, entry)).isDirectory());
+}
+
+// story #4008(2026-09-17) — 이 가드는 원래 `(authenticated)`(Next.js route group,
+// URL 세그먼트 0개) 하나만 이름으로 특례 처리했다. v3용 두 번째 그룹 `(v3)/chat`을
+// 추가하자 그 그룹 폴더 자체가 "예약 안 된 라이브 경로"로 오탐(실측 재현) — route
+// group은 이름 무관하게 전부 URL에 안 남으므로, 하드코딩 대신 Next.js 문법
+// `(name)`으로 일반화한다(그룹이 몇 개든·이름이 뭐든 앞으로 다시 안 걸림).
+function isRouteGroup(name: string): boolean {
+  return name.startsWith('(') && name.endsWith(')');
 }
 
 function listTopLevelFiles(dir: string): string[] {
@@ -57,9 +65,16 @@ export interface SyncCheckResult {
 }
 
 export function checkReservedFirstSegmentsSync(): SyncCheckResult {
+  const topLevel = listTopLevelDirs(APP_ROOT);
+  const routeGroups = topLevel.filter(isRouteGroup);
+  // 그룹 자신은 URL에 안 남지만, 그 자식은 그룹이 없는 것처럼 실 경로가 된다
+  // ((authenticated)/board → /board, (v3)/chat → /chat) — 자식을 top-level인 것처럼 편입.
+  // [ws]는 동적 세그먼트(예약어 축과 무관, 항상 제외).
   const liveDirs = [
-    ...listTopLevelDirs(APP_ROOT).filter((d) => d !== '(authenticated)'),
-    ...listTopLevelDirs(AUTHENTICATED_ROOT).filter((d) => d !== '[ws]'),
+    ...topLevel.filter((d) => !isRouteGroup(d)),
+    ...routeGroups.flatMap((group) =>
+      listTopLevelDirs(path.resolve(APP_ROOT, group)).filter((d) => d !== '[ws]'),
+    ),
   ];
 
   const appRootFiles = listTopLevelFiles(APP_ROOT);

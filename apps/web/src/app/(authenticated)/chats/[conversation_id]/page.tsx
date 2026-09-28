@@ -17,6 +17,7 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface Participant {
   member_id: string;
@@ -68,13 +69,14 @@ function formatHeaderTitle(
   // formatParticipantNames와 동일 사람언어 폴백으로 통일('?'는 비인간어). story #3758
   // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
   // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
-  if (meta.type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc);
+  if (meta.type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc);
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
-  return `${others.slice(0, MAX).map((p) => participantDisplayLabel(p, t, tc)).join(', ')} 외 ${others.length - MAX}명`;
+  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, tc)).join(', ');
+  return `${others.slice(0, MAX).map((p) => participantDisplayLabel(p, tc)).join(', ')} 외 ${others.length - MAX}명`;
 }
 
 export default function ConversationPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { conversation_id } = useParams<{ conversation_id: string }>();
   const router = useRouter();
   // story #1959(P2-S3): 딥링크 매니페스트(chat_thread→parentTab=chat) — 콜드 진입 시 "채팅"
@@ -209,11 +211,11 @@ export default function ConversationPage() {
     setShowAddParticipant(false);
     if (newConversationId && newConversationId !== conversation_id) {
       // DM → group fork: navigate to new group chat
-      router.push(`/chats/${newConversationId}`);
+      router.push(flatHref(`/chats/${newConversationId}`));
     } else {
       void fetchMeta();
     }
-  }, [conversation_id, fetchMeta, router]);
+  }, [conversation_id, fetchMeta, router, flatHref]);
 
   if (!currentTeamMemberId) {
     return (
@@ -240,7 +242,7 @@ export default function ConversationPage() {
     .filter((p) => p.type === 'agent' && p.member_id !== currentTeamMemberId && p.runtime_type !== undefined)
     // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
     // story #3758(9번째) — resolved 비트로 갈라 그린다.
-    .map((p) => ({ agentId: p.member_id, agentName: participantDisplayLabel(p, t, tc), runtimeType: p.runtime_type ?? null }));
+    .map((p) => ({ agentId: p.member_id, agentName: participantDisplayLabel(p, tc), runtimeType: p.runtime_type ?? null }));
 
   return (
     <>
@@ -264,7 +266,7 @@ export default function ConversationPage() {
               // 프로젝트로 `?p=`를 실어 복귀시킨다(R2 SSOT가 그대로 헤더·스위처를 되돌린다 —
               // "전환이 일방통행이 아니다"). 새 되돌리기 UI를 만들지 않고 기존 뒤로가기 버튼이
               // 그 역할을 겸한다.
-              onClick={() => router.replace(fromProjectId ? `/chats?p=${fromProjectId}` : '/chats')}
+              onClick={() => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'))}
               className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -279,7 +281,7 @@ export default function ConversationPage() {
                 // 넘기면 그 문구 첫 글자가 가짜 이니셜로 뜬다(「이름 없는 구성원」→「이」 등)
                 // — name은 원시, 표시 문구는 label로.
                 name={headerAvatarParticipant.name ?? null}
-                label={participantDisplayLabel(headerAvatarParticipant, t, tc)}
+                label={participantDisplayLabel(headerAvatarParticipant, tc)}
                 avatarUrl={headerAvatarParticipant.avatar_url ?? null}
                 actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
                 size={24}

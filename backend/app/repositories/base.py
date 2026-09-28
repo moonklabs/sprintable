@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,6 +62,10 @@ class BaseRepository(Generic[T]):
             q = q.where(self.model.deleted_at.is_(None))  # type: ignore[attr-defined]
         for attr, val in filters.items():
             q = q.where(getattr(self.model, attr) == val)
+        # story #4382 — LIMIT에 순서가 없으면 limit을 넘는 목록에서 어느 행이 빠질지 · 행 순서가 요청마다 달라질 수 있었다. 예전에 보이던
+        # 순서(대개 넣은 순)에 가장 가깝게 생성 시각 오름차순 + 기본 키(동률 보조 키).
+        order = [self.model.created_at] if hasattr(self.model, "created_at") else []
+        q = q.order_by(*order, *self.model.__mapper__.primary_key)  # type: ignore[attr-defined]
         result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
 
@@ -74,9 +79,13 @@ class BaseRepository(Generic[T]):
         limit: int | None = None,
         cursor: datetime | None = None,
         order_by: str = "created_at",
+        project_ids: Collection[uuid.UUID] | None = None,
         **filters: Any,
     ) -> tuple[list[T], int]:
         """true cursor 페이지네이션 + 전체 카운트.
+
+        - project_ids(story #4350): 주면 `project_id IN (...)`로 범위를 좁힌다 — project 필터 없는 목록을 caller가 접근 가능한
+          프로젝트로만(accessible_project_ids_in_org). SQL에서 거른다(뒤 거르기는 limit · total을 어긋나게 함). 빈 집합이면 0건.
 
         - order_by: 단조 컬럼 화이트리스트(created_at/updated_at). 그 외는 created_at로 폴백.
         - cursor: 직전 페이지 마지막 row의 order_by 값(datetime). desc 페이지네이션(< cursor).
@@ -95,6 +104,15 @@ class BaseRepository(Generic[T]):
             conds.append(self.model.deleted_at.is_(None))  # type: ignore[attr-defined]
         for attr, val in filters.items():
             conds.append(getattr(self.model, attr) == val)
+        if project_ids is not None:
+            # project_id가 nullable인 표(예: standup_entries)는 프로젝트에 매이지 않은 org 수준 행을 그대로 둔다 — 어느
+            # 프로젝트의 내용도 아니라서(assets `_scope_filter` · activity_logs와 같은 모양). NOT NULL 표는 IN만.
+            col = self.model.project_id  # type: ignore[attr-defined]
+            nullable = bool(getattr(col.property.columns[0], "nullable", False))
+            if not project_ids and not nullable:
+                return [], 0
+            in_accessible = col.in_(list(project_ids))
+            conds.append(or_(col.is_(None), in_accessible) if nullable else in_accessible)
 
         if order_by not in self._orderable_fields():
             order_by = "created_at"

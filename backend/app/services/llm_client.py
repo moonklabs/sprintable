@@ -48,6 +48,9 @@ MODEL_VERSION = os.environ.get("LLM_GEMINI_MODEL", "gemini-2.5-flash")
 MODEL_LOCATION = os.environ.get("LLM_GEMINI_LOCATION") or settings.vertex_ai_location
 # S25 AC③ — 토큰 cap(과금 안전핀). L2 종합류 짧은 산출물 용도로 512면 충분(호출부가 필요시 override).
 DEFAULT_MAX_OUTPUT_TOKENS = 512
+# story #4322 — Vertex 호출 명시 시간 제한(밀리초 · google-genai HttpOptions.timeout). 예전엔 없어 Vertex가 멈추면 그 스레드(예전엔
+# 이벤트 루프 자체)가 멈췄다. 브라우저 · BFF 30초(4310 · 4320)보다 짧게 둬 사용자가 끊기 전에 None(«아직 못 만듦»)으로 돌아온다.
+LLM_TIMEOUT_MS = 25_000
 
 # Gemini finish_reason 성공 판정 — STOP만 정상 종료. MAX_TOKENS(thinking 잠식/truncate)·
 # SAFETY·RECITATION·OTHER 등은 부분/거부 출력일 수 있어 텍스트가 비어있지 않아도 실패로
@@ -101,7 +104,7 @@ def generate_text(
             vertexai=True,
             project=settings.gcp_project_id,
             location=location or MODEL_LOCATION,
-            http_options=types.HttpOptions(api_version="v1"),
+            http_options=types.HttpOptions(api_version="v1", timeout=LLM_TIMEOUT_MS),
         )
         config_kwargs: dict = {
             "max_output_tokens": max_output_tokens,

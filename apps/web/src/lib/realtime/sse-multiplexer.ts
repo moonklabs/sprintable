@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createReconnectBackoffState } from './sse-reconnect-backoff';
 import { isSessionAlive } from './sse-session-guard';
 import { isCursorEligibleEventName } from './sse-cursor-eligibility';
-import { createVisibilityReconnectState } from './sse-visibility-reconnect';
+import { createSseLivenessTracker, createVisibilityReconnectState } from './sse-visibility-reconnect';
 
 /**
  * story #2078(E-ARCH 0단계) — presence·notification·chat이 각자 EventSource를 열어 탭당 장수
@@ -29,6 +29,20 @@ import { createVisibilityReconnectState } from './sse-visibility-reconnect';
 
 type EventHandler = (data: string, eventId?: string) => void;
 
+/**
+ * story #4245 — 연결 직후 서버가 다시 보내는 «백필» 이벤트인지(BE events.py 스트림이 백필 행 data에 `is_backfill: true`를 싣는다).
+ * 백필은 이 연결 이전에 이미 일어난 일이라, 마운트 때 한 번 조회한 값(배지 수 등)이 이미 반영하고 있다 — 재조회 트리거로 쓰면 기동마다
+ * 같은 요청이 한 번 더 나간다. data가 JSON이 아니거나 필드가 없으면 false(실시간 이벤트로 본다 — 재조회를 놓치지 않는 쪽).
+ */
+export function isBackfillEvent(data: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(data);
+    return typeof parsed === 'object' && parsed !== null && (parsed as { is_backfill?: unknown }).is_backfill === true;
+  } catch {
+    return false;
+  }
+}
+
 export interface SseMultiplexerHandle {
   /** 이름 있는 SSE 이벤트(예: 'chat:message'·'presence'·'notification') 구독. 구독 순서
    * 무관 — 커넥션이 이미 열려있어도 그 순간부터 즉시 받는다. */
@@ -47,6 +61,10 @@ export interface SseMultiplexerHandle {
    * 반응해야 하는 소비처는 이 필드를 폴링하지 말고 `subscribeReconnect`를 쓴다.
    */
   connected: boolean;
+  /** story #4263 — 지금 SSE가 **살아 있는가**(OPEN · 최근 수신이 heartbeat 주기 + 여유 안). 4252가 창 포커스 때 재연결을 건너뛰는 판정
+   * (`createSseLivenessTracker` · 지금 소스의 활동만 셈)과 **같은 값**이다 — 소비처가 «SSE가 대신하는 자원»의 포커스 재조회를 생략할지 이것으로
+   * 가른다(규칙 사본 0). 호출 시점 값(리액티브 아님). 죽었거나 끊겼던 뒤엔 false → 소비처는 재조회를 유지한다(정확성 우선). */
+  isAlive: () => boolean;
 }
 
 export function useSseMultiplexer(memberId: string | undefined, enabled: boolean): SseMultiplexerHandle {
@@ -60,6 +78,8 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   const esRef = useRef<EventSource | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastEventIdRef = useRef<string | null>(null);
+  // story #4252 — 이 커넥션이 최근에 무엇이든 받았는지(open · heartbeat · 이벤트). focus 때 살아 있는 커넥션을 끊지 않는 판정용.
+  const livenessRef = useRef(createSseLivenessTracker());
   const memberIdRef = useRef(memberId);
   useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
   // story #2940 카디르 QA(PR#3388) HIGH — memberId가 진짜로 바뀐 재실행(마운트·enabled 단독
@@ -80,6 +100,9 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
     attachedEventNamesRef.current.add(eventName);
     es.addEventListener(eventName, (e: Event) => {
       const me = e as MessageEvent<string>;
+      // story #4252(까디르 QA HIGH) — 활동은 **지금 소스**의 것만 센다. 재연결로 tracker를 reset한 뒤 옛 소스 큐에 남은 이벤트가
+      // 새(좀비일 수 있는) 소스를 «살아 있음»으로 되살리지 않게.
+      if (esRef.current === es) livenessRef.current.markActivity();
       dispatchNamed(eventName, me.data, me.lastEventId || undefined);
     });
   }, [dispatchNamed]);
@@ -131,11 +154,15 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
 
       const es = new EventSource(url.toString(), { withCredentials: true });
       esRef.current = es;
+      livenessRef.current.reset();
+      // story #4252 — BE가 쉬는 동안 30초마다 보내는 heartbeat을 생존 신호로 받는다(구독자 없음 · 판정 전용).
+      es.addEventListener('heartbeat', () => { if (esRef.current === es) livenessRef.current.markActivity(); });
       // 새 커넥션이므로 지금까지 구독된 이름을 전부 다시 attach(지연 attach 캐시 초기화).
       attachedEventNamesRef.current = new Set();
       for (const eventName of namedSubscribersRef.current.keys()) attachIfNeeded(eventName);
 
       es.onopen = () => {
+        if (esRef.current === es) livenessRef.current.markActivity(); // 지금 소스만(#4252 · 위 이름 있는 이벤트와 같은 가드)
         const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
         pendingForcedReconnect = false;
         backoff.onOpen();
@@ -144,6 +171,7 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       };
 
       es.onmessage = (e: MessageEvent<string>) => {
+        if (esRef.current === es) livenessRef.current.markActivity(); // 지금 소스만(#4252)
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         for (const handler of messageSubscribersRef.current) handler(e.data, e.lastEventId || undefined);
       };
@@ -196,8 +224,9 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
     // OS 포커스만 오간" 복귀를 못 잡는다(sse-visibility-reconnect.ts 모듈 docstring 참고 —
     // onVisible()은 hidden 이력이 없으면 구조적으로 항상 false). window.focus를 독립
     // 신호로 추가 — hidden 이력과 무관하게 강제 재연결하되 짧은 throttle로 중복 억제.
+    // story #4252 — 단, OPEN이면서 최근(heartbeat 주기 + 여유 안)에 받은 게 있으면 살아 있는 커넥션이라 그대로 둔다.
     const handleWindowFocus = () => {
-      if (visibilityState.onFocusRegained()) {
+      if (visibilityState.onFocusRegained(livenessRef.current.isAlive(esRef.current?.readyState))) {
         pendingForcedReconnect = true;
         connect();
       }
@@ -238,10 +267,12 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   // 안정적이므로(useCallback, 의존성 불변) 이 useMemo도 최초 1회 이후 재계산되지 않는다 —
   // `connected`가 몇 번을 토글해도 핸들 참조는 그대로라, 이 핸들을 effect deps에 둔
   // 소비처가 재연결마다 구독을 해지·재구독하는 일이 없다.
+  const isAlive = useCallback(() => livenessRef.current.isAlive(esRef.current?.readyState), []);
   return useMemo(() => ({
     subscribe,
     subscribeMessage,
     subscribeReconnect,
     get connected() { return connectedRef.current; },
-  }), [subscribe, subscribeMessage, subscribeReconnect]);
+    isAlive,
+  }), [subscribe, subscribeMessage, subscribeReconnect, isAlive]);
 }

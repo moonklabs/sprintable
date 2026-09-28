@@ -7,6 +7,7 @@ import { deriveFailureAction, type CommandStatus } from '@/components/content/fa
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3422(doc §11 T8) — 캘린더 격자 셀과 「날짜 미정」 레인이 공유하는 유일한 렌더
 // 단위(설계 코멘트 "ChannelPostCard가 유일한 렌더 단위" 그대로). deriveChannelPostView를
@@ -20,6 +21,7 @@ export interface ChannelPostCardProps {
 }
 
 export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('content');
   const hasGateContract = 'gate_status' in item;
   const view = hasGateContract
@@ -45,11 +47,12 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
     reasonCode: item.command_reason_code,
     reasonResetAt: item.command_reason_reset_at,
     processingKind: item.processing_kind,
+    retryable: item.command_retryable ?? null,
   });
 
   return (
     <Link
-      href={`/content/channel-posts/${item.draft_id}`}
+      href={flatHref(`/content/channel-posts/${item.draft_id}`)}
       className="block space-y-1 rounded-md border border-border p-2 text-xs hover:bg-muted"
       data-testid="channel-post-calendar-card"
       data-status-chip={view.status ?? 'unknown'}
@@ -69,7 +72,13 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
       {/* N3(페드루 PO, 2026-09-04 13:26Z) — 카드 전체가 <Link>라 그 안에 배지의
           <Button>을 그대로 두면 인터랙티브 요소가 중첩된다(a>button). compact로 라벨만
           받는다 — 재시도는 카드를 눌러 상세로 들어간 다음에 한다. */}
-      {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact /> : null}
+      {failureAction ? (
+        <FailureActionBadge
+          action={failureAction} displayTimezone={displayTimezone} compact
+          approvalContext={(('gate_status' in item && 'scheduled_at' in item)
+              ? { gateStatus: item.gate_status ?? null, sealedScheduledAt: item.scheduled_at ?? null } : undefined)}
+        />
+      ) : null}
       {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널만 이
           객체를 받는다(discriminator=BE의 channel 판별, content_kind류 신규 필드 0).
           subject 우선(제목이 사람이 알아보는 값), 세그먼트는 미확定이면 기존 어휘

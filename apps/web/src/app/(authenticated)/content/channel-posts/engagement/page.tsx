@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { memberOptionLabels } from '@/lib/member-display';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -11,13 +12,15 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CommentReplyDialog, type CommentReplyOutcome } from '@/components/content/comment-reply-dialog';
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import type { CommentItem } from '@/components/content/comments-section';
 import { shouldShowReplyDetectionUnavailable } from './collection-status';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3805(Phase3·3-1·PR 2[FE]→PR 3, 유나 §절·08:14Z/08:40Z 낱말·범위 정정) —
@@ -116,15 +119,28 @@ interface OrgMemberOption {
   name: string;
 }
 
+// story #4005(BFF `/api/organizations/{id}/members`가 백엔드에 없는 경로로
+// 프록시해 404를 catch가 삼키던 결함 처방) — `/api/members`(story #3997이
+// additive로 실은 `runtime_type`) 응답 raw shape. name은 canonical member
+// 해소가 None을 낼 수 있어 null 허용(members.py::MemberResponse와 동형).
+interface MemberListRow {
+  id: string;
+  name: string | null;
+  runtime_type?: string | null;
+}
+
 async function readJson<T>(res: Response): Promise<T | null> {
   const body = (await res.json().catch(() => null)) as { data?: T } | null;
   return body?.data ?? null;
 }
 
 export default function ChannelPostsEngagementPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const router = useRouter();
   const { orgId, orgTimezone } = useDashboardContext();
   const t = useTranslations('content');
+  const channelLabel = useChannelLabel();
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
 
@@ -139,6 +155,7 @@ export default function ChannelPostsEngagementPage() {
   const [patchError, setPatchError] = useState<string | null>(null);
   const [collectionStatus, setCollectionStatus] = useState<CollectionStatusItem[]>([]);
   const [members, setMembers] = useState<OrgMemberOption[]>([]);
+  const [membersLoadError, setMembersLoadError] = useState(false);
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [convertTargetId, setConvertTargetId] = useState<string | null>(null);
 
@@ -203,22 +220,31 @@ export default function ChannelPostsEngagementPage() {
     return () => { cancelled = true; };
   }, [orgId]);
 
-  useEffect(() => {
+  const loadMembers = useCallback(async () => {
     if (!orgId) return;
-    let cancelled = false;
-    async function loadMembers() {
-      try {
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/members`);
-        if (!res.ok || cancelled) return;
-        const data = await readJson<{ id: string; name: string }[]>(res);
-        if (!cancelled && data) setMembers(data.map((m) => ({ id: m.id, name: m.name })));
-      } catch {
-        // 배정 드롭다운이 비어도 목록 자체는 정상 — fail-soft.
-      }
+    setMembersLoadError(false);
+    try {
+      // story #4005 — 404를 조용히 삼키던 옛 BFF(`/api/organizations/{id}/members`,
+      // 백엔드에 없는 라우트로 프록시)를 걷어내고, 이미 정상 동작하는 canonical
+      // SSOT 엔드포인트(`/api/members` → BE `/api/v2/members`, project_id 생략 시
+      // org 전원=휴먼 org_members 전원+에이전트 team_members 전부)로 교체.
+      const res = await fetchWithAuth('/api/members');
+      if (!res.ok) { setMembersLoadError(true); return; }
+      const data = await readJson<MemberListRow[]>(res);
+      if (!data) { setMembersLoadError(true); return; }
+      // story #3997과 같은 결 — 「시스템 발행」은 사람이 고를 배정 대상이 아니다
+      // (add-participant-modal.tsx 선례와 동형 필터, 새 판정 로직 발명 0).
+      setMembers(
+        data
+          .filter((m) => !isSystemPublisher(m.runtime_type))
+          .map((m) => ({ id: m.id, name: m.name ?? '' })),
+      );
+    } catch {
+      setMembersLoadError(true);
     }
-    void loadMembers();
-    return () => { cancelled = true; };
   }, [orgId]);
+
+  useEffect(() => { void loadMembers(); }, [loadMembers]);
 
   const channelOptions = useMemo(
     () => Array.from(new Set([...items.map((i) => i.channel), ...collectionStatus.map((c) => c.channel)])),
@@ -288,8 +314,8 @@ export default function ChannelPostsEngagementPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
       <Tabs value="engagement" onValueChange={(v) => {
-        if (v === 'list') router.push('/content/channel-posts');
-        if (v === 'calendar') router.push('/content/channel-posts/calendar');
+        if (v === 'list') router.push(flatHref('/content/channel-posts'));
+        if (v === 'calendar') router.push(flatHref('/content/channel-posts/calendar'));
       }}
       >
         <TabsList data-testid="channel-posts-view-switch">
@@ -314,9 +340,9 @@ export default function ChannelPostsEngagementPage() {
             <span key={c.connection_id}>
               {c.last_collected_at
                 ? t('engagementCollectionStatusCollected', {
-                    channel: channelLabel(c.channel, t), time: formatRelativeTime(c.last_collected_at, locale, displayTimezone),
+                    channel: channelLabel(c.channel), time: formatRelativeTime(c.last_collected_at, locale, displayTimezone),
                   })
-                : t('engagementCollectionStatusNotCollected', { channel: channelLabel(c.channel, t) })}
+                : t('engagementCollectionStatusNotCollected', { channel: channelLabel(c.channel) })}
               {shouldShowReplyDetectionUnavailable(c) ? (
                 <>
                   {' · '}
@@ -353,7 +379,7 @@ export default function ChannelPostsEngagementPage() {
           >
             <option value="all">{t('engagementFilterChannelAll')}</option>
             {channelOptions.map((c) => (
-              <option key={c} value={c}>{channelLabel(c, t)}</option>
+              <option key={c} value={c}>{channelLabel(c)}</option>
             ))}
           </select>
         </label>
@@ -376,6 +402,17 @@ export default function ChannelPostsEngagementPage() {
       {patchError ? (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{patchError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {membersLoadError ? (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{t('engagementAssigneeLoadFailed')}</span>
+            <Button size="sm" variant="outline" onClick={() => void loadMembers()} data-testid="engagement-members-retry">
+              {tc('retry')}
+            </Button>
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -421,7 +458,7 @@ export default function ChannelPostsEngagementPage() {
                 const ordinal = index + 1;
                 return (
                   <tr key={item.id} className="border-b border-border last:border-0">
-                    <td className="px-3 py-2 align-top">{channelLabel(item.channel, t)}</td>
+                    <td className="px-3 py-2 align-top">{channelLabel(item.channel)}</td>
                     <td className="px-3 py-2 align-top">
                       <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                         {t(KIND_LABEL_KEY[item.kind])}
@@ -434,7 +471,8 @@ export default function ChannelPostsEngagementPage() {
                       <p className="line-clamp-2 whitespace-pre-wrap text-foreground">{item.text}</p>
                       {item.linked_story_id ? (
                         <a
-                          href={getEntityHref('story', item.linked_story_id) ?? '#'}
+                          // 대상-프로젝트: 댓글 항목은 연결된 스토리 id만 싣는다(스토리 프로젝트 필드 없음 · 보드가 착지 뒤 정한다).
+                          href={getEntityHref('story', item.linked_story_id, flatHref) ?? '#'}
                           className="mt-1 inline-block text-xs text-primary underline underline-offset-4"
                           data-testid="engagement-view-task-link"
                         >
@@ -470,9 +508,9 @@ export default function ChannelPostsEngagementPage() {
                         data-testid="engagement-assignee-select"
                       >
                         <option value="">{t('engagementAssigneeNone')}</option>
-                        {members.map((m) => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
+                        {((labels) => members.map((m) => (
+                          <option key={m.id} value={m.id}>{labels.get(m.id)}</option>
+                        )))(memberOptionLabels(members, tc))}
                       </select>
                       {assignedName ? null : null}
                     </td>
@@ -546,7 +584,7 @@ export default function ChannelPostsEngagementPage() {
 
       {convertTarget ? (
         <CommentConvertToTaskDialog
-          postTitle={channelLabel(convertTarget.channel, t)}
+          postTitle={channelLabel(convertTarget.channel)}
           comment={toCommentItem(convertTarget)}
           onClose={() => setConvertTargetId(null)}
           onSubmit={async ({ title, note }) => {

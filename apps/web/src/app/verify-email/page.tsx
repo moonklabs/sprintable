@@ -113,7 +113,7 @@ export default function VerifyEmailPage() {
         {status === 'error' && (
           <div className="space-y-4">
             <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{message}</p>
-            <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
+            <Link href="/login" className="block text-sm font-medium text-brand-text hover:text-brand-text/85">
               {t('backToLogin')}
             </Link>
           </div>

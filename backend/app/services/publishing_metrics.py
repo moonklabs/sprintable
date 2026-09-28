@@ -155,7 +155,7 @@ async def _compute_recovery_percentiles(
                 PublicationAttempt.finished_at.is_not(None),
                 PublicationAttempt.finished_at > dead_letter_at,
             )
-            .order_by(PublicationAttempt.finished_at.asc())
+            .order_by(PublicationAttempt.finished_at.asc(), PublicationAttempt.id)
             .limit(1)
         )
         finished_at = (await session.execute(first_success_stmt)).scalar_one_or_none()

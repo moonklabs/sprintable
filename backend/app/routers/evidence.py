@@ -2,7 +2,7 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, computed_field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,8 @@ from app.dependencies.database import get_db
 from app.models.evidence import _CLIENT_CREATABLE_TYPES, Evidence
 from app.models.pm import Story, Task
 from app.models.visual_artifact import ArtifactVersion, VisualArtifact
+from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
 from app.services.reference_registry import _project_id_of_evidence
@@ -36,9 +38,10 @@ class EvidenceCreateRequest(BaseModel):
     artifact_id: uuid.UUID | None = None
     # story #3498(페드루 PO 決定 2026-09-05) — evidence API가 "지출 기록" 정본이 되려면
     # 클라이언트가 payload를 실을 수 있어야 한다(이전엔 insight_snapshots.py 등 내부
-    # 서비스만 이 컬럼을 썼다). 스키마는 여기서 강제 안 함(content_rules.py::lint_content
-    # 관례와 동형 — type="metric"·payload.kind="generation_cost"·cost_minor 규약은
-    # generation_budget.py가 읽는 쪽에서만 본다).
+    # 서비스만 이 컬럼을 썼다). shape 자체는 여기서 강제 안 함(content_rules.py::
+    # lint_content 관례와 동형) — 다만 story #4042부터 `payload.kind`가 있으면
+    # fail-closed 화이트리스트(`_EVIDENCE_KIND_TYPE_REGISTRY`)를 거친다(미등재 kind·
+    # kind-type 페어링 불일치는 422, `_validate_and_normalize_evidence_payload` 참조).
     payload: dict | None = None
 
     @field_validator("work_item_type")
@@ -109,6 +112,15 @@ class EvidenceResponse(BaseModel):
         from app.services.reference_token import build_reference_token
         return build_reference_token("evidence", self.id, f"[{self.type}] {self.ref}")
 
+
+
+class EvidenceDetailResponse(EvidenceResponse):
+    """story #4253(PO 14:56Z · 까디르 codex 4612 델타 P2) — 단건 GET 전용. 위 slug와 같은 값(접근 판정에 이미 쓴 _project_id_of_evidence)의
+    id를 싣는다 — project_slug가 없는 옛 프로젝트에서도 FE 미리보기 «상위 스토리로» 폴백이 현재 p 대신 증거 자기 프로젝트를 싣게(embed-card
+    resolveScopedEntityHref 폴백). 공용 EvidenceResponse에 두면 POST · 목록 GET에도 계산 안 한 `"project_id": null`이 새로 나가 «프로젝트
+    없음»처럼 읽히므로, 계산하는 이 응답에만 둔다."""
+
+    project_id: uuid.UUID | None = None
 
 async def _assert_work_item_access(
     session: AsyncSession, work_item_id: uuid.UUID, work_item_type: str,
@@ -207,10 +219,37 @@ _GENERATION_COST_KIND = "generation_cost"
 _VERIFICATION_SHEET_KIND = "verification_sheet"
 _VERIFICATION_SHEET_VERDICTS = frozenset({"pass", "fail", "n_a"})
 
+# story #4042(E-RECIPE-1 ②, 페드루 PO 確定 2026-09-18 — 민 레군 프로브 실측 「미등재 kind가
+# 검증 없이 통과한다」의 근본 처방) — payload.kind는 **fail-closed** 화이트리스트다. 실측
+# 전엔 이 함수의 if/elif가 아는 kind 2종만 처리하고 나머지는 else 없이 그냥 통과했다(:294
+# return 그대로) — 오타·미등재 kind가 201로 조용히 받아들여지는 구멍이었다.
+#
+# 값은 "kind → 그 kind가 실려야 하는 evidence.type"의 페어링이다(단순 존재-체크가 아니다 —
+# 페드루 PO 후속 제안 2026-09-18 06:45Z, 민 레군이 실측으로 못박은 표 그대로). 이 페어링이
+# 없으면 「맞는 kind인데 type을 잘못 실은」 evidence가 여기는 통과해도 소비처가 조용히
+# 못 본다 — 정확히 generation_budget.py::compute_generation_budget_status가
+# `Evidence.type == "metric"`으로 필터해 합산하므로, kind="generation_cost"인데
+# type="report"로 잘못 실으면 그 지출은 예산 잔량 계산에서 영원히 안 잡힌다(그런데 API는
+# 201을 돌려줘 호출자는 "기록됐다"고 믿는다 — 조용한 데이터 유실 클래스, evidence type
+# CHECK 확장이 아니라 이 페어링 강제로만 막을 수 있다).
+#
+# 크리에이티브 4종(material_collection_sheet·concept_brief·storyboard·animatic)은 story
+# #4041/#4045(민 레군 emit 계약)의 실측 emit 그대로 — 전부 type="report"(verification_sheet
+# 선례와 동형, 구조화 산출물이라 "보고서" 부류). kind별 shape 검증(샷표 필드 등)은 이 카드
+# 필수가 아니다(AC3) — 존재+type 페어링 강제까지만, shape는 후속 정련.
+_EVIDENCE_KIND_TYPE_REGISTRY: dict[str, str] = {
+    _GENERATION_COST_KIND: "metric",
+    _VERIFICATION_SHEET_KIND: "report",
+    "material_collection_sheet": "report",
+    "concept_brief": "report",
+    "storyboard": "report",
+    "animatic": "report",
+}
+
 
 async def _validate_and_normalize_evidence_payload(
     session: AsyncSession, *, org_id: uuid.UUID, payload: dict | None, caller_type: str,
-    caller_id: uuid.UUID | None = None,
+    evidence_type: str, resolved_locale: str, caller_id: uuid.UUID | None = None,
 ) -> dict | None:
     """story #3498(페드루 PO REQUIRED, PR#3847 리뷰) — client-writable payload를 연
     대가로 두 가지를 서버가 강제한다.
@@ -218,6 +257,18 @@ async def _validate_and_normalize_evidence_payload(
     ① `recorded_by`는 클라이언트 값을 항상 버리고 서버가 채운다(caller_type 그대로
     — "platform" 표식은 이 경로로 절대 못 나온다, insight_snapshots.py 내부 서비스
     호출만이 그 표식을 쓸 수 있다). evidence.py의 어떤 payload든 이 축은 위조 불가.
+
+    ①-b(story #4042) `kind`가 실려 있으면 **fail-closed**로 검사한다 — 이 축이 새로
+    생긴 이유는 아래 ②③ 두 kind만 알던 이 함수가 그 밖의 kind는 else 없이 그냥
+    통과시켰기 때문(오타·미등재 kind가 201로 조용히 받아들여지던 구멍). `kind`가
+    `_EVIDENCE_KIND_TYPE_REGISTRY`에 없으면 422로 거부(허용 kind를 message에 실어
+    호출자가 스스로 고치게 한다). 있으면 그 kind가 짝지어진 `evidence_type`과 이번
+    호출의 `type`이 정확히 일치해야 한다 — 안 그러면(예: kind="generation_cost"인데
+    type="report") evidence는 저장되지만 예산 합산(`compute_generation_budget_status`가
+    `Evidence.type=="metric"`만 본다)에서 조용히 빠지는 데이터 유실 클래스가 나므로,
+    그 오기입 자체를 여기서 막는다. `kind` 필드가 없는 payload(예: 채널 인사이트
+    metric처럼 kind 없이 정규화된 7키만 싣는 부류)는 이 축의 검사 대상이 아니다(그
+    자체로 이미 다른 축의 정본 스키마를 따른다 — 새 규칙을 지어내지 않는다).
 
     ② `kind="generation_cost"`(생성 비용 자기 보고, 3498 §2 spent 합산의 유일한
     입력)면 `cost_minor`는 int·0 이상이어야 한다(음수 cost로 잔량을 부풀려 한도를
@@ -237,6 +288,36 @@ async def _validate_and_normalize_evidence_payload(
         return None
     payload = dict(payload)
     payload["recorded_by"] = caller_type
+
+    kind = payload.get("kind")
+    if kind is not None:
+        # 카디르 QA 지적(2026-09-19) — kind가 list/dict 등 unhashable이면 dict.get()
+        # 자체가 TypeError를 던져 fail-closed 422 대신 미처리 크래시(fail-crash)로
+        # 샜다. 문자열이 아니면 애초에 registry에 등재될 수 없는 값이므로 그대로
+        # "등재되지 않은 kind" 422 분기로 합류시킨다(새 registry/메시지 발명 없이).
+        expected_type = _EVIDENCE_KIND_TYPE_REGISTRY.get(kind) if isinstance(kind, str) else None
+        if expected_type is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EVIDENCE_PAYLOAD_INVALID",
+                    "message": t(
+                        "evidence.kind_unregistered", resolved_locale,
+                        kind=kind, allowed=", ".join(sorted(_EVIDENCE_KIND_TYPE_REGISTRY)),
+                    ),
+                },
+            )
+        if expected_type != evidence_type:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EVIDENCE_PAYLOAD_INVALID",
+                    "message": t(
+                        "evidence.kind_type_mismatch", resolved_locale,
+                        kind=kind, expected_type=expected_type, received_type=evidence_type,
+                    ),
+                },
+            )
 
     if payload.get("kind") == _GENERATION_COST_KIND:
         cost_minor = payload.get("cost_minor")
@@ -300,6 +381,27 @@ async def create_evidence(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> EvidenceResponse:
+    """story #4042(카디르 QA CI FAILURE 원칙, i18n_catalog.py 모듈 docstring 참조) —
+    라우트 진입점, `Header()` DI 마커는 여기서만 받는다. 직접-호출(realdb·유닛) 테스트는
+    `_create_evidence`를 불러야 한다(#4425 CI 실사고 — #4045 테스트가 이 함수를 직접
+    호출하며 `accept_language`를 안 넘겨 미해소 `Header` 객체가 그대로 내려가
+    `AttributeError: 'Header' object has no attribute 'split'`로 죽었다)."""
+    return await _create_evidence(
+        body, session=session, org_id=org_id, auth=auth,
+        resolved_locale=resolve_locale_from_request(locale, accept_language),
+    )
+
+
+async def _create_evidence(
+    body: EvidenceCreateRequest,
+    *,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    auth: AuthContext,
+    resolved_locale: str,
 ) -> EvidenceResponse:
     caller = await resolve_member(auth, org_id, session)
     # story #2042/#1936(같은 결함 클래스, 실측으로 확定): resolve_member().id는 휴먼일 때
@@ -319,7 +421,8 @@ async def create_evidence(
         )
 
     payload = await _validate_and_normalize_evidence_payload(
-        session, org_id=org_id, payload=body.payload, caller_type=caller.type, caller_id=caller.id,
+        session, org_id=org_id, payload=body.payload, caller_type=caller.type,
+        evidence_type=body.type, resolved_locale=resolved_locale, caller_id=caller.id,
     )
 
     evidence = Evidence(
@@ -336,10 +439,64 @@ async def create_evidence(
         created_by=caller.id,
     )
     session.add(evidence)
+    await session.flush()  # entity_references FK 삽입 前 evidence.id를 확정(같은 트랜잭션).
+    await _reconcile_evidence_entity_references(
+        session, org_id=org_id, evidence_id=evidence.id, work_item_id=body.work_item_id,
+        work_item_type=body.work_item_type, artifact_id=body.artifact_id, payload=payload,
+        created_by=caller.id,
+    )
     await session.commit()
     await session.refresh(evidence)
     [denorm] = await _attach_artifact_denorm(session, [evidence])
     return denorm
+
+
+async def _reconcile_evidence_entity_references(
+    session: AsyncSession, *, org_id: uuid.UUID, evidence_id: uuid.UUID,
+    work_item_id: uuid.UUID, work_item_type: str, artifact_id: uuid.UUID | None,
+    payload: dict | None, created_by: uuid.UUID | None,
+) -> None:
+    """story #4141(페드루 PO 確定 2026-09-22) — evidence 생성이 entity_references에
+    source_type="evidence" 행을 남긴다(이 write-path 신설 前엔 0건 — «이것을 가리키는
+    것들» backlinks가 evidence를 아예 못 셌다). 대상 3종, 전부 이미 있는 신호 재사용
+    (새 파서·새 판정 0):
+      ① artifact — `body.artifact_id`(이미 있는 값, artifact_version_id로 다시 안 풀어도
+         됨 — target은 artifact 그 자체지 특정 버전이 아니다).
+      ② doc — `payload.doc`("entity:doc:uuid" 원시 토큰, recipe_gate_hooks.resolve_entity_
+         token 재사용 — #4135 파서를 다시 안 짠다).
+      ③ 게이트 핀 — `payload.kind`가 있으면 `recipe_gate_hooks._GATE_TYPE_EXPECTED_EVIDENCE_
+         KINDS`(같은 표, #4135와 공유)로 이 kind를 기대하는 gate_type의 실 게이트를 찾아
+         전부 target=gate로 싣는다(상태 무관 — "이 게이트가 이 산출물을 기대한다"는 사실
+         자체는 게이트 상태와 별개).
+    `known_new=True`(evidence는 이 라우터에 수정 엔드포인트가 없다 — 생성 시점 1회뿐이라
+    채팅 메시지와 동일하게 기존 참조 diff/stale-delete가 구조적으로 불필요, existing-refs
+    SELECT를 건너뛴다)."""
+    from app.services.mention_parser import reconcile_entity_references
+    from app.services.recipe_gate_hooks import resolve_entity_token, resolve_pinned_gate_ids_for_evidence_kind
+    from app.services.reference_registry import WRITE_TARGET_TYPES_WITH_TARGET_ONLY
+
+    extracted_refs: list[tuple[str, uuid.UUID, str, str]] = []
+    if artifact_id is not None:
+        extracted_refs.append(("artifact", artifact_id, "mention", "explicit"))
+
+    doc_id = resolve_entity_token((payload or {}).get("doc"), expect_type="doc")
+    if doc_id is not None:
+        extracted_refs.append(("doc", doc_id, "mention", "explicit"))
+
+    kind = (payload or {}).get("kind")
+    if isinstance(kind, str):
+        gate_ids = await resolve_pinned_gate_ids_for_evidence_kind(
+            session, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, kind=kind,
+        )
+        extracted_refs.extend(("gate", gate_id, "mention", "explicit") for gate_id in gate_ids)
+
+    if not extracted_refs:
+        return
+    await reconcile_entity_references(
+        session, org_id=org_id, source_type="evidence", source_field="ref", source_id=evidence_id,
+        extracted_refs=extracted_refs, created_by=created_by,
+        target_types=WRITE_TARGET_TYPES_WITH_TARGET_ONLY, known_new=True,
+    )
 
 
 @router.get("", response_model=list[EvidenceResponse])
@@ -362,19 +519,19 @@ async def list_evidence(
             Evidence.org_id == org_id,
             Evidence.work_item_id == work_item_id,
             Evidence.work_item_type == work_item_type,
-        ).order_by(Evidence.created_at.asc())
+        ).order_by(Evidence.created_at.asc(), Evidence.id)
     )
     items = list(result.scalars().all())
     return await _attach_artifact_denorm(session, items)
 
 
-@router.get("/{id}", response_model=EvidenceResponse)
+@router.get("/{id}", response_model=EvidenceDetailResponse)
 async def get_evidence(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
-) -> EvidenceResponse:
+) -> EvidenceDetailResponse:
     """story #2314 AC1 — 형제 단건 라우트(get_story 등)와 같은 관례. AC2: 못 보는 evidence는
     「있다는 사실」도 새지 않는다 — org 안·project 밖도 404로 통일한다(#2322가 story 헬퍼에서
     막 세운 그 방향과 동형 — evidence.py는 #2322의 4개 헬퍼 목록엔 없지만, 신규 라우트는
@@ -405,7 +562,10 @@ async def get_evidence(
     project_slug_map = await resolve_project_slugs(session, {project_id})
 
     [denorm] = await _attach_artifact_denorm(session, [evidence])
-    return denorm.model_copy(
+    return EvidenceDetailResponse(
+        **denorm.model_dump(exclude={"reference_token"}),
+        project_id=project_id,
+    ).model_copy(
         update={
             "resolved_story_id": resolved_story_id,
             "org_slug": org_slug,
@@ -437,5 +597,15 @@ async def delete_evidence(
     if evidence.created_by != caller.id:
         raise HTTPException(status_code=403, detail="Only the creator can retract evidence")
 
+    # story #4141(AC1 "삭제 시 참조 정리") — entity_references.source_id는 polymorphic이라
+    # FK가 없다(모듈 docstring 그대로, ON DELETE CASCADE 불가) — evidence 행을 지우기 前에
+    # 이 evidence가 source인 Reference 행을 직접 지운다(그대로 두면 backlinks가 "존재하지
+    # 않는 evidence를 가리키는 유령 행"을 계속 낸다 — still_exists=False 폴백이 있어도
+    # 그건 "끊어짐을 보여주는 것"이지 "정리"가 아니다).
+    from app.models.reference import Reference
+
+    await session.execute(
+        Reference.__table__.delete().where(Reference.source_type == "evidence", Reference.source_id == id)
+    )
     await session.delete(evidence)
     await session.commit()

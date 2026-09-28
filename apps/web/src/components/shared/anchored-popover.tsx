@@ -1,0 +1,263 @@
+'use client';
+
+import { useCallback, useEffect, useId, useRef, useState, type HTMLAttributes, type KeyboardEvent, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
+import { clampIntoViewX, VIEWPORT_GUTTER_PX } from '@/hooks/use-viewport-clamp';
+
+/**
+ * story #4349 — 트리거에 붙는 팝오버를 **부모 밖(body · 모달 안이면 그 모달 팝업 — 아래 `portalContainerFor`)**에 그린다.
+ * 왜: 축척 사다리 안내 팝오버(`absolute top-full`)는 담는 블록이 짧은 띠(칩 줄 `overflow-x-auto` · 사다리 `overflow-hidden`) 안이라,
+ *   그 띠가 팝오버 90px를 통째로 잘랐다 — 어떤 폭에서도 안 보였다(유나 실측). 부모 overflow를 풀면 칩 줄 가로 스크롤이 죽는다.
+ * 처방: body로 포털 → `position: fixed`로 트리거 사각형 바로 아래(트리거 왼쪽 + offsetX, 아래 gap)에 둔다.
+ *   가로는 4342 `clampIntoViewX`(드롭다운 훅과 한 원천)로 보이는 상자 안([8, 폭 − 8])으로 민다 — fixed라 잘라내는 조상이 없어 뷰포트가 곧 상자다.
+ *   어느 조상의 스크롤(칩 줄 가로 스크롤 포함 · capture) · 창 크기 바뀜마다 다시 둔다.
+ * - 세로(4349 AC5 · 유나 실측 — 모바일 서랍 문서 트리 행 «⋮» 메뉴 82px가 목록 아래 끝에서 42px 잘림): 아래가 모자라고 위가 더 넓으면
+ *   **위로 뒤집는다**(`placeVertical`). 어느 쪽도 다 못 담으면 넓은 쪽에 두고 [8, 높이 − 8] 안으로 민다. 고른 쪽은 `data-side`(bottom|top).
+ * - 가로 기준: `align="start"`(트리거 왼쪽 + offsetX · 기본) · `"end"`(트리거 오른쪽 끝에 팝오버 오른쪽 끝 − offsetX).
+ * - 바깥 클릭 판정을 하는 호출부는 `popoverRef`로 이 요소도 «안»으로 센다(포털이라 트리거 wrapper의 자손이 아니다).
+ * - 열릴 때만 그린다(호출부가 `open &&`로 감싼다). SSR엔 document가 없어 아무것도 안 그린다.
+ */
+export interface AnchoredPopoverProps extends HTMLAttributes<HTMLDivElement> {
+  /** 기준 트리거(열린 동안 붙어 있어야 한다). */
+  anchorRef: RefObject<HTMLElement | null>;
+  /** 트리거 왼쪽에서 더 민 거리(px) — 예전 `left-3` = 12. */
+  offsetX?: number;
+  /** 트리거와의 틈(px) — 예전 `mt-2` = 8. 위로 뒤집으면 트리거 위 틈. */
+  gap?: number;
+  /** 가로 기준 — start: 트리거 왼쪽 · end: 트리거 오른쪽 끝(예전 `right-0`). */
+  align?: 'start' | 'end';
+  /** 바깥 클릭 판정용 — 포털된 팝오버 요소. */
+  popoverRef?: RefObject<HTMLDivElement | null>;
+  /**
+   * story #4373 — 기준이 스크롤 · 창 크기 말고도 움직이는 자리(캔버스 pan/zoom = CSS 변환만 바뀌어 이벤트가 없다): 열린 동안 매 프레임
+   * 기준 사각형과 팝오버 자기 크기를 재서 둘 중 하나가 바뀐 프레임에만 다시 둔다(글꼴이 늦게 붙거나 내용으로 칸 크기가 바뀌면 뒤집기 ·
+   * 밀어넣기가 낡은 크기로 남던 것 — 까디르 4757 리뷰).
+   */
+  trackAnchor?: boolean;
+}
+
+/**
+ * 세로 자리 — 트리거 아래에 다 들어가면 아래. 아니면 위가 더 넓을 때 위로 뒤집는다. 고른 쪽에도 다 못 들어가면 [gutter, 높이 − gutter] 안으로 민다
+ * (트리거와 조금 겹쳐도 메뉴 전부가 보이는 쪽이 낫다).
+ */
+export function placeVertical(
+  anchor: { top: number; bottom: number }, height: number, viewportHeight: number, gap: number, gutter = VIEWPORT_GUTTER_PX,
+): { top: number; side: 'bottom' | 'top' } {
+  const below = viewportHeight - gutter - (anchor.bottom + gap);
+  const above = anchor.top - gap - gutter;
+  const fitIn = (top: number) => Math.max(gutter, Math.min(top, viewportHeight - gutter - height));
+  if (height <= below || below >= above) {
+    const top = anchor.bottom + gap;
+    return { top: height <= below ? top : fitIn(top), side: 'bottom' };
+  }
+  const top = anchor.top - gap - height;
+  return { top: height <= above ? top : fitIn(top), side: 'top' };
+}
+
+/**
+ * 바깥 누름 판정(#4349 PR 2 · 유나 #4728) — `root` 밖이면서 포털된 AnchoredPopover(`[data-anchored-popover]`) 안도 아니면 바깥이다.
+ * 포털 팝오버는 DOM상 body 직속이라 `root.contains`만 보면 늘 «바깥»이다. 그러면 부모가 mousedown에서 먼저 닫히고, 자식 메뉴가
+ * 언마운트돼 그 누름의 click이 오지 않는다(390 문서 담당자 창 → «더 보기» → «이벤트 전달» 탭 = 디스패치 요청 0).
+ * document 바깥 누름 닫기는 모두 이 규칙 하나를 쓴다(가드: `outside-press.guard.test.ts`). root가 아직 없으면 바깥 아님(예전 `ref.current &&`와 같음).
+ */
+export function isOutsidePress(root: Element | null | undefined, target: EventTarget | null): boolean {
+  if (!root || !(target instanceof Node)) return false;
+  if (root.contains(target)) return false;
+  const el = target instanceof Element ? target : target.parentElement;
+  return !el?.closest('[data-anchored-popover]');
+}
+
+/**
+ * story #4373(까디르 실측 · 부류) — 포털 대상. **Base UI 모달 팝업**(표지 `data-modal-popup` — 래퍼 `components/ui/sheet.tsx` · `dialog.tsx`와
+ * 래퍼 밖에서 `@base-ui/react/dialog`를 바로 쓰는 artifact-expand-dialog · image-lightbox · command-palette의 Popup 다섯 곳) 안의 트리거면
+ * **그 팝업 안**, 아니면 body. Base UI 모달은 열려 있는 동안 팝업(과 자기가 아는 포털) 밖의 body 자식을 전부 `aria-hidden`으로 숨긴다
+ * (floating-ui-react markOthers) — body 끝에 붙은 포털은 그 «밖»이라 보조기기에서 칸 · 단추가 사라졌고(390 작업 목록 시트 안 산출물 댓글 칸),
+ * 시트 쪽 바깥 누름 판정에서도 «밖»이었다. 팝업 안이면 둘 다 «안».
+ * `role="dialog"`만으로 고르지 않는다(유나 4757 반려): 스토리 상세처럼 스스로 그린 비모달 패널도 그 역할을 달고, 그런 패널은 밖을 숨기지
+ * 않으니 body로 두는 게 예전 그대로다. 표지는 한 이름 — 새 Base UI 모달 Popup이 표지를 빠뜨리면 modal-popup-marker.guard.test.ts가 RED.
+ */
+export const MODAL_POPUP_SELECTOR = '[data-modal-popup]';
+
+export function portalContainerFor(anchor: Element | null): Element | null {
+  if (typeof document === 'undefined') return null;
+  return anchor?.closest(MODAL_POPUP_SELECTOR) ?? document.body;
+}
+
+export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'start', popoverRef, trackAnchor = false, style, children, ...rest }: AnchoredPopoverProps) {
+  const elRef = useRef<HTMLDivElement | null>(null);
+  // story #4373(까디르 실측) — 마지막으로 둔 뒤 실제로 보인 자리. trackAnchor가 «트리거는 그대로인데 담는 블록만 바뀐»(시트 애니 끝 프레임에
+  // translate가 빠짐) 경우를 이 값과의 어긋남으로 잡는다.
+  const shownRef = useRef<{ left: number; top: number } | null>(null);
+  // 여는 순간엔 트리거가 이미 붙어 있다(열림 = 트리거를 누른 뒤) — 첫 그림부터 제자리(팝업 안)에 그려야 연 뒤 한 번 도는 효과
+  // (첫 항목 초점 · 칸 휠 리스너)가 요소를 본다. 같은 커밋에 트리거가 늦게 붙는 드문 순서면 body로 먼저 그리고 레이아웃 단계에서 바로잡는다.
+  const [container, setContainer] = useState<Element | null>(() => portalContainerFor(anchorRef.current));
+  // 레이아웃 효과는 부모(트리거 wrapper) ref가 붙기 전에 돌 수 있다(자식 먼저) — ref가 다 붙은 뒤인 passive 효과에서 바로잡는다(아래 place()와 같은 까닭).
+  useEffect(() => {
+    const next = portalContainerFor(anchorRef.current);
+    setContainer((cur) => (cur === next ? cur : next));
+  }, [anchorRef]);
+
+  const place = useCallback(() => {
+    const el = elRef.current;
+    const anchor = anchorRef.current;
+    if (!el || !anchor) return;
+    const a = anchor.getBoundingClientRect();
+    el.style.transform = '';
+    const own = el.getBoundingClientRect();
+    const v = placeVertical(a, own.height, window.innerHeight, gap);
+    const top = Math.round(v.top);
+    const left = Math.round(align === 'end' ? a.right - own.width - offsetX : a.left + offsetX);
+    el.style.top = `${top}px`;
+    el.style.left = `${left}px`;
+    // story #4373(유나 4757 반려) — 모달 팝업 안에 포털되면 fixed의 담는 블록이 뷰포트가 아닐 수 있다: 팝업(이나 그 조상)의 transform ·
+    // translate(시트 미끄러짐 200ms) · filter · backdrop-filter · contain · will-change · container-type 등 무엇이든. CSS 속성으로 짐작하지
+    // 않고 **둔 뒤 재서** 목표와의 차이만큼 되민다(한 식). body 직속이면 담는 블록 = 뷰포트(html · body에 그런 속성 없음)라 재지 않는다.
+    if (el.parentElement !== document.body) {
+      const placed = el.getBoundingClientRect();
+      const dx = placed.left - left;
+      const dy = placed.top - top;
+      if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
+        el.style.left = `${Math.round(left - dx)}px`;
+        el.style.top = `${Math.round(top - dy)}px`;
+      }
+    }
+    el.dataset.side = v.side;
+    el.style.visibility = '';
+    clampIntoViewX(el);
+    const shown = el.getBoundingClientRect();
+    shownRef.current = { left: shown.left, top: shown.top };
+  }, [anchorRef, gap, offsetX, align]);
+
+  // 같은 커밋에서 트리거 wrapper의 ref가 이 요소보다 **늦게** 붙을 수 있다(자식 ref가 먼저) → 붙는 순간엔 숨겨 두고,
+  // 기준이 있으면 바로 · 없으면 커밋이 끝난 뒤(아래 effect) 둔다 — 0,0에 한 프레임 번쩍이는 일 0.
+  const setRef = useCallback((el: HTMLDivElement | null) => {
+    elRef.current = el;
+    if (popoverRef) popoverRef.current = el;
+    if (el) {
+      el.style.visibility = 'hidden';
+      place();
+    }
+  }, [place, popoverRef]);
+
+  useEffect(() => {
+    place();
+    window.addEventListener('resize', place);
+    document.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      document.removeEventListener('scroll', place, true);
+    };
+  }, [place]);
+
+  useEffect(() => {
+    if (!trackAnchor) return;
+    let last = '';
+    let frame = requestAnimationFrame(function tick() {
+      const r = anchorRef.current?.getBoundingClientRect();
+      const own = elRef.current;
+      const key = r ? `${r.left},${r.top},${r.width},${r.height}|${own?.offsetWidth ?? 0},${own?.offsetHeight ?? 0}` : '';
+      // 트리거 · 자기 크기가 그대로여도, 담는 블록이 움직이면(시트 여는 도중 translate가 붙었다 빠짐) 실제 자리가 어긋난다 — 재서 다시 둔다.
+      const shown = own && shownRef.current ? own.getBoundingClientRect() : null;
+      const drifted = !!shown && (Math.abs(shown.left - shownRef.current!.left) >= 0.5 || Math.abs(shown.top - shownRef.current!.top) >= 0.5);
+      if (key !== last || drifted) {
+        last = key;
+        place();
+      }
+      frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [trackAnchor, anchorRef, place]);
+
+  if (typeof document === 'undefined' || !container) return null;
+  return createPortal(
+    <div ref={setRef} data-anchored-popover="" {...rest} style={{ ...style, position: 'fixed' }}>
+      {children}
+    </div>,
+    container,
+  );
+}
+
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export interface PortalMenuKeysOptions {
+  open: boolean;
+  onClose: () => void;
+  /** 포털된 팝오버(`AnchoredPopover`의 `popoverRef`). */
+  popoverRef: RefObject<HTMLElement | null>;
+  /** 여는 트리거 — 닫히면 초점이 여기로 돌아간다. */
+  triggerRef: RefObject<HTMLElement | null>;
+  /** 메뉴(항목 목록): 열면 첫 항목에 초점 · ↑↓로 옮김. 패널(여러 조작): 초점은 트리거에 두고, 트리거에서 Tab이면 패널 첫 조작으로. */
+  kind: 'menu' | 'panel';
+}
+
+/**
+ * story #4349 — 포털된 팝오버의 키보드 길. 포털이면 DOM 순서상 트리거 바로 뒤가 아니라서, 예전엔 Tab 한 번에 닿던 항목이 멀어진다.
+ * 그 빈틈만 메운다:
+ * - menu: 열면 첫 항목에 초점 · ↑↓로 옮김(끝에서 돌아감).
+ * - panel: 초점은 트리거에 그대로 두고, 트리거에서 Tab이면 패널 첫 조작으로(예전 DOM 순서 그대로).
+ * - 공통: 첫 조작에서 Shift+Tab이면 트리거로(panel은 열린 채 · menu는 닫고) · 마지막에서 Tab이거나 Esc면 닫고 트리거로.
+ *   Esc는 전파를 멈춘다(서랍 · 셸의 초점 트랩이 document keydown에서 Esc로 자기까지 닫지 않게).
+ * 돌려주는 것: 팝오버 · 트리거에 붙일 onKeyDown 둘 + **ARIA props 둘**(까디르 4724 · 부류):
+ * - menu: 트리거 `aria-haspopup="menu"` · `aria-expanded` · `aria-controls`(열렸을 때 패널 id) / 팝오버 `id` · `role="menu"` — 항목 `role="menuitem"`은 호출부가 단다.
+ * - panel: 트리거 `aria-expanded` · `aria-controls` / 팝오버 `id`(메뉴 역할 아님).
+ * `id`도 돌려준다(패널이 둘인 자리 — 벨의 좁은 화면 오버레이 — 가 aria-controls를 제 것으로 바꿀 때).
+ * `closeToTrigger`도 돌려준다(유나 #4728): 패널 안 «닫기» 버튼 같은 자리가 Esc와 같은 길(닫고 트리거로 초점)을 쓰게 — 안 그러면 누른 버튼이
+ * 사라지며 초점이 body로 떨어진다.
+ */
+export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind }: PortalMenuKeysOptions) {
+  const id = useId();
+  const closeToTrigger = useCallback(() => { onClose(); triggerRef.current?.focus(); }, [onClose, triggerRef]);
+  useEffect(() => {
+    if (open && kind === 'menu') popoverRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+  }, [open, kind, popoverRef]);
+
+  const onPopoverKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeToTrigger();
+    } else if (kind === 'menu' && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && items.length > 0) {
+      e.preventDefault();
+      const n = items.length;
+      items[e.key === 'ArrowDown' ? (i + 1) % n : (i - 1 + n) % n]?.focus();
+    } else if (e.key === 'Tab' && e.shiftKey && i <= 0) {
+      e.preventDefault();
+      if (kind === 'menu') closeToTrigger();
+      else triggerRef.current?.focus();
+    } else if (e.key === 'Tab' && !e.shiftKey && i === items.length - 1) {
+      e.preventDefault();
+      closeToTrigger();
+    }
+  }, [kind, closeToTrigger, triggerRef]);
+
+  const onTriggerKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
+    if (!open) return;
+    // story #4355(유나 배포 35) — 열린 채 초점이 트리거에 있어도 Esc = 닫힘(초점은 이미 트리거). 포인터로 연 패널(목차 · 벨)은 초점이 트리거에
+    // 남는 게 설계라 이 길이 없으면 Esc가 무시되거나, 서랍 · 셸 초점 트랩(document keydown)까지 가 서랍째 닫혔다.
+    // 트리거는 포털 밖(React 뿌리 안)이라 App Router처럼 뿌리가 document면 트랩과 **같은 노드**에서 듣는다 → stopPropagation으론 못 막고
+    // stopImmediatePropagation(React 뿌리 리스너가 hydrate 때 먼저 붙어 트랩보다 앞)으로 막는다.
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.nativeEvent.stopImmediatePropagation();
+      onClose();
+      return;
+    }
+    if (e.key !== 'Tab' || e.shiftKey) return;
+    // 안 보이는 패널(예: 넓은 화면 전용 `hidden lg:flex`가 좁은 화면에서 display:none)로는 초점을 안 보낸다 — Tab을 막기만 하는 일 0.
+    const pop = popoverRef.current;
+    if (!pop || getComputedStyle(pop).display === 'none') return;
+    const first = pop.querySelector<HTMLElement>(FOCUSABLE);
+    if (!first) return;
+    e.preventDefault();
+    first.focus();
+  }, [open, onClose, popoverRef]);
+
+  const triggerProps = kind === 'menu'
+    ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': open, 'aria-controls': open ? id : undefined }
+    : { 'aria-expanded': open, 'aria-controls': open ? id : undefined };
+  const popoverProps = kind === 'menu' ? { id, role: 'menu' as const } : { id };
+  return { onPopoverKeyDown, onTriggerKeyDown, triggerProps, popoverProps, id, closeToTrigger };
+}

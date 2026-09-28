@@ -1,19 +1,24 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock } from '@/lib/block-template';
+import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock, type EventDefinitionSummary } from '@/lib/block-template';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 import { gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
+import { isLocalizedPlatformPreset, localizeLegacyUnnamedHeader, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
 
 // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
 // INTERNAL_METRICS와 동일 닫힌 집합(outcomeLoop.metric_{slug} 낱말이 실존하는 metric
@@ -74,6 +79,9 @@ interface EventBlockCardProps {
     | null
     | { found: boolean; token?: string; type?: string; name?: string }
   >;
+  /** story #4209 — 이 이벤트의 정의(key·org_id·name). 플랫폼 마케팅·워크플로우 프리셋이면 카드 머리말·본문·필드
+   * 라벨을 로케일 문안으로 바꾼다(localizePresetBlockTemplate). 없거나 조직 정의면 템플릿 원문 그대로. */
+  definition?: EventDefinitionSummary | null;
 }
 
 // story #2637 — 유나 design 스티어 2차(08-14, 재작업 방식까지 PR 前 확定).
@@ -114,7 +122,7 @@ const INLINE_MD_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
 // `MdBody`의 references-less 패턴과 동형으로 ghost/referenceMeta 생략 기본값을 그대로 쓴다.
 const ENTITY_TOKEN_SPAN_RE = /\[((?:[^\]\\]|\\.)*)\]\(([^)]*)\)/g;
 
-function renderTextWithEntityTokens(text: string): React.ReactNode {
+function renderTextWithEntityTokens(text: string, withProject: (href: string) => string): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let lastEnd = 0;
   let i = 0;
@@ -130,7 +138,7 @@ function renderTextWithEntityTokens(text: string): React.ReactNode {
         entityType={ref.entityType}
         entityId={ref.entityId}
         label={unescapeReferenceLabel(rawTitle)}
-        href={getEntityHref(ref.entityType, ref.entityId)}
+        href={getEntityHref(ref.entityType, ref.entityId, withProject)}
       />,
     );
     lastEnd = start + full.length;
@@ -163,13 +171,13 @@ function renderInlineMarkdown(text: string): React.ReactNode {
 // 마커 조각 판별도 같은 이유로 .test() 재검사 대신 split 결과의 인덱스 홀짝으로 가른다 —
 // 캡처 그룹 1개짜리 정규식의 split은 [평문, 매치, 평문, 매치, ...] 순서를 보장하므로
 // (홀수 인덱스=캡처된 매치) 공유 정규식 객체의 lastIndex 상태와 완전히 무관하다.
-function renderTextWithMissingMarkers(text: string): React.ReactNode {
+function renderTextWithMissingMarkers(text: string, withProject: (href: string) => string): React.ReactNode {
   const parts = text.split(MISSING_MARKER_RE);
-  if (parts.length === 1) return renderTextWithEntityTokens(text);
+  if (parts.length === 1) return renderTextWithEntityTokens(text, withProject);
   return parts.map((part, i) =>
     i % 2 === 1
       ? <em key={i} className="italic text-warning-strong">{part}</em>
-      : <span key={i}>{renderTextWithEntityTokens(part)}</span>,
+      : <span key={i}>{renderTextWithEntityTokens(part, withProject)}</span>,
   );
 }
 
@@ -189,16 +197,19 @@ function renderTextWithMissingMarkers(text: string): React.ReactNode {
  * admin/owner — team_members.role, `/api/me`가 내려주는 그 값)이다. 직무 템플릿 slug(예:
  * "backend-engineer")가 아니다 — 이름이 비슷해 헷갈리기 쉬운 축이라 명시한다.
  */
-export function EventBlockCard({ template, payload, refs }: EventBlockCardProps) {
+export function EventBlockCard({ template, payload, refs, definition }: EventBlockCardProps) {
   const t = useTranslations('chats');
   const tBoard = useTranslations('board');
   const tCage = useTranslations('cage');
   const tDashboard = useTranslations('dashboard');
+  const tOrg = useTranslations('organization');
   const tEventCard = useTranslations('eventCard');
   const tOutcomeLoop = useTranslations('outcomeLoop');
   const tHypotheses = useTranslations('hypotheses');
+  const tPreset = useTranslations('recipePreset');
   const locale = useLocale();
-  const { currentMemberType, role, orgId } = useDashboardContext();
+  const { currentMemberType, role, orgId, currentTeamMemberId } = useDashboardContext();
+  const flatHref = useFlatHref();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
   // (오버라이드 미설정) 아래에서 canonical i18n(STORY_STATUS_KEY_MAP→tBoard)으로 폴백한다 —
   // kanban-board.tsx 등 기존 소비처와 동일 3단 폴백(org 커스텀 → canonical i18n → 원시 slug).
@@ -233,6 +244,15 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const gateType = payload['gate_type'];
   if (typeof gateType === 'string') {
     labels['gate_type'] = gateTypeLabel(tDashboard, gateType);
+  }
+  // story #4086 — 레시피 사이클형 정의(preset.marketing.video_production 등)의 단계
+  // 알림이 raw stage slug("draft" 등)를 그대로 노출했다. recipe-stage-label.ts(story
+  // #4049/#4082, 스토리 패널·결재함·게이트 상세 3표면이 이미 쓰는 그 SSOT — 두 번째
+  // 사전 0)로 해소 — 미등재 slug는 원시값 그대로(지어내지 않음, 기존 recipeStageLabel
+  // pass-through 계약 그대로).
+  const stage = payload['stage'];
+  if (typeof stage === 'string') {
+    labels['stage'] = recipeStageLabel(stage, tOrg);
   }
 
   // story #3884 AC1 — refs.work_item(events.py의 세 모양)을 labels.work_item_target으로
@@ -357,6 +377,8 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
     sourceLabel: tEventCard('sourceLabel'),
     metricValueLabel: tEventCard('metricValueLabel'),
     measuredAtLabel: tEventCard('measuredAtLabel'),
+    // story #4258 — preset.recipe.publish_failed(레시피 비동기 발행 멈춤) 카드 머리.
+    recipePublishFailedHeader: tEventCard('recipePublishFailedHeader'),
   };
 
   // story #3884 — 현재 실 프리셋(status_changed·gate.verdict)은 더 이상 `{{ref.X}}`를
@@ -373,7 +395,42 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
       if (typeof value === 'string' || value === null) refsForTemplate[key] = value;
     }
   }
-  const blocks = renderBlockTemplate(template, payload, refsForTemplate, labels, translations);
+  // story #4209(유나 확정) — 플랫폼 마케팅·워크플로우 프리셋은 시드 block_template(한 언어·옛 이름·합니다체·워크플로우는
+  // stage slug 원문)을 로케일 문안으로: 머리말 «{이름} 워크플로우» · 본문 «**{단계 라벨}** 단계로 넘어갔어요» · «대상» 필드
+  // 라벨. 조직 정의·정의 모름은 원문 그대로(isLocalizedPlatformPreset).
+  const stageMovedBody = typeof labels['stage'] === 'string' ? tPreset('stageMovedBody', { stage: labels['stage'] }) : null;
+  // story #4257(PO 11:27Z) — 조직 정의 · 정의 모름은 원문 그대로이되, 플랫폼이 넣어 준 기본 단계 문장(씨앗과 같은 text 블록)만 로케일로.
+  const localizedTemplate = isLocalizedPlatformPreset(definition)
+    ? localizePresetBlockTemplate(template, definition, {
+      header: tPreset('headerTemplate', { name: presetName(definition, tPreset) }),
+      body: stageMovedBody,
+      targetLabel: tEventCard('targetLabel'),
+    })
+    : localizeLegacyUnnamedHeader(
+      localizeSeedStageTextBlocks(template, stageMovedBody),
+      // story #4257(PO 12:59Z) — 옛 자리 표시 머리말은 정의 이름(필수값) · 이름을 모르면(정의 모름 · 구 캐시) 로케일 자리 표시.
+      definition?.name?.trim() || tOrg('definerUnnamedPreview'),
+    );
+  const blocks = renderBlockTemplate(localizedTemplate, payload, refsForTemplate, labels, translations);
+
+  // story #4249(유나 design ⑥) — 레시피 stage 카드는 그 stage 담당(발행 시점 바인딩 · refs.stage_assignee)이 보는 사람일 때만
+  // 그 스토리로 가는 링크 하나. 카드가 아직 현재 단계인지는 여기서 모르므로 행동을 약속하지 않는 «스토리 보기»다(«스토리에서
+  // 완료하기»는 현재 단계를 알 수 있을 때만 — 지난 카드에 «완료하기»가 남으면 거짓).
+  const stageAssignee = refs?.['stage_assignee'];
+  const storyId = payload['work_item_type'] === 'story' && typeof payload['work_item_id'] === 'string' ? payload['work_item_id'] : null;
+  // PO 4623 리뷰 — 채팅은 조직 전체가 보는 자리라 «항목 자기 프로젝트»(이벤트가 가진 프로젝트 · refs → payload)를 싣고, 모를
+  // 때만 보는 사람의 현재 프로젝트로 폴백한다.
+  const eventProjectId = typeof refs?.['project_id'] === 'string'
+    ? refs['project_id'] as string
+    : typeof payload['project_id'] === 'string' ? payload['project_id'] : null;
+  // 유나 10:32Z — 프로젝트를 고르는 함수 자체를 `getEntityHref`에 넘긴다. story 주소가 이미 `?p=`를 싣고 오는 모양(4612)이면
+  // `withProjectParam`은 «이미 실은 p는 그대로»라 뒤에서 얹는 방식은 이벤트 프로젝트를 버린다. 결과에 한 번 더 거는 것은 story가
+  // 프로젝트 함수를 안 쓰는 모양(4612 전)을 위한 것이다 — 이미 p가 있으면 그대로라 두 번 걸어도 값이 같다.
+  const pickProject = (href: string) => (eventProjectId ? withProjectParam(href, eventProjectId) : flatHref(href));
+  const storyPath = storyId && typeof stageAssignee === 'string' && currentTeamMemberId && stageAssignee === currentTeamMemberId
+    ? getEntityHref('story', storyId, pickProject)
+    : null;
+  const storyHref = storyPath ? pickProject(storyPath) : null;
 
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
@@ -387,6 +444,11 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
           t={t}
         />
       ))}
+      {storyHref ? (
+        <Link href={storyHref} className="inline-block text-xs font-medium text-primary hover:underline" data-testid="event-card-view-story">
+          {tEventCard('viewStory')}
+        </Link>
+      ) : null}
     </div>
   );
 }
@@ -409,15 +471,16 @@ function isActionAuthorized(
  * 안 걸러도 안전). EventBlockCard와 approval-request-card 둘 다 이 함수로 동일한 시각 어휘를
  * 공유한다(DS 원칙 "동일 개념=동일 어휘" — 사본 분화 금지).
  */
-export function renderStaticEventBlock(block: BlockTemplateBlock, key: number): React.ReactNode {
+/** withProject — 본문 엔티티 칩(문서 · flat)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 호출처 컴포넌트는 useFlatHref()를 넘긴다. */
+export function renderStaticEventBlock(block: BlockTemplateBlock, key: number, withProject: (href: string) => string): React.ReactNode {
   // story #2637 — 유나 design 스티어: 4블록 시각 위계(header 최상위 > fields 구조데이터 >
   // text 본문 > actions 하단 액션열) — 렌더 «순서»는 템플릿 저자가 선언한 그대로 따르되
   // (임의 재배열 안 함), 각 블록 타입의 폰트 크기/굵기로 위계만 표현한다.
   if (block.type === 'header') {
-    return <p key={key} className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text)}</p>;
+    return <p key={key} className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text, withProject)}</p>;
   }
   if (block.type === 'text') {
-    return <p key={key} className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text)}</p>;
+    return <p key={key} className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text, withProject)}</p>;
   }
   if (block.type === 'fields') {
     return (
@@ -425,7 +488,7 @@ export function renderStaticEventBlock(block: BlockTemplateBlock, key: number): 
         {block.fields.map((f, i) => (
           <div key={i} className="flex gap-2 text-xs">
             <dt className="shrink-0 font-medium text-muted-foreground">{f.label}</dt>
-            <dd className="min-w-0 text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(f.value)}</dd>
+            <dd className="min-w-0 text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(f.value, withProject)}</dd>
           </div>
         ))}
       </dl>
@@ -443,8 +506,10 @@ function EventBlockRow({
   currentRole: string | undefined;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서 · flat)은 현재 프로젝트를 싣는다
   if (block.type !== 'actions') {
-    return renderStaticEventBlock(block, 0);
+    // 대상-프로젝트: 이벤트 본문 엔티티 토큰은 type · id뿐이라 대상 프로젝트를 모른다(승인 카드처럼 게이트 프로젝트를 아는 호출처는 자기 래퍼를 넘긴다).
+    return renderStaticEventBlock(block, 0, flatHref);
   }
   return (
     <div className="flex flex-wrap items-center gap-2 pt-0.5">
@@ -551,7 +616,11 @@ export interface EventPreviewHelpers {
   /** story #3893 CHANGES①(PO PR#4298 리뷰) — metric_unit(metric 이름, 「%」 아님) 매핑용,
    * event-block-card.tsx의 METRIC_UNIT_KEYS 닫힌 집합과 동형 재사용. */
   tOutcomeLoop: (key: string) => string;
-  domainLabels: { statusLabel: (slug: string) => string | undefined };
+  domainLabels: {
+    statusLabel: (slug: string) => string | undefined;
+    /** story #4281 — 알림 본문의 종류 낱말도 조직 커스텀 라벨이 먼저(`useOrgDomainLabels` 그대로 넘기면 채워짐). */
+    entityTypeLabel?: (slug: string) => string | undefined;
+  };
 }
 
 /**

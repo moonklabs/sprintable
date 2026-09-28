@@ -9,6 +9,9 @@ import {
   summarizeSeverity,
 } from './derive-now-strip';
 
+// story #4231 3차 — withProject(필수)는 이 테스트에선 주소 그대로(프로젝트 싣기 자체는 아래 전용 케이스가 잰다).
+const same = (href: string) => href;
+
 // story #3177(S3a) — 스텁 번역기(내용은 action-zone.test.tsx가 이미 attentionDetailText로
 // 잰다, 여기선 derive-now-strip 자신의 로직만: 정렬·key·href·severity 정규화·요약). next-intl
 // 번역기 실 타입(rich/markup/raw/has)은 이 순수함수 유닛테스트 관심사가 아니라 캐스트로
@@ -130,35 +133,36 @@ describe('nowStripItemKey — 7종 각자 안정 key(SID 3150 회귀 금지, gen
 
 describe('nowStripItemHref — §1a 링크 대상(원탭 도달)', () => {
   it('agent_stuck(entity_type=story)은 보드로', () => {
-    expect(nowStripItemHref(AGENT_STUCK)).toBe('/board?story=s-1');
+    expect(nowStripItemHref(AGENT_STUCK, same)).toBe('/flow?story=s-1');
   });
 
   it('agent_stuck(entity_type≠story, 예: epic)은 게이트 인박스로(제네릭 폴백)', () => {
-    expect(nowStripItemHref({ ...AGENT_STUCK, entity_type: 'epic' })).toBe('/inbox?tab=gates');
+    expect(nowStripItemHref({ ...AGENT_STUCK, entity_type: 'epic' }, same)).toBe('/inbox?tab=gates');
   });
 
   it('agent_auth_failure는 워크포스 멤버 상세로', () => {
-    expect(nowStripItemHref(AGENT_AUTH_FAILURE)).toBe('/organization/workforce/m-1');
+    expect(nowStripItemHref(AGENT_AUTH_FAILURE, same)).toBe('/organization/workforce/m-1');
   });
 
-  it('unanswered_blocker는 차단 스토리 보드로', () => {
-    expect(nowStripItemHref(UNANSWERED_BLOCKER)).toBe('/board?story=story-2');
+  // #4231 4차(PO 07:53Z) — 조직 전체 목록이라 옛 자원 경로는 **항목 자기 project_id**를 싣는다(현재 p 아님).
+  it('unanswered_blocker는 차단 스토리 보드로 · 항목의 프로젝트', () => {
+    expect(nowStripItemHref(UNANSWERED_BLOCKER, same)).toBe(`/flow?story=story-2&p=${UNANSWERED_BLOCKER.project_id}`);
   });
 
   it('hypothesis 2종(falsified/overdue)은 전용 상세 페이지가 없어(embed-card.tsx 실측) /flow로', () => {
-    expect(nowStripItemHref(HYPOTHESIS_FALSIFIED)).toBe('/flow');
-    expect(nowStripItemHref(LOOP_OVERDUE_HYPOTHESIS)).toBe('/flow');
+    expect(nowStripItemHref(HYPOTHESIS_FALSIFIED, same)).toBe(`/flow?p=${HYPOTHESIS_FALSIFIED.project_id}`);
+    expect(nowStripItemHref(LOOP_OVERDUE_HYPOTHESIS, same)).toBe(`/flow?p=${LOOP_OVERDUE_HYPOTHESIS.project_id}`);
   });
 
   it('goal 2종(overdue/outcome-missing)은 /goals/[id]로', () => {
-    expect(nowStripItemHref(LOOP_OVERDUE_GOAL)).toBe('/goals/g-1');
-    expect(nowStripItemHref(LOOP_OUTCOME_MISSING_GOAL)).toBe('/goals/g-2');
+    expect(nowStripItemHref(LOOP_OVERDUE_GOAL, same)).toBe(`/goals/g-1?p=${LOOP_OVERDUE_GOAL.project_id}`);
+    expect(nowStripItemHref(LOOP_OUTCOME_MISSING_GOAL, same)).toBe(`/goals/g-2?p=${LOOP_OUTCOME_MISSING_GOAL.project_id}`);
   });
 });
 
 describe('buildNowStripItems — severity 정렬(danger→warn→info)', () => {
   it('입력 순서와 무관하게 danger가 먼저, info가 마지막에 온다', () => {
-    const items = buildNowStripItems(ALL_SEVEN, t);
+    const items = buildNowStripItems(ALL_SEVEN, t, same);
     expect(items).toHaveLength(7);
     const severities = items.map((i) => i.severity);
     const firstInfoIdx = severities.indexOf('info');
@@ -170,27 +174,55 @@ describe('buildNowStripItems — severity 정렬(danger→warn→info)', () => {
   });
 
   it('resolveName/epicTitles를 안 넘겨도 no-fiction 폴백(entity_type)으로 죽지 않는다', () => {
-    const items = buildNowStripItems([AGENT_STUCK], t);
+    const items = buildNowStripItems([AGENT_STUCK], t, same);
     expect(items[0]!.title).toBe('story'); // resolveName 없음 → entity_type 폴백.
   });
 
   it('agent_stuck 라벨은 resolveName이 있으면 그걸 우선한다(action-zone.tsx attentionEntityLabel 재사용 증거)', () => {
-    const items = buildNowStripItems([AGENT_STUCK], t, (id) => (id === 's-1' ? '온보딩 완주 체크' : null));
+    const items = buildNowStripItems([AGENT_STUCK], t, same, (id) => (id === 's-1' ? '온보딩 완주 체크' : null));
     expect(items[0]!.title).toBe('온보딩 완주 체크');
   });
 
   it('빈 배열이면 빈 배열을 낸다', () => {
-    expect(buildNowStripItems([], t)).toEqual([]);
+    expect(buildNowStripItems([], t, same)).toEqual([]);
   });
 });
 
 describe('summarizeSeverity — collapsed 「지금 N」 정직 카운트', () => {
   it('7종(danger 1·warn 5·info 1)을 정확히 센다', () => {
-    const items = buildNowStripItems(ALL_SEVEN, t);
+    const items = buildNowStripItems(ALL_SEVEN, t, same);
     expect(summarizeSeverity(items)).toEqual({ danger: 1, warn: 5, info: 1, total: 7 });
   });
 
   it('빈 목록은 전부 0', () => {
     expect(summarizeSeverity([])).toEqual({ danger: 0, warn: 0, info: 0, total: 0 });
+  });
+});
+
+describe('nowStripItemHref — flat 목적지는 withProject로 프로젝트를 싣는다(story #4231 3차)', () => {
+  const addP = (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=proj-A`;
+  it('결재함 · 에이전트 상세(조직 단위 flat)는 싣고 · 보드(워크스페이스 경로)는 그대로', () => {
+    expect(nowStripItemHref({ ...AGENT_STUCK, entity_type: 'epic' }, addP)).toBe('/inbox?tab=gates&p=proj-A');
+    expect(nowStripItemHref(AGENT_AUTH_FAILURE, addP)).toBe('/organization/workforce/m-1?p=proj-A');
+    expect(nowStripItemHref(AGENT_STUCK, addP)).toBe('/flow?story=s-1');
+  });
+});
+
+
+// story #4231 4차(PO 07:53Z) — 조직 전체 목록: 옛 자원 경로는 현재 프로젝트가 아니라 항목 자기 project_id(현재 p로 감싸면 «p는 붙었는데 틀린 셸»).
+describe('nowStripItemHref — 다른 프로젝트 항목은 그 항목의 p(#4231 4차)', () => {
+  const current = (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=CURRENT`;
+  it('⭐unanswered_blocker(다른 프로젝트) → 그 항목의 p · 현재 p 아님', () => {
+    const href = nowStripItemHref({ ...UNANSWERED_BLOCKER, project_id: 'OTHER' }, current);
+    expect(href).toBe('/flow?story=story-2&p=OTHER');
+    expect(href).not.toContain('CURRENT');
+  });
+  it('agent_stuck(스토리) — 옛 응답이라 project_id가 없으면 주소 그대로(지어내지 않음)', () => {
+    expect(nowStripItemHref(AGENT_STUCK, current)).toBe('/flow?story=s-1');
+  });
+  it('⭐agent_stuck(스토리) — BE가 싣는 project_id(#4259)면 그 항목의 p · 현재 p 아님', () => {
+    const href = nowStripItemHref({ ...AGENT_STUCK, project_id: 'OTHER' } as typeof AGENT_STUCK, current);
+    expect(href).toBe('/flow?story=s-1&p=OTHER');
+    expect(href).not.toContain('CURRENT');
   });
 });

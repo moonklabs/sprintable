@@ -126,7 +126,7 @@ async def _publish_next_collect_event(db: AsyncSession, *, org_id: uuid.UUID, de
             EventDefinition.key == definition_key,
             EventDefinition.enabled.is_(True),
             or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
-        ).limit(1)
+        ).order_by(EventDefinition.org_id.is_(None), EventDefinition.id).limit(1)
     )).scalars().first()
     if definition_row is None:
         raise ValueError(f"definition not found/disabled at publish time: {definition_key!r}")
@@ -138,7 +138,8 @@ async def _publish_next_collect_event(db: AsyncSession, *, org_id: uuid.UUID, de
     )
     background_tasks = BackgroundTasks()
     # 진짜 발행 본체 — 여기서 던지는 예외만 "회차 발행 실패"로 취급한다.
-    await _publish_registry_event_core(db, org_id, auth, definition_key, payload, background_tasks)
+    # story #4251 — 방금 만든 새 회차 스토리의 첫 stage(시스템 발행자)라 멤버 stage 검증을 받지 않는다.
+    await _publish_registry_event_core(db, org_id, auth, definition_key, payload, background_tasks, stage_origin="server")
     try:
         await background_tasks()
     except Exception:

@@ -3,8 +3,10 @@ from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
+from app.core.datetime_query import OffsetDatetime
 from app.schemas.story import _validate_metric_definition
 from app.schemas.validators import is_blank
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 # story #2413 AC3(PO 지시, 2026-08-02) — 제목이 빈 스프린트를 만들 수 없게 서버가 거부한다.
 # ⭐관측된 결함 수정이 아니라 방어다 — 실측(dev, MCP list_sprints): 16건 중 blank title 0건.
@@ -73,9 +75,14 @@ class SprintBase(BaseModel):
 class SprintCreate(SprintBase):
     project_id: uuid.UUID
     org_id: uuid.UUID
+    # story #4330 — SprintBase는 응답(SprintResponse)과 공유라 요청 쪽만 오프셋 필수 타입으로 덮는다.
+    measure_after: OffsetDatetime | None = None
 
 
-class SprintUpdate(BaseModel):
+class SprintUpdate(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"title", "duration"})
+
     title: str | None = None
     start_date: date | None = None
     end_date: date | None = None
@@ -90,7 +97,7 @@ class SprintUpdate(BaseModel):
     # E-OUTCOME-LOOP: 의도 필드 (Update 허용)
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
-    measure_after: datetime | None = None
+    measure_after: OffsetDatetime | None = None
     # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
 
     @field_validator("metric_definition")

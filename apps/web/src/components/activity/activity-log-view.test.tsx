@@ -12,7 +12,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { ActivityLogView } from './activity-log-view';
-import { TopBarProvider } from '@/components/nav/top-bar-context';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import enMessages from '../../../messages/en.json';
 
 const fetchWithAuthMock = vi.fn();
@@ -117,5 +117,28 @@ describe('ActivityLogView — action 필터 debounce(story #3228)', () => {
     await mount();
     const input = container.querySelector('input[type="text"]') as HTMLInputElement;
     expect(input.maxLength).toBe(200);
+  });
+});
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div>{title}</div>;
+}
+
+describe('ActivityLogView — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="en" messages={enMessages}>
+          <TopBarProvider>
+            <TopBarTitleProbe />
+            <ActivityLogView projectId="p1" />
+          </TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });

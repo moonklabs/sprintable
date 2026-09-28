@@ -8,12 +8,22 @@
 //   failure_kind: 'connection'|'needs_check'|'transient'|null
 //   next_retry_at / command_reason_code: string|null
 export type CommandStatus =
-  | 'pending' | 'in_progress' | 'completed' | 'blocked' | 'dead_letter' | 'voided' | 'cancelled';
-export type FailureKind = 'connection' | 'needs_check' | 'transient';
+  | 'pending' | 'in_progress' | 'completed' | 'blocked' | 'dead_letter' | 'voided' | 'cancelled'
+  // story #4264 ④ — 발행 직전 승인 필요 · 예산 초과로 막힘(재시도 없음 · 다시 승인하면 새 명령). 예전엔 이 값을 아는 갈래가 없어
+  // 워커 경로는 배지 0, 즉시 발행 경로는 dead_letter로 저장돼 헛된 «다시 시도» 버튼이 떴다.
+  | 'blocked_unapproved';
+// story #4262 — `not_sent`(확실히 안 나감 · 곧바로 dead_letter). 판정은 dead_letter 갈래에서 «needs_check가 아님»으로 읽혀
+// «자동 재시도를 멈췄어요»가 된다(아래 deriveFailureAction 무변).
+// story #4305(까디르) — `paused`: 조직 «외부 발행 일시 중지»로 멈춘 blocked(BE `FAILURE_KIND_PAUSED`).
+export type FailureKind = 'connection' | 'needs_check' | 'transient' | 'not_sent' | 'paused';
 
+// story #4290(까디르 QA ④ · PO 06:40Z) — `retryable`은 서버 한 판정(`command_retryable` = 보는 사람이 지금 다시 시도할 수 있는가)을
+// 그대로 옮긴 값이다. 호출부가 넘길 때만 실린다(모르면 없음) — 배지는 이 값이 false면 버튼을 켜지 않는다(화면이 상태로 따로 가르지 않음).
 export type FailureAction =
-  | { kind: 'blocked' }
-  | { kind: 'needs_check' }
+  // story #4305 — `paused`: 조직 «외부 발행 일시 중지»로 멈춘 blocked(연결 문제 아님). 그때만 실린다(연결 blocked는 예전 모양 그대로).
+  // story #4305(유나 4660 판정 끝) — `unknownReason`: failure_kind가 없거나 모르는 blocked(연결인지 일시 중지인지 모름 · 연결이라 말하지 않는다).
+  | { kind: 'blocked'; retryable?: boolean; paused?: true; unknownReason?: true }
+  | { kind: 'needs_check'; retryable?: boolean }
   | { kind: 'auto_retry'; nextRetryAt: string | null }
   // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시
   // dead_letter로 접어(publication_command.py:695-698) 위 kind:'needs_check' 갈래는
@@ -28,13 +38,22 @@ export type FailureAction =
   // check→dead_letter, 재시도 대상 아님) 그동안 이 갈래는 reasonCode를 아예 안 봐
   // BE가 아는 사유(사용량 소진·리셋 시각)를 화면이 못 읽고 일반 dead_letter/
   // needs_check 문구만 보여줬다 — 원인은 아는데 모른다고 말하는 결함.
-  | { kind: 'dead_letter'; needsRecheck: boolean; reasonCode: string | null; reasonResetAt: string | null }
+  | { kind: 'dead_letter'; needsRecheck: boolean; reasonCode: string | null; reasonResetAt: string | null; retryable?: boolean }
   | { kind: 'voided'; reasonCode: string | null }
+  // story #4264 ④ — 사유 문장만 · 버튼 0(재시도 개념이 없다).
+  | { kind: 'blocked_unapproved'; reasonCode: string | null }
   // 페드루 PO 정정(2026-09-04 09:49Z, BE #3425/PR#3776) — 이미지 글이 컨테이너 생성→
   // 완료 대기 중일 때. §17-15 "자동으로 이어서 처리 중"(중립·버튼 없음) — transient의
   // "다시 시도"(실패 후 재시도)와 뜻이 다르다(이건 실패가 아니라 진행 중), 같은 값으로
   // 묶지 않는다(§17-15 "모양은 같고 뜻은 다르다").
-  | { kind: 'processing' };
+  | { kind: 'processing' }
+  // story #4336 AC4(PO 08:47Z «목록 · 게이트 화면 = PR 1») — 즉시 발행이 워커 대기열로 간 뒤 목록 · 캘린더 카드도 상세와 같은 두 상태를
+  // 말한다. 판정은 서버 한 곳(`processing_kind=publishing` · `command_reason_code=WORKER_TICK_BUDGET_TOO_SMALL`) — 화면은 옮기기만.
+  | { kind: 'publishing' }
+  | { kind: 'publish_stuck' };
+
+/** story #4336 — 워커 한 틱 예산보다 긴 명령에 서버가 다는 사유(대기 · 비종결, 발행 안 되는 중). */
+export const WORKER_TICK_BUDGET_TOO_SMALL = 'WORKER_TICK_BUDGET_TOO_SMALL';
 
 // story #3422 N2(페드루 PO 지적, 2026-09-04 12:41Z) — command_reason_code 원시값을
 // 화면에 그대로 노출하지 않는다(entity-status-labels.ts::STATUS_LABELS와 동형 규율 —
@@ -71,6 +90,14 @@ export const CHANNEL_POST_VOID_REASON_MESSAGE_KEYS: Record<string, string> = {
   API_USAGE_BUDGET_EXCEEDED: 'channelPostsVoidReasonApiUsageBudgetExceeded',
 };
 
+// story #4264 ④(까디르 codex P2 · PO 17:45Z) — blocked_unapproved 사유 → 문장. 예산 둘은 같은 사실이라 voided 문장 그대로, 승인
+// 필요는 유나 문안. 사유가 비었으면(4264 전 워커 행 — 그 갈래만 사유를 안 채웠다) 승인 필요로 읽는다.
+export const CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS: Record<string, string> = {
+  EXTERNAL_PUBLISH_APPROVAL_REQUIRED: 'channelPostsBlockedReasonApprovalRequired',
+  GENERATION_BUDGET_EXCEEDED: 'channelPostsVoidReasonGenerationBudgetExceeded',
+  API_USAGE_BUDGET_EXCEEDED: 'channelPostsVoidReasonApiUsageBudgetExceeded',
+};
+
 // story #3815(페드루 PO steer②, 2026-09-12 17:34Z) — voided의 REASON_MESSAGE_KEYS와
 // 동형 축, dead_letter 전용. reason_code→문구 표: 맵에 있으면 그 정적 문구를
 // 즉시 낸다(원인을 아는 채로 일반 dead_letter/needs_check 문구로 뭉개지 않는다),
@@ -92,6 +119,8 @@ export interface FailureActionInput {
   reasonResetAt?: string | null;
   /** BE #3425(PR#3776) 서버 파생 — 'awaiting_container'면 이미지 컨테이너 처리 중(§17-15). */
   processingKind?: 'awaiting_container' | string | null;
+  /** story #4290(까디르 QA ④) — 서버 `command_retryable`. 넘기면 멈춤 갈래(blocked · needs_check · dead_letter)에 그대로 실린다. */
+  retryable?: boolean | null;
 }
 
 /**
@@ -104,7 +133,17 @@ export interface FailureActionInput {
  * 있는 것을 막는다 — 판단을 사람에게 넘기는 쪽이 어느 사고도 안 낸다").
  */
 export function deriveFailureAction(input: FailureActionInput): FailureAction | undefined {
+  const action = deriveFailureKind(input);
+  if (!action || input.retryable == null) return action;
+  if (action.kind === 'blocked' || action.kind === 'needs_check' || action.kind === 'dead_letter') {
+    return { ...action, retryable: input.retryable };
+  }
+  return action;
+}
+
+function deriveFailureKind(input: FailureActionInput): FailureAction | undefined {
   if (input.commandStatus === 'voided') return { kind: 'voided', reasonCode: input.reasonCode ?? null };
+  if (input.commandStatus === 'blocked_unapproved') return { kind: 'blocked_unapproved', reasonCode: input.reasonCode ?? null };
   // story #3402 갭(2026-09-10) — needsRecheck는 dead_letter로 접히기 直前의 failure_kind가
   // needs_check였는지만 본다(§17-2 층 구분: command_status가 이미 dead_letter를 확定했으니
   // 그 안에서 failure_kind는 "무엇을 보여줄지"만 고른다, "보여줄지 말지"는 안 건드린다).
@@ -114,12 +153,21 @@ export function deriveFailureAction(input: FailureActionInput): FailureAction | 
       reasonCode: input.reasonCode ?? null, reasonResetAt: input.reasonResetAt ?? null,
     };
   }
-  if (input.commandStatus === 'blocked') return { kind: 'blocked' };
+  if (input.commandStatus === 'blocked') {
+    const reason = blockedReason(input.commandStatus, input.failureKind);
+    if (reason === 'paused') return { kind: 'blocked', paused: true };
+    return reason === 'connection' ? { kind: 'blocked' } : { kind: 'blocked', unknownReason: true };
+  }
   if (input.commandStatus === 'completed' || input.commandStatus === 'cancelled' || !input.commandStatus) return undefined;
   // 페드루 PO 정정(2026-09-04 09:49Z) — pending ∧ processing_kind==='awaiting_container'
   // 는 failure_kind보다 먼저 잡는다. 실패가 아니라 "진행 중"이라 §17-2의 실패 갈래
   // 축과 아예 다르다(실패 여부를 먼저 걸러야 failure_kind 유무로 오판 안 함).
   if (input.commandStatus === 'pending' && input.processingKind === 'awaiting_container') return { kind: 'processing' };
+  // story #4336 — 예산 밖은 «발행 중»보다 먼저(서버도 이 사유면 processing_kind를 publishing으로 안 준다 — 방어).
+  if (input.commandStatus === 'pending' && input.reasonCode === WORKER_TICK_BUDGET_TOO_SMALL) return { kind: 'publish_stuck' };
+  if (input.processingKind === 'publishing' && (input.commandStatus === 'pending' || input.commandStatus === 'in_progress')) {
+    return { kind: 'publishing' };
+  }
   // pending·in_progress — 실패가 아직 자동 재시도 큐에 있는 상태. failure_kind가 없으면
   // (예: 아직 한 번도 실패한 적 없는 정상 대기) 표시할 실패 자체가 없다.
   if (!input.failureKind) return undefined;
@@ -127,3 +175,22 @@ export function deriveFailureAction(input: FailureActionInput): FailureAction | 
   // 'needs_check' 명시값 + 그 외 모르는 값(§17-2 fail-closed) 전부 이 갈래.
   return { kind: 'needs_check' };
 }
+
+/** story #4304 — 멈춘(blocked) 명령이 **연결 사유**인가. BE가 blocked로 세우는 길은 지금 둘이다: 연결 실패(`failure_kind=connection`)와 조직
+ * 일시정지(`paused` — 연결과 무관, 정지를 풀면 서버가 다시 올림). «연결 확인» 링크는 앞의 것에만 단다(일시정지에 연결 화면을 가리키면 거짓 길).
+ * 까디르 QA(PO 08:55Z) — **닫힌 판정**: `connection`일 때만 참. 없는 kind · 모르는 kind(앞으로 blocked 사유가 늘 때)는 링크를 받지 않는다. */
+export function blockedByConnection(commandStatus: string | null | undefined, failureKind: string | null | undefined): boolean {
+  return blockedReason(commandStatus, failureKind) === 'connection';
+}
+
+/** story #4305(유나 확정) — 멈춘(blocked) 명령의 사유 한 판정(닫힌 판정). `connection` · `paused`만 이름을 붙이고, 없는 kind · 모르는 kind는
+ * `unknown`(연결이라고도 일시 중지라고도 말하지 않는다). 배지 · 댓글 답변 줄 · 채널 상세 발행 영역 줄이 이 값 하나로 갈린다. blocked가 아니면 null. */
+export function blockedReason(
+  commandStatus: string | null | undefined, failureKind: string | null | undefined,
+): 'connection' | 'paused' | 'unknown' | null {
+  if (commandStatus !== 'blocked') return null;
+  if (failureKind === 'connection') return 'connection';
+  if (failureKind === 'paused') return 'paused';
+  return 'unknown';
+}
+

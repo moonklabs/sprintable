@@ -30,12 +30,17 @@ def _rate(num: int, den: int) -> float | None:
 
 async def compute_line_metrics(
     session: AsyncSession, org_id: uuid.UUID, window_days: int = DEFAULT_WINDOW_DAYS,
-    now: datetime | None = None,
+    now: datetime | None = None, *, project_ids: list[uuid.UUID] | None = None,
 ) -> dict:
-    """org 의 line metric 집계(read-only·bounded·default-off org=0/no-op)."""
+    """org 의 line metric 집계(read-only·bounded·default-off org=0/no-op).
+
+    story #4351 PR B(SEC-S8) — `project_ids`가 주어지면(접근이 제한된 caller) 그 프로젝트의 step run · 이벤트만 센다. None = 전체."""
     now = now or _now()
     cutoff = now - timedelta(days=window_days)
-    base = (WorkflowLineStepRun.org_id == org_id, WorkflowLineStepRun.started_at >= cutoff)
+    base = (
+        WorkflowLineStepRun.org_id == org_id, WorkflowLineStepRun.started_at >= cutoff,
+        *([] if project_ids is None else [WorkflowLineStepRun.project_id.in_(project_ids)]),
+    )
 
     def _c(cond):  # conditional count(단일 쿼리 내 case-sum)
         return func.sum(case((cond, 1), else_=0))
@@ -78,6 +83,7 @@ async def compute_line_metrics(
         select(WorkflowLineStepRunEvent.event_type, func.count()).where(
             WorkflowLineStepRunEvent.org_id == org_id,
             WorkflowLineStepRunEvent.created_at >= cutoff,
+            *([] if project_ids is None else [WorkflowLineStepRunEvent.project_id.in_(project_ids)]),
         ).group_by(WorkflowLineStepRunEvent.event_type)
     )).all()
     ev = {et: int(c) for et, c in ev_rows}

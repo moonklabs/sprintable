@@ -4,6 +4,7 @@ import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -21,13 +22,17 @@ export async function POST(request: Request) {
   const utmCampaign = cookieStore.get('sp_attr_campaign')?.value;
   const referrer = cookieStore.get('sp_attr_ref')?.value;
 
-  const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/register`, {
+  const fastapiRes = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/register`, {
+    // story #4320(까디르 QA ③) — 계정 · 첫 토큰을 새로 만든다(귀속 쿠키 소비) — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+    timeLimitOnly: true,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       email: body.email,
       password: body.password,
-      display_name: body.display_name ?? body.email.split('@')[0],
+      // story #4293 — 이메일 앞부분을 이름 칸에 지어내지 않는다(#3755 · #3758 «이메일은 이름 칸에 안 싣는다»). 받은 그대로 넘기고, 없거나
+      // 비었으면 BE가 422로 거절한다(auth.py `display_name: str` 필수 + 공백 거부) — 가입 화면은 이름을 필수로 보낸다.
+      ...(body.display_name !== undefined ? { display_name: body.display_name } : {}),
       tos_accepted: body.tos_accepted ?? false,
       ...(body.invite_token ? { invite_token: body.invite_token } : {}),
       ...(utmSource ? { signup_utm_source: utmSource } : {}),

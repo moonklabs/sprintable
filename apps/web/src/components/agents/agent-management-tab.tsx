@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ChevronRight, Plus } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +17,46 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
-import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
+import { fetchMe } from '@/lib/me-client';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { orgRoleLabel } from '@/lib/org-role-label';
+import { memberRowLabels } from '@/lib/member-display';
+import { RowName } from '@/components/shared/row-name';
+
+/**
+ * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
+ * 2026-09-21 23:25Z 문안 개정). client_version/session_started_at 둘 다 없으면 줄 전체를
+ * 숨긴다(placeholder로 "판단 불가"를 보여주지 않는다, AC3) — 있는 세그먼트만 · 로 잇는다.
+ */
+export function formatAgentRuntimeLine(
+  agent: Pick<OrgAgent, 'client_version' | 'plugin_version' | 'session_started_at'>,
+  locale: string,
+  displayTimezone: string,
+  // story #4129 CI RED(check-i18n-keys.js) — 이 파라미터가 `t`였을 때, 이 파일의
+  // `const t = useTranslations('settings')`(scripts/check-i18n-keys.js는 스코프를
+  // 모르는 파일 단위 정적 매칭이라 함수 파라미터의 섀도잉을 못 본다)로 오귀속돼
+  // agentRuntimeSegment류를 실제 호출부 네임스페이스(agents, 아래 `ta` 인자)가 아니라
+  // settings 네임스페이스에서 찾다 missing 처리했다. 파라미터명을 `t`와 겹치지 않게
+  // 바꿔 그 정적 매칭 오귀속 자체를 원천 차단(페드루 PO 리뷰).
+  translate: (key: string, values?: Record<string, string>) => string,
+): string | null {
+  const segments: string[] = [];
+  if (agent.client_version) {
+    segments.push(translate('agentRuntimeSegment', { version: agent.client_version }));
+  }
+  if (agent.plugin_version) {
+    segments.push(translate('agentRuntimePluginSegment', { version: agent.plugin_version }));
+  }
+  if (agent.session_started_at) {
+    const relative = formatRelativeTime(agent.session_started_at, locale, displayTimezone);
+    if (relative) segments.push(translate('agentRuntimeSessionSegment', { relative }));
+  }
+  if (segments.length === 0) return null;
+  return segments.join(' · ');
+}
 
 interface OrgAgent {
   id: string;
@@ -30,6 +69,19 @@ interface OrgAgent {
   // 방어) — 그 경우 CTA를 안 띄운다(거짓 "연결 안 됨" 낙인 방지, 침묵 실패보다 과소표시가
   // 안전한 방향).
   verified?: boolean | null;
+  // story #4129 — MCP clientInfo·(있으면)plugin 버전·세션 시작. 전부 BE computed_field라
+  // 값이 없으면 그냥 undefined(마이그레이션 0, 새 응답 계약 필드 아님 — 무회귀).
+  client_name?: string | null;
+  client_version?: string | null;
+  plugin_version?: string | null;
+  session_started_at?: string | null;
+  // BE `_inject_active_stories()`가 조직 내 plugin_version MAX 대비 배치 주입. null=판단
+  // 불가(플러그인 버전이 없거나 org에 비교대상 없음) — false와 구분(휴리스틱 배지 금지).
+  needs_restart?: boolean | null;
+  // story #3994 — 「시스템 발행」(runtime_type==='system-publisher')은 verified가 항상
+  // false지만 연결 대상이 아니다(BE TeamMemberResponse가 이미 실어 보내던 필드, 이
+  // 로컬 타입에만 없었다 — 새 BE 0). 판별 없이 verified만 보면 거짓 「연결 안 됨」.
+  runtime_type?: string | null;
 }
 
 interface ProjectOption {
@@ -62,11 +114,18 @@ export function requiresDeactivateConfirm(agent: Pick<OrgAgent, 'is_active'>): b
  * Phase 2 매트릭스가 우려하는 N×M 콜과 다름: 프로젝트 수 P에만 비례, 에이전트 수와는 무관).
  */
 export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
   const tc = useTranslations('common');
   const to = useTranslations('organization');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const [agents, setAgents] = useState<OrgAgent[]>([]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  // story #4311(유나 비차단) — 행에 조직 역할 배지가 보이므로 그 글자를 roleLabel로 넘긴다(역할이 보이고 서로 다르면 꼬리 없음).
+  const rowLabels = useMemo(() => memberRowLabels(agents, tc, (a) => orgRoleLabel(a.role, to) ?? ''), [agents, tc, to]);
+
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -119,7 +178,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
         // 이 try/catch 바깥 catch가 setLoadError(true)로 «승격»시켜 에이전트 목록(이
         // 탭의 실제 주 콘텐츠, refreshAgents가 따로 그린다)까지 통째로 못 뜨게 했다.
         const [meRes, projectsRes] = await Promise.all([
-          fetchWithAuth('/api/me').catch(() => null),
+          fetchMe().catch(() => null),
           fetchWithAuth('/api/projects').catch(() => null),
         ]);
         if (meRes?.ok) {
@@ -221,25 +280,40 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
             <div className="space-y-2">
               {agents.map((agent, index) => (
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
-                  <Link href={`/organization/workforce/${agent.id}`} className="min-w-0 flex-1">
+                  <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate font-medium text-foreground hover:underline hover:text-primary">{agent.name}</span>
-                      {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
+                      <RowName className="font-medium text-foreground hover:underline hover:text-primary" label={rowLabels.get(agent.id)} id={agent.id} />
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{t('agentMember')}</Badge>
-                      <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
+                      {/* [SID:4282 · 유나 결정] agent.role은 조직 역할(owner/admin/member)이다 — 직무 해석기(resolveRoleLabel)에 넣으면
+                          원문(«member»)이 샜다(배포 27 기기 탐색 점검 7번). 조직 역할 라벨로 · 모르는 값만 원문. */}
+                      {(() => { const roleText = orgRoleLabel(agent.role, to); return roleText ? <Badge variant="outline">{roleText}</Badge> : null; })()}
                       <Badge variant="info">{ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 })}</Badge>
-                      {agent.verified === false ? (
+                      {/* [SID:4282 · 유나 결정] 비활성은 칩 줄로(정체 → 범위 → 상태) · 되돌릴 수 있는 상태라 빨강 아님(secondary). 이름 줄엔 이름만. */}
+                      {!agent.is_active ? <Badge variant="secondary">{t('agentInactiveBadge')}</Badge> : null}
+                      {isSystemPublisher(agent.runtime_type) ? (
+                        <span className="text-xs text-muted-foreground">{ta('systemPublisherNeutralDescription')}</span>
+                      ) : agent.verified === false ? (
                         <Badge variant="warning">{ta('agentNotConnected')}</Badge>
                       ) : null}
+                      {agent.needs_restart ? (
+                        <Badge variant="warning">{ta('agentNeedsRestartBadge')}</Badge>
+                      ) : null}
                     </div>
+                    {(() => {
+                      const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
+                      return runtimeLine ? (
+                        <p className="mt-1 truncate text-xs text-muted-foreground">{runtimeLine}</p>
+                      ) : null;
+                    })()}
                   </Link>
                   <div className="flex shrink-0 items-center gap-2">
-                    {agent.verified === false ? (
+                    {!isSystemPublisher(agent.runtime_type) && agent.verified === false ? (
                       <Link
-                        href={`/organization/workforce/${agent.id}`}
-                        className="whitespace-nowrap text-xs font-medium text-primary hover:underline"
+                        href={flatHref(`/organization/workforce/${agent.id}`)}
+                        // [SID:4282 · 유나 추가 결정] 카드 · 화살표와 같은 곳으로 가는 중복 링크 — lg 미만에선 숨겨 이름 칸을 돌려준다(390 en 이름 22px).
+                        className="hidden whitespace-nowrap text-xs font-medium text-primary hover:underline lg:inline"
                       >
                         {ta('viewConnectionSettings')}
                       </Link>
@@ -263,7 +337,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                         </Button>
                       );
                     })() : null}
-                    <Link href={`/organization/workforce/${agent.id}`} className="text-muted-foreground hover:text-foreground">
+                    <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="text-muted-foreground hover:text-foreground">
                       <ChevronRight className="size-4" />
                     </Link>
                   </div>

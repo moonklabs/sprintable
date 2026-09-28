@@ -5,6 +5,7 @@ import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChatBubble } from './chat-bubble';
 import { ConnectionLostBanner } from './connection-lost-banner';
@@ -33,7 +34,9 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { actorRowLabels } from '@/lib/member-display';
 import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ChatViewProps {
   threadId: string;
@@ -129,7 +132,25 @@ export function filterUnconnectedAgentParticipants(
   );
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
+// [SID:4286 · 유나 결정 1] 미연결 에이전트 한 명 배너 문장 — 배너 조건이 type === 'agent'라 이름이 비면 날것 «?»(«?가 연결되지…»)
+// 대신 «이름 없는 에이전트»(common.agentUnnamed)로, 조사(이/가)도 그 폴백 글자에서(«…에이전트가»). en은 관사가 붙는 별도 문장
+// («An unnamed agent isn't connected yet — …»). 무거운 ChatView 마운트 없이 테스트하려고 순수 함수로 뽑았다.
+export function agentNotConnectedBannerText(
+  p: { name: string | null },
+  tChats: (key: string, values?: Record<string, string>) => string,
+  tc: (key: string) => string,
+): string {
+  if (!p.name) {
+    const fallback = tc('agentUnnamed');
+    return tChats('agentNotConnectedBannerUnnamed', { name: fallback, josa: pickIGaJosa(fallback) });
+  }
+  return tChats('agentNotConnectedBanner', { name: p.name, josa: pickIGaJosa(p.name) });
+}
+
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
+  // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
+  const backHref = backHrefProp ?? flatHref('/chats');
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -865,6 +886,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, [messages]);
 
   const groups = groupByDate(messages, locale, displayTimezone);
+  // [SID:4311 PR 3] 발신자 라벨 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번 · 불러온 메시지 안에서만).
+  // 내 메시지는 «나»로 서서 셈에서 뺀다(내 이름이 남의 줄에 꼬리를 만들지 않게).
+  const senderLabels = actorRowLabels(messages.filter((m) => m.created_by !== currentTeamMemberId).map((m) => ({ id: m.created_by, label: m.sender_name || t('team') })));
 
   // story #1977: "여기부터 안읽음" 마커 위치 — markerBoundary(동결된 진입 시점 last_read_at)
   // 이후·타인 발신(§4-1 BE unread 정의 sender IS DISTINCT FROM 나와 동형) 첫 메시지 앞.
@@ -935,11 +959,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               <UserX className="h-3.5 w-3.5 flex-shrink-0" />
               <span className="flex-1">
                 {unconnectedAgentParticipants.length === 1
-                  ? t('agentNotConnectedBanner', { name: unconnectedAgentParticipants[0]!.name ?? '?' })
+                  ? agentNotConnectedBannerText(unconnectedAgentParticipants[0]!, t, tc)
                   : t('agentNotConnectedBannerMulti', { count: unconnectedAgentParticipants.length })}
               </span>
               <Link
-                href={`/organization/workforce/${unconnectedAgentParticipants[0]!.member_id}`}
+                href={flatHref(`/organization/workforce/${unconnectedAgentParticipants[0]!.member_id}`)}
                 className="flex items-center gap-1 rounded px-1.5 py-1 font-medium hover:bg-warning-border/40"
               >
                 {ta('viewConnectionSettings')}
@@ -1029,6 +1053,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             }
                             isMine={msg.created_by === currentTeamMemberId}
                             isGrouped={isGrouped}
+                            senderLabel={senderLabels.get(msg.created_by)}
                             onOpenThread={openThread}
                             onOpenReadingPanel={openReadingPanel}
                             onDelete={handleDeleteMessage}

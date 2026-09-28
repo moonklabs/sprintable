@@ -10,7 +10,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { TopBarProvider } from '@/components/nav/top-bar-context';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 
@@ -176,5 +176,21 @@ describe('AgentRunsList — 빈 상태 문구가 기본 창과 넓힌 창을 가
 
     expect(container.textContent).toContain(koMessages.agentRuns.emptyTitle);
     expect(container.textContent).not.toContain(koMessages.agentRuns.emptyTitleDefaultWindow.replace('{days}', '7'));
+  });
+});
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div>{title}</div>;
+}
+
+describe('AgentRunsList — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    stubFetch(() => ({ status: 200, body: { data: [], meta: null } }));
+    await act(async () => { root.render(wrap(<><TopBarTitleProbe /><AgentRunsList /></>)); });
+    await flush();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP_ROUTER_EXPORT_WHITELIST, ROUTE_FILE_BASENAME_RE, scanFileContent, scanRepo } from './verify-route-file-exports';
+import { measureFsReads } from './test-utils/fs-work';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app');
 
@@ -185,11 +186,36 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // agents/[id] 세 page.tsx 삭제(React 오류 코드 310 근본원인 — loading.tsx 스트리밍
   // 경계 아래 redirect() 호출을 next.config.ts redirects()로 이관, page.tsx 자체가
   // 불요해짐. hitl·[id] 디렉토리도 dangling 없이 통째 제거)로 101→98.
-  it('실 트리(apps/web/src/app) — 라우트 파일 98개·위반 0건', () => {
-    const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(98);
+  // story #4116(2026-09-21) — organization/generation-connectors/page.tsx 신설로 98→99.
+  // story #3962(2026-09-17) — `/today`(v3 첫 화면, (authenticated) 밖 신규 라우트
+  // 그룹) page.tsx+layout.tsx 신설로 99→101(develop 착지).
+  // story #3972(2026-09-16) — app/chat/layout.tsx+page.tsx 신설(시안 ② 3단 허브,
+  // 기능 플래그 뒤)로 101→103(develop 착지).
+  // story #3982(2026-09-17) — `/connect-rules`(v3 「연결·규칙」 화면, (authenticated)
+  // 밖 신규 라우트 그룹) page.tsx+layout.tsx 신설로 103→105(develop 착지).
+  // [SID:4021](2026-09-17, rebase 시점 재정정 2026-09-22) — onboarding/first-instruction/
+  // page.tsx 신설(컴패니언 «첫 지시»가 여는 웹 진입·3995 선행)로 105→106(develop 착지).
+  // story #4008(2026-09-17, rebase 시점 재정정 2026-09-22) — app/chat/layout.tsx 삭제 +
+  // app/(v3)/layout.tsx 신설(그룹 레이아웃 하나로 통합, RealtimeProvider 공급) +
+  // app/chat/page.tsx가 app/(v3)/chat/page.tsx로 이동 — 이 브랜치 자체 기준 순증감 0
+  // (−1 챗 레이아웃, +1 v3 그룹 레이아웃, 이동은 파일 수 불변). develop 착지분 106.
+  // story #3989(「일감」 흡수 3/N, rebase 시점 재정정 2026-09-22) — [ws]/[proj]/hypotheses/
+  // page.tsx 신규(일감 「가설」 보기)로 106→107(이 브랜치 자체 기준 +1).
+  // story #4221 — 죽은 app/dashboard/settings/error.tsx 삭제(그 경로는 redirect뿐이라 오류 경계가 뜰 일이 없음)로 107→106.
+  // story #4274 — 탭 · 메뉴 목적지 loading.tsx 12개 신설([ws]/[proj] · more · org-briefing · content · organization/ 여덟)로 106→118,
+  // 까디르 검수 P2(v3 플래그 ON 목적지 today · connect-rules · (v3)/chat loading.tsx 셋)로 118→121, 일감 프레임 탭 줄을 품는 loading.tsx
+  // 넷(work-list · flow · epics · hypotheses — sprints · retro는 기존 파일 교체)으로 121→125(위반 0건 그대로 — default export만).
+  // story #4291 — `[ws]/[proj]/layout.tsx`(일감 탭 띠 WorkTabsFrame) 하나로 125→126(default export만).
+  // story #4326(까디르 4688) — `organization/workforce/runs/loading.tsx`(실행 목록 상단바 폴백) 하나로 126→127(default export만).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
+  it('실 트리(apps/web/src/app) — 라우트 파일 127개·위반 0건', () => {
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(APP_ROOT));
+    const { violations, fileCount } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
+    expect(fileCount).toBe(127);
     expect(violations).toEqual([]);
-  }, 1000);
+  });
 });
 
 describe('APP_ROUTER_EXPORT_WHITELIST — story #3760 AC1', () => {

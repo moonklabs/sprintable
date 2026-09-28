@@ -42,6 +42,7 @@ def _full_story():
         acceptance_criteria=None, position=None, success_hypothesis=None, metric_definition=None,
         measure_after=None, outcome_status="n_a", outcome_result=None, is_excluded=False,
         created_at=now, updated_at=now,
+        deleted_at=None,  # story #4299: trust 수집이 읽은 Story 행의 삭제 여부를 본다(실 Story 행과 같은 모양).
     )
 
 
@@ -64,6 +65,8 @@ async def test_bulk_handler_refreshes_and_serializes(monkeypatch):
     repo.org_id = uuid.uuid4()
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     # ⚠️ model_validate 는 모킹하지 않는다 — 실 직렬화를 태워야 P0 3차류를 잡는다.
 
@@ -92,6 +95,8 @@ async def test_bulk_nonsequential_jump_flags_violation_but_allows(monkeypatch):
     repo = MagicMock(); repo.org_id = uuid.uuid4()
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     _fire = AsyncMock()
     monkeypatch.setattr(stories_mod, "fire_webhooks", _fire)
@@ -125,6 +130,7 @@ async def test_bulk_adjacent_and_reopen_no_violation(monkeypatch):
         db.flush = AsyncMock(); db.refresh = AsyncMock(); db.commit = AsyncMock()
         repo = MagicMock(); repo.org_id = uuid.uuid4()
         monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+        monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
         monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
         _fire = AsyncMock(); monkeypatch.setattr(stories_mod, "fire_webhooks", _fire)
 

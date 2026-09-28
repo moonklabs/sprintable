@@ -10,22 +10,22 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { CountBadge } from '@/components/ui/count-badge';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 import { canEditOrgMemberRole } from '@/lib/org-member-role';
+import { memberDisplayLabel } from '@/lib/member-display';
+import { ORG_ROLE_LABEL_KEY } from '@/lib/org-role-label';
 
 interface OrgMember {
   id: string;
   user_id: string | null;
-  name: string;
+  name: string | null;
   email?: string;
   role: 'owner' | 'admin' | 'member';
 }
 
 const ROLE_ORDER = ['owner', 'admin', 'member'] as const;
-const ROLE_LABEL_KEY: Record<(typeof ROLE_ORDER)[number], string> = {
-  owner: 'roleGroupOwner',
-  admin: 'roleGroupAdmin',
-  member: 'roleGroupMember',
-};
+// [SID:4282] 라벨 키는 lib/org-role-label.ts 한 곳(에이전트 관리 · 신뢰 센터와 같은 낱말).
+const ROLE_LABEL_KEY: Record<(typeof ROLE_ORDER)[number], string> = ORG_ROLE_LABEL_KEY;
 
 export default function OrganizationRolesPage() {
   const { orgId, orgMemberships } = useDashboardContext();
@@ -42,6 +42,7 @@ export default function OrganizationRolesPage() {
   // 저하될 뿐, 데이터가 새지는 않는다).
   const canView = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('organization');
+  const tc = useTranslations('common');
 
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +51,7 @@ export default function OrganizationRolesPage() {
   const refresh = async () => {
     const [res, meRes] = await Promise.all([
       fetchWithAuth('/api/org-members').catch(() => null),
-      fetchWithAuth('/api/me').catch(() => null),
+      fetchMe().catch(() => null),
     ]);
     if (meRes?.ok) {
       const json = await meRes.json() as { data?: { user_id?: string | null } };
@@ -61,7 +62,9 @@ export default function OrganizationRolesPage() {
       setMembers((json.data ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id ?? null,
-        name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? '?',
+        // [SID:4286] 이름 칸 폴백 — 이메일 앞부분 · user_id 조각 · 날것 «?»를 이름으로 지어내지 않는다(선생님 상수
+        // «이메일은 이름 칸에 안 싣는다» · 3755번 AC1). 이름이 없으면 null 그대로 두고 그릴 때 memberDisplayLabel로.
+        name: m.name?.trim() || null,
         email: m.email ?? undefined,
         role: m.role,
       })));
@@ -158,7 +161,7 @@ export default function OrganizationRolesPage() {
                     return (
                       <MemberRow
                         key={member.id}
-                        name={member.name}
+                        name={memberDisplayLabel(member.name, tc)}
                         email={member.email}
                         className="border-0 rounded-none bg-transparent"
                         actions={

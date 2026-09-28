@@ -299,8 +299,8 @@ async def test_can_withdraw_field_three_branches_via_detail_endpoint():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            author_agent_id = await _seed_agent(s, org_id, project_id, name="작성자")
-            other_agent_id = await _seed_agent(s, org_id, project_id, name="무관")
+            author_agent_id = await _seed_agent(s, org_id, project_id, name="작성자", grant=True)
+            other_agent_id = await _seed_agent(s, org_id, project_id, name="무관", grant=True)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_connection(s, org_id)
         _setup_org_scoped_app(app, Session, org_id, user_id=author_agent_id, agent=True)
@@ -321,7 +321,7 @@ async def test_can_withdraw_field_three_branches_via_detail_endpoint():
 
         # ③ org admin(작성자 아님) — can_withdraw=true
         async with Session() as s:
-            admin_user_id = await _seed_human(s, org_id, role="admin")
+            admin_user_id = await _seed_human(s, org_id, role="admin", grant=True)
         _setup_org_scoped_app(app, Session, org_id, user_id=admin_user_id)
         async with _client_for(app) as client:
             r = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}")
@@ -340,7 +340,7 @@ async def test_list_excludes_withdrawn_by_default_includes_with_flag():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_connection(s, org_id)
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)

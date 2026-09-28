@@ -44,7 +44,7 @@ async def _execute_side_effects(
                 if role:
                     result = await session.execute(
                         select(TeamMember.id)
-                        .where(TeamMember.org_id == org_id, TeamMember.role == role)
+                        .where(TeamMember.org_id == org_id, TeamMember.role == role).order_by(TeamMember.id)
                         .limit(1)
                     )
                     member_id = result.scalar_one_or_none()

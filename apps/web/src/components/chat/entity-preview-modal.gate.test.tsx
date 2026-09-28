@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { EntityPreviewModal } from './embed-card';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -44,11 +45,10 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
       expect(url).toBe('/api/gates/g-1');
       return {
         ok: true,
+        // /api/gates/[id]는 proxyToFastapi — BE GateResponse 날 JSON(#4253 · 예전 {data} 목이 미리보기 본문 빈 채를 가렸다).
         json: async () => ({
-          data: {
-            id: 'g-1', status: 'pending', gate_type: 'merge', risk_grade: 'high',
-            work_item_summary: { title: 'PR#42 병합 게이트', slug: null }, work_item_id: 'wi-1',
-          },
+          id: 'g-1', status: 'pending', gate_type: 'merge', risk_grade: 'high',
+          work_item_summary: { title: 'PR#42 병합 게이트', slug: null }, work_item_id: 'wi-1',
         }),
       };
     });
@@ -61,8 +61,30 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     });
     await flush();
     expect(container.textContent).toContain('PR#42 병합 게이트');
-    expect(container.textContent).toContain('merge');
+    // story #4253(유나 CHANGES · PO 13:46Z) — 종류 · 상태는 공용 낱말(gateTypeLabel · gateStatusLabel). 원시 키(merge · pending)는 안 찍는다.
+    expect(container.textContent).toContain(koMessages.dashboard.ccGateTypeMerge);
+    expect(container.textContent).toContain(koMessages.cage.gateStatusPending);
+    expect(container.textContent).not.toContain('merge');
+    expect(container.textContent).not.toContain('pending');
     expect(container.textContent).toContain('고위험');
+  });
+
+  it('en — 종류 · 상태 배지가 영어 낱말(원시 키 doc_approval · approved 0)', async () => {
+    stubFetchWithAuth(async () => ({
+      ok: true,
+      json: async () => ({ id: 'g-9', status: 'approved', gate_type: 'doc_approval', risk_grade: 'low', work_item_summary: { title: 'Spec', slug: null }, work_item_id: 'wi-9' }),
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="en" messages={enMessages} timeZone="Asia/Seoul">
+          <EntityPreviewModal entityType="gate" entityId="g-9" title={null} status={null} href={null} onClose={() => {}} embedded />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    expect(container.textContent).toContain(enMessages.dashboard.ccGateTypeDocApproval);
+    expect(container.textContent).toContain(enMessages.cage.gateStatusApproved);
+    expect(container.textContent).not.toContain('doc_approval');
   });
 
   // story #3888(§⑤·Chat) — risk_grade='unknown' 배지(workList.riskBadgeUnknown, 신규 키)
@@ -71,10 +93,8 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     stubFetchWithAuth(async () => ({
       ok: true,
       json: async () => ({
-        data: {
-          id: 'g-3', status: 'pending', gate_type: 'merge', risk_grade: 'unknown',
-          work_item_summary: { title: '위험도 미산정 게이트', slug: null }, work_item_id: 'wi-3',
-        },
+        id: 'g-3', status: 'pending', gate_type: 'merge', risk_grade: 'unknown',
+        work_item_summary: { title: '위험도 미산정 게이트', slug: null }, work_item_id: 'wi-3',
       }),
     }));
     await act(async () => {
@@ -92,7 +112,7 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
   it('전체 보기 링크가 /gates/{id}로 향한다(own-href, parity getEntityHref 무관)', async () => {
     stubFetchWithAuth(async () => ({
       ok: true,
-      json: async () => ({ data: { id: 'g-2', status: 'pending', gate_type: 'doc_approval', risk_grade: 'low' } }),
+      json: async () => ({ id: 'g-2', status: 'pending', gate_type: 'doc_approval', risk_grade: 'low' }),
     }));
     await act(async () => {
       root.render(

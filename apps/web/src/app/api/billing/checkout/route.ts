@@ -1,4 +1,5 @@
 import { proxyToFastapiWrapped } from '@/lib/fastapi-proxy';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 /**
  * POST /api/billing/checkout — Toss 위젯 카드 인증(authKey) 완료 후 구독 체크아웃(#2510).
@@ -10,5 +11,10 @@ import { proxyToFastapiWrapped } from '@/lib/fastapi-proxy';
  * `{error:{code,message}}`로 감싸 그대로 통과) — 이 레포 envelope 관례와 일치.
  */
 export async function POST(request: Request): Promise<Response> {
-  return proxyToFastapiWrapped(request, '/api/v2/org-subscriptions/checkout');
+  return proxyToFastapiWrapped(request, '/api/v2/org-subscriptions/checkout', {
+    // story #4320(까디르 QA ③) — 결제(Toss authKey 소비 · 카드 청구) — 끊으면 청구는 됐는데 결과를 못 받고 다시 누르면 이중 결제 — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+    timeLimitOnly: true,
+    // 까디르 QA ① — 백엔드 최악(결제 사슬)은 프런트 한도를 넘는다 → 한도 안 천장 · 결과는 주문번호 조회로 확정(후속 카드). 근거는 표.
+    timeoutMs: LONG_ROUTES.billingCheckout.bffMs,
+  });
 }

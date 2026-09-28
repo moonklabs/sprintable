@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 
 /**
  * 프로젝트 컨텍스트 SSOT (R2: d802da27 stale context / 85614dd9 멀티탭 독립).
@@ -35,6 +36,13 @@ const effectiveOrgIdRef: { current: string | undefined } = { current: undefined 
 
 export function setEffectiveOrgId(id: string | undefined): void {
   effectiveOrgIdRef.current = id;
+}
+
+/** story #4184 — 인터셉터가 지금 실어 보낼 요청 맥락(org·project) 그대로의 키. 같은 요청을 나눠
+ * 쓰는 쪽(lib/me-client.ts)이 «맥락이 같을 때만 합류»하는 데 쓴다 — 전환 직전에 출발한 요청에
+ * 전환 뒤 호출이 붙지 않게. */
+export function getRequestContextKey(): string {
+  return `${effectiveOrgIdRef.current ?? ''}|${effectiveProjectIdRef.current ?? ''}`;
 }
 
 // story #2545(카디르 라이브 재QA, 2단계) — DashboardShell의 자동 switch-org(불일치 감지 →
@@ -78,6 +86,24 @@ export function useOrgSyncVersion(): number {
 let interceptorInstalled = false;
 
 /**
+ * story #4184(PR #4565 PO 위험 (b)) — `/api/me` 재사용 무효화의 **제외 목록**: 사용자 손 없이 자주 나가고 `/me` 내용
+ * (역할·멤버십·프로필·2단계 인증·연결 계정·비밀번호)을 바꿀 수 없는 쓰기. 채팅 읽음 표시는 열린 대화에 새 메시지가 올
+ * 때마다 자동으로 나가(chat-view markRead) 그 «완료 시 무효화»가, 채팅 중 설정으로 가면 첫 fetchMe 캐시를 지워 2회가 됐다.
+ * 허용 목록(«`/me`를 바꾸는 쓰기만 무효화»)이 아니라 제외 목록인 이유: 새 엔드포인트가 목록에서 빠지면 허용 목록은 옛 값을
+ * 내고(정확성 결함) 제외 목록은 한 번 더 부를 뿐이다(성능). 여기 더할 때는 «이 쓰기가 /me를 바꿀 수 없다»를 한 줄로 적는다.
+ */
+const ME_INVALIDATION_EXEMPT_WRITES: readonly RegExp[] = [
+  // 채팅 읽음 표시(/api/chats·/api/conversations 두 prefix) — 대화 참여자의 읽음 위치만 바꾼다.
+  /^\/api\/(?:chats|conversations)\/[^/]+\/read$/,
+];
+
+export function isMeInvalidatingWrite(path: string, method: string): boolean {
+  const m = method.toUpperCase();
+  if (m === 'GET' || m === 'HEAD' || !path.startsWith('/api/')) return false;
+  return !ME_INVALIDATION_EXEMPT_WRITES.some((re) => re.test(path));
+}
+
+/**
  * same-origin `/api/*` 요청에 `X-Project-Id`+`X-Org-Id`(탭 effective project/org)를
  * 주입하는 단일 chokepoint. 호출부 전수 마이그레이션 대신 window.fetch 1점 패치 —
  * raw fetch 호출까지 빠짐없이 커버.
@@ -105,7 +131,32 @@ export function installProjectHeaderInterceptor(): void {
   interceptorInstalled = true;
   const originalFetch = window.fetch.bind(window);
 
+  // story #4184(PR #4565 까디르 재QA · PO 처방) — /api/me 결과 재사용(me-client)의 쓰기 무효화도 이 관문 한 곳에서.
+  // 예전엔 fetchWithAuth의 쓰기만 무효화해, 전역 fetch로 하는 쓰기(2FA 켜기·프로젝트 이름 변경·전환·org 자동 동기 등
+  // ~200곳)는 캐시를 안 버렸다(2FA 켠 뒤 30초 안 «꺼짐»). 이 인터셉터는 raw fetch·fetchWithAuth·Request 입력 모두를
+  // 지나므로 호출부를 옮기지 않고 부류를 닫는다. same-origin `/api/` 쓰기(GET·HEAD 아님)는 **시작**에 무효화(진행 중
+  // /me 떼기·세대 올림)하고 **완료**(성공·실패 무관)에 한 번 더 — 쓰기 도중 출발한 /me 응답이 캐시로 남지 않게.
   window.fetch = function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    let isApiWrite = false;
+    try {
+      const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+      const absolute = /^https?:\/\//.test(rawUrl);
+      const writeSameOrigin = !absolute || new URL(rawUrl).origin === window.location.origin;
+      const writePath = absolute ? new URL(rawUrl).pathname : rawUrl.split('?')[0];
+      isApiWrite = writeSameOrigin && isMeInvalidatingWrite(writePath, method);
+    } catch {
+      isApiWrite = false;
+    }
+    if (!isApiWrite) return injectHeaders(input, init);
+    invalidateMeCache();
+    const settle = () => { invalidateMeCache(); };
+    const pending = injectHeaders(input, init);
+    pending.then(settle, settle);
+    return pending;
+  };
+
+  function injectHeaders(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     try {
       if (typeof input === 'string' || input instanceof URL) {
         const url = typeof input === 'string' ? input : input.href;
@@ -131,7 +182,7 @@ export function installProjectHeaderInterceptor(): void {
       // 인터셉터 실패는 원본 fetch 로 폴백 — 네트워크 동작을 절대 깨지 않는다.
     }
     return originalFetch(input, init);
-  };
+  }
 }
 
 /**
@@ -159,6 +210,21 @@ export function installProjectHeaderInterceptor(): void {
  * 서버 렌더와 동일한 값(경로/URL/serverProjectId 기준)을 내도록 강제한다 — 안 그러면 SSR과 첫
  * CSR 사이에 값이 갈려 하이드레이션 직후 예상 밖 URL 정규화(router.replace)가 발동할 수 있다.
  */
+/**
+ * story #4231 다음 조각(래칫 맹점 ① · PO 15:10Z) — 이 탭이 들고 있는 프로젝트 후보를 **셸과 같은 순서**로: URL `?p=` → sessionStorage
+ * (`sprintable_tab_project_id` · 셸이 effective를 쓴 값 · 하이드레이션 뒤에만). 셸(resolveEffectiveProjectId)은 여기에 accessibleIds 필터를
+ * 얹고, 셸 밖(useFlatHref)은 필터 없이 첫 후보를 쓴다(착지 셸이 다시 검증하니 낡은 값이면 오늘과 같은 정규화로 떨어질 뿐). 판정 사본 0.
+ */
+export function tabProjectCandidates(urlProjectId: string | null, hydrated: boolean): string[] {
+  const out: string[] = [];
+  if (urlProjectId) out.push(urlProjectId);
+  if (hydrated && typeof window !== 'undefined') {
+    const stored = window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY);
+    if (stored) out.push(stored);
+  }
+  return out;
+}
+
 export function resolveEffectiveProjectId(
   urlProjectId: string | null,
   serverProjectId: string | undefined,
@@ -167,11 +233,8 @@ export function resolveEffectiveProjectId(
   pathProjectId?: string,
 ): string | undefined {
   if (pathProjectId) return pathProjectId;
-  if (urlProjectId && accessibleIds.has(urlProjectId)) return urlProjectId;
-  if (hydrated && typeof window !== 'undefined') {
-    const stored = window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY);
-    if (stored && accessibleIds.has(stored)) return stored;
-  }
+  const fromTab = tabProjectCandidates(urlProjectId, hydrated).find((id) => accessibleIds.has(id));
+  if (fromTab) return fromTab;
   // story #2490 — 이전엔 이 마지막 폴백(serverProjectId, me.project_id=쿠키/JWT 유래)만
   // accessibleIds 체크가 없었다. stale한 값이 비멤버 프로젝트를 가리키면 무검증으로
   // 채택돼(fire #2486 재현, 퍼펫티어 실측) X-Project-Id로 실려 project-gated 엔드포인트를

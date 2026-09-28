@@ -5,11 +5,23 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
+import { guardEscClose } from "@/lib/inner-layer-esc"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
-function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+// [SID:4367] 한 Esc = 한 층 — 안쪽 층이 쓴 Esc(preventDefault)면 이 창의 Esc 닫기를 취소한다(inner-layer-esc.ts).
+// [SID:4369] 유나 규칙 — 조합 중 Esc · 글 있는 여러 줄 칸의 첫 Esc도 닫지 않는다(칸에서만 빠져나옴 · 둘째 Esc = 닫힘).
+function Dialog({ onOpenChange, ...props }: DialogPrimitive.Root.Props) {
+  return (
+    <DialogPrimitive.Root
+      data-slot="dialog"
+      onOpenChange={(open, details) => {
+        if (guardEscClose(open, details)) return;
+        onOpenChange?.(open, details);
+      }}
+      {...props}
+    />
+  )
 }
 
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
@@ -55,13 +67,18 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay />
-      <DialogPrimitive.Popup
+      <DialogPrimitive.Popup data-modal-popup=""
         data-slot="dialog-content"
+        // story #4210(유나 390 실측) — 닫기(X)가 떠 있으면 머리 줄이 그 자리를 비우도록 표지(DialogHeader · DialogTitle).
+        data-close-button={showCloseButton ? "" : undefined}
         // story #2969 §2 PR-4(doc proofline-system-layer-2969) — 크리스프(rounded-xl→
         // rounded-lg)·--elev-overlay 적용·hairline을 proof-line-strong으로 정련(§1.2 "항상
         // elev-overlay+hairline 동반").
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg bg-popover p-4 text-sm text-popover-foreground shadow-[var(--elev-overlay)] ring-1 ring-proof-line-strong duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // story #4210 — grid-cols-[minmax(0,1fr)]: 열 폭이 자식의 최소 내용 폭(예: 9단계 스테퍼 1040px)을 따라 늘어
+          // 390에서 다이얼로그를 가로로 넘기고 제목을 화면 밖으로 밀던 것 — 열을 다이얼로그 폭 안에 묶고 넓은 자식은
+          // 제 칸에서 스크롤. group/dialog는 머리 줄(DialogHeader)·DialogTitle이 닫기 버튼 유무를 읽는 데 쓴다.
+          "group/dialog fixed top-1/2 left-1/2 z-50 grid grid-cols-[minmax(0,1fr)] max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg bg-popover p-4 text-sm text-popover-foreground shadow-[var(--elev-overlay)] ring-1 ring-proof-line-strong duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
@@ -92,7 +109,10 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      // story #4210 후속(배포 20 라이브 · 1440 X가 «Apply to project» 위에 겹침 · 유나 규격) — 닫기(X)가 있으면 **머리 줄 전체**
+      // (제목 · 머리 액션 · 배지 · 라벨)가 X 자리를 비운다. 예전엔 DialogTitle만 비켜서 같은 줄의 버튼·배지·라벨이 X 밑에 깔렸다.
+      // 첫 자식 전체에 거는 규칙은 쓰지 않는다 — 내용 전체를 한 래퍼로 감싼 다이얼로그(레시피 상세)는 본문까지 32px을 잃는다(PO 리뷰).
+      className={cn("flex flex-col gap-2 group-data-[close-button]/dialog:pr-8", className)}
       {...props}
     />
   )
@@ -106,6 +126,7 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
 }) {
+  const t = useTranslations("common") // story #4359 — 하단 닫기 버튼 글자(예전 영어 고정)
   return (
     <div
       data-slot="dialog-footer"
@@ -118,7 +139,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          {t("close")}
         </DialogPrimitive.Close>
       )}
     </div>
@@ -130,7 +151,9 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
     <DialogPrimitive.Title
       data-slot="dialog-title"
       className={cn(
-        "font-heading text-base leading-none font-medium",
+        // story #4210 — 닫기(X, absolute top-2 right-2 · 28px)가 떠 있을 때만 제목 오른쪽을 비워 긴 제목(en)이 X 밑으로
+        // 들어가지 않게. 닫기 버튼이 없는 다이얼로그는 제목 폭 그대로. DialogHeader 안이면 머리 줄이 이미 비우므로 제목은 안 비운다(이중 32px 방지).
+        "font-heading text-base leading-none font-medium group-data-[close-button]/dialog:not-in-data-[slot=dialog-header]:pr-8",
         className
       )}
       {...props}

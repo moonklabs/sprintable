@@ -208,4 +208,15 @@ describe('EditCanvas — 스펙 핀 저작 왕복 (story 7fe16274, doc artifact-
     await act(async () => { await Promise.resolve(); });
     expect(container.textContent).toContain('핀을 놓을 지점을 클릭해요.');
   });
+
+  // [SID:4379] 핀 도구는 켜고 끄는 것 — 색으로만 보이던 켜짐을 보조기기에도(aria-pressed).
+  it('스펙 핀 도구 단추는 aria-pressed — 누르면 true · 다시 누르면 false([SID:4379])', async () => {
+    await mount();
+    const toolButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '스펙 핀 추가')!;
+    expect(toolButton().getAttribute('aria-pressed')).toBe('false');
+    await act(async () => { toolButton().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(toolButton().getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { toolButton().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(toolButton().getAttribute('aria-pressed')).toBe('false');
+  });
 });

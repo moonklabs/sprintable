@@ -49,6 +49,7 @@ import {
   yearlyMonthlyEquivalentKrw,
   type TierId,
 } from './pricing-data';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface PlatformSettings {
   billing_price_public: boolean;
@@ -79,6 +80,7 @@ function toTierId(raw: string | undefined): TierId {
 }
 
 export function BillingTab({ orgId }: { orgId: string }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('pricingPlans');
   const tc = useTranslations('common');
   const router = useRouter();
@@ -132,7 +134,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
     const checkoutParam = searchParams.get('checkout');
     if (checkoutParam == null) return;
 
-    const clearQuery = () => router.replace('/settings?tab=billing');
+    const clearQuery = () => router.replace(flatHref('/settings?tab=billing'));
 
     if (checkoutParam === 'fail') {
       setCheckoutOutcome({ kind: 'widgetFailed' });

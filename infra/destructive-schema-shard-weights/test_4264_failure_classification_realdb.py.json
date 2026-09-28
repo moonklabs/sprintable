@@ -1,0 +1,1 @@
+{"file": "tests/test_4264_failure_classification_realdb.py", "sec": 26.0, "source": "story #4283(AC4 · PO 2026-09-28 07:27Z) — CI 실측 중앙값으로 갱신(등재 5.0 → 26.0s): 최근 성공 PR run 40개(2026-09-27 22:14Z~09-28 06:33Z) shard-durations 산출물 · 표본 40 · 최대 43.0s. 옛 등재값이 중앙값÷1.25보다 작아 판정선이 실측보다 좁았다(선 60.0 → 65.0s)."}

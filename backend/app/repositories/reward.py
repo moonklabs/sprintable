@@ -22,7 +22,7 @@ class RewardRepository:
         )
         if member_id is not None:
             q = q.where(RewardLedger.member_id == member_id)
-        q = q.order_by(RewardLedger.created_at.desc())
+        q = q.order_by(RewardLedger.created_at.desc(), RewardLedger.id.desc())
         result = await self.session.execute(q)
         return list(result.scalars().all())
 

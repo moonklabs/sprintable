@@ -1,8 +1,11 @@
+import { RouteTopBarFallback } from '@/components/nav/flat-tab-top-bar';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Loading() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* story #4326 — 불러오는 동안 상단바 제목 · 칩이 비지 않게(경로 → 제목 표). */}
+      <RouteTopBarFallback route="channel" />
       <div className="border-b border-border px-4 py-3">
         <Skeleton className="h-6 w-40" />
       </div>

@@ -12,6 +12,9 @@ import {
   LANGUAGE_LABELS,
 } from '../lib/shiki-highlighter';
 import { renderMermaid } from '../lib/mermaid-renderer';
+import { copyTextSafely } from '@/lib/clipboard';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 // ─── Mermaid Block ───────────────────────────────────────────────────────────
 
@@ -96,13 +99,26 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
 
 // ─── Shiki Code Block View ────────────────────────────────────────────────────
 
-function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
+function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeViewProps) {
   // story #3776(1층B) — "복사됨"/"복사", docs ns의 기존 codeCopied/codeCopy 키 재사용.
   const t = useTranslations('docs');
   const [copied, setCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 실패해도 무조건 setCopied
+  // (true)였다. 코드 자체는 이 블록에 이미 선택 가능하게 떠 있다.
+  const [copyFailed, setCopyFailed] = useState(false);
   const [highlightedHtml, setHighlightedHtml] = useState('');
   const [showLangMenu, setShowLangMenu] = useState(false);
   const langMenuRef = useRef<HTMLDivElement>(null);
+  const langButtonRef = useRef<HTMLButtonElement>(null);
+  const langListClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
+  // story #4364 — 목록의 키보드 길 · ARIA는 공용 훅 하나(4349): Esc = 닫고 이 블록 트리거로 · 열면 첫 항목 초점 · ↑↓ ·
+  // 트리거 aria-haspopup/expanded/controls · 목록 role=menu.
+  const langListRef = useRef<HTMLDivElement | null>(null);
+  const setLangList = useCallback((el: HTMLDivElement | null) => { langListRef.current = el; langListClampRef(el); }, [langListClampRef]);
+  const closeLangMenu = useCallback(() => setShowLangMenu(false), []);
+  const langKeys = usePortalMenuKeys({
+    open: showLangMenu, onClose: closeLangMenu, popoverRef: langListRef, triggerRef: langButtonRef, kind: 'menu',
+  });
 
   const language = (node.attrs as { language?: string }).language ?? null;
   const resolvedLang = resolveLanguage(language);
@@ -129,19 +145,28 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
   }, [code, resolvedLang]);
 
   const handleCopy = useCallback(async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(code);
-      }
-    } catch { /* clipboard unavailable */ }
+    const result = await copyTextSafely(code);
+    if (!result.ok) {
+      setCopyFailed(true);
+      window.setTimeout(() => setCopyFailed(false), 1600);
+      return;
+    }
+    setCopyFailed(false);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }, [code]);
 
   const handleLangSelect = useCallback((lang: string) => {
-    editor?.commands.updateAttributes('codeBlock', { language: lang });
+    // story #4360 — 이 고르개가 붙은 블록(NodeView 자기 위치)의 언어를 바꾼다. 예전 `editor.commands.updateAttributes('codeBlock', …)`는
+    // **지금 선택 영역**의 코드 블록을 바꿔, 커서가 다른 코드 블록에 있으면 그 블록의 언어가 바뀌었다.
+    // 고른 선택지는 목록과 함께 사라진다 — 초점이 body로 떨어지지 않게 이 블록의 언어 버튼으로 돌려놓는다(키보드로 이어서 쓸 수 있게).
+    // 단 초점이 아직 이 고르개 안(또는 body · 없음)일 때만 — 사용자가 그 사이 딴 데로 옮긴 초점은 빼앗지 않는다(까디르 09-27).
+    const active = document.activeElement;
+    const focusStillHere = !active || active === document.body || (langMenuRef.current?.contains(active) ?? false);
+    updateAttributes({ language: lang });
     setShowLangMenu(false);
-  }, [editor]);
+    if (focusStillHere) langButtonRef.current?.focus();
+  }, [updateAttributes]);
 
   useEffect(() => {
     if (!showLangMenu) return;
@@ -162,8 +187,11 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
           {/* Language dropdown */}
           <div ref={langMenuRef} className="relative" contentEditable={false}>
             <button
+              ref={langButtonRef}
               type="button"
               onClick={() => isEditable && setShowLangMenu((v) => !v)}
+              onKeyDown={langKeys.onTriggerKeyDown}
+              {...(isEditable ? langKeys.triggerProps : {})}
               className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition ${
                 isEditable
                   ? 'text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer'
@@ -174,11 +202,13 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
               {isEditable && <ChevronDown className="size-3" />}
             </button>
             {showLangMenu && (
-              <div className="focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 overflow-y-auto rounded-xl border border-border bg-popover py-1">
+              <div ref={setLangList} onKeyDown={langKeys.onPopoverKeyDown} {...langKeys.popoverProps} data-dropdown-panel="code-lang" className="focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-border bg-popover py-1">
                 {SUPPORTED_LANGUAGES.map((lang) => (
                   <button
                     key={lang}
                     type="button"
+                    role="menuitemradio"
+                    aria-checked={lang === language}
                     onClick={() => handleLangSelect(lang)}
                     className={`flex w-full items-center px-3 py-1.5 text-left text-xs transition hover:bg-accent ${
                       lang === language ? 'text-primary' : 'text-foreground'
@@ -198,7 +228,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
             onClick={handleCopy}
             className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
           >
-            {copied ? t('codeCopied') : t('codeCopy')}
+            {copyFailed ? t('codeCopyFailed') : copied ? t('codeCopied') : t('codeCopy')}
           </button>
         </div>
 

@@ -1,15 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check, Loader2 } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { memberRowLabels } from '@/lib/member-display';
 
 interface OrgAgent {
   id: string;
   name: string;
+  // story #3997 CHANGES(카디르 「고르는 자리」 전수, 페드루 확定 2026-09-17) — 「시스템
+  // 발행」 행 자체를 매트릭스에서 제외하는 데 쓴다(예약 멤버의 프로젝트 접근을 회수하면
+  // 자동 발행이 막힐 수 있어, 토글이 아니라 행 제외 — 서버 측 원자적 거부는 story #3999).
+  runtime_type?: string | null;
 }
 
 interface ProjectOption {
@@ -54,6 +60,10 @@ export function AccessMatrixTab() {
   const ta = useTranslations('agents');
 
   const [agents, setAgents] = useState<OrgAgent[]>([]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const tc = useTranslations('common');
+  const rowLabels = useMemo(() => memberRowLabels(agents, tc, () => ''), [agents, tc]);
+
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   // (agent_member_id, project_id) → record_id. 없으면 차단.
   const [grantMap, setGrantMap] = useState<Record<string, string>>({});
@@ -82,7 +92,7 @@ export function AccessMatrixTab() {
       const projectsJson = await projectsRes.json() as { data?: ProjectOption[] };
       const matrixJson = await matrixRes.json() as { data?: AccessMatrixRow[] };
 
-      setAgents(agentsJson.data ?? []);
+      setAgents((agentsJson.data ?? []).filter((a) => !isSystemPublisher(a.runtime_type)));
       setProjects((projectsJson.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
 
       const map: Record<string, string> = {};
@@ -214,7 +224,7 @@ export function AccessMatrixTab() {
                   {agents.map((agent) => (
                     <tr key={agent.id} className="border-b border-border last:border-b-0">
                       <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium text-foreground">
-                        {agent.name}
+                        {rowLabels.get(agent.id)}
                       </td>
                       {projects.map((project) => {
                         const k = key(agent.id, project.id);

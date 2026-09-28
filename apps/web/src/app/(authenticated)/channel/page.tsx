@@ -8,8 +8,11 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { ChannelTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 
 interface ChannelMsg {
   id: string;
@@ -169,18 +172,18 @@ export default function ChannelPage() {
   return (
     <>
       <TopBarSlot
-        title={
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">{t('title')}</span>
-            <span className={`h-2 w-2 rounded-full ${statusDot}`} title={wsStatus} />
-          </div>
-        }
+        title={<ChannelTopBarTitle statusDot={{ className: statusDot, label: wsStatus }} />}
         showContextChip
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      {/* story #4130 — 아래 입력 영역(:241)이 하단 고정 툴바 역할이라, 로컬 min-h-0/
+          flex-1/overflow-hidden 경계를 걷어내고(셸의 단일 스크롤러 :199가 메시지 목록을
+          스크롤) 입력 영역을 sticky bottom-0로 바꾼다(#4125가 이미 증명한 sticky 메커니즘
+          재사용 — 위쪽 대신 아래쪽 오프셋). scrollIntoView() 기반 자동 스크롤(:116)은 실제
+          스크롤 컨테이너가 바뀌어도 DOM API가 스스로 찾아가므로 영향 없음. */}
+      <div className="flex flex-col bg-background">
         {/* 메시지 목록 */}
-        <section className="flex-1 overflow-y-auto px-4 py-4">
+        <section className="px-4 py-4">
           {messages.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {wsStatus === 'connecting' ? t('connecting') : t('empty')}
@@ -219,7 +222,8 @@ export default function ChannelPage() {
                     <button
                       type="button"
                       onClick={() => setReplyTo(msg.id)}
-                      className={`absolute ${isOwn ? '-left-6' : '-right-6'} top-1 hidden text-muted-foreground group-hover:block`}
+                      // story #4345 — `hidden`(탭 순서에서 빠짐) → 호버 없는 기기에선 늘 · 마우스는 호버 · 초점에서(HOVER_REVEAL).
+                      className={`absolute ${isOwn ? '-left-6' : '-right-6'} top-0 rounded-sm text-muted-foreground ${HOVER_REVEAL_HIT} ${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
                       title={t('reply')}
                     >
                       ↩
@@ -238,13 +242,13 @@ export default function ChannelPage() {
         </section>
 
         {/* 입력 영역 */}
-        <div className="border-t border-border bg-background px-4 pb-safe-4 pb-4 pt-3">
+        <div className="sticky bottom-0 border-t border-border bg-background px-4 pb-safe-4 pb-4 pt-3">
           {replyTo && (
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
               <span>
                 ↩{' '}
                 {/* eslint-disable-next-line react-hooks/refs */}
-                {(msgMapRef.current.get(replyTo)?.content ?? '').slice(0, 40) || t('attachment')}
+                {toPlainPreview(msgMapRef.current.get(replyTo)?.content ?? '').slice(0, 40) || t('attachment')}
               </span>
               <button
                 type="button"

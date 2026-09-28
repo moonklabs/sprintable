@@ -12,6 +12,7 @@ from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.repositories.webhook_config import WebhookConfigRepository
 from app.schemas.webhook_config import UpsertWebhookConfig, WebhookConfigResponse
+from app.services.system_publisher_guard import assert_member_id_not_system_publisher
 
 router = APIRouter(prefix="/api/v2/webhooks", tags=["webhooks", "Organization"])
 
@@ -120,7 +121,15 @@ async def list_webhook_configs(
                     detail="Admin role required to view another member's webhook config",
                 )
         scope_member_id = target_member_id
-    items = await repo.list(member_id=scope_member_id, project_id=project_id)
+    # story #4350 PR 3(까디르 MEDIUM · SEC-S8) — 멤버 범위만 보고 프로젝트 접근은 안 봤다(접근 잃은 프로젝트의 웹훅 URL이 계속 보임).
+    # 명시한 project_id가 접근 불가면 404(없는 프로젝트와 같게) · 목록은 caller의 접근 가능 프로젝트 + org 수준만.
+    from app.services.project_auth import accessible_project_ids_in_org, require_project_access
+
+    caller_uid = uuid.UUID(auth.user_id)
+    if project_id is not None:
+        await require_project_access(session, caller_uid, project_id, org_id, not_found_detail="Project not found")
+    accessible = await accessible_project_ids_in_org(session, caller_uid, org_id)
+    items = await repo.list(member_id=scope_member_id, project_id=project_id, project_ids=accessible)
     return [WebhookConfigResponse.model_validate(i) for i in items]
 
 
@@ -153,6 +162,16 @@ async def upsert_webhook_config(
                 status_code=403,
                 detail="Admin role required to configure another member's webhook",
             )
+
+    # story #3999 — 예약 멤버(「시스템 발행」) 대상 webhook 설정을 원자적으로 거부.
+    await assert_member_id_not_system_publisher(session, target_member_id)
+
+    # story #4350 PR 3(까디르 P1) — 웹훅은 프로젝트 범위: 접근 못 하는 프로젝트를 걸어 만들면(또는 그 프로젝트로 바꾸면) 그 프로젝트
+    # 이벤트가 내 URL로 갈 수 있었다. 저장 전에 목록과 같은 확인 · 같은 404(없는 프로젝트와 같은 모양). org 수준(project_id 없음)은 그대로.
+    if body.project_id is not None:
+        from app.services.project_auth import require_project_access
+
+        await require_project_access(session, uuid.UUID(auth.user_id), body.project_id, org_id, not_found_detail="Project not found")
 
     config = await repo.upsert(
         member_id=target_member_id,

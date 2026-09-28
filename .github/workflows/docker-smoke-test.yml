@@ -38,9 +38,16 @@ jobs:
           push: false
           load: true
           tags: sprintable-ee:smoke
+          # story #3947(페드루 PO CHANGES, 카디르 재현) — NEXT_PUBLIC_APP_URL 없이 이
+          # 이미지를 실제로 실행해 create-organization-dialog.tsx/onboarding-form.tsx가
+          # 렌더되면 apps/web/src/lib/public-app-host.ts의 런타임 프로덕션 가드(smoke 컨테이너도
+          # NODE_ENV=production)가 던진다 — smoke는 SPRINTABLE_DEPLOY_BUILD를 안 심으니
+          # next.config.ts의 빌드 가드는 안 걸리지만, 이 런타임 가드는 값 존재 자체로만
+          # 판단하므로 placeholder라도 채워야 한다.
           build-args: |
             LICENSE_CONSENT=agreed
             NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
             NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-placeholder
+            NEXT_PUBLIC_APP_URL=http://localhost:3108
           cache-from: type=gha
           cache-to: type=gha,mode=max

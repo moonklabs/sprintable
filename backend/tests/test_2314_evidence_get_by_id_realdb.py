@@ -100,7 +100,7 @@ async def _seed(session):
     return {
         "org_id": org.id, "other_org_id": other_org.id,
         "agent_id": agent.id, "stranger_id": stranger.id, "cross_org_agent_id": cross_org_agent.id,
-        "story_id": story.id, "task_id": task.id,
+        "story_id": story.id, "task_id": task.id, "project_id": project.id,
         "story_evidence_id": story_evidence.id, "task_evidence_id": task_evidence.id,
     }
 
@@ -151,6 +151,8 @@ async def test_get_story_evidence_200_with_resolved_story_id():
             assert body["work_item_type"] == "story"
             assert body["ref"] == "https://example.com/story-evidence"
             assert body["resolved_story_id"] == str(seeded["story_id"])
+            # story #4231 다음 조각 — 접근 판정에 쓴 증거 자기 프로젝트 id를 응답에도 싣는다(slug 없는 프로젝트의 FE 폴백 `?p=`).
+            assert body["project_id"] == str(seeded["project_id"])
             # AC5(MCP mention wiring) 전제조건 — reference_token이 실제로 실린다(제목이 없어
             # ref를 대신 쓴다). _resolve_mention_content(chat.py)가 이 필드를 그대로 읽는다.
             # 기대값은 실제 builder(build_reference_token)로 계산 — escape 규칙을 이 테스트에서
@@ -298,6 +300,44 @@ async def test_get_evidence_mutation_self_check_gate_actually_blocks():
             assert resp2.status_code == 404, resp2.text
         finally:
             await client2.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_project_id_only_on_detail_not_on_post_or_list():
+    """까디르 codex 4612 델타 P2 — project_id는 계산하는 단건 GET에만. POST · 목록 GET 응답엔 키 자체가 없다
+    (공용 모델에 두면 계산 안 한 `"project_id": null`이 «프로젝트 없음»처럼 새 나간다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+
+        await _setup_app(app, Session, seeded["agent_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            created = await client.post("/api/v2/evidence", json={
+                "work_item_id": str(seeded["story_id"]), "work_item_type": "story",
+                "type": "url", "ref": "https://example.com/new-evidence",
+            })
+            assert created.status_code == 201, created.text
+            assert "project_id" not in created.json()
+
+            listed = await client.get("/api/v2/evidence", params={
+                "work_item_id": str(seeded["story_id"]), "work_item_type": "story",
+            })
+            assert listed.status_code == 200, listed.text
+            rows = listed.json()
+            assert rows, "대조: 목록이 비어 있으면 키 부재가 공허하게 통과한다"
+            assert all("project_id" not in r for r in rows)
+
+            detail = await client.get(f"/api/v2/evidence/{seeded['story_evidence_id']}")
+            assert detail.json()["project_id"] == str(seeded["project_id"])  # 대조: 단건엔 있다
+        finally:
+            await client.aclose()
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

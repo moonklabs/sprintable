@@ -3,6 +3,7 @@ import {
   buildSlashMenuCategories,
   calculatePopupPosition,
   createSlashCommandExtension,
+  matchesSlashQuery,
   type SlashMenuStrings,
 } from './slash-command';
 import enMessages from '../../../../messages/en.json';
@@ -119,10 +120,11 @@ describe('calculatePopupPosition', () => {
 // This helper mirrors the exact same flattening so the test exercises the real shape.
 interface RawSlashMenuMessages {
   categories: SlashMenuStrings['categories'];
-  items: Record<keyof SlashMenuStrings['items'], { description: string }>;
+  items: Record<keyof SlashMenuStrings['items'], { title: string; description: string; searchAlias?: string }>;
   embedPrompt: string;
   mermaidDefault: { start: string; end: string };
   toggleDefaultTitle: string;
+  listLabel: string;
 }
 
 function stringsFromMessages(messages: { docs: { slashMenu: RawSlashMenuMessages } }): SlashMenuStrings {
@@ -130,12 +132,18 @@ function stringsFromMessages(messages: { docs: { slashMenu: RawSlashMenuMessages
   const items = Object.fromEntries(
     Object.entries(raw.items).map(([key, value]) => [key, value.description]),
   ) as SlashMenuStrings['items'];
+  const titles = Object.fromEntries(
+    Object.entries(raw.items).map(([key, value]) => [key, value.title]),
+  ) as SlashMenuStrings['titles'];
   return {
     categories: raw.categories,
+    titles,
     items,
     embedPrompt: raw.embedPrompt,
     mermaidDefault: raw.mermaidDefault,
     toggleDefaultTitle: raw.toggleDefaultTitle,
+    columnsSearchAlias: raw.items.columns.searchAlias ?? '',
+    listLabel: raw.listLabel,
   };
 }
 
@@ -148,13 +156,12 @@ const koCategories = buildSlashMenuCategories(koStrings);
 
 // story #3782 — 이전엔 defaultSlashItems(module-scope ko 고정 상수, 자기 테스트 외
 // 소비처 0)의 항목 형(title/icon/command)을 직접 쟀다. 그 상수를 걷으며 같은 불변식을
-// 라이브 경로의 출력(buildSlashMenuCategories)으로 옮긴다 — title은 로케일 무관 검색
-// 키라 en/ko 어느 쪽으로 재도 동일(아래 'item titles stay identical' 테스트가 그 불변식
-// 자체를 고정).
+// 라이브 경로의 출력(buildSlashMenuCategories)으로 옮긴다.
+// story #4377 — title은 이제 로케일(한국어 화면에 «Heading 1» 0). 로케일 무관 고정은 id · 영어 별칭(aliases)으로 옮겼다.
 describe('buildSlashMenuCategories(strings) — item shape (story #3782, defaultSlashItems 후속)', () => {
   const items = enCategories.flatMap((c) => c.items);
 
-  it('includes expected block types (title = locale-invariant search key)', () => {
+  it('includes expected block types (EN titles)', () => {
     const titles = items.map((i) => i.title);
     expect(titles).toContain('Heading 1');
     expect(titles).toContain('Bullet List');
@@ -191,10 +198,14 @@ describe('buildSlashMenuCategories — EN strings carry no Korean leakage', () =
   // story #3782 — 이전엔 module-scope 상수 slashMenuCategories(ko 고정)와 비교했으나 그
   // 상수 자체가 테스트 전용 죽은 export라 걷었다. title이 로케일 무관 검색 키라는 게 본래
   // 불변식이므로, en/ko 두 로케일 결과를 서로 비교해도 같은 불변식을 고정할 수 있다.
-  it('item titles stay identical across locales (locale-invariant search key)', () => {
-    const enTitles = enCategories.flatMap((c) => c.items.map((i) => i.title));
-    const koTitles = koCategories.flatMap((c) => c.items.map((i) => i.title));
-    expect(enTitles).toEqual(koTitles);
+  // story #4377 — 예전 불변식(«제목은 로케일 무관 영어 검색 키»)을 뒤집는다: 제목은 로케일, 고정은 id · 영어 별칭.
+  it('item ids and English aliases stay identical across locales; EN title = the first alias (the rest are search-only variants)', () => {
+    const en = enCategories.flatMap((c) => c.items);
+    const ko = koCategories.flatMap((c) => c.items);
+    expect(ko.map((i) => [i.id, i.aliases[0]])).toEqual(en.map((i) => [i.id, i.aliases[0]]));
+    for (const item of en) expect(item.aliases).toEqual([item.title]);
+    // story #4383 — 찾기 전용 다른 표기는 ko 칼럼의 «컬럼» 하나뿐(별칭이 조용히 늘지 않게 · en은 빈 값이라 없음).
+    expect(ko.filter((i) => i.aliases.length > 1).map((i) => [i.id, i.aliases.slice(1)])).toEqual([['columns', ['컬럼']]]);
   });
 
   it('produces the same category/item counts across locales', () => {
@@ -207,12 +218,15 @@ describe('buildSlashMenuCategories — EN strings carry no Korean leakage', () =
 // 비교했으나 그 상수 자체가 테스트 전용 죽은 export라 걷었다. 아래 배열은 그 상수가 갖고
 // 있던 정확한 값(2026-09-10 삭제 직전 실측, 카테고리·항목 순서 그대로)을 이 테스트에 그대로
 // 얼려 둔 것 — ko.json이 조용히 다른 뜻으로 바뀌는 것(오타·의미변형)을 계속 잡아낸다.
+// story #4377(유나 design 표 · PR 4768 comment 5863735875) — 제목이 로케일이 되며 제목을 되풀이하던 설명 다섯(체크리스트 · 코드 블록 ·
+// 강조 박스 · 구분선 · 다이어그램 삽입)을 뜻을 풀어 쓴 문장으로 바꿨다(의도한 변경 — 여기서 함께 얼린다).
+// story #4383 — «칼럼/컬럼» 두 표기를 «칼럼» 하나로(외래어 표기법 · 보드와 같은 말) · 다단 설명도 «2단 · 3단으로 나란히 배치»(의도한 변경).
 const KO_DESCRIPTIONS_FROZEN_AT_MIGRATION = [
   '큰 제목', '중간 제목', '작은 제목',
-  '순서 없는 목록', '순서 있는 목록', '체크리스트',
-  '코드 블록', '인용구', '강조 박스', '표 삽입',
-  '이미지 삽입', '파일 첨부', '외부 URL 임베드', '다이어그램 삽입',
-  '2단/3단 컬럼 레이아웃', 'LaTeX 블록 수식', 'LaTeX 인라인 수식', '접기/펼치기 블록', '다른 문서 임베드', '구분선',
+  '순서 없는 목록', '순서 있는 목록', '완료 표시를 할 수 있는 목록',
+  '언어별 색 강조가 되는 코드', '인용구', '눈에 띄게 따로 묶은 안내 글', '표 삽입',
+  '이미지 삽입', '파일 첨부', '외부 URL 임베드', '코드로 그리는 순서도 · 흐름도',
+  '2단 · 3단으로 나란히 배치', 'LaTeX 블록 수식', 'LaTeX 인라인 수식', '접기/펼치기 블록', '다른 문서 임베드', '내용 사이를 가르는 가로줄',
 ];
 
 describe('buildSlashMenuCategories — KO strings still carry the original Korean copy', () => {
@@ -233,5 +247,56 @@ describe('createSlashCommandExtension(strings)', () => {
     const options = ext.options as { suggestion: { items: (arg: { query: string }) => { title: string }[] } };
     const matches = options.suggestion.items({ query: 'heading' });
     expect(matches.map((m) => m.title)).toEqual(['Heading 1', 'Heading 2', 'Heading 3']);
+  });
+
+  // story #4377 AC2 — 한국어 화면: 한국어 제목과 영어 별칭 둘 다로 걸린다(설명으로는 안 거른다).
+  it('KO: «/제목» · «/heading» · «/임베드» · «/page» all match (localized title or English alias)', () => {
+    const ext = createSlashCommandExtension(koStrings);
+    const options = ext.options as { suggestion: { items: (arg: { query: string }) => { id: string }[] } };
+    const ids = (query: string) => options.suggestion.items({ query }).map((m) => m.id);
+    expect(ids('제목')).toEqual(['heading1', 'heading2', 'heading3']);
+    expect(ids('heading')).toEqual(['heading1', 'heading2', 'heading3']);
+    expect(ids('임베드')).toEqual(['embed', 'pageEmbed']);
+    expect(ids('page')).toEqual(['pageEmbed']);
+    expect(ids('HEAD')).toEqual(['heading1', 'heading2', 'heading3']);  // 대소문자 무시
+  });
+});
+
+// story #4377 AC1 — 한국어 화면에 영어 제목 0(예전 slash-command.tsx 영어 리터럴 20개).
+describe('buildSlashMenuCategories — KO titles are Korean', () => {
+  it('every KO item title has Hangul and differs from its English alias', () => {
+    const ko = koCategories.flatMap((c) => c.items);
+    expect(ko).toHaveLength(20);
+    for (const item of ko) {
+      expect(item.title).toMatch(KOREAN_RE);
+      expect(item.aliases).not.toContain(item.title);
+    }
+  });
+});
+
+// story #4383 — 같은 말이 보드 «칼럼» · 문서 편집기 «컬럼» 두 표기였다 → «칼럼» 하나(외래어 표기법). 한국어로 «/칼럼»을 쳐도,
+// 영어로 «/column»을 쳐도 같은 다단 항목이 걸린다. ko.json 사람용 문장에 «컬럼»이 다시 들어오면 잡는다.
+describe('«칼럼» 한 표기(story #4383)', () => {
+  const columnsItem = () => koCategories.flatMap((c) => c.items).find((i) => i.id === 'columns')!;
+
+  it('다단 항목 제목 · 편집기 칼럼 이름 = «칼럼»', () => {
+    expect(columnsItem().title).toBe('칼럼');
+    expect((koMessages as unknown as { docs: { columnsLabel: string } }).docs.columnsLabel).toBe('칼럼');
+  });
+
+  it('«/칼럼» · «/컬럼» · «/column» 셋 다 다단 항목에 걸린다(«컬럼»은 찾기 전용 · 화면 표기는 «칼럼» 하나)', () => {
+    expect(matchesSlashQuery(columnsItem(), '칼럼')).toBe(true);
+    expect(matchesSlashQuery(columnsItem(), '컬럼')).toBe(true);
+    expect(matchesSlashQuery(columnsItem(), 'column')).toBe(true);
+  });
+
+  it('ko.json 사람용 문장에 «컬럼» 표기가 없다(찾기 전용 searchAlias만 예외 · 화면엔 안 나옴)', () => {
+    const found: string[] = [];
+    const walk = (node: unknown, path: string) => {
+      if (typeof node === 'string') { if (node.includes('컬럼') && !path.endsWith('.searchAlias')) found.push(`${path} = ${node}`); return; }
+      if (node && typeof node === 'object') for (const [k, v] of Object.entries(node)) walk(v, path ? `${path}.${k}` : k);
+    };
+    walk(koMessages, '');
+    expect(found).toEqual([]);
   });
 });

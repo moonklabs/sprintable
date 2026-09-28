@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useFieldDraft } from '@/hooks/use-field-draft';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,8 @@ interface PinAuthoringPopoverProps {
   onSave: (description: string) => Promise<boolean>;
   /** 기존 핀 재편집일 때만 — 신규 배치(draft)는 저장 전이라 삭제할 대상이 없다(ESC=배치 취소로 충분). */
   onDelete?: () => Promise<boolean>;
+  /** story #4370 — 설명 초안 키: 새 핀 = 산출물 단위(핀 자리는 닫힐 때 버려짐) · 고치기 = 핀 id. */
+  draftKey: { surface: string; targetId: string | null };
 }
 
 /**
@@ -25,10 +28,12 @@ interface PinAuthoringPopoverProps {
  * 닫기 기본 제공)를 재사용해 좌표 추적 복잡도 없이 핵심 계약(즉시 입력·빈 커밋 차단·ESC 취소)을
  * 충족시켰다 — "핀 옆"의 문자 그대로의 배치는 이번 스코프 밖(신규 좌표-추적 메커니즘 발명 회피).
  */
-export function PinAuthoringPopover({ open, onOpenChange, initialDescription, onSave, onDelete }: PinAuthoringPopoverProps) {
+export function PinAuthoringPopover({ open, onOpenChange, initialDescription, onSave, onDelete, draftKey }: PinAuthoringPopoverProps) {
   const t = useTranslations('canvas');
   const tc = useTranslations('common');
-  const [description, setDescription] = useState(initialDescription);
+  // story #4370 — 설명(여러 줄 · 이 폼의 유일한 칸)은 초안: ✕ · 바깥 · Esc로 닫혀도 남고 «취소» · 저장/지우기 성공에서만 지운다
+  // (예전 «ESC/닫기 = 취소»는 유나 규칙으로 바뀜 — 버림은 보이는 «취소»로만). 고치기는 저장된 설명이 처음 값(같으면 초안 없음).
+  const [description, setDescription, clearDescriptionDraft] = useFieldDraft({ ...draftKey, field: 'form' }, initialDescription);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
 
@@ -42,6 +47,7 @@ export function PinAuthoringPopover({ open, onOpenChange, initialDescription, on
     const ok = await onSave(trimmed);
     setSaving(false);
     if (!ok) { setError(true); return; }
+    clearDescriptionDraft();
     onOpenChange(false);
   };
 
@@ -52,6 +58,7 @@ export function PinAuthoringPopover({ open, onOpenChange, initialDescription, on
     const ok = await onDelete();
     setSaving(false);
     if (!ok) { setError(true); return; }
+    clearDescriptionDraft();
     onOpenChange(false);
   };
 
@@ -79,7 +86,7 @@ export function PinAuthoringPopover({ open, onOpenChange, initialDescription, on
             </Button>
           ) : <span />}
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
+            <Button variant="outline" size="sm" onClick={() => { clearDescriptionDraft(); onOpenChange(false); }} disabled={saving}>
               {t('specPinCancelAction')}
             </Button>
             <Button size="sm" onClick={() => void handleSave()} disabled={!canSave}>

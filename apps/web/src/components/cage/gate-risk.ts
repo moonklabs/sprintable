@@ -117,3 +117,21 @@ export function deriveDecisionFacts(gate: GateItem): DecisionFacts | null {
 export function isCommentReplyGate(gate: GateItem): boolean {
   return gate.gate_type === 'external_publish' && gate.neutral_facts?.['kind'] === 'comment_reply';
 }
+
+// story #4190(유나 «본 버전 대조» 자리 규칙 · PO 판정 2026-09-23) — 「레시피 발행 게이트」 판정 하나. GateEvidence의
+// 연결 초안 카드 분기, 작업 목록 평문 «승인», 오늘 v3 일괄 제외, 원탭 라벨이 같이 쓴다(자리마다 조건을 다시 쓰면 갈린다).
+// BE `gate_service._is_recipe_external_publish_gate`와 같은 축(external_publish · scope_key "" · neutral_facts.stage).
+export function isRecipePublishGate(gate: GateItem): boolean {
+  const stage = gate.neutral_facts?.['stage'];
+  return (
+    gate.gate_type === 'external_publish' && (gate.scope_key ?? '') === ''
+    && typeof stage === 'string' && stage.length > 0
+  );
+}
+
+/** 승인 화면이 그린 초안(채널·블로그 카드 중 BE가 채운 하나)의 id·버전 — 승인 요청이 `reviewed_draft_*`로 그대로
+ * 돌려보낸다(BE가 승인 순간 최신과 대조, 다르면 409 gate_draft_changed). 카드가 없으면 null(필드 불요). */
+export function reviewedDraftOf(gate: GateItem): { id: string; version: number } | null {
+  const shown = gate.linked_channel_draft ?? gate.linked_site_draft ?? null;
+  return shown ? { id: shown.draft_id, version: shown.version } : null;
+}

@@ -94,8 +94,8 @@ def export_string(key: str, locale: str) -> str:
 
 
 def votes_label(count: int, locale: str) -> str:
-    """apps/web/messages/{ko,en}.json retro.votes 값 그대로(2026-09-10 실측:
-    ko "{count}표"·en "{count} votes")."""
+    """apps/web/messages/{ko,en}.json retro.votes 값 그대로 — ko "{count}표" · en은 story #4223부터 ICU 복수형
+    "{count, plural, one {# vote} other {# votes}}"(en 규칙: 1만 one)."""
     if locale == "en":
-        return f"{count} votes"
+        return f"{count} vote" if count == 1 else f"{count} votes"
     return f"{count}표"

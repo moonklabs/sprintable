@@ -641,6 +641,13 @@ async def evaluate_merge_gate(
                 session, org_id=org_id, work_item_type="story", work_item_id=story_id,
                 project_id=project_id, title=story_title, gate_id=gate.id, gate_type=MERGE_GATE_TYPE,
                 requester_id=member_id, approver_ids=approver_ids,
+                # story #4097(페드루 PO 確定, 2026-09-21) — 이 호출이 지금까지 designated_
+                # approver_id를 안 넘겨 #3319 org 정책(merge_gate_default_approver_member_id,
+                # create_gate가 이미 gate.designated_approver_id에 채워 둔 그 값)이 merge
+                # 게이트에서 무시되고 owner/admin 전원에게 카드가 갔다(doc.py:127~134의 동일
+                # 패턴은 정확히 넘김 — 그 대조로 발견). 정책 미설정(None)이면 dispatch_approval_
+                # request_cards 자체가 approver_ids 전원 폴백이라 회귀 0.
+                designated_approver_id=gate.designated_approver_id,
                 # story #3821(PR B) — 같은 스토리에 여러 소 PR이 열려 이 gate가 매번
                 # 새로 생겨도(PR마다 다른 gate_id), 최상위 카드가 이미 있으면 「다시
                 # 결재가 필요합니다 — PR #{n}」 스레드 답글로 붕괴시킨다. db_pr_number

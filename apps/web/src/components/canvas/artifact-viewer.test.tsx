@@ -303,7 +303,7 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
   it('clicking the header comment badge toggles pin-add mode (crosshair cursor)', async () => {
     await act(async () => {
       root.render(wrap(
-        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={() => {}} />,
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={async () => true} />,
       ));
     });
     const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
@@ -319,7 +319,7 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
   it('picking a coordinate in add-mode shows a draft pin + compose popover, and turns add-mode back off', async () => {
     await act(async () => {
       root.render(wrap(
-        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={() => {}} />,
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={async () => true} />,
       ));
     });
     const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
@@ -327,7 +327,7 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
 
     await pickAt(640, 400); // 50%, 50%
     expect(toggle.getAttribute('aria-pressed')).toBe('false'); // 픽 즉시 모드 종료
-    const textarea = container.querySelector('textarea');
+    const textarea = document.querySelector('textarea');
     expect(textarea).not.toBeNull();
     expect(textarea!.placeholder).toBe('이 지점에 코멘트를 남기세요');
   });
@@ -343,13 +343,13 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
     await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await pickAt(320, 200); // 25%, 25%
 
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
       setter.call(textarea, '여기가 어색해요');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '코멘트')!;
+    const submitButton = [...document.querySelectorAll('button')].find((b) => b.textContent === '코멘트')!;
     await act(async () => { submitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(onCreateThread).toHaveBeenCalledTimes(1);
@@ -357,7 +357,7 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
     expect(x).toBeCloseTo(25, 5);
     expect(y).toBeCloseTo(25, 5);
     expect(body).toBe('여기가 어색해요');
-    expect(container.querySelector('textarea')).toBeNull(); // draft 소거
+    expect(document.querySelector('textarea')).toBeNull(); // draft 소거
   });
 
   it('the cancel button discards the draft without calling onCreateThread', async () => {
@@ -371,11 +371,11 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
     await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await pickAt(640, 400);
 
-    const cancelButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '취소')!;
+    const cancelButton = [...document.querySelectorAll('button')].find((b) => b.textContent === '취소')!;
     await act(async () => { cancelButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(onCreateThread).not.toHaveBeenCalled();
-    expect(container.querySelector('textarea')).toBeNull();
+    expect(document.querySelector('textarea')).toBeNull();
   });
 
   it('Escape discards the draft without calling onCreateThread', async () => {
@@ -389,11 +389,11 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
     await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await pickAt(640, 400);
 
-    const popover = container.querySelector('textarea')!.closest('div')!;
+    const popover = document.querySelector('textarea')!.closest('div')!;
     await act(async () => { popover.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })); });
 
     expect(onCreateThread).not.toHaveBeenCalled();
-    expect(container.querySelector('textarea')).toBeNull();
+    expect(document.querySelector('textarea')).toBeNull();
   });
 });
 

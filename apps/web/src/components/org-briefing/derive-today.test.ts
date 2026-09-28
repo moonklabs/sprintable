@@ -22,16 +22,25 @@ describe('deriveNeedsMeState — 낱말 표 §① 상태 3어(PO 確定 2026-09-
 });
 
 describe('hrefForNeedsMeItem — 기존 라우트 재사용(새 API 0)', () => {
-  it('source=gate → /gates/{id}(canonical 상세)', () => {
-    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1' })).toBe('/gates/g1');
+  // story #4231 4차 — 결재함 큐(조직 단위 화면)는 넘긴 withProject(현재 p)를 거치고, 게이트 상세는 결재 자기 프로젝트만(현재 p 아님).
+  const cur = (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=CURRENT`;
+
+  it('source=gate → /gates/{id}(canonical 상세) · 프로젝트 없는(조직 단위) 결재는 현재 p(4241)', () => {
+    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1' }, cur)).toBe('/gates/g1?p=CURRENT');
   });
 
-  it('source=hitl → /inbox?tab=gates(전용 상세 없음)', () => {
-    expect(hrefForNeedsMeItem({ source: 'hitl', id: 'h1' })).toBe('/inbox?tab=gates');
+  it('source=hitl → /inbox?tab=gates(전용 상세 없음) · 현재 p', () => {
+    expect(hrefForNeedsMeItem({ source: 'hitl', id: 'h1' }, cur)).toBe('/inbox?tab=gates&p=CURRENT');
   });
 
-  it('source=workflow_step → /inbox?tab=gates(전용 상세 없음)', () => {
-    expect(hrefForNeedsMeItem({ source: 'workflow_step', id: 'w1' })).toBe('/inbox?tab=gates');
+  it('source=workflow_step → /inbox?tab=gates(전용 상세 없음) · 현재 p', () => {
+    expect(hrefForNeedsMeItem({ source: 'workflow_step', id: 'w1' }, cur)).toBe('/inbox?tab=gates&p=CURRENT');
+  });
+
+  it('⭐story #4241 · #4231 4차 — 게이트 상세는 결재 자신의 프로젝트 · 결재함 큐는 현재 p(항목 p 아님)', () => {
+    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1', projectId: 'proj-C' }, cur)).toBe('/gates/g1?p=proj-C');
+    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1', projectId: null }, cur)).toBe('/gates/g1?p=CURRENT');
+    expect(hrefForNeedsMeItem({ source: 'hitl', id: 'h1', projectId: 'proj-C' }, cur)).toBe('/inbox?tab=gates&p=CURRENT');
   });
 });
 
@@ -40,7 +49,7 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     const raw = {
       needs_me: [
         {
-          kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1',
+          kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1', project_id: 'proj-C',
           work_item: { type: 'story', id: 's1', title: 'Threads에 글 발행' },
           requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
         },
@@ -65,15 +74,16 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     expect(snapshot.needsMeCount).toBe(2);
     expect(snapshot.needsMe).toHaveLength(2);
     expect(snapshot.needsMe[0]).toEqual({
-      id: 'g1', source: 'gate', state: 'signature', workItemType: 'story', workItemId: 's1',
+      id: 'g1', source: 'gate', state: 'signature', risk: 'high', workItemType: 'story', workItemId: 's1',
       workItemTitle: 'Threads에 글 발행', requestedByName: null, reason: null,
-      createdAt: '2026-09-13T05:00:00Z', conversationId: null,
+      createdAt: '2026-09-13T05:00:00Z', conversationId: null, conversationProjectId: null, recipePublish: false, projectId: 'proj-C',
     });
     expect(snapshot.needsMe[1]!.state).toBe('answer');
     expect(snapshot.needsMe[1]!.reason).toBe('YouTube 챕터를 3개로 나눌까요?');
     expect(snapshot.agentProgress).toHaveLength(1);
     expect(snapshot.agentProgress[0]).toEqual({
       runId: 'r1', agentName: '미르코', workItemTitle: 'YouTube 영상 올리기', status: 'running', startedAt: '2026-09-13T03:00:00Z',
+      cancel: null,
     });
     expect(snapshot.published).toEqual({ count: 3, byChannel: [{ channelKind: 'blog', count: 2 }, { channelKind: 'newsletter', count: 1 }] });
     expect(snapshot.usage).toEqual({ platform: [{ connectionId: 'c1', channelKind: 'youtube', used: 100, limit: 10000, resetAt: '2026-09-14T00:00:00Z' }], adSpendMeasured: false });
@@ -97,11 +107,13 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
         kind: 'approval', risk: 'low', source: 'gate', source_id: 'g1',
         work_item: { type: 'story', id: 's1', title: '블로그 글 발행' },
         requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
-        conversation_id: 'conv-1',
+        conversation_id: 'conv-1', conversation_project_id: 'proj-Q',
       }],
       needs_me_count: 1, agent_progress: [], published_today: { count: 0, by_channel: [] }, usage: { platform: [], ad_spend: { measured: false } },
     };
     expect(parseToday({ data: raw }).needsMe[0]!.conversationId).toBe('conv-1');
+    // story #4231 — 대화 자기 프로젝트도 그대로(링크 `?p=`).
+    expect(parseToday({ data: raw }).needsMe[0]!.conversationProjectId).toBe('proj-Q');
   });
 
   it('핵심 식별자(work_item.id·created_at) 없는 needs_me 항목은 생략한다(지어내지 않음)', () => {

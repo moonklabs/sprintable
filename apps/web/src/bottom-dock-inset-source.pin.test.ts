@@ -45,6 +45,22 @@ describe('dashboard-shell.tsx — SidebarProvider가 dashboard-shell-root 클래
   });
 });
 
+// story #4006(critical, 5pt) AC8 PO CHANGES-1 ③ — v3 3화면은 `(authenticated)` 밖이라
+// dashboard-shell-root 조상이 없다. 각 화면 최상위 div에 v3-shell-root를 직접 부착해야
+// --mobile-tab-bar-h/--bottom-dock-inset이 실제로 세워진다(되돌리면 MobileTabBar 자기
+// 높이가 auto로 무너지는 회귀).
+describe('v3 3화면 — 최상위 div가 v3-shell-root 클래스를 부착한다', () => {
+  it.each([
+    ['src/components/today-v3/today-v3-screen.tsx', 'today-v3-screen'],
+    ['src/components/chat-v3/chat-v3-screen.tsx', 'chat-v3-screen'],
+    ['src/components/connect-rules-v3/connect-rules-v3-screen.tsx', 'connect-rules-v3-screen'],
+  ])('%s — data-testid=%s인 최상위 div에 v3-shell-root가 있다', (relPath, testId) => {
+    const content = read(relPath);
+    const re = new RegExp(`className=["'\`][^"'\`]*\\bv3-shell-root\\b[^"'\`]*["'\`][^>]*data-testid=["'\`]${testId}["'\`]`);
+    expect(content).toMatch(re);
+  });
+});
+
 describe('mobile-tab-bar.tsx — nav 높이가 --mobile-tab-bar-h 토큰을 참조한다', () => {
   it('h-16 같은 하드코딩이 아니라 h-[var(--mobile-tab-bar-h)]를 쓴다', () => {
     const content = read('src/components/nav/mobile-tab-bar.tsx');
@@ -56,14 +72,18 @@ describe('mobile-tab-bar.tsx — nav 높이가 --mobile-tab-bar-h 토큰을 참�
 describe('globals.css — --bottom-dock-inset·--mobile-tab-bar-h 정의 + lg 미만 media query', () => {
   const css = read('src/app/globals.css');
 
-  it('.dashboard-shell-root가 두 변수를 기본값으로 세운다', () => {
-    expect(css).toMatch(/\.dashboard-shell-root\s*\{[^}]*--mobile-tab-bar-h:\s*4rem/);
-    expect(css).toMatch(/\.dashboard-shell-root\s*\{[^}]*--bottom-dock-inset:\s*env\(safe-area-inset-bottom\)/);
+  // story #4006(critical, 5pt) AC8 PO CHANGES-1 ③ — v3 3화면도 이 두 변수가 필요해
+  // `.dashboard-shell-root`에 `.v3-shell-root`를 나란히 추가(@layer components로 함께
+  // 이관, verify-no-unlayered-css-class 정본 갱신). 정규식을 "두 selector 다 있고 그
+  // 한 블록 안에 두 변수가 있다"로 느슨화(순서·개행·@layer 래퍼는 안 가림).
+  it('.dashboard-shell-root·.v3-shell-root가 두 변수를 기본값으로 세운다', () => {
+    expect(css).toMatch(/\.dashboard-shell-root,\s*\n?\s*\.v3-shell-root\s*\{[^}]*--mobile-tab-bar-h:\s*4rem/);
+    expect(css).toMatch(/\.dashboard-shell-root,\s*\n?\s*\.v3-shell-root\s*\{[^}]*--bottom-dock-inset:\s*env\(safe-area-inset-bottom\)/);
   });
 
   it('lg 미만(<1024px, hooks/use-mobile.ts MOBILE_BREAKPOINT와 동일 SSOT)에서 탭 바 높이를 더한다', () => {
     expect(css).toMatch(
-      /@media \(max-width: 1023px\)\s*\{\s*\.dashboard-shell-root\s*\{[^}]*--bottom-dock-inset:\s*calc\(var\(--mobile-tab-bar-h\)\s*\+\s*env\(safe-area-inset-bottom\)\)/,
+      /@media \(max-width: 1023px\)\s*\{\s*\.dashboard-shell-root,\s*\n?\s*\.v3-shell-root\s*\{[^}]*--bottom-dock-inset:\s*calc\(var\(--mobile-tab-bar-h\)\s*\+\s*env\(safe-area-inset-bottom\)\)/,
     );
   });
 

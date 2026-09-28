@@ -36,6 +36,47 @@ describe('findRepeatedRowActionHits (story #3592 §22-18)', () => {
     expect(findRepeatedRowActionHits(content).length).toBe(0);
   });
 
+  // [SID:4286 · PO 12:42Z] 루프 변수 필드로 조회한 행 라벨 표 값(memberRowLabels) — 행마다 갈린다.
+  it('does not flag a button whose label is a row-label lookup keyed by the loop var field(.get · [] · ?? 폴백)', () => {
+    for (const label of ['{rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)}', '{rowLabels.get(m.id)}', '{labels[m.id] || fallback}', '{labels[ m.id ]}']) {
+      const content = `
+        {members.map((m) => (
+          <button type="button" onClick={() => add(m.id)}>
+            <span className="flex-1 truncate">${label}</span>
+          </button>
+        ))}
+      `;
+      expect(findRepeatedRowActionHits(content).length, label).toBe(0);
+    }
+  });
+
+  // [까디르 cc197cc4b P2] 폴백이 원시 id면 «갈림»으로 인정하지 않는다(id 노출을 통과시키지 않게).
+  it('양성 대조 — 표 조회 뒤 폴백이 id 모양(m.id · x_id · memberId · uuid · id 조각)이면 여전히 히트', () => {
+    for (const label of ['{rowLabels.get(m.id) ?? m.id}', '{labels[m.id] || m.member_id}', '{rowLabels.get(m.id) ?? memberId}', '{rowLabels.get(m.id) ?? m.uuid}', '{rowLabels.get(m.id) ?? m.id.slice(0, 8)}']) {
+      const content = `
+        {members.map((m) => (
+          <button type="button" onClick={() => add(m.id)}>
+            <span>${label}</span>
+          </button>
+        ))}
+      `;
+      expect(findRepeatedRowActionHits(content).length, label).toBe(1);
+    }
+  });
+
+  it('양성 대조 — 조회가 조건식 안이거나(같은 두 글자 중 하나) 루프 변수가 아닌 키로 조회하면 여전히 히트', () => {
+    for (const label of ["{rowLabels.get(m.id) ? t('remove') : t('add')}", '{rowLabels.get(selectedId)}', "{labels[other.id]}", "{t('addCta')}"]) {
+      const content = `
+        {members.map((m) => (
+          <button type="button" onClick={() => add(m.id)}>
+            <span>${label}</span>
+          </button>
+        ))}
+      `;
+      expect(findRepeatedRowActionHits(content).length, label).toBe(1);
+    }
+  });
+
   it('flags lowercase <button> too, not just <Button>', () => {
     const content = `
       {items.map((item) => (

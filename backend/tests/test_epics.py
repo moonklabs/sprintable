@@ -51,6 +51,20 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _accessible_projects_without_db():
+    """story #4350 — project 필터 없는 목표 목록은 caller의 접근 가능 프로젝트를 먼저 푼다. 이 파일의 세션은 execute 순서를
+    세는 목이라 그 조회를 여기서 고정한다(빈 집합이 아니게 — 빈 집합이면 목록이 SQL 없이 0건으로 끝난다)."""
+    from unittest.mock import patch
+
+    # app.main을 **패치 전에** 불러 둔다 — 라우터 중 모듈 머리에서 이 함수를 이름으로 가져오는 곳(assets · glance · dependencies)이
+    # 패치 중에 처음 import되면 목을 영구히 쥐어 다른 테스트 파일로 샌다(4350에서 test_2642 asset 테스트로 실측).
+    import app.main  # noqa: F401
+
+    with patch("app.services.project_auth.accessible_project_ids_in_org", AsyncMock(return_value=[uuid.uuid4()])):
+        yield
+
+
 async def _client():
     from app.main import app
 

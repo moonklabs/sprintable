@@ -32,7 +32,7 @@ async def withdraw_channel_post_draft(args: WithdrawChannelPostDraftInput) -> li
         )
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 # story #3651(Phase2·MCP·소형, 페드루 PO 確定 2026-09-07) — 블루프린트 v3 §7 Phase 2 AC
@@ -147,4 +147,4 @@ async def get_publication_insights(args: GetPublicationInsightsInput) -> list[Te
             "superseded_snapshots": superseded_count,
         })
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

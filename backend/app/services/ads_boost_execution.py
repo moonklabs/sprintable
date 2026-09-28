@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
 from app.models.publication_command import PublicationCommand
+from app.services.provider_call_mark import provider_client
 from app.services.publication_command import create_or_get_publication_command
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
@@ -362,7 +363,9 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     "ads_boost" 분기가 이 함수로 넘긴다(site_post/comment_reply와 동형 위임 패턴).
     실패 시 `apply_command_failure`(publication_command.py)를 그대로 재사용 —
     백오프·connection 승격 로직 재구현 금지."""
+    from app.services.provider_call_mark import provider_call_marked
     from app.services.publication_command import (
+        PRE_CALL_ERROR_CODE,
         STATUS_BLOCKED_UNAPPROVED,
         apply_command_failure,
         record_publication_attempt,
@@ -385,17 +388,34 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     is_sandbox = getattr(module, "__name__", "").endswith("ads_sandbox_campaign")
 
     try:
-        import httpx
 
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with provider_client(timeout=20) as client:
             if command.operation == OP_BOOST_START:
-                result = await module.create_boost_campaign(
-                    client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
-                    object_story_id=ctx["object_story_id"], budget_minor=gate.sealed_ads_budget_minor,
-                    currency=gate.sealed_ads_currency, starts_at_iso=gate.sealed_ads_starts_at.isoformat(),
-                    ends_at_iso=gate.sealed_ads_ends_at.isoformat(), objective=gate.sealed_ads_objective,
-                )
-                run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
+                # story #4268 — 재시도(ACTIVE 전환 실패 · 생성 중간 실패 뒤)가 이미 만든 캠페인 · 광고 세트 · 광고를 다시 만들지
+                # 않는다(고객 광고 계정에 PAUSED 객체가 중복으로 쌓이던 결함). 셋이 다 있으면 생성을 건너뛰고 상태 전환만,
+                # 일부만 있으면 이어서 만든다. 중간 실패의 부분 id도 실행 행에 남긴다(이 명령의 결과와 같은 커밋 — 워커가 틱마다
+                # 명령 결과를 커밋한다).
+                existing = {"campaign_id": run.campaign_id, "adset_id": run.adset_id, "ad_id": run.ad_id}
+                if not all(existing.values()):
+                    try:
+                        result = await module.create_boost_campaign(
+                            client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
+                            object_story_id=ctx["object_story_id"], budget_minor=gate.sealed_ads_budget_minor,
+                            currency=gate.sealed_ads_currency, starts_at_iso=gate.sealed_ads_starts_at.isoformat(),
+                            ends_at_iso=gate.sealed_ads_ends_at.isoformat(), objective=gate.sealed_ads_objective,
+                            existing=existing,
+                        )
+                    except Exception as create_exc:
+                        partial = getattr(create_exc, "partial", None) or {}
+                        run.campaign_id = partial.get("campaign_id") or run.campaign_id
+                        run.adset_id = partial.get("adset_id") or run.adset_id
+                        run.ad_id = partial.get("ad_id") or run.ad_id
+                        raise
+                    run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
+                    # story #4268 AC2 — 만든 id를 ACTIVE 전환 **전에** 커밋한다. 뒤(ACTIVE · 지출 스냅샷 예약 · 활동 기록)에서 DB
+                    # 오류로 이 트랜잭션이 롤백돼도 id는 남아, 재시도가 새로 만들지 않는다(롤백으로 id를 잃으면 이미 ACTIVE인
+                    # 캠페인 옆에 또 만들어 이중 집행이 될 수 있었다). 세션은 expire_on_commit=False라 아래 속성 읽기는 그대로다.
+                    await db.commit()
                 await module.set_campaign_status(
                     client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="ACTIVE",
                 )
@@ -493,11 +513,13 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         command.last_error = None
         command.failure_kind = None
     except Exception as exc:  # noqa: BLE001 — publication_command.py 2중 방어와 동형.
-        error_code = getattr(exc, "code", None) or "ADS_BOOST_PROVIDER_ERROR"
+        # story #4272(까디르 codex P1) — 코드 없는 예외는 광고 API 호출 직전 표시로 가른다: 호출 전이면 자동 재시도(아무것도 안
+        # 나감), 호출 뒤면 예전처럼 모름(needs_check). 장부의 adapter_called도 그 표시 그대로.
+        error_code = getattr(exc, "code", None) or ("ADS_BOOST_PROVIDER_ERROR" if provider_call_marked() else PRE_CALL_ERROR_CODE)
         last_error = getattr(exc, "message", None) or str(exc)
         run.last_error = last_error[:2000]
         await record_publication_attempt(
-            db, command=command, approval_check="ok", adapter_called=True,
+            db, command=command, approval_check="ok", adapter_called=provider_call_marked(),
             started_at=attempt_started_at, finished_at=now, result_code=error_code,
         )
         await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)

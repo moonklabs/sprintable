@@ -1,0 +1,1 @@
+{"file": "tests/test_4115_channel_connection_target_skips_registry_realdb.py", "sec": 5.6, "source": "story-4115(2026-09-21, 신규 파일 — 4건, 로컬 raw pytest 전체 wall time 실측(5.55s, throwaway pgvector:pg16) 그대로 등재 — test_4110 등재 선례와 동일 방법론. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}

@@ -69,6 +69,12 @@ async def my_actions(
     member = await resolve_member(auth, org_id, session)
     member_id = member.id
     now = _now()
+    # story #4350(PO 2026-09-26) — `attention`은 org 자동 이상감지지만 **caller가 접근 가능한 프로젝트의 항목 · 수만**(SEC-S8 선생님
+    # 확정: org 전체 노출 = 갭). 예전엔 loop_measure_due 큐가 «같은 3축이 여기로 이미 org-wide»를 근거로 org-wide를 유지했다 —
+    # 둘 다 같은 해소기로 맞춘다. 프로젝트에 매이지 않은 항목(에이전트 인증 실패)은 그대로.
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    _accessible_project_ids = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
 
     # ⛔⛔ story #2288 리뷰(2026-07-29, PO 지적 — my_blockers 누락 버그의 근본): 이 함수가
     # queue.append({"type": ...})로 내보내는 문자열 전수는 **세 곳이 같이 움직여야 하는**
@@ -102,6 +108,7 @@ async def my_actions(
                 WorkflowLineStepApproval.approver_member_id == member_id,
                 WorkflowLineStepApproval.status == "pending",
                 WorkflowLineStepApproval.blocking.is_(True),
+                WorkflowLineStepRun.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
             )
             .order_by(WorkflowLineStepApproval.created_at.asc())
             .limit(50)
@@ -169,8 +176,9 @@ async def my_actions(
                 Story.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 Story.deleted_at.is_(None),
                 ~exists(_blocked_by_open_dependency),
+                Story.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
             )
-            .order_by(Story.updated_at.desc())
+            .order_by(Story.updated_at.desc(), Story.id.desc())
             .limit(50)
         )
     ).scalars().all()
@@ -192,6 +200,7 @@ async def my_actions(
             .where(
                 Task.org_id == org_id,
                 Task.assignee_id == member_id,
+                Story.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
                 # story #2288 리뷰(2026-07-29, PO 지적): "미완료"는 명세5(review_merge)와
                 # «같은 자»를 써야 한다 — 안 그러면 같은 화면에 "다른 뜻의 미완료"가 둘 선다.
                 # _OPEN_EXCLUDED_STATUSES(파일 상단, 지금은 ("done",) 하나)가 그 SSOT다.
@@ -204,7 +213,7 @@ async def my_actions(
                 Story.org_id == org_id,
                 Story.deleted_at.is_(None),
             )
-            .order_by(Task.updated_at.desc())
+            .order_by(Task.updated_at.desc(), Task.id.desc())
             .limit(50)
         )
     ).all()
@@ -232,6 +241,8 @@ async def my_actions(
                 _Blocker.org_id == org_id,                # defense-in-depth: 조인 story 도 org-scope.
                 _Blocked.org_id == org_id,
                 _Blocker.assignee_id == member_id,        # 막은 쪽이 내 담당.
+                _Blocker.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
+                _Blocked.project_id.in_(_accessible_project_ids),
                 _Blocker.deleted_at.is_(None),
                 _Blocked.status.not_in(_OPEN_EXCLUDED_STATUSES),  # 막힌 쪽이 아직 open.
                 _Blocked.deleted_at.is_(None),
@@ -257,6 +268,8 @@ async def my_actions(
                     _Blocked.org_id == org_id,
                     _Blocked.status.not_in(_OPEN_EXCLUDED_STATUSES),
                     _Blocked.deleted_at.is_(None),
+                    # story #4351(까디르 델타) — 위 my_blockers와 같은 축: 접근 못 하는 프로젝트의 막힌 스토리는 세지 않는다(수로 존재가 새지 않게).
+                    _Blocked.project_id.in_(_accessible_project_ids),
                 )
                 .group_by(ItemDependency.from_id)
             )
@@ -325,10 +338,11 @@ async def my_actions(
                 _WaitingStory.org_id == org_id,
                 _WaitingStory.assignee_id == member_id,
                 _WaitingStory.deleted_at.is_(None),
+                _WaitingStory.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
                 WorkflowLineStepApproval.approver_member_id != member_id,
                 ~exists(_my_pending_approval_on_step),
             )
-            .order_by(_WaitingStory.updated_at.desc())
+            .order_by(_WaitingStory.updated_at.desc(), _WaitingStory.id.desc())
             .limit(100)
         )
     ).all()
@@ -354,6 +368,7 @@ async def my_actions(
             select(WorkflowLineStepRun)
             .where(
                 WorkflowLineStepRun.org_id == org_id,
+                WorkflowLineStepRun.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 WorkflowLineStepRun.status == "pending",
                 WorkflowLineStepRun.started_at < now - timedelta(minutes=_AGENT_STUCK_MINUTES),
                 WorkflowLineStepRun.resolved_member_type == "agent",  # HIGH2: agent run 만.
@@ -368,6 +383,9 @@ async def my_actions(
             "entity_type": r.entity_type, "entity_id": str(r.entity_id),
             "gate_type": r.effective_gate_type,
             "stuck_since": r.started_at.isoformat() if r.started_at else None,
+            # story #4259 — 조직 전체 목록이라 링크가 항목 자기 프로젝트를 실어야 한다(4231 4차 규칙). step run의 project_id(NOT NULL ·
+            # 그 엔터티가 속한 프로젝트의 라인)를 그대로 싣는다 — 다른 멈춤 항목(unanswered_blocker · 가설 · 목표)과 같은 축.
+            "project_id": str(r.project_id),
         })
     # 1b) story #2836 — 에이전트 API키 401 연속(유나 6시간+ 침묵·미르코 revoke 실사고 근본원인).
     # windowed COUNT(agent_stuck·story_stalled와 동형 관측 패턴 — 별도 상태기계 없음). invalid
@@ -424,10 +442,11 @@ async def my_actions(
                 ItemDependency.item_type == "story",
                 ItemDependency.created_at < now - timedelta(days=_BLOCKER_UNANSWERED_DAYS),
                 _BlockedU.org_id == org_id,               # defense-in-depth: 조인 story 도 org-scope.
+                _BlockedU.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 _BlockedU.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 _BlockedU.deleted_at.is_(None),
             )
-            .order_by(ItemDependency.created_at.asc())
+            .order_by(ItemDependency.created_at.asc(), ItemDependency.id)
             .limit(20)
         )
     ).all()
@@ -449,10 +468,11 @@ async def my_actions(
             )
             .where(
                 Hypothesis.org_id == org_id,
+                Hypothesis.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 Hypothesis.status == "falsified",
                 Hypothesis.updated_at >= now - timedelta(days=_HYPOTHESIS_FALSIFIED_DAYS),
             )
-            .order_by(Hypothesis.updated_at.desc())
+            .order_by(Hypothesis.updated_at.desc(), Hypothesis.id.desc())
             .limit(20)
         )
     ).all()
@@ -477,6 +497,7 @@ async def my_actions(
             )
             .where(
                 Hypothesis.org_id == org_id,
+                Hypothesis.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 Hypothesis.status.in_(("active", "measuring")),
                 Hypothesis.measure_after <= now,
             )
@@ -497,6 +518,7 @@ async def my_actions(
             select(Goal.id, Goal.title, Goal.measure_after, Goal.assignee_id, Goal.project_id)
             .where(
                 Goal.org_id == org_id,
+                Goal.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 Goal.status == "active",
                 Goal.measure_after.isnot(None),
                 Goal.measure_after <= now,
@@ -522,10 +544,11 @@ async def my_actions(
             select(Goal.id, Goal.title, Goal.updated_at, Goal.assignee_id, Goal.project_id)
             .where(
                 Goal.org_id == org_id,
+                Goal.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 Goal.status == "done",
                 Goal.outcome_status.in_(("n_a", "unmeasured")),
             )
-            .order_by(Goal.updated_at.asc())
+            .order_by(Goal.updated_at.asc(), Goal.id)
             .limit(20)
         )
     ).all()
@@ -545,6 +568,7 @@ async def my_actions(
                 Goal.org_id == org_id,
                 Goal.status == "active",
                 Goal.measure_after.is_(None),
+                Goal.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -558,6 +582,7 @@ async def my_actions(
                 Hypothesis.org_id == org_id,
                 Hypothesis.status.in_(("active", "measuring")),
                 Hypothesis.measure_after <= now,
+                Hypothesis.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -568,6 +593,7 @@ async def my_actions(
                 Goal.status == "active",
                 Goal.measure_after.isnot(None),
                 Goal.measure_after <= now,
+                Goal.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -577,6 +603,7 @@ async def my_actions(
                 Goal.org_id == org_id,
                 Goal.status == "done",
                 Goal.outcome_status.in_(("n_a", "unmeasured")),
+                Goal.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -589,6 +616,7 @@ async def my_actions(
                 Goal.org_id == org_id,
                 Goal.status == "done",
                 Goal.outcome_status == "unmeasurable",
+                Goal.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -642,6 +670,15 @@ async def overview(
 ) -> JSONResponse:
     """② 프로젝트 현황 + 헤더 함대. scope=org/team. 비용·기여는 org aggregate only(개인 노출 0)."""
     now = _now()
+    # story #4351 PR B(④ · SEC-S8 · PO 2026-09-26) — 접근이 제한된 caller에겐 프로젝트 소속 집계(에픽 · 가설 · 최근 변화 · 기여 ·
+    # 사이클타임 · 비용 · 위험)를 접근 가능 프로젝트로 좁힌다(owner/admin = None = 옛 동작). 헤더 함대(에이전트 수 · 상태)는 org 수준
+    # 그대로. «aggregate only»는 개인별 노출 0이라는 뜻(CC-BE.2)이지 프로젝트 범위 결정이 아니다. 좁혀진 판은 scope로 그 범위를 말한다.
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(_auth.user_id)), org_id)
+
+    def _in_scope(col) -> list:
+        return [] if restricted is None else [col.in_(restricted)]
     # 헤더 — 함대: 총 에이전트(실).
     total_agents = (
         await session.execute(
@@ -663,13 +700,14 @@ async def overview(
             .where(
                 Story.org_id == org_id, Story.deleted_at.is_(None),
                 Story.epic_id.isnot(None), Story.is_excluded.is_(False),
+                *_in_scope(Story.project_id),
             )
             .group_by(Story.epic_id)
         )
     ).all()
     counts = {epic_id: (total, done) for epic_id, total, done in rows}
     epics_q = (
-        await session.execute(select(Goal).where(Goal.org_id == org_id))
+        await session.execute(select(Goal).where(Goal.org_id == org_id, *_in_scope(Goal.project_id)))
     ).scalars().all()
     epics = []
     for e in epics_q:
@@ -689,7 +727,7 @@ async def overview(
             select(
                 func.count(Hypothesis.id),
                 func.count(Hypothesis.id).filter(Hypothesis.status == "verified"),
-            ).where(Hypothesis.org_id == org_id)
+            ).where(Hypothesis.org_id == org_id, *_in_scope(Hypothesis.project_id))
         )
     ).one()
 
@@ -697,8 +735,8 @@ async def overview(
     events = (
         await session.execute(
             select(ActivityEvent)
-            .where(ActivityEvent.org_id == org_id)
-            .order_by(ActivityEvent.occurred_at.desc())
+            .where(ActivityEvent.org_id == org_id, *_in_scope(ActivityEvent.project_id))
+            .order_by(ActivityEvent.occurred_at.desc(), ActivityEvent.activity_id.desc())
             .limit(40)
         )
     ).scalars().all()
@@ -739,6 +777,7 @@ async def overview(
             .where(
                 Story.org_id == org_id, Story.status == "done",
                 Story.deleted_at.is_(None), Story.is_excluded.is_(False),
+                *_in_scope(Story.project_id),
             )
             .group_by(effective_type)
         )
@@ -767,6 +806,7 @@ async def overview(
                 StoryActivity.new_value == "done",
                 StoryActivity.created_at > now - timedelta(days=30),
                 Story.deleted_at.is_(None), Story.is_excluded.is_(False),
+                *_in_scope(Story.project_id),
             )
         )
     ).one()
@@ -788,7 +828,7 @@ async def overview(
                 func.sum(AgentRun.cost_usd),
                 func.sum(func.coalesce(AgentRun.input_tokens, 0) + func.coalesce(AgentRun.output_tokens, 0)),
             )
-            .where(AgentRun.org_id == org_id, AgentRun.started_at > now - timedelta(days=14))
+            .where(AgentRun.org_id == org_id, AgentRun.started_at > now - timedelta(days=14), *_in_scope(AgentRun.project_id))
             .group_by(cost_day)
             .order_by(cost_day)
         )
@@ -817,6 +857,7 @@ async def overview(
                 _BlockedR.org_id == org_id,               # defense-in-depth: 조인 story 도 org-scope.
                 _BlockedR.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 _BlockedR.deleted_at.is_(None),
+                *_in_scope(_BlockedR.project_id),
             )
         )
     ).scalar_one()
@@ -825,6 +866,7 @@ async def overview(
             select(func.count(AgentRun.id)).where(
                 AgentRun.org_id == org_id, AgentRun.status == "failed",
                 AgentRun.started_at > now - timedelta(days=7),
+                *_in_scope(AgentRun.project_id),
             )
         )
     ).scalar_one()
@@ -859,7 +901,8 @@ async def overview(
         # status NULL(미접속) 등은 online/offline 어디에도 안 셈(보수적).
 
     return JSONResponse(content={
-        "scope": "org",
+        # 좁혀진 판(제한된 caller) = "accessible_projects" — 화면 라벨이 «조직 전체»라고 단정하지 않게(유나 판정 대상).
+        "scope": "org" if restricted is None else "accessible_projects",
         "fleet": {
             "total_agents": total_agents,
             "status_breakdown": fleet_breakdown,  # CC-BE.2 실데이터.

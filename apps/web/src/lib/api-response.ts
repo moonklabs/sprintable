@@ -42,6 +42,22 @@ export function apiSuccess<T>(data: T, meta?: ApiMeta, status = 200): NextRespon
   return NextResponse.json({ data, error: null, meta: meta ?? null }, { status });
 }
 
+/**
+ * [SID:4299 AC2 꼬리] apiSuccess와 같은 봉투를 상류 본문 **글자 그대로** 끼워 조립한다 — 이미 JSON 글자로 온 목록을
+ * 파싱 · 재직렬화하지 않는다(stories unattached 100행 실측: 파싱 40 + 재직렬화 17~23ms · 동시 8 p90 268).
+ * 겉이 JSON 배열 · 객체(`[…]` · `{…}`)가 아니면 옛 길(JSON.parse → apiSuccess)로 — 깨진 본문은 전과 같이 던진다.
+ * 상류가 JSON.stringify와 같은 조밀한 글자를 주면(FastAPI 기본) 응답 바이트가 apiSuccess와 같다.
+ */
+export function apiSuccessRawJson(rawJson: string, meta?: ApiMeta): NextResponse {
+  const body = rawJson.trim();
+  const looksJson = (body.startsWith('[') && body.endsWith(']')) || (body.startsWith('{') && body.endsWith('}'));
+  if (!looksJson) return apiSuccess(JSON.parse(rawJson), meta);
+  return new NextResponse(`{"data":${body},"error":null,"meta":${JSON.stringify(meta ?? null)}}`, {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 /** 에러 응답 */
 export function apiError(
   code: string,

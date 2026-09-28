@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 결함 fix(2026-07-30) — `include` searchParam이 GET 핸들러에서 GoalService.list()로 한 번도
 // 전달되지 않았다(story #2298/#2303의 `include=glance` 옵트인이 이 지점에서부터 이미 죽어
@@ -7,7 +7,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(), createGoalRepository: vi.fn(), list: vi.fn(), proxyToFastapi: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+// story #4346 — 목록 GET은 getOrgProjectAuthContext(`/me` 0)로 옮겼다 — 같은 스텁을 물려 이 파일의 인증 가정을 그대로 둔다.
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, getOrgProjectAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createGoalRepository: h.createGoalRepository }));
 vi.mock('@/services/goal', async (importActual) => ({
   ...(await importActual<typeof import('@/services/goal')>()),
@@ -151,5 +152,31 @@ describe('/api/goals GET — ids 배치 lookup 분기(#2262 PR②)', () => {
     await GET(new Request(`http://localhost/api/goals?ids=${manyIds}`));
     const calledWith = h.list.mock.calls[0]![0] as { ids: string[] };
     expect(calledWith.ids).toHaveLength(200);
+  });
+});
+
+// story #4299 AC2 꼬리 — 하위 구간(dev 전용 · SERVER_TIMING_MARKERS). 분기 셋 모두 auth → service → serialize.
+describe('/api/goals GET — 하위 구간 bff_auth · bff_service · bff_serialize(4299)', () => {
+  const ORDER = /^bff;dur=\d+, bff_auth;dur=\d+, bff_service;dur=\d+, bff_serialize;dur=\d+$/;
+  let log: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createGoalRepository.mockResolvedValue({});
+    process.env['SERVER_TIMING_MARKERS'] = 'true';
+    log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => { delete process.env['SERVER_TIMING_MARKERS']; log.mockRestore(); });
+
+  it.each([
+    ['목록(커서)', 'http://localhost/api/goals?project_id=p'],
+    ['ids 배치', 'http://localhost/api/goals?ids=g1'],
+    ['position 프록시', 'http://localhost/api/goals?project_id=p&order_by=position'],
+  ])('%s: 헤더에 셋이 차례로', async (_label, url) => {
+    h.list.mockResolvedValue([{ id: 'g1', created_at: '2026-07-01T00:00:00Z' }]);
+    h.proxyToFastapi.mockResolvedValue(fastapiOk([{ id: 'g1' }], { 'x-total-count': '1' }));
+    const res = await GET(new Request(url));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Server-Timing')).toMatch(ORDER);
   });
 });

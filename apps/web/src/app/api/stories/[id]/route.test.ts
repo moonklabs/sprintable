@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
   getByIdWithDetails: vi.fn(), getById: vi.fn(), update: vi.fn(), del: vi.fn(), logActivity: vi.fn(),
   parseBody: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, getOrgProjectAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createStoryRepository: h.createStoryRepository }));
 vi.mock('@/services/story', async (importActual) => ({
   ...(await importActual<typeof import('@/services/story')>()),

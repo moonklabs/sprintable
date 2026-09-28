@@ -24,9 +24,29 @@ def anyio_backend():
 
 
 class _FakeGateRow:
-    def __init__(self, neutral_facts: dict | None, *, id_=None):
+    """story #4142(페드루 PO CHANGES-1, 2026-09-22) — `scope_key`/`work_item_id`는
+    실 Gate 행에선 NOT NULL(gate.py 65·85행)이라 이 목도 실 모양으로 채운다(값 없는
+    getattr 방어를 프로덕션 코드에 남기는 대신 — 4514의 SimpleNamespace→model_
+    construct 선례와 동형). 기본값 `scope_key=""`은 이 파일이 검증하는 unscoped
+    site_post/일반 channel_post 게이트와 그대로 일치(레시피 scoped 분기는 안 탐,
+    회귀 0)."""
+    def __init__(
+        self, neutral_facts: dict | None, *, id_=None, scope_key: str = "", work_item_id=None,
+        publish_outcome: str | None = None,
+    ):
         self.neutral_facts = neutral_facts
         self.id = id_ or uuid.uuid4()
+        self.scope_key = scope_key
+        self.work_item_id = work_item_id or uuid.uuid4()
+        # story #4149(페드루 PO 確定 2026-09-22) — 이 목의 scope_key 기본값("")이 실
+        # unscoped 게이트와 같은 축이라, 신설 분기(events.py:1674)가 접근하는
+        # publish_outcome도 실 컬럼처럼 채워야 AttributeError 없이 기존 human_only
+        # 폴백까지 그대로 통과한다(기본 None → 조건 거짓 → 회귀 0, 4142 CHANGES-1과
+        # 동형 원칙: 목을 실물에 맞춘다).
+        self.publish_outcome = publish_outcome
+        # story #4174 — 레시피 문맥 판별(resolve_site_post_recipe_context)이 게이트 행의 work_item_type을 읽는다(실
+        # 컬럼 NOT NULL — 같은 원칙으로 목을 실물에 맞춘다). 이 파일의 게이트는 전부 story 일감.
+        self.work_item_type = "story"
 
 
 class _FakeResult:
@@ -41,6 +61,12 @@ class _FakeResult:
 
     def first(self):
         return self._row
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return [] if self._row is None else [self._row]
 
 
 def _fake_db(
@@ -67,6 +93,9 @@ def _fake_db(
             return _FakeResult(uuid.uuid4() if site_post_draft_exists else None)
         if "publication_commands" in q:
             return _FakeResult(uuid.uuid4() if site_post_command_exists else None)
+        if "event_definitions" in q:
+            # story #4174 — 블로그 레시피 정의 조회(레시피 문맥 판별). 이 파일은 레시피 밖 게이트만 재므로 정의 0건.
+            return _FakeResult(None)
         return _FakeResult(gate_row)
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -138,7 +167,7 @@ class TestExternalPublishAgentNextAction:
         text = await _render(_payload(
             gate_type="external_publish", verdict="rejected", resolution_note="제목 오타 수정 필요",
         ))
-        assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다." in text
+        assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정해요." in text
 
     async def test_site_post_external_destination_approved_says_worker_tick_not_human_screen(self):
         """story #3487 — site_post 외부 목적지(WordPress 등)는 승인 즉시 워커가
@@ -267,15 +296,18 @@ class TestOtherGateTypesUnchanged:
     """story #3387 회귀 0 — external_publish 이외 gate_type(예: qa/deploy/merge/pr_review·
     레시피 파이프라인)은 옛 문구를 그대로 유지한다."""
 
-    async def test_non_external_publish_approved_keeps_old_publish_tool_text(self):
+    # story #4265(유나 확정 · PO 14:28Z · 14:57Z) 개정 — 레시피 문맥이 없는 게이트(qa 등 · triggered_by_event 없음)는 레시피 전제 문구
+    # («발행 도구» · «같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요»)를 싣지 않는다 — «다음 행동» 줄 자체가 없다.
+    async def test_non_recipe_qa_gate_approved_has_no_recipe_next_action(self):
         text = await _render(_payload(gate_type="qa", verdict="approved"))
-        assert "발행 도구" in text
-        assert "할 일 없음" not in text
+        assert "발행 도구" not in text
+        assert "다음 행동" not in text
 
-    async def test_non_external_publish_rejected_keeps_old_resubmit_text(self):
+    async def test_non_recipe_qa_gate_rejected_has_no_recipe_resubmit_line(self):
         text = await _render(_payload(gate_type="qa", verdict="rejected", resolution_note="폐기 대상"))
-        assert "다시 발행하세요" in text
-        assert "자동 재오픈됩니다" in text
+        assert "다시 발행하세요" not in text
+        assert "자동 재오픈돼요" not in text
+        assert "다음 행동" not in text  # 까디르 codex 4627 P3 — 옛 문구 부재만이 아니라 줄 자체가 없다
 
 
 class TestNextActionI18nCatalogMigration:

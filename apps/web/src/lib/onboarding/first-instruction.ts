@@ -1,4 +1,5 @@
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 /**
  * story #3201(activation·절벽 처방) — connect-step "첫 지시 보내기" CTA와 온보딩
@@ -17,8 +18,11 @@ export async function createFirstInstructionConversation(
   if (!targetAgentId) {
     const res = await fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`);
     if (!res.ok) return null;
-    const json = (await res.json()) as { data?: { id: string }[] };
-    targetAgentId = json.data?.[0]?.id;
+    const json = (await res.json()) as { data?: { id: string; runtime_type?: string | null }[] };
+    // story #3994 — 「시스템 발행」이 정렬상 첫 에이전트면 이 폴백이 그리로 첫 DM을
+    // 열어 버릴 잠재 결함(연결 대상이 아닌 내부 멤버에게 지시를 보내는 셈이라 아무
+    // 반응도 안 옴). 골라내고 그다음 실 에이전트를 쓴다.
+    targetAgentId = json.data?.find((a) => !isSystemPublisher(a.runtime_type))?.id;
     if (!targetAgentId) return null;
   }
 

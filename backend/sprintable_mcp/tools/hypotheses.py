@@ -101,7 +101,7 @@ async def list_hypotheses(args: ListHypothesesInput) -> list[TextContent]:
         rows = await client.get("/api/v2/hypotheses", params=params)
         return ok([_compact(h) for h in (rows or [])])
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_hypothesis(args: GetHypothesisInput) -> list[TextContent]:
@@ -115,7 +115,7 @@ async def get_hypothesis(args: GetHypothesisInput) -> list[TextContent]:
                 h["source_snapshot"] = {"_truncated": text[:_SNAPSHOT_MAX]}
         return ok(h)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def create_hypothesis(args: CreateHypothesisInput) -> list[TextContent]:
@@ -144,7 +144,7 @@ async def create_hypothesis(args: CreateHypothesisInput) -> list[TextContent]:
                 body[field] = val
         return ok(await client.post("/api/v2/hypotheses", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_hypothesis(args: UpdateHypothesisInput) -> list[TextContent]:
@@ -157,7 +157,7 @@ async def update_hypothesis(args: UpdateHypothesisInput) -> list[TextContent]:
     try:
         return ok(await client.patch(f"/api/v2/hypotheses/{args.hypothesis_id}", json=updates))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def link_hypothesis(args: LinkHypothesisInput) -> list[TextContent]:
@@ -172,7 +172,7 @@ async def link_hypothesis(args: LinkHypothesisInput) -> list[TextContent]:
     try:
         return ok(await client.post(f"/api/v2/hypotheses/{args.hypothesis_id}/links", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def confirm_hypothesis(args: ConfirmHypothesisInput) -> list[TextContent]:
@@ -183,4 +183,4 @@ async def confirm_hypothesis(args: ConfirmHypothesisInput) -> list[TextContent]:
     try:
         return ok(await client.post(f"/api/v2/hypotheses/{args.hypothesis_id}/transition", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

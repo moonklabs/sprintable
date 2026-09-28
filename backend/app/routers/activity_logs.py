@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_read_db
 from app.models.activity_log import ActivityLog
@@ -27,6 +28,10 @@ except Exception:
     pass
 
 router = APIRouter(prefix="/api/v2/activity-logs", tags=["activity-logs", "Trust"])
+
+# story #4294 — 기간 파라미터는 오프셋 필수(`app/core/datetime_query.py`) · 기본값 호출을 모듈 상수로(ruff B008).
+_FROM_QUERY = Depends(aware_datetime_query("from", description="created_at >= from"))
+_TO_QUERY = Depends(aware_datetime_query("to", description="created_at <= to"))
 
 _ENTITY_TITLE_MODELS: dict[str, type] = {}
 
@@ -77,8 +82,9 @@ async def list_activity_logs(
     action: str | None = Query(default=None),
     entity_type: str | None = Query(default=None),
     entity_id: uuid.UUID | None = Query(default=None),
-    from_: datetime | None = Query(default=None, alias="from"),
-    to: datetime | None = Query(default=None),
+    # story #4294 — 오프셋 없는 일시는 422(`app/core/datetime_query.py`).
+    from_: datetime | None = _FROM_QUERY,
+    to: datetime | None = _TO_QUERY,
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     # story #2451(§6 Phase3 A1): append-only 로그·create→self-read 흐름 없음 → read replica.
@@ -100,6 +106,14 @@ async def list_activity_logs(
 
     if project_id:
         q = q.where(ActivityLog.project_id == project_id)
+    else:
+        # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트의 로그 + 프로젝트에 매이지 않은 org 수준 로그만
+        # (SEC-S8 선생님 확정: org 전체 노출 = 갭 · assets `_scope_filter`와 같은 모양). EE RBAC 필터는 이 위에 그대로 얹힌다.
+        from sqlalchemy import or_
+
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = await accessible_project_ids_in_org(db, uuid.UUID(auth.user_id), org_id)
+        q = q.where(or_(ActivityLog.project_id.is_(None), ActivityLog.project_id.in_(accessible)))
     if actor_id:
         q = q.where(ActivityLog.actor_id == actor_id)
     if action:
@@ -149,7 +163,7 @@ async def list_activity_logs(
     total = total_result.scalar_one()
 
     items_result = await db.execute(
-        q.order_by(ActivityLog.created_at.desc()).limit(limit).offset(offset)
+        q.order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc()).limit(limit).offset(offset)
     )
     items = items_result.scalars().all()
 

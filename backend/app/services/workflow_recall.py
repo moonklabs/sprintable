@@ -38,7 +38,7 @@ async def _is_requester(session: AsyncSession, sr: WorkflowLineStepRun, actor_id
         select(WorkflowLineStepApproval.requested_by_member_id).where(
             WorkflowLineStepApproval.approval_group_id == sr.approval_group_id,
             WorkflowLineStepApproval.requested_by_member_id.is_not(None),
-        ).limit(1)
+        ).order_by(WorkflowLineStepApproval.created_at, WorkflowLineStepApproval.id).limit(1)
     )).scalar_one_or_none()
     return rb is not None and str(rb) == str(actor_id)
 

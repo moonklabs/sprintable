@@ -403,6 +403,24 @@ async def has_project_access(
     return bool(result.scalar_one_or_none())
 
 
+async def project_org_and_access(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    project_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> tuple[uuid.UUID | None, bool]:
+    """story #4299: project의 org_id와 `has_project_access(user_id, project_id, org_id)` 판정을 **한 SQL**로 읽는다
+    (요청마다 `get_project_scoped_org_id`가 SELECT 두 개를 따로 내던 것).
+
+    반환 (project의 org_id — project가 없으면 None, 접근 판정). 판정은 `has_project_access`와 같은
+    `_project_access_predicate`(SSOT) 그대로다 — org_id가 project의 org와 다르면 predicate의 org 스코프에서 False.
+    바깥 SELECT에 FROM이 없어(두 값 모두 자기 FROM을 가진 서브쿼리) predicate 안의 `projects`가 바깥으로 correlate될 자리가 없다."""
+    project_org = select(Project.org_id).where(Project.id == project_id).scalar_subquery()
+    predicate = _project_access_predicate(project_id, user_id=user_id, org_id=org_id)
+    row = (await session.execute(select(project_org, predicate))).one()
+    return row[0], bool(row[1])
+
+
 async def require_project_access(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -702,6 +720,22 @@ async def accessible_project_ids_in_org(
         {"user_id": user_id, "org_id": org_id},
     )
     return [uuid.UUID(str(r[0])) for r in rows.all()]
+
+
+async def restricted_accessible_project_ids(
+    session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID,
+) -> list[uuid.UUID] | None:
+    """story #4351 — caller가 org의 **모든** 프로젝트에 접근하면 None(거를 것 없음 — owner/admin 등은 옛 동작 그대로), 아니면 접근 가능
+    프로젝트 목록. «제한된 caller에게만 범위를 건다»는 목록 · 집계 라우트가 같이 쓴다."""
+    from sqlalchemy import select
+
+    from app.models.project import Project
+
+    accessible = await accessible_project_ids_in_org(session, user_id, org_id)
+    all_projects = set((await session.execute(
+        select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalars())
+    return None if all_projects <= set(accessible) else accessible
 
 
 async def project_accessible_member_ids(

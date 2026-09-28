@@ -12,6 +12,11 @@ import {
 } from '@/components/ui/dialog';
 import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui/operator-control';
 import { cn } from '@/lib/utils';
+import { disambiguateFallbackLabels, memberLookup } from '@/lib/member-display';
+import { storyAssigneeChipLabels } from '@/components/standup/story-assignee-label';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 import type {
   StandupEntrySummary,
   StandupFeedbackSummary,
@@ -50,6 +55,10 @@ function formatTimestamp(value: string) {
     : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
+/** story #4370 — 피드백 폼 초안(글 · 종류). */
+interface FeedbackDraft { text: string; reviewType: StandupReviewType }
+const EMPTY_FEEDBACK_DRAFT: FeedbackDraft = { text: '', reviewType: 'comment' };
+
 export function StandupFeedbackDialog({
   open,
   onOpenChange,
@@ -69,6 +78,17 @@ export function StandupFeedbackDialog({
   // 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례 그대로 재사용
   // (§②-1 기존 상태 낱말, 새 키 0).
   const tBoard = useTranslations('board');
+  // [SID:4300 · PO 06:37Z · 유나 짚음] 피드백 작성자 이름 — 예전엔 이름 빔 · 표에 없음 둘 다 «알 수 없음». #4284 규칙: 표에 있는데 이름 빔 =
+  // «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원»(표가 거른 비활성 · 다른 프로젝트 사람은 조직 원천으로 보충). 같은 폴백 글자가
+  // 서로 다른 사람 둘 이상에 서면 그 폴백에만 id 앞 8자 꼬리(겹칠 때만). 대화상자는 명단을 받은 뒤 열려 loaded=true.
+  const { orgId } = useDashboardContext();
+  const feedbackAuthorIds = useMemo(() => [...new Set(feedback.map((item) => item.feedback_by_id))], [feedback]);
+  const authorNames = useMemberNameFallback(orgId, memberNameById, feedbackAuthorIds, true);
+  // [SID:4300 · story #4311] 꼬리는 보이는 글자가 같은 작성자(폴백 · 동명이인)끼리만 · 받는 동안(null) 행은 규칙 밖(빈 글자끼리 안 묶임).
+  const authorLabelById = useMemo(() => disambiguateFallbackLabels(feedbackAuthorIds.flatMap((id) => {
+    const r = memberLookup(authorNames.memberMap, id, tc, { loaded: authorNames.loaded });
+    return r ? [{ id, ...r }] : [];
+  })), [feedbackAuthorIds, authorNames.memberMap, authorNames.loaded, tc]);
   const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
     backlog: 'backlog',
     'ready-for-dev': 'readyForDev',
@@ -81,37 +101,51 @@ export function StandupFeedbackDialog({
     return key ? tBoard(key) : slug;
   };
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
-  const [feedbackText, setFeedbackText] = useState('');
-  const [reviewType, setReviewType] = useState<StandupReviewType>('comment');
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(피드백 글)이 든 폼 둘 다 폼 전체가 초안: 새 피드백 = 스탠드업 항목별 · 고치기 = 피드백별
+  // (저장된 글 · 종류가 처음 값). 창이 닫히거나 폼을 접어도 남고, 보이는 «취소»와 저장/보내기 · 지우기 성공에서만 지운다.
+  const [newForm, setNewForm, clearNewFeedbackDraft] = useJsonFieldDraft<FeedbackDraft>(
+    { surface: 'standup-feedback-new', targetId: entry?.id ?? null, field: 'form' }, EMPTY_FEEDBACK_DRAFT,
+  );
+  const feedbackText = newForm.text;
+  const reviewType = newForm.reviewType;
+  const setFeedbackText = (v: string) => setNewForm((f) => ({ ...f, text: v }));
+  const setReviewType = (v: StandupReviewType) => setNewForm((f) => ({ ...f, reviewType: v }));
   // A4(9f27af8f): 기본 제스처=한 줄 코멘트. reviewMode=true일 때만 approve/request_changes 노출(리뷰로 표시).
   const [reviewMode, setReviewMode] = useState(false);
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(null);
-  const [editingReviewType, setEditingReviewType] = useState<StandupReviewType>('comment');
-  const [editingFeedbackText, setEditingFeedbackText] = useState('');
+  const editingItem = feedback.find((item) => item.id === editingFeedbackId) ?? null;
+  const editingInitial = useMemo<FeedbackDraft>(
+    () => (editingItem ? { text: editingItem.feedback_text, reviewType: editingItem.review_type } : EMPTY_FEEDBACK_DRAFT),
+    [editingItem],
+  );
+  const [editForm, setEditForm, clearEditFeedbackDraft] = useJsonFieldDraft<FeedbackDraft>(
+    { surface: 'standup-feedback-edit', targetId: editingFeedbackId, field: 'form' }, editingInitial,
+  );
+  const editingReviewType = editForm.reviewType;
+  const editingFeedbackText = editForm.text;
+  const setEditingReviewType = (v: StandupReviewType) => setEditForm((f) => ({ ...f, reviewType: v }));
+  const setEditingFeedbackText = (v: string) => setEditForm((f) => ({ ...f, text: v }));
   const [savingFeedbackId, setSavingFeedbackId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
+      // 창이 닫히면 화면 상태만 접는다 — 쓴 글 · 종류는 초안으로 남는다(story #4370).
       setShowFeedbackForm(false);
-      setFeedbackText('');
-      setReviewType('comment');
       setReviewMode(false);
       setEditingFeedbackId(null);
-      setEditingReviewType('comment');
-      setEditingFeedbackText('');
       setActionError(null);
     }
   }, [open]);
 
   useEffect(() => {
     if (editingFeedbackId && !feedback.some((item) => item.id === editingFeedbackId)) {
+      // 고치던 피드백이 사라졌다(다른 곳에서 지움) — 그 초안도 버린다.
+      clearEditFeedbackDraft();
       setEditingFeedbackId(null);
-      setEditingFeedbackText('');
-      setEditingReviewType('comment');
     }
-  }, [editingFeedbackId, feedback]);
+  }, [editingFeedbackId, feedback, clearEditFeedbackDraft]);
 
   const linkedStories = useMemo<LinkedStoryView[]>(() => {
     // a9e67531: plan_stories(org-scope·cross-board 포함) 우선·scoped stories에 있으면 enrich·없으면 요약(미노출 fix).
@@ -127,6 +161,11 @@ export function StandupFeedbackDialog({
       .map((storyId) => stories.find((story) => story.id === storyId))
       .filter((story): story is StandupStorySummary => Boolean(story));
   }, [entry?.plan_stories, entry?.plan_story_ids, stories]);
+  // [SID:4311 PR 3] 연결 스토리 담당 칩 — 스탠드업 화면과 같은 규칙(담당 없음 · 이름 빔 · 표에 없음 · 같은 이름 둘은 꼬리). 창은 명단을 받은 뒤 열린다.
+  const assigneeChipLabel = useMemo(
+    () => storyAssigneeChipLabels(linkedStories, memberNameById, tc, tBoard('unassigned')),
+    [linkedStories, memberNameById, tc, tBoard],
+  );
 
   const canAddFeedback = Boolean(entry) && currentMemberId !== member.id;
 
@@ -140,8 +179,7 @@ export function StandupFeedbackDialog({
         review_type: reviewType,
         feedback_text: feedbackText.trim(),
       });
-      setFeedbackText('');
-      setReviewType('comment');
+      clearNewFeedbackDraft();
       setShowFeedbackForm(false);
     } catch {
       setActionError(t('actionFailed'));
@@ -151,9 +189,8 @@ export function StandupFeedbackDialog({
   }
 
   function startEditFeedback(item: StandupFeedbackSummary) {
+    // 글 · 종류는 초안 훅이 채운다(남은 초안이 있으면 그것 · 없으면 저장된 값).
     setEditingFeedbackId(item.id);
-    setEditingReviewType(item.review_type);
-    setEditingFeedbackText(item.feedback_text);
   }
 
   async function saveFeedbackEdit(item: StandupFeedbackSummary) {
@@ -165,9 +202,8 @@ export function StandupFeedbackDialog({
         review_type: editingReviewType,
         feedback_text: editingFeedbackText.trim(),
       });
+      clearEditFeedbackDraft();
       setEditingFeedbackId(null);
-      setEditingFeedbackText('');
-      setEditingReviewType('comment');
     } catch {
       setActionError(t('actionFailed'));
     } finally {
@@ -183,9 +219,8 @@ export function StandupFeedbackDialog({
     try {
       await onDeleteFeedback(item.id);
       if (editingFeedbackId === item.id) {
+        clearEditFeedbackDraft();
         setEditingFeedbackId(null);
-        setEditingFeedbackText('');
-        setEditingReviewType('comment');
       }
     } catch {
       setActionError(t('actionFailed'));
@@ -252,7 +287,7 @@ export function StandupFeedbackDialog({
                     {story.task_count != null ? (
                       <>
                         <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                          <Badge variant="chip">{assigneeChipLabel(story.assignee_id)}</Badge>
                           <span>{t('taskProgress', { done: story.done_task_count ?? 0, total: story.task_count })}</span>
                         </div>
                         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -274,7 +309,15 @@ export function StandupFeedbackDialog({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('feedback')}</p>
               {canAddFeedback ? (
-                <Button variant="glass" size="sm" onClick={() => setShowFeedbackForm((prev) => !prev)}>
+                <Button
+                  variant="glass"
+                  size="sm"
+                  onClick={() => {
+                    // 폼이 열려 있으면 이 버튼은 보이는 «취소» — 초안을 버린다(story #4370 · 유나 규칙). 닫혀 있으면 «피드백 추가»로 연다.
+                    if (showFeedbackForm) { clearNewFeedbackDraft(); setReviewMode(false); }
+                    setShowFeedbackForm((prev) => !prev);
+                  }}
+                >
                   {showFeedbackForm ? t('cancel') : t('addFeedback')}
                 </Button>
               ) : null}
@@ -287,7 +330,7 @@ export function StandupFeedbackDialog({
             ) : (
               <div className="space-y-2">
                 {feedback.map((item) => {
-                  const authorName = memberNameById[item.feedback_by_id] ?? t('unknown');
+                  const authorName = authorLabelById.get(item.feedback_by_id) ?? '';
                   const isAuthor = currentMemberId === item.feedback_by_id;
                   const isEditing = editingFeedbackId === item.id;
                   return (
@@ -316,7 +359,7 @@ export function StandupFeedbackDialog({
                             <Button variant="hero" size="sm" onClick={() => void saveFeedbackEdit(item)} disabled={savingFeedbackId === item.id || !editingFeedbackText.trim()}>
                               {savingFeedbackId === item.id ? tc('saving') : t('saveFeedback')}
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => { setEditingFeedbackId(null); setEditingFeedbackText(''); setEditingReviewType('comment'); }}>
+                            <Button variant="outline" size="sm" onClick={() => { clearEditFeedbackDraft(); setEditingFeedbackId(null); }}>
                               {t('cancel')}
                             </Button>
                           </div>
@@ -383,7 +426,7 @@ export function StandupFeedbackDialog({
                   <Button variant="hero" size="sm" onClick={() => void submitFeedback()} disabled={submittingFeedback || !feedbackText.trim()}>
                     {submittingFeedback ? tc('saving') : t('submitFeedback')}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => { setShowFeedbackForm(false); setReviewMode(false); setReviewType('comment'); }}>
+                  <Button variant="outline" size="sm" onClick={() => { clearNewFeedbackDraft(); setShowFeedbackForm(false); setReviewMode(false); }}>
                     {t('cancel')}
                   </Button>
                 </div>

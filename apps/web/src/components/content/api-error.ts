@@ -22,6 +22,7 @@
 // — 채널 포스트 모델 자체에 title이 없다, doc §5 각주)를 싣는다.
 export type SitePostApiErrorKind =
   | 'approval_required'
+  | 'external_publish_paused'
   | 'permission'
   | 'reapproval_required'
   | 'seal_missing'
@@ -32,6 +33,8 @@ export type SitePostApiErrorKind =
   | 'connection_not_active'
   | 'approver_role_missing'
   | 'publish_in_progress'
+  // story #4264(유나 4632 · PO 처방) — «나갔는지 모름»으로 멈춘 명령에 새 발행 요청 → BE 409 CHANNEL_POST_NEEDS_CHECK(어댑터 0).
+  | 'publish_needs_check'
   | 'text_too_long'
   | 'provider_error'
   // story #3426(BE #3419) — 예약 취소·회수 전용 신규 kind 2개.
@@ -165,8 +168,18 @@ interface KnownError {
 // 화면과 같은 문구를 쓴다.
 const KNOWN_ERRORS: Record<string, KnownError> = {
   MEDIA_NOT_SUPPORTED_PHASE0: { labelKey: 'errorMediaNotSupported', kind: 'unknown' },
+  // story #4336 PR2 — 채널 자산 확인의 스토리지 호출이 시한을 넘김(504 · 이미지 요청 · 영상 요청 안 HEAD) · 영상 확정 작업이 되풀이 실패.
+  // 서버 원문(영어 기술 문장)이 화면에 새지 않게 코드로 받는다. 낱말은 유나 확정 전 잠정.
+  CHANNEL_ASSET_STORAGE_TIMEOUT: { labelKey: 'errorChannelAssetStorageTimeout', kind: 'unknown' },
+  BACKGROUND_JOB_FAILED: { labelKey: 'errorBackgroundJobFailed', kind: 'unknown' },
   SITE_POST_PUBLISH_HUMAN_ONLY: { labelKey: 'errorPublishHumanOnly', kind: 'permission' },
   EXTERNAL_PUBLISH_APPROVAL_REQUIRED: { labelKey: 'errorApprovalRequired', kind: 'approval_required' },
+  // story #3953(블루프린트 §1-5, 페드루 PO 정정 2026-09-17) — 조직 owner가 외부
+  // 발행을 일시 중지했다(423). reason은 어디서도 표시 0(external-publish-pause-
+  // card.tsx 자기 주석과 동형 — 입력만·감사 로그행에만 남음) — 이 자리(발행 시도
+  // 즉시 실패 배너)는 "지금 왜 안 되는지" 1줄이면 충분(다른 KNOWN_ERRORS
+  // 엔트리들도 동형 — labelKey는 정적 문구).
+  EXTERNAL_PUBLISH_PAUSED: { labelKey: 'errorExternalPublishPaused', kind: 'external_publish_paused' },
   SITE_POST_REAPPROVAL_REQUIRED: { labelKey: 'errorReapprovalRequired', kind: 'reapproval_required' },
   SITE_POST_SEAL_MISSING: { labelKey: 'errorSealMissing', kind: 'seal_missing' },
   SITE_POST_RESUBMIT_REQUIRED: { labelKey: 'errorResubmitRequired', kind: 'resubmit_required' },
@@ -208,6 +221,8 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // story #3395 — 동시 발행 요청 경합에서 진 쪽이 받는 응답. "다시 발행"이 아니라
   // "상태를 다시 확認"이 맞는 다음 행동이다(두 번째 요청이 새 게시를 만들지 않는다).
   CHANNEL_PUBLISH_IN_PROGRESS: { labelKey: 'errorChannelPublishInProgress', kind: 'publish_in_progress' },
+  // story #4264 — 문구는 page.tsx가 잠금 사유와 같은 문장으로 조립한다(배지의 재시도 이름 {cta} 보간).
+  CHANNEL_POST_NEEDS_CHECK: { labelKey: '', kind: 'publish_needs_check' },
   CHANNEL_TEXT_TOO_LONG: { labelKey: '', kind: 'text_too_long' }, // maxLength·currentLength로 문구 조립(labelKey는 page.tsx가 보간)
   // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 선알림(사유 사슬)과 같은 i18n 키.
   // 서버 message를 그대로 뿌리지 않는다(코드→화면 문구 선택, §22-15 규율).
@@ -225,6 +240,13 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 부가·i18n 완성 문구). YOUTUBE_QUOTA_EXCEEDED와 동형 — labelKey 비움(서버
   // message 그대로, FE가 문장을 다시 짓지 않는다).
   YOUTUBE_METADATA_INVALID: { labelKey: '', kind: 'validation' },
+  // story #4336(PO P2) — 발행 전 검사의 이어쓰기 실패 세 코드(예전엔 BE가 코드 없는 500). 서버가 요청 언어로 숫자까지 넣은 문장을
+  // 내므로 labelKey 비움(YOUTUBE_METADATA_INVALID와 같은 모양) — 워커가 남긴 본문(`command_failure_detail`)도 같은 문장.
+  CHANNEL_THREAD_UNSUPPORTED: { labelKey: '', kind: 'validation' },
+  CHANNEL_THREAD_SEGMENT_LIMIT_EXCEEDED: { labelKey: '', kind: 'validation' },
+  CHANNEL_THREAD_SEGMENT_TOO_LONG: { labelKey: '', kind: 'validation' },
+  // story #4336(PO P2) — 워커 차례에 초안이 사라짐(요청 404와 같은 코드). 예전엔 표 밖이라 «나갔는지 모름»으로 그렸다.
+  CHANNEL_POST_DRAFT_NOT_FOUND: { labelKey: 'editNotFound', kind: 'validation' },
   // story #3575(BE #3574, 페드루 PO 確定 2026-09-06) — 영상이 있는 초안에 커버를
   // 2장째 올리려 할 때의 서버 방어선(화면 상한 1이 정상 경로를 이미 막지만, 레이스
   // 등으로 도달 시 회귀 0). labelKey 빈칸 — 서버 message 그대로(3471 동형).

@@ -96,7 +96,7 @@ async def test_second_page_returns_different_rows_than_first_realdb():
             from app.repositories.notification import NotificationRepository
             repo = NotificationRepository(s, ORG)
             page1 = await list_notifications(
-                unread=None, is_read=None, limit=2, before=None,
+                unread=None, is_read=None, limit=2, before=None, type_filter=None,
                 db=s, auth=_auth(), repo=repo,
             )
         assert [n.id for n in page1["data"]] == newest_first[0:2]
@@ -107,7 +107,7 @@ async def test_second_page_returns_different_rows_than_first_realdb():
             from app.repositories.notification import NotificationRepository
             repo = NotificationRepository(s, ORG)
             page2 = await list_notifications(
-                unread=None, is_read=None, limit=2, before=page1["meta"]["next_cursor"],
+                unread=None, is_read=None, limit=2, before=page1["meta"]["next_cursor"], type_filter=None,
                 db=s, auth=_auth(), repo=repo,
             )
         page2_ids = [n.id for n in page2["data"]]
@@ -119,7 +119,7 @@ async def test_second_page_returns_different_rows_than_first_realdb():
             from app.repositories.notification import NotificationRepository
             repo = NotificationRepository(s, ORG)
             page3 = await list_notifications(
-                unread=None, is_read=None, limit=2, before=page2["meta"]["next_cursor"],
+                unread=None, is_read=None, limit=2, before=page2["meta"]["next_cursor"], type_filter=None,
                 db=s, auth=_auth(), repo=repo,
             )
         page3_ids = [n.id for n in page3["data"]]
@@ -147,7 +147,7 @@ async def test_no_cursor_first_page_unaffected_when_under_limit_realdb():
         async with Session() as s:
             repo = NotificationRepository(s, ORG)
             page = await list_notifications(
-                unread=None, is_read=None, limit=50, before=None,
+                unread=None, is_read=None, limit=50, before=None, type_filter=None,
                 db=s, auth=_auth(), repo=repo,
             )
         assert [n.id for n in page["data"]] == seeded
@@ -180,7 +180,7 @@ async def test_non_string_truthy_before_treated_as_no_cursor_not_crash_realdb():
         async with Session() as s:
             repo = NotificationRepository(s, ORG)
             page = await list_notifications(
-                unread=None, is_read=None, limit=50, before=fake_sentinel,
+                unread=None, is_read=None, limit=50, before=fake_sentinel, type_filter=None,  # story #4329 신규 Query
                 db=s, auth=_auth(), repo=repo,
             )
         assert [n.id for n in page["data"]] == seeded, "커서 없음으로 취급돼 전체가 나와야 한다(크래시 아님)"

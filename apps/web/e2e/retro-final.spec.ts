@@ -76,7 +76,9 @@ test.describe('Sprint Retro - Final Comprehensive Tests', () => {
       const _href = await sessionLink.getAttribute('href');
       await sessionLink.click();
       
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       const currentUrl = page.url();
       expect(currentUrl).toContain('/retro/');
@@ -97,7 +99,9 @@ test.describe('Sprint Retro - Final Comprehensive Tests', () => {
     
     if (await sessionLink.isVisible().catch(() => false)) {
       await sessionLink.click();
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       // Check for phase stepper
       const phases = ['Collect', 'Group', 'Vote', 'Discuss', 'Action'];
@@ -137,7 +141,9 @@ test.describe('Sprint Retro - Final Comprehensive Tests', () => {
     
     if (await sessionLink.isVisible().catch(() => false)) {
       await sessionLink.click();
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       // Find input field
       const inputs = page.locator('textarea, input[type="text"]');
@@ -187,7 +193,9 @@ test.describe('Sprint Retro - Final Comprehensive Tests', () => {
     
     if (await sessionLink.isVisible().catch(() => false)) {
       await sessionLink.click();
-      await page.waitForLoadState('networkidle');
+      // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거(SSE가 계속 붙어 있어 네트워크가
+      // 안 조용해질 수 있음). h1/h2(목록·상세 둘 다 항상 렌더)로 대체.
+      await page.locator('h1, h2').first().waitFor({ state: 'visible' });
       
       // Find phase transition button
       const nextBtn = page.locator('button:has-text("Next"), button:has-text("Continue"), button:has-text("Group")').first();
@@ -217,9 +225,10 @@ test.describe('Sprint Retro - Final Comprehensive Tests', () => {
       }
     });
     
+    // CHANGES(페드루 PO, 2026-09-18) — networkidle 제거, h1/h2(목록 항상 렌더)로 대체.
     await page.goto(`${BASE_URL}/retro`);
-    await page.waitForLoadState('networkidle');
-    
+    await page.locator('h1, h2').first().waitFor({ state: 'visible' });
+
     // Filter out known expected errors
     const criticalErrors = errors.filter(e => !e.includes('Failed to load resource') && e.length > 5);
     

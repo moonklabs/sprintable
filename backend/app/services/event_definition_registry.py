@@ -13,6 +13,8 @@ import uuid
 
 import jsonschema
 
+from app.services.agent_onboarding_config import SUPPORTED_LOCALES
+
 _PRESET_KEY_RE = re.compile(r"^preset\.[a-z0-9_]+(\.[a-z0-9_]+)+$")
 _ORG_KEY_RE = re.compile(r"^org\.([a-z0-9-]+)\.[a-z0-9_]+(\.[a-z0-9_]+)*$")
 
@@ -30,7 +32,7 @@ _SEGMENT_CHARSET_RE = re.compile(r"^[a-z0-9_]+$")
 # 페드루 판정 2026-08-13) — story #2633(해석기)이 실제로 이 target들을 member_id로 풀어야
 # 하므로, 여기 없는 target을 server_derived로 등록하면 해석기가 절대 못 푸는 정의가 만들어진다
 # — validate_event_routing이 등록 시점에 막는다(발행 시점에야 발견되는 것보다 이르게).
-SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owner"})
+SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owner", "recipe_publish_failure"})
 # story #3312(M1→M3·마케팅자동화) — stage_metadata[stage].gate.approver의 닫힌 어휘.
 # SERVER_DERIVED_TARGETS와 동형 설계: PO 확定(페드루, 2026-09-02) "approver는 역할 참조로만
 # 선언(조직 상수 0) — 다른 org가 같은 정의를 apply해도 그 org 자신의 owner가 승인자". 실제
@@ -38,6 +40,33 @@ SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owne
 # resolver를 갖는지 모듈 로드 시점에 assert로 고정한다(event_routing_resolver.py의
 # _SERVER_DERIVED_RESOLVERS 완결성 assert와 동일 패턴).
 APPROVER_ROLE_REFERENCES = frozenset({"org_owner"})
+# story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — stage_metadata[stage].role_
+# actor_kinds(정의 레벨 옵션 사전, {role명: kind})의 **값** 어휘. role 이름 자체는
+# APPROVER_ROLE_REFERENCES와 달리 닫지 않는다(role은 저자 자유 문자열 — 기존 계약,
+# recipe-role-slots.ts 참조) — 닫는 건 "이 role이 사람인가 에이전트인가"라는 값 축뿐이다.
+# story #4243(PO 2026-09-24) — 세 번째 값 `either`: 사람도 에이전트도 맡을 수 있는 자리(적용 창이 사람 + 에이전트를 함께
+# 보여 주는 멤버 자리). `human`·`agent`는 이름부터 한쪽인 역할만. 대부분의 일반 역할(PO·QA·Reviewer 등)은 `either`다 —
+# 에이전트가 PO·QA를 맡는 조직(customer-zero)이 반례라 `human`으로 박으면 결함을 반대 방향으로 다시 만든다.
+ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent", "either"})
+# story #4090(alembic 0387·페드루 PO 確定 2026-09-21) — capability.target의 닫힌 어휘.
+# gate.approver·server_derived 축과 동형 설계 — apply_recipe_role_bindings가 role_mapping의
+# stage별 값을 어느 테이블(TeamMember/ChannelConnection)로 검증할지 이 값 하나로 가른다.
+# capability.kind(열린 값)와 섞지 않는다 — kind='publish'는 이미 "에이전트가 쓸 커넥터
+# 종류"라는 기존 계약을 여러 정의가 쓰고 있어(#3317 PR B), kind로 target을 유도하면 그
+# 계약을 조용히 바꾼다. "agent"가 기본(capability.target 생략 시)이라 기존 정의 전부 무변.
+# story #4101(alembic 0391·#4095 그라운딩 doc c65ce586 §3-1 후보A·PO Q③닫힌집합 確定,
+# 2026-09-21) — 세 번째 값. Compute 슬롯(live_generation류) stage는 "알릴 사람"도
+# "발행할 채널"도 아니라 "org의 생성 모델 커넥터"를 가리켜야 한다 — 같은 XOR 판별축에
+# 세 번째 값만 더한다(kind='generate'는 #3317 기존 계약 그대로 무변, target만 추가).
+_CAPABILITY_TARGETS = frozenset({"agent", "channel_connection", "generation_connector"})
+
+# story #4174 후속(PO 2026-09-24) — stage의 승인이 **이 stage 밖**(예: 블로그 초안 게이트)에서 일어남을 정의가 선언하는
+# 닫힌 어휘. 적용 창이 사람 역할의 이 stage를 선택 없는 읽기 전용 자리로 그린다(선언 없는 사람 비게이트 stage는 사람이
+# 실제로 일하는 자리라 지금처럼 멤버 자리 — 까디르 QA 재현 C). 승인자는 적지 않는다 — 초안 게이트의 승인자는 게이트
+# 쪽 규칙이 정하므로 여기 또 적으면 어긋날 수 있는 두 번째 원천이 된다.
+# story #4243 D3(PO 2026-09-24) — `doc_approval`: 승인이 결재함의 **문서 결재**에서 일어남(loop_agency «브리프»). 레시피 게이트를
+# 따로 선언하면 결재가 둘로 갈라지므로 쓰지 않는다.
+_APPROVAL_SURFACES = frozenset({"draft_gate", "doc_approval"})
 # story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
 # 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
 # payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —
@@ -73,6 +102,12 @@ class InvalidStageMetadataError(ValueError):
     """story #2792(2790 P1) — stage_metadata 키가 payload_schema.properties.stage.enum의
     부분집합이 아님(페드루 판정 2026-08-19, 가드①). 오타 slug가 조용히 죽는 클래스
     (stage_metadata에는 있는데 실제 stage.enum엔 없어 영원히 안 읽히는 항목) 차단."""
+
+
+class InvalidRoleActorKindsError(ValueError):
+    """story #4092 — role_actor_kinds 값이 닫힌 어휘({"human","agent"}) 밖이거나, 선언된
+    role명이 이 정의의 stage_metadata 어디에도 실재하지 않음(오타로 영원히 안 읽히는 항목
+    차단 — InvalidStageMetadataError와 동일 클래스)."""
 
 
 class InvalidActionAuthError(ValueError):
@@ -379,11 +414,19 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
     stage_metadata가 빈 dict({})면 항상 통과(사이클형이 아닌 정의는 이 슬롯을 안 씀 — 신호형/
     측정형 정의도 이 함수를 걸어도 안전). payload_schema에 stage enum 자체가 없는데
     stage_metadata가 비어있지 않으면(가리킬 enum이 없음) 거부."""
+    if stage_metadata is None:
+        return
+    # story #4239(까디르 4598 QA P2 · 부류 전체) — 이 함수는 등록·수정 API의 입력을 그대로 받는다. 멤버십·set·`.get` 앞에서
+    # 타입을 먼저 본다 — 목록·객체가 frozenset 멤버십이나 set()에 들어가면 TypeError, dict 아닌 값의 `.get`은
+    # AttributeError가 돼 API가 400 대신 500을 낸다.
+    if not isinstance(stage_metadata, dict):
+        raise InvalidStageMetadataError(f"stage_metadata must be an object — got {type(stage_metadata).__name__}.")
     if not stage_metadata:
         return
-    stage_prop = (payload_schema.get("properties") or {}).get("stage") or {}
-    enum = stage_prop.get("enum")
-    if not isinstance(enum, list):
+    properties = payload_schema.get("properties") if isinstance(payload_schema, dict) else None
+    stage_prop = properties.get("stage") if isinstance(properties, dict) else None
+    enum = stage_prop.get("enum") if isinstance(stage_prop, dict) else None
+    if not isinstance(enum, list) or not all(isinstance(value, str) for value in enum):
         raise InvalidStageMetadataError(
             "stage_metadata가 있으려면 payload_schema.properties.stage.enum이 먼저 선언돼야 합니다."
         )
@@ -409,6 +452,15 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].{field}는 비어있지 않은 문자열이어야 합니다."
                 )
+        # story #4224 — action_i18n은 선택 필드(에이전트 지시의 로케일별 문안 · 없으면 action 원문). 있으면 모양 강제.
+        if "action_i18n" in meta:
+            action_i18n = meta["action_i18n"]
+            if not isinstance(action_i18n, dict) or not all(
+                loc in SUPPORTED_LOCALES and isinstance(text, str) and text for loc, text in action_i18n.items()
+            ):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].action_i18n must map a supported locale ({list(SUPPORTED_LOCALES)}) to a non-empty string."
+                )
         # story #3312(M1→M3·마케팅자동화, PO 확定 2026-09-02②) — gate는 선택 필드지만, «막지
         # 않는다고 검증 안 하면 오타가 조용히 무시»되는 자리라(recipe_gate_hooks.py가 gate
         # 키가 없으면 그냥 no-op하므로, 오타 난 gate 선언은 "게이트가 영원히 안 생기는" 채로
@@ -424,10 +476,27 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].gate.type은 비어있지 않은 문자열이어야 합니다."
                 )
-            if gate.get("approver") not in APPROVER_ROLE_REFERENCES:
+            # 목록·객체는 frozenset 멤버십에서 TypeError(→ API 500)라 문자열인지 먼저 본다(까디르 4594 codex P2).
+            if not isinstance(gate.get("approver"), str) or gate["approver"] not in APPROVER_ROLE_REFERENCES:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].gate.approver는 {sorted(APPROVER_ROLE_REFERENCES)} "
                     f"중 하나여야 합니다 — {gate.get('approver')!r}은 닫힌 어휘 밖입니다."
+                )
+        # story #4174 후속 — approval(선택): `{"surface": <닫힌 어휘>}` 하나만. gate와 동시 선언 금지(승인 자리가 둘이 된다).
+        if "approval" in meta:
+            approval = meta["approval"]
+            if (
+                not isinstance(approval, dict) or set(approval) != {"surface"} or not isinstance(approval["surface"], str)
+                or approval["surface"] not in _APPROVAL_SURFACES
+            ):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].approval must be exactly {{'surface': one of {sorted(_APPROVAL_SURFACES)}}} "
+                    f"— got {approval!r}."
+                )
+            if "gate" in meta:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}] must not declare both gate and approval — approval means the approval "
+                    f"happens outside this stage."
                 )
         # story #3317 PR B(마케팅자동화·레시피 결함, PO 확定 2026-09-02) — capability도 gate와
         # 동형: 선택 필드지만 있으면 shape 강제(오타 방치 금지). ⚠️kind는 gate.approver와
@@ -454,6 +523,89 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                     f"stage_metadata[{slug!r}].capability.connector_key는 있으면 비어있지 않은 "
                     f"문자열이어야 합니다."
                 )
+            # story #4090(alembic 0385·페드루 PO 確定 2026-09-21) — capability.target 신설,
+            # kind와 달리 **닫힌 어휘**(생략 시 기본 "agent"). apply_recipe_role_bindings가
+            # 이 값으로 role_mapping의 stage별 target 테이블을 가른다(agent → TeamMember,
+            # channel_connection → ChannelConnection). kind는 여전히 열린 값(조직이 뜻을
+            # 정하는 커넥터 종류)이라 target을 kind에서 유도하지 않는다 — 명시 선언만 신뢰
+            # (7건 기존 픽스처가 "kind=publish + agent 바인딩"을 pin하고 있어, kind 값
+            # 자체로 판별하면 그 계약을 조용히 깬다).
+            # story #4239 — 허용 채널 종류(선택). 발행할 채널을 가리키는 stage(target="channel_connection")에서만 뜻이 있고,
+            # 있으면 알려진 채널 키(샌드박스 포함 · channel_adapters.ALL_CHANNEL_KEYS)의 비어 있지 않은 중복 없는 목록이어야
+            # 한다. 적용 API(apply_recipe_role_bindings)가 바인딩 연결의 채널 종류를 이 목록으로 거른다(밖이면 422).
+            if "channels" in capability:
+                from app.services.channel_adapters import ALL_CHANNEL_KEYS
+
+                channels = capability["channels"]
+                if capability.get("target") != "channel_connection":
+                    raise InvalidStageMetadataError(
+                        f"stage_metadata[{slug!r}].capability.channels is only allowed with target='channel_connection'."
+                    )
+                if (
+                    not isinstance(channels, list) or not channels
+                    or not all(isinstance(c, str) and c in ALL_CHANNEL_KEYS for c in channels)
+                    or len(set(channels)) != len(channels)
+                ):
+                    raise InvalidStageMetadataError(
+                        f"stage_metadata[{slug!r}].capability.channels must be a non-empty list of unique known channel "
+                        f"keys ({sorted(ALL_CHANNEL_KEYS)}) — got {channels!r}."
+                    )
+            if "target" in capability and (
+                not isinstance(capability["target"], str) or capability["target"] not in _CAPABILITY_TARGETS
+            ):
+                # story #3779 BE 한글 사용자 문장 가드(story #3924 "baseline은 줄기만") —
+                # 이 정의 등록 검증 에러는 내부 개발자/설정 대상(에이전트가 event
+                # definition을 신설할 때 hits)이라 sibling raise들(위)과 달리 새로 여기
+                # 한글을 더하지 않고 영문으로 남긴다.
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].capability.target must be one of "
+                    f"{sorted(_CAPABILITY_TARGETS)} — got {capability.get('target')!r}."
+                )
+
+
+def validate_role_actor_kinds(
+    stage_metadata: dict, role_actor_kinds: dict | None, *, locale: str = "ko",
+) -> None:
+    """story #4092(§b) — 선택 필드. None/빈 dict면 "모름"(오늘 zero_reach 동작 그대로)이라
+    검증 대상 자체가 없어 통과. 있으면 두 가지를 강제:
+    ①값이 ROLE_ACTOR_KIND_VALUES({"human","agent"}) 밖이면 거부(role 이름 자체는 자유
+    문자열이라 안 막는다 — 막는 건 kind 값뿐).
+    ②선언된 role명이 이 정의의 stage_metadata 어디에도 실재하지 않으면 거부(오타 role명이
+    조용히 죽는 클래스 — validate_stage_metadata의 stage-key 부분집합 검증과 동일 정신).
+
+    ⛔페드루 PO CHANGES(2026-09-21, PR #4467 리뷰) — validate_stage_metadata 등 이웃
+    함수들의 raw 한글 f-string은 가드(story #3779) 도입 당시 grandfather된 것일 뿐 허가가
+    아니다. 이 함수는 새로 짜는 자리라 baseline에 새 항목을 얹지 않고 i18n_catalog로
+    바로 라우팅한다(정의 저자에게 닿는 사용자 문장) — create/update_event_definition
+    엔드포인트가 아직 locale 헤더를 안 받아 기본값 "ko"(그 두 엔드포인트의 기존 모든
+    거부 문구와 동일 실질 동작, 회귀 0)."""
+    from app.services.i18n_catalog import t
+
+    # 까디르 4606 P2 — «없음»은 None과 빈 dict뿐이다. `[]` · `""` · `0` · `False`는 falsy라도 모양이 틀린 값이라 아래에서
+    # 거부한다(예전 `if not ...`는 그 넷을 «없음»으로 보고 통과시켰다). 서비스 계약이다 — HTTP 등록 · 수정은 요청 스키마
+    # (`dict | None`)가 그 넷을 먼저 422로 막는다(test_2636 HTTP 테스트).
+    if role_actor_kinds is None:
+        return
+    if not isinstance(role_actor_kinds, dict):
+        raise InvalidRoleActorKindsError(
+            t("events.role_actor_kinds_not_object", locale, type_name=type(role_actor_kinds).__name__)
+        )
+    declared_roles = {
+        meta.get("role") for meta in (stage_metadata.values() if isinstance(stage_metadata, dict) else ())
+        if isinstance(meta, dict) and isinstance(meta.get("role"), str)
+    }
+    for role, kind in role_actor_kinds.items():
+        if not isinstance(kind, str) or kind not in ROLE_ACTOR_KIND_VALUES:
+            raise InvalidRoleActorKindsError(
+                t("events.role_actor_kinds_value_outside_vocabulary", locale, role=role, kind=kind)
+            )
+        if role not in declared_roles:
+            raise InvalidRoleActorKindsError(
+                t(
+                    "events.role_actor_kinds_role_not_declared", locale,
+                    role=role, declared_roles=sorted(r for r in declared_roles if r is not None),
+                )
+            )
 
 
 def validate_event_payload(payload_schema: dict, payload: dict) -> None:

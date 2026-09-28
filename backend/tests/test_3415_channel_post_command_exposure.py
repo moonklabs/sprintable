@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.conftest import grant_org_projects
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -91,16 +93,18 @@ async def _seed_org(session, *, slug=None):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+async def _seed_agent(session, org_id, project_id, *, name="담롱", grant: bool = False):
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, agent_member_id=m.id)
     return m.id
 
 
-async def _seed_human(session, org_id, *, role="member"):
+async def _seed_human(session, org_id, *, role="member", grant: bool = False):
     from app.models.project import OrgMember
     from app.models.user import User
 
@@ -110,6 +114,8 @@ async def _seed_human(session, org_id, *, role="member"):
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
     session.add(om)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, user_id=user.id)
     return user.id
 
 
@@ -228,7 +234,7 @@ async def test_no_command_yet_all_new_fields_null():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_connection(s, org_id)
 
@@ -264,7 +270,7 @@ async def test_command_status_and_reason_code_distinguish_voided_pending_blocked
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -385,7 +391,7 @@ async def test_transient_failure_exposes_failure_kind_and_next_retry_at():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -416,7 +422,7 @@ async def test_transient_failure_exposes_failure_kind_and_next_retry_at():
         with (
             patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
-                status_code=500, code="SERVER_ERROR", message="boom",
+                status_code=500, code="THREADS_CREATE_CONTAINER_FAILED", message="boom",  # 실 어댑터 코드(쓰기 前 · 4264 명시 transient)
             ))),
         ):
             async with Session() as s:
@@ -447,7 +453,7 @@ async def test_dead_letter_exposes_dead_letter_at_and_null_next_retry_at():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -479,7 +485,7 @@ async def test_dead_letter_exposes_dead_letter_at_and_null_next_retry_at():
         with (
             patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
-                status_code=500, code="SERVER_ERROR", message="boom",
+                status_code=500, code="THREADS_CREATE_CONTAINER_FAILED", message="boom",  # 실 어댑터 코드(쓰기 前 · 4264 명시 transient)
             ))),
         ):
             async with Session() as s:
@@ -507,7 +513,7 @@ async def test_latest_command_wins_over_older_completed_history_on_same_gate():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -563,7 +569,7 @@ async def test_list_and_detail_parity_for_new_fields():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -594,7 +600,7 @@ async def test_list_and_detail_parity_for_new_fields():
         with (
             patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
-                status_code=500, code="SERVER_ERROR", message="boom",
+                status_code=500, code="THREADS_CREATE_CONTAINER_FAILED", message="boom",  # 실 어댑터 코드(쓰기 前 · 4264 명시 transient)
             ))),
         ):
             async with Session() as s:
@@ -634,7 +640,7 @@ async def test_list_query_count_with_commands_does_not_scale_with_draft_count():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)

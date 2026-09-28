@@ -10,6 +10,7 @@ import {
   type ExportFormat, type BeArtifactExport,
 } from '@/services/canvas-export';
 import type { ArtifactFormat } from '@/services/canvas';
+import { copyTextSafely } from '@/lib/clipboard';
 
 export type ExportTheme = 'light' | 'dark';
 
@@ -31,6 +32,7 @@ interface ExportDialogProps {
  */
 export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, captureTargetRef, artifactFormat }: ExportDialogProps) {
   const t = useTranslations('canvas');
+  const tc = useTranslations('common');
   const pngAllowed = canPngExport(artifactFormat);
   // 유나 §① "보이는 그대로"(WYSIWYG) — 테마 토글 초기값은 지금 보고 있는 테마여야 한다
   // (하드코딩 'light'는 위반). resolvedTheme이 'system'을 실제 적용 테마로 풀어준다.
@@ -41,6 +43,9 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
   const [result, setResult] = useState<BeArtifactExport | null>(null);
   // export 실패 원인(캡처 throw 등)을 UI/로그에 노출 — 빈 catch가 삼켜 진단 불가였던 회귀 방지.
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 clipboard 실패를 삼키고
+  // 아무 피드백도 없었다(성공 표시 자체가 원래 없었다 — catch(()=>{}) 뿐).
+  const [linkCopyFailed, setLinkCopyFailed] = useState(false);
 
   const handleExport = async () => {
     setPhase('exporting');
@@ -77,7 +82,15 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
   };
 
   const handleCopyLink = () => {
-    if (result?.download_url) void navigator.clipboard.writeText(result.download_url).catch(() => {});
+    if (!result?.download_url) return;
+    void copyTextSafely(result.download_url).then((r) => {
+      if (!r.ok) {
+        setLinkCopyFailed(true);
+        setTimeout(() => setLinkCopyFailed(false), 3000);
+      } else {
+        setLinkCopyFailed(false);
+      }
+    });
   };
 
   return (
@@ -94,6 +107,21 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
               <button type="button" onClick={handleCopyLink} className="font-semibold text-primary hover:underline">
                 {t('exportCopyLinkAction')}
               </button>
+            ) : null}
+            {/* story #3986 — 실패하면 링크 자체를 선택 가능하게 노출한다(유나
+                지시 — 실패 문구가 이미 "직접 선택" 지시, 별도 안내 줄은 안
+                만든다). */}
+            {linkCopyFailed && result?.download_url ? (
+              <div className="space-y-1">
+                <p role="alert" className="text-destructive">{tc('copyFailedSelectManually')}</p>
+                <input
+                  readOnly
+                  value={result.download_url}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground"
+                  data-testid="export-dialog-copy-failed-raw-link"
+                />
+              </div>
             ) : null}
           </div>
         ) : phase === 'error' ? (

@@ -149,8 +149,27 @@ async def get_loop_context_pack(
         loop = await svc.require_loop_project_access(session, loop_id, uuid.UUID(str(auth.user_id)), org_id)
     except svc.LoopServiceError as err:
         _raise(err)
-    from app.services.context_pack_items import build_loop_context_pack
-    return await build_loop_context_pack(session, org_id, loop)
+    from fastapi.responses import JSONResponse
+
+    from app.services.background_jobs import background_job_view, enqueue_background_job
+    from app.services.context_pack_items import ContextPackCacheMiss, build_loop_context_pack
+    from app.services.member_resolver import resolve_member
+
+    # story #4336 PR2 ②(PO 04:32Z) — 임베드 · 검색 · 캐시 확인(≈10s)은 요청 안. 종합/추천 캐시가 있으면 그대로 답하고, 없으면 LLM 사슬
+    # (25s × 2 · 순차)을 요청에서 떼어 작업(loop_context_pack)으로 — 202 + 작업. 워커가 만들며 캐시를 채워 다음 GET은 곧바로 답한다.
+    try:
+        return await build_loop_context_pack(session, org_id, loop, generate_on_miss=False)
+    except ContextPackCacheMiss:
+        await session.rollback()
+    requester = await resolve_member(auth, org_id, session)
+    job = await enqueue_background_job(
+        session, org_id=org_id, kind="loop_context_pack", requested_by_member_id=requester.id,
+        payload={"loop_id": str(loop_id)},
+        # PO 10:39Z — MCP가 30초 뒤 «다시 부르라»고 안내 → 다시 불러도 열린 작업 하나(두 틱이 LLM을 두 번 부르지 않게)
+        dedup_key=f"loop:{loop_id}",
+    )
+    await session.commit()
+    return JSONResponse(status_code=202, content=background_job_view(job))
 
 
 @router.post("/{loop_id}/artifacts", response_model=LoopArtifactResponse, status_code=201)

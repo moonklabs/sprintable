@@ -7,6 +7,8 @@ from datetime import date, datetime
 
 from mcp.types import TextContent
 
+from .api_client import SprintableApiError, _split_code_message
+
 
 def _default_serializer(obj: object) -> str:
     """datetime/UUID → JSON 직렬화 가능 타입으로 변환."""
@@ -22,9 +24,55 @@ def ok(data: object) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, indent=2, ensure_ascii=False, default=_default_serializer))]
 
 
-def err(msg: str) -> list[TextContent]:
-    """오류 응답 — ok()와 동일한 list[TextContent] 반환. 에러 prefix로 에이전트 구분."""
-    return [TextContent(type="text", text=f"Error: {msg}")]
+
+# story #3933 — code→다음 행동 힌트. 낱말 발명 0(기존 문구·BE code 그대로) 원칙이라
+# 대부분은 의도적으로 비워 둔다 — 없는 code는 hint 필드 자체를 생략(AC1 명시 허용). 다음에
+# 실제로 자주 보이는 code가 생기면 그 code 자신의 기존 메시지/문서에서 문구를 그대로
+# 가져와 여기 추가한다(새 낱말 짓지 않는다).
+#
+# circuit_breaker_open(AC3 우선 처리, conversations.py:2551) — 원래 문장이 저자 자신이
+# em-dash로 나눠 뒀던 "무슨 일"(message)과 "다음 행동"(hint)을 그대로 옮김, 새 낱말 0.
+_ERROR_HINTS: dict[str, str] = {
+    "CIRCUIT_BREAKER_OPEN": "org owner/admin의 해제 또는 자동 해소를 기다려주세요",
+}
+
+
+def err(exc: str | BaseException) -> list[TextContent]:
+    """오류 응답 — ok()와 동일한 list[TextContent] 반환.
+
+    story #3933(2026-09-16, 페드루 PO 판정) — 이전엔 `err(str(exc))`로 123곳 호출부가
+    이미 `str(exc)`로 code/detail을 문자열 하나에 뭉개 넘겼다. `SprintableApiError`가
+    가진 `.code`/`.message`/`.detail`을 그대로 받게 시그니처를 넓혀서(str도 여전히
+    받는다 — 기존 소수 직접-문자열 호출부 하위호환) 구조를 복원한다.
+
+    출력은 두 겹: 1행은 기존 그대로 `Error: {code}: {message}`(fleet의 `startswith
+    ("Error:")`류 파싱 무변 — 블라스트 반경 흡수) + 그 뒤 JSON 블록
+    `{"code","message","hint"?,"detail"?}`(기계가 읽는 구조, hint/detail은 있을 때만).
+    """
+    if isinstance(exc, SprintableApiError):
+        code = exc.code or "UNKNOWN"
+        message = exc.message
+        detail = exc.detail
+    elif isinstance(exc, BaseException):
+        code = "UNKNOWN"
+        message = str(exc)
+        detail = None
+    else:
+        code, message = _split_code_message(exc)
+        code = code or "UNKNOWN"
+        detail = None
+
+    first_line = f"Error: {code}: {message}" if code != "UNKNOWN" else f"Error: {message}"
+
+    payload: dict[str, object] = {"code": code, "message": message}
+    hint = _ERROR_HINTS.get(code)
+    if hint:
+        payload["hint"] = hint
+    if detail is not None:
+        payload["detail"] = detail
+
+    json_block = json.dumps(payload, indent=2, ensure_ascii=False, default=_default_serializer)
+    return [TextContent(type="text", text=f"{first_line}\n{json_block}")]
 
 
 def ok_paginated(

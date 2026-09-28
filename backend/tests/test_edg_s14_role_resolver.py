@@ -227,7 +227,7 @@ async def test_priority_order_and_unresolved_marks_step_run():
 async def test_s13_escalation_resolves_role_key_via_s14_resolver():
     """⭐fold-in: S13 SLA escalate_to=role_key → S14 resolver 로 해소(silent keep_pending 금지)."""
     import sqlalchemy as sa
-    from app.services.workflow_sla_processor import process_sla
+    from tests.test_edg_s13_sla_processor import _run_sla
     from app.models.workflow_line import WorkflowLineStepRun
     from sqlalchemy import select
     engine, Session = await _session()
@@ -237,7 +237,7 @@ async def test_s13_escalation_resolves_role_key_via_s14_resolver():
         deputy = await _member(s, org)
         await _assign(s, org, "manager", deputy)  # role_key='manager' → deputy
         sr = await _seed_sla_run(s, org, {"timeout_hours": 4, "escalate_to": "manager"}, age_h=10)
-        c = await process_sla(s, now=_NOW)
+        c = await _run_sla(s, now=_NOW)
         assert c["escalated"] == 1 and c["unresolved"] == 0
         row = (await s.execute(select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id))).scalar_one()
         assert row.escalated_to_member_id == deputy and row.status == "escalated"
@@ -249,7 +249,7 @@ async def test_s13_escalation_resolves_role_key_via_s14_resolver():
 async def test_s13_escalation_unresolved_role_visible_not_silent():
     """⭐fold-in: role_key 후보 없으면 silent keep_pending 금지 → unresolved_assignee 가시화."""
     import sqlalchemy as sa
-    from app.services.workflow_sla_processor import process_sla
+    from tests.test_edg_s13_sla_processor import _run_sla
     from app.models.workflow_line import WorkflowLineStepRun
     from sqlalchemy import select
     engine, Session = await _session()
@@ -257,14 +257,14 @@ async def test_s13_escalation_unresolved_role_visible_not_silent():
         await s.execute(sa.text("TRUNCATE workflow_line_step_runs CASCADE"))
         org = uuid.uuid4()
         sr = await _seed_sla_run(s, org, {"timeout_hours": 4, "escalate_to": "no_role"}, age_h=10)
-        c = await process_sla(s, now=_NOW)
+        c = await _run_sla(s, now=_NOW)
         assert c["unresolved"] == 1 and c["escalated"] == 0 and c["kept_pending"] == 0
         row = (await s.execute(select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id))).scalar_one()
         assert row.delivery_status == "unresolved_assignee"  # silent prison 아님
 
         # ⭐멱등(산티아고 SME): cron 재실행해도 escalated(unresolved) event 중복 기록 안 함.
         from app.models.workflow_line import WorkflowLineStepRunEvent
-        c2 = await process_sla(s, now=_NOW)
+        c2 = await _run_sla(s, now=_NOW)
         assert c2["unresolved"] == 0 and c2["kept_pending"] == 1  # 재기록 skip
         evs = (await s.execute(select(WorkflowLineStepRunEvent).where(
             WorkflowLineStepRunEvent.step_run_id == sr.id,

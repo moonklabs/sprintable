@@ -1,5 +1,6 @@
 import { apiSuccess } from '@/lib/api-response';
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 type RouteParams = { params: Promise<{ id: string; draftId: string }> };
 
@@ -10,6 +11,10 @@ export async function POST(request: Request, { params }: RouteParams) {
   const { id, draftId } = await params;
   const _r = await proxyToFastapiWithParams(
     request, '/api/v2/organizations/[id]/channel-posts/drafts/[draftId]/submit', { id, draftId },
+    {
+      // story #4320(까디르 QA ①) — 레시피 자동 충족이면 그 자리에서 발행 — 시한은 표 한 곳(bff-route-timeouts · 근거 백엔드 파일:줄).
+      timeoutMs: LONG_ROUTES.channelDraftSubmit.bffMs,
+    },
   );
   if (!_r.ok) return _r;
   return apiSuccess(await _r.json());

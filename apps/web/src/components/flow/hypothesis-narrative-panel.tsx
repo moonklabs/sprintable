@@ -92,7 +92,7 @@ function NarrativeStep({
     <div className="relative border-l-2 border-border pb-6 pl-5 last:pb-0">
       <span aria-hidden="true" className="absolute -left-[7px] top-0.5 size-3 rounded-full border-2 border-background bg-brand" />
       <div className="mb-1 flex items-baseline gap-2">
-        <span className="text-[10px] font-bold tracking-wide text-brand">{label}</span>
+        <span className="text-[10px] font-bold tracking-wide text-brand-text">{label}</span>
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       </div>
       <div className="text-xs text-muted-foreground">{children}</div>
@@ -171,7 +171,7 @@ export function HypothesisNarrativePanel({
                         <button
                           type="button"
                           onClick={() => onNavigateToGoal(g.id)}
-                          className="text-left text-brand underline-offset-2 hover:underline"
+                          className="text-left text-brand-text underline-offset-2 hover:underline"
                         >
                           {g.title} <span aria-hidden="true">→</span> {t('narrativeGoalDrilldownHint')}
                         </button>

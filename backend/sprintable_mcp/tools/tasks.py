@@ -66,7 +66,7 @@ async def list_tasks(args: ListTasksInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_tasks")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def list_my_tasks(args: ListMyTasksInput) -> list[TextContent]:
@@ -82,7 +82,7 @@ async def list_my_tasks(args: ListMyTasksInput) -> list[TextContent]:
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_my_tasks")
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_task(args: GetTaskInput) -> list[TextContent]:
@@ -90,7 +90,7 @@ async def get_task(args: GetTaskInput) -> list[TextContent]:
     try:
         return ok(await client.get(f"/api/v2/tasks/{args.task_id}"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def add_task(args: AddTaskInput) -> list[TextContent]:
@@ -105,7 +105,7 @@ async def add_task(args: AddTaskInput) -> list[TextContent]:
     try:
         return ok(await client.post("/api/v2/tasks", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_task(args: UpdateTaskInput) -> list[TextContent]:
@@ -120,7 +120,7 @@ async def update_task(args: UpdateTaskInput) -> list[TextContent]:
     try:
         return ok(await client.patch(f"/api/v2/tasks/{args.task_id}", json=updates))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_task_status(args: UpdateTaskStatusInput) -> list[TextContent]:
@@ -128,4 +128,4 @@ async def update_task_status(args: UpdateTaskStatusInput) -> list[TextContent]:
     try:
         return ok(await client.patch(f"/api/v2/tasks/{args.task_id}", json={"status": args.status.value}))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

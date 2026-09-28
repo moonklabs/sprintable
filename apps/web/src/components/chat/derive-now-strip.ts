@@ -12,6 +12,7 @@
  * BE가 attention 종을 늘리면 이 파일도 함께 고쳐야 한다(3곳 동기화 경계: types.ts +
  * action-zone.tsx attentionEntityLabel/attentionDayCount + 이 파일의 href/icon 매핑).
  */
+import { withProjectParam } from '@/lib/with-project-param';
 import type { useTranslations } from 'next-intl';
 import type { AttentionItem } from '@/components/dashboard/command-center/types';
 import { attentionEntityLabel, attentionDetailText } from '@/components/dashboard/command-center/action-zone';
@@ -60,20 +61,27 @@ export function nowStripItemKey(item: AttentionItem): string {
  * AttentionRow와 동일 한계). §1a 표는 「무엇에 도달하나」만 규정하지 「어느 프로젝트로」는
  * 이 스토리 범위 밖(크로스 프로젝트 정합은 후속 표면 작업 몫).
  */
-export function nowStripItemHref(item: AttentionItem): string {
+/** withProject — 조직 단위 flat 목적지(결재함 · 에이전트 상세)에 **현재** 프로젝트를 싣는 함수(story #4231 3차 · 필수 · 호출처는 useFlatHref).
+ * story #4231 4차(PO 07:53Z) — my-actions attention은 **조직 전체**라 항목마다 프로젝트가 다를 수 있다. 옛 자원 경로(/board · /flow · /goals ·
+ * proxy가 `?p=`로 scoped 경로를 정한다 · #4253)는 현재 프로젝트가 아니라 **항목 자기 project_id**를 싣는다(현재 p로 감싸면 «p는 붙었는데 틀린
+ * 셸»). agent_stuck도 #4259부터 BE가 project_id를 싣는다(옛 응답이면 주소 그대로 — 지어내지 않는다). */
+export function nowStripItemHref(item: AttentionItem, withProject: (href: string) => string): string {
   switch (item.type) {
     case 'agent_stuck':
-      return item.entity_type === 'story' ? `/board?story=${item.entity_id}` : '/inbox?tab=gates';
+      // story #4259 — BE가 agent_stuck에 step run의 project_id를 싣는다 → 항목 자기 프로젝트(옛 응답이라 없으면 주소 그대로 — 지어내지 않음).
+      return item.entity_type === 'story'
+        ? withProjectParam(`/flow?story=${item.entity_id}`, item.project_id ?? null)
+        : withProject('/inbox?tab=gates');
     case 'agent_auth_failure':
-      return `/organization/workforce/${item.member_id}`;
+      return withProject(`/organization/workforce/${item.member_id}`);
     case 'unanswered_blocker':
-      return `/board?story=${item.blocked_story_id}`;
+      return withProjectParam(`/flow?story=${item.blocked_story_id}`, item.project_id);
     case 'hypothesis_falsified':
     case 'loop_overdue_hypothesis':
-      return '/flow';
+      return withProjectParam('/flow', item.project_id);
     case 'loop_overdue_goal':
     case 'loop_outcome_missing_goal':
-      return `/goals/${item.goal_id}`;
+      return withProjectParam(`/goals/${item.goal_id}`, item.project_id);
   }
 }
 
@@ -93,6 +101,7 @@ export interface NowStripItem {
 export function buildNowStripItems(
   items: AttentionItem[],
   t: ReturnType<typeof useTranslations>,
+  withProject: (href: string) => string,
   resolveName: (id: string | null | undefined) => string | null = () => null,
   epicTitles: Record<string, string> = {},
 ): NowStripItem[] {
@@ -102,7 +111,7 @@ export function buildNowStripItems(
     severity: normalizeSeverity(item.severity),
     title: attentionEntityLabel(item, resolveName, epicTitles),
     detail: attentionDetailText(t, item),
-    href: nowStripItemHref(item),
+    href: nowStripItemHref(item, withProject),
   }));
   return out.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
 }

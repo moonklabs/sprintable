@@ -89,6 +89,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "doc 결재 게이트는 doc 상신 경로로만 생성돼요 (직접 생성 불가).",
         "en": "Doc approval gates are created only through the doc submission flow — direct creation is not allowed",
     },
+    # story #4190(유나 확정 · PO 11:53Z) — 레시피 발행 승인 화면을 연 뒤 초안이 새 버전으로 바뀌었을 때(409 gate_draft_changed).
+    "gates.draft_changed": {
+        "ko": "그 사이 초안이 새 버전으로 바뀌어 승인되지 않았어요. 최신 초안을 확인한 뒤 다시 승인해 주세요.",
+        "en": "The draft was updated in the meantime, so it wasn't approved. Review the latest draft, then approve again.",
+    },
     "gates.approve_human_only": {
         "ko": "게이트 승인/거부는 휴먼 멤버만 가능해요 (에이전트 승인 불가).",
         "en": "Only human members can approve or reject a gate — agents cannot approve",
@@ -96,6 +101,21 @@ _CATALOG: dict[str, dict[str, str]] = {
     "gates.approve_self_not_allowed": {
         "ko": "본인이 상신한 doc 결재는 본인이 승인/거부할 수 없어요 (self-approval 금지·상신자 미검증 차단).",
         "en": "You cannot approve or reject a doc approval you submitted — self-approval is not allowed",
+    },
+    # story #4083 — recipe_gate_default_approver_member_id도 merge_gate_default_approver_
+    # member_id(hitl_config.py, story #3319)와 같은 불변식(사람 owner/admin, 에이전트 불가)이라
+    # 검증 자체는 같은 형으로 짓는다(발명 0). 다만 그 문구는 #3319 당시 grandfather돼
+    # baseline에 남아 있고, 이 필드는 새로 만드는 거라 korean_user_strings_baseline.txt에 얹지
+    # 않고(#4092 PO 정정 재적용) 이 카탈로그로 바로 옮긴다.
+    #
+    # ⚠️정정(페드루 PO 리뷰, 2026-09-21, PR #4477) — 최초 문구가 필드명(snake_case)·영문
+    # 내부 속성어("human owner/admin"·"requires_human")를 그대로 담아 API 소비자 전용
+    # 표현이었다. 이 카탈로그는 «사용자 문장 자리»(파일 docstring)이므로 화면에 그대로
+    # 떠도 되는 사람 문장으로 다시 짓는다 — API detail이 곧 화면 문구가 되는 이 레포 관례
+    # (story e0c1b24c, HTTPException.detail raw passthrough)상 카탈로그 쪽이 뿌리.
+    "gates.recipe_default_approver_invalid_member": {
+        "ko": "레시피 게이트 기본 승인자는 이 조직의 소유자 또는 관리자(사람)만 지정할 수 있어요.",
+        "en": "The recipe gate default approver must be a human owner or admin of this organization.",
     },
     "gates.approve_no_doc_access": {
         "ko": "doc 결재 권한이 없어요 (대상 프로젝트 접근 필요).",
@@ -144,6 +164,14 @@ _CATALOG: dict[str, dict[str, str]] = {
     "gates.require_admin_generic": {
         "ko": "이 액션은 조직 소유자/관리자만 가능해요.",
         "en": "This action requires org admin/owner",
+    },
+    "gates.approval_not_found": {
+        "ko": "결재 항목을 찾을 수 없어요.",
+        "en": "Approval item not found",
+    },
+    "gates.approval_self_or_foreign": {
+        "ko": "본인에게 배정된 결재 항목만 처리할 수 있어요.",
+        "en": "You can only act on an approval item assigned to you",
     },
     "gates.delegate_designated_only": {
         "ko": "지정 결재자 본인만 위임할 수 있어요.",
@@ -224,6 +252,528 @@ _CATALOG: dict[str, dict[str, str]] = {
     "events.gate_verdict_next_action_publish_human_only": {
         "ko": "다음 행동: 할 일 없음 — 발행은 휴먼이 화면에서 해요.",
         "en": "Next action: nothing to do — a human publishes this from the screen.",
+    },
+    # story #4076(BE, 페드루 PO 確定 2026-09-21) — events.py 레시피 stage 자기설명 렌더러
+    # (사이클)·판정 렌더러(_render_gate_verdict_message) 공용. stage_metadata[stage].gate
+    # 선언이 어느 발행에 묶이는지에 따라 두 문장으로 갈린다(recipe_gate_hooks.py::
+    # maybe_create_stage_gate — routing 직후·메시지 발송 전에 "지금 발행되는 그 stage"의
+    # 게이트를 만든다, events.py:1845-1854).
+    # story #4251(PO 판정) — 원시 발행이 레시피 stage 순서 · 권한을 어겨 거부될 때의 본문. 사람과 에이전트가 같은 문장을 읽고
+    # 스스로 멈추게 «무엇이 막혔나(첫 줄) + 지금 stage와 담당(둘째 줄)»을 싣는다(events.py `_stage_publish_rejection_detail`).
+    # 문안 = 유나 11:08Z — 자리표시자 뒤에 조사를 두지 않는다(값마다 받침이 달라 «이고/고» · «예요/이에요»가 틀린다).
+    "events.stage_publish_rejected_not_next": {
+        "ko": "{stage} 단계는 지금 낼 수 없어요 — 레시피는 단계를 건너뛰거나 되돌아가지 않아요. 다음에 낼 단계: {next}",
+        "en": "The {stage} stage can't be published now — a recipe never skips or goes back a stage. Next stage to publish: {next}",
+    },
+    "events.stage_publish_rejected_not_next_last": {
+        "ko": "{stage} 단계는 지금 낼 수 없어요 — 레시피가 이미 마지막 단계에 와 있어요.",
+        "en": "The {stage} stage can't be published now — the recipe is already at its last stage.",
+    },
+    "events.stage_publish_rejected_not_assignee": {
+        "ko": "{stage} 단계는 {allowed}만 낼 수 있어요 — 직접 내지 말고 그 멤버가 이어 가게 두세요.",
+        "en": "Only {allowed} can publish the {stage} stage — don't publish it yourself; let them continue.",
+    },
+    "events.stage_publish_rejected_not_approved": {
+        "ko": "{current} 단계의 승인이 아직이에요 — 승인 알림(preset.gate.verdict)을 받은 뒤 {stage} 단계를 내 주세요.",
+        "en": "The {current} stage isn't approved yet — publish the {stage} stage after the approval notification "
+        "(preset.gate.verdict) arrives.",
+    },
+    # PO 12:59Z — 게이트가 이미 승인된 stage를 다시 내려 할 때(문안 = 유나 13:16Z · «순서 밖» 줄과 같은 틀 — 누가 이을지는
+    # 둘째 줄 담당이 알려 준다 · 마지막 stage면 «다음에 낼 단계»를 뺀다).
+    "events.stage_publish_rejected_already_approved": {
+        "ko": "{stage} 단계는 다시 낼 수 없어요 — 이미 승인됐어요. 다음에 낼 단계: {next}",
+        "en": "The {stage} stage can't be published again — it's already approved. Next stage to publish: {next}",
+    },
+    "events.stage_publish_rejected_already_approved_last": {
+        "ko": "{stage} 단계는 다시 낼 수 없어요 — 이미 승인됐어요.",
+        "en": "The {stage} stage can't be published again — it's already approved.",
+    },
+    "events.stage_publish_rejected_server": {
+        "ko": "{stage} 단계는 서버가 내요 — 직접 내지 마세요. 서버 일이 성공하면 워크플로우가 다음 단계로 넘어가요.",
+        "en": "The server publishes the {stage} stage — don't publish it yourself. Once the server's work succeeds, the "
+        "workflow moves to the next stage.",
+    },
+    "events.stage_publish_rejected_now": {
+        "ko": "지금 단계: {current} · 담당: {assignee}",
+        "en": "Current stage: {current} · assigned to: {assignee}",
+    },
+    "events.stage_publish_rejected_not_started": {
+        "ko": "이 작업 항목에서 이 레시피는 아직 시작 전이에요.",
+        "en": "This recipe hasn't started on this work item yet.",
+    },
+    "events.stage_publish_rejected_nobody": {
+        "ko": "담당 없음",
+        "en": "no one",
+    },
+    "events.stage_gate_already_open": {
+        "ko": "지금 사람 승인 게이트가 열려 있어요({approver_clause}) — 승인 알림"
+        "(preset.gate.verdict) 뒤 다음 단계를 발행해 주세요.",
+        "en": "A human approval gate is already open ({approver_clause}) — publish "
+        "the next stage after you receive the approval notification (preset.gate.verdict).",
+    },
+    # story #4149(리허설 2호 실측, 페드루 PO 確定 2026-09-22) — 위 events.stage_gate_
+    # already_open의 {approver_clause} 두 갈래. #4083 OrgGatePolicy.recipe_gate_default_
+    # approver_member_id가 설정돼 있으면(정책 지정) 그 멤버 표시명을 그대로 싣고, 미설정
+    # (기본값, recipe_gate_hooks.py::_resolve_org_owner의 org owner 폴백 그대로)이면 역할
+    # 문구만 — "org_owner"(내부 role 참조 슬러그) 리터럴이 문장에 그대로 새던 실사고
+    # (댄 보고 원문, #4145 스모크) 처방.
+    "events.stage_gate_approver_clause_policy": {
+        "ko": "승인자: {name}(정책 지정)",
+        "en": "approver: {name} (policy-designated)",
+    },
+    "events.stage_gate_approver_clause_default": {
+        "ko": "승인자 역할: org 소유자",
+        "en": "approver role: org owner",
+    },
+    "events.stage_gate_opens_on_publish": {
+        "ko": "이 발행을 하면 사람 승인 게이트가 열려요 — 승인 알림(preset.gate.verdict) "
+        "뒤에 그다음 단계를 발행해 주세요.",
+        "en": "Publishing this will open a human approval gate — publish the following stage "
+        "only after you receive the approval notification (preset.gate.verdict).",
+    },
+    # story #4090([E-RECIPE-1] Publisher 슬롯) AC3(페드루 PO 確定 2026-09-21) — 다음
+    # stage가 채널 자동발행 대상(capability.target=="channel_connection")일 때의
+    # 네 갈래 안내(AC2 훅의 실제 gate.publish_outcome을 그대로 반영, 지어내지 않는다).
+    "events.gate_verdict_recipe_auto_published": {
+        "ko": "다음 행동: 할 일 없음 — 이 승인으로 바인딩된 채널에 이미 자동 발행됐어요.",
+        "en": "Next action: nothing — this approval already auto-published to the bound "
+        "channel connection.",
+    },
+    "events.gate_verdict_recipe_auto_publish_scheduled": {
+        "ko": "다음 행동: 할 일 없음 — 예약 시각에 자동 발행돼요.",
+        "en": "Next action: nothing — this will auto-publish at the scheduled time.",
+    },
+    # story #4142(페드루 PO 처방, 2026-09-22) — 비동기 컨테이너(REELS 등)가 아직
+    # 완결 안 된 비최종 상태. "이미 발행됐어요"(published 키)와 명확히 갈라야 한다 —
+    # 이 카드가 발행 완료를 거짓으로 알리던 실사고의 직접 처방.
+    "events.gate_verdict_recipe_auto_publish_processing": {
+        "ko": "다음 행동: 할 일 없음 — 지정 채널로 발행 진행 중이에요, 잠시 후 완료돼요.",
+        "en": "Next action: nothing — publishing to the bound channel is in progress, it "
+        "will finish shortly.",
+    },
+    "events.gate_verdict_recipe_auto_publish_skipped": {
+        "ko": "다음 행동: {reason}",
+        "en": "Next action: {reason}",
+    },
+    "events.gate_verdict_recipe_auto_publish_pending": {
+        "ko": "다음 행동: 채널 포스트 초안을 만들어 제출하면 승인이 자동으로 발행까지 이어져요.",
+        "en": "Next action: create and submit a channel post draft — approval will auto-publish it.",
+    },
+    # story #4090 AC3 정정(story #3779 가드, 2026-09-21) — gate.publish_outcome은 닫힌
+    # 어휘 코드(no_channel_binding|no_submitted_draft|no_resolver|publish_failed:*)라
+    # skipped 안내문의 {reason} 자리에 코드→문구 번역이 필요해졌다(4갈래 세분).
+    "events.gate_verdict_recipe_auto_publish_reason_no_channel": {
+        "ko": "발행 채널이 아직 지정되지 않았어요 — 레시피 적용 화면에서 발행 채널을 먼저 지정해 주세요.",
+        "en": "No publish channel is bound yet — bind one from the recipe apply screen first.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_no_draft": {
+        "ko": "제출된 채널 포스트 초안이 없어 발행을 건너뛰었어요 — 채널 포스트 초안을 만들어 제출한 뒤 "
+        "다시 승인해 주세요.",
+        "en": "No submitted channel post draft — create and submit one, then re-approve.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_no_resolver": {
+        "ko": "승인자를 확인할 수 없어 발행을 건너뛰었어요.",
+        "en": "Skipped — could not resolve an approver.",
+    },
+    # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — "publish_failed:<code>"의
+    # code도 닫힌 어휘(connector_error|rate_limited|auth_expired, channel_posts.py::
+    # classify_publish_failure_outcome)라 커넥터 원문을 안 싣고 각 코드별로 번역한다.
+    "events.gate_verdict_recipe_auto_publish_reason_auth_expired": {
+        "ko": "채널 연결이 끊겼거나 만료됐어요 — 조직 설정에서 연결을 갱신한 뒤 다시 승인해 주세요.",
+        "en": "The channel connection expired or was revoked — reconnect it, then re-approve.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_rate_limited": {
+        "ko": "채널 발행 한도에 걸렸어요 — 잠시 뒤 다시 승인해 주세요.",
+        "en": "Hit the channel's rate limit — re-approve again shortly.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_connector_error": {
+        "ko": "자동 발행이 실패했어요 — 채널 상태를 확인한 뒤 다시 승인해 주세요.",
+        "en": "Auto-publish failed — check the channel, then re-approve.",
+    },
+    # story #4264(유나 4632 · PO 처방) — 같은 승인본의 앞 시도가 «나갔는지 모름»으로 멈춰 자동 발행이 다시 쏘지 않았을 때.
+    # «다시 승인»을 권하면 새 명령으로 한 번 더 나갈 수 있으니 채널 확인 → 재시도로만 안내한다.
+    # 유나 조건(PO 23:40Z) — 이 verdict 문장이 뜨는 채팅엔 글 화면 링크가 없어 긴 형(«글 화면에서»)을 쓴다.
+    "events.gate_verdict_recipe_auto_publish_reason_needs_check": {
+        "ko": "채널에 이미 나갔을 수 있어서 다시 보내지 않았어요 — 글 화면에서 확인한 뒤 다시 보내 주세요.",
+        "en": "Not sent again — this may already be on the channel. Check on the post screen, then send it again.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_unknown_failure": {
+        "ko": "자동 발행이 실패했어요 — 다시 승인해 주세요.",
+        "en": "Auto-publish failed — re-approve.",
+    },
+    # story #4076 CI 정정(2026-09-21, 페드루 PO 지적) — 아래 두 키는 원래 events.py에
+    # f-string 리터럴로 있었으나(라벨+발행 예시 JSON을 한 문자열로), 사이클 렌더러와
+    # verdict 렌더러가 JSON 빌더 헬퍼(`_next_stage_publish_payload_json`)를 공유하도록
+    # 리팩터하면서 라벨 부분의 AST 리터럴 경계가 바뀌어 BE 한글 사용자 문장 가드(#3779)가
+    # "신규 한글"로 잡았다 — 라벨을 카탈로그로 옮겨 근본 해결(리터럴 경계가 코드 구조를
+    # 바꿀 때마다 다시 걸리는 일을 막는다).
+    "events.site_draft_link_candidates": {
+        "ko": "이 스토리에 발행 전 블로그 초안이 여럿이라 {field}를 자동으로 채우지 않았어요. 이번 회차에 submit_site_post_draft로 제출하는 초안의 id를 후보에서 골라 {field}에 넣어요. 후보: {ids}",
+        "en": "This story has several unpublished blog drafts, so {field} was not filled in automatically. Pick the id of the draft you submit with submit_site_post_draft in this run and put it in {field}. Candidates: {ids}",
+    },
+    # story #4261 — 유나 확정 문안(13:39Z). 지금 단계를 모르면(마지막 발행 못 찾음) «— 지금 단계: …» 구절을 뺀 문장.
+    "events.recipe_already_started": {
+        "ko": "이 스토리에서 이 레시피는 이미 시작됐어요 — 지금 단계: {stage}. 레시피는 스토리마다 한 번만 실행돼요. 다시 실행하려면 새 스토리에서 시작하세요.",
+        "en": "This recipe has already started on this story — current stage: {stage}. A recipe runs once per story. To run it again, start it on a new story.",
+    },
+    "events.recipe_already_started_no_stage": {
+        "ko": "이 스토리에서 이 레시피는 이미 시작됐어요. 레시피는 스토리마다 한 번만 실행돼요. 다시 실행하려면 새 스토리에서 시작하세요.",
+        "en": "This recipe has already started on this story. A recipe runs once per story. To run it again, start it on a new story.",
+    },
+    "events.stage_next_publish_example": {
+        "ko": "다음 단계로 넘기는 발행 예시: publish_event({example})",
+        "en": "Publish example for the next stage: publish_event({example})",
+    },
+    "events.gate_verdict_next_action_publish_example": {
+        "ko": "다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요: publish_event({example})",
+        "en": "Next action: publish the next stage event for this definition: "
+        "publish_event({example})",
+    },
+    # story #4085(리허설 1호 실측, PO 확定 2026-09-21) — gate_type={gate_type} 게이트를
+    # 여는 stage 발행에 봉인 필드가 빠졌을 때의 422 메시지(recipe_gate_hooks.py::
+    # MissingGateSealedFieldError, events.py 라우터가 그대로 옮겨 담는다). 해요체 규칙.
+    "events.gate_sealed_field_missing": {
+        "ko": "gate_type={gate_type} 게이트를 열려면 다음 필드가 필요해요: {fields}.",
+        "en": "Opening a gate_type={gate_type} gate requires the following field(s): {fields}.",
+    },
+    # story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21) — 사람 역할 stage(role_actor_kinds
+    # 선언 human) 발행은 애초 에이전트 바인딩이 없는 게 정상이라 zero_reach 경고 대신 이
+    # 중립 안내를 싣는다(MCP 표면은 "[안내] "로 강조, tools/events.py 참조).
+    # story #4250 — zero_reach 경고(발행 응답 `warning` · MCP가 "[경고]"로 강조). 발행자가 읽는 문장이라 조직/요청 로케일로.
+    # ko는 옛 하드코딩 문장과 같은 뜻 · 카탈로그 톤 가드(test_3931)에 맞춰 해요체로(«~습니다» → «~이에요/~아요»).
+    "events.zero_reach_warning": {
+        "ko": "발행은 됐지만 escalation·broadcast 대상이 모두 0명이에요 — work_item이 미배정이거나 routing이 아무도 가리키지 않아요.",
+        "en": "Published, but escalation and broadcast both reached 0 people — the work item is unassigned or the routing points to no one.",
+    },
+    "events.human_stage_zero_reach_notice": {
+        "ko": "이 단계는 사람이 판단해요 — 에이전트 바인딩이 필요 없어요.",
+        "en": "This stage is handled by a human — no agent binding is needed.",
+    },
+    # story #4092(§b) — validate_role_actor_kinds(정의 등록/수정 시점 검증)의 거부 사유 3종.
+    # 페드루 PO CHANGES(2026-09-21) — 정의 저자에게 닿는 사용자 문장이라 baseline grandfather
+    # 대신 이 카탈로그로. 플레이스홀더 뒤 고정 조사 결합(#4086류 결함) 회피 위해 값 자리는
+    # 전부 "라벨: 값" 콜론 형태로 — 받침 유무와 무관하게 항상 맞는다.
+    "events.role_actor_kinds_not_object": {
+        "ko": "role_actor_kinds는 role명과 human/agent/either 값으로 이루어진 객체여야 해요 — 받은 타입: {type_name}",
+        "en": "role_actor_kinds must be an object mapping role names to human/agent/either — received type: {type_name}",
+    },
+    "events.role_actor_kinds_value_outside_vocabulary": {
+        "ko": "role_actor_kinds[{role}]의 값이 닫힌 어휘(human/agent/either) 밖이에요 — 받은 값: {kind}",
+        "en": "role_actor_kinds[{role}] value is outside the closed vocabulary (human/agent/either) — received: {kind}",
+    },
+    "events.role_actor_kinds_role_not_declared": {
+        "ko": "role_actor_kinds에 선언한 role명이 stage_metadata 어디에도 없어요(오타로 의심돼요) — "
+        "선언한 role: {role} · 실재하는 role: {declared_roles}",
+        "en": "The role name declared in role_actor_kinds isn't found anywhere in stage_metadata (likely "
+        "a typo) — declared role: {role} · roles present: {declared_roles}",
+    },
+    # story #4085 AC1 — 자기설명 렌더러가 다음 stage 발행 예시에 봉인 필드(예:
+    # estimated_cost_minor)를 실값 예시로 채운 뒤, 그 값이 왜 필요한지 바로 아래 한 줄로
+    # 붙이는 설명(recipe_gate_hooks.py::SealedFieldSpec.explanation_catalog_key).
+    # story #4191 — newsletter_send 게이트(레시피 발송 단계)의 봉인 필드 3종 설명.
+    "events.sealed_field_newsletter_publication_id": {
+        "ko": "publication_id는 위 예시값이 아니라 이 스토리에서 발행 완료된 뉴스레터 캠페인(스티비)의"
+        " 발행물 id로 바꿔서 채워야 해요 — 무엇을 보낼지가 이 값으로 정해져요.",
+        "en": "Replace the example above with the publication id of this story's published newsletter"
+        " campaign (Stibee) for publication_id — it decides what gets sent.",
+    },
+    "events.sealed_field_newsletter_segment_name": {
+        "ko": "segment_name은 실제로 보낼 수신 대상(스티비 세그먼트 이름)으로 바꿔서 채워야 해요 —"
+        " 승인 카드에 «누구에게»로 봉인돼요.",
+        "en": "Replace segment_name with the actual recipients (the Stibee segment name) — it is sealed"
+        " onto the approval card as who receives it.",
+    },
+    "events.sealed_field_newsletter_scheduled_at": {
+        "ko": "scheduled_at은 실제 발송 예정 시각(시간대를 붙인 ISO 8601)으로 바꿔서 채워야 해요 —"
+        " 승인 카드에 «언제»로 봉인되고, 사람이 승인하면 이 시각에 발송돼요.",
+        "en": "Replace scheduled_at with the actual send time (ISO 8601 with a time zone) — it is sealed"
+        " onto the approval card as when, and the send goes out at this time once a person approves.",
+    },
+    "events.sealed_field_estimated_cost_minor": {
+        "ko": "estimated_cost_minor는 위 예시값이 아니라 실제 예상 비용(정수, 조직 통화의"
+        " 최소 단위)으로 바꿔서 채워야 해요 — 이 값이 승인 카드에 예상 비용으로 봉인돼요.",
+        "en": "Replace the example above with the actual estimated cost (an integer, in the"
+        " organization's minor currency unit) for estimated_cost_minor — this value is sealed"
+        " onto the approval card as the estimated cost.",
+    },
+    # story #4088(E-RECIPE-1, PO 분담조정 2026-09-21 "2/2") — 리허설 1호가 잡은 자기설명
+    # 멘션 구멍 3종. 전부 stage_metadata.capability.kind/gate.type 선언에서 유도(하드코딩
+    # 0) — _render_event_message_content의 capability/gate 분기가 이 3키를 참조한다.
+    "events.capability_hint_attach_video": {
+        "ko": "영상은 attach_channel_post_video로 초안에 첨부해요.",
+        "en": "Attach the video to the draft using attach_channel_post_video.",
+    },
+    # story #4176(레시피 4호 SNS) — 이미지 포스트의 첨부 단계. attach_video와 같은 축(에이전트 자기 도구).
+    "events.capability_hint_attach_image": {
+        "ko": "이미지는 attach_channel_post_image로 초안에 첨부해요.",
+        "en": "Attach the images to the draft using attach_channel_post_image.",
+    },
+    # story #4174(레시피 2호 블로그) — 에이전트 멘션 안내(도구 이름은 에이전트용 식별자).
+    "events.capability_hint_draft_site_post": {
+        "ko": "블로그 초안은 create_site_post_draft로 같은 스토리에 만들어요.",
+        "en": "Create the blog draft for the same story using create_site_post_draft.",
+    },
+    "events.capability_hint_submit_site_post": {
+        "ko": "검수를 마친 초안은 submit_site_post_draft로 제출하고, 제출한 초안의 draft_id(submit_site_post_draft에 넣은 값)를 다음 단계 발행의 site_post_draft_id에 넣어요 — 발행 승인은 사람이 결재함의 그 초안에서 해요.",
+        "en": "Submit the reviewed draft using submit_site_post_draft and put the submitted draft's draft_id (the value you passed to submit_site_post_draft) in site_post_draft_id when you publish the next stage — a person approves publishing on that draft in Approvals.",
+    },
+    "events.capability_hint_site_post_auto_publish": {
+        "ko": "승인된 초안은 서버가 블로그에 발행했어요. get_site_post_publication으로 공개 주소를 확인해요.",
+        "en": "The server published the approved draft to the blog. Check its public URL using get_site_post_publication.",
+    },
+    # 유나 문안(PO 09:16Z) — 한 문장에 «발행» 두 뜻(블로그/이벤트)이 섞이지 않게 금지 대상을 도구 이름으로.
+    # story #4174(까디르 P2) — 서버 몫 다음 단계 줄의 «다음 단계:» 머리(영문 로케일에서도 한국어로 나가던 것).
+    "events.stage_next_label": {
+        "ko": "다음 단계: {stage}",
+        "en": "Next stage: {stage}",
+    },
+    "events.event_line_header": {
+        "ko": "[이벤트] {event_key}",
+        "en": "[Event] {event_key}",
+    },
+    "events.stage_action_label": {
+        "ko": "할 일: {action}",
+        "en": "To do: {action}",
+    },
+    # story #4224(까디르 QA P3 · AC2 «en 본문 한국어 0») — 판정 알림 본문의 나머지 줄 · 앞 단계 산출물 레이블. ko는 옛 리터럴 그대로이되,
+    # 카탈로그 톤 가드(verify_user_facing_tone)에 맞춰 합니다체 어미 3곳만 해요체로(정합니다→정해요 · 재오픈됩니다→재오픈돼요 · 없습니다→없어요).
+    "events.gate_verdict_gate_line": {
+        "ko": "게이트: {gate_type} → {verdict}",
+        "en": "Gate: {gate_type} → {verdict}",
+    },
+    "events.gate_verdict_reason_line": {
+        "ko": "사유: {note}",
+        "en": "Reason: {note}",
+    },
+    "events.gate_verdict_target_artifact_line": {
+        "ko": "대상 산출물: {ref}",
+        "en": "Target artifact: {ref}",
+    },
+    "events.gate_verdict_next_action_none_author_decides": {
+        "ko": "다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정해요.",
+        "en": "Next action: nothing to do — the author decides whether to resubmit.",
+    },
+    "events.gate_verdict_next_action_revise_and_republish": {
+        "ko": "다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 발행으로 자동 재오픈돼요.",
+        "en": "Next action: revise the artifact, then publish the same recipe definition's approve stage event again (payload.previous_output_doc_id=revised doc id) — the gate reopens automatically on that publish.",
+    },
+    "events.gate_verdict_next_action_publish_via_connector": {
+        "ko": "다음 행동: {connector_key} 커넥터로 발행하세요(channel={channel}).",
+        "en": "Next action: publish with the {connector_key} connector (channel={channel}).",
+    },
+    "events.gate_verdict_next_action_no_connector_mapping": {
+        "ko": "다음 행동: channel={channel}에 대한 커넥터 매핑이 없어요 — 조직 설정에 channel_connector_map을 등록하세요.",
+        "en": "Next action: there is no connector mapping for channel={channel} — register channel_connector_map in the organization settings.",
+    },
+    # story #4265(유나 확정) — 레시피 게이트 승인인데 다음 stage가 없음(마지막 단계). 끝났다고 하지 않는다 — 발행할 다음 단계가 없다는 사실만.
+    "events.gate_verdict_next_action_recipe_last_stage": {
+        "ko": "다음 행동: 할 일 없음 — 레시피의 마지막 단계라 더 낼 단계가 없어요.",
+        "en": "Next action: nothing — this is the recipe's last stage, so there is no next stage to publish.",
+    },
+    "events.gate_verdict_next_action_publish_next_stage": {
+        "ko": "다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 승인 게이트를 확인하는 발행 도구를 쓰세요).",
+        "en": "Next action: publish this definition's next stage event (at a publish stage, use the publishing tool that checks this approval gate).",
+    },
+    "events.previous_output_doc_label": {
+        "ko": "앞 단계 산출물",
+        "en": "Previous stage output",
+    },
+    # story #4255 — 마지막 단계가 서버의 채널 게시일 때 결과 통지 줄(문안 = 유나).
+    "events.stage_last_channel_published": {
+        "ko": "다음 행동: 할 일 없음 — 발행됐어요. 공개 주소: {permalink}",
+        "en": "Next action: nothing — it's published. Public URL: {permalink}",
+    },
+    "events.stage_last_channel_published_no_link": {
+        "ko": "다음 행동: 할 일 없음 — 발행됐어요. 공개 주소는 채널에서 아직 받지 못했어요.",
+        "en": "Next action: nothing — it's published. The channel hasn't sent the public URL yet.",
+    },
+    # story #4258 — 레시피 비동기 발행 멈춤 통지(preset.recipe.publish_failed · 문안 = 유나 · 4258 본문 «디자인 확정» 표). 발행물
+    # 목록 실패 배지(failure-action-badge · content.channelPostsFailure*)와 같은 말을 쓴다.
+    "events.recipe_publish_failed_what_newsletter_send": {
+        "ko": "무엇: 뉴스레터 발송이 멈췄어요.", "en": "What: the newsletter send has stopped.",
+    },
+    "events.recipe_publish_failed_what_channel_post": {
+        "ko": "무엇: 채널 발행이 멈췄어요.", "en": "What: publishing to the channel has stopped.",
+    },
+    "events.recipe_publish_failed_what_site_post": {
+        "ko": "무엇: 블로그 발행이 멈췄어요.", "en": "What: publishing to the blog has stopped.",
+    },
+    "events.recipe_publish_failed_reason_dead_letter": {
+        "ko": "사유: 자동 재시도를 멈췄어요.", "en": "Reason: automatic retries have stopped.",
+    },
+    "events.recipe_publish_failed_reason_dead_letter_code": {
+        "ko": "사유: 자동 재시도를 멈췄어요(코드 {code}).", "en": "Reason: automatic retries have stopped (code {code}).",
+    },
+    "events.recipe_publish_failed_reason_needs_check": {
+        "ko": "사유: 채널에 나갔는지 알 수 없어요.", "en": "Reason: we can't tell if it went out.",
+    },
+    "events.recipe_publish_failed_reason_needs_check_code": {
+        "ko": "사유: 채널에 나갔는지 알 수 없어요(코드 {code}).", "en": "Reason: we can't tell if it went out (code {code}).",
+    },
+    # 표에 있는 reason_code — FE `CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS`의 같은 키 문장과 같다(짝 테스트가 고정).
+    "events.recipe_publish_failed_reason_youtube_quota_exceeded": {
+        "ko": "사유: 오늘 YouTube 사용량을 다 썼어요 — 사용량은 매일 태평양 시간 자정에 초기화돼요(플랫폼 공유 한도).",
+        "en": "Reason: Today's YouTube usage limit has been reached — it resets daily at midnight Pacific Time (shared platform-wide limit).",
+    },
+    "events.recipe_publish_failed_reason_blocked": {
+        "ko": "사유: 연결 문제로 멈췄어요.", "en": "Reason: stopped by a connection problem.",
+    },
+    "events.recipe_publish_failed_next_dead_letter": {
+        "ko": "다음 행동: 사람이 다시 시도해야 해요 — {retry_url}",
+        "en": "Next action: a person needs to retry — {retry_url}",
+    },
+    "events.recipe_publish_failed_next_needs_check": {
+        "ko": "다음 행동: 사람이 채널에서 확인한 뒤 다시 시도해야 해요 — {retry_url}",
+        "en": "Next action: a person needs to check the channel, then retry — {retry_url}",
+    },
+    # 연결이 끊긴 blocked는 재연결 뒤에도 스스로 이어지지 않는다(재연결 경로에 명령 재큐 없음) — 유나 대안 문장.
+    "events.recipe_publish_failed_next_blocked": {
+        "ko": "다음 행동: 사람이 채널을 다시 연결한 뒤 다시 시도해야 해요 — {retry_url}",
+        "en": "Next action: a person needs to reconnect the channel, then retry — {retry_url}",
+    },
+    # 재시도 화면이 정해지지 않은 발행(뉴스레터 발송 — FE에 발송 명령 재시도 자리가 아직 없다)은 링크 없이 같은 문장.
+    "events.recipe_publish_failed_next_dead_letter_no_link": {
+        "ko": "다음 행동: 사람이 다시 시도해야 해요.", "en": "Next action: a person needs to retry.",
+    },
+    "events.recipe_publish_failed_next_needs_check_no_link": {
+        "ko": "다음 행동: 사람이 채널에서 확인한 뒤 다시 시도해야 해요.",
+        "en": "Next action: a person needs to check the channel, then retry.",
+    },
+    "events.recipe_publish_failed_next_blocked_no_link": {
+        "ko": "다음 행동: 사람이 채널을 다시 연결한 뒤 다시 시도해야 해요.",
+        "en": "Next action: a person needs to reconnect the channel, then retry.",
+    },
+    "events.recipe_publish_failed_next_newsletter_unavailable": {
+        "ko": "다음 행동: 뉴스레터 발송은 아직 앱에서 다시 시도할 수 없어요.",
+        "en": "Next action: newsletter sends can't be retried in the app yet.",
+    },
+    "events.recipe_publish_failed_recipe_stopped": {
+        "ko": "레시피는 이 단계에 멈춰 있어요.", "en": "The recipe is paused at this stage.",
+    },
+    "events.stage_next_none": {
+        "ko": "다음 단계: 없음(마지막 stage)",
+        "en": "Next stage: none (last stage)",
+    },
+    "events.stage_next_server_driven": {
+        "ko": "블로그 발행이 끝나면 서버가 다음 단계로 넘겨요 — 이 단계에서는 publish_event를 부르지 마세요.",
+        "en": "The server moves to the next stage once the blog post is published — don't call publish_event from this stage.",
+    },
+    # story #4174 — 승인 뒤 에이전트가 받는 판정 알림의 «다음 행동»(레시피 문맥 블로그) · 유나 문안 6 정정본.
+    # — «바로»가 없는 것은 예약 시각이 봉인된 초안은 그 시각에 발행되기 때문.
+    "events.gate_verdict_next_action_recipe_site_auto_publish": {
+        "ko": "다음 행동: 할 일 없음 — 자동으로 발행되고, 발행이 끝나면 워크플로우가 다음 단계로 넘어가요.",
+        "en": "Next action: nothing — it publishes automatically, and the workflow moves to the next stage once publishing finishes.",
+    },
+    # story #4254 — 승인 뒤 다음 단계를 서버가 내는 게이트(발송 게이트). 발행 예시를 싣지 않는다(그대로 따르면 발송 전에
+    # 다음 단계가 나 흐름이 거짓 완료된다). 문안 = 유나.
+    "events.gate_verdict_next_action_recipe_server_sends": {
+        "ko": "다음 행동: 할 일 없음 — 서버가 발송하고, 발송에 성공하면 워크플로우가 다음 단계로 넘어가요. 이 단계에서는 publish_event를 부르지 마세요.",
+        "en": "Next action: nothing — the server sends it, and the workflow moves to the next stage once the send succeeds. Don't call publish_event at this stage.",
+    },
+    # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 연산 단계 자기설명 멘션에
+    # get_generation_connector(#4110 REST를 부르는 플러그인 도구, sprintable-agent-plugins
+    # PR #52) 안내 1줄 추가. 기존 마스터컷 evidence 문장은 무변(별개 사실 — "무엇을 남겨야
+    # 하는지"와 "무엇으로 실행하는지"는 다른 축) · 새 문장을 그 뒤에 붙인다.
+    "events.capability_hint_master_cut_evidence": {
+        "ko": "type=url·ref=live-run:master-cut evidence를 남겨야 계보가 생겨요."
+        " 연산 단계에서는 get_generation_connector로 org 커넥터 config·자격을 받아 자기 실행해요.",
+        "en": "Record evidence with type=url and ref=live-run:master-cut so lineage gets created."
+        " For the generation stage, call get_generation_connector to get the org connector's"
+        " config and credentials, then run it yourself.",
+    },
+    # story #4088 CHANGES(페드루 PO 리뷰, 2026-09-21) — 원문 "승인이 자동 충족돼요"는
+    # "사람 승인이 아예 불요"로 오독될 수 있었다. 실물(#4069 자동충족 훅 + #4090 승인→
+    # 자동발행)은 "제출해 두면 그 뒤 사람 승인 한 번이 발행까지 이어진다"는 뜻 — 승인
+    # 단계 자체가 없어지는 게 아니라 승인 이후 사람 손(발행 클릭)이 없어지는 것.
+    "events.gate_hint_external_publish_auto_satisfy": {
+        "ko": "같은 스토리에 채널 초안을 만들어 제출해 두면 사람 승인 한 번으로 자동 발행까지 이어져요.",
+        "en": "Create and submit a channel draft for the same story; one human approval then publishes it automatically.",
+    },
+    # story #4104(페드루 PO 라이브 실측, 2026-09-21) — apply 준비 경고 루프(story #3317 PR B)
+    # 두 문구가 "설정 스킬을 먼저 실행하세요"라는 내부어(고객이 뭘 해야 할지 모르는 표현)를
+    # 담고 있었다 — apply 다이얼로그가 warnings를 화면에 그대로 보여주므로 사용자 문장이어야
+    # 한다. 합니다체 → 해요체 전환 겸.
+    #
+    # story #4108(페드루 PO 確定, 2026-09-21) — #4104가 해요체·목적지 문장으로 바꿨지만
+    # `stage={stage!r}`·`kind={kind!r}` 등 파이썬 repr 토큰은 그대로 남아 있었다(#4107이
+    # 이 warnings를 마케팅 v2 다이얼로그에도 노출하면서 실사용자가 읽음). `stage` 자리는
+    # 호출부(events.py)가 이미 사람말 라벨로 바꿔 `stage_label`로 넘긴다 — 여기서는 그
+    # 라벨과 나머지 값(kind/connector_key/channel)을 따옴표·repr 없이 그대로 문장에 싣는다.
+    # story #4108 — "단계" 접미사 자체가 새 한글 사용자 문장이라(BE 한글 가드 story #3779가
+    # 잡음) 이 조각도 events.py의 raw f-string이 아니라 카탈로그 항목으로 뽑는다. role이
+    # 없으면(방어적 폴백) events.py가 이 키를 아예 안 부르고 stage 키를 그대로 쓴다.
+    #
+    # story #4108 design CHANGES(유나·페드루 PO, 2026-09-21) — 첫 push는
+    # `stage_metadata[stage].role`을 그대로 사람말이라 가정했지만, 실 정의는 그 자리에
+    # 영어 enum(Publisher/Creator/Compute/Director 등, story #4049/#3773 정본)을 쓴다 —
+    # 고치기 전이면 "Publisher 단계: …"로 원어가 그대로 샜을 것(story #4460류 재발).
+    # FE `apps/web/src/lib/stage-role.ts`(story #3773, 유나 定)가 이미 이 17종의
+    # 한글 라벨 정본이라 그 집합과 1:1로 여기 옮긴다(새 어휘 발명 0) — events.py가
+    # role → 이 카탈로그 라벨(미등재 role은 원시값 그대로 pass-through, FE와 동형
+    # 원칙) → 아래 apply_stage_role_label로 "{role} 단계" 조립.
+    "events.stage_role.Agent": {"ko": "에이전트", "en": "Agent"},
+    "events.stage_role.Any": {"ko": "누구나", "en": "Any"},
+    "events.stage_role.Approver": {"ko": "승인자", "en": "Approver"},
+    "events.stage_role.Compute": {"ko": "연산", "en": "Compute"},
+    "events.stage_role.Creator": {"ko": "크리에이터", "en": "Creator"},
+    "events.stage_role.Dev": {"ko": "개발자", "en": "Dev"},
+    "events.stage_role.Director": {"ko": "디렉터", "en": "Director"},
+    "events.stage_role.Executor": {"ko": "실행자", "en": "Executor"},
+    "events.stage_role.Human": {"ko": "사람", "en": "Human"},
+    "events.stage_role.Lead": {"ko": "리드", "en": "Lead"},
+    "events.stage_role.Maker": {"ko": "제작자", "en": "Maker"},
+    "events.stage_role.Member": {"ko": "구성원", "en": "Member"},
+    "events.stage_role.PO": {"ko": "PO", "en": "PO"},
+    "events.stage_role.Publisher": {"ko": "발행자", "en": "Publisher"},
+    "events.stage_role.QA": {"ko": "QA", "en": "QA"},
+    "events.stage_role.Reviewer": {"ko": "검토자", "en": "Reviewer"},
+    "events.stage_role.Worker": {"ko": "작업자", "en": "Worker"},
+    "events.apply_stage_role_label": {
+        "ko": "{role} 단계",
+        "en": "{role} stage",
+    },
+    # story #4115(유나 문구 정본, 페드루 PO 確定 2026-09-21 15:11Z) — "조직 설정에서
+    # 채널을 먼저 연결하세요"는 틀린 세계를 가리켰다(라이브 실사고: 채널은 이미 연결돼
+    # 있는데 org_connectors 레지스트리 행이 없어서 뜬 경고였다 — 사람이 "조직 설정"에서
+    # 할 수 있는 일이 아니라, 레지스트리 행은 에이전트가 설정 스킬(POST .../connectors/
+    # {key}, connectors.py 106행 — org member 누구나, owner/admin 전용 아님을 코드로
+    # 확認)로 등록하는 것). 목적지를 실물(담당 발행 에이전트가 설정)로 교정.
+    "events.apply_connector_registered_missing": {
+        "ko": "{stage_label}: {connector_key} 커넥터가 아직 준비되지 않았어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
+        "en": "{stage_label}: connector {connector_key} isn't ready yet — the assigned publisher agent must set up its publish tool for this channel first",
+    },
+    # story #4119(페드루 PO 確定, 2026-09-21) — #4108이 stage_metadata[stage].role을
+    # 한글 라벨로 바꿨지만 capability.kind는 영어 식별자(publish/collect) 그대로 남아
+    # 있었다(유나 #4115 앵커 비차단 지적). capability.kind는 열린 값이라(판별 기준으로
+    # 못 씀, event_definition_registry.py 49행) stage_role과 동형으로 닫힌 라벨 집합
+    # (등재 kind만) + 미등재 raw pass-through(events.py `_CAPABILITY_KIND_LABEL_KEYS`).
+    "events.capability_kind.publish": {"ko": "발행", "en": "Publish"},
+    "events.capability_kind.collect": {"ko": "수집", "en": "Collect"},
+    "events.apply_kind_connector_not_registered": {
+        # story #4119 — 원문 "{kind} 종류 발행 커넥터가…"는 kind가 publish로 라벨링되면
+        # "발행 종류 발행 커넥터"로 겹쳐 읽혔다("종류"+하드코딩된 "발행" 중복). {kind}
+        # 자리가 이제 사람말 라벨(발행/수집)을 직접 받으므로 "종류"를 떼고 라벨을
+        # 커넥터에 바로 붙인다 — "발행 커넥터가 아직 준비되지 않았어요"(PO 제시 목표문).
+        "ko": "{stage_label}: {kind} 커넥터가 아직 준비되지 않았어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
+        "en": "{stage_label}: the {kind} connector isn't ready yet — the assigned publisher agent must set up its publish tool for this channel first",
+    },
+    "events.apply_channel_connector_map_missing": {
+        "ko": "{stage_label}: {channel} 채널에 대한 커넥터 연결이 없어요 — 담당 발행 에이전트가 이 채널의 발행 도구를 먼저 설정해야 해요.",
+        "en": "{stage_label}: no connector is mapped for channel {channel} — the assigned publisher agent must set up its publish tool for this channel first",
+    },
+    "events.apply_connector_config_incomplete": {
+        "ko": "{stage_label}: {connector_key} 커넥터의 필수 설정값이 비어 있어요 — {missing}. 조직 설정 화면에서 채워주세요.",
+        "en": "{stage_label}: connector {connector_key} is missing required configuration — {missing}. Fill it in from organization settings",
+    },
+    "events.apply_kind_connector_config_incomplete": {
+        # story #4119 — 위 not_registered와 동형으로 "종류"를 떼고 라벨을 커넥터에 바로
+        # 붙인다("발행 커넥터는 등록돼 있지만…").
+        # story #4119 CHANGES(유나 문구 확認, 페드루 PO 전달, 2026-09-21) — "등록돼
+        # 있지만 … 등록하세요"는 "이미 등록됨"과 "등록하라"가 한 문장에서 모순됐다.
+        # 이 갈래는 커넥터가 이미 등록돼 있고 필수 설정값만 비어 있는 상태라 꼬리를
+        # "설정을 완료하세요"로 교정(새 등록이 아니라 기존 등록의 설정 완결).
+        "ko": "{stage_label}: {kind} 커넥터는 등록돼 있지만 필수 설정값이 아직 비어 있어요 — 조직 설정 화면에서 설정을 완료하세요.",
+        "en": "{stage_label}: a connector supporting kind {kind} is registered but its required configuration is incomplete — complete its settings in organization settings",
     },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
@@ -439,9 +989,29 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 문장은 4필드(title/tags/categoryId/privacyStatus) 중 어느 게 틀렸는지
     # 구체적으로 말하지 않는다(field/reason은 detail의 별도 키로 실림, 문장 자체는
     # 그 4필드 전체를 가리키는 안내).
+    # story #4264(유나 4632 · PO 처방) — «나갔는지 모름»(needs_check)으로 멈춘 발행에 다른 길로 새 발행이 들어왔을 때. 일어난 것
+    # («보내지 않았다»)을 먼저, 다음 행동(확인 → «확인했어요 · 다시 시도»)을 뒤에.
+    "channel_posts.publish_needs_check": {
+        "ko": "채널에 이미 나갔을 수 있어서 다시 보내지 않았어요 — 채널에서 확인한 뒤 «확인했어요 · 다시 시도»로 보내 주세요.",
+        "en": "Not sent again — this may already be on the channel. Check there, then use \"Checked · retry\".",
+    },
     "channel_posts.youtube_metadata_invalid": {
         "ko": "YouTube 제목·태그·카테고리·공개 범위 값을 확인해 주세요.",
         "en": "Check the YouTube title, tags, category, and privacy values.",
+    },
+    # story #4336(PO P2) — 발행 전 검사의 이어쓰기 실패(요청 422 · 워커가 남긴 본문 공용). 넘침 문장은 편집 화면
+    # `channelPostsThreadOverCap`과 같은 낱말.
+    "channel_posts.thread_unsupported": {
+        "ko": "이 채널은 이어쓰기를 지원하지 않아요.",
+        "en": "This channel doesn't support continuation segments.",
+    },
+    "channel_posts.thread_over_cap": {
+        "ko": "이 채널은 이어쓰기를 최대 {max}건까지 지원해요.",
+        "en": "Up to {max} continuation segments on this channel.",
+    },
+    "channel_posts.thread_segment_too_long": {
+        "ko": "{segment}번째 이어쓰기가 {max}자 한도를 넘어요(지금 {current}자).",
+        "en": "Continuation {segment} is over the {max}-character limit (now {current}).",
     },
     # story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13, PR B) —
     # approval_delivery.py::dispatch_approval_request_cards의 스레드 답글 문구.
@@ -454,6 +1024,22 @@ _CATALOG: dict[str, dict[str, str]] = {
     "approval_delivery.reopen_reply": {
         "ko": "다시 결재가 필요해요",
         "en": "Re-approval is needed",
+    },
+    # story #4042(evidence.py::_validate_and_normalize_evidence_payload, kind fail-closed
+    # 화이트리스트) — 신규 코드라 verify_no_new_korean_user_strings.py 대상, EXEMPT_FILES가
+    # 아닌 evidence.py 자신에 리터럴로 못 심어 이 카탈로그를 경유한다.
+    "evidence.kind_unregistered": {
+        "ko": "payload.kind={kind}는 등재되지 않은 kind예요 — 허용: {allowed}.",
+        "en": "payload.kind={kind} is not a registered kind — allowed: {allowed}.",
+    },
+    # story #4294(PO 05:01Z) — 기간 질의의 오프셋 없는 일시는 해석을 지어내지 않고 거절한다(`app/core/datetime_query.py`).
+    "common.datetime_offset_required": {
+        "ko": "{param}에 시간대를 붙여 주세요 — 예: 2020-01-01T00:00:00Z 또는 2020-01-01T09:00:00+09:00.",
+        "en": "Add a timezone offset to {param} — e.g. 2020-01-01T00:00:00Z or 2020-01-01T09:00:00+09:00.",
+    },
+    "evidence.kind_type_mismatch": {
+        "ko": "payload.kind={kind}는 type={expected_type}로 실려야 해요 (받은 type={received_type}).",
+        "en": "payload.kind={kind} must be sent with type={expected_type} (received type={received_type}).",
     },
 }
 

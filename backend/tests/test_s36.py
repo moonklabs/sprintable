@@ -50,6 +50,14 @@ def _mock_run(status: str = "running") -> MagicMock:
     # ValidationError) agent_name과 동형으로 세팅.
     r.conversation_id = None
     r.triggering_message_id = None
+    # story #3961 — AgentRunResponse에 cancel 감사 5필드 추가. MagicMock은 명시 안 하면
+    # 자동으로 MagicMock을 만들어내(UUID|None·str|None 위반 → ValidationError) 위 필드들과
+    # 동형으로 세팅.
+    r.cancel_requested_by = None
+    r.cancel_requested_at = None
+    r.cancel_reason = None
+    r.cancel_ack_at = None
+    r.cancel_outcome = None
     return r
 
 

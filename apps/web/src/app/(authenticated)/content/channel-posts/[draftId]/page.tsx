@@ -4,14 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
+import { channelConnectionIdentityLabel, useChannelLabel } from '@/lib/channel-label';
 import { channelTextLength } from '@/components/content/channel-text-length';
 import { parseSitePostApiError, type SitePostApiErrorInfo } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
@@ -20,8 +20,10 @@ import { contentPostStatusLabelKey } from '@/components/content/post-status';
 import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
 import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
-import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { blockedByConnection, blockedReason, deriveFailureAction, WORKER_TICK_BUDGET_TOO_SMALL, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { isAwaitingPublishWorker, PUBLISH_WORKER_POLL_MS } from '@/lib/publish-worker-poll';
+import { SLOW_JOB_NOTICE_MS, waitForBackgroundJob, type BackgroundJob } from '@/lib/background-job';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { BoostRequestDialog } from '@/components/content/boost-request-dialog';
@@ -36,6 +38,7 @@ import { ApiUsageBudgetExceededBanner } from '@/components/content/api-usage-bud
 import { ApiUsageBudgetIndicator, type ApiUsageBudgetState } from '@/components/content/api-usage-budget-indicator';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+import { notRetryableMessageKey, postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 import { ImageAttachmentList } from '@/components/content/image-attachment-list';
 import { formatImageConvertedBadge } from '@/components/content/image-converted-badge';
 // story #3483 — 3472 2부에서 이 페이지에 있던 위반 표시 로직을 공용으로 뺐다
@@ -44,6 +47,8 @@ import {
   ContentRuleViolationList, ContentRuleSubmitBlockedReason, type ContentRuleViolation,
 } from '@/components/content/content-rule-violation';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -92,12 +97,17 @@ interface ChannelPostDraftDetail {
   // scheduled_at 스냅샷과 다르다 — 재승인 뒤 갱신된다).
   command_status?: string | null;
   command_reason_code?: string | null;
+  // story #4336(PO 조건 2) — 워커의 공급자 호출 전 검사가 걸렸을 때 즉시 발행 422와 같은 오류 본문(없으면 null).
+  command_failure_detail?: Record<string, unknown> | null;
   // story #3815(배포 82 라이브 회차 실 결함) — command_reason_code==='YOUTUBE_QUOTA_
   // EXCEEDED'일 때만 채워진다.
   command_reason_reset_at?: string | null;
   // story f061c1a3(BE 0e960006) — 재시도 BFF가 붙일 대상 command. 목록/단건 응답
   // (ChannelPostDraftListItem)이 이미 낸다 — command 자체가 없으면 null.
   command_id?: string | null;
+  // story #4290 — 사람이 지금 «다시 시도»할 수 있는가(서버 한 판정 `human_retryable` · 재시도 엔드포인트와 같은 값). 배지 버튼 · 404 뒤 결과
+  // 줄이 이 값만 본다.
+  command_retryable?: boolean;
   // story #3499(PO 確定 2026-09-05) — 최신 ChannelPublication.id(BE #3844 조각4 의존,
   // 이 PR 작성 시점 미착지 — additive, 없으면 undefined). command_id(PublicationCommand
   // 축)와 다른 테이블이라 혼동 금지.
@@ -484,11 +494,25 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
   }
 }
 
+// story #4305(유나 확정) — 멈춘(blocked) 사유별 발행 영역 줄 문장(blockedReason 한 판정의 세 갈래). 문장 키는 표 값으로 둔다(죽은 키 가드가
+// 표 값을 소비로 읽는다 — 배지 사유 표와 같은 관례).
+const BLOCKED_REASON_LINE_KEYS: Record<string, string> = {
+  connection: 'channelPostsCommandInFlightReasonBlocked',
+  paused: 'errorExternalPublishPaused',
+  unknown: 'channelPostsCommandInFlightReasonBlockedUnknown',
+};
+
+// story #4336 — 워커가 발행하는 동안 초안을 다시 읽는 간격(워커는 1분마다 돈다).
+
 export default function ChannelPostEditPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId, role } = useDashboardContext();
+  // story #4017(PO 확定 2026-09-17) — 아래 4곳의 「연결 화면」 링크를 목적지 모듈로.
+  const connectRulesHref = useConnectRulesHref('/organization/channels');
   const params = useParams();
   const draftId = String(params.draftId);
   const t = useTranslations('content');
+  const channelLabel = useChannelLabel();
   // story #3679 — 훅 미태깅 라벨은 새 낱말을 안 만들고 insights-board가 이미 재사용
   // 중인 docs 네임스페이스 키(indexCategoryUncategorized, 「미분류」)를 그대로 쓴다
   // (같은 사실=같은 낱말, 유나 §3656 확定과 동형).
@@ -546,6 +570,25 @@ export default function ChannelPostEditPage() {
     return () => { cancelled = true; };
   }, [orgId, draft?.publication_id]);
   useEffect(() => loadComments(), [loadComments]);
+  // 까디르 codex 4634 P2 — 댓글 답변 «다시 보내기» 뒤 다시 읽기 전용: 실패하면 지금 목록을 **그대로 두고** false(loadComments는 실패면
+  // 목록 자리를 오류 면으로 바꾼다 — 첫 로드 동작 그대로 · 여기서만 이전 상태 유지).
+  // story #4290 — 재시도한 답변 명령(replyCommandId)을 주면 다시 읽은 목록에서 그 명령의 서버 판정(`command_retryable`)도 돌려준다.
+  const refreshCommentsAfterRetry = useCallback(async (replyCommandId?: string): Promise<ReloadOutcome> => {
+    if (!orgId || !draft?.publication_id) return false;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publications/${draft.publication_id}/comments`);
+      if (!res.ok) return false;
+      const body = await res.json().catch(() => null);
+      const data = (body?.data ?? null) as RawCommentsResponse | null;
+      if (!data) return false;
+      setCommentsFace(deriveCommentsFace(data));
+      if (!replyCommandId) return true;
+      const reloaded = data.comments.find((c) => c.reply?.command_id === replyCommandId)?.reply;
+      return { retryable: reloaded?.command_retryable === true };
+    } catch {
+      return false;
+    }
+  }, [orgId, draft?.publication_id]);
   // story #3517(BE #3865 조각①, 유나 §22-10③) — 수동 재수집. 세 갈래로 가른다(전부
   // 뭉뚱그리면 429/422가 같은 취급을 받는다 — CommentsRefreshButton 주석 참고):
   // 429는 Retry-After 헤더를 그대로 읽어 초를 준다(지어내지 않는다, 없으면 null).
@@ -692,23 +735,30 @@ export default function ChannelPostEditPage() {
   // 성공/재실패로 끝내야 'failed'에서 벗어난다(비동기 지연은 정상, 지어내지 않는다).
   const handleRetryReply = useCallback(async (
     comment: CommentItem,
-  ): Promise<{ ok: true } | { ok: false; errorMessage: string }> => {
+  ): Promise<{ ok: true; notice?: string } | { ok: false; errorMessage: string }> => {
     if (!orgId || !comment.replyCommandId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
-    try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${comment.replyCommandId}/retry`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
-        const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
-        return { ok: false, errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric') };
-      }
-      loadComments();
-      return { ok: true };
-    } catch {
-      return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
+    // story #4266 — 발행 재시도 확인 창들과 같은 공용 규칙(같은 엔드포인트): 404(재시도 대상 아님)는 서버 원문 대신 목록을 다시 읽고
+    // 유나 문장 · 그 밖의 실패도 서버 원문 대신 로케일 문장. 이 자리는 확인 창 없이 줄 안에 보여 «창 뒤 오류»는 해당 없음.
+    const replyCommandId = comment.replyCommandId;
+    const result = await withReload(
+      await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${replyCommandId}/retry`),
+      () => refreshCommentsAfterRetry(replyCommandId),
+    );
+    // 다시 읽기 실패면 목록은 이전 그대로 · «다시 불러왔어요»라고 말하지 않고 «최신 상태는 불러오지 못했어요» 한 줄(유나 확정 조합).
+    if (result.type === 'success') {
+      return result.reloadFailed ? { ok: true, notice: t('publicationRetryReloadFailed') } : { ok: true };
     }
-  }, [orgId, loadComments, t]);
+    if (result.type === 'not_retryable') {
+      return {
+        ok: false,
+        // story #4290 — 다시 읽은 답변 명령이 다시 시도 가능한 새 멈춤이면 유나 문장(«그 사이 다시 시도됐고…») · 글 상세와 같은 키.
+        errorMessage: result.reloadFailed
+          ? `${t('publicationRetryNotRetryable')} ${t('publicationRetryReloadFailed')}`
+          : t(notRetryableMessageKey(result)),
+      };
+    }
+    return { ok: false, errorMessage: result.messageKey ? t(result.messageKey) : t('channelPostsRetryFailed') };
+  }, [orgId, refreshCommentsAfterRetry, t]);
 
   // story #3544 조각⑧(유나 §22-15 ⑧, PO 確定 2026-09-06) — voided(봉인 불일치)
   // 「다시 상신」 전용. 일반 「답변」(handleOpenReply)과 갈라 두는 이유: 이쪽만
@@ -874,11 +924,19 @@ export default function ChannelPostEditPage() {
   // ③(PO 確定 2026-09-06) — uploading 단계는 XHR upload.onprogress로 % 표시(서명
   // PUT은 XHR로 보낸다, fetch는 업로드 진행률 이벤트가 없다). 나머지 단계는 이미지와
   // 동형 텍스트 라벨.
+  // story #4336 PR2 — 영상 확정 작업을 기다리는 동안 화면을 떠나면 묻기를 멈춘다.
+  const videoJobAbortRef = useRef(new AbortController());
+  useEffect(() => {
+    const controller = new AbortController();
+    videoJobAbortRef.current = controller;
+    return () => controller.abort();
+  }, []);
   const [videoUploadStatus, setVideoUploadStatus] = useState<
     | { phase: 'idle' }
     | { phase: 'requesting_url' }
     | { phase: 'uploading'; progress: number }
-    | { phase: 'confirming' }
+    // story #4336 PR2 — slow = 작업을 SLOW_JOB_NOTICE_MS 넘게 기다리는 중(같은 줄에 «창을 닫아도 계속 처리돼요»).
+    | { phase: 'confirming'; slow?: boolean }
     | { phase: 'error'; text: string; raw?: string }
   >({ phase: 'idle' });
   const videoFileInputRef = useRef<HTMLInputElement>(null);
@@ -948,6 +1006,9 @@ export default function ChannelPostEditPage() {
   // story #3426 ①-c — 예약 취소·회수. 둘 다 되돌릴 수 없는(또는 되돌리기 번거로운) 상태
   // 전환이라 ConfirmDialog를 거친다(site-posts::handleUnpublish와 동형 — story #2416).
   const [cancelScheduledConfirmOpen, setCancelScheduledConfirmOpen] = useState(false);
+  // story #4336 — 워커 예산 밖으로 멈춘 발행의 취소(공급자에 아무것도 안 간 명령만 · 확인 창 없음 · 유나).
+  const [cancellingPublish, setCancellingPublish] = useState(false);
+  const [cancelPublishResult, setCancelPublishResult] = useState<'success' | 'too_late' | 'failed' | null>(null);
   const [cancellingScheduled, setCancellingScheduled] = useState(false);
   // story #3454(유나 Design FAIL, PR#3801) — 8곳 중 이 state만 raw가 없었다. 같은
   // 패턴으로 마저 닫는다.
@@ -974,7 +1035,7 @@ export default function ChannelPostEditPage() {
   // story #3454(유나 지적, PR#3798 Design review) — 다른 여섯 결과 state와 동형으로
   // raw를 담는다(§4-1 "원문을 접어서 함께 보존한다" — 이 state만 raw 자체가 없어서 재시도
   // 실패 시에만 원문이 안 남던 것을 맞춘다).
-  const [retryResult, setRetryResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
+  const [retryResult, setRetryResult] = useState<PublicationRetryResult | null>(null);
 
   useEffect(() => {
     if (!orgId || !draftId) return;
@@ -1069,7 +1130,7 @@ export default function ChannelPostEditPage() {
             // AC9 — account_label 없으면 폴백(지어내지 않는다). story #3671(3661 후속) —
             // account_id를 그대로 쓰면 webhook류가 139자 URL로 문장을 무너뜨린다
             // (channel-label.ts::channelConnectionIdentityLabel, 3661과 동형 처방).
-            if (conn) setAccountLabel(channelConnectionIdentityLabel(conn, t));
+            if (conn) setAccountLabel(channelConnectionIdentityLabel(conn, channelLabel));
             // story #3426 — can_unpublish/unpublish_blocked_reason은 draft가 아니라
             // 이 연결 응답에 실린다(그라운딩 확認) — 새 왕복을 만들지 않고 같은 응답에서 읽는다.
             if (conn) {
@@ -1146,7 +1207,7 @@ export default function ChannelPostEditPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, draftId]);
+  }, [orgId, draftId, channelLabel]);
 
   // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 잔량은
   // 규칙과 별개 왕복(draft/versions 로드를 막지 않는다, `limit`과 동형 원칙).
@@ -1327,7 +1388,7 @@ export default function ChannelPostEditPage() {
       if (estimatedCostInput !== '' && generationBudgetCurrency !== null) {
         submitBody.estimated_cost_minor = majorToMinor(Number(estimatedCostInput), generationBudgetCurrency);
       }
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, { timeoutMs: LONG_ROUTES.channelDraftSubmit.browserMs,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(submitBody),
@@ -1375,7 +1436,7 @@ export default function ChannelPostEditPage() {
         // 문구는 쓰지 않는다(제품에 없는 동작 — doc §5 각주 명시).
         if (info.kind === 'gate_already_held' && info.heldByDraftId) {
           const holdingDraftId = info.heldByDraftId;
-          const holdingChannelLabel = info.heldByChannel ? channelLabel(info.heldByChannel, t) : t('channelThreads');
+          const holdingChannelLabel = channelLabel(info.heldByChannel ?? 'threads');
           let holdingLabel = `${holdingChannelLabel} 초안 ····${holdingDraftId.slice(0, 4)}`;
           try {
             const holdingRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${holdingDraftId}`);
@@ -1470,7 +1531,7 @@ export default function ChannelPostEditPage() {
       setImageUploadStatus({ phase: 'confirming' });
       const confirmRes = await fetchWithAuth(
         `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/confirm`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
+        { timeoutMs: LONG_ROUTES.channelAssetConfirm.browserMs, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
       );
       if (!confirmRes.ok) {
         const body = await confirmRes.json().catch(() => null);
@@ -1620,8 +1681,9 @@ export default function ChannelPostEditPage() {
 
       setVideoUploadStatus({ phase: 'confirming' });
       const confirmRes = await fetchWithAuth(
+        // story #4336 PR2 ②(까디르 codex) — 영상 확정은 요청 안이 DB + HEAD(15초)뿐이라 자기 표 줄(channelVideoConfirm) — 이미지 40초 예산을 빌리지 않는다.
         `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/video/confirm`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
+        { timeoutMs: LONG_ROUTES.channelVideoConfirm.browserMs, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
       );
       if (!confirmRes.ok) {
         const body = await confirmRes.json().catch(() => null);
@@ -1629,8 +1691,24 @@ export default function ChannelPostEditPage() {
         setVideoUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
         return;
       }
-      const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: ChannelPostVideoResponse } | null;
-      const uploaded = confirmJson?.data;
+      // story #4336 PR2(PO 04:32Z) — 영상 확정은 작업화: 202 + 작업(id). 워커(1분 틱)가 받기 · MP4 파싱 · 새 버전을 마치면 작업 상태 보기로
+      // 결과(영상)를 받는다. 실패 본문은 예전 확정 응답과 같은 모양이라 같은 문장을 고른다. 화면을 떠나면 묻기를 멈춘다(워커는 계속 — 다시 오면 초안에 반영돼 있음).
+      const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: BackgroundJob<{ video?: ChannelPostVideoResponse }> } | null;
+      const queued = confirmJson?.data;
+      const slowTimer = setTimeout(() => {
+        setVideoUploadStatus((prev) => (prev.phase === 'confirming' ? { phase: 'confirming', slow: true } : prev));
+      }, SLOW_JOB_NOTICE_MS);
+      const finished = queued?.id
+        ? await waitForBackgroundJob<{ video?: ChannelPostVideoResponse }>(orgId, queued.id, { signal: videoJobAbortRef.current.signal })
+            .finally(() => clearTimeout(slowTimer))
+        : (clearTimeout(slowTimer), null);
+      if (queued?.id && finished === null) return;
+      if (finished?.status === 'failed') {
+        const info = parseSitePostApiError({ detail: finished.error?.detail });
+        setVideoUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
+        return;
+      }
+      const uploaded = finished?.result?.video;
       if (!uploaded) {
         // story #3575(⑤ 조건 1) — confirmRes.ok=true인데 본문에 .data가 없다 —
         // 마찬가지로 "응답 있음" 갈래.
@@ -1757,14 +1835,60 @@ export default function ChannelPostEditPage() {
   // 두 축을 조인 축을 다르게 계산하므로(§4-2, story #3394 AC2) 화면이 그 판정을 흉내내지
   // 않는다 — 성공 응답 필드만 병합하고, 진짜 publication_status는 다음 로드/새로고침이
   // 정직하게 채운다(지어내지 않는다).
+  // story #4336(PO 조건 2) — 즉시 발행 422와 워커가 명령에 남긴 오류 본문(`command_failure_detail`)이 같은 화면을 그리도록 한 곳에서.
+  const presentPublishError = (info: SitePostApiErrorInfo) => {
+    // story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — 예산 초과(생성 비용·X 비용)는 submit과 같은
+    // 구조화 배너(4값+통화). 통화를 모르면(축 GET이 실패/불완전) 배너를 접고 generic 문구로 폴백('KRW' 추정 금지).
+    if (
+      info.kind === 'generation_budget_exceeded'
+      && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
+      && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+      && generationBudgetCurrency !== null
+    ) {
+      setGenBudgetExceeded({
+        limitMinor: info.limitMinor, spentMinor: info.spentMinor,
+        estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
+        currency: generationBudgetCurrency,
+      });
+      return;
+    }
+    if (
+      info.kind === 'api_usage_budget_exceeded'
+      && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
+      && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+      && apiUsageBudgetCurrency !== null
+    ) {
+      setApiUsageBudgetExceeded({
+        limitMinor: info.limitMinor, spentMinor: info.spentMinor,
+        estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
+        currency: apiUsageBudgetCurrency,
+      });
+      return;
+    }
+    // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG·CHANNEL_RATE_LIMITED는 값을 보간해 문장을 짓는다(doc §5 표).
+    const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
+      ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
+      : info.kind === 'rate_limited' && info.resetAt
+        ? t('channelPostsRateLimitedUntil', { time: formatScheduledAt(info.resetAt, displayTimezone).display })
+        : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
+    // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
+    // 는 뭉치면 안 되는 별개 사실이다. 페드루 PO 블로커 판정(2026-09-04 06:17Z) —
+    // 판정 축은 http_status 숫자가 아니라 info.kind다(500/503/504·BFF 400·미지
+    // 코드는 parseSitePostApiError가 이미 kind='unknown'으로 fail-closed해 둠 —
+    // describeExternalImpact가 그 kind를 그대로 읽어 "모른다"를 "안 나갔다"로
+    // 단정하지 않는다).
+    setPublishResult({ type: 'error', text, raw: info.raw, externalImpact: describeExternalImpact(info.kind) });
+  };
+
   const handlePublish = async () => {
     if (!orgId || !draft || !canPublish || blockedByCommandInFlight) return;
     setPublishing(true);
     setPublishResult(null);
+    setCancelPublishResult(null);
     setGenBudgetExceeded(null);
     setApiUsageBudgetExceeded(null);
     try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { timeoutMs: LONG_ROUTES.channelPublishNow.browserMs, method: 'POST' });
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as
           { data?: { permalink?: string; external_id?: string; published_at?: string; scheduled?: boolean; scheduled_at?: string; publication_id?: string | null; processing?: boolean } } | null;
@@ -1790,14 +1914,19 @@ export default function ChannelPostEditPage() {
           // "처리 中"이라면서 발행 버튼은 눌리는 이 스토리의 원 사고(사람이 다시
           // 눌러 CHANNEL_PUBLISH_IN_PROGRESS로 꼬이는 것)가 그대로 재현된다(AC1
           // "발행 버튼은 오버레이 규칙대로").
+          // story #4336 — 즉시 발행도 이제 워커가 돌린다: 응답은 «발행 중»(processing)뿐이라 같은 모양으로 'publishing'을 병합하고,
+          // 아래 폴링이 초안을 다시 읽어 발행됨 카드 · 실패 배지로 넘어간다.
           setPublishResult(null);
-          setDraft((prev) => prev && { ...prev, processing_kind: 'awaiting_container', command_status: 'pending' });
-        } else if (permalink && published_at) {
+          setDraft((prev) => prev && { ...prev, processing_kind: 'publishing', command_status: 'pending' });
+        } else if (published_at) {
+          // story #4264(까디르 codex P1 · PO 17:33Z) — 게시 뒤 permalink 조회가 실패하면 BE는 게시 성공 · id 보존 · permalink만
+          // 비워 준다(X username 없음도 같은 모양). 예전 조건(permalink && published_at)은 그 성공을 «발행 실패»로 그렸다 —
+          // 성공 판정은 published_at, 링크 행은 permalink가 있을 때만(발행됨 카드가 이미 그 조건으로 그린다).
           setPublishResult({ type: 'success' });
           // story #3525(PO 確定 ③) — publication_id도 permalink 등과 같은 병합 대상
           // (BE #3525가 publish 응답에 이 필드를 추가) — 재로드 없이도 발행됨 카드가
           // draft.publication_id 조건 하나로 즉시 열린다.
-          setDraft((prev) => prev && { ...prev, permalink, external_id, published_at, publication_status: 'published', publication_id: publication_id ?? prev.publication_id });
+          setDraft((prev) => prev && { ...prev, permalink: permalink ?? null, external_id, published_at, publication_status: 'published', publication_id: publication_id ?? prev.publication_id });
         } else {
           setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
         }
@@ -1810,50 +1939,36 @@ export default function ChannelPostEditPage() {
         // 특별취급 안 해 generic "발행에 실패했습니다"만 보여줬다(humanMessageKey가
         // 둘 다 빈 문자열이라). 통화를 모르면(축 GET이 실패/불완전) 배너를 접고
         // generic 문구로 폴백(submit과 동형 규율, 'KRW' 추정 금지).
-        if (
-          info.kind === 'generation_budget_exceeded'
-          && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
-          && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
-          && generationBudgetCurrency !== null
-        ) {
-          setGenBudgetExceeded({
-            limitMinor: info.limitMinor, spentMinor: info.spentMinor,
-            estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
-            currency: generationBudgetCurrency,
-          });
-          return;
-        }
-        if (
-          info.kind === 'api_usage_budget_exceeded'
-          && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
-          && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
-          && apiUsageBudgetCurrency !== null
-        ) {
-          setApiUsageBudgetExceeded({
-            limitMinor: info.limitMinor, spentMinor: info.spentMinor,
-            estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
-            currency: apiUsageBudgetCurrency,
-          });
-          return;
-        }
         // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG·CHANNEL_RATE_LIMITED는
         // api-error.ts가 max_length/current_length·reset_at을 실어만 오고 문구 조립은
         // 소비부 몫으로 남겨 둔 코드다(doc §5 표 — 「500자 한도인데 517자입니다」·
         // 「내일 09:00 이후 가능합니다」는 값을 실제로 보간해야 하는 문장이라 정적
         // 번역키 하나로 못 담는다). 나머지 코드는 기존 humanMessageKey/fallback 체인
         // 그대로.
-        const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
-          ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
-          : info.kind === 'rate_limited' && info.resetAt
-            ? t('channelPostsRateLimitedUntil', { time: formatScheduledAt(info.resetAt, displayTimezone).display })
-            : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
-        // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
-        // 는 뭉치면 안 되는 별개 사실이다. 페드루 PO 블로커 판정(2026-09-04 06:17Z) —
-        // 판정 축은 http_status 숫자가 아니라 info.kind다(500/503/504·BFF 400·미지
-        // 코드는 parseSitePostApiError가 이미 kind='unknown'으로 fail-closed해 둠 —
-        // describeExternalImpact가 그 kind를 그대로 읽어 "모른다"를 "안 나갔다"로
-        // 단정하지 않는다).
-        setPublishResult({ type: 'error', text, raw: info.raw, externalImpact: describeExternalImpact(info.kind) });
+        // story #4264(유나 4632 · PO 처방) — 서버가 needs_check로 거절했으면(어댑터 0) 이 화면도 곧바로 잠금 상태로(목록을 다시
+        // 불러오기 전에 또 누르지 않게 — 회색 잠금 줄이 상태를 말한다). 빨간 알림은 **일어난 일**만(유나 재검 02:05Z): BE 409 문장과
+        // 같은 «다시 보내지 않았어요». 외부 영향 줄은 없다 — 이번 요청은 어댑터를 안 불렀으니 «나갔는지 모름 · 다시 시도»(unknown
+        // 폴백)는 사실과 다르다.
+        if (info.kind === 'publish_needs_check') {
+          // story #4290(까디르 QA ②) — 409가 싣는 사실(거절된 명령 id · 실제 상태 · 서버 한 판정 `command_retryable`)을 그대로 쓴다 —
+          // 화면이 dead_letter · 재시도 가능을 지어내지 않는다(pending/in_progress + needs_check면 서버는 false · 재시도 404).
+          type RefusedCommand = { command_id?: string; command_status?: string; command_retryable?: boolean };
+          const refused = ((body as { error?: RefusedCommand; detail?: RefusedCommand } | null)?.error
+            ?? (body as { detail?: RefusedCommand } | null)?.detail) ?? null;
+          setDraft((prev) => prev && {
+            ...prev, failure_kind: 'needs_check',
+            command_status: refused?.command_status ?? prev.command_status,
+            command_retryable: refused?.command_retryable === true,
+            command_id: refused?.command_id ?? prev.command_id,
+          });
+          setPublishResult({
+            type: 'error',
+            text: t('channelPostsPublishRefusedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') }),
+            raw: info.raw,
+          });
+          return;
+        }
+        presentPublishError(info);
       }
     } catch {
       // 네트워크 예외(fetch 자체가 throw) — 요청이 실제로 Threads까지 갔는지 여부를
@@ -1990,42 +2105,85 @@ export default function ChannelPostEditPage() {
     }
   };
 
-  // story f061c1a3(#3422 AC3 잔여) — dead_letter 수동 재시도·needs_check 2단계 확認 뒤
-  // 재시도. 성공하면 로컬로 짐작해 만들지 않고 단건 GET을 다시 불러 서버가 낸
-  // command_status(보통 pending)로 배지를 갱신한다(§3-2 "지어내지 않는다"와 같은 축 —
-  // B1(#3428)의 confirm 후 재조회 처방과 동형). 403(HUMAN_ONLY)·404(재시도 대상
-  // 아님)는 서버 문장을 그대로 보인다(BFF가 삼키지 않는다).
+  // story f061c1a3(#3422 AC3 잔여) — dead_letter 수동 재시도·needs_check 2단계 확認 뒤 재시도. 성공하면 로컬로 짐작해 만들지 않고 단건 GET을
+  // 다시 불러 서버가 낸 command_status로 배지를 갱신한다(§3-2 "지어내지 않는다").
+  // story #4266 — 결과가 무엇이든 확인 창을 닫고 결과 줄로 보인다(예전엔 실패면 창이 열린 채 · 오류 줄이 오버레이 뒤). 404(재시도 대상 아님)는
+  // 서버 원문 대신 상태를 다시 읽고 로케일 문장 · 그 밖의 실패도 로케일 문장(공용 postPublicationRetry).
+  // 까디르 codex 4634 P2① — 다시 읽기 성공 여부를 돌려준다(실패면 이전 초안 그대로 · 결과 줄이 «다시 불러오지 못했어요»를 말한다).
+  // story #4290 — 다시 읽은 서버 판정(`command_retryable`)도 돌려줘 404 뒤 결과 줄을 그 값으로 고른다(withReload).
+  const reloadDraft = async (): Promise<ReloadOutcome> => {
+    const draftRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`);
+    if (!draftRes.ok) return false;
+    const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
+    if (!draftJson?.data) return false;
+    setDraft(draftJson.data);
+    return { retryable: draftJson.data.command_retryable === true };
+  };
   const handleRetry = async () => {
     if (!orgId || !draft?.command_id) return;
     setRetrying(true);
     setRetryResult(null);
     try {
-      const res = await fetchWithAuth(
-        `/api/organizations/${orgId}/channel-posts/publication-commands/${draft.command_id}/retry`, { method: 'POST' },
+      const result = await postPublicationRetry(
+        `/api/organizations/${orgId}/channel-posts/publication-commands/${draft.command_id}/retry`,
       );
-      if (res.ok) {
-        setRetryConfirmOpen(false);
-        setRetryResult({ type: 'success' });
-        const draftRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`);
-        if (draftRes.ok) {
-          const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
-          if (draftJson?.data) setDraft(draftJson.data);
-        }
-      } else {
-        const body = await res.json().catch(() => null);
-        const info = parseSitePostApiError(body);
-        setRetryResult({
-          type: 'error',
-          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsRetryFailed')),
-          raw: info.raw,
-        });
-      }
-    } catch {
-      setRetryResult({ type: 'error', text: t('channelPostsRetryFailed') });
+      setRetryConfirmOpen(false);
+      setRetryChecklistConfirmed(false);
+      setRetryResult(await withReload(result, reloadDraft));
     } finally {
       setRetrying(false);
     }
   };
+
+  const handleCancelPublish = async () => {
+    if (!orgId) return;
+    setCancellingPublish(true);
+    setCancelPublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/cancel-publish`, { method: 'POST' });
+      if (res.ok) {
+        setCancelPublishResult('success');
+        await reloadDraft();
+      } else if (res.status === 409) {
+        // 이미 집혀 공급자 호출이 시작됐다 — 결과는 이 화면에 뜬다(취소하지 않음).
+        setCancelPublishResult('too_late');
+        await reloadDraft();
+      } else {
+        setCancelPublishResult('failed');
+      }
+    } catch {
+      setCancelPublishResult('failed');
+    } finally {
+      setCancellingPublish(false);
+    }
+  };
+
+  // story #4336(PO 조건 2) — 워커가 명령에 남긴 오류 본문이면 즉시 발행 422와 같은 배너 · 문장을 그린다(초안을 읽을 때마다).
+  const failureDetail = draft?.command_failure_detail ?? null;
+  const failureDetailKey = failureDetail ? JSON.stringify(failureDetail) : null;
+  const presentPublishErrorRef = useRef(presentPublishError);
+  useEffect(() => {
+    presentPublishErrorRef.current = presentPublishError;
+  });
+  useEffect(() => {
+    if (!failureDetailKey) return;
+    presentPublishErrorRef.current(parseSitePostApiError({ error: JSON.parse(failureDetailKey) as Record<string, unknown> }));
+  }, [failureDetailKey, generationBudgetCurrency, apiUsageBudgetCurrency]);
+
+  // story #4336 — 발행은 워커(cron)가 돌린다: «발행 중»(publishing) · 컨테이너 대기인 동안 초안을 다시 읽어 결과로 넘어간다.
+  // 서버가 결과를 적으면 processing_kind가 null로 바뀌어 폴링이 멈춘다.
+  const awaitingWorker = isAwaitingPublishWorker(draft?.processing_kind);
+  const reloadDraftRef = useRef(reloadDraft);
+  useEffect(() => {
+    reloadDraftRef.current = reloadDraft;
+  });
+  useEffect(() => {
+    if (!awaitingWorker) return;
+    const timer = setInterval(() => {
+      void reloadDraftRef.current();
+    }, PUBLISH_WORKER_POLL_MS);
+    return () => clearInterval(timer);
+  }, [awaitingWorker]);
 
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
@@ -2045,7 +2203,7 @@ export default function ChannelPostEditPage() {
         {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
             읽은 사용자에게 «나가는 길» 하나(막다른 길 클래스, 3650과 같은 결).
             새 낱말 0 — channel-posts/calendar 페이지가 이미 쓰는 키 재사용. */}
-        <Link href="/content/channel-posts" className="text-sm font-medium text-primary underline">
+        <Link href={flatHref('/content/channel-posts')} className="text-sm font-medium text-primary underline">
           {t('channelPostsCalendarBackToListCta')}
         </Link>
       </div>
@@ -2057,7 +2215,7 @@ export default function ChannelPostEditPage() {
         <Alert variant="destructive">
           <AlertDescription>{t('editForbidden')}</AlertDescription>
         </Alert>
-        <Link href="/content/channel-posts" className="text-sm font-medium text-primary underline">
+        <Link href={flatHref('/content/channel-posts')} className="text-sm font-medium text-primary underline">
           {t('channelPostsCalendarBackToListCta')}
         </Link>
       </div>
@@ -2177,8 +2335,13 @@ export default function ChannelPostEditPage() {
   // 한 문장에 묶으면 절반은 틀린 지시가 된다. command_status만이 아니라 위 축으로
   // 정확히 갈라 서로 다른 문장을 낸다(backoff-pending은 이 잠금 문구 대상이 아니다 —
   // FailureActionBadge의 「{시각}에 자동으로 다시 시도합니다」가 그 상태의 안내를 전담).
-  const commandInFlightReasonKey = draft.command_status === 'blocked'
-    ? 'channelPostsCommandInFlightReasonBlocked' : 'channelPostsCommandInFlightReasonScheduled';
+  // story #4305(유나 확정) — blocked라도 조직 «외부 발행 일시 중지»면 연결 문장이 아니라 일시 중지 문장 — 새 키 없이 발행 409와 같은
+  // `errorExternalPublishPaused`(«… 승인·예약은 그대로예요»까지 · 상신 자리에서 필요한 안심). 연결 화면 링크 없음.
+  // story #4305(유나 확정) — 발행 영역 줄 세 갈래(blockedReason 한 판정): 연결 = 연결 문장(링크) · 일시 중지 = errorExternalPublishPaused ·
+  // 사유 모름 = 중립 문장(«발행 · 예약 상신»이 왜 비활성인지는 늘 버튼 밖에 보인다 — 줄을 빼지 않는다).
+  const blockedReasonNow = blockedReason(draft.command_status, draft.failure_kind);
+  const commandInFlightReasonKey = blockedReasonNow
+    ? BLOCKED_REASON_LINE_KEYS[blockedReasonNow] : 'channelPostsCommandInFlightReasonScheduled';
 
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
   // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와
@@ -2190,6 +2353,7 @@ export default function ChannelPostEditPage() {
     reasonCode: draft.command_reason_code,
     reasonResetAt: draft.command_reason_reset_at,
     processingKind: draft.processing_kind,
+    retryable: draft.command_retryable ?? null,
   });
   // story #3402 갭(PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시 dead_letter로
   // 접어(publication_command.py:695-698) kind==='needs_check' 갈래가 라이브에서
@@ -2261,7 +2425,7 @@ export default function ChannelPostEditPage() {
           {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
         </div>
         <p className="text-sm text-muted-foreground">
-          {channelLabel(draft.channel, t)} · v{draft.current_version}
+          {channelLabel(draft.channel)} · v{draft.current_version}
         </p>
         {/* story 15e481ce(#3453 AC2, 유나 §14-2 안전 표기) — "원문" 단정이 아니라 "같은
             스토리의 글". source_content_item_id 없으면(정상값) 이 줄 자체를 안 그린다.
@@ -2279,7 +2443,7 @@ export default function ChannelPostEditPage() {
           <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground" data-testid="channel-post-source-link">
             <span>
               {t('channelPostsSourceLabel')}{' '}
-              <Link href={`/content/${draft.source_content_item_id}`} className="underline">
+              <Link href={flatHref(`/content/${draft.source_content_item_id}`)} className="underline">
                 {t('channelPostsSourceLinkText', { title: draft.source_title })}
               </Link>
             </span>
@@ -2327,15 +2491,32 @@ export default function ChannelPostEditPage() {
             channelPostsAwaitingContainerNotice 알림과 문장이 겹친다(알림이 배지 문구를
             글자 그대로 포함 + 「다음 발」까지 지님). 목록(page.tsx:427)엔 이 알림이 없어
             배지가 유일한 신호라 그대로 두고, 상세는 알림이 대신하므로 이 상태에서만
-            배지를 안 그린다. */}
-        {failureAction && failureAction.kind !== 'processing' ? (
+            배지를 안 그린다.
+
+            story #4015(PO CHANGES 2) — processing_kind==='awaiting_container'면 위 상태
+            알림 IIFE가 컨테이너 대기 알림을 «먼저» 세운다(command_status 무관). 서버는
+            명령이 blocked/dead_letter로 가면 processing_kind를 null로 되돌리므로(위 컨테이너
+            대기 분기 주석) awaiting_container는 pending에서만 온다 — 즉 dead_letter+awaiting_
+            container 같은 조합은 «서버상 도달 불가»다. 도달 가능한 상태에선 kind!=='processing'
+            억제와 동작이 같고, 이 넓힌 조건은 그 도달 불가 조합에 대한 «방어»다(전수 곱
+            테스트가 그 조합까지 돌려도 실패 신호가 1개로 유지되게 한다). */}
+        {/* story #4336 AC4 — publishing · publish_stuck은 위 상태 알림(발행 중 · 예산 밖 + 발행 취소)이 이미 말한다 — 배지로 두 번 말하지 않는다. */}
+        {failureAction && draft.processing_kind !== 'awaiting_container'
+          && failureAction.kind !== 'publishing' && failureAction.kind !== 'publish_stuck' ? (
           <FailureActionBadge
             action={failureAction} displayTimezone={displayTimezone}
             // story #3402 갭 후속(페드루 PO, 2026-09-10 ②) — 이 화면(상세)엔 아래
             // ConfirmDialog가 실제 needs_check 관문(체크리스트·확認버튼 disabled)을
             // 제공한다 — recheckGate=true라 needsRecheck 문면이 「약속을 지키는」 곳.
             recheckGate
-            onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
+            // story #4264 ④ — 승인 필요 멈춤의 뒷문장은 이 화면이 실제로 받은 게이트 상태 · 승인된 예약 시각으로만 고른다.
+            approvalContext={(('gate_status' in draft && 'scheduled_at' in draft)
+              ? { gateStatus: draft.gate_status ?? null, sealedScheduledAt: draft.scheduled_at ?? null } : undefined)}
+            // story #4290 — 버튼은 서버 판정(`command_retryable`)이 참일 때만 — 화면이 상태로 따로 가르지 않는다(가르면 서버 404와 갈라진다).
+            onRetryClick={draft.command_retryable
+              ? () => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }
+              : undefined}
+            connectionHref={blockedByConnection(draft.command_status, draft.failure_kind) ? connectRulesHref : undefined}
           />
         ) : null}
         {/* story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 부분
@@ -2389,18 +2570,7 @@ export default function ChannelPostEditPage() {
           destructive={false}
           onConfirm={() => void handleRetry()}
         />
-        {retryResult ? (
-          <Alert
-            variant={retryResult.type === 'error' ? 'destructive' : 'default'}
-            role={retryResult.type === 'error' ? 'alert' : 'status'}
-            data-testid="channel-post-retry-result"
-          >
-            <AlertDescription>
-              {retryResult.type === 'success' ? t('channelPostsRetrySuccess') : retryResult.text}
-            </AlertDescription>
-            {retryResult.type === 'error' ? <RawDetailsToggle raw={retryResult.raw} label={t('errorRawDetailsToggle')} /> : null}
-          </Alert>
-        ) : null}
+        <PublicationRetryResultLine result={retryResult} testId="channel-post-retry-result" />
         {/* AC9 — 나가는 계정. */}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">{t('channelPostsApprovalAccountLabel')}</span>
@@ -2517,12 +2687,18 @@ export default function ChannelPostEditPage() {
               {t('channelPostsYoutubePublishedPrivateBadge')}
             </span>
           ) : null}
-          {draft.permalink ? (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">{t('publishedInfoUrlLabel')}</span>
+          {/* story #4264(유나 디자인 확정 · 까디르 codex P1) — 게시는 됐는데 permalink 조회가 실패하면(BE가 id 보존 · permalink만
+              비움) 줄을 숨기지 않고 «가져오지 못했어요»를 흐린 글씨로 남긴다(«아직»은 안 붙인다 — 다시 가져오는 길이 없으면 약속). */}
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('publishedInfoUrlLabel')}</span>
+            {draft.permalink ? (
               <a href={draft.permalink} target="_blank" rel="noreferrer" className="underline">{draft.permalink}</a>
-            </div>
-          ) : null}
+            ) : (
+              <span className="text-muted-foreground" data-testid="channel-post-published-url-unavailable">
+                {t('publishedInfoUrlUnavailable')}
+              </span>
+            )}
+          </div>
           {draft.published_at ? (
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">{t('publishedInfoAtLabel')}</span>
@@ -2591,9 +2767,9 @@ export default function ChannelPostEditPage() {
                 {/* story #3426 후속(페드루 지시·유나 435fd06d 실측, 2026-09-10) — 이
                     자리가 채널 무관하게 「Threads」를 문자열에 박아 놨었다. 이 화면은
                     sandbox·facebook_sandbox·instagram_sandbox 초안도 서므로(헤더는
-                    이미 :1921에서 channelLabel(draft.channel, t)로 정확히 그린다 —
+                    이미 :1921에서 channelLabel(draft.channel)로 정확히 그린다 —
                     같은 정본 재사용, 새 낱말 0) 그 채널의 라벨로 보간한다. */}
-                {t('channelPostsUnpublishedNotice', { channel: channelLabel(draft.channel, t) })}
+                {t('channelPostsUnpublishedNotice', { channel: channelLabel(draft.channel) })}
               </AlertDescription>
             </Alert>
           );
@@ -2606,6 +2782,41 @@ export default function ChannelPostEditPage() {
         // dead_letter/needs_check로 전이되면 서버가 processing_kind를 null로 되돌리므로
         // (BE 620beefc _to_draft_list_item) 이 분기는 자연히 사라지고 실패 알림이 대신
         // 선다 — 화면이 두 신호를 조합판정하지 않는다.
+        // story #4336(PO 04:57Z) — 워커 틱 예산보다 긴 명령은 집히지 않는다(비종결 · 예산이 커지면 자동으로 집힘). «발행 중»이 아니라 그 사유를 말한다.
+        if (cancelPublishResult === 'success' || cancelPublishResult === 'too_late') {
+          return (
+            <Alert role="status" data-testid="channel-post-cancel-publish-result" data-result={cancelPublishResult}>
+              <AlertDescription className="break-keep">
+                {cancelPublishResult === 'success' ? t('channelPostsCancelPublishSuccess') : t('channelPostsCancelPublishTooLate')}
+              </AlertDescription>
+            </Alert>
+          );
+        }
+        if (draft.command_reason_code === WORKER_TICK_BUDGET_TOO_SMALL) {
+          return (
+            <Alert role="status" variant="warning" data-testid="channel-post-worker-budget-notice">
+              <AlertDescription className="space-y-2 break-keep">
+                <span className="block">{t('channelPostsPublishStuckNotice')}</span>
+                {cancelPublishResult === 'failed' ? (
+                  <span className="block" data-testid="channel-post-cancel-publish-failed">{t('channelPostsCancelPublishFailed')}</span>
+                ) : null}
+                <Button
+                  size="sm" variant="outline" disabled={cancellingPublish}
+                  onClick={() => void handleCancelPublish()} data-testid="channel-post-cancel-publish-button"
+                >
+                  {cancellingPublish ? t('channelPostsCancelPublishPendingCta') : t('channelPostsCancelPublishCta')}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          );
+        }
+        if (draft.processing_kind === 'publishing') {
+          return (
+            <Alert role="status" data-testid="channel-post-publishing-notice">
+              <AlertDescription className="break-keep">{t('channelPostsPublishingNotice')}</AlertDescription>
+            </Alert>
+          );
+        }
         if (draft.processing_kind === 'awaiting_container') {
           return (
             <Alert role="status" data-testid="channel-post-awaiting-container-notice">
@@ -2614,9 +2825,40 @@ export default function ChannelPostEditPage() {
           );
         }
         if (view.publicationFailed) {
+          // story #4015(§③ 색↔사람 할 일) — 실패 신호는 종류(kind)마다 「사람 할 일」이
+          // 달라 FailureActionBadge(위 :2331)가 이미 kind별로 색·액션까지 맞게 낸다.
+          // 옛 blanket destructive+「이 시도는 다음 발행에서 이어서 처리돼요」는 auto_retry
+          // 조합엔 과경보(자동 복구인데 빨강)·dead_letter/blocked엔 거짓 안내(자동 멈춰
+          // 사람이 눌러야 하는데 「자동 이어서」)였고, 같은 화면 배지 「자동 재시도를
+          // 멈췄어요」와 정면 모순이었다. 이제 두 규율:
+          //   ① failureAction이 서는 조합 = 배지가 유일한 신호(이 알림 안 그린다).
+          //   ② 배지가 못 그리는 조합(deriveFailureAction=undefined: command_status가
+          //      null·completed·cancelled, 또는 pending/in_progress에 failure_kind 없음)
+          //      에서만, 자동을 약속하지 않는 「참인 사실 문장」 하나를 중립(role=status)
+          //      으로 낸다. command_status별 문장(§③ doc d6a885cb §5 조합 표):
+          //      - cancelled: 실패+취소 사실 유지  - pending: 자동 재시도 예정
+          //        (process_due_publication_commands가 pending을 집는다·prod는 승격
+          //        스케줄러 등록 뒤 참)  - in_progress: 지금 재발행 중  - null(command
+          //        없음)+canPublish: 「다시 발행」 안내(버튼 활성) / 아니면 사실만(버튼
+          //        약속 0)  - completed: 도달 불가(all-published라야 completed) → 폴백.
+          if (failureAction !== undefined) return null;
+          // #4015 CHANGES 2 — 「다시 발행」이라는 없는 버튼을 지어내지 않는다. 안내에
+          // 끼우는 이름은 실제 발행 버튼과 «같은 키»(view.isRepublish ? publishRepublishCta
+          // : publishCta — 아래 발행 버튼 라벨과 동일)로 보간해 늘 버튼 텍스트와 일치시킨다.
+          const republishActionLabel = t(view.isRepublish ? 'publishRepublishCta' : 'publishCta');
+          const failedNotice =
+            draft.command_status === 'cancelled'
+              ? t('channelPostsPublicationFailedCancelledNotice')
+              : draft.command_status === 'pending'
+                ? t('channelPostsPublicationFailedPendingRetryNotice')
+                : draft.command_status === 'in_progress'
+                  ? t('channelPostsPublicationFailedInProgressNotice')
+                  : !draft.command_status && canPublish
+                    ? t('channelPostsPublicationFailedRepublishNotice', { action: republishActionLabel })
+                    : t('channelPostsPublicationFailedNotice');
           return (
-            <Alert variant="destructive" role="alert" data-testid="channel-post-publication-failed-notice">
-              <AlertDescription>{t('channelPostsPublicationFailedNotice')}</AlertDescription>
+            <Alert role="status" data-testid="channel-post-publication-failed-notice">
+              <AlertDescription>{failedNotice}</AlertDescription>
             </Alert>
           );
         }
@@ -2656,7 +2898,14 @@ export default function ChannelPostEditPage() {
             disabled={
               !canPublish || publishing || blockedByCommandInFlight
               || draft.processing_kind === 'awaiting_container'
+              // story #4336 — 워커가 발행하는 중(publishing)에도 잠근다.
+              || draft.processing_kind === 'publishing'
+              || draft.command_reason_code === WORKER_TICK_BUDGET_TOO_SMALL
               || (view.partialSuccess && blockedByReasonReset)
+              // story #4264(유나 4632 CHANGES) — needs_check(«나갔는지 모름»)면 이 버튼이 확인 없이 다시 보낸다(`POST …/publish` →
+              // 기존 command → 어댑터 재호출 · 서버 중복 막이는 «published 발행물 있음»뿐). 배지의 2단계(채널 확인 → «확인했어요 · 다시
+              // 시도»)만 문으로 남긴다. not_sent(«안 나감»)는 그대로 열린다.
+              || isNeedsCheckGate
             }
             data-testid="channel-post-publish-button"
           >
@@ -2706,6 +2955,14 @@ export default function ChannelPostEditPage() {
             </Button>
           ) : null}
         </div>
+        {canPublish && isNeedsCheckGate ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-locked-needs-check">
+            {/* story #4290(유나 05:16Z) — 배지 재시도를 지금 못 누르면(서버 command_retryable=false) 그 버튼을 가리키지 않는다. */}
+            {draft.command_retryable
+              ? t('channelPostsPublishLockedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') })
+              : t('channelPostsPublishLockedNeedsCheckNoRetry')}
+          </p>
+        ) : null}
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
             {view.blockedReason === 'SEAL_MISSING'
@@ -2737,7 +2994,7 @@ export default function ChannelPostEditPage() {
         {draft.command_status === 'blocked' || (canPublish && blockedByCommandInFlight) ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-command-inflight-reason">
             {t.rich(commandInFlightReasonKey, {
-              link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+              link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
             })}
           </p>
         ) : null}
@@ -2763,7 +3020,7 @@ export default function ChannelPostEditPage() {
                 owner에게 요청하라는 안내라 이 화면 안에 갈 곳이 없다(링크 없음 그대로). */}
             {role === 'owner'
               ? t.rich('channelPostsUnpublishScopeInsufficientOwner', {
-                link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+                link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
               })
               : t('channelPostsUnpublishScopeInsufficientNonOwner')}
           </p>
@@ -2773,7 +3030,7 @@ export default function ChannelPostEditPage() {
           // 하나뿐인데 전역 내비를 뒤지게 하지 않는다).
           <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="connection_not_active">
             {t.rich('channelPostsUnpublishConnectionNotActive', {
-              link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+              link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
             })}
           </p>
         ) : showUnpublish && canUnpublish && unpublishGate === undefined ? (
@@ -2861,7 +3118,7 @@ export default function ChannelPostEditPage() {
           description={(
             <>
               <span className="block" data-testid="channel-post-unpublish-confirm-what">
-                {t('channelPostsUnpublishConfirmWhat', { channel: channelLabel(draft.channel, t) })}
+                {t('channelPostsUnpublishConfirmWhat', { channel: channelLabel(draft.channel) })}
               </span>
               <span className="block" data-testid="channel-post-unpublish-confirm-reversible">{t('channelPostsUnpublishConfirmReversible')}</span>
             </>
@@ -3203,17 +3460,19 @@ export default function ChannelPostEditPage() {
             </p>
           ) : null}
           {videoUploadInProgress ? (
-            <p className="text-xs text-muted-foreground" data-testid="channel-post-video-upload-progress">
+            <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-video-upload-progress">
               {videoUploadStatus.phase === 'requesting_url'
                 ? t('channelPostsImageUploadRequestingUrl')
                 : videoUploadStatus.phase === 'uploading'
                   ? t('channelPostsVideoUploading', { pct: videoUploadStatus.progress })
-                  : t('channelPostsImageConfirming')}
+                  : videoUploadStatus.phase === 'confirming' && videoUploadStatus.slow
+                    ? `${t('channelPostsImageConfirming')} ${tc('backgroundJobSlow')}`
+                    : t('channelPostsImageConfirming')}
             </p>
           ) : null}
           {videoUploadStatus.phase === 'error' ? (
             <Alert variant="destructive" role="alert" data-testid="channel-post-video-upload-error">
-              <AlertDescription>{videoUploadStatus.text}</AlertDescription>
+              <AlertDescription className="break-keep">{videoUploadStatus.text}</AlertDescription>
               <RawDetailsToggle raw={videoUploadStatus.raw} label={t('errorRawDetailsToggle')} />
             </Alert>
           ) : null}
@@ -3356,7 +3615,7 @@ export default function ChannelPostEditPage() {
           ) : null}
           {imageUploadStatus.phase === 'error' ? (
             <Alert variant="destructive" role="alert" data-testid="channel-post-image-upload-error">
-              <AlertDescription>{imageUploadStatus.text}</AlertDescription>
+              <AlertDescription className="break-keep">{imageUploadStatus.text}</AlertDescription>
               <RawDetailsToggle raw={imageUploadStatus.raw} label={t('errorRawDetailsToggle')} />
             </Alert>
           ) : null}
@@ -3523,7 +3782,7 @@ export default function ChannelPostEditPage() {
       {!isOverLimit && !hasBlockingViolations && blockedByCommandInFlight ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-schedule-submit-command-inflight-reason">
           {t.rich(commandInFlightReasonKey, {
-            link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+            link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
           })}
         </p>
       ) : null}
@@ -3553,7 +3812,8 @@ export default function ChannelPostEditPage() {
           <Alert role="status">
             <AlertDescription>
               {t('submitSuccess')}{' '}
-              <Link href={`/gates/${submitResult.gateId}`} className="underline">{t('submitGateLink')}</Link>
+              {/* 대상-프로젝트: 제출 응답은 게이트 id만 준다(채널 게시물 초안은 조직 단위 · 게이트 상세가 자기 프로젝트로 연다). */}
+              <Link href={flatHref(`/gates/${submitResult.gateId}`)} className="underline">{t('submitGateLink')}</Link>
             </AlertDescription>
           </Alert>
         ) : (
@@ -3563,7 +3823,7 @@ export default function ChannelPostEditPage() {
               {submitResult.heldByDraftId ? (
                 <>
                   {' '}
-                  <Link href={`/content/channel-posts/${submitResult.heldByDraftId}`} className="underline">
+                  <Link href={flatHref(`/content/channel-posts/${submitResult.heldByDraftId}`)} className="underline">
                     {t('errorGateAlreadyHeldLink')}
                   </Link>
                 </>

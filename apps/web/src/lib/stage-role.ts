@@ -4,9 +4,12 @@
  * story #3770(원시 org 역할 값 i18n 클래스)과 같은 누출 클래스지만 어휘가 다르다 —
  * org/trust 역할 정본(`orgRoleLabel`/`resolveRoleLabel`)엔 이 값 집합이 없다.
  *
- * 프리셋 13종(`backend/alembic/versions/0260_compile_workflow_recipes_to_cycle_events.py`
- * 시드 — `_BUILTIN_RECIPES`의 리터럴 role 7종 + `_DB_RECIPES`의 `default_label` 6종, dev DB
- * 라이브 실측으로 재확認·마이그레이션으로만 늘어난다)만 i18n 정본을 거친다 — **조직 커스텀
+ * 프리셋 17종 — `backend/alembic/versions/0260_compile_workflow_recipes_to_cycle_events.py`
+ * 시드(`_BUILTIN_RECIPES` 리터럴 role 7종 + `_DB_RECIPES`의 `default_label` 6종, dev DB
+ * 라이브 실측으로 재확認) + story #4039(E-RECIPE-1 ①, `0379_preset_marketing_video_
+ * production_recipe.py`) 시드가 새로 여는 마케팅 레시피 역할 슬롯 4종(Director/Creator/
+ * Compute/Publisher, 유나 핸드셰이크 2026-09-18 06:32Z 확定 — 디렉터=사람·크리에이터=
+ * 에이전트·연산=모델 임대·발행자) — 이 목록은 마이그레이션으로만 늘어난다 — **조직 커스텀
  * 이벤트 정의의 role 값은 사용자가 직접 적은 데이터라 그대로 pass-through**(`orgRoleLabel`·
  * `resolveRoleLabel`과 동형 원칙, 새 기전 0).
  *
@@ -17,13 +20,17 @@ const STAGE_ROLE_KEY: Record<string, string> = {
   Agent: 'stageRoleLabelAgent',
   Any: 'stageRoleLabelAny',
   Approver: 'stageRoleLabelApprover',
+  Compute: 'stageRoleLabelCompute',
+  Creator: 'stageRoleLabelCreator',
   Dev: 'stageRoleLabelDev',
+  Director: 'stageRoleLabelDirector',
   Executor: 'stageRoleLabelExecutor',
   Human: 'stageRoleLabelHuman',
   Lead: 'stageRoleLabelLead',
   Maker: 'stageRoleLabelMaker',
   Member: 'stageRoleLabelMember',
   PO: 'stageRoleLabelPo',
+  Publisher: 'stageRoleLabelPublisher',
   QA: 'stageRoleLabelQa',
   Reviewer: 'stageRoleLabelReviewer',
   Worker: 'stageRoleLabelWorker',

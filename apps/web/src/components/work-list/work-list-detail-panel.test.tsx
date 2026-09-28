@@ -26,7 +26,7 @@ const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 vi.stubGlobal('fetch', fetchMock);
 
 const { dashboardContextRef } = vi.hoisted(() => ({
-  dashboardContextRef: { current: { currentMemberType: 'human' as 'human' | 'agent' | undefined } },
+  dashboardContextRef: { current: { currentMemberType: 'human' as 'human' | 'agent' | undefined, orgId: 'org-1' as string | undefined } },
 }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => dashboardContextRef.current,
@@ -67,10 +67,24 @@ function mockFetchRoutes(routes: {
   gates?: unknown[];
   artifacts?: unknown[];
   transitionStatus?: number;
+  // story #3976
+  tasks?: unknown[];
+  activityLogItems?: unknown[];
+  // story #3988
+  channelDrafts?: unknown[];
+  siteDrafts?: unknown[];
+  channelDraftsStatus?: number;
+  siteDraftsStatus?: number;
 }) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST' && url.includes('/transition')) {
       return jsonResponse({ id: 'g1', status: 'approved' }, { status: routes.transitionStatus ?? 200 });
+    }
+    if (url.includes('/channel-posts/drafts?work_item_id=')) {
+      return jsonResponse(routes.channelDrafts ?? [], { status: routes.channelDraftsStatus ?? 200 });
+    }
+    if (url.includes('/site-posts/drafts?work_item_id=')) {
+      return jsonResponse(routes.siteDrafts ?? [], { status: routes.siteDraftsStatus ?? 200 });
     }
     if (url.startsWith('/api/stories/') && url.endsWith('/backlinks?source_type=doc')) {
       return jsonResponse(routes.docs ?? []);
@@ -84,6 +98,12 @@ function mockFetchRoutes(routes: {
     if (url.startsWith('/api/visual-artifacts')) {
       return jsonResponse(routes.artifacts ?? []);
     }
+    if (url.startsWith('/api/tasks?story_id=')) {
+      return jsonResponse(routes.tasks ?? []);
+    }
+    if (url.startsWith('/api/activity-logs')) {
+      return jsonResponse({ items: routes.activityLogItems ?? [] });
+    }
     if (url.startsWith('/api/gates')) {
       return jsonResponse(routes.gates ?? []);
     }
@@ -95,7 +115,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
-  dashboardContextRef.current = { currentMemberType: 'human' };
+  dashboardContextRef.current = { currentMemberType: 'human', orgId: 'org-1' };
   fetchMock.mockReset();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -226,6 +246,104 @@ describe('WorkListDetailPanel — 탭→데이터 매핑', () => {
     await mountPanel(baseRow(), 'story-99');
     await act(async () => { (container.querySelector('[data-testid="panel-tab-artifacts"]') as HTMLElement).click(); });
     expect(container.querySelector('[data-testid="stub-artifact-section"]')?.getAttribute('data-story-id')).toBe('story-99');
+  });
+
+  // story #3976 AC2 — 「일」 체크리스트(기존 GET /api/tasks?story_id= 재사용, 새 BE 0).
+  it('⭐일 탭 — task 제목+상태 라벨(entity-status-labels.ts SSOT)이 뜬다', async () => {
+    mockFetchRoutes({ tasks: [{ id: 't1', title: '시안 그리기', status: 'in-progress' }, { id: 't2', title: 'PO 렌더 검수', status: 'todo' }] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-tasks"]') as HTMLElement).click(); });
+    const list = container.querySelector('[data-testid="panel-tasks-list"]');
+    expect(list?.textContent).toContain('시안 그리기');
+    expect(list?.textContent).toContain('진행 중');
+    expect(list?.textContent).toContain('PO 렌더 검수');
+    expect(list?.textContent).toContain('할 일');
+  });
+
+  it('일 탭 — 0건이면 「아직 일로 안 나뉘었어요」', async () => {
+    mockFetchRoutes({ tasks: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-tasks"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-tasks-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyTasks);
+  });
+
+  // story #3976 CHANGES(페드루 PO C1, 2026-09-17 00:38Z, dev 실측 3픽스처 — moonklabs
+  // 스토리 로그 100건: story_updated의 81%에 context.old_status/new_status·14%에
+  // context.fields). action 원시값·필드명 원시값은 노출 0, 실측 모양 그대로 검증.
+  it('⭐이력 탭 — 생성은 그대로, 상태 전후 있으면 SSOT 라벨로 「상태를 X → Y로」', async () => {
+    mockFetchRoutes({
+      activityLogItems: [
+        { id: 'l1', actor_name: '페드루', action: 'story_created', created_at: new Date().toISOString(), context: {} },
+        { id: 'l2', actor_name: '유나', action: 'story_updated', created_at: new Date().toISOString(), context: { old_status: 'in-progress', new_status: 'in-review' } },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    const list = container.querySelector('[data-testid="panel-history-list"]');
+    expect(list?.textContent).toContain('페드루가 만들었어요');
+    expect(list?.textContent).toContain('유나가 상태를 진행 중 → 검토 중으로 바꿨어요');
+    expect(list?.textContent).not.toContain('story_created');
+    expect(list?.textContent).not.toContain('in-progress');
+  });
+
+  it('⭐이력 탭 — fields만 있으면(status 전후 없음) §3875 유형 라벨로 「{필드} 바꿨어요」', async () => {
+    mockFetchRoutes({
+      activityLogItems: [
+        { id: 'l3', actor_name: '디디', action: 'story_updated', created_at: new Date().toISOString(), context: { fields: ['title'] } },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-history-list"]')?.textContent).toContain('디디가 제목을 바꿨어요');
+  });
+
+  it('⭐이력 탭 — 미등록 필드(story_points 등)·근거 부재는 중립 폴백 「그 밖의 변경」 1개로(원시 필드명 노출 0)', async () => {
+    mockFetchRoutes({
+      activityLogItems: [
+        { id: 'l4', actor_name: '미르코', action: 'story_updated', created_at: new Date().toISOString(), context: { fields: ['story_points', 'priority'] } },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    const list = container.querySelector('[data-testid="panel-history-list"]');
+    expect(list?.textContent).toContain('미르코가 그 밖의 변경을 했어요');
+    expect(list?.textContent).not.toContain('story_points');
+    expect(list?.textContent).not.toContain('priority');
+  });
+
+  // [SID:4311 PR 2] 이력 행의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자» · 조사는 꼬리 붙은 최종 라벨의 끝소리(유나 ·
+  // 숫자 받침 «…3이» · 영문 «…d가») · 같은 사람 여러 줄은 겹침 아님 · 행위자 있는데 이름 빔 = «이름 없는 구성원» · 행위자 없음 = «누군가».
+  it('이력 탭 — 같은 이름 둘은 꼬리로 갈리고 조사는 꼬리 끝소리를 따른다([SID:4311 PR 2])', async () => {
+    const now = new Date().toISOString();
+    mockFetchRoutes({
+      activityLogItems: [
+        { id: 'h1', actor_id: 'aaaa1113-1', actor_name: '송윤재', action: 'story_created', created_at: now, context: {} },
+        { id: 'h2', actor_id: 'bbbbbbbd-2', actor_name: '송윤재', action: 'story_created', created_at: now, context: {} },
+        { id: 'h3', actor_id: 'm-yuna', actor_name: '유나', action: 'story_created', created_at: now, context: {} },
+        { id: 'h4', actor_id: 'm-yuna', actor_name: '유나', action: 'story_created', created_at: now, context: {} },
+        { id: 'h5', actor_id: 'm-unnamed', actor_name: null, action: 'story_created', created_at: now, context: {} },
+        { id: 'h6', actor_id: null, actor_name: null, action: 'story_created', created_at: now, context: {} },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    const rows = [...container.querySelectorAll('[data-testid="panel-history-list"] li > span:first-child')].map((el) => el.textContent);
+    const unnamed = koMessages.common.memberUnnamed;
+    expect(rows).toEqual([
+      '송윤재 · aaaa1113이 만들었어요',
+      '송윤재 · bbbbbbbd가 만들었어요',
+      '유나가 만들었어요',
+      '유나가 만들었어요',
+      `${unnamed}이 만들었어요`,
+      '누군가가 만들었어요',
+    ]);
+  });
+
+  it('이력 탭 — 0건이면 「아직 이력이 없어요」', async () => {
+    mockFetchRoutes({ activityLogItems: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-history-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyHistory);
   });
 
   // 픽셀 커밋 CHANGES 2(페드루 PO 판정 09:40Z) — 3탭 다 "아직 로딩 중"과 "진짜 0건"을
@@ -360,7 +478,7 @@ describe('WorkListDetailPanel — 서명 플로우(고위험, 픽셀 커밋 ②:
 
 describe('WorkListDetailPanel — 에이전트 뷰어 403 회피', () => {
   it('⭐currentMemberType=agent면 pending gate가 있어도 주 액션 버튼 자체가 없다(평문 경로)', async () => {
-    dashboardContextRef.current = { currentMemberType: 'agent' };
+    dashboardContextRef.current = { currentMemberType: 'agent', orgId: 'org-1' };
     mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel();
     expect(container.querySelector('[data-testid="panel-primary-action-section"]')).toBeNull();
@@ -368,7 +486,7 @@ describe('WorkListDetailPanel — 에이전트 뷰어 403 회피', () => {
   });
 
   it('⭐currentMemberType=agent면 서명 플로우 경로도 통째로 안 뜬다(canShowPrimaryAction이 두 분기 공통 게이트)', async () => {
-    dashboardContextRef.current = { currentMemberType: 'agent' };
+    dashboardContextRef.current = { currentMemberType: 'agent', orgId: 'org-1' };
     mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'high', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' }] });
     await mountPanel();
     expect(container.querySelector('[data-testid="panel-primary-action-section"]')).toBeNull();
@@ -426,5 +544,234 @@ describe('WorkListDetailPanel — 답하기(3860 AC2, BE #4273 착지 前 구조
     mockFetchRoutes({ gates: [{ id: 'g1', gate_type: 'doc_approval', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task', conversation_id: null }] });
     await mountPanel();
     expect(container.querySelector('[data-testid="panel-reply-action"]')).toBeNull();
+  });
+});
+
+// story #3988(E-UX-OVERHAUL·「일감」 흡수 2/N) — 「발행물」 탭. 다른 5탭과 달리 패널이
+// 열릴 때 같이 안 부른다(AC2 "탭 열 때만 조회" — 첫 화면 콜 수 무증가 회귀가드)·성공/
+// 실패를 구분해 보이는 「다시 시도」를 낸다(fetchJsonData의 실패-삼킴과 다른 계약).
+describe('WorkListDetailPanel — 발행물 탭(story #3988)', () => {
+  it('⭐마운트 시점엔 채널/사이트 초안 API를 안 부른다(탭을 열기 전까지 콜 수 무증가)', async () => {
+    mockFetchRoutes({});
+    await mountPanel();
+    const calledPublicationsRoute = fetchMock.mock.calls.some((call: unknown[]) => {
+      const [url] = call as [string];
+      return url.includes('/channel-posts/drafts') || url.includes('/site-posts/drafts');
+    });
+    expect(calledPublicationsRoute).toBe(false);
+  });
+
+  it('⭐탭을 열면 그제서야 두 초안 API를 storyId(work_item_id)로 부른다', async () => {
+    mockFetchRoutes({ channelDrafts: [], siteDrafts: [] });
+    await mountPanel(baseRow(), 'story-77');
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const channelCall = fetchMock.mock.calls.find((call: unknown[]) => (call as [string])[0].includes('/channel-posts/drafts'));
+    const siteCall = fetchMock.mock.calls.find((call: unknown[]) => (call as [string])[0].includes('/site-posts/drafts'));
+    expect((channelCall?.[0] as string)).toContain('work_item_id=story-77');
+    expect((siteCall?.[0] as string)).toContain('work_item_id=story-77');
+  });
+
+  it('탭을 열면 응답 도착 전까지 스켈레톤(로딩)이 뜬다', async () => {
+    let resolveChannel: (v: Response) => void = () => {};
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/channel-posts/drafts')) return new Promise<Response>((r) => { resolveChannel = r; });
+      if (url.includes('/site-posts/drafts')) return jsonResponse([]);
+      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="panel-publications-loading"]')).not.toBeNull();
+    await act(async () => { resolveChannel(jsonResponse([]) as unknown as Response); });
+  });
+
+  it('0건이면 「아직 연결된 발행물이 없어요」', async () => {
+    mockFetchRoutes({ channelDrafts: [], siteDrafts: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-empty"]')?.textContent).toBe(koMessages.workList.panelEmptyPublications);
+  });
+
+  it('⭐실패(500)면 보이는 에러+「다시 시도」가 뜬다(다른 탭들의 실패-삼킴과 다르다)', async () => {
+    mockFetchRoutes({ channelDraftsStatus: 500, siteDrafts: [] });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const errorBox = container.querySelector('[data-testid="panel-publications-error"]');
+    expect(errorBox?.textContent).toContain(koMessages.workList.panelPublicationsError);
+    expect(errorBox?.textContent).toContain(koMessages.common.retry);
+  });
+
+  it('⭐다시 시도 클릭 — 성공 응답으로 바뀌면 재조회해 목록이 뜬다', async () => {
+    let siteStatus = 500;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/channel-posts/drafts')) return jsonResponse([]);
+      if (url.includes('/site-posts/drafts')) {
+        return siteStatus === 500 ? jsonResponse(null, { status: 500 }) : jsonResponse([
+          { draft_id: 's1', title: '재시도로 뜬 글', slug: 'retry-post', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h1', published_at: null },
+        ]);
+      }
+      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-error"]')).not.toBeNull();
+    siteStatus = 200;
+    const retryBtn = container.querySelector('[data-testid="panel-publications-error"] button') as HTMLButtonElement;
+    await act(async () => { retryBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-list"]')?.textContent).toContain('재시도로 뜬 글');
+  });
+
+  it('⭐사이트 초안(draft, gate 없음) + 채널 초안(approved+published) — 각자 열기 링크와 5상태 재사용 상태 라벨', async () => {
+    mockFetchRoutes({
+      siteDrafts: [
+        { draft_id: 'site-1', title: '초안 상태 글', slug: 'draft-post', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h1', published_at: null },
+      ],
+      channelDrafts: [
+        {
+          draft_id: 'chan-1', channel: 'threads', text_preview: '발행된 채널 글',
+          gate_status: 'approved', reapproval_required: false,
+          sealed_content_sha256: 'same', body_sha256: 'same', published_at: '2026-09-17T00:00:00Z',
+          publication_status: 'published', error_code: null,
+        },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const list = container.querySelector('[data-testid="panel-publications-list"]') as HTMLElement;
+    expect(list.textContent).toContain('초안 상태 글');
+    expect(list.textContent).toContain(koMessages.content.contentStatusDraft);
+    expect(list.textContent).toContain('발행된 채널 글');
+    expect(list.textContent).toContain(koMessages.content.contentStatusPublished);
+    const siteLink = [...list.querySelectorAll('a')].find((a) => a.textContent === '초안 상태 글');
+    expect(siteLink?.getAttribute('href')).toBe('/content/site-1');
+    const channelLink = [...list.querySelectorAll('a')].find((a) => a.textContent === '발행된 채널 글');
+    expect(channelLink?.getAttribute('href')).toBe('/content/channel-posts/chan-1');
+  });
+
+  it('⭐발행물 탭을 이미 연 채로 다른 행으로 옮기면 idle 스켈레톤에 갇히지 않고 새 storyId로 즉시 재조회한다', async () => {
+    mockFetchRoutes({ siteDrafts: [{ draft_id: 'site-1', title: '첫 행 글', slug: 's', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }], channelDrafts: [] });
+    await mountPanel(baseRow(), 'story-1');
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-list"]')?.textContent).toContain('첫 행 글');
+
+    mockFetchRoutes({ siteDrafts: [{ draft_id: 'site-2', title: '둘째 행 글', slug: 's2', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }], channelDrafts: [] });
+    // 탭을 다시 클릭하지 않는다 — 이미 「발행물」 탭이 열려 있는 채로 storyId만 바뀌는
+    // 경우(딱 이 테스트가 재현)라 재조회가 클릭 없이도 일어나야 한다.
+    await mountPanel(baseRow(), 'story-2');
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-list"]')?.textContent).toContain('둘째 행 글');
+    const siteCalls = fetchMock.mock.calls.filter((c: unknown[]) => (c as [string])[0].includes('/site-posts/drafts'));
+    expect(siteCalls.some((c) => (c[0] as string).includes('work_item_id=story-2'))).toBe(true);
+  });
+
+  // CHANGES-1(페드루 PO 판정 2026-09-17 03:49Z) — A에서 탭을 열어 조회가 나간 채(응답
+  // 지연) B로 옮기면, 나중에 도착한 A의 응답이 B 화면에 얹히는 경합. 세 조회 자리 공통
+  // ref(publicationsRequestForRef) 회귀가드.
+  it('⭐CHANGES-1 — A행 요청이 늦게 도착해도 그 사이 옮겨간 B행 화면을 덮어쓰지 않는다', async () => {
+    let resolveA: (v: Response) => void = () => {};
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/channel-posts/drafts')) return jsonResponse([]);
+      if (url.includes('/site-posts/drafts?work_item_id=story-A')) {
+        return new Promise<Response>((r) => { resolveA = r; });
+      }
+      if (url.includes('/site-posts/drafts?work_item_id=story-B')) {
+        return jsonResponse([{ draft_id: 'site-b', title: 'B행 글', slug: 'b', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }]);
+      }
+      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+    });
+
+    await mountPanel(baseRow(), 'story-A');
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-loading"]')).not.toBeNull();
+
+    // A 응답이 오기 전에 B로 옮긴다(이미 발행물 탭이 열려 있어 클릭 없이 즉시 재조회).
+    await mountPanel(baseRow(), 'story-B');
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-list"]')?.textContent).toContain('B행 글');
+
+    // A의 지연 응답이 이제야 도착 — 이미 지나간 요청이라 버려져야 한다.
+    await act(async () => {
+      resolveA(jsonResponse([{ draft_id: 'site-a', title: 'A행 글', slug: 'a', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }]) as unknown as Response);
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    const list = container.querySelector('[data-testid="panel-publications-list"]');
+    expect(list?.textContent).toContain('B행 글');
+    expect(list?.textContent).not.toContain('A행 글');
+  });
+
+  it('작은 것(페드루 PO 판정) — orgId가 없으면 스켈레톤에 갇히지 않고 오류+「다시 시도」로', async () => {
+    dashboardContextRef.current = { currentMemberType: 'human', orgId: undefined };
+    mockFetchRoutes({});
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="panel-publications-loading"]')).toBeNull();
+    expect(container.querySelector('[data-testid="panel-publications-error"]')).not.toBeNull();
+  });
+});
+
+// story #4190(유나 «본 버전 대조» 1) — 레시피 발행 게이트: 평문(저위험) 자리는 초안 카드를 안 그리므로 승인 대신 «초안 보고
+// 승인» 링크(→ /gates/{id}) · 서명 흐름은 게이트 상세와 같게(본 버전 전송 · 409면 문장 + loadGate 재조회 → 카드 새 버전).
+describe('WorkListDetailPanel — 레시피 발행 게이트 본 초안 버전 (story #4190)', () => {
+  function recipeGate(risk: 'low' | 'high', version: number) {
+    return {
+      id: 'g1', gate_type: 'external_publish', scope_key: '', risk_grade: risk, status: 'pending',
+      work_item_id: 'task-1', work_item_type: 'task',
+      neutral_facts: { stage: 'pending_approval', triggered_by_event: 'e-1' },
+      linked_site_draft: {
+        draft_id: 'site-d1', version, title: `제목 v${version}`, body_preview: '본문',
+        channel: null, account_id: null, account_label: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      },
+    };
+  }
+
+  it('⭐평문 자리 — 승인 버튼 대신 «초안 보고 승인» 링크(/gates/g1)', async () => {
+    mockFetchRoutes({ gates: [recipeGate('low', 1)] });
+    await mountPanel();
+    const action = container.querySelector('[data-testid="panel-primary-action"]');
+    expect(action?.tagName).toBe('A');
+    expect(action?.getAttribute('href')).toBe('/gates/g1');
+    expect(action?.textContent).toBe(koMessages.cage.gateReviewDraftToApprove);
+  });
+
+  it('⭐서명 흐름 — 본 버전 전송 · 409면 문장 + 재조회로 카드가 v2', async () => {
+    let gateFetches = 0;
+    const bodies: Record<string, unknown>[] = [];
+    mockFetchRoutes({});
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST' && url.includes('/transition')) {
+        bodies.push(JSON.parse(String(init.body)));
+        return { ok: false, status: 409, json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'x' }, meta: null }) };
+      }
+      if (url.startsWith('/api/gates')) { gateFetches += 1; return jsonResponse([recipeGate('high', gateFetches === 1 ? 1 : 2)]); }
+      return base(url, init);
+    });
+    await mountPanel();
+    const flow = container.querySelector('[data-testid="panel-signature-flow"]') as HTMLElement;
+    expect(flow.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v1');
+    const checkbox = flow.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const textarea = flow.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      checkbox.click();
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'v1 봤음');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const approveBtn = [...flow.querySelectorAll('button')].at(-1) as HTMLButtonElement;
+    await act(async () => { approveBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(bodies[0]).toMatchObject({ reviewed_draft_id: 'site-d1', reviewed_draft_version: 1 });
+    expect(container.textContent).toContain(koMessages.cage.gateDraftChangedError);
+    expect(gateFetches).toBe(2);
+    expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v2');
   });
 });

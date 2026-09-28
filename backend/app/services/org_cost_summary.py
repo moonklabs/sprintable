@@ -26,11 +26,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ads_boost_run import AdsBoostRun
+from app.models.channel_connection import ChannelConnection
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.services.ads_spend_snapshots import _ADS_BOOST_GATE_TYPE, _PAID_SOURCE, paid_snapshots_only
 from app.services.generation_budget import compute_generation_budget_status
 from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY, API_USAGE_COST_KIND
+
+
+def _derive_ads_connection_status(rows: list[ChannelConnection]) -> str:
+    """story #3987(2026-09-17, 페드루 PO 確定) — `insights_board.py::
+    _derive_board_ga4_connection_status`(GA4Connection 전용)와 같은 3값
+    (not_connected·needs_reauth·connected) 모양을 광고 계정(`ChannelConnection`,
+    kind="ads" — meta_ads·ads_sandbox)에 적용한 자매 함수. GA4는 org당 연결이
+    최대 1행(unique)이라 단건 판정이지만 광고 계정은 여러 채널·계정이 있을 수
+    있어 "org의 ads 연결 중 가장 좋은 상태"로 접는다: active가 하나라도 있으면
+    connected(다른 계정이 만료돼 있어도 최소 하나로 발행 가능) · active가 0이고
+    행 자체는 있으면(전부 expired/revoked/error) needs_reauth · 행이 아예
+    없으면 not_connected. 새 판정 규칙 발명 0 — GA4 함수가 이미 쓰는 3값·순서
+    그대로."""
+    if not rows:
+        return "not_connected"
+    if any(r.status == "active" for r in rows):
+        return "connected"
+    return "needs_reauth"
 
 
 async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> dict:
@@ -87,6 +106,19 @@ async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> di
         )).scalars().all()
         cap_reached_count = len(runs)
 
+    # story #3987 — 승인된 boost 집합과 무관한 별도 축(연결 자체 유무). 채널 종류는
+    # CHANNEL_ADAPTERS 레지스트리에서 kind=="ads"로 파생(meta_ads·ads_sandbox
+    # 하드코딩 0 — 새 ads 채널이 늘어도 이 자리 무변경).
+    from app.services.channel_adapters import CHANNEL_ADAPTERS
+
+    ads_channels = [channel for channel, cfg in CHANNEL_ADAPTERS.items() if cfg.kind == "ads"]
+    ads_connections = (await db.execute(
+        select(ChannelConnection).where(
+            ChannelConnection.org_id == org_id, ChannelConnection.channel.in_(ads_channels),
+        )
+    )).scalars().all()
+    connection_status = _derive_ads_connection_status(list(ads_connections))
+
     return {
         "approved_boost_count": len(gates),
         "sealed_ads_currency": currency,
@@ -94,6 +126,7 @@ async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> di
         "captured_spend_minor": captured_spend_minor_sum,
         "remaining_minor": remaining_minor,
         "cap_reached_count": cap_reached_count,
+        "connection_status": connection_status,
     }
 
 

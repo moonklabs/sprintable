@@ -204,7 +204,12 @@ async def publish_x_thread(
         except ThreadsPublishError as exc:
             exc.published_segments = results  # type: ignore[attr-defined]
             raise
-        permalink = await get_tweet_permalink(client, access_token=access_token, tweet_id=tweet_id)
+        # story #4264(까디르 codex P1 · PO 17:33Z) — 게시는 이미 성공(tweet_id 확보). 뒤따르는 조회 실패가 예외로 새면 호출부가
+        # 발행 실패로 적고 재시도가 같은 tweet을 또 올린다(이중 게시) — 받은 id를 보존하고 permalink만 비운다.
+        try:
+            permalink = await get_tweet_permalink(client, access_token=access_token, tweet_id=tweet_id)
+        except ThreadsPublishError:
+            permalink = None
         results.append({"sequence": sequence, "external_id": tweet_id, "permalink": permalink})
         prev_tweet_id = tweet_id
     return results

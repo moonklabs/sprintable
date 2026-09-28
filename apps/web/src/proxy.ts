@@ -1,8 +1,10 @@
 import { jwtVerify } from 'jose';
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
 import {
   fetchResolve,
@@ -13,30 +15,15 @@ import {
   SP_RESOLVE_CACHE_COOKIE,
   verifyResolveCache,
 } from '@/lib/route-resolve';
+import { formatServerTiming, isServerTimingEnabled, logServerTiming, MW_T0_HEADER, withServerTiming } from '@/lib/server-timing';
+import { resolveLocale } from '@/i18n/locale-negotiation';
 
-// story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고,
-// apps/web/src/i18n/request.ts의 getLocale()(next-intl RSC config, `cookies()`/`headers()`
-// 비동기 API)을 그대로 재사용할 수 없다 — 이 파일(proxy)은 NextRequest 동기 API
-// (`request.cookies`/`request.headers`)로 도는 별개 실행 경로다. 그래서 알고리즘만
-// 그대로 이식한다: 쿠키 `locale` 우선 → Accept-Language 부분일치 → 기본값 'en'
-// (request.ts DEFAULT_LOCALE과 동일). 두 구현이 갈리면 SSR 페이지 언어와 이 정적
-// 문서의 언어가 서로 다른 locale로 어긋난다 — request.ts를 바꾸면 이 함수도 같이
-// 바꿔야 한다(proxy.test.ts가 이 함수를, i18n 쪽 테스트가 request.ts를 각각 고정).
-const CONNECT_GUIDE_SUPPORTED_LOCALES = ['en', 'ko'] as const;
-const CONNECT_GUIDE_DEFAULT_LOCALE = 'en';
-
+// story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고, i18n/request.ts의 getLocale()
+// (next-intl RSC config · 비동기 cookies()/headers())을 못 부른다 — 이 파일(proxy)은 NextRequest 동기 API로 도는 별개
+// 실행 경로다. story #4289 — 규칙 사본을 걷고 i18n/locale-negotiation.ts의 resolveLocale 하나를 같이 읽는다(값만 꺼내
+// 넘김). 전엔 두 사본이 같이 «지원 목록 순서(en 먼저) · includes»라 «ko 첫째 · en 둘째» 브라우저가 영어 문서를 받았다.
 function resolveConnectGuideLocale(request: NextRequest): string {
-  const cookieLocale = request.cookies.get('locale')?.value;
-  if (cookieLocale && (CONNECT_GUIDE_SUPPORTED_LOCALES as readonly string[]).includes(cookieLocale)) {
-    return cookieLocale;
-  }
-
-  const acceptLang = request.headers.get('accept-language') ?? '';
-  for (const locale of CONNECT_GUIDE_SUPPORTED_LOCALES) {
-    if (acceptLang.includes(locale)) return locale;
-  }
-
-  return CONNECT_GUIDE_DEFAULT_LOCALE;
+  return resolveLocale({ cookie: request.cookies.get('locale')?.value, acceptLanguage: request.headers.get('accept-language') });
 }
 
 const PUBLIC_EXACT = [
@@ -216,6 +203,36 @@ async function getProjectIdFromAccessToken(token: string): Promise<string | null
 // 에서 가져오던 경로)가 안 깨지게 유지한다 — 값은 여전히 legacy-resource-tables.ts가 SSOT다.
 export { RENAMED_RESOURCES, RETIRED_RESOURCES };
 
+/** story #4253 — 해소된 org/project slug로 옛 flat 자원 경로를 scoped 경로로 보내는 307(+ resolve 캐시). `?p=` · 쿠키 → JWT 두 경로가 같이 쓴다.
+ * 착지 URL에서 `p`는 뗀다 — 경로가 프로젝트를 대신한다(scoped 경로에선 아무도 읽지 않아 남으면 경로와 어긋날 수만 있다). */
+async function legacyResourceRedirect(
+  request: NextRequest,
+  resourceName: string,
+  pathname: string,
+  slugs: NonNullable<Awaited<ReturnType<typeof resolveLegacyResourcePath>>>,
+  orgId: string,
+  projectId: string,
+): Promise<NextResponse> {
+  const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
+  const url = request.nextUrl.clone();
+  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${finalResourcePath(resourceName, rest)}`;
+  url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
+  url.searchParams.delete('p');
+  const response = sessionDependentRedirect(url);
+  // story #4219 G2(PO 판정) — 이 307이 가리키는 `/{org}/{project}`를 방금 org 소속(단건 조회 = /resolve와 같은 판정)·project
+  // 접근(has_project_access)까지 확인했으니, 그 결과를 기존 sp_resolve_cache(서명·50초 만료) 규칙 그대로 심는다 — 이어지는
+  // 문서 요청의 proxy가 /resolve 왕복(dev 콜드 ≈50ms)을 건너뛴다. 캐시 키가 이 307의 목적지 slug와 같아서 다른 org/project로
+  // 가는 요청엔 안 맞는다(verifyResolveCache가 slug 불일치 = 미스). 역할을 모르면(옛 백엔드) 심지 않는다. project를 read replica
+  // 목록 폴백으로 찾았으면(primaryVerified=false) 심지 않는다 — replica 지연 중 회수된 권한으로 서명하지 않게(까디르 P2).
+  if (slugs.orgRole && slugs.primaryVerified) {
+    const token = await signResolveCache(slugs.orgSlug, slugs.projectSlug, {
+      orgId, orgSlug: slugs.orgSlug, orgRole: slugs.orgRole, projectId, projectSlug: slugs.projectSlug,
+    });
+    response.cookies.set(SP_RESOLVE_CACHE_COOKIE, token, { ...cookieBase(), maxAge: RESOLVE_CACHE_TTL_SECONDS });
+  }
+  return response;
+}
+
 /**
  * story a539c649(S2 최초 도입·S3에서 리소스 파라미터화) — 옛 flat `/{resource}/*` 를
  * default(현재 org+project) 로 해소해 301. 해소 불가(로그인 직후 project 미선택 등)면 null
@@ -250,8 +267,18 @@ async function redirectLegacyResourcePath(
       const url = request.nextUrl.clone();
       url.pathname = `/${ownSlugs.orgSlug}/${ownSlugs.projectSlug}/${resourceName}${rest}`;
       url.searchParams.delete(RESOLVE_RETRY_PARAM);
-      return NextResponse.redirect(url, 301);
+      return sessionDependentRedirect(url);
     }
+  }
+
+  // story #4253 — 링크가 실은 `?p=`(대상 자기 프로젝트 · #4231 · #4244)를 **먼저** 시도한다. 예전엔 쿠키 → JWT만 봐서, 다른 프로젝트 문서 ·
+  // 스토리 링크(`/docs?id=…&p=C`)가 현재(쿠키 B) 프로젝트 셸로 착지했다. org 소속 · project 접근은 resolveLegacyResourcePath 안에서 확인된다
+  // (GET /projects/{id}는 has_project_access가 없으면 404 · 목록 폴백은 보이는 프로젝트만) — p로 접근 못 하는 프로젝트를 열 수는 없고,
+  // 실패하면(모양 불일치 · 다른 org · 접근 없음 · 없는 프로젝트) 아래 기존 순서(쿠키 → JWT)로 간다.
+  const linkProjectId = request.nextUrl.searchParams.get('p');
+  if (linkProjectId && UUID_RE.test(linkProjectId)) {
+    const linkSlugs = await resolveLegacyResourcePath(fastapiUrl, orgId, linkProjectId, accessToken);
+    if (linkSlugs) return legacyResourceRedirect(request, resourceName, pathname, linkSlugs, orgId, linkProjectId);
   }
 
   // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
@@ -278,11 +305,37 @@ async function redirectLegacyResourcePath(
     return redirectToProjectPicker(request, pathname);
   }
 
-  const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
-  const url = request.nextUrl.clone();
-  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${resourceName}${rest}`;
-  url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
-  return NextResponse.redirect(url, 301);
+  return legacyResourceRedirect(request, resourceName, pathname, slugs, orgId, projectId);
+}
+
+/**
+ * story #4170 AC4(PO 리뷰) — 옛 flat 주소(`/glance` 등)의 목적지는 **세션**(현재 org·project 쿠키/토큰)으로
+ * 정해진다. 301(+Cache-Control 없음)이면 브라우저가 디스크에 캐시해 2회차부터 서버에 안 묻는다(크롬 실측
+ * `fromDiskCache: true`) — 프로젝트를 바꾸거나 같은 기기에서 다른 계정으로 들어와도 캐시된 옛 목적지로 간다.
+ * 그래서 307 + `Cache-Control: no-store`. 경로만으로 정해지는 이름 바꿈(`/{ws}/{proj}/board`→`/flow`,
+ * redirectRenamedResourcePath·redirectRetiredResourcePath)은 누구에게나 같으니 301 그대로.
+ * 트레이드오프: 캐시 덕에 2회차부터 0이던 이 홉의 서버 처리(0.12~0.2초)가 매번 한 번 든다 — 정확성이 먼저이고,
+ * 같은 PR이 홉 2→1로 번 왕복(0.3~0.45초)이 그보다 크다.
+ */
+function sessionDependentRedirect(url: URL): NextResponse {
+  const response = NextResponse.redirect(url, 307);
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+}
+
+/**
+ * story #4170(E-MOBILE-SPEED) — 옛 flat 리소스가 이름까지 바뀐 것(RENAMED)·은퇴한 것(RETIRED)이면 org/project를
+ * 채우는 이 301에서 최종 이름까지 한 번에 간다. 예전엔 `/glance` → `/{ws}/{proj}/glance`(301) →
+ * `/{ws}/{proj}/flow`(301) 두 홉이었다 — 로그인 상태 셸 진입마다 왕복 1회(dev 실측 홉 사이 0.3~0.45초)가
+ * 샜다. 두 번째 홉이 하던 규칙을 그대로 쓴다: rename은 하위 경로를 들고 가고(같은 행의 새 이름),
+ * 은퇴는 하위 경로를 버린다(redirectRetiredResourcePath와 같은 이유 — 다른 id 공간).
+ */
+function finalResourcePath(resourceName: string, rest: string): string {
+  const renamed = RENAMED_RESOURCES[resourceName];
+  if (renamed) return `${renamed}${rest}`;
+  const retired = RETIRED_RESOURCES[resourceName];
+  if (retired) return retired;
+  return `${resourceName}${rest}`;
 }
 
 // story #2212 — org-briefing 왕복이 한 번 더 실패했을 때 무한 왕복을 막기 위한 내부 마커(오르테가
@@ -298,9 +351,15 @@ function isSafeInternalPath(value: string): boolean {
   return value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
 }
 
+// story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
+// readNavV3FlagsFromEnv() 한 곳(nav-v3-flags-server.ts)으로, 목적지 문자열은
+// resolveNavV3Destinations() 한 곳(nav-v3-destinations.ts)으로만 — 여기서 '/today'·
+// '/org-briefing' 리터럴을 다시 조립하지 않는다. 북마크 등으로 `/org-briefing`을 직접
+// 방문하는 경우는 이 리다이렉트를 안 거치므로 레거시 그대로(#4017 AC 스코프 — 적기만,
+// 이 카드에서 안 고침).
 function redirectToProjectPicker(request: NextRequest, originalPathname: string): NextResponse {
   const url = request.nextUrl.clone();
-  url.pathname = '/org-briefing';
+  url.pathname = resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path;
   const targetSearch = new URLSearchParams(request.nextUrl.search);
   targetSearch.set(RESOLVE_RETRY_PARAM, '1');
   const targetQuery = targetSearch.toString();
@@ -667,7 +726,28 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
   if (externalReferrer) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.referrer, externalReferrer, base);
 }
 
+/**
+ * story #4219 C1 — dev 전용 서버 구간 마커(SERVER_TIMING_MARKERS=true일 때만). 요청 처리 중 나간 백엔드 호출별 시작·시간·연결
+ * 재사용 여부를 `Server-Timing` 헤더와 로그 한 줄로 — 이름·시간만(경로·id 0). 꺼져 있으면 그대로 통과(동작 변화 0).
+ */
 export async function proxy(request: NextRequest) {
+  if (!isServerTimingEnabled()) return proxyImpl(request);
+  // story #4299 — 미들웨어 시작 시각을 요청 헤더로(route handler가 «미들웨어 + 라우터 대기»를 잰다). 클라이언트가 보낸 같은 이름은 덮어씀.
+  const stamped = withMiddlewareStart(request);
+  const { value: response, spans, totalMs } = await withServerTiming(() => proxyImpl(stamped));
+  if (spans.length > 0) {
+    response.headers.set('Server-Timing', formatServerTiming('proxy', totalMs, spans));
+    const pathname = request.nextUrl.pathname;
+    logServerTiming('proxy', pathname === '/glance' ? 'glance' : request.headers.has('rsc') ? 'rsc' : 'document', totalMs, spans);
+  }
+  return response;
+}
+
+async function proxyImpl(incoming: NextRequest) {
+  // story #4219 D1(PO 리뷰) — x-resolved-*는 이 proxy가 resolve한 값만 레이아웃·라우트에 닿아야 한다. 클라이언트가 같은
+  // 이름으로 보낸 위조 헤더를 **입구에서 한 번** 지운 요청으로 바꿔, 아래 모든 갈래(API 통과 · 토큰 갱신 뒤 두 곳 · 공개 경로
+  // 통과 · rewrite · 기본 resolve)가 이 요청의 헤더만 넘긴다(원본 요청 전달 0). 위조 헤더가 없으면 원본 그대로(동작 변화 0).
+  const request = withoutClientResolvedHeaders(incoming);
   const pathname = request.nextUrl.pathname;
 
   // story #2595 — /connect-guide.txt is locale-branched: rewrite (not redirect, so the URL
@@ -678,7 +758,8 @@ export async function proxy(request: NextRequest) {
     const locale = resolveConnectGuideLocale(request);
     const url = request.nextUrl.clone();
     url.pathname = `/connect-guide.${locale}.txt`;
-    return NextResponse.rewrite(url);
+    // rewrite는 request 옵션이 없으면 들어온 원본 헤더를 넘긴다 — 입구에서 지운 헤더로 명시.
+    return NextResponse.rewrite(url, { request: { headers: request.headers } });
   }
 
   const isPublicPath =
@@ -796,7 +877,10 @@ async function resolveWorkspaceProject(
     if (outcome.workspace) nextSegments[0] = outcome.workspace;
     if (outcome.project && nextSegments.length > 1) nextSegments[1] = outcome.project;
     url.pathname = '/' + nextSegments.join('/');
-    return { kind: 'redirect', response: NextResponse.redirect(url, 301) };
+    // story #4170 AC4b(까디르 QA) — 옛 slug → 새 slug. 백엔드 resolve.py가 «옛 slug는 다른 entity에 재점유될 수
+    // 있다 · 긴 캐시 금지»라고 적은 경로라, 캐시된 301이면 재점유 뒤에도 옛 목적지로 간다 — 세션 의존 flat
+    // 리다이렉트와 같은 부류로 307 + no-store.
+    return { kind: 'redirect', response: sessionDependentRedirect(url) };
   }
 
   setResolvedHeaders(fwdHeaders, outcome.context);
@@ -804,10 +888,39 @@ async function resolveWorkspaceProject(
   return { kind: 'set-cache', token };
 }
 
-function setResolvedHeaders(fwdHeaders: Headers, context: { orgId: string; orgRole: string; projectId?: string }): void {
+function setResolvedHeaders(
+  fwdHeaders: Headers,
+  context: { orgId: string; orgRole: string; orgSlug?: string; projectId?: string; projectSlug?: string },
+): void {
   fwdHeaders.set('x-resolved-org-id', context.orgId);
   fwdHeaders.set('x-resolved-org-role', context.orgRole);
   if (context.projectId) fwdHeaders.set('x-resolved-project-id', context.projectId);
+  // story #4219 D1 — resolve가 이미 준 slug를 넘겨, 레이아웃이 slug만 알려고 /projects/{id}를 다시 부르지 않게.
+  // slug는 ASCII가 아닐 수 있어 인코딩(헤더 값은 ByteString).
+  if (context.orgSlug) fwdHeaders.set('x-resolved-org-slug', encodeURIComponent(context.orgSlug));
+  if (context.projectSlug) fwdHeaders.set('x-resolved-project-slug', encodeURIComponent(context.projectSlug));
+}
+
+export function stripClientResolvedHeaders(fwdHeaders: Headers): void {
+  for (const key of [...fwdHeaders.keys()]) {
+    if (key.toLowerCase().startsWith('x-resolved-')) fwdHeaders.delete(key);
+  }
+}
+
+// story #4299 — dev 전용(SERVER_TIMING_MARKERS · proxy()의 켜진 갈래에서만 부름). 미들웨어 시작 시각(같은 프로세스 시계의
+// epoch ms)을 실은 요청 — proxyImpl의 모든 갈래가 이 요청의 헤더를 넘기므로(#4219 D1) route handler까지 닿는다.
+export function withMiddlewareStart(request: NextRequest, wall: () => number = Date.now): NextRequest {
+  const headers = new Headers(request.headers);
+  headers.set(MW_T0_HEADER, String(wall()));
+  return new NextRequest(request, { headers });
+}
+
+/** 클라이언트가 보낸 x-resolved-*를 지운 요청. 없으면 원본 그대로(새 객체 0 · 동작 변화 0). */
+export function withoutClientResolvedHeaders(request: NextRequest): NextRequest {
+  if (![...request.headers.keys()].some((k) => k.toLowerCase().startsWith('x-resolved-'))) return request;
+  const headers = new Headers(request.headers);
+  stripClientResolvedHeaders(headers);
+  return new NextRequest(request, { headers });
 }
 
 export const config = {

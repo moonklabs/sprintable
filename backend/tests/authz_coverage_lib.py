@@ -36,6 +36,10 @@ GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "assert_caller_is_member",
     "is_caller_member",
     "assert_agent_owner",
+    # story #3999 — assert_agent_owner_mutable(app/dependencies/ownership.py)은
+    # assert_agent_owner를 그대로 호출한 뒤 「시스템 발행」 예약 거부만 얹는 상위집합
+    # 가드다(쓰기 경로 전용) — 인가 축 자체는 무변경이라 여기도 같이 인정한다.
+    "assert_agent_owner_mutable",
     "_is_org_admin",
     "has_project_role",
     "has_project_access",
@@ -67,6 +71,9 @@ PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "has_project_role",
     "resolve_member",
     "accessible_project_ids_in_org",
+    # story #4299 — `get_project_scoped_org_id`가 project org 조회와 has_project_access 판정을 한 SQL로 합친 헬퍼
+    # (같은 `_project_access_predicate` SSOT). 이 이름을 모르면 그 의존성만 쓰는 라우트(loops.list_loops 등)가 «미가드»로 오탐.
+    "project_org_and_access",
     "get_project_role",
     "_assert_story_link_targets_in_project",
     "_assert_doc_parent_in_project",

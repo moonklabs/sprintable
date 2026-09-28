@@ -5,11 +5,13 @@ import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
+import { ChevronDown, Folder as FolderIcon, X } from 'lucide-react';
 import { formatTotalSize } from '@/lib/storage/format';
 import { uploadStorageAsset } from '@/lib/storage/storage-upload';
 import { StorageCapacityBanner } from './storage-capacity-banner';
@@ -26,6 +28,7 @@ import type {
   StorageViewMode,
 } from '@/lib/storage/types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { StorageTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 // story #2302 AC1 — `?asset=` 딥링크가 무엇을 해야 하는지의 판정만 순수 함수로 뽑아 둔다
 // (StorageView 전체를 렌더하지 않고도 이 결정 로직 자체를 단위테스트하기 위함 — 이 컴포넌트는
@@ -59,6 +62,7 @@ export function resolveAssetDeepLinkAction(params: {
 // projectName 은 순수 표시용(폴더 트리 헤더)이라 전역 컨텍스트 그대로 유지(artifacts와 동형).
 export function StorageView({ projectId }: { projectId: string }) {
   const t = useTranslations('storage');
+  const tc = useTranslations('common');
   const { addToast } = useToast();
   const { projectName } = useDashboardContext();
   const searchParams = useSearchParams();
@@ -374,21 +378,23 @@ export function StorageView({ projectId }: { projectId: string }) {
   // 요약 칩: 로드된 집합 기준(전체 카운트 전용 엔드포인트 부재 — 가정/NOTE).
   const totalBytes = useMemo(() => items.reduce((sum, a) => sum + (a.size_bytes || 0), 0), [items]);
 
-  const topBarTitle = useMemo(
-    () => (
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span className="shrink-0 text-[12px] text-muted-foreground">{t('breadcrumb')}</span>
-        <span className="shrink-0 text-[12px] text-muted-foreground">/</span>
-        <h1 className="shrink-0 text-[15px] font-[650] tracking-[-0.01em] text-foreground">{t('title')}</h1>
-        <Badge variant="info" className="ml-1 shrink-0 font-bold">
-          {t('summary', { count: items.length, size: formatTotalSize(totalBytes) })}
-        </Badge>
-      </div>
-    ),
-    [t, items.length, totalBytes],
-  );
+  const summaryText = storageSummaryText(t, items.length, totalBytes, nextCursor !== null);
+  // story #4277 폭 관례 · #4326 폴백과 같은 모양은 StorageTopBarTitle 한 곳(알약만 화면이 넘긴다).
+  const topBarTitle = useMemo(() => <StorageTopBarTitle summaryText={summaryText} />, [summaryText]);
 
   const supportsInlinePanel = detailPanel.supportsInlinePanel;
+  // story #4277(민 기기 #2) — 402폭에서도 데스크톱 2단(폴더 칸 248px 고정)이라 목록이 약 150px로 찌그러져 «정렬: 최근 수정»이 한 자씩
+  // 세로로 서고 파일 이름이 안 보였다. 문서 화면과 같은 관례: lg 미만은 한 단 · 폴더 트리는 왼쪽 스와이프 서랍(버튼 = 지금 폴더 이름).
+  const [folderDrawerOpen, setFolderDrawerOpen] = useState(false);
+  const openFolderDrawer = useCallback(() => setFolderDrawerOpen(true), []);
+  const closeFolderDrawer = useCallback(() => setFolderDrawerOpen(false), []);
+  const { progress: folderDrawerProgress, dragging: folderDrawerDragging } = useSwipeDrawer(folderDrawerOpen, openFolderDrawer, closeFolderDrawer);
+  const folderDrawerTrapRef = useFocusTrap(folderDrawerOpen, closeFolderDrawer);
+  const handleSelectFolderFromDrawer = useCallback((id: string | null) => {
+    setSelectedFolderId(id);
+    setFolderDrawerOpen(false);
+  }, []);
+  const currentFolderLabel = resolveFolderLabel(selectedFolderId) ?? t('allAssets');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -398,24 +404,40 @@ export function StorageView({ projectId }: { projectId: string }) {
         <StorageCapacityBanner />
       </div>
 
+      <div className="px-4 pt-3 lg:hidden">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={openFolderDrawer}
+          className="h-auto min-h-[44px] min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-foreground"
+          data-testid="storage-folder-drawer-trigger"
+        >
+          <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="min-w-0 truncate font-medium">{currentFolderLabel}</span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Button>
+      </div>
+
       <div
         className={cn(
-          'grid min-h-0 flex-1',
+          'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)]',
           supportsInlinePanel
-            ? 'grid-cols-[248px_minmax(0,1fr)_372px]'
-            : 'grid-cols-[248px_minmax(0,1fr)]',
+            ? 'lg:grid-cols-[248px_minmax(0,1fr)_372px]'
+            : 'lg:grid-cols-[248px_minmax(0,1fr)]',
         )}
       >
-        <StorageFolderTree
-          folders={folders}
-          selectedFolderId={selectedFolderId}
-          onSelectFolder={setSelectedFolderId}
-          projectId={projectId}
-          projectName={projectName}
-          folderSearch={folderSearch}
-          onFolderSearchChange={setFolderSearch}
-          onCreateFolder={handleCreateFolder}
-        />
+        <div className="hidden min-h-0 lg:contents" data-testid="storage-folder-tree-column">
+          <StorageFolderTree
+            folders={folders}
+            selectedFolderId={selectedFolderId}
+            onSelectFolder={setSelectedFolderId}
+            projectId={projectId}
+            projectName={projectName}
+            folderSearch={folderSearch}
+            onFolderSearchChange={setFolderSearch}
+            onCreateFolder={handleCreateFolder}
+          />
+        </div>
 
         <StorageAssetList
           assets={items}
@@ -448,6 +470,51 @@ export function StorageView({ projectId }: { projectId: string }) {
             onRequestDelete={handleRequestDelete}
           />
         ) : null}
+      </div>
+
+      {/* story #4277 — lg 미만 폴더 서랍(문서 화면 docs-client-layout의 모바일 스와이프 서랍과 같은 모양 · 같은 훅). */}
+      <div
+        className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
+        style={{
+          opacity: folderDrawerProgress,
+          pointerEvents: folderDrawerProgress > 0.05 ? 'auto' : 'none',
+          transition: folderDrawerDragging ? 'none' : 'opacity 280ms cubic-bezier(0.4,0,0.2,1)',
+        }}
+        onClick={closeFolderDrawer}
+        aria-hidden="true"
+      />
+      <div
+        ref={folderDrawerTrapRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('metaFolder')}
+        className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
+        style={{
+          transform: `translateX(${(folderDrawerProgress - 1) * 100}%)`,
+          transition: folderDrawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
+        }}
+        {...closedDrawerProps(folderDrawerProgress, folderDrawerOpen)}
+        data-testid="storage-folder-drawer"
+      >
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
+          <span className="text-sm font-medium text-foreground">{t('metaFolder')}</span>
+          <Button type="button" variant="ghost" size="icon-sm" onClick={closeFolderDrawer} className="text-muted-foreground hover:text-foreground" aria-label={tc('close')}>
+            <X className="size-4" />
+          </Button>
+        </div>
+        <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <StorageFolderTree
+            folders={folders}
+            selectedFolderId={selectedFolderId}
+            onSelectFolder={handleSelectFolderFromDrawer}
+            projectId={projectId}
+            projectName={projectName}
+            folderSearch={folderSearch}
+            onFolderSearchChange={setFolderSearch}
+            onCreateFolder={handleCreateFolder}
+          />
+        </div>
       </div>
 
       {/* <1536: 상세 패널 드로어 (contextual-panel storageKey 'storage-detail') */}
@@ -487,4 +554,15 @@ export function StorageView({ projectId }: { projectId: string }) {
 
     </div>
   );
+}
+
+// story #4302(유나 판정) — 상단 뱃지 «{수}개 자산 · {용량}». 자산은 커서로 나눠 받으므로 수 · 용량 둘 다 «불러온 것»의 합이다:
+// 더 남았으면(hasMore) 둘 다 `+`. en이 복수형 키라 `+`를 숫자 인자에 붙이지 않고 형제 키(summaryAtLeast)에 둔다(formatAtLeast 주석 참고).
+// 컴포넌트 아래에 둔다 — i18n 키 스캐너가 위에서부터 읽으며 `t = useTranslations('storage')` 바인딩을 먼저 봐야 이 안의 키를 storage.*로 센다.
+export function storageSummaryText(
+  t: (key: 'summary' | 'summaryAtLeast', values: { count: number; size: string }) => string,
+  count: number, totalBytes: number, hasMore: boolean,
+): string {
+  const values = { count, size: formatTotalSize(totalBytes) };
+  return hasMore ? t('summaryAtLeast', values) : t('summary', values);
 }

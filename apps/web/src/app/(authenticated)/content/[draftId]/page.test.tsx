@@ -3,6 +3,7 @@
 // story #3368(Phase0·마케팅운영 S4) — 글 편집(S3). AC2 pin: 저장하면 새 버전 번호와
 // "미상신"(초안) 상태가 표시되고, slug·lang은 잠겨(표시만, 입력란 없음) 재전송된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -16,6 +17,9 @@ const { routerPushMock } = vi.hoisted(() => ({ routerPushMock: vi.fn() }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
+  // story #4017 — OFF 상태 테스트라 레거시 값 그대로(실 훅의 navV3Flags undefined 분기와 동형).
+  useChatsHref: () => '/chats',
+  useConnectRulesHref: (fallback: string) => fallback,
 }));
 vi.mock('next/navigation', () => ({
   useParams: () => useParamsMock(),
@@ -96,7 +100,7 @@ function stubFetchWithVersions(
       } | null;
       command?: {
         id: string; command_status: string; attempt_count: number; failure_kind: string | null;
-        next_retry_at: string | null; dead_letter_at: string | null; command_reason_code: string | null; last_error: string | null;
+        next_retry_at: string | null; dead_letter_at: string | null; command_reason_code: string | null; last_error: string | null; command_retryable?: boolean;
       } | null;
     };
     // story #3499 — /publications/{id}/insights 응답. 넘기지 않으면(대부분 테스트가
@@ -227,10 +231,14 @@ function stubFetchWithVersions(
         const body = opts?.publication ?? {
           published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
         };
-        const withExternal = {
+        const merged = {
           destination: 'hosted_site', channel_publication: null, command: null,
           ...body,
-        };
+        } as Record<string, unknown> & { command: Record<string, unknown> | null };
+        // story #4290 — 서버처럼 command_retryable을 싣는다(`human_retryable`: dead_letter · blocked → 참) · 테스트가 직접 주면 그 값.
+        const withExternal = merged.command && !('command_retryable' in merged.command)
+          ? { ...merged, command: { ...merged.command, command_retryable: merged.command.command_status === 'dead_letter' || (merged.command.command_status === 'blocked' && merged.command.failure_kind !== 'paused') } }
+          : merged;
         return { ok: true, status: 200, json: async () => ({ data: withExternal, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/publication-commands/cmd-1/retry` && init?.method === 'POST') {
@@ -243,7 +251,7 @@ function stubFetchWithVersions(
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
-      if (url === '/api/team-members') {
+      if (url === ORG_NAMES_URL) {
         return { ok: true, status: 200, json: async () => ({ data: opts?.teamMembers ?? [], error: null, meta: null }) };
       }
       if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/insights')) {
@@ -862,7 +870,8 @@ describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', ()
     expect(container.textContent).not.toContain('human-1');
   });
 
-  it('발행자 이름 해소 실패(team-members 목록에 없음) — UUID 앞 8자로 graceful 폴백한다', async () => {
+  // [SID:4286] 발행자가 목록에 없으면 id 조각 대신 «알 수 없는 구성원»(3755번 AC1 «id 문자열 0»).
+  it('발행자 이름 해소 실패(team-members 목록에 없음) — «알 수 없는 구성원» · UUID 조각 0', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       gates: APPROVED_GATE,
       publication: {
@@ -877,7 +886,8 @@ describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', ()
     await flush();
     await flush();
 
-    expect(container.textContent).toContain('human-un');
+    expect(container.textContent).toContain(koMessages.common.memberUnknown);
+    expect(container.textContent).not.toContain('human-un');
   });
 
   it('⭐발행됨 + 재승인된 새 버전(라이브 해시≠승인 해시) — 「재발행」 라벨로 버튼이 다시 열린다(AC2)', async () => {
@@ -1217,7 +1227,7 @@ describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce 
 
     const item = container.querySelector('[data-testid="content-variants-list-item"]');
     expect(item?.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/cp-1');
-    expect(item?.textContent).toContain(koMessages.content.channelThreads);
+    expect(item?.textContent).toContain(koMessages.channelConnect.channelThreads);
     expect(item?.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('approved');
   });
 
@@ -1278,7 +1288,7 @@ describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce 
     expect(items[0]?.textContent).toContain('@brand_a');
     expect(items[1]?.textContent).toContain('@brand_b');
     expect(items[2]?.textContent).not.toContain('@brand');
-    expect(items[2]?.textContent).toContain(koMessages.content.channelThreads);
+    expect(items[2]?.textContent).toContain(koMessages.channelConnect.channelThreads);
   });
 });
 
@@ -1687,7 +1697,7 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
 
     const info = container.querySelector('[data-testid="content-external-publication-info"]');
     expect(info).not.toBeNull();
-    expect(info?.textContent).toContain(koMessages.content.channelLabelWordpress);
+    expect(info?.textContent).toContain(koMessages.channelConnect.channelLabelWordpress);
     const link = info?.querySelector<HTMLAnchorElement>('a[href="https://blog.example.com/hello"]');
     expect(link).not.toBeNull();
     // completed엔 보일 실패가 없다 — FailureActionBadge 자체가 안 뜬다(가짜 상태 금지).
@@ -1714,6 +1724,49 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
   // 2단계 관문을 site_post 외부발행 상세에도 이식(recheckGate=true, 새 컴포넌트·새
   // 낱말 0). ConfirmDialog는 Portal이라 document.body에 뜬다(unpublish 다이얼로그
   // 테스트와 동형).
+  // story #4304(유나 확정) — 연결 사유로 멈춘 외부 발행 배지: «연결 문제로 멈춤 — 연결 확인»(링크) → 아래 «다시 시도». 조직 일시정지는 링크 없음.
+  describe('⭐4304 — 연결 사유 blocked 배지의 «연결 확인»', () => {
+    const blockedPublication = (failureKind: string) => ({
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'webhook',
+        channel_publication: null,
+        command: { id: 'cmd-1', command_status: 'blocked', attempt_count: 1, failure_kind: failureKind, next_retry_at: null, dead_letter_at: null, command_reason_code: null, last_error: 'token expired' },
+      },
+    });
+
+    it('연결 실패 → 링크(연결 화면) + 그 아래 «다시 시도»', async () => {
+      stubFetchWithVersions([VERSION_1], undefined, undefined, blockedPublication('connection'));
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+      const link = container.querySelector('[data-testid="channel-post-failure-connection-link"]');
+      expect(link?.getAttribute('href')).toBe('/organization/channels');
+      expect(link?.textContent).toBe(koMessages.content.channelPostsFailureConnectionCheckLink);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).not.toBeNull();
+    });
+
+    it('사유 모름(failure_kind 없음) → 중립 머리 · 링크 0(story #4305 · 까디르 — 호출 자리가 연결을 지어내지 않음)', async () => {
+      const unknown = blockedPublication('connection');
+      (unknown.publication.command as { failure_kind: string | null }).failure_kind = null;
+      stubFetchWithVersions([VERSION_1], undefined, undefined, unknown);
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toContain(koMessages.content.channelPostsFailureBlockedUnknown);
+      expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();
+    });
+
+    it('조직 일시정지(paused) → 연결 화면을 가리키지 않는다(링크 0)', async () => {
+      stubFetchWithVersions([VERSION_1], undefined, undefined, blockedPublication('paused'));
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();
+    });
+  });
+
   describe('⭐3369 — needs_check 2단계 관문(dead_letter ∧ failure_kind=needs_check)', () => {
     it('⭐배지·CTA부터 needs_check 것 — recheckGate=true라 「밖에 나갔는지 모르는 실패」 문면이 선다', async () => {
       stubFetchWithVersions([VERSION_1], undefined, undefined, {
@@ -1834,6 +1887,153 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
     await flush();
 
     expect(retried).toBe('cmd-1');
+  });
+
+  // story #4266 — 예전엔 재시도 실패가 조용했다(결과 줄 없음 · 확인 창만 열린 채). 이제 창을 닫고 결과 줄 · 404는 다시 읽고 유나 문장.
+  // story #4290 — commandAfterRetry: 재시도 뒤 다시 읽는 발행 상태의 명령(그 사이 다른 시도가 명령을 움직였다). 없으면 재시도 전 그대로.
+  async function retryWith(onRetry: () => { status: number; body: unknown }, commandAfterRetry?: Record<string, unknown>) {
+    const command = { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: null, next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' };
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'webhook',
+        channel_publication: null,
+        command,
+      },
+      onRetryPublicationCommand: onRetry,
+    });
+    if (commandAfterRetry) {
+      const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+      let retried = false;
+      vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+        if (String(u).endsWith('/retry') && i?.method === 'POST') { retried = true; return base(u, i); }
+        if (retried && String(u) === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+          const data = {
+            published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+            destination: 'webhook', channel_publication: null, command: { ...command, ...commandAfterRetry },
+          };
+          return { ok: true, status: 200, json: async () => ({ data, error: null, meta: null }) };
+        }
+        return base(u, i);
+      }));
+    }
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+    const pubGets = () => (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(([u]) => String(u) === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`).length;
+    const before = pubGets();
+    const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).not.toBeNull();
+    const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn)
+      .find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction) as HTMLButtonElement;
+    await act(async () => { confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    await flush();
+    return { reloads: pubGets() - before };
+  }
+
+  it('⭐#4266 AC1 — 재시도 500 → 확인 창이 닫히고 결과 줄이 보인다 · 서버 원문 0(예전엔 결과 줄 자체가 없었다)', async () => {
+    await retryWith(() => ({ status: 500, body: { detail: '내부 서버 원문 문장' } }));
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).toBeNull();
+    const line = container.querySelector('[data-testid="content-retry-result"] p');
+    expect(line?.textContent).toBe(koMessages.content.channelPostsRetryFailed);
+    expect(line?.textContent).not.toContain('내부 서버 원문');
+  });
+
+  it('⭐#4266 AC2 — 재시도 404 → 창 닫힘 · 발행 상태를 다시 읽고 유나 문장 · 서버 원문 0', async () => {
+    // 그 사이 다른 시도가 명령을 pending으로 돌렸다(서버: 지금 재시도 불가).
+    const { reloads } = await retryWith(
+      () => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }),
+      { command_status: 'pending', dead_letter_at: null, command_retryable: false },
+    );
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-retry-result"] p')?.textContent)
+      .toBe(koMessages.content.publicationRetryNotRetryableReloaded);
+    expect(document.body.textContent).not.toContain('command를 찾을 수 없거나');
+    expect(reloads).toBe(1);
+  });
+
+  // story #4290(유나 03:29Z) — 404 뒤 다시 읽은 명령이 다시 시도 가능한 새 멈춤이면 «그 사이 다시 시도됐고…» · 버튼 켜짐(채널 포스트와
+  // 같은 키). 뮤테이션: withReload가 다시 읽은 판정을 무시하면 RED.
+  it('⭐#4290 — 재시도 404 + 다시 읽은 명령이 새 멈춤 → «그 사이 다시 시도됐고…» · 버튼 켜짐', async () => {
+    await retryWith(() => ({ status: 404, body: { detail: 'x' } }));
+    expect(container.querySelector('[data-testid="content-retry-result"] p')?.textContent)
+      .toBe(koMessages.content.publicationRetryStoppedAgainReloaded);
+    expect((container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // story #4290 AC2 — 버튼은 서버 판정(command_retryable)만 본다. 뮤테이션: onRetryClick을 늘 넘기면 RED.
+  it('⭐#4290 AC2 — 서버가 다시 시도 불가라고 한 명령엔 다시 시도 버튼이 눌리지 않는다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'webhook', channel_publication: null,
+        command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: 'needs_check', next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout', command_retryable: false },
+      },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+    expect(btn === null || btn.disabled).toBe(true);
+  });
+
+  // 까디르 codex 4634 P2② — 재시도 뒤 다시 읽기가 실패해도 외부 발행 카드와 결과 줄이 사라지지 않는다(예전: setPublication(null)).
+  async function retryWithReloadFailure(onRetry: () => { status: number; body: unknown }) {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'webhook',
+        channel_publication: null,
+        command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: null, next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
+      },
+      onRetryPublicationCommand: onRetry,
+    });
+    const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+    let retried = false;
+    vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+      if (String(u).endsWith('/retry') && i?.method === 'POST') { retried = true; return base(u, i); }
+      if (retried && String(u) === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+        return { ok: false, status: 500, json: async () => ({ detail: 'x' }) };
+      }
+      return base(u, i);
+    }));
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+    const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn)
+      .find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction) as HTMLButtonElement;
+    await act(async () => { confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    await flush();
+  }
+
+  it('⭐#4634 P2② — 404 + 다시 읽기 실패 → 외부 발행 카드 · 결과 줄 그대로 · «불러오지 못했어요» · «다시 불러왔어요» 0', async () => {
+    await retryWithReloadFailure(() => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }));
+    const texts = [...container.querySelectorAll('[data-testid="content-retry-result"] p')].map((e) => e.textContent);
+    expect(texts).toEqual([koMessages.content.publicationRetryNotRetryable, koMessages.content.publicationRetryReloadFailed]);
+    expect(container.textContent).not.toContain(koMessages.content.publicationRetryNotRetryableReloaded);
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).not.toBeNull(); // 카드 그대로(이전 상태)
+  });
+
+  it('#4634 P2② — 성공 + 다시 읽기 실패 → 성공 문장 + «불러오지 못했어요» · 카드 그대로', async () => {
+    await retryWithReloadFailure(() => ({ status: 200, body: { id: 'cmd-1', status: 'pending' } }));
+    const texts = [...container.querySelectorAll('[data-testid="content-retry-result"] p')].map((e) => e.textContent);
+    expect(texts).toEqual([koMessages.content.channelPostsRetrySuccess, koMessages.content.publicationRetryReloadFailed]);
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).not.toBeNull();
+  });
+
+  it('#4266 — 재시도 성공 → 창 닫힘 · 성공 결과 줄 · 발행 상태 다시 읽음(회귀 0)', async () => {
+    const { reloads } = await retryWith(() => ({ status: 200, body: { id: 'cmd-1', status: 'pending' } }));
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-retry-result"] p')?.textContent).toBe(koMessages.content.channelPostsRetrySuccess);
+    expect(reloads).toBe(1);
   });
 
   it('⭐카디르군 REQUEST_CHANGES(2026-09-05) — permalink이 null이면(아직 미발행) 「공개 URL」 라벨을 포함해 그 행 전체가 안 보인다(<a> 부재만으론 안 잡히던 회귀)', async () => {

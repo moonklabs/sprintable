@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { AlertTriangle, Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogClose, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import { StorageSourceUsageList } from './storage-source-usage-list';
 import type { Asset } from '@/lib/storage/types';
 
@@ -18,6 +19,7 @@ interface StorageDeleteDialogProps {
 
 export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: StorageDeleteDialogProps) {
   const t = useTranslations('storage');
+  const titleId = useId();
   const { addToast } = useToast();
   const [deleting, setDeleting] = useState(false);
 
@@ -48,12 +50,14 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           showCloseButton={false}
+          // [SID:4375] 머리 줄이 보이는 제목이다(DialogTitle 아님 → 창 이름 0이던 자리) — 그 줄로 창 이름을 잇는다(배치 무변경).
+          aria-labelledby={asset ? titleId : undefined}
           className="flex w-[440px] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[440px]"
         >
           {asset ? (
             <>
               {/* Header — 고정(scroll 영역 밖) */}
-              <div className="flex shrink-0 items-center gap-[9px] px-[18px] pb-[6px] pt-[18px] text-[15px] font-[650] text-foreground">
+              <div id={titleId} className="flex shrink-0 items-center gap-[9px] px-[18px] pb-[6px] pt-[18px] text-[15px] font-[650] text-foreground">
                 <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-destructive-tint text-destructive">
                   <AlertTriangle className="size-[15px]" />
                 </span>
@@ -64,6 +68,9 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
               <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[14px] pt-[4px] text-[13px] leading-[1.55] text-muted-foreground">
                 {t.rich('deleteBody', {
                   name: asset.name,
+                  // story #4120 — 조사를 문자열에 고정하지 않고 렌더 시점에 결정적으로 고른다
+                  // (#4117 pickEulReulJosa 선례와 동형).
+                  josa: pickEulReulJosa(asset.name),
                   b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
                 })}
 

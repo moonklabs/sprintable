@@ -10,20 +10,28 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
+import enMessages from '../../../../../messages/en.json';
 
-const { useDashboardContextMock, useSearchParamsMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, useSearchParamsMock, routerReplaceMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   useSearchParamsMock: vi.fn(),
+  routerReplaceMock: vi.fn(),
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
+// story #4019 — OAuthResultBanner(oauth-result-banner.tsx)가 usePathname·useRouter도
+// 쓴다(결과 인자 정리, AC2). replace는 no-op 목 — 실 네비게이션은 안 검증(그 자체는
+// oauth-result-banner.test.tsx 몫), 여기는 이 화면이 배너를 그대로 그리는지만 본다.
 vi.mock('next/navigation', () => ({
   useSearchParams: () => useSearchParamsMock(),
+  usePathname: () => '/organization/channels',
+  useRouter: () => ({ replace: routerReplaceMock }),
 }));
 
 import OrganizationChannelsPage from './page';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -407,6 +415,45 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     await mount('owner');
     // story 3436(묶음 6) — channelLabel()이 raw 쿼리값을 사람이 읽는 이름으로 정규화한다.
     expect(container.textContent).toContain('Threads 연결이 완료됐어요');
+  });
+
+  // story #4019(PO 確定 2026-09-17 16:05Z) AC2 — 두 화면 다 표시 뒤 결과 인자를 지워
+  // 새로고침 반복을 0으로 만든다. 조건①(state 캡처 뒤 제거라 안 꺼짐)·③(결과 인자
+  // 5개만·select_pending류는 보존)·④(history 새 항목 0·스크롤 0=router.replace+
+  // {scroll:false}).
+  describe('OAuth 결과 인자 정리(story #4019 AC2)', () => {
+    it('⭐배너를 그린 뒤 router.replace로 결과 인자 5개를 지운다(select_pending류는 보존) — 지운다고 배너가 사라지지 않는다', async () => {
+      useSearchParamsMock.mockReturnValue(
+        new URLSearchParams('connected=threads&select_pending=instagram&pending_id=p1&candidates=%5B%5D'),
+      );
+      stubFetch({ connections: [] });
+      routerReplaceMock.mockClear();
+      await mount('owner');
+      expect(container.textContent).toContain('Threads 연결이 완료됐어요');
+      expect(routerReplaceMock).toHaveBeenCalledTimes(1);
+      const [url, opts] = routerReplaceMock.mock.calls[0]!;
+      expect(url).not.toContain('connected=');
+      expect(url).toContain('select_pending=instagram');
+      expect(url).toContain('pending_id=p1');
+      expect(url).toContain('candidates=');
+      expect(opts).toEqual({ scroll: false });
+    });
+
+    it('결과 인자가 아예 없으면 router.replace를 안 부른다(빈 리다이렉트 소음 0)', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('select_pending=instagram&pending_id=p1&candidates=%5B%5D'));
+      stubFetch({ connections: [] });
+      routerReplaceMock.mockClear();
+      await mount('owner');
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    });
+
+    it('결과 인자만 있고 다른 쿼리가 없으면 물음표 없는 pathname으로 정리한다', async () => {
+      useSearchParamsMock.mockReturnValue(new URLSearchParams('connected=threads'));
+      stubFetch({ connections: [] });
+      routerReplaceMock.mockClear();
+      await mount('owner');
+      expect(routerReplaceMock).toHaveBeenCalledWith('/organization/channels', { scroll: false });
+    });
   });
 
   it('?connect_error=로 알려진 코드는 사람 말로, 모르는 코드는 일반 실패 문구로 뜬다', async () => {
@@ -1263,7 +1310,8 @@ describe('OrganizationChannelsPage — 연결 시각 상대시각 정본(story #
 
     // 폴백도 formatScheduledAt(§11-2 정본)이지 브라우저 toLocaleString이 아니다 —
     // "MM-DD HH:mm TZ" 꼴(마침표 구분자 없음).
-    expect(container.textContent).toMatch(/09-01 \d{2}:\d{2}/);
+    // story #4280 — 화면은 표시 시간대(조직 tz 없으면 실행 기계 TZ)로 날짜를 그린다. 날짜를 박아 두면 음의 오프셋 기계(LA)에서 하루 앞으로 밀려 깨졌다 — 같은 포맷터로 기대값.
+    expect(container.textContent).toContain(formatScheduledAt('2026-09-01T00:00:00Z', resolveDisplayTimezone().tz).display);
     expect(container.textContent).not.toMatch(/\d{4}\. \d{1,2}\. \d{1,2}\./);
   });
 });
@@ -1544,17 +1592,38 @@ describe('OrganizationChannelsPage — GA4 연결(story #3583)', () => {
   // story #3598(유나 §AC9 문구 確定 2026-09-06 15:44Z) — channelReauthError 교체 2 —
   // 「갱신에 실패했습니다」(reason=error가 갱신 문제라고 잘못 단정하던 옛 문구)를
   // 「이 연결로 지금 발행할 수 없어요 — 다시 연결해 주세요.」로(재연결로 풀린다고
-  // 약속하지 않는다).
-  it('⭐#3598 — needs_reauth reason=error면 새 문구(발행 불가·재연결 유도)가 뜬다', async () => {
+  // 약속하지 않는다). story #3951(3595 표 후속, 유나 §⑤ 판정 2026-09-16) — ④(앱
+  // 비활성)가 Graph 신호로 구별 불가하다는 그라운딩이 확定돼(developers.facebook.com
+  // 공식 문서 재확認) 「다시 연결해 주세요」의 단정을 「다시 연결해 보세요」로
+  // 완화(재연결이 항상 통한다고 거짓 약속하지 않는다).
+  it('⭐#3598/#3951 — needs_reauth reason=error면 새 문구(발행 불가·재연결 유도·완화된 어미)가 뜬다', async () => {
     stubFetch({
       measurementConnections: [
         { key: 'ga4', status: 'needs_reauth', last_seen_at: null, count_7d: null, settings_path: null, reason: 'error' },
       ],
     });
     await mount('owner');
-    expect(container.textContent).toContain('이 연결로 지금 발행할 수 없어요 — 다시 연결해 주세요.');
+    expect(container.textContent).toContain(koMessages.channelConnect.channelReauthError);
     expect(container.textContent).not.toContain('갱신에 실패했습니다');
     expect(container.textContent).not.toContain('서버 응답');
+  });
+
+  // story #3951 — 유나 §⑤ 판정(전→후)을 값으로 고정(판정 선언은 테스트로 pin) —
+  // 3문장이 「무슨 일 — 무엇을 하라」 한 형태로 통일됐는지 리터럴로 잠근다. ②·③
+  // (권한 회수·페이지 연결 해제)은 안 가른다는 판정이라 channelReauthRevoked 하나가
+  // 둘 다를 포괄하는 문장이어야 한다(별도 pin 불요 — 같은 키 재사용 자체가 그 증거).
+  it('⭐#3951 — 유나 판정 문구 3종이 정확히 그 값으로 고정된다(ko)', () => {
+    expect(koMessages.channelConnect.channelReauthExpired).toBe('연결이 만료됐어요 — 다시 연결해 주세요.');
+    expect(koMessages.channelConnect.channelReauthRevoked).toBe('채널 쪽에서 연결이 끊겼어요 — 다시 연결해 주세요.');
+    expect(koMessages.channelConnect.channelReauthError).toBe('이 연결로 지금 발행할 수 없어요 — 다시 연결해 보세요.');
+  });
+
+  // story #3951 — 유나가 별도 코멘트(2026-09-16 12:58Z, artifact 9ec22395)로 못박은
+  // en.json 짝(「디디군이 영어 발명 안 하게」) — ko와 마찬가지로 리터럴 고정.
+  it('⭐#3951 — 유나 판정 문구 3종이 정확히 그 값으로 고정된다(en)', () => {
+    expect(enMessages.channelConnect.channelReauthExpired).toBe('This connection expired — please reconnect.');
+    expect(enMessages.channelConnect.channelReauthRevoked).toBe('The channel disconnected this connection — please reconnect.');
+    expect(enMessages.channelConnect.channelReauthError).toBe("You can't publish with this connection right now — try reconnecting.");
   });
 
   it('needs_reauth — reason이 없으면 note 자체를 안 그린다', async () => {

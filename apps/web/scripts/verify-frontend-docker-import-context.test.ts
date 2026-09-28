@@ -8,8 +8,10 @@
 //   ② dst를 그대로 접두로 쓰면 안 된다 — `COPY package.json ./`의 dst가 이미지 루트(/app)라
 //     레포 전체가 허용으로 열려 실 위반이 조용히 통과한다(가드가 아무것도 안 잡는 최악 형).
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { measureFsReads } from './test-utils/fs-work';
 import {
   parseCopiedPrefixes,
   parseRelativeSpecifiers,
@@ -118,15 +120,15 @@ describe('isInsideContext — 접두 매칭', () => {
 // (c) 실사고 재현+회귀가드 — 배포 58을 일으킨 정확한 import(#3729 前 상태)를 합성 픽스처로
 // 재현한다. 현재 develop(3729 착지 뒤)은 이 위반이 없어야 한다는 것도 같이 고정.
 describe('scanRepository — 실 저장소 스캔(현재 develop 기준)', () => {
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: apps/web
-  // 전체 스위트 동시부하 재현 5회 = 276·278·325·241·274ms 중 최댓값 325ms → ×3 ≈ 975ms →
-  // 1000ms로 반올림). CI 리포터가 기본값이라 개별 테스트 duration이 로그에 안 남아 전체
-  // 스위트 동시부하 재현치를 대체 자로 씀.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('apps/web 비-테스트 파일 전수 스캔 — 컨텍스트 밖 상대 import 0건(#3729 핫픽스+#3731 이관 뒤)', () => {
-    const { violations, scanned } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { violations, scanned } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(scanned).toBeGreaterThan(1000); // 유나 실측 1,233개 규모 — 큰 폭 감소는 walk 로직 회귀 신호
     expect(violations).toEqual([]);
-  }, 1000);
+  });
 });
 
 // AC㉤(커밋③) — 주석 속 import 문자열은 stripComments()로 제외된다. 이 자체는 scanRepository
@@ -147,26 +149,23 @@ describe('AC㉤ — 주석 속 import 문자열은 위반으로 안 잡힌다(st
     expect(specs).toEqual(['../lib/real.js']);
   });
 
-  // scanRepository() 자신이 실제로 stripComments를 거치는지(단순 유틸 정확성이 아니라
-  // «배선»)까지 재는 통합 테스트 — apps/web 안에 실 스캔 대상이 되는 임시 픽스처를
-  // 만들어(walk()가 스캔하는 실경로) 확認한다. mutation-kill: scanRepository 안
-  // stripComments 호출을 지우면 이 테스트가 RED로 걸린다(별도로 확認 완료).
-  describe('scanRepository 통합 — 배선 확認(실 임시 픽스처)', () => {
-    const fixturePath = path.resolve(__dirname, '__ac40-fixture.ts');
+  // scanRepository() 자신이 실제로 stripComments를 거치는지(단순 유틸 정확성이 아니라 «배선»)까지 재는 통합 테스트. mutation-kill:
+  // scanRepository 안 stripComments 호출을 지우면 RED(주석 속 `../../../` import가 격리 루트 밖 = 저장소 밖으로 풀려 위반).
+  // story #4333 — 예전엔 픽스처를 apps/web 실 트리에 썼다 → 같은 전체 판의 다른 실 트리 스캐너가 그 임시 파일을 세어 까닭 없이 RED.
+  // 이제 os.tmpdir() 아래 격리 루트에 쓰고 scanRepository에 그 파일만 넘긴다.
+  describe('scanRepository 통합 — 배선 확認(격리 루트 픽스처)', () => {
+    let dir = '';
+    afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 
-    afterEach(() => {
-      if (existsSync(fixturePath)) unlinkSync(fixturePath);
-    });
-
-    // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-    // 재현 5회 = 285·288·386·265·254ms 중 최댓값 386ms → ×3 ≈ 1158ms → 1500ms로 반올림).
-    it('apps/web 실경로에 주석 속 컨텍스트 밖 import를 심어도 위반으로 안 잡힌다', () => {
-      writeFileSync(
-        fixturePath,
-        "// import { x } from '../../../outside-context-in-a-comment.js';\nexport const noop = 1;\n",
-      );
-      const { violations } = scanRepository();
+    it('주석 속 컨텍스트 밖 import는 위반으로 안 잡힌다 · 주석 밖이면 잡힌다(대조)', () => {
+      dir = mkdtempSync(path.join(tmpdir(), 'docker-ctx-'));
+      const inComment = path.join(dir, '__ac40-fixture.ts');
+      const live = path.join(dir, '__ac40-live.ts');
+      writeFileSync(inComment, "// import { x } from '../../../outside-context-in-a-comment.js';\nexport const noop = 1;\n");
+      writeFileSync(live, "import { x } from '../../../outside-context-live.js';\nexport const y = x;\n");
+      const { violations } = scanRepository({ files: [inComment, live] });
       expect(violations.some((v) => v.file.endsWith('__ac40-fixture.ts'))).toBe(false);
-    }, 1500);
+      expect(violations.some((v) => v.file.endsWith('__ac40-live.ts')), '주석 밖 import는 잡혀야 대조가 선다').toBe(true);
+    });
   });
 });

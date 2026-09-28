@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { cardVariants } from '@/components/ui/card';
 import {
   VerifyRail, useVerificationRail,
   type Transport,
@@ -15,6 +16,10 @@ import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemet
 
 import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
+import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { copyTextSafely } from '@/lib/clipboard';
+import { withProjectParam } from '@/hooks/use-flat-href';
+import { VerifyPromptCopyFailedPanel } from './verify-prompt-copy-failed-panel';
 
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
 // 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
@@ -38,6 +43,10 @@ interface ConnectStepProps {
   apiKey: string | null;
   projectId: string | null;
   onFinish: () => void;
+  // story #3983 CHANGES(페드루 PO 2026-09-17 02:11Z) — 데스크톱 절 완료 버튼
+  // 낱말이 실제 착지와 같아야 한다(온보딩 원칙). 기본값 false = 기존 테스트
+  // (이 prop 없이 마운트)가 현행 낱말(dashboardCta)을 계속 기대.
+  todayV3Enabled?: boolean;
 }
 
 /** `sk_live_••••<last4>` — prefix + 마지막 4자만 노출.
@@ -95,8 +104,9 @@ export function HighlightedJson({ text }: { text: string }) {
   );
 }
 
-export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectStepProps) {
+export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabled = false }: ConnectStepProps) {
   const t = useTranslations('onboarding');
+  const tc = useTranslations('common');
 
   // transport=null: 최초 default-resolve 응답 대기 中(BE edition 기본 판별 前).
   const [transport, setTransport] = useState<Transport | null>(null);
@@ -107,8 +117,23 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
   const [hostedUnavailable, setHostedUnavailable] = useState(false);
   const [hasCopiedMap, setHasCopiedMap] = useState<Partial<Record<Transport, boolean>>>({});
   const [justCopied, setJustCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 실패 시 「복사됨」을 안 띄우고, 화면에
+  // 보이는 config는 마스킹판(displayConfig)이라 클립보드용 실 config(cfg, 실키
+  // 포함)와 다르다 — 실패했을 때만 실 config를 선택 가능한 자리에 노출한다
+  // (유나 지시 2026-09-17 02:47Z — 실패 문구가 이미 "직접 선택" 지시, 별도 안내
+  // 줄은 안 만든다).
+  const [copyFailed, setCopyFailed] = useState(false);
+  const [copyFailedRawConfig, setCopyFailedRawConfig] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const leftRef = useRef(false);
+
+  // story #3986 CHANGES(페드루 PO C4) — 실패 시 뜬 raw config는 그 transport/키 것이다.
+  // transport를 바꾸거나 키가 갱신되는데 리셋을 안 하면 이전 transport의 raw config가
+  // 새 화면에 그대로 남아, 사용자가 선택해 붙이면 엉뚱한 transport 설정을 붙이게 된다.
+  useEffect(() => {
+    setCopyFailed(false);
+    setCopyFailedRawConfig(null);
+  }, [transport, apiKey]);
 
   const hasCopied = transport ? Boolean(hasCopiedMap[transport]) : false;
   // misconfig 폴백(아래) — edition 기본이 http인데 배포가 없을 때 stdio로 명시 재요청해야
@@ -208,7 +233,9 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
     enabled: Boolean(apiKey),
     configCopiedDone: hasCopied,
   });
-  const { displaySteps, verified, verifying, awaitingVerification, timedOut } = rail;
+  const { displaySteps, verified, verifying, awaitingVerification, timedOut, copyVerifyPromptFailed: railCopyVerifyPromptFailed, dismissCopyVerifyPromptFailed } = rail;
+
+  // story #3986 CHANGES(페드루 PO 2회차) — 실패 패널의 바깥 클릭 · Esc 닫기는 VerifyPromptCopyFailedPanel 안으로(story #4372 · 채용 화면과 공용).
 
   // unload(탭닫기/이탈) best-effort — 미검증 시 abandoned_explicit 보조 신호(SoT는 BE 파생).
   useEffect(() => {
@@ -224,11 +251,14 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
     if (!apiKey || !transport) return;
     const cfg = renderArtifact(artifacts[transport] ?? null, apiKey, false);
     if (!cfg) return; // 아티팩트 미준비(pending) — copy 불가
-    try {
-      await navigator.clipboard.writeText(cfg);
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(cfg);
+    if (!result.ok) {
+      setCopyFailed(true);
+      setCopyFailedRawConfig(cfg);
+      return;
     }
+    setCopyFailed(false);
+    setCopyFailedRawConfig(null);
     setHasCopiedMap((p) => ({ ...p, [transport]: true }));
     setJustCopied(true);
     setTimeout(() => setJustCopied(false), 2000);
@@ -254,6 +284,33 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
     onFinish();
   };
 
+  // story #3983 CHANGES(페드루 PO 2026-09-17 02:11Z, 실결함④) — 웹 경로는
+  // config_copied·verify_started가 다 찍히는데 데스크톱 경로는 0이라 활성화
+  // 퍼널에서 둘을 못 갈랐다 — 같은 emitOnboardingEvent 패턴으로 신호 추가.
+  const handleDesktopFinish = () => {
+    emitOnboardingEvent('desktop_handoff_selected', { agent_id: agentId, flow: 'onboarding' });
+    handleDashboard();
+  };
+
+  const [desktopKeyCopied, setDesktopKeyCopied] = useState(false);
+  // story #3986 — 실패 시 마스킹판(maskApiKey) 대신 실 키를 선택 가능하게
+  // 보여야 「직접 선택」 지시가 실행 가능하다(유나 2026-09-17 02:47Z).
+  const [desktopKeyCopyFailed, setDesktopKeyCopyFailed] = useState(false);
+  const handleCopyKeyForDesktop = async () => {
+    if (!apiKey) return;
+    const result = await copyTextSafely(apiKey);
+    if (!result.ok) {
+      setDesktopKeyCopyFailed(true);
+      return;
+    }
+    setDesktopKeyCopyFailed(false);
+    setDesktopKeyCopied(true);
+    setTimeout(() => setDesktopKeyCopied(false), 2000);
+    // story #3983 CHANGES r2(페드루 PO 2026-09-17 02:23Z) — config_copied는
+    // 웹 경로 이벤트(verify rail 첫 상태)라 재사용하면 퍼널이 섞인다 — 별도 이름.
+    emitOnboardingEvent('desktop_key_copied', { agent_id: agentId, flow: 'onboarding' });
+  };
+
   // story #3201(activation·절벽 처방) — 1차 깔때기 "연결까지 온 사람 중 첫 왕복 0%" 절벽.
   // PO 확定(2026-08-29): verified 무관 상시 노출(미연결인 채 눌러도 새 DM에서 #3194 침묵
   // 배너가 다음 행동을 안내하는 자기정합 구조). 생성 실패 시 onFinish()로 폴백(제3경로
@@ -273,7 +330,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
       // auth 토큰 갱신 raw fetch 호출을 그대로 베끼지 않고, 같은 목적의 기존 헬퍼
       // (lib/db/client.ts의 refreshAuthTokens, callAuthRoute 경유)를 재사용한다.
       await refreshAuthTokens().catch(() => null);
-      window.location.href = `/chats/${convId}`;
+      window.location.href = withProjectParam(`/chats/${convId}`, projectId); // story #4231 3차 — 온보딩 프로젝트를 싣는다
     } catch {
       onFinish();
     } finally {
@@ -288,7 +345,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
         <div className="space-y-2 rounded-md border border-warning-border bg-warning-tint p-3">
           <p className="text-sm text-warning-strong">{t('apiKeyFailedMembers')}</p>
           <Link
-            href="/settings?tab=members"
+            href={withProjectParam('/settings?tab=members', projectId)}
             className="inline-block rounded border border-warning-border bg-background px-3 py-1 text-xs font-medium text-warning-strong transition-colors hover:bg-warning-tint"
           >
             {t('goToMembersAgents')} →
@@ -308,6 +365,63 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
 
   return (
     <div className="space-y-4">
+      {/* story #3983(PO 확定 2026-09-17 01:41Z, CHANGES 2026-09-17 02:11Z) — 주
+          경로 「데스크톱 앱에서 이어서」(기존 DesktopDownloadCard 그대로, 새
+          다운로드 로직 0). 보조 경로(아래 기존 웹 connect 흐름)는 삭제 0.
+          CHANGES ③: 절 제목을 안 둔다(카드 자체가 이미 「데스크톱 앱」 제목을
+          갖는다 — 두 제목이 부딪힌다). 부제만 남긴다. */}
+      <section className={cn(cardVariants(), 'space-y-3 p-4')} data-testid="connect-step-desktop-primary">
+        <p className="text-xs text-muted-foreground">{t('desktopHandoffSubtitle')}</p>
+        <DesktopDownloadCard />
+        {/* CHANGES ①: 데스크톱 앱은 이 화면 밖이라 키를 붙여 넣을 곳이 없다 —
+            웹 경로 쪽(재시작 안내 옆)에 있던 핸드오프 문구+복사 칸을 여기로
+            옮긴다(그쪽엔 데스크톱에 줄 키가 필요 없다 — 그 자리와 안 부딪힘). */}
+        <div className="rounded-md border border-border bg-muted/40 p-3">
+          <p className="text-xs text-muted-foreground" data-testid="connect-step-desktop-key-handoff">
+            {t('desktopKeyHandoffTitle')} — {t('desktopKeyHandoffCanonicalNote')}
+          </p>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded border border-border bg-background px-2.5 py-1.5">
+            {/* story #3986 — 실패했을 때만 마스킹판 대신 실 키를 선택 가능한
+                input으로 보인다(유나 지시 — 실패 문구가 이미 "직접 선택" 지시). */}
+            {desktopKeyCopyFailed ? (
+              <input
+                readOnly
+                value={apiKey}
+                onFocus={(e) => e.currentTarget.select()}
+                className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs text-foreground"
+                data-testid="connect-step-desktop-key-raw"
+              />
+            ) : (
+              <code className="truncate font-mono text-xs text-foreground">{maskApiKey(apiKey)}</code>
+            )}
+            <Button
+              variant="outline" size="sm"
+              onClick={() => void handleCopyKeyForDesktop()}
+              className="shrink-0"
+              data-testid="connect-step-desktop-key-copy"
+            >
+              {desktopKeyCopied ? (
+                <><Check className="h-3.5 w-3.5" />{t('copied')}</>
+              ) : (
+                <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>
+              )}
+            </Button>
+          </div>
+          {desktopKeyCopyFailed ? (
+            <p role="alert" className="mt-1.5 text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+          ) : null}
+        </div>
+        {/* CHANGES ②: 낱말 = 착지와 같이(ON이면 「오늘」 낱말·OFF면 현행
+            dashboardCta). variant도 outline(이 절의 주 행동은 내려받기 —
+            hero는 화면에 하나만, 웹 경로 「첫 지시 보내기」가 그 자리). */}
+        <Button variant="outline" size="sm" onClick={handleDesktopFinish} data-testid="connect-step-desktop-finish">
+          {todayV3Enabled ? t('desktopFinishToToday') : t('dashboardCta')}
+        </Button>
+      </section>
+      <p className="text-xs font-medium text-muted-foreground" data-testid="connect-step-web-secondary-label">
+        {t('webConnectSecondaryLabel')}
+      </p>
+
       {/* [0] transport 세그먼트 토글 */}
       <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]">
         <button
@@ -391,6 +505,23 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
             </div>
           )}
         </div>
+        {/* story #3986 — 복사 실패는 화면에 보이는 config(마스킹판)와 클립보드용
+            실 config가 다르므로, 실패했을 때만 실 config를 선택 가능한 자리에
+            노출한다(유나 지시 — 실패 문구가 이미 "직접 선택" 지시, 별도 안내
+            줄은 안 만든다). */}
+        {copyFailed && copyFailedRawConfig ? (
+          <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
+            <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p>
+            <textarea
+              readOnly
+              value={copyFailedRawConfig}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+              rows={4}
+              data-testid="connect-step-copy-failed-raw-config"
+            />
+          </div>
+        ) : null}
         {transport === 'http' && !isHostedUnavailable && (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
           <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
@@ -409,6 +540,10 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
           {t('artifactGuide')}
         </p>
         <p className="text-xs text-muted-foreground">{t('keyOneTimeNote')}</p>
+        {/* story #3983 CHANGES(페드루 PO 2026-09-17 02:11Z) — 키 핸드오프 문구는
+            이 웹 절이 아니라 데스크톱 절로 옮겼다(여기 뒷문장이 keyOneTimeNote와
+            같은 말을 반복했고, 애초 이 웹 절엔 데스크톱에 «붙여 넣을» 필요가
+            없다 — 그 화면 쪽으로 가야 뜻이 선다). */}
         {/* story #4cdad425(prod 에스컬레이트) — 「설정만 붙이면 자동」 오해가 무한 대기의 근본이었다
             (실유저 5회 재시도). 설정 저장 뒤 «Claude Code 재시작»이 연결 적용의 필수 단계라 그
             자리에 명시한다. info 톤(안내·연결 미확認≠에러). */}
@@ -463,13 +598,25 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
           </p>
         )}
         {rail.showVerifyExamplePrompt && (
-          <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
-            <span className="min-w-0 truncate text-foreground">
-              {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
-            </span>
-            <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
-              {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
-            </Button>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
+              <span className="min-w-0 truncate text-foreground">
+                {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
+              </span>
+              <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0" data-testid="connect-step-verify-prompt-copy">
+                {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
+              </Button>
+            </div>
+            {/* story #3986 CHANGES(페드루 PO C2·2회차) — 위 인용부호 안 문구는
+                truncate라 좁은 화면에선 말줄임표로 잘린다. 실패했을 때만 안 잘린
+                전체 문구를 선택 가능하게 새로 보여준다 — 3초로 안 자르고 다음
+                성공·바깥 클릭·Esc·닫기까지 유지한다. */}
+            <VerifyPromptCopyFailedPanel
+              failed={railCopyVerifyPromptFailed}
+              onDismiss={dismissCopyVerifyPromptFailed}
+              promptText={t('verifyExamplePrompt')}
+              rawTestId="connect-step-verify-prompt-raw"
+            />
           </div>
         )}
         {verified && (
@@ -501,7 +648,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish }: ConnectSte
         {advancedOpen && (
           <div className="mt-3 space-y-2">
             <p className="text-xs text-muted-foreground">{t('advancedNote')}</p>
-            <Link href="/settings?tab=members" className="inline-block text-xs font-medium text-primary hover:underline">
+            <Link href={withProjectParam('/settings?tab=members', projectId)} className="inline-block text-xs font-medium text-primary hover:underline">
               {t('goToMembersAgents')} →
             </Link>
           </div>

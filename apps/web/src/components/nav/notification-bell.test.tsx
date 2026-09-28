@@ -130,7 +130,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
 
     // jsdom은 Tailwind의 lg:flex/lg:hidden 반응형 클래스를 실제로 평가하지 않아 데스크톱
     // 드롭다운·모바일 오버레이 둘 다 DOM에 동시 존재한다 — 데스크톱 컨테이너(.w-80)로 좁혀서 잰다.
-    const desktopPanel = container.querySelector('.w-80')!;
+    const desktopPanel = document.querySelector('.w-80')!; // story #4349 — 넓은 화면 드롭다운은 body로 포털(셸 스크롤 면 밖) → document에서
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(30);
 
     const clickLoadMore = async () => {
@@ -155,7 +155,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
     });
     await openBell();
 
-    const desktopPanel = container.querySelector('.w-80')!;
+    const desktopPanel = document.querySelector('.w-80')!;
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(30);
 
     // SSE로 실시간 알림 1건이 목록 맨 앞에 끼어든다 — API로 받은 게 아니므로 offsetRef는 그대로 30이어야.
@@ -324,12 +324,42 @@ describe('getEntityHref — 딥링크 계약(story #2956 QA changes)', () => {
   });
 });
 
+// story #4244 — 종 알림 링크는 대상 자기 프로젝트(target_project_id · BE 배치 해소)를 싣는다. events.project_id(수신자 멤버 행의 프로젝트)는
+// 쓰지 않는다. 모르면 주소 그대로(틀린 p 없음).
+describe('getEntityHref — 대상 프로젝트(story #4244)', () => {
+  it('⭐게이트 알림 → /gates/{id}에 게이트 대상의 프로젝트 · events.project_id(수신자 쪽)는 무시', () => {
+    const href = getEntityHref(baseNotification({
+      source_entity_type: 'gate', source_entity_id: 'g-1', target_project_id: 'proj-B',
+      ...({ project_id: 'proj-RECIPIENT' } as Partial<EventNotification>),
+    }));
+    expect(href).toBe('/gates/g-1?p=proj-B');
+  });
+
+  it('⭐문서 → BE slug 우선(payload slug보다) · 대상 프로젝트', () => {
+    const href = getEntityHref(baseNotification({
+      source_entity_type: 'doc', source_entity_id: 'd-1', target_project_id: 'P', target_doc_slug: 'ops-guide', payload: { slug: 'old-slug' },
+    }));
+    expect(href).toBe('/docs/ops-guide?p=P');
+  });
+
+  it('story · task · epic · sprint도 대상 프로젝트를 싣는다', () => {
+    const hrefs = (['story', 'task', 'epic', 'sprint'] as const).map((t) =>
+      getEntityHref(baseNotification({ source_entity_type: t, source_entity_id: 'x', target_project_id: 'P' })));
+    expect(hrefs).toEqual(['/flow?story=x&p=P', '/flow?task_id=x&p=P', '/goals/x?p=P', '/sprints?id=x&p=P']);
+  });
+
+  it('대상 프로젝트를 모르면(SSE로 막 들어온 항목 · 옛 응답) 주소 그대로 · 문서는 payload slug 폴백', () => {
+    expect(getEntityHref(baseNotification({ source_entity_type: 'gate', source_entity_id: 'g-2' }))).toBe('/gates/g-2');
+    expect(getEntityHref(baseNotification({ source_entity_type: 'doc', source_entity_id: 'd-2', payload: { slug: 'runbook' } }))).toBe('/docs/runbook');
+  });
+});
+
 // story #3007(로드맵 P2·PR-E, L1) — 데스크톱 드롭다운 패널은 floating이라 --elev-overlay.
 describe('NotificationBell — 로드맵 P2·PR-E L1(드롭다운 패널 elevation 토큰)', () => {
   it('데스크톱 드롭다운(.w-80)이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {
     stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
     await openBell();
-    const desktopPanel = container.querySelector('.w-80');
+    const desktopPanel = document.querySelector('.w-80');
     expect(desktopPanel?.className).toContain('shadow-[var(--elev-overlay)]');
     expect(desktopPanel?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
   });
@@ -553,5 +583,39 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
 
     expect(lightContrast).toBeGreaterThanOrEqual(4.5);
     expect(darkContrast).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+// story #4182 — 이미 저장된 옛 summary엔 내부 HTML 주석(`<!-- linear-comment-id … -->`)이
+// 남아 있다. 서버 수정으로는 안 고쳐지므로 렌더(목록·데스크톱/OS 알림)에서 평문화한다.
+describe('NotificationBell — summary 내부 HTML 주석 평문화(story #4182)', () => {
+  const COMMENTED = '유나: <!-- linear-comment-id: abc-123 -->답장 내용';
+
+  it('목록 행에 주석이 안 보이고 본문은 남는다', async () => {
+    stubFetchSequenceByOffset({ 0: { items: [{ ...notif('c1'), payload: { summary: COMMENTED } }], hasMore: false } });
+    await openBell();
+    expect(container.textContent).not.toContain('<!--');
+    expect(container.textContent).toContain('유나: 답장 내용');
+  });
+
+  it('데스크톱 셸 notify_show body에도 주석이 안 실린다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    const notifyShow = vi.fn().mockResolvedValue(true);
+    (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge = { notify_show: notifyShow };
+
+    await openBell();
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('notification', {
+        id: 'live-c', event_type: 'conversation.message_created', source_entity_type: null, source_entity_id: null,
+        payload: { summary: COMMENTED }, read_at: null, created_at: '2026-09-23T01:00:00Z',
+      });
+    });
+
+    expect(notifyShow).toHaveBeenCalledTimes(1);
+    expect(notifyShow.mock.calls[0]![0].body).toBe('유나: 답장 내용');
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
   });
 });

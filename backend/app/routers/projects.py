@@ -41,7 +41,7 @@ async def list_projects(
     rows = await session.execute(
         select(Project)
         .where(Project.id.in_(ids), Project.deleted_at.is_(None))
-        .order_by(Project.created_at.asc())
+        .order_by(Project.created_at.asc(), Project.id)
     )
     return [ProjectResponse.model_validate(p) for p in rows.scalars().all()]
 

@@ -6,6 +6,7 @@ import { ENTITY_ICONS } from '@/components/chat/embed-card';
 import { entityTypeLabel, getEntityQuery, type EntityResult } from '@/components/chat/chat-input-entity-tokens';
 import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
+import { AnchoredPopover } from '@/components/shared/anchored-popover';
 
 interface EntityAwareTextareaProps {
   value: string;
@@ -68,7 +69,8 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
       if (ent) selectEntity(ent);
       return;
     }
-    if (e.key === 'Escape') { entityPicker.close(); return; }
+    // [SID:4367] 후보만 닫고 «썼다»고 표시 — 바깥(스토리 패널 window Esc)이 편집 취소까지 하지 않게. 후보가 없을 때의 Esc는 위에서 그냥 지나간다.
+    if (e.key === 'Escape') { e.preventDefault(); entityPicker.close(); return; }
   };
 
   return (
@@ -87,7 +89,10 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
       {/* story #2263(C-5) ㉠㉡㉢ 그대로 재사용 — chat-input.tsx 엔티티 dropdown과 동형 렌더. */}
       {entityPicker.entityResults.length > 0 && (
         // story #3007(로드맵 P2·PR-E, L1) — 자동완성 리스트박스는 floating이라 --elev-overlay.
-        <ul role="listbox" aria-label={entityCandidatesLabel} className="focus-inset absolute left-0 z-50 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+        // story #4349(전수 9번) — 스토리 상세 스크롤 면(`overflow-y-auto`) 안의 absolute라 면 아래 끝에서 잘린 채였다 → body로 포털
+        // (AnchoredPopover · 입력칸 아래 4px · 모자라면 위로 · 가로는 4342 클램프). 화살표 · Enter는 입력칸에 머무는 그대로(초점 안 옮김).
+        <AnchoredPopover anchorRef={textareaRef} gap={4} className="z-50 w-72 max-w-[calc(100vw-1rem)]">
+        <ul data-dropdown-panel="entity-candidates" role="listbox" aria-label={entityCandidatesLabel} className="focus-inset max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
           {entityPicker.entityResults.map((entity, idx) => {
             const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
             const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
@@ -122,6 +127,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
             );
           })}
         </ul>
+        </AnchoredPopover>
       )}
     </div>
   );

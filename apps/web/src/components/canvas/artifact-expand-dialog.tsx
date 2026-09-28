@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { ArtifactStage, isResponsiveHtml, RESPONSIVE_PREVIEW_BREAKPOINTS, type ResponsivePreviewBreakpoint } from './artifact-stage';
 import { ArtifactGalleryTimeline, type GalleryTimelineVersion } from './artifact-gallery-timeline';
 import type { ArtifactFormat } from '@/services/canvas';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 type PreviewBreakpoint = ResponsivePreviewBreakpoint | 'desktop';
 
@@ -46,6 +47,7 @@ interface ArtifactExpandDialogProps {
 export function ArtifactExpandDialog({
   open, onOpenChange, title, format, content, canvasBounds, versions, selectedVersion, onSelectVersion, artifactId,
 }: ArtifactExpandDialogProps) {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   const t = useTranslations('canvas');
   // story 3d0d60a3 — 반응형 미리보기. @media 판정=html 포맷에서만(유나 1순위·값싼 소스 파싱,
   // 신규 BE 0). 판정 실패(고정폭)면 셀렉터 자체를 렌더하지 않는다(disabled 아님·부재 — no-fiction).
@@ -72,7 +74,7 @@ export function ArtifactExpandDialog({
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <DialogPrimitive.Popup
+        <DialogPrimitive.Popup data-modal-popup=""
           className={cn(
             'fixed top-1/2 left-1/2 z-50 flex h-[85vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden',
             // story #3007(로드맵 P2·PR-E, L1) — 다이얼로그는 floating이라 --elev-overlay.
@@ -91,7 +93,7 @@ export function ArtifactExpandDialog({
             <div className="ml-auto flex items-center gap-2">
               {artifactId ? (
                 <Link
-                  href={`/artifacts/${artifactId}`}
+                  href={flatHref(`/artifacts/${artifactId}`)}
                   title={t('artifactDetailPageLinkHint')}
                   className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
                 >

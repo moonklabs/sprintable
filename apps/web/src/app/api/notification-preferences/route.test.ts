@@ -11,7 +11,7 @@ const { getAuthContextMock, getServerSessionMock } = vi.hoisted(() => ({
   getServerSessionMock: vi.fn(),
 }));
 
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: getAuthContextMock }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: getAuthContextMock, getOrgProjectAuthContext: getAuthContextMock }));
 vi.mock('@/lib/db/server', () => ({ getServerSession: getServerSessionMock }));
 
 import { GET, PUT } from './route';

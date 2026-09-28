@@ -987,7 +987,7 @@ export function FlowMapCanvas({
                         height: PAST_EXPANDED_TOP_START - PAST_BUNDLE_TOP + lane.pastNodes.length * PAST_EXPANDED_ROW_HEIGHT,
                       }}
                     >
-                      <span className="absolute -top-[9px] left-2 bg-card px-1 font-mono text-[9.5px] text-brand">
+                      <span className="absolute -top-[9px] left-2 bg-card px-1 font-mono text-[9.5px] text-brand-text">
                         {t('flowMapPastCount', { n: lane.pastTotal })} · {t('flowMapPastExpandedCaption')}
                       </span>
                       <button
@@ -1098,7 +1098,7 @@ export function FlowMapCanvas({
                     // 자체는 상시 있는 빈 상자가 아니라 «끌 때만» 나타나는 것이라 이 조건부
                     // 문구(shouldShowNoDeeperReason)에 얹는다(새 상시 UI를 만들지 않는다).
                     <p
-                      className="absolute whitespace-nowrap font-mono text-[9px] text-brand"
+                      className="absolute whitespace-nowrap font-mono text-[9px] text-brand-text"
                       style={{ left: FLOW_MAP_DEPTH0_X + FLOW_MAP_GRID_STEP + 12, top: height / 2 - 6 }}
                     >
                       {linkDraft.phase === 'linking' ? t('flowMapSlotDragHint') : t('flowMapNoDeeperReason')}

@@ -139,6 +139,7 @@ async def _deliver_one(job: dict) -> None:
                     session, org_id, payload["event"],
                     recipient_member_ids=_uuid_set_or_none(payload.get("recipient_member_ids")),
                     preserve_broadcast=payload.get("preserve_broadcast", True),
+                    event_data=payload.get("data"),  # story #4358 — 배달 시점 주인 접근 재확인에 이벤트의 project_id가 필요
                 )
                 await session.commit()
             # ⬇ 이 구간은 세션이 닫혀 있다(커넥션 풀에 반납됨) — 외부 I/O만.

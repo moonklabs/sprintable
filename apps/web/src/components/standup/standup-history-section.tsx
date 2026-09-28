@@ -1,12 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useState, startTransition } from 'react';
+import { useCallback, useEffect, useMemo, useState, startTransition } from 'react';
 import { ClipboardList } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { formatAtLeast } from '@/lib/format-at-least';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { parseCursorMeta } from '@/lib/pagination';
+import { disambiguateFallbackLabels, memberLookup } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { sprintScreenUrls, takeSprintScreenOrFetch } from '@/components/sprints/sprint-screen-prefetch';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 interface HistoryEntry {
   id: string;
@@ -20,12 +25,26 @@ interface HistoryEntry {
 interface Props {
   projectId: string;
   memberNameById?: Record<string, string>;
+  // [SID:4286] 부모의 이름 표를 다 불러왔는지 — 기록은 따로 불러와 표보다 먼저 그려질 수 있다.
+  memberNamesLoaded: boolean;
 }
 
-export function StandupHistorySection({ projectId, memberNameById = {} }: Props) {
+export function StandupHistorySection({ projectId, memberNameById = {}, memberNamesLoaded }: Props) {
+  const { currentTeamMemberId } = useDashboardContext();
   const t = useTranslations('standup');
   const tCommon = useTranslations('common');
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  // [SID:4300] 작성자 이름 = 부모 표(조직 범위 팀원 · 활성만 — 오늘 체크인 명단과 같은 목록) + 지난 기록 작성자가 거기 없을 때만
+  // 비활성까지 싣는 조직 원천으로 보충(비활성 에이전트의 옛 기록). 부모 명단은 그대로.
+  const { orgId } = useDashboardContext();
+  const authorIds = useMemo(() => entries.map((e) => e.author_id), [entries]);
+  const authorNames = useMemberNameFallback(orgId, memberNameById, authorIds, memberNamesLoaded);
+  // [SID:4300 · PO 06:37Z · story #4311] 보이는 글자가 같은 서로 다른 작성자(폴백 · 동명이인)가 둘 이상이면 그 행에만 id 앞 8자 꼬리(규칙은 member-display 한 곳).
+  // 받는 동안(memberLookup null) 행은 규칙에 넣지 않는다 — 빈 글자끼리 묶여 « · id»만 보이는 줄이 생기지 않게.
+  const authorLabelById = useMemo(() => disambiguateFallbackLabels([...new Set(authorIds)].flatMap((id) => {
+    const r = memberLookup(authorNames.memberMap, id, tCommon, { loaded: authorNames.loaded });
+    return r ? [{ id, ...r }] : [];
+  })), [authorIds, authorNames.memberMap, authorNames.loaded, tCommon]);
   const [loading, setLoading] = useState(true);
   // story #2248 — story-detail-panel.tsx의 활동/댓글 「더보기」 자리를 그대로 본뜬다(발명 금지).
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -33,22 +52,28 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
 
   useEffect(() => {
     if (!projectId) return;
+    // 까디르 4694 ① — 프로젝트(또는 사람)가 바뀐 뒤 늦게 온 옛 응답은 버린다(다른 화면에 옛 기록이 붙지 않게).
+    let cancelled = false;
     startTransition(() => setLoading(true));
-    fetchWithAuth(`/api/standup/history?project_id=${projectId}&limit=20`)
-      .then((r) => r.json())
+    // story #4328 — 스프린트 화면이 첫 물결에 먼저 출발시킨 같은 요청을 한 번 넘겨받는다(주소는 sprintScreenUrls 한 곳).
+    takeSprintScreenOrFetch(sprintScreenUrls.history(projectId), { memberId: currentTeamMemberId, projectId })
+      // 실패 응답의 에러 바디를 기록으로 읽지 않는다(verify:no-fetch-response-without-ok-check) — 실패면 빈 채(예전과 같은 결과).
+      .then((r) => { if (!r.ok) throw new Error(`standup history ${r.status}`); return r.json(); })
       .then((json) => {
+        if (cancelled) return;
         if (json?.data && Array.isArray(json.data)) setEntries(json.data);
         setNextCursor(parseCursorMeta(json.meta, 'standup-history-section').nextCursor);
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [projectId]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId, currentTeamMemberId]);
 
   const handleLoadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await fetch(`/api/standup/history?project_id=${projectId}&limit=20&cursor=${encodeURIComponent(nextCursor)}`);
+      const res = await fetchWithAuth(`/api/standup/history?project_id=${projectId}&limit=20&cursor=${encodeURIComponent(nextCursor)}`);
       if (res.ok) {
         const json = await res.json();
         setEntries((prev) => [...prev, ...(json.data ?? [])]);
@@ -75,7 +100,9 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
           <ClipboardList className="h-4 w-4" aria-hidden />
           {t('history')}
         </h2>
-        <Badge variant="chip">{entries.length}</Badge>
+        {/* story #4302 — 20건씩 받는 목록이라 불러온 수는 전체가 아니다: 더 남았으면 «48+»(formatAtLeast · 유나 판정). 칩은 맨 수만
+            (머리 «작성 이력»이 이미 무엇의 수인지 말한다 — 문장을 넣으면 en에서 «Standup»이 두 번). */}
+        <Badge variant="chip">{formatAtLeast(entries.length, nextCursor !== null)}</Badge>
       </div>
       <div className="space-y-4">
         {sortedDates.map((date) => (
@@ -83,8 +110,9 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
             <p className="mb-2 text-xs font-medium text-muted-foreground">{date}</p>
             <div className="space-y-2">
               {byDate[date].map((entry) => (
-                <div key={entry.id} className="text-xs text-foreground/80">
-                  <span className="font-medium">{memberNameById[entry.author_id] ?? entry.author_id.slice(0, 8)}</span>
+                <div key={entry.id} className="min-h-4 text-xs text-foreground/80">
+                  {/* [SID:4286] 작성자 id 조각(앞 8자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → 빈 칸. */}
+                  <span className="font-medium">{authorLabelById.get(entry.author_id) ?? ''}</span>
                   {entry.done ? <span className="ml-2 text-muted-foreground">✅ {entry.done.slice(0, 80)}{entry.done.length > 80 ? '…' : ''}</span> : null}
                 </div>
               ))}
