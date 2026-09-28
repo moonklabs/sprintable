@@ -1,77 +1,40 @@
 /**
  * Unit tests for page-embed-node.tsx
  *
- * Focuses on pure exported helpers — isCircularEmbed and attribute parseHTML logic.
+ * Focuses on pure exported helpers — isSelfEmbed and attribute parseHTML logic.
  * The Tiptap extension itself and the React node view require a browser
  * environment (jsdom + full editor setup) and are covered by smoke testing.
  */
 import { describe, expect, it } from 'vitest';
-import { isCircularEmbed } from './page-embed-node';
+import { isSelfEmbed } from './page-embed-node';
 
-describe('isCircularEmbed — direct self-embed (A embeds A)', () => {
+describe('isSelfEmbed — self-embed (A embeds A) · [SID:4381] 간접 순환 판정은 걷음', () => {
   it('returns true when docId matches currentDocId', () => {
-    expect(isCircularEmbed('doc-abc', 'doc-abc')).toBe(true);
+    expect(isSelfEmbed('doc-abc', 'doc-abc')).toBe(true);
   });
 
   it('returns false when docId differs from currentDocId', () => {
-    expect(isCircularEmbed('doc-abc', 'doc-xyz')).toBe(false);
+    expect(isSelfEmbed('doc-abc', 'doc-xyz')).toBe(false);
   });
 
   it('returns false when docId is null (no doc selected yet)', () => {
-    expect(isCircularEmbed(null, 'doc-abc')).toBe(false);
+    expect(isSelfEmbed(null, 'doc-abc')).toBe(false);
   });
 
   it('returns false when docId is undefined', () => {
-    expect(isCircularEmbed(undefined, 'doc-abc')).toBe(false);
+    expect(isSelfEmbed(undefined, 'doc-abc')).toBe(false);
   });
 
   it('returns false when currentDocId is undefined (editor not bound to a doc)', () => {
-    expect(isCircularEmbed('doc-abc', undefined)).toBe(false);
+    expect(isSelfEmbed('doc-abc', undefined)).toBe(false);
   });
 
   it('returns false when both are undefined', () => {
-    expect(isCircularEmbed(undefined, undefined)).toBe(false);
+    expect(isSelfEmbed(undefined, undefined)).toBe(false);
   });
 
   it('returns false when both are null/undefined mix', () => {
-    expect(isCircularEmbed(null, undefined)).toBe(false);
-  });
-});
-
-describe('isCircularEmbed — indirect cycle (A→B→A via embedChain)', () => {
-  it('returns true when currentDocId appears in embedChain (A embeds B, B embeds A)', () => {
-    // currentDoc = 'doc-a', target = 'doc-b', doc-b embeds doc-a → cycle
-    expect(isCircularEmbed('doc-b', 'doc-a', ['doc-a', 'doc-c'])).toBe(true);
-  });
-
-  it('returns true when currentDocId appears deep in embedChain (A→B→C→A)', () => {
-    expect(isCircularEmbed('doc-b', 'doc-a', ['doc-c', 'doc-d', 'doc-a'])).toBe(true);
-  });
-
-  it('returns false when embedChain does not contain currentDocId', () => {
-    expect(isCircularEmbed('doc-b', 'doc-a', ['doc-c', 'doc-d'])).toBe(false);
-  });
-
-  it('returns false when embedChain is empty', () => {
-    expect(isCircularEmbed('doc-b', 'doc-a', [])).toBe(false);
-  });
-
-  it('defaults to empty embedChain when not provided — no cycle', () => {
-    expect(isCircularEmbed('doc-b', 'doc-a')).toBe(false);
-  });
-
-  it('returns false when docId is null even if embedChain contains currentDocId', () => {
-    // No target doc selected — cannot form a cycle
-    expect(isCircularEmbed(null, 'doc-a', ['doc-a'])).toBe(false);
-  });
-
-  it('returns false when currentDocId is undefined even if embedChain is non-empty', () => {
-    expect(isCircularEmbed('doc-b', undefined, ['doc-x', 'doc-y'])).toBe(false);
-  });
-
-  it('direct self-embed takes priority regardless of embedChain', () => {
-    // docId === currentDocId is caught before checking embedChain
-    expect(isCircularEmbed('doc-a', 'doc-a', [])).toBe(true);
+    expect(isSelfEmbed(null, undefined)).toBe(false);
   });
 });
 

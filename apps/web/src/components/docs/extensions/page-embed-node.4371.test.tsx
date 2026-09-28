@@ -74,7 +74,6 @@ describe('임베드 입력칸 제출 실패 — 입력칸 아래 오류 한 줄(
   it.each([
     ['찾을 수 없음(404)', () => status(404), docs.pageEmbedNotFound],
     ['불가(403)', () => status(403), docs.pageEmbedUnavailable],
-    ['순환(대상의 embedChain에 지금 문서)', () => ok({ id: 'doc-b', title: 'B', icon: null, slug: 'b', embedChain: [CURRENT] }), docs.pageEmbedCycle],
     ['불러오기 실패(네트워크)', () => { throw new Error('offline'); }, docs.pageEmbedLoadFailed],
   ])('%s → role=alert 오류 줄 · 입력값 유지 · 초점은 입력칸', async (_label, respond, message) => {
     fetchMock.mockImplementation(async () => respond());
@@ -89,7 +88,7 @@ describe('임베드 입력칸 제출 실패 — 입력칸 아래 오류 한 줄(
 
   it('오류 뒤 올바른 slug를 넣으면 오류가 사라지고 임베드된다', async () => {
     fetchMock.mockImplementationOnce(async () => status(404));
-    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '기획서', icon: null, slug: 'plan', embedChain: [] }));
+    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '기획서', icon: null, slug: 'plan' }));
     await mount(EMPTY);
     await submit('plna');
     expect(alert()).not.toBeNull();
@@ -112,17 +111,18 @@ describe('저장된 임베드 — 열 때 한 번 조회(story #4371 AC3 · AC5)
     expect(container.textContent).not.toContain('옛 제목');
   });
 
-  it('순환 → 순환 오류 · 문장은 낱말 단위로 줄을 바꾼다(break-keep · 유나 판)', async () => {
-    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan', embedChain: [CURRENT] }));
+  // [SID:4381] 예전엔 «순환» 오류로 이 규칙을 봤다(간접 순환 판정은 걷음) — 같은 오류 카드의 «찾을 수 없음»으로 본다.
+  it('오류 문장은 낱말 단위로 줄을 바꾼다(break-keep · 유나 판)', async () => {
+    fetchMock.mockImplementation(async () => status(404));
     await mount(SAVED);
     const card = container.querySelector('[data-testid="page-embed-error"]')!;
-    expect(card.textContent).toContain(docs.pageEmbedCycle);
-    const text = Array.from(card.querySelectorAll('span')).find((el) => el.textContent === docs.pageEmbedCycle)!;
+    expect(card.textContent).toContain(docs.pageEmbedNotFound);
+    const text = Array.from(card.querySelectorAll('span')).find((el) => el.textContent === docs.pageEmbedNotFound)!;
     expect(text.className).toContain('break-keep');
   });
 
   it('제목 · 아이콘이 바뀜 → 최신 값으로 그리되 속성(문서 내용)은 쓰지 않는다 — 열기 = 읽기(PO 4371)', async () => {
-    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '새 제목', icon: '🗂️', slug: 'plan-v2', embedChain: [] }));
+    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '새 제목', icon: '🗂️', slug: 'plan-v2' }));
     await mount(SAVED);
     const card = container.querySelector('[data-testid="page-embed-preview"]')!;
     expect(card.textContent).toContain('새 제목');
@@ -133,7 +133,7 @@ describe('저장된 임베드 — 열 때 한 번 조회(story #4371 AC3 · AC5)
   });
 
   it('값이 같으면 정상 표시 그대로 · 속성 쓰기 0 · 조회는 한 번', async () => {
-    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan', embedChain: [] }));
+    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan' }));
     await mount(SAVED);
     const card = container.querySelector('[data-testid="page-embed-preview"]')!;
     expect(card.textContent).toContain('옛 제목');
@@ -149,12 +149,12 @@ describe('저장된 임베드 — 열 때 한 번 조회(story #4371 AC3 · AC5)
     await mount(SAVED);
     expect(container.querySelector('[data-testid="page-embed-preview"]')?.textContent).toContain('옛 제목');
     expect(container.querySelector('[data-testid="page-embed-loading"]')).toBeNull();
-    await act(async () => { release(ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan', embedChain: [] })); });
+    await act(async () => { release(ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan' })); });
     await settle();
   });
 
   it('StrictMode(효과 두 번)에서도 열 때 조회는 한 번 — 같은 대상 이중 조회를 막는 ref(PR 설명 고정 · 까디르)', async () => {
-    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan', embedChain: [] }));
+    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan' }));
     await mount(SAVED, { strict: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-testid="page-embed-preview"]')?.textContent).toContain('옛 제목');

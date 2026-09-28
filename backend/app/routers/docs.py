@@ -377,7 +377,6 @@ class DocPreviewResponse(BaseModel):
     title: str
     icon: str | None = None
     slug: str
-    embed_chain: list[str] = []
     # #2168 PR-①: 크로스프로젝트 doc 링크가 "링크 자신이 속한 project 를 실어 나르는" 처방이라
     # 받는 쪽(FE embed-card)이 "현재 프로젝트"를 추측하지 않고 이 doc 의 실제 project 로 직행할
     # 수 있어야 한다 — project_id(2차 조회 스코프용) + org_slug/project_slug(경로 세그먼트,
@@ -467,7 +466,6 @@ async def get_doc_preview(
         title=doc.title,
         icon=doc.icon,
         slug=doc.slug,
-        embed_chain=[],
         project_id=doc.project_id,
         org_slug=org_slug,
         project_slug=project_slug,

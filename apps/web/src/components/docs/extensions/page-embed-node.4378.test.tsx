@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * [SID:4378] 입력칸에 **그 문서 자신**의 slug · id를 넣으면 «서로를 임베드하는 문서라…»(pageEmbedCycle)가 나갔다 — 상황은 «자기 자신»인데
+ * [SID:4378] 입력칸에 **그 문서 자신**의 slug · id를 넣으면 «서로를 임베드하는 문서라…»(옛 pageEmbedCycle)가 나갔다 — 상황은 «자기 자신»인데
  * «서로를»이라 말함. 자기 자신이면 저장된 자기 임베드 갈래와 같은 «문서는 자기 자신을 임베드할 수 없어요»(pageEmbedSelf) ·
- * 진짜 순환(A↔B)은 지금 문구 그대로. 틀은 page-embed-node.4371.test.tsx와 같다.
+ * [SID:4381] 간접 순환(A↔B) 판정은 걷었다 — 서로 임베드는 막지 않는다. 틀은 page-embed-node.4371.test.tsx와 같다.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useState, type ReactNode } from 'react';
@@ -72,20 +72,21 @@ describe('[SID:4378] 입력칸에 자기 문서 — «자기 자신» 문구', (
     ['slug', 'current-doc'],
     ['id', CURRENT],
   ])('자기 문서 %s(%s) → «자기 자신» 문구 한 줄(role=alert) · 입력값 유지 · 초점은 입력칸 · 속성 쓰기 0', async (_kind, value) => {
-    fetchMock.mockImplementation(async () => ok({ id: CURRENT, title: '지금 문서', icon: null, slug: 'current-doc', embedChain: [] }));
+    fetchMock.mockImplementation(async () => ok({ id: CURRENT, title: '지금 문서', icon: null, slug: 'current-doc' }));
     await mount();
     await submit(value);
     expect(alert()?.textContent).toBe(docs.pageEmbedSelf);
-    expect(alert()?.textContent).not.toBe(docs.pageEmbedCycle);
     expect(input()?.value).toBe(value);
     expect(document.activeElement).toBe(input());
     expect(updates).toEqual([]);
   });
 
-  it('진짜 순환(대상의 embedChain에 지금 문서 · A↔B)은 지금 문구 그대로', async () => {
-    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: 'B', icon: null, slug: 'b', embedChain: [CURRENT] }));
+  // [SID:4381] 실제 미리보기 응답 계약(id · 제목 · 아이콘 · slug · 프로젝트 — 순환 정보 없음) 그대로. B가 이미 A를 임베드해도 막지 않는다.
+  it('서로 임베드(A↔B)는 막지 않는다 — 오류 0 · 대상이 임베드된다', async () => {
+    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: 'B', icon: null, slug: 'b', projectId: 'p1', orgSlug: 'o', projectSlug: 'p' }));
     await mount();
     await submit('b');
-    expect(alert()?.textContent).toBe(docs.pageEmbedCycle);
+    expect(alert()).toBeNull();
+    expect(updates).toEqual([{ docId: 'doc-b', title: 'B', icon: null, slug: 'b' }]);
   });
 });
