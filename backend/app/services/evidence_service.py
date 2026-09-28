@@ -31,6 +31,12 @@ async def batch_has_evidence(
     return set(result.scalars().all())
 
 
+def gate_approval_filter(work_item_type: str) -> tuple:
+    """human_verified 신호원 조건(work_item_id 매칭 제외) — `batch_human_verified`와 story #4299 목록 한 문장
+    (`story_list_facts`)이 같은 조건을 쓴다(따로 적으면 두 판정이 갈린다)."""
+    return (Evidence.work_item_type == work_item_type, Evidence.type == "gate_approval")
+
+
 async def batch_human_verified(
     session: AsyncSession, work_item_ids: list[uuid.UUID], work_item_type: str
 ) -> dict[uuid.UUID, Evidence]:
@@ -44,9 +50,8 @@ async def batch_human_verified(
         return {}
     result = await session.execute(
         select(Evidence).where(
-            Evidence.work_item_type == work_item_type,
+            *gate_approval_filter(work_item_type),
             Evidence.work_item_id.in_(work_item_ids),
-            Evidence.type == "gate_approval",
         ).order_by(Evidence.created_at.desc())
     )
     latest: dict[uuid.UUID, Evidence] = {}

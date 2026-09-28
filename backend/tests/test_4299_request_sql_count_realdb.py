@@ -8,6 +8,11 @@ dev 실측(db_timing): GET /api/v2/stories 한 번에 SQL 24 · /glance/attentio
 - org slug · project slug 두 번 → `resolve_org_and_project_slugs` 한 번
 - attention의 story_activities max 두 번(in-review 진입 · 마지막 상태 변화) → 한 번
 
+그다음(dev EXPLAIN · PO 2026-09-28 — 요청 하나의 DB 안쪽 합 약 22ms인데 앱이 잰 SQL 합 79ms · 남는 약 70%가 문장마다 오가는 왕복):
+- stories 14 → 4: 붙이기 아홉(assignee · 위임 · evidence 둘 · 가설 · slug · trust 셋 + 안 쓰던 scope 하나)을 한 문장(`story_list_facts`) ·
+  목록 + count를 한 문장(count(*) over()). 남는 넷 = 인증 · 스코프 · 목록 · 붙이기.
+- attention 12 → 8: in-review story와 그 판정 셋 · in-review 진입 시각을 한 문장, stalled 모집단과 마지막 상태 변화를 한 문장.
+
 가드: 목록 행 10 → 100에서 SQL 수가 같다(N+1 0) · 수가 상한 이하다(위 중 하나라도 되돌리면 RED).
 에이전트 키 요청은 응답 뒤 기록(tool_calls INSERT · agent_runs 조회)이 다음 요청의 창에 섞여 수가 흔들려 사람 JWT로 잰다.
 """
@@ -24,8 +29,8 @@ _RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DAT
 _ASYNC = _RAW.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
 pytestmark = [pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip"), pytest.mark.anyio]
 
-STORIES_SQL_MAX = 14
-ATTENTION_SQL_MAX = 12
+STORIES_SQL_MAX = 4
+ATTENTION_SQL_MAX = 8
 
 
 @pytest.fixture

@@ -75,6 +75,58 @@ def derive_exception_signals(facts: TrustFacts) -> dict[str, bool]:
     }
 
 
+# story #4299 — 신호별 조건(story id 매칭 제외)을 한 곳에: 아래 batch_*(id IN 목록)와 목록 한 문장(`story_list_facts`, id = 행마다)이
+# 같은 조건을 쓴다. 조건을 두 군데 적으면 두 판정이 갈린다(#3336 드리프트와 같은 부류).
+def pending_human_gate_filter(org_id: uuid.UUID) -> tuple:
+    return (
+        Gate.org_id == org_id,
+        Gate.work_item_type == "story",
+        Gate.status == "pending",
+        Gate.requires_human.is_(True),
+    )
+
+
+def verify_fail_filter(org_id: uuid.UUID) -> tuple:
+    return (
+        Gate.org_id == org_id,
+        Gate.work_item_type == "story",
+        Gate.gate_type == "merge",
+        Gate.evidence_status == "blocked",
+    )
+
+
+def unresolved_blocker_select(org_id: uuid.UUID):
+    """막힌 story(to_id)를 내는 SELECT — 호출부가 `ItemDependency.to_id` 매칭을 더한다."""
+    blocker = aliased(Story)
+    return (
+        select(ItemDependency.to_id)
+        .select_from(ItemDependency)
+        .join(blocker, blocker.id == ItemDependency.from_id)
+        .where(
+            ItemDependency.org_id == org_id,
+            ItemDependency.dep_type == "blocks",
+            ItemDependency.item_type == "story",
+            blocker.status != "done",
+            blocker.deleted_at.is_(None),
+        )
+    )
+
+
+def confident_pr_link_filter(org_id: uuid.UUID) -> tuple:
+    """scope_violation을 볼 PR 링크 — confident(should_auto_close와 같은 신뢰 등급) · 살아 있는 것."""
+    return (
+        PullRequestStoryLink.org_id == org_id,
+        PullRequestStoryLink.deleted_at.is_(None),
+        or_(
+            PullRequestStoryLink.link_source == "explicit",
+            and_(
+                PullRequestStoryLink.link_source.in_(("auto_match", "sid")),
+                PullRequestStoryLink.confidence == "high",
+            ),
+        ),
+    )
+
+
 async def batch_pending_human_gate(
     session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID]
 ) -> set[uuid.UUID]:
@@ -82,13 +134,7 @@ async def batch_pending_human_gate(
     if not story_ids:
         return set()
     result = await session.execute(
-        select(Gate.work_item_id).where(
-            Gate.org_id == org_id,
-            Gate.work_item_type == "story",
-            Gate.work_item_id.in_(story_ids),
-            Gate.status == "pending",
-            Gate.requires_human.is_(True),
-        )
+        select(Gate.work_item_id).where(*pending_human_gate_filter(org_id), Gate.work_item_id.in_(story_ids))
     )
     return set(result.scalars().all())
 
@@ -102,13 +148,7 @@ async def batch_verify_fail(
     if not story_ids:
         return set()
     result = await session.execute(
-        select(Gate.work_item_id).where(
-            Gate.org_id == org_id,
-            Gate.work_item_type == "story",
-            Gate.work_item_id.in_(story_ids),
-            Gate.gate_type == "merge",
-            Gate.evidence_status == "blocked",
-        )
+        select(Gate.work_item_id).where(*verify_fail_filter(org_id), Gate.work_item_id.in_(story_ids))
     )
     return set(result.scalars().all())
 
@@ -119,20 +159,7 @@ async def batch_unresolved_blocker(
     """blocked 신호원 — glance.py 기존 blocked 판정과 동형(막는 쪽도 미완인 미해소 blocks-dep)."""
     if not story_ids:
         return set()
-    blocker = aliased(Story)
-    result = await session.execute(
-        select(ItemDependency.to_id)
-        .select_from(ItemDependency)
-        .join(blocker, blocker.id == ItemDependency.from_id)
-        .where(
-            ItemDependency.org_id == org_id,
-            ItemDependency.dep_type == "blocks",
-            ItemDependency.item_type == "story",
-            ItemDependency.to_id.in_(story_ids),
-            blocker.status != "done",
-            blocker.deleted_at.is_(None),
-        )
-    )
+    result = await session.execute(unresolved_blocker_select(org_id).where(ItemDependency.to_id.in_(story_ids)))
     return set(result.scalars().all())
 
 
@@ -147,18 +174,7 @@ async def batch_scope_violation(
     latest = (
         select(PullRequestStoryLink.story_id, PullRequestStoryLink.evidence)
         .distinct(PullRequestStoryLink.story_id)
-        .where(
-            PullRequestStoryLink.org_id == org_id,
-            PullRequestStoryLink.story_id.in_(story_ids),
-            PullRequestStoryLink.deleted_at.is_(None),
-            or_(
-                PullRequestStoryLink.link_source == "explicit",
-                and_(
-                    PullRequestStoryLink.link_source.in_(("auto_match", "sid")),
-                    PullRequestStoryLink.confidence == "high",
-                ),
-            ),
-        )
+        .where(*confident_pr_link_filter(org_id), PullRequestStoryLink.story_id.in_(story_ids))
         .order_by(PullRequestStoryLink.story_id, PullRequestStoryLink.updated_at.desc())
         .subquery()
     )
