@@ -3648,11 +3648,11 @@
         },
         "checklist": {
           "title": "Checklist",
-          "description": "Checklist"
+          "description": "List you can tick off"
         },
         "codeBlock": {
           "title": "Code Block",
-          "description": "Code block"
+          "description": "Code with syntax highlighting"
         },
         "blockquote": {
           "title": "Blockquote",
@@ -3680,7 +3680,7 @@
         },
         "mermaidDiagram": {
           "title": "Mermaid Diagram",
-          "description": "Insert diagram"
+          "description": "Flowcharts written as code"
         },
         "columns": {
           "title": "Columns",
