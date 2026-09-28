@@ -90,9 +90,6 @@ down_revision = "0354"
 branch_labels = None
 depends_on = None
 
-_SEGMENT_1_FILES = ["0282_platform_settings_vat_rate_bp.py"]
-_SEGMENT_2_FILES = ["0288_org_subscriptions_au_enforcement.py"]
-_SEGMENT_3_FILES = ["0291_billing_orders_receipt_url.py"]
 _SEGMENT_4_FILES = [
     "0296_org_domain_label.py",
     "0297_recipe_role_bindings.py",
@@ -199,33 +196,8 @@ def _require_exists(bind: sa.engine.Connection, table: str, column: str | None =
 def _replay_segments(bind: sa.engine.Connection) -> list[str]:
     summary: list[str] = []
 
-    inspector = sa.inspect(bind)
-    ps_cols = {c["name"] for c in inspector.get_columns("platform_settings")}
-    if "vat_rate_bp" not in ps_cols:
-        _replay(_SEGMENT_1_FILES)
-        summary.append("구간① 0282(platform_settings.vat_rate_bp): 재생함")
-    else:
-        summary.append("구간① 0282(platform_settings.vat_rate_bp): skip(이미 존재)")
-    _require_exists(bind, "platform_settings", "vat_rate_bp")
-
-    inspector = sa.inspect(bind)
-    os_cols = {c["name"] for c in inspector.get_columns("org_subscriptions")}
-    if "au_warn_80_notified_at" not in os_cols:
-        _replay(_SEGMENT_2_FILES)
-        summary.append("구간② 0288(org_subscriptions.au_warn_80_notified_at): 재생함")
-    else:
-        summary.append("구간② 0288(org_subscriptions.au_warn_80_notified_at): skip(이미 존재)")
-    _require_exists(bind, "org_subscriptions", "au_warn_80_notified_at")
-
-    inspector = sa.inspect(bind)
-    bo_cols = {c["name"] for c in inspector.get_columns("billing_orders")}
-    if "receipt_url" not in bo_cols:
-        _replay(_SEGMENT_3_FILES)
-        summary.append("구간③ 0291(billing_orders.receipt_url): 재생함")
-    else:
-        summary.append("구간③ 0291(billing_orders.receipt_url): skip(이미 존재)")
-    _require_exists(bind, "billing_orders", "receipt_url")
-
+    # prod 승격(결제 축 제외 · 2026-09-28 · story #4391): 구간①~③(0282 VAT · 0288 AU · 0291 영수증)은 결제 축이라 이 파일셋에 원본
+    # 마이그가 없다(main 08-31 · 09-18 승격이 지웠고 0283 · 0289 · 0292를 재봉합) — 재생 · 단언 둘 다 뺀다. 처방 C(1525a8a93)와 같은 판단.
     inspector = sa.inspect(bind)
     if "channel_connections" not in inspector.get_table_names():
         _replay(_SEGMENT_4_FILES)
