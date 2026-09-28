@@ -2366,6 +2366,10 @@ jobs:
       # story #4372 — 훅이 돌려주는 오류(error · loadError · loadFailed · …Failed)를 호출처가 버려 실패가 «없음»으로 보이는 클래스.
       - name: "Verify hook error results are read by callers (story #4372 regression guard)"
         run: pnpm --filter web verify:no-dropped-hook-error
+      # story #4375 — 접근 이름 없는 버튼(아이콘만 · aria-label 0)과 이름 없는 창(…Title · aria-label(ledby) 0) 클래스
+      # (목표 만들기 창 «✕»가 화면 읽기에 «버튼»으로만 읽힘 · 첫 전수 버튼 14 · 창 3 전부 고침 · grandfather 0).
+      - name: "Verify no nameless icon buttons or dialogs (story #4375 regression guard)"
+        run: pnpm --filter web verify:no-nameless-button
 
       # story #3880(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — #3876 가드의 자매 축(a): JSX
       # 텍스트 자식이 아니라 title/label/placeholder/description/aria-label/alt 같은

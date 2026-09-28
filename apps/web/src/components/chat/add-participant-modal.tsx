@@ -104,7 +104,7 @@ export function AddParticipantModal({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <DialogTitle className="text-sm font-semibold text-foreground">{t('addParticipantsTitle')}</DialogTitle>
-          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={onClose} aria-label={tc('close')} className="text-muted-foreground hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
         </div>

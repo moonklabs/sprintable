@@ -162,3 +162,14 @@ describe('StorageDeleteDialog — #3241 삭제 왕복 + 에러 카피', () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 });
+
+// [SID:4375] AC5 — 머리 줄이 보이는 제목인데 DialogTitle이 아니라 창 이름이 0이었다(화면 읽기가 «대화 상자»로만 읽음).
+describe('StorageDeleteDialog — 창 접근 이름([SID:4375])', () => {
+  it('창(role=dialog) aria-labelledby → 머리 줄 «deleteTitle»', () => {
+    renderDialog(makeAsset(0));
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
+    const labelledby = dialog.getAttribute('aria-labelledby');
+    expect(labelledby).toBeTruthy();
+    expect(document.getElementById(labelledby!)?.textContent?.trim()).toBe(koMessages.storage.deleteTitle);
+  });
+});

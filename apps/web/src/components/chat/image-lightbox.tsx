@@ -151,6 +151,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
       <DialogPortal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/90 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
         <DialogPrimitive.Popup data-modal-popup=""
+          aria-label={current.alt}
           className="fixed inset-0 z-50 flex flex-col outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}

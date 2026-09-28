@@ -882,6 +882,7 @@ export default function RetroSessionPage() {
                               type="button"
                               role="checkbox"
                               aria-checked={isDone}
+                              aria-label={action.title}
                               onClick={() => void toggleActionStatus(action)}
                               disabled={togglingActionId === action.id}
                               className={cn(

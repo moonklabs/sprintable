@@ -380,7 +380,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                     />
                   </div>
                   <Sheet open={narrowContextOpen} onOpenChange={setNarrowContextOpen}>
-                    <SheetContent side="right" className="w-full p-0 sm:max-w-sm">
+                    <SheetContent side="right" className="w-full p-0 sm:max-w-sm" aria-label={t('contextPanelTitle')}>
                       <ChatV3ContextPanel
                         conversationId={selectedThread.id}
                         conversationProjectId={selectedThread.project_id ?? null}

@@ -995,6 +995,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           className="h-9 w-9 flex-shrink-0 rounded-xl"
           onClick={() => void (steerMode ? handleSendSteer() : handleSend())}
           disabled={steerMode ? !canSteerSend : !canSend}
+          aria-label={t('sendAction')}
         >
           <Send className="h-4 w-4" />
         </Button>
