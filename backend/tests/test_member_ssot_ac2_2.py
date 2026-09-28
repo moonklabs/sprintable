@@ -33,7 +33,7 @@ def test_notification_preferences_member_id_has_no_team_members_fk():
     assert "team_members" not in referred_tables
 
 
-# ── get_project_scoped_org_id: has_project_access 위임 (740e3b7e) ─────────────
+# ── get_project_scoped_org_id: has_project_access 위임 (740e3b7e · #4299부터 org 조회와 한 SQL: project_org_and_access) ─────────────
 
 @pytest.mark.anyio
 async def test_get_project_scoped_grant_only_allows():
@@ -49,12 +49,9 @@ async def test_get_project_scoped_grant_only_allows():
     ctx.claims = {"app_metadata": {"org_id": str(project_org)}}
 
     db = AsyncMock()
-    proj_result = MagicMock()
-    proj_result.scalar_one_or_none.return_value = project_org
-    db.execute = AsyncMock(return_value=proj_result)
 
     with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=project_org)), \
-         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)), \
+         patch("app.services.project_auth.project_org_and_access", new=AsyncMock(return_value=(project_org, True))), \
          patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(db)):
         result = await get_project_scoped_org_id(
             project_id=project_id, auth=ctx, x_org_id=None, request=None
@@ -76,18 +73,16 @@ async def test_get_project_scoped_no_access_403():
     ctx.claims = {"app_metadata": {"org_id": str(project_org)}}
 
     db = AsyncMock()
-    proj_result = MagicMock()
-    proj_result.scalar_one_or_none.return_value = project_org
-    db.execute = AsyncMock(return_value=proj_result)
 
     with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=project_org)), \
-         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=False)), \
+         patch("app.services.project_auth.project_org_and_access", new=AsyncMock(return_value=(project_org, False))), \
          patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(db)):
         with pytest.raises(HTTPException) as exc:
             await get_project_scoped_org_id(
                 project_id=project_id, auth=ctx, x_org_id=None, request=None
             )
     assert exc.value.status_code == 403
+    assert exc.value.detail == "해당 프로젝트의 멤버가 아닌"  # org는 맞고 접근 판정이 거부
 
 
 # ── c6b82459: cross-org re-entry 차단 (0-project switch 직후 stale project_id) ──
@@ -111,20 +106,19 @@ async def test_get_project_scoped_cross_org_without_header_rejected():
     ctx.claims = {"app_metadata": {"org_id": str(scoped_org)}}
 
     db = AsyncMock()
-    proj_result = MagicMock()
-    proj_result.scalar_one_or_none.return_value = project_org
-    db.execute = AsyncMock(return_value=proj_result)
 
-    has_access = AsyncMock(return_value=True)
+    # story #4299: org 조회와 접근 판정이 한 SQL이라 «판정을 안 부른다»가 아니라 «판정이 True여도 org 가드가 거부»로 본다.
+    has_access = AsyncMock(return_value=(project_org, True))
     with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=scoped_org)), \
-         patch("app.services.project_auth.has_project_access", new=has_access), \
+         patch("app.services.project_auth.project_org_and_access", new=has_access), \
          patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(db)):
         with pytest.raises(HTTPException) as exc:
             await get_project_scoped_org_id(
                 project_id=project_id, auth=ctx, x_org_id=None, request=None
             )
     assert exc.value.status_code == 403
-    has_access.assert_not_awaited()  # cross-org 가드가 access 체크보다 먼저 차단
+    has_access.assert_awaited_once()
+    assert exc.value.detail == "요청한 org 스코프와 다른 org 의 프로젝트에 접근할 수 없습니다"  # 접근 판정 True여도 cross-org 가드가 거부
 
 
 @pytest.mark.anyio
@@ -142,13 +136,10 @@ async def test_get_project_scoped_cross_org_with_matching_header_allowed():
     ctx.claims = {"app_metadata": {"org_id": str(uuid.uuid4())}}  # JWT 는 다른 org
 
     db = AsyncMock()
-    proj_result = MagicMock()
-    proj_result.scalar_one_or_none.return_value = project_org
-    db.execute = AsyncMock(return_value=proj_result)
 
     # X-Org-Id=project_org 명시 → get_verified_org_id 가 membership 검증 후 project_org 반환
     with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=project_org)), \
-         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)), \
+         patch("app.services.project_auth.project_org_and_access", new=AsyncMock(return_value=(project_org, True))), \
          patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(db)):
         result = await get_project_scoped_org_id(
             project_id=project_id, auth=ctx, x_org_id=str(project_org), request=None

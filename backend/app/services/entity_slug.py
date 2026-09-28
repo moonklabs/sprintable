@@ -10,7 +10,8 @@ import re
 import unicodedata
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import false, func, select
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.doc_slug import MAX_SLUG_LEN, slugify
@@ -209,6 +210,27 @@ async def resolve_project_slugs(
     return {pid: slug for pid, slug in rows}
 
 
+
+async def resolve_org_and_project_slugs(
+    session: AsyncSession, org_id: uuid.UUID,
+    project_ids: set[uuid.UUID] | list[uuid.UUID] | list[uuid.UUID | None],
+) -> tuple[str, dict[uuid.UUID, str | None]]:
+    """story #4299: `resolve_org_slug` + `resolve_project_slugs`를 한 번에 읽는다(요청당 SQL 2 → 1).
+    결과 규약은 두 헬퍼와 같다 — org가 없으면 `scalar_one()`처럼 NoResultFound, 없는 project_id는 맵에서 빠진다."""
+    from app.models.organization import Organization
+    from app.models.project import Project
+
+    ids = {pid for pid in project_ids if pid is not None}
+    rows = (await session.execute(
+        select(Organization.slug, Project.id, Project.slug)
+        .select_from(Organization)
+        .outerjoin(Project, Project.id.in_(ids) if ids else false())
+        .where(Organization.id == org_id)
+    )).all()
+    if not rows:
+        raise NoResultFound("No row was found when one was required")
+    return rows[0][0], {pid: slug for _, pid, slug in rows if pid is not None}
+
 __all__ = [
     "slugify",
     "slugify_ascii",
@@ -220,6 +242,7 @@ __all__ = [
     "resolve_unique_workspace_slug",
     "is_project_slug_taken",
     "resolve_unique_project_slug",
+    "resolve_org_and_project_slugs",
     "resolve_org_slug",
     "resolve_project_slugs",
 ]

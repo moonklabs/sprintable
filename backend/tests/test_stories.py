@@ -100,6 +100,8 @@ async def test_list_stories_200():
         # project_id query → get_project_scoped_org_id 의 project→org 조회. 실제 불변식
         # (project 는 스코프 org 소속)을 반영: 같은 org 여야 cross-org 가드(c6b82459) 통과.
         mock_result.scalar_one_or_none.return_value = ORG_ID
+        # story #4299: project org 조회 · 접근 판정이 한 SQL(project_org_and_access) — 한 행 (org, 접근 여부).
+        mock_result.one.return_value = (ORG_ID, True)
         session.execute = AsyncMock(return_value=mock_result)
 
         # story #2459: get_project_scoped_org_id가 전용 단명 세션(async_session_factory())을

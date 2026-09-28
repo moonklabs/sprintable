@@ -865,12 +865,14 @@ async def get_project_scoped_org_id(
     if not project_id:
         return base_org_id
 
-    from app.models.project import Project
+    # story #4299: project의 org와 접근 판정(has_project_access와 같은 SSOT predicate)을 한 SQL · 한 세션으로 읽는다.
+    # 판정은 스코프 org(base_org_id) 기준 — 아래에서 project org가 그와 다르면 판정과 무관하게 403이고, 같으면
+    # has_project_access(…, project_org_id)와 같은 값이다.
+    from app.services.project_auth import project_org_and_access
     async with async_session_factory() as db:
-        result = await db.execute(
-            select(Project.org_id).where(Project.id == project_id)
+        project_org_id, allowed = await project_org_and_access(
+            db, uuid.UUID(auth.user_id), project_id, base_org_id,
         )
-        project_org_id = result.scalar_one_or_none()
     if not project_org_id:
         return base_org_id
 
@@ -890,9 +892,6 @@ async def get_project_scoped_org_id(
     #   - owner/admin은 rowless 접근 유지 (OSS fresh install, team_members 미생성 포함)
     #   - grant-only 휴먼(project_access)도 project 접근 허용 (740e3b7e 에픽403 해소)
     #   - 동일 org 내 다른 project 미멤버 우회 방지(project 스코프)는 그대로 유지
-    from app.services.project_auth import has_project_access
-    async with async_session_factory() as db:
-        allowed = await has_project_access(db, uuid.UUID(auth.user_id), project_id, project_org_id)
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
