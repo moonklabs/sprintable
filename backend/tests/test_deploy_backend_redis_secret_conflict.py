@@ -191,6 +191,13 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   dev에 넣은 값은 `--update-env-vars`가 추가형이라 그대로 남으므로 **모든 환경에서 명시 제거**(백엔드 REMOVE_ENV_VARS · 프런트
   `--remove-env-vars`). 읽는 코드가 없어 남아도 무해하지만 «꺼진 스위치가 켜진 채 남은 설정»을 두지 않는다. 다음 배포 정리 때 이 이름을
   제거 목록에서도 뺀다.
+- **story #4398 RM_SECRETS(PO 결정 2026-09-29)**: `EDGE_CLIENT_IP_SECRET`은 dev만 `SECRETS_FLAG`(`--update-secrets`)로 붙이고
+  prod는 `RM_SECRETS`=`--remove-secrets=EDGE_CLIENT_IP_SECRET`로 명시 제거(«밖은 명시 제거» 규칙 — 손으로 붙인 값도 다음 배포가 뗀다).
+  SECRETS_FLAG 블록 밖 별도 변수인 이유: infra/check_secrets_flag_env_symmetry.py · cloudbuild_secret_refs.py가 `--update-secrets=` 한
+  따옴표 안을 KEY=VALUE 목록으로 읽는다. 붙은 적 없는 키 제거는 gcloud가 건너뛴다(command_lib/run/config_changes.py `_PruneMapping`:
+  `if var_or_path in mapping: del mapping[var_or_path]`) · `--update-secrets`와 `--remove-secrets`는 같이 쓸 수 있다(flags.py
+  MapFlagsNoFile: «Only --update-{0} and --remove-{0} can be used together … --remove-{0} will be applied first»). dev엔 remove를 넣지
+  않는다(같은 키 update와 겹치지 않게). prod 승격 때 _PROD 시크릿을 SECRETS_FLAG prod 갈래에 넣으면서 이 remove를 걷는다.
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
 
@@ -854,6 +861,42 @@ def test_deploy_removes_xff_probe_flag_everywhere_after_observation():
     frontend = frontend[: frontend.index("--quiet")]
     assert "--remove-env-vars=XFF_PROBE_ENABLED" in frontend, frontend
     assert "XFF_PROBE_ENABLED=true" not in cloudbuild
+
+
+def _run_frontend_deploy_argv(deploy_env: str) -> list[str]:
+    """deploy-frontend 스텝을 gcloud만 가로채 실행 — `gcloud run deploy`가 실제로 받는 인자 목록(따옴표 · 단어 나눔 적용 뒤)."""
+    script = _apply_cloudbuild_escaping(_extract_step_script("deploy-frontend"))
+    stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
+    env = {
+        **os.environ,
+        "_DEPLOY_ENV": deploy_env, "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
+        "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
+        "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
+        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2",
+    }
+    proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
+    return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
+
+
+def test_deploy_edge_client_ip_secret_attached_on_dev_and_removed_on_prod():
+    """story #4398(PO 2026-09-29) — EDGE_CLIENT_IP_SECRET은 dev만 `--update-secrets`로 붙이고, prod는 프런트 · 백엔드 둘 다
+    `--remove-secrets`로 명시 제거(«밖은 명시 제거» 규칙 · 손으로 붙인 값도 다음 배포가 뗀다). dev엔 remove가 없다(같은 키 update와
+    겹치지 않게). 붙은 적 없는 키 제거는 gcloud `_PruneMapping`(`if var_or_path in mapping: del`)이 건너뛴다."""
+    remove = "--remove-secrets=EDGE_CLIENT_IP_SECRET"
+    fe_dev, fe_prod = _run_frontend_deploy_argv("dev"), _run_frontend_deploy_argv("prod")
+    assert "--update-secrets=EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest" in fe_dev, fe_dev
+    assert not [a for a in fe_dev if a.startswith("--remove-secrets")], fe_dev
+    assert remove in fe_prod, fe_prod
+    assert not [a for a in fe_prod if "EDGE_CLIENT_IP_SECRET_DEV" in a], fe_prod
+
+    dev_flag = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="SECRETS_FLAG")
+    assert "EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest" in dev_flag.split(",")
+    assert _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="RM_SECRETS") == ""
+    assert "EDGE_CLIENT_IP_SECRET" not in _run_env_vars_assembly("prod", "", var="SECRETS_FLAG")
+    assert _run_env_vars_assembly("prod", "", var="RM_SECRETS") == remove
+    script = _extract_deploy_backend_script()
+    call = script[script.index("gcloud run deploy sprintable-backend"):]
+    assert "$${RM_SECRETS}" in call[: call.index("--quiet")], call
 
 
 def test_deploy_backend_gcloud_uses_assembled_remove_list():

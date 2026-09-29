@@ -728,6 +728,9 @@ steps:
           # story #4219 C1(PO 판정) — 첫 문서 서버 구간 마커(Server-Timing 헤더·로그 한 줄 · 이름·시간만). dev 분기에서만
           # 싣고 prod엔 안 실어 미설정 = 꺼짐(값이 정확히 "true"일 때만 켜진다 — lib/server-timing.isServerTimingEnabled).
           ENV_VARS="$${ENV_VARS},SERVER_TIMING_MARKERS=true"
+        elif [ "${_DEPLOY_ENV}" == "prod" ]; then
+          # #4398 — prod는 명시 제거(손으로 붙여도 다음 배포가 뗀다 · 없는 키 제거는 gcloud가 건너뜀).
+          FE_SECRETS="--remove-secrets=EDGE_CLIENT_IP_SECRET"
         fi
         gcloud run deploy sprintable-frontend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA} \
@@ -842,7 +845,7 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},SANDBOX_CHANNEL_ENABLED=true"
         fi
-        # #4332 DB_TIMING_LOG_ENABLED(dev만) · #4398 XFF_PROBE_ENABLED(걷은 관측 · 전 환경 제거) — 사유는 아카이브.
+        # #4332 DB_TIMING_LOG_ENABLED(dev만) · #4398 XFF_PROBE_ENABLED(전 환경 제거) — 아카이브.
         REMOVE_ENV_VARS="REDIS_CONSUME_ENABLED,XFF_PROBE_ENABLED"
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           ENV_VARS="$${ENV_VARS},DB_TIMING_LOG_ENABLED=true"
@@ -857,21 +860,22 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_GOTENBERG_SERVICE_URL}" ]; then
           ENV_VARS="$${ENV_VARS},GOTENBERG_SERVICE_URL=${_GOTENBERG_SERVICE_URL}"
         fi
-        # story #3279 — SUPPORT_GATEWAY_OPERATOR_REPLY_URL(dev만·빈 값이면 미배선).
+        # #3279 · #183fe7a5 — SUPPORT_GATEWAY_*_URL 둘(dev만·빈 값이면 미배선).
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}" ]; then
           ENV_VARS="$${ENV_VARS},SUPPORT_GATEWAY_OPERATOR_REPLY_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}/api/v1/internal/operator-replies"
         fi
-        # story #183fe7a5 — SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL(위와 동일 게이트).
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}" ]; then
           ENV_VARS="$${ENV_VARS},SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}/api/v1/internal/escalation-resolution"
         fi
-        # story #2445/#3110/#3118/#f2a27d2a/f56bd418 — SECRETS_FLAG(사유는 docstring 아카이브).
+        # #2445/#3110/#3118/#f2a27d2a/f56bd418 SECRETS_FLAG · #4398 RM_SECRETS — 아카이브.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_dev:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_DEV:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_DEV:latest,GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY=GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY_DEV:latest,EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_PROD:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_PROD:latest,GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY=GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY_PROD:latest"
         fi
+        RM_SECRETS=""
+        if [ "${_DEPLOY_ENV}" == "prod" ]; then RM_SECRETS="--remove-secrets=EDGE_CLIENT_IP_SECRET"; fi
         gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -880,7 +884,7 @@ steps:
           --timeout=${_BACKEND_TIMEOUT} \
           --allow-unauthenticated \
           --update-env-vars="$${ENV_VARS}" \
-          $${SECRETS_FLAG} \
+          $${SECRETS_FLAG} $${RM_SECRETS} \
           --remove-env-vars=$${REMOVE_ENV_VARS} \
           --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
