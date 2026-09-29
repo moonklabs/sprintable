@@ -55,7 +55,7 @@ export function VerifyPromptCopyFailedPanel({ failed, onDismiss, promptText, raw
         readOnly
         value={promptText}
         onFocus={(e) => e.currentTarget.select()}
-        className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+        className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-base lg:text-xs text-foreground"
         data-testid={rawTestId}
       />
     </div>

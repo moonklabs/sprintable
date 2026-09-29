@@ -273,7 +273,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
                   type="text"
                   placeholder={t('namePlaceholder')}
                   autoComplete="name"
-                  className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="w-full rounded-lg border border-border bg-background px-4 py-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   disabled={submitting}
@@ -283,7 +283,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
                 type="email"
                 placeholder={t2('email')}
                 autoComplete="email"
-                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={submitting}
@@ -292,7 +292,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
                 type="password"
                 placeholder={t2('password')}
                 autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
-                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && void handleSubmit()}

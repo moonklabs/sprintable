@@ -1370,7 +1370,7 @@ export default function SettingsPage() {
                                   value={draft}
                                   onChange={(e) => setWebhookEditing((prev) => ({ ...prev, [member.id]: e.target.value }))}
                                   placeholder={t('webhookUrlPlaceholder')}
-                                  className="min-w-0 flex-1 font-mono text-xs"
+                                  className="min-w-0 flex-1 font-mono"
                                 />
                                 <Button
                                   variant="hero"

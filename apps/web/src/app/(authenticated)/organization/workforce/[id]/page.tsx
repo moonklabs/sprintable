@@ -655,7 +655,7 @@ export default function AgentDetailPage() {
                   value={webhookUrl}
                   onChange={(e) => setWebhookUrl(e.target.value)}
                   placeholder="https://your-agent.example.com/webhook"
-                  className="flex-1 font-mono text-xs"
+                  className="flex-1 font-mono"
                   disabled={!webhookActive || !canEditWebhook}
                 />
                 <Button
