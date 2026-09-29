@@ -454,11 +454,6 @@ from app.core.request_db_timing import RequestDbTimingMiddleware, timing_enabled
 if timing_enabled():
     app.add_middleware(RequestDbTimingMiddleware)
 
-# story #4398 ④ — 임시 관측(XFF 칸 모양). XFF_PROBE_ENABLED일 때만 단다 · dev만 · ④ 판정 뒤 걷음.
-from app.core.xff_probe import install_xff_probe  # noqa: E402
-
-install_xff_probe(app)
-
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(activity_logs.router)

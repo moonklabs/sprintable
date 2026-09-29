@@ -279,9 +279,7 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     assert "BACKEND_REQUEST_TIMEOUT_SECONDS" in keys and "PUBLICATION_WORKER_SCHEDULER_DEADLINE_SECONDS" in keys
     # story #4397 — push_devices_by_user(push by person across orgs · dev on, prod off) 1필드 신설로 131→132.
     assert "PUSH_DEVICES_BY_USER" in keys
-    # story #4398 ④ — xff_probe_enabled 1필드 신설(임시 관측 · dev만 · 판정 뒤 걷음)로 132→133.
-    assert "XFF_PROBE_ENABLED" in keys
-    assert len(keys) == 133
+    assert len(keys) == 132
 
 
 def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():

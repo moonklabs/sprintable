@@ -186,15 +186,17 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(`app/core/request_db_timing.py`). 폴링 경로(designated-pending-count 등)
   때문에 양이 커 다른 환경은 미설정 = 기본 끔. 응답 헤더엔 싣지 않는다(존재 여부 누출 · PR 4697 CI). 배포 설정도
   코드라 PR로(PO) — 수동 env 주입 아님.
+- **story #4398 ④ 관측 걷음(PO 판정 2026-09-29 00:18Z)**: `XFF_PROBE_ENABLED`(XFF 칸 수 · 맨 오른쪽 · 소켓 주소 임시 관측 · PR 4798)는
+  «프런트 요청 1277건 전부 hops 2 · 오른쪽 끝 Cloudflare · run.app 직통은 hops 1 · 접속 주소»로 판정이 끝나 코드를 걷었다. 배포 43이
+  dev에 넣은 값은 `--update-env-vars`가 추가형이라 그대로 남으므로 **모든 환경에서 명시 제거**(백엔드 REMOVE_ENV_VARS · 프런트
+  `--remove-env-vars`). 읽는 코드가 없어 남아도 무해하지만 «꺼진 스위치가 켜진 채 남은 설정»을 두지 않는다. 다음 배포 정리 때 이 이름을
+  제거 목록에서도 뺀다.
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
 
 deploy-backend와 같은 이유로 deploy-realtime도 86%(8,640B)까지 자랐다 — 같은 처방
 (서사 외부화, 값/로직 무변경). 원문(요약 없이 옮김):
 
-- **story #4398 ④(PO 결정 2026-09-28)**: `XFF_PROBE_ENABLED=true`는 **dev에서만** — 요청마다 X-Forwarded-For 칸 수 · 맨 오른쪽 ·
-  소켓 주소 · trace 한 줄(app/core/xff_probe.py · 주소만, 헤더 원문 0). «XFF 오른쪽 끝 = 접속 주소» 판정용 **임시 관측**이라 판정 뒤
-  걷는다. `--update-env-vars`가 추가형이라 dev 밖에선 DB_TIMING과 같이 명시 제거한다(같은 분기 한 줄로 합쳐 바이트 여유 유지).
 - **⛔fail-fast(오르테가군 PO 2026-07-23)**: `_REALTIME_URL` 기본값을 dev URL에서 빈
   문자열로 내렸다(substitutions 주석 — prod 프론트가 dev realtime을 가리킬 여지 제거).
   frontend 쪽은 빈 값이 곧 "FASTAPI_URL로 폴백"이라 안전하지만, **여기서는 빈 값이
@@ -823,8 +825,6 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "SANDBOX_CHANNEL_ENABLED=true,"
         # story #4332 — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml 삽입 순서 그대로 · dev만).
         "DB_TIMING_LOG_ENABLED=true,"
-        # story #4398 ④ — 같은 dev 분기에서 이어 붙는 임시 관측 스위치(판정 뒤 걷음).
-        "XFF_PROBE_ENABLED=true,"
         # story e4fc29fa — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
@@ -836,14 +836,24 @@ def test_deploy_backend_removes_db_timing_flag_outside_dev():
     dev는 켜고(제거 목록에 없음) · prod는 제거 목록에 있다 · 옛 REDIS_CONSUME_ENABLED 제거는 두 쪽 다 그대로. 같은 키를 켜면서 지우지 않는다."""
     dev_remove = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="REMOVE_ENV_VARS").split(",")
     prod_remove = _run_env_vars_assembly("prod", "", var="REMOVE_ENV_VARS").split(",")
-    assert dev_remove == ["REDIS_CONSUME_ENABLED"]
-    # story #4398 ④ — XFF_PROBE_ENABLED(임시 관측)도 같은 규칙: dev만 켜고 · 밖에선 명시 제거.
-    assert prod_remove == ["REDIS_CONSUME_ENABLED", "DB_TIMING_LOG_ENABLED", "XFF_PROBE_ENABLED"]
+    assert dev_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED"]
+    assert prod_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED", "DB_TIMING_LOG_ENABLED"]
     dev_env = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
     assert "DB_TIMING_LOG_ENABLED=true" in dev_env.split(",")
-    assert "XFF_PROBE_ENABLED=true" in dev_env.split(",")
     assert "DB_TIMING_LOG_ENABLED" not in _run_env_vars_assembly("prod", "")
-    assert "XFF_PROBE_ENABLED" not in _run_env_vars_assembly("prod", "")
+
+
+def test_deploy_removes_xff_probe_flag_everywhere_after_observation():
+    """story #4398 — 임시 관측(XFF_PROBE_ENABLED) 코드를 걷은 뒤, 배포 43이 dev에 넣은 값은 `--update-env-vars`가 추가형이라 남는다 →
+    백엔드 · 프런트 둘 다 **모든 환경에서** 명시 제거(dev 포함). 켜는 쪽(ENV_VARS)에는 어디에도 없다."""
+    for deploy_env, redis in (("dev", "redis://10.164.120.243:6379"), ("prod", "")):
+        assert "XFF_PROBE_ENABLED" in _run_env_vars_assembly(deploy_env, redis, var="REMOVE_ENV_VARS").split(",")
+        assert "XFF_PROBE_ENABLED" not in _run_env_vars_assembly(deploy_env, redis)
+    cloudbuild = (Path(__file__).resolve().parents[2] / "cloudbuild.yaml").read_text()
+    frontend = cloudbuild[cloudbuild.index("gcloud run deploy sprintable-frontend"):]
+    frontend = frontend[: frontend.index("--quiet")]
+    assert "--remove-env-vars=XFF_PROBE_ENABLED" in frontend, frontend
+    assert "XFF_PROBE_ENABLED=true" not in cloudbuild
 
 
 def test_deploy_backend_gcloud_uses_assembled_remove_list():
