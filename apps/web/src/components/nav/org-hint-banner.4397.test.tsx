@@ -208,5 +208,17 @@ describe('[SID:4397] OrgHintBanner', () => {
       expect(nav.replace).toHaveBeenCalledWith('/gates/g-b');
     });
   });
+
+  it('the error line has the description\'s type size, not a larger one (Yuna side note)', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: {} }), { status: 403 }));
+    await mount(`org_id=${ORG_B}`);
+    await act(async () => { button(koMessages.nav.switcherSwitchToOrg).click(); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const error = banner()!.querySelector('[role="alert"]')!;
+    const description = [...banner()!.querySelectorAll('p')].find((p) => p.textContent?.includes('Heavaa'))!;
+    const sizes = (el: Element) => el.className.split(/\s+/).filter((c) => /^text-(xs|sm|base|lg)$/.test(c) || c.startsWith('leading-'));
+    expect(sizes(error)).toEqual(sizes(description));
+    expect(error.className).not.toMatch(/\btext-sm\b/);
+  });
 });
 
