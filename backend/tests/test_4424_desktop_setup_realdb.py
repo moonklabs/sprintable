@@ -45,6 +45,18 @@ STAGES = {
     "publisher": {"role": "Publisher", "capability": {"kind": "publish", "target": "channel_connection"}},
 }
 KINDS = {"Approver": "human"}  # keyed by role, as events.py reads it
+RECIPE_NAME = "Desktop recipe"
+RECIPE2 = uuid.UUID("d4424000-0000-0000-0000-000000000018")  # the same stages, a person's stage first
+RECIPE2_KEY = "org.d4424-org.person_first"
+
+
+def _schema(order: list[str]) -> str:
+    return json.dumps({"type": "object", "properties": {
+        "stage": {"type": "string", "enum": order}, "work_item_type": {"type": "string"}, "work_item_id": {"type": "string"},
+    }})
+
+
+ROUTING = json.dumps({"escalation": {"kind": "server_derived", "target": "none"}, "broadcast": {"kind": "recipe_role_binding"}})
 
 
 @pytest.fixture
@@ -86,7 +98,11 @@ _CLEAN = [
     f"DELETE FROM agent_api_keys WHERE team_member_id IN (SELECT id FROM members WHERE org_id IN ('{ORG}','{ORG2}'))",
     f"DELETE FROM desktop_setups WHERE org_id IN ('{ORG}','{ORG2}') OR device_name LIKE 'd4424%'",
     f"DELETE FROM recipe_role_bindings WHERE org_id IN ('{ORG}','{ORG2}')",
-    f"DELETE FROM event_definitions WHERE id='{RECIPE}'",
+    f"DELETE FROM conversation_messages WHERE conversation_id IN (SELECT id FROM conversations WHERE org_id IN ('{ORG}','{ORG2}'))",
+    f"DELETE FROM conversation_participants WHERE conversation_id IN (SELECT id FROM conversations WHERE org_id IN ('{ORG}','{ORG2}'))",
+    f"DELETE FROM conversations WHERE org_id IN ('{ORG}','{ORG2}')",
+    f"DELETE FROM stories WHERE project_id='{PROJ}'",
+    f"DELETE FROM event_definitions WHERE id IN ('{RECIPE}','{RECIPE2}')",
     f"DELETE FROM notification_preferences WHERE member_id IN (SELECT id FROM members WHERE org_id IN ('{ORG}','{ORG2}'))",
     f"DELETE FROM agent_message_allowlist WHERE agent_member_id IN (SELECT id FROM members WHERE org_id IN ('{ORG}','{ORG2}'))",
     f"DELETE FROM agent_project_profiles WHERE project_id='{PROJ}'",
@@ -121,9 +137,14 @@ async def world():
         f"(gen_random_uuid(),'{EXISTING}','{EXISTING}','sk_live_exist','{hashlib.sha256(b'existing').hexdigest()}',ARRAY['core'])",
         "INSERT INTO event_definitions (id,key,org_id,name,description,payload_schema,routing,block_template,stage_metadata,"
         "role_actor_kinds,enabled,version) VALUES "
-        f"('{RECIPE}','{RECIPE_KEY}','{ORG}','Desktop recipe','d4424',CAST(:ps AS jsonb),CAST(:r AS jsonb),CAST(:bt AS jsonb),"
+        f"('{RECIPE}','{RECIPE_KEY}','{ORG}','{RECIPE_NAME}','d4424',CAST(:ps AS jsonb),CAST(:r AS jsonb),CAST(:bt AS jsonb),"
+        "CAST(:sm AS jsonb),CAST(:rak AS jsonb),true,1),"
+        f"('{RECIPE2}','{RECIPE2_KEY}','{ORG}','Person first','d4424',CAST(:ps2 AS jsonb),CAST(:r AS jsonb),CAST(:bt AS jsonb),"
         "CAST(:sm AS jsonb),CAST(:rak AS jsonb),true,1)",
-        params={"ps": "{}", "r": "{}", "bt": "{}", "sm": json.dumps(STAGES), "rak": json.dumps(KINDS)},
+        params={
+            "ps": _schema(["writer", "reviewer", "approver", "publisher"]), "ps2": _schema(["approver", "writer", "reviewer", "publisher"]),
+            "r": ROUTING, "bt": "{}", "sm": json.dumps(STAGES), "rak": json.dumps(KINDS),
+        },
     )
     yield
     await _sql(*_CLEAN)
@@ -212,6 +233,7 @@ async def test_ac1_pending_then_the_keys_once_then_never_again(world, caplog):
         assert all(a["api_key"].startswith("sk_live_") for a in agents.values())
         assert "api_url" in body and "mcp_url" in body
         assert body["workdir_hint"] is None  # none was chosen
+        assert body["recipe_name"] == RECIPE_NAME  # the app's default folder ~/Sprintable/{recipe}
 
         r = await _exchange(c, code, verifier)
         assert r.status_code == 410  # once
@@ -593,3 +615,78 @@ async def test_agent_key_requests_to_the_setup_api_are_not_recorded_as_tool_call
     for secret in (code2, verifier2, code, verifier):
         assert secret not in dump
     assert "/api/v2/desktop" not in dump
+# ─── PO 08:22Z — the first work item in the confirmation's transaction ─────────
+
+
+async def _stream_events(agent_id: str) -> list:
+    """What the agent's stream sends on its very first connection (no cursor, no Last-Event-ID): the stream's own read."""
+    from app.routers.agent_gateway import _fetch_events
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(eng)() as s:
+            return await _fetch_events(s, uuid.UUID(agent_id), 0, 100)
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_confirmation_starts_the_first_work_item_and_the_new_agent_gets_it_on_its_first_subscription(world):
+    async with _client() as c:
+        code, _ = await _code(c)
+        r = await _confirm(c, code)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        story = await _sql(fetch=f"SELECT title, project_id FROM stories WHERE id='{body['work_item_id']}'")
+        assert story == [(RECIPE_NAME, PROJ)]
+        writer = next(m["member_id"] for m in body["members"] if m["stage"] == "writer")
+        events = await _stream_events(writer)
+        payloads = [json.dumps(e.payload if hasattr(e, "payload") else e._mapping["payload"], default=str) for e in events]
+        assert any(body["work_item_id"] in p for p in payloads), payloads  # the first stage, on that story
+        # the first stage was published once, by the person who confirmed
+        sent = await _sql(fetch=(
+            "SELECT m.sender_id, m.metadata->'event'->'payload'->>'stage' FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id "
+            f"WHERE c.org_id='{ORG}' AND m.metadata->'event'->'payload'->>'work_item_id'='{body['work_item_id']}'"
+        ))
+        assert sent == [(OWNER_TM, "writer")]
+
+
+@pytest.mark.anyio
+async def test_a_person_first_recipe_sends_the_first_stage_to_the_person(world):
+    async with _client() as c:
+        code, _ = await _code(c)
+        r = await _confirm(c, code, body={**_ROLES, "recipe_id": str(RECIPE2)})
+        assert r.status_code == 200, r.text
+        wid = r.json()["work_item_id"]
+        rows = await _sql(fetch=(
+            "SELECT m.metadata->'event'->'payload'->>'stage', p.member_id FROM conversation_messages m "
+            "JOIN conversations c ON c.id=m.conversation_id JOIN conversation_participants p ON p.conversation_id=c.id "
+            f"WHERE c.org_id='{ORG}' AND m.metadata->'event'->'payload'->>'work_item_id'='{wid}'"
+        ))
+        assert {stage for stage, _ in rows} == {"approver"}  # the recipe's own order: the person's stage first
+        assert OWNER_TM in {member for _, member in rows}
+        writer = next(m["member_id"] for m in r.json()["members"] if m["stage"] == "writer")
+        assert not any(wid in json.dumps(e._mapping["payload"], default=str) for e in await _stream_events(writer))
+
+
+@pytest.mark.anyio
+async def test_a_failed_first_publish_undoes_the_whole_confirmation(world, monkeypatch):
+    from fastapi import HTTPException
+
+    async def refuse(*_a, **_kw):
+        raise HTTPException(status_code=409, detail={"code": "sentinel_publish_refused", "message": "sentinel"})
+
+    before = await _counts()
+    stories_before = (await _sql(fetch=f"SELECT count(*) FROM stories WHERE project_id='{PROJ}'"))[0][0]
+    monkeypatch.setattr("app.routers.events._publish_registry_event_core", refuse)
+    async with _client() as c:
+        code, verifier = await _code(c)
+        r = await _confirm(c, code)
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "sentinel_publish_refused")
+        # read again in a new session: no agent · binding · story · key, and the code is still waiting for a confirmation
+        assert await _counts() == before
+        assert (await _sql(fetch=f"SELECT count(*) FROM stories WHERE project_id='{PROJ}'"))[0][0] == stories_before
+        assert (await _sql(fetch="SELECT confirmed_at, members, workdir_hint FROM desktop_setups WHERE device_name='d4424 laptop'"))[0] == (None, None, None)
+        assert (await _exchange(c, code, verifier)).status_code == 202
+        monkeypatch.undo()
+        assert (await _confirm(c, code)).status_code == 200  # the same code confirms fine afterwards

@@ -124,8 +124,9 @@ async def confirm_setup(
     roles: list[RoleChoice],
     auth,
     workdir_hint: str | None = None,
-) -> tuple[uuid.UUID, list[dict]]:
-    """Returns (setup_id, members). Writes only through `db` and never commits — the caller commits, or rolls back on any
+    background_tasks=None,
+) -> tuple[uuid.UUID, list[dict], uuid.UUID]:
+    """Returns (setup_id, members, work_item_id). Writes only through `db` and never commits — the caller commits, or rolls back on any
     error so nothing of a half-made setup stays."""
     from app.models.event_definition import EventDefinition
     from app.repositories.team_member import TeamMemberRepository
@@ -216,13 +217,48 @@ async def confirm_setup(
     setup.members = members
     setup.workdir_hint = workdir_hint
     await db.flush()
+
+    work_item_id = await _start_first_work_item(
+        db, org_id=org_id, project_id=project_id, definition=definition, auth=auth, background_tasks=background_tasks,
+    )
     from app.services.onboarding_funnel import emit_onboarding_event
 
     await emit_onboarding_event(
         db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
         meta={"flow": "desktop_setup", "human_hand": True, "agents": sum(m["kind"] == "agent" for m in members)},
     )
-    return setup.id, members
+    return setup.id, members, work_item_id
+
+
+async def _start_first_work_item(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, definition, auth, background_tasks,
+) -> uuid.UUID:
+    """PO 08:22Z — the first work item, in the confirmation's transaction: a story (title = the recipe's name) and the recipe's
+    first stage published on it by the confirming person, through the same publish core and checks as the board's «Start»
+    (`_publish_registry_event_core`, stage_origin «member»). A recipe run is keyed by its work item, so a publish without one
+    would cut progress and stage hand-offs; publishing from a second browser call could leave a half setup if the window
+    closed in between.
+
+    The publish is the **last** write of the confirmation and its message commit is the confirmation's one commit: a person's
+    message cannot join a caller's transaction (`send_message_core(after_commit=…)` is for server-issued messages — a person's
+    message runs the `process_event` hook on the committed session), so instead nothing else is written after it. Any failure
+    before that commit raises out of here and the caller rolls everything back (agents · bindings · story · the code's state);
+    nothing is swallowed, so no SAVEPOINT. The deliveries it registers run on the request's `background_tasks`, after the
+    response. A recipe without stages gets its story and no publish (the caller commits)."""
+    from fastapi import BackgroundTasks
+
+    from app.repositories.story import StoryRepository
+    from app.routers.events import _publish_registry_event_core
+
+    story = await StoryRepository(db, org_id).create(project_id=project_id, title=(definition.name or definition.key)[:500])
+    stages = ((definition.payload_schema or {}).get("properties") or {}).get("stage", {}).get("enum") or []
+    if stages:
+        await _publish_registry_event_core(
+            db, org_id, auth, definition.key,
+            {"work_item_type": "story", "work_item_id": str(story.id), "stage": stages[0]},
+            background_tasks if background_tasks is not None else BackgroundTasks(), stage_origin="member",
+        )
+    return story.id
 
 
 @dataclass
@@ -230,6 +266,7 @@ class Exchanged:
     setup_id: uuid.UUID
     agents: list[dict]
     workdir_hint: str | None
+    recipe_name: str | None
 
 
 async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Exchanged | None:
@@ -280,7 +317,22 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
         db, EVENT_EXCHANGED, session_id=setup.id, org_id=setup.org_id, project_id=setup.project_id,
         meta={"flow": "desktop_setup", "keys": len(agents)},
     )
-    return Exchanged(setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint)
+    return Exchanged(setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup))
+
+
+async def _recipe_name(db: AsyncSession, setup: DesktopSetup) -> str | None:
+    """The recipe's display name (PO 08:22Z — the app's default folder ~/Sprintable/{recipe}). The org's own definition wins
+    over a preset with the same key, as in the publish path."""
+    from app.models.event_definition import EventDefinition
+
+    if not setup.event_definition_key:
+        return None
+    return (await db.execute(
+        select(EventDefinition.name).where(
+            EventDefinition.key == setup.event_definition_key,
+            (EventDefinition.org_id == setup.org_id) | (EventDefinition.org_id.is_(None)),
+        ).order_by(EventDefinition.org_id.is_(None)).limit(1)
+    )).scalar_one_or_none()
 
 
 async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> int:

@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -121,27 +121,33 @@ class ConfirmedMember(BaseModel):
 class ConfirmResponse(BaseModel):
     setup_id: uuid.UUID
     members: list[ConfirmedMember]
+    work_item_id: uuid.UUID  # the story the recipe's first stage was published on
 
 
 @router.post("/setup-codes/confirm", response_model=ConfirmResponse)
 async def post_confirm(
     body: ConfirmRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     user_id = _human_only(auth)
     try:
-        setup_id, members = await confirm_setup(
+        setup_id, members, work_item_id = await confirm_setup(
             db, code=body.code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
             roles=[RoleChoice(role=r.role, runtime=r.runtime) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            background_tasks=background_tasks,
         )
     except DesktopSetupError as e:
         # AC2: any error leaves the request by raising, and get_db rolls the whole session back — e.g. the plan's agent
         # limit (402) on the second agent takes the first one with it
         raise _error(e) from None
     await db.commit()
-    return ConfirmResponse(setup_id=setup_id, members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members])
+    return ConfirmResponse(
+        setup_id=setup_id, work_item_id=work_item_id,
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members],
+    )
 
 
 class ExchangeRequest(BaseModel):
@@ -170,7 +176,7 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
         status_code=200,
         content={
             "setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url,
-            "workdir_hint": done.workdir_hint,
+            "workdir_hint": done.workdir_hint, "recipe_name": done.recipe_name,
         },
         headers=headers,
     )
