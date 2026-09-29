@@ -139,3 +139,40 @@ describe('[SID:4412] «link existing campaign» (Yuna 00:49Z)', () => {
   });
 });
 
+// Yuna 5882760917 — every line of the card (the result lines included) keeps Korean words whole: at 390 «홍|보» and at 360
+// «있어|요» broke mid-word. The token sits on the card's text container in each of its three states.
+describe('[SID:4412] the card text keeps words whole (break-keep) in every state', () => {
+  const card = () => document.body.querySelector('[data-testid="boost-execution-control"]') as HTMLElement | null;
+
+  async function mountWith(data: unknown, startsAt: string) {
+    mockedFetch.mockResolvedValueOnce(jsonResponse({ data }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <BoostExecutionControl
+            orgId="org-1" gateId="gate-1" sealedAdsBudgetMinor={50_000} sealedAdsCurrency="KRW"
+            sealedAdsStartsAt={startsAt} sealedAdsEndsAt="2099-09-19T00:00:00Z" sealedAdsObjective="POST_ENGAGEMENT"
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+  }
+
+  it('needs a check', async () => {
+    await mountCard();
+    expect(card()?.classList.contains('break-keep')).toBe(true);
+  });
+
+  it('not started yet', async () => {
+    await mountWith({ run_status: null }, '2099-01-01T00:00:00Z');
+    expect($('boost-start-trigger')).not.toBeNull();
+    expect(card()?.classList.contains('break-keep')).toBe(true);
+  });
+
+  it('running', async () => {
+    await mountWith({ run_status: 'running' }, '2026-09-01T00:00:00Z');
+    expect($('boost-pause-trigger')).not.toBeNull();
+    expect(card()?.classList.contains('break-keep')).toBe(true);
+  });
+});

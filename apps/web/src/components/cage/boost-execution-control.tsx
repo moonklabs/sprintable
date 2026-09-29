@@ -271,7 +271,7 @@ export function BoostExecutionControl({
   if (needsCheck && runStatus !== 'running' && runStatus !== 'paused') {
     const outcomeUnknown = startCommand.error_code === OUTCOME_UNKNOWN;
     return (
-      <div className="space-y-2" data-testid="boost-execution-control">
+      <div className="space-y-2 break-keep" data-testid="boost-execution-control">
         <p className="text-xs">
           <span className="font-medium text-foreground" data-testid="boost-needs-check">{t('boostNeedsCheckTitle')}</span>
         </p>
@@ -411,7 +411,7 @@ export function BoostExecutionControl({
     const startsAtMs = new Date(sealedAdsStartsAt).getTime();
     const beforeStart = startsAtMs > Date.now();
     return (
-      <div className="space-y-2" data-testid="boost-execution-control">
+      <div className="space-y-2 break-keep" data-testid="boost-execution-control">
         {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
         <Button
           variant="outline" size="sm" disabled={beforeStart}
@@ -452,7 +452,7 @@ export function BoostExecutionControl({
   }
 
   return (
-    <div className="space-y-2" data-testid="boost-execution-control">
+    <div className="space-y-2 break-keep" data-testid="boost-execution-control">
       <p className="text-xs">
         <span className="font-medium text-foreground">
           {runStatus === 'running' ? t('boostExecutionStatusRunning') : t('boostExecutionStatusPaused')}
