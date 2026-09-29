@@ -740,3 +740,62 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
     existing_key = (await _sql(fetch=f"SELECT id FROM agent_api_keys WHERE team_member_id='{EXISTING}'"))[0][0]
     await mark_tools_connected(existing_key)
     assert (await _sql(fetch="SELECT count(*) FROM onboarding_events WHERE event='desktop_tools_connected'"))[0][0] == before
+
+
+@pytest.mark.anyio
+async def test_the_first_result_is_the_setup_agents_first_write_on_its_first_work_item(world):
+    """PO 08:44Z — `desktop_first_result_seen` is written by the server when one of the setup's agents first writes on the
+    setup's work item (here a comment, then a status change: still one row); the person's writes do not count."""
+    async with _client() as c:
+        code, verifier = await _code(c)
+        confirmed = (await _confirm(c, code)).json()
+        agents = (await _exchange(c, code, verifier)).json()["agents"]
+        setup_id, wid = confirmed["setup_id"], confirmed["work_item_id"]
+        rows = lambda: _sql(fetch=f"SELECT meta->>'member_id' FROM onboarding_events WHERE session_id='{setup_id}' AND event='desktop_first_result_seen'")
+
+        # the person comments first: not a result
+        assert (await c.post(f"/api/v2/stories/{wid}/comments", json={"content": "go"}, headers=_person(OWNER))).status_code == 201
+        assert await rows() == []
+        writer = next(a for a in agents if a["role"] == "Writer")
+        bearer = {"Authorization": f"Bearer {writer['api_key']}"}
+        r = await c.post(f"/api/v2/stories/{wid}/comments", json={"content": "draft ready"}, headers=bearer)
+        assert r.status_code == 201, r.text
+        assert await rows() == [(writer["member_id"],)]
+        r = await c.patch(f"/api/v2/stories/{wid}/status", json={"status": "in-progress"}, headers=bearer)
+        assert r.status_code == 200, r.text
+        assert await rows() == [(writer["member_id"],)]  # once
+        status = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()
+        assert status["signals"]["first_result_at"] is not None
+        hands = (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OWNER))).json()
+        assert hands["minutes_to_first_result"] is not None
+
+
+@pytest.mark.anyio
+async def test_a_stage_publish_by_the_agent_is_also_a_first_result(world):
+    async with _client() as c:
+        code, verifier = await _code(c)
+        confirmed = (await _confirm(c, code)).json()
+        agents = (await _exchange(c, code, verifier)).json()["agents"]
+        writer = next(a for a in agents if a["role"] == "Writer")
+        r = await c.post(
+            "/api/v2/events/publish",
+            json={"definition_key": RECIPE_KEY, "payload": {"work_item_type": "story", "work_item_id": confirmed["work_item_id"], "stage": "reviewer"}},
+            headers={"Authorization": f"Bearer {writer['api_key']}"},
+        )
+        assert r.status_code == 201, r.text
+        rows = await _sql(fetch=f"SELECT meta->>'member_id' FROM onboarding_events WHERE session_id='{confirmed['setup_id']}' AND event='desktop_first_result_seen'")
+        assert rows == [(writer["member_id"],)]
+
+
+@pytest.mark.anyio
+async def test_a_status_change_by_the_agent_is_also_a_first_result(world):
+    async with _client() as c:
+        code, verifier = await _code(c)
+        confirmed = (await _confirm(c, code)).json()
+        agents = (await _exchange(c, code, verifier)).json()["agents"]
+        reviewer = next(a for a in agents if a["role"] == "Reviewer")
+        r = await c.patch(f"/api/v2/stories/{confirmed['work_item_id']}/status", json={"status": "in-progress"},
+                          headers={"Authorization": f"Bearer {reviewer['api_key']}"})
+        assert r.status_code == 200, r.text
+        rows = await _sql(fetch=f"SELECT meta->>'member_id' FROM onboarding_events WHERE session_id='{confirmed['setup_id']}' AND event='desktop_first_result_seen'")
+        assert rows == [(reviewer["member_id"],)]

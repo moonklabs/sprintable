@@ -92,15 +92,16 @@ def test_the_desktop_setup_writes_only_names_in_the_backend_list():
     «every name that can be recorded»); the sending side carries this test."""
     from app.services import desktop_setup as d
 
-    written = {d.EVENT_CODE_ISSUED, d.EVENT_CONFIRMED, d.EVENT_EXCHANGED, d.EVENT_TOOLS_CONNECTED}
+    written = {d.EVENT_CODE_ISSUED, d.EVENT_CONFIRMED, d.EVENT_EXCHANGED, d.EVENT_TOOLS_CONNECTED, d.EVENT_FIRST_RESULT}
     assert written <= f.BE_EMIT_EVENTS, sorted(written - f.BE_EMIT_EVENTS)
 
 
 def test_the_setup_reads_only_names_the_desktop_app_may_send():
-    """The status and hands reads count names the desktop app sends; a misspelling would count 0 silently."""
+    """The status read counts names the desktop app sends; a misspelling would count 0 silently. (`desktop_doc_opened`, read by
+    the hands line, is the web's — its sending PR (4427) lists it and carries the ⊆ test.)"""
     from app.services import desktop_setup as d
 
-    read = {d.EVENT_FIRST_TASK_HANDED, d.EVENT_WORKDIR_FALLBACK, d.EVENT_BLOCKED, d.EVENT_FIRST_RESULT, d.EVENT_DOC_OPENED}
+    read = {d.EVENT_FIRST_TASK_HANDED, d.EVENT_WORKDIR_FALLBACK, d.EVENT_BLOCKED}
     assert read <= f.DESKTOP_SHELL_EMIT_EVENTS, sorted(read - f.DESKTOP_SHELL_EMIT_EVENTS)
 
 

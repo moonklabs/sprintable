@@ -2750,6 +2750,14 @@ async def update_story_status(
     # status 변경을 side effects 실행 전에 먼저 commit — process_event/webhook
     # 내부 DB 에러가 트랜잭션을 aborted 상태로 만들어 status 변경까지 rollback하는 버그 방지
     await db.commit()
+    if old_status != story.status:
+        # story #4424 — a desktop setup agent's first write on its first work item = its first result (no-op otherwise)
+        from app.services.desktop_setup import mark_first_result
+
+        try:
+            await mark_first_result(id, await _resolve_team_member_id(auth, repo.org_id, db))
+        except Exception:  # noqa: BLE001 — the actor lookup is only for the measurement
+            logger.warning("first-result actor lookup failed story_id=%s", id, exc_info=True)
 
     # E-DG S7: relay wake — commit(recipient_seq 확정) 후 agent wake + CC delivery 발화(이중전달 방지).
     if _relay_wake is not None:
@@ -2980,6 +2988,10 @@ async def add_comment(
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
+    # story #4424 — a desktop setup agent's first write on its first work item = its first result (no-op for anyone else)
+    from app.services.desktop_setup import mark_first_result
+
+    await mark_first_result(id, created_by)
 
     # E-CANVAS C0-S1(story cfa61434) §F4: comment.created 이벤트 전파 — 기반층 검증 케이스
     # (blueprint 제1원칙 "이벤트 없는 기능 금지"). 수신자 = story assignee(멀티) + mentioned_ids

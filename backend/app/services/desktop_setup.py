@@ -38,7 +38,7 @@ SETUP_CODE_TTL = timedelta(minutes=10)
 EVENT_CODE_ISSUED = "desktop_setup_code_issued"
 EVENT_CONFIRMED = "desktop_setup_confirmed"
 EVENT_EXCHANGED = "desktop_setup_exchanged"
-EVENT_FIRST_RESULT = "desktop_first_result_seen"
+EVENT_FIRST_RESULT = "desktop_first_result_seen"  # written by the story comment · status · stage publish paths (below)
 EVENT_TOOLS_CONNECTED = "desktop_tools_connected"  # written by the MCP manifest route (below)
 # sent by the desktop app — read here, carried into the catalog by the PR that sends them (this exact spelling)
 EVENT_FIRST_TASK_HANDED = "desktop_first_task_handed"
@@ -481,17 +481,34 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
 
 
 
-async def mark_tools_connected(api_key_id) -> None:
-    """`desktop_tools_connected` (session_id = the setup · meta.member_id) the first time a key handed out by a desktop setup
-    fetches the MCP manifest. Once per setup · member (an advisory lock keeps two concurrent first calls to one row). Own
-    short session; any failure is logged, never raised — the manifest answer must not depend on this."""
-    import logging
-
+async def _mark_once(s: AsyncSession, *, setup_id: uuid.UUID, member_id: uuid.UUID, event: str) -> None:
+    """One `event` row per setup · member (an advisory lock keeps two concurrent first writes to one row)."""
     from sqlalchemy import func
 
-    from app.core.database import async_session_factory
     from app.models.onboarding_event import OnboardingEvent
     from app.services.onboarding_funnel import record_onboarding_event
+
+    await s.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"{event}:{setup_id}:{member_id}"))))
+    seen = (await s.execute(
+        select(OnboardingEvent.id).where(
+            OnboardingEvent.session_id == setup_id, OnboardingEvent.event == event,
+            OnboardingEvent.meta["member_id"].astext == str(member_id),
+        ).limit(1)
+    )).first()
+    if seen is None:
+        await record_onboarding_event(
+            s, event=event, session_id=setup_id, agent_id=member_id,
+            meta={"flow": "desktop_setup", "member_id": str(member_id)},
+        )
+
+
+async def mark_tools_connected(api_key_id) -> None:
+    """`desktop_tools_connected` (session_id = the setup · meta.member_id) the first time a key handed out by a desktop setup
+    fetches the MCP manifest. Once per setup · member. Own short session; any failure is logged, never raised — the manifest
+    answer must not depend on this."""
+    import logging
+
+    from app.core.database import async_session_factory
 
     try:
         key_id = uuid.UUID(str(api_key_id))
@@ -504,22 +521,40 @@ async def mark_tools_connected(api_key_id) -> None:
             )).first()
             if row is None or row[0] is None:
                 return
-            setup_id, member_id = row
-            await s.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop_tools_connected:{setup_id}:{member_id}"))))
-            seen = (await s.execute(
-                select(OnboardingEvent.id).where(
-                    OnboardingEvent.session_id == setup_id, OnboardingEvent.event == EVENT_TOOLS_CONNECTED,
-                    OnboardingEvent.meta["member_id"].astext == str(member_id),
-                ).limit(1)
-            )).first()
-            if seen is None:
-                await record_onboarding_event(
-                    s, event=EVENT_TOOLS_CONNECTED, session_id=setup_id, agent_id=member_id,
-                    meta={"flow": "desktop_setup", "member_id": str(member_id)},
-                )
+            await _mark_once(s, setup_id=row[0], member_id=row[1], event=EVENT_TOOLS_CONNECTED)
             await s.commit()
     except Exception:  # noqa: BLE001 — a measurement; the manifest answer goes on
         logging.getLogger(__name__).error("desktop_tools_connected mark failed api_key_id=%s", key_id, exc_info=True)
+
+
+async def mark_first_result(story_id, member_id) -> None:
+    """`desktop_first_result_seen` (PO 08:44Z): the first time one of a setup's **agents** writes on that setup's first work
+    item — a comment, a status change or a stage publish, whichever comes first — i.e. when its result is recorded on the
+    server (what the person sees on the web). Once per setup · member. Called after the write committed, in its own session;
+    a failure is logged, never raised."""
+    import logging
+
+    from app.core.database import async_session_factory
+    from app.models.onboarding_event import OnboardingEvent
+
+    if story_id is None or member_id is None:
+        return
+    try:
+        async with async_session_factory() as s:
+            setups = (await s.execute(
+                select(OnboardingEvent.session_id).where(
+                    OnboardingEvent.event == EVENT_CONFIRMED,
+                    OnboardingEvent.meta["work_item_id"].astext == str(story_id),
+                )
+            )).scalars().all()
+            for setup_id in setups:
+                setup = await s.get(DesktopSetup, setup_id)
+                agents = {m["member_id"] for m in (setup.members or []) if m.get("kind") == "agent"} if setup else set()
+                if str(member_id) in agents:
+                    await _mark_once(s, setup_id=setup_id, member_id=uuid.UUID(str(member_id)), event=EVENT_FIRST_RESULT)
+            await s.commit()
+    except Exception:  # noqa: BLE001 — a measurement; the write it follows is already done
+        logging.getLogger(__name__).error("desktop_first_result_seen mark failed story_id=%s", story_id, exc_info=True)
 
 
 def exchange_urls() -> tuple[str | None, str | None]:
