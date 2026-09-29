@@ -40,6 +40,9 @@ BE_EMIT_EVENTS = frozenset({
 # the app keeps a copy of these names with a «sent names ⊆ copy» test pointing here. Merge this before the app sends them.
 DESKTOP_SHELL_EMIT_EVENTS = frozenset({
     "desktop_workdir_fallback", "desktop_setup_blocked", "desktop_first_screen_human_input", "desktop_first_task_handed",
+    # PO 09:58Z — the shell reopens the setup page after a sign-in (the code never sits in the web), so it is the one that
+    # knows a sign-in happened: a human hand, sent by the shell
+    "desktop_setup_signed_in",
 })
 # §1 canonical = FE-emit ∪ BE-emit (one source each; the router accepts exactly this).
 EVENT_CATALOG = FE_EMIT_EVENTS | BE_EMIT_EVENTS | DESKTOP_SHELL_EMIT_EVENTS
