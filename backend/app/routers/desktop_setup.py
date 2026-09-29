@@ -25,7 +25,9 @@ from app.services.desktop_setup import (
     create_setup_code,
     exchange_setup,
     exchange_urls,
+    list_setups,
     revoke_setup,
+    setup_hands,
 )
 
 router = APIRouter(prefix="/api/v2/desktop", tags=["desktop"])
@@ -150,6 +152,68 @@ async def post_exchange(request: Request, code: str, body: ExchangeRequest, db: 
         content={"setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url},
         headers=headers,
     )
+
+
+class SetupMember(BaseModel):
+    stage: str
+    member_id: str
+    kind: Literal["agent", "human"]
+    runtime: Literal["claude", "codex"] | None = None
+
+
+class SetupItem(BaseModel):
+    setup_id: uuid.UUID
+    device_name: str
+    state: Literal["waiting_for_app", "handed_over", "not_handed_over", "disconnected"]
+    project_id: uuid.UUID | None
+    recipe_key: str | None
+    confirmed_by: uuid.UUID | None
+    confirmed_at: datetime | None
+    exchanged_at: datetime | None
+    revoked_at: datetime | None
+    keys_issued: int
+    active_keys: int
+    members: list[SetupMember]
+
+
+class SetupListResponse(BaseModel):
+    setups: list[SetupItem]
+
+
+@router.get("/setups", response_model=SetupListResponse)
+async def get_setups(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """The org's desktop setups for the web list (who · which device · state · keys still active)."""
+    user_id = _human_only(auth)
+    try:
+        return SetupListResponse(setups=[SetupItem(**s) for s in await list_setups(db, user_id=user_id, org_id=org_id)])
+    except DesktopSetupError as e:
+        raise _error(e) from None
+
+
+class SetupHandsResponse(BaseModel):
+    setup_id: uuid.UUID
+    human_hands: int
+    minutes_to_first_result: float | None
+    docs_opened: int
+
+
+@router.get("/setups/{setup_id}/hands", response_model=SetupHandsResponse)
+async def get_setup_hands(
+    setup_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4426 ② — «human hands N · first result after M minutes · docs opened K» for one setup (the admin surface is 3801)."""
+    user_id = _human_only(auth)
+    try:
+        return SetupHandsResponse(**await setup_hands(db, setup_id=setup_id, user_id=user_id, org_id=org_id))
+    except DesktopSetupError as e:
+        raise _error(e) from None
 
 
 class RevokeResponse(BaseModel):

@@ -74,6 +74,7 @@ async def _sql(*stmts: str, params: dict | None = None, fetch: str | None = None
 
 
 _CLEAN = [
+    "DELETE FROM onboarding_events WHERE session_id IN (SELECT id FROM desktop_setups WHERE device_name LIKE 'd4424%')",
     f"DELETE FROM agent_api_keys WHERE team_member_id IN (SELECT id FROM members WHERE org_id IN ('{ORG}','{ORG2}'))",
     f"DELETE FROM desktop_setups WHERE org_id IN ('{ORG}','{ORG2}') OR device_name LIKE 'd4424%'",
     f"DELETE FROM recipe_role_bindings WHERE org_id IN ('{ORG}','{ORG2}')",
@@ -244,6 +245,14 @@ async def test_ac1_refusals(world):
         assert (await _exchange(c, code2, verifier2)).status_code == 410
         assert (await _confirm(c, code2)).status_code == 410
 
+        # confirmed but the app never picked the keys up before the code ran out: listed as not handed over
+        code4, verifier4 = await _code(c, "d4424 never picked up")
+        assert (await _confirm(c, code4)).status_code == 200
+        await _sql("UPDATE desktop_setups SET expires_at = now() - interval '1 second' WHERE device_name='d4424 never picked up'")
+        assert (await _exchange(c, code4, verifier4)).status_code == 410
+        listed = {x["device_name"]: x["state"] for x in (await c.get("/api/v2/desktop/setups", headers=_person(OWNER))).json()["setups"]}
+        assert listed["d4424 never picked up"] == "not_handed_over"
+
         # a runtime the app does not have, a stage that is a person's or a channel's, a missing agent stage
         code3, _ = await _code(c, "d4424 roles")
         for roles in (
@@ -372,9 +381,49 @@ async def test_ac3_to_ac6_least_privilege_other_keys_disconnect_and_the_record(w
         assert (await c.get("/api/v2/me", headers={"Authorization": f"Bearer {other_agents[0]['api_key']}"})).status_code == 200
         assert await _sql(fetch=f"SELECT id, revoked_at FROM agent_api_keys WHERE team_member_id='{EXISTING}'") == existing_before
 
+        # the web list: both devices, the disconnected one with 0 active keys; people who are not admins see nothing
+        listed = {x["device_name"]: x for x in (await c.get("/api/v2/desktop/setups", headers=_person(OWNER))).json()["setups"]}
+        assert (listed["d4424 laptop"]["state"], listed["d4424 laptop"]["active_keys"]) == ("disconnected", 0)
+        assert (listed["d4424 other device"]["state"], listed["d4424 other device"]["active_keys"]) == ("handed_over", 2)
+        assert {m["stage"] for m in listed["d4424 laptop"]["members"]} == {"writer", "reviewer", "approver"}
+        assert (await c.get("/api/v2/desktop/setups", headers=_person(PLAIN))).status_code == 403
+        assert (await c.get("/api/v2/desktop/setups", headers=_person(OUTSIDER, ORG2))).json()["setups"] == []
+
     # AC6: who · which device · how many · when handed · when cut
     row = (await _sql(fetch=(
         "SELECT confirmed_by, device_name, jsonb_array_length(members), keys_issued, exchanged_at IS NOT NULL, revoked_by,"
         f" revoked_at IS NOT NULL FROM desktop_setups WHERE id='{setup_id}'"
     )))[0]
     assert row == (OWNER, "d4424 laptop", 3, 2, True, OWNER, True)
+
+
+# ─── story #4426 ② — the setup's steps and the one-line read ───────────────────
+
+
+@pytest.mark.anyio
+async def test_4426_the_setup_steps_and_the_one_line_read(world):
+    async with _client() as c:
+        code, verifier = await _code(c)
+        assert (await _confirm(c, code)).status_code == 200
+        assert (await _exchange(c, code, verifier)).status_code == 200
+        setup_id = (await _sql(fetch=f"SELECT id FROM desktop_setups WHERE org_id='{ORG}'"))[0][0]
+        steps = await _sql(fetch=f"SELECT event, meta->>'human_hand' FROM onboarding_events WHERE session_id='{setup_id}' ORDER BY server_ts")
+        assert steps == [("desktop_setup_code_issued", None), ("desktop_setup_confirmed", "true"), ("desktop_setup_exchanged", None)]
+
+        read = (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OWNER))).json()
+        assert (read["human_hands"], read["minutes_to_first_result"], read["docs_opened"]) == (1, None, 0)  # no result yet
+
+        # the code was asked for 3 minutes before the person confirmed; the app later reports a folder-trust prompt the person
+        # answered, a doc, and the first result 7 minutes after the confirmation → 10 minutes from the code
+        await _sql(f"UPDATE onboarding_events SET server_ts = server_ts - interval '3 minutes' WHERE session_id='{setup_id}' AND event='desktop_setup_code_issued'")
+        await _sql(
+            "INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES "
+            f"(gen_random_uuid(), 'desktop_cli_prompt_answered', '{setup_id}', '{{\"human_hand\": true, \"prompt\": \"folder_trust\"}}', now()),"
+            f"(gen_random_uuid(), 'desktop_doc_opened', '{setup_id}', '{{}}', now()),"
+            f"(gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}',"
+            f" (SELECT server_ts FROM onboarding_events WHERE session_id='{setup_id}' AND event='desktop_setup_confirmed') + interval '7 minutes')"
+        )
+        read = (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OWNER))).json()
+        assert (read["human_hands"], read["minutes_to_first_result"], read["docs_opened"]) == (2, 10.0, 1)
+        assert (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(PLAIN))).status_code == 403
+        assert (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OUTSIDER, ORG2))).status_code == 404

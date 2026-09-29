@@ -31,6 +31,13 @@ from app.models.desktop_setup import DesktopSetup
 from app.services.oauth_handoff import pkce_challenge_from_verifier
 
 SETUP_CODE_TTL = timedelta(minutes=10)
+# story #4426 ② — the setup's own steps, written by the backend (grouped by `session_id` = the setup id). A person's action
+# carries `meta.human_hand = true`; the one-line read counts those.
+EVENT_CODE_ISSUED = "desktop_setup_code_issued"
+EVENT_CONFIRMED = "desktop_setup_confirmed"
+EVENT_EXCHANGED = "desktop_setup_exchanged"
+EVENT_FIRST_RESULT = "desktop_first_result_seen"
+EVENT_DOC_OPENED = "desktop_doc_opened"
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
 _CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")  # base64url(sha256) without padding
@@ -61,10 +68,14 @@ async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: st
     name = device_name.strip()[:80]
     if not name:
         raise DesktopSetupError("request_invalid", "device_name is required")
+    from app.services.onboarding_funnel import emit_onboarding_event
+
     code = secrets.token_urlsafe(32)
     expires_at = _now() + SETUP_CODE_TTL
-    db.add(DesktopSetup(code_hash=_hash(code), code_challenge=challenge, device_name=name, expires_at=expires_at))
+    setup = DesktopSetup(code_hash=_hash(code), code_challenge=challenge, device_name=name, expires_at=expires_at)
+    db.add(setup)
     await db.flush()
+    await emit_onboarding_event(db, EVENT_CODE_ISSUED, session_id=setup.id, meta={"flow": "desktop_setup"})
     return code, expires_at
 
 
@@ -172,6 +183,12 @@ async def confirm_setup(
     setup.confirmed_at = _now()
     setup.members = members
     await db.flush()
+    from app.services.onboarding_funnel import emit_onboarding_event
+
+    await emit_onboarding_event(
+        db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
+        meta={"flow": "desktop_setup", "human_hand": True, "agents": sum(m["kind"] == "agent" for m in members)},
+    )
     return setup.id, members
 
 
@@ -211,6 +228,13 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
     setup.exchanged_at = _now()
     setup.keys_issued = len(agents)
     await db.flush()
+    from app.services.onboarding_funnel import emit_onboarding_event
+
+    # no key material in the event: the counts only (the record path refuses a key-shaped string anyway)
+    await emit_onboarding_event(
+        db, EVENT_EXCHANGED, session_id=setup.id, org_id=setup.org_id, project_id=setup.project_id,
+        meta={"flow": "desktop_setup", "keys": len(agents)},
+    )
     return Exchanged(setup_id=setup.id, agents=agents)
 
 
@@ -235,6 +259,72 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         setup.revoked_by = user_id
     await db.flush()
     return len(revoked)
+
+
+def setup_state(setup: DesktopSetup, now: datetime | None = None) -> str:
+    """What the web list shows for a confirmed setup: disconnected · handed_over · waiting_for_app (confirmed, the app has not
+    picked the keys up yet) · not_handed_over (the code ran out first — its agents have no key; «disconnect» clears it)."""
+    if setup.revoked_at is not None:
+        return "disconnected"
+    if setup.exchanged_at is not None:
+        return "handed_over"
+    return "waiting_for_app" if (now or _now()) < setup.expires_at else "not_handed_over"
+
+
+async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID) -> list[dict]:
+    """The org's confirmed setups, newest first, with how many of each one's keys are still active (org owner/admin)."""
+    from sqlalchemy import func
+
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise DesktopSetupError("not_org_admin")
+    rows = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.org_id == org_id, DesktopSetup.confirmed_at.isnot(None))
+        .order_by(DesktopSetup.confirmed_at.desc()).limit(200)
+    )).scalars().all()
+    active = dict((await db.execute(
+        select(ApiKey.desktop_setup_id, func.count()).where(
+            ApiKey.desktop_setup_id.in_([r.id for r in rows]), ApiKey.revoked_at.is_(None),
+        ).group_by(ApiKey.desktop_setup_id)
+    )).all()) if rows else {}
+    now = _now()
+    return [{
+        "setup_id": r.id, "device_name": r.device_name, "state": setup_state(r, now), "project_id": r.project_id,
+        "recipe_key": r.event_definition_key, "confirmed_by": r.confirmed_by, "confirmed_at": r.confirmed_at,
+        "exchanged_at": r.exchanged_at, "revoked_at": r.revoked_at, "keys_issued": r.keys_issued,
+        "active_keys": active.get(r.id, 0),
+        "members": [{k: m.get(k) for k in ("stage", "member_id", "kind", "runtime")} for m in (r.members or [])],
+    } for r in rows]
+
+
+async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> dict:
+    """story #4426 ② — one line for one setup: how many times a person had to act, minutes from the code to the first result
+    the person saw, how many docs they opened. None where the step has not happened yet (never a guessed number)."""
+    from sqlalchemy import func
+
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.project_auth import is_org_owner_or_admin
+
+    setup = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.org_id == org_id)
+    )).scalar_one_or_none()
+    if setup is None:
+        raise DesktopSetupError("setup_not_found")
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise DesktopSetupError("not_org_admin")
+    rows = (await db.execute(
+        select(OnboardingEvent.event, OnboardingEvent.meta, OnboardingEvent.server_ts)
+        .where(OnboardingEvent.session_id == setup_id).order_by(OnboardingEvent.server_ts)
+    )).all()
+    hands = sum(1 for _e, meta, _t in rows if (meta or {}).get("human_hand") is True)
+    started = next((t for e, _m, t in rows if e == EVENT_CODE_ISSUED), None)
+    first_result = next((t for e, _m, t in rows if e == EVENT_FIRST_RESULT), None)
+    minutes = round((first_result - started).total_seconds() / 60, 1) if started and first_result else None
+    return {
+        "setup_id": setup_id, "human_hands": hands, "minutes_to_first_result": minutes,
+        "docs_opened": sum(1 for e, _m, _t in rows if e == EVENT_DOC_OPENED),
+    }
 
 
 def exchange_urls() -> tuple[str, str | None]:
