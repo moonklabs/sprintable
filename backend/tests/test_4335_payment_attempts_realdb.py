@@ -1448,11 +1448,24 @@ async def test_attempt_owned_orders_are_left_to_the_attempt_sweep_by_dunning_and
 
     toss.charge_mode = "decline"
     org_id, attempt_id, token = await _checkout_attempt(Session)
+    # story #4414 — 양성 대조(재현 모양 그대로): 다른 org가 남긴 «하루 지난» 주인 없는 failed 갱신 주문. CI 잡이 UTC 자정을 넘길 때
+    # 앞 파일(test_2907)의 잔여물이 dunning에 잡히던 모양을 시각과 무관하게 늘 만든다. 결제 키가 있어야 실제로 청구되므로
+    # 같은 방식(거절된 결제 시도)으로 키를 받게 한다.
+    stranger_org, stranger_attempt, stranger_token = await _checkout_attempt(Session)
     now = datetime.now(timezone.utc)
     two_days_ago = now - timedelta(days=2)
     async with Session() as s:
         await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
         assert (await svc.get_attempt(s, attempt_id)).status == "declined"
+        await svc.drive_attempt(s, stranger_attempt, stranger_token, auth_key="auth-2")
+        stranger_renewal = f"renewal:{stranger_org}:{uuid.uuid4()}:{(now - timedelta(days=1)).date()}"
+        await s.execute(
+            text(
+                "INSERT INTO billing_orders (id, org_id, order_id, amount_minor, currency, status, purpose, created_at, updated_at) "
+                "VALUES (:id, :o, :oid, 29000, 'krw', 'failed', 'charge', :t, :t)"
+            ),
+            {"id": uuid.uuid4(), "o": stranger_org, "oid": stranger_renewal, "t": now - timedelta(days=1)},
+        )
         owned = await _row(s, "SELECT order_id, status, payment_attempt_id FROM billing_orders WHERE org_id=:o", o=org_id)
         assert (owned.status, owned.payment_attempt_id) == ("failed", attempt_id)
         renewal_id = f"renewal:{uuid.uuid4().hex}"
@@ -1469,7 +1482,12 @@ async def test_attempt_owned_orders_are_left_to_the_attempt_sweep_by_dunning_and
         toss.charge_mode = "ok"
         toss.charge_calls.clear()
         await sweep_dunning_retries(s, now=now)
-        assert toss.charge_calls == [renewal_id], "시도 주문을 dunning이 다시 청구했다"
+        # story #4414 — dunning은 전 org를 쓴다(제품 동작). 주장은 «시도 주문은 재청구 0 · 내 주인 없는 갱신 주문은 재청구»라서
+        # 공유 DB의 다른 org 청구와 무관하게 이 테스트 org의 청구만 본다.
+        mine = {r.order_id for r in (await s.execute(text("SELECT order_id FROM billing_orders WHERE org_id=:o"), {"o": org_id})).all()}
+        assert owned.order_id not in toss.charge_calls, "시도 주문을 dunning이 다시 청구했다"
+        assert [c for c in toss.charge_calls if c in mine] == [renewal_id]
+        assert stranger_renewal in toss.charge_calls, "양성 대조가 헛돎 — 다른 org의 하루 지난 주문을 dunning이 안 집었다"
         # 갱신 재청구 성공이 구독을 active로 돌린다(옛 동작) — 그 뒤 상태가 기준.
         sub_before = tuple(await _row(s, "SELECT tier, status FROM org_subscriptions WHERE org_id=:o", o=org_id))
 

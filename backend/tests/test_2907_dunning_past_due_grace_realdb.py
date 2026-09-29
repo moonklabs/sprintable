@@ -47,8 +47,35 @@ def _crypto_key(monkeypatch):
     billing_key_crypto._get_multi_fernet.cache_clear()
 
 
+# story #4414 — 이 파일이 만든 org의 결제 행을 테스트마다 지운다. 예전엔 `finally:`가 engine.dispose()뿐이라 실패한 갱신 주문
+# (`renewal:{org}:{offering}:{period_end}` · failed · payment_attempt_id NULL) · 도래한 구독이 공유 실 DB에 남았고, 전 org를 쓰는
+# 다른 테스트의 쓸기(dunning · trigger_due_charges)가 그것을 집었다 — CI 잡이 UTC 자정을 넘기면 다음 날 dunning이 재청구해
+# test_4335의 «청구 전부 == 내 주문» 단언이 무관하게 깨졌다(run 36499022537).
+_SEEDED_ORGS: list[uuid.UUID] = []
+# 지우는 것: 주문(dunning · stale 쓸기 대상) · 결제 키. 원장 항목(billing_ledger_entries)은 append-only(트리거)라 못 지우고 지우지도
+# 않는다 — 그것이 가리키는 구독 행도 남기되 `current_period_end`를 비워 trigger_due_charges(active · 도래 · 기간 끝 있음) 대상에서
+# 뺀다. org · 사용자 행은 남겨도 쓸기 대상이 아니다.
+@pytest.fixture(autouse=True)
+async def _drop_seeded_billing_rows():
+    _SEEDED_ORGS.clear()
+    yield
+    if not _SEEDED_ORGS:
+        return
+    engine = create_async_engine(_ASYNC)
+    try:
+        async with engine.begin() as conn:
+            ids = {"ids": list(_SEEDED_ORGS)}
+            await conn.execute(text("DELETE FROM billing_orders WHERE org_id = ANY(:ids)"), ids)
+            await conn.execute(text("DELETE FROM org_billing_keys WHERE org_id = ANY(:ids)"), ids)
+            await conn.execute(text("UPDATE org_subscriptions SET current_period_end = NULL WHERE org_id = ANY(:ids)"), ids)
+    finally:
+        await engine.dispose()
+    _SEEDED_ORGS.clear()
+
+
 async def _seed_org_with_owner(session, *, email):
     org_id = uuid.uuid4()
+    _SEEDED_ORGS.append(org_id)
     user_id = uuid.uuid4()
     await session.execute(
         text("INSERT INTO organizations (id, name, slug, plan) VALUES (:id, :name, :slug, 'free')"),
