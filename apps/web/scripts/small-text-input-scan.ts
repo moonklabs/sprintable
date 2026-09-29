@@ -254,6 +254,54 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, Wr
   return out;
 }
 
+/**
+ * story #4410(PO 01:11Z) — 래퍼를 손 목록으로만 두면 다음 래퍼가 샌다(MenuSearchInput이 `{...props}`로 className을 넘겨 보드 검색칸
+ * 다섯이 가드 밖이었다). 트리에서 **입력칸을 그리며 호출부 className을 넘기는 컴포넌트**를 찾아 래퍼로 삼는다:
+ * PascalCase 컴포넌트가 처음 그리는 입력칸(날 · 공용)의 className 식이 `className`을 참조하거나, className 속성이 없거나 그 뒤에
+ * 펼침(`{...props}`)이 있으면(= 호출부 className이 이김) 넘기는 것으로 본다. 크기는 정의를 같은 규칙으로 읽는다(공용 부품이면 밑단까지 병합 ·
+ * 크기가 없으면 호출부가 크기를 주는 래퍼 = null). 같은 이름이 두 파일에서 다르게 나오면 던진다(호출부가 어느 쪽인지 모름).
+ */
+export function discoverWrappers(contents: ReadonlyMap<string, string>, sharedBase: (tag: string) => string): Map<string, WrapperInfo & { file: string }> {
+  const out = new Map<string, WrapperInfo & { file: string }>();
+  for (const [rel, content] of contents) {
+    if (!/<(input|textarea|select|Input|Textarea)\b/.test(content)) continue;
+    const sf = ts.createSourceFile(rel, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const constants = stringConstants(sf);
+    const consider = (name: string, body: ts.Node) => {
+      if (!/^[A-Z]/.test(name) || RAW_TAGS.has(name) || SHARED_TAGS.has(name)) return;
+      let el: ts.JsxOpeningLikeElement | undefined;
+      const find = (n: ts.Node) => {
+        if (el) return;
+        if ((ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) && (RAW_TAGS.has(n.tagName.getText(sf)) || SHARED_TAGS.has(n.tagName.getText(sf)))) { el = n; return; }
+        n.forEachChild(find);
+      };
+      find(body);
+      if (!el) return;
+      const props = el.attributes.properties;
+      const clsIdx = props.findIndex((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'className');
+      const spreadAfter = props.some((p, i) => ts.isJsxSpreadAttribute(p) && i > clsIdx);
+      const clsAttr = clsIdx >= 0 ? (props[clsIdx] as ts.JsxAttribute) : undefined;
+      const refersClassName = !!clsAttr?.initializer && /\bclassName\b/.test(clsAttr.initializer.getText(sf));
+      if (!(refersClassName || spreadAfter)) return;
+      const tag = el.tagName.getText(sf);
+      const classes = clsAttr?.initializer ? classText(clsAttr.initializer, constants) : '';
+      const inner = SHARED_TAGS.has(tag) ? sharedBase(tag) : '';
+      const px = baseFontPx(cn(inner, classes)) ?? (SHARED_TAGS.has(tag) ? 16 : null);
+      const info = { inner, classes, px, file: rel };
+      const prev = out.get(name);
+      if (prev && (prev.classes !== classes || prev.inner !== inner)) {
+        throw new Error(`래퍼 이름 ${name}이 두 파일에서 다르게 나온다(${prev.file} · ${rel}) — 호출부가 어느 쪽인지 정적으로 못 가린다. 이름을 나누거나 가드를 넓힐 것`);
+      }
+      out.set(name, info);
+    };
+    sf.forEachChild((n) => {
+      if (ts.isFunctionDeclaration(n) && n.name) consider(n.name.text, n);
+      if (ts.isVariableStatement(n)) for (const d of n.declarationList.declarations) if (ts.isIdentifier(d.name) && d.initializer) consider(d.name.text, d.initializer);
+    });
+  }
+  return out;
+}
+
 /** 파일별 16px 미만 칸 수(0인 파일은 뺌) · 전체 목록 · 래퍼 크기. */
 export function scanTree(srcRoot: string): {
   perFile: Record<string, number>;
@@ -265,12 +313,23 @@ export function scanTree(srcRoot: string): {
   const files = tsxFiles(srcRoot);
   const contents = new Map<string, string>();
   for (const abs of files) contents.set(path.relative(srcRoot, abs).split(path.sep).join('/'), readFileSync(abs, 'utf8'));
-  const wrappers = wrapperSizes((rel) => {
+  const contentOf = (rel: string) => {
     const c = contents.get(rel);
     if (c === undefined) throw new Error(`래퍼 정의 파일 ${rel}이 트리에 없다 — WRAPPERS 표를 고칠 것`);
     return c;
-  });
-  const tagPattern = new RegExp(`<(input|textarea|select|Input|Textarea|${Object.keys(WRAPPERS).join('|')})\\b`);
+  };
+  // 손 목록(WRAPPERS)은 «반드시 있어야 하는» 씨앗(정의가 사라지면 던짐) · 그 밖은 트리에서 찾은 래퍼.
+  const wrappers: Map<string, WrapperInfo> = wrapperSizes(contentOf);
+  const sharedCache = new Map<string, string>();
+  for (const [name, info] of discoverWrappers(contents, (tag) => {
+    const rel = SHARED_DEFS[tag];
+    if (!rel) return '';
+    if (!sharedCache.has(tag)) sharedCache.set(tag, componentClasses(contentOf(rel), rel, tag));
+    return sharedCache.get(tag)!;
+  })) {
+    if (!wrappers.has(name)) wrappers.set(name, { inner: info.inner, classes: info.classes, px: info.px });
+  }
+  const tagPattern = new RegExp(`<(input|textarea|select|Input|Textarea|${[...wrappers.keys()].join('|')})\\b`);
   const perFile: Record<string, number> = {};
   const sites: SmallTextInputSite[] = [];
   const drift: DesktopDrift[] = [];

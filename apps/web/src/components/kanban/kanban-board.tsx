@@ -1373,7 +1373,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   value={sprintSearch}
                   onChange={(e) => setSprintSearch(e.target.value)}
                   placeholder={t('searchSprints')}
-                  className="h-7 text-xs"
+                  className="h-7"
                 />
               </div>
               <DropdownMenuSeparator />
@@ -1432,7 +1432,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   value={epicSearch}
                   onChange={(e) => setEpicSearch(e.target.value)}
                   placeholder={t('searchEpics')}
-                  className="h-7 text-xs"
+                  className="h-7"
                 />
               </div>
               <DropdownMenuSeparator />
@@ -1495,7 +1495,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   value={assigneeSearch}
                   onChange={(e) => setAssigneeSearch(e.target.value)}
                   placeholder={t('searchAssignees')}
-                  className="h-7 text-xs"
+                  className="h-7"
                 />
               </div>
               <DropdownMenuSeparator />
@@ -1577,7 +1577,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     value={labelSearch}
                     onChange={(e) => setLabelSearch(e.target.value)}
                     placeholder={t('searchLabels')}
-                    className="h-7 text-xs"
+                    className="h-7"
                   />
                 </div>
                 <DropdownMenuSeparator />

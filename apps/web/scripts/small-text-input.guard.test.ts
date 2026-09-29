@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { baseFontPx, beforeResponsive, desktopFontPx, scanSource, scanTree, wrapperSizes } from './small-text-input-scan';
+import { baseFontPx, beforeResponsive, desktopFontPx, discoverWrappers, scanSource, scanTree, wrapperSizes } from './small-text-input-scan';
 import { measureFsReads } from './test-utils/fs-work';
 
 // story #4406 — 모바일 폭에서 글자가 16px 미만인 입력칸(iOS WebKit이 초점 때 화면을 확대)을 새로 만들지 않는다.
@@ -80,6 +80,23 @@ describe('scanSource — 셀프테스트', () => {
     const r = scanSource(src, 'g.tsx', wrappers);
     expect(r.sites.map((x) => [x.tag, x.px])).toEqual([['EntityAwareTextarea', 14]]);
     expect(r.drift).toEqual([]);
+  });
+
+  it('⭐래퍼 찾기(story #4410 · PO 01:11Z) — 호출부 className을 넘기는 입력칸 컴포넌트를 손 목록 없이 찾는다', () => {
+    const files = new Map([
+      // 펼침으로 넘김(MenuSearchInput 모양 — className 속성 없음)
+      ['a.tsx', `export function MenuSearchInput(props) { return <Input aria-label="x" {...props} />; }`],
+      // cn(…, className)으로 넘김
+      ['b.tsx', `export function SidebarInput({ className, ...props }) { return <Input className={cn('h-8 w-full', className)} {...props} />; }`],
+      // 넘기지 않음(고정 클래스 · 펼침이 className 앞) → 래퍼 아님
+      ['c.tsx', `export function Fixed(props) { return <input {...props} className="text-sm" />; }`],
+    ]);
+    const found = discoverWrappers(files, (tag) => (tag === 'Input' ? 'h-9 text-base lg:text-sm' : ''));
+    expect([...found.keys()].sort()).toEqual(['MenuSearchInput', 'SidebarInput']);
+    expect(found.get('MenuSearchInput')).toMatchObject({ inner: 'h-9 text-base lg:text-sm', px: 16 });
+    // 호출부 text-xs는 밑단 text-base만 지우고 lg:text-sm은 남긴다 → 폰 12(센다).
+    const r = scanSource('export const K = () => <MenuSearchInput className="h-7 text-xs" />;', 'k.tsx', found);
+    expect(r.sites.map((x) => x.px)).toEqual([12]);
   });
 
   it('beforeResponsive · desktopFontPx — 래퍼를 반응형으로 바꾸기 전 모양 · 1024px 이상 크기(lg → md → 접두사 없음)', () => {

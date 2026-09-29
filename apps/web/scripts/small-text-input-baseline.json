@@ -49,7 +49,7 @@
   "components/insights-board/follow-up-dialog.tsx": 2,
   "components/loops/loop-create-dialog.tsx": 12,
   "components/organization/apply-recipe-dialog.tsx": 1,
-  "components/organization/event-definer-form.tsx": 6,
+  "components/organization/event-definer-form.tsx": 5,
   "components/organization/generation-connector-register-form.tsx": 6,
   "components/organization/marketing-recipe-apply-dialog.tsx": 4,
   "components/organization/recipe-role-mapping-fields.tsx": 3,
