@@ -3,9 +3,11 @@ the app exchanges the code once for its agents' keys. No key is copied or pasted
 
 Contract (PO 07:15Z · 07:21Z · PO decision on when keys are made — the plaintext is born in the exchange answer only):
 - create (no login): `{challenge, device_name}` → a one-time code (256-bit, only its sha256 stored), 10 minutes.
-- confirm (a person, org owner/admin — never an agent key): one transaction — for every agent stage of the recipe a **new**
-  agent (role member · no key yet) or, for a stage declared `human` in `role_actor_kinds`, the confirming person; the stage is
-  bound (the same upsert as the recipe apply API). Channel/connector stages are left for later («connect later»).
+- confirm (a person, org owner/admin — never an agent key): one transaction — the recipe's agent-target stages are grouped
+  by their **role** (`stage_metadata[stage].role`; a stage without one is its own role — PO 08:31Z). A role declared `human`
+  in `role_actor_kinds` (a table keyed by role) goes to the confirming person; every other role gets **one new** agent
+  (role member · no key yet), and all of that role's stages are bound to it (the same upsert as the recipe apply API).
+  Channel/connector stages are left for later («connect later»).
 - exchange (no login, PKCE S256 verifier): before the confirmation `pending`; after it, once — one transaction issues one key
   per new agent (scope = the non-admin tool groups · no expiry · tied to this setup) and marks the setup handed over. Never
   again after that. Existing agents are never given a new key (issue = replace would cut their running sessions).
@@ -45,7 +47,7 @@ _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 
 
 class DesktopSetupError(Exception):
-    """A closed code: request_invalid · code_not_found · code_expired · code_used · code_not_confirmed_yet · verifier_mismatch ·
+    """A closed code: request_invalid · service_unavailable · code_not_found · code_expired · code_used · code_not_confirmed_yet · verifier_mismatch ·
     already_confirmed · not_org_admin · recipe_not_found · roles_invalid · human_stage_needs_member · setup_not_found."""
 
     def __init__(self, code: str, detail: str | None = None):
@@ -62,7 +64,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: str) -> tuple[str, datetime]:
+async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: str) -> tuple[str, datetime, uuid.UUID]:
     if not _CHALLENGE_RE.match(challenge):
         raise DesktopSetupError("request_invalid", "challenge must be base64url(sha256(verifier)) without padding")
     name = device_name.strip()[:80]
@@ -76,7 +78,9 @@ async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: st
     db.add(setup)
     await db.flush()
     await emit_onboarding_event(db, EVENT_CODE_ISSUED, session_id=setup.id, meta={"flow": "desktop_setup"})
-    return code, expires_at
+    # the setup id is not a secret (nothing can be done with it without an admin session); the app passes it to the web page
+    # so steps before the confirmation (a sign-in) can be keyed by it (PO 08:31Z)
+    return code, expires_at, setup.id
 
 
 async def _setup_by_code(db: AsyncSession, code: str) -> DesktopSetup:
@@ -90,8 +94,23 @@ async def _setup_by_code(db: AsyncSession, code: str) -> DesktopSetup:
 
 @dataclass
 class RoleChoice:
-    stage: str
+    role: str
     runtime: str
+
+
+def stage_role(definition, stage: str) -> str:
+    """A stage's role (`stage_metadata[stage].role`); an older definition without one: the stage is its own role."""
+    role = (definition.stage_metadata.get(stage) or {}).get("role")
+    return role if isinstance(role, str) and role else stage
+
+
+def ordered_agent_stages(definition) -> list[str]:
+    """The agent-target stages in the recipe's own order (the payload's stage enum; else the stage_metadata order)."""
+    from app.services.recipe_role_bindings import stage_target
+
+    order = ((definition.payload_schema or {}).get("properties") or {}).get("stage", {}).get("enum") or []
+    stages = [s for s in order if s in definition.stage_metadata] + [s for s in definition.stage_metadata if s not in order]
+    return [s for s in stages if stage_target(definition, s) == "agent"]
 
 
 async def confirm_setup(
@@ -113,7 +132,7 @@ async def confirm_setup(
     from app.services.member_resolver import resolve_member
     from app.services.org_agent import create_org_level_agent
     from app.services.project_auth import is_org_owner_or_admin, require_project_access
-    from app.services.recipe_role_bindings import stage_target, upsert_role_binding
+    from app.services.recipe_role_bindings import upsert_role_binding
 
     setup = await _setup_by_code(db, code)
     if setup.revoked_at is not None or setup.exchanged_at is not None:
@@ -136,45 +155,57 @@ async def confirm_setup(
     if definition is None:
         raise DesktopSetupError("recipe_not_found")
 
-    agent_stages = [s for s in definition.stage_metadata if stage_target(definition, s) == "agent"]
-    kinds = definition.role_actor_kinds or {}
-    human_stages = {s for s in agent_stages if kinds.get(s) == "human"}
+    agent_stages = ordered_agent_stages(definition)
+    role_order: list[str] = []
+    for s in agent_stages:
+        if stage_role(definition, s) not in role_order:
+            role_order.append(stage_role(definition, s))
+    kinds = definition.role_actor_kinds or {}  # keyed by role (events.py reads it the same way)
+    human_roles = {r for r in role_order if kinds.get(r) == "human"}
     choices: dict[str, str] = {}
     for r in roles:
-        if r.stage in choices or r.stage not in agent_stages or r.stage in human_stages or r.runtime not in RUNTIME_TYPES:
-            raise DesktopSetupError("roles_invalid", f"stage {r.stage!r} / runtime {r.runtime!r}")
-        choices[r.stage] = r.runtime
-    missing = [s for s in agent_stages if s not in human_stages and s not in choices]
+        if r.role in choices or r.role not in role_order or r.role in human_roles or r.runtime not in RUNTIME_TYPES:
+            raise DesktopSetupError("roles_invalid", f"role {r.role!r} / runtime {r.runtime!r}")
+        choices[r.role] = r.runtime
+    missing = [r for r in role_order if r not in human_roles and r not in choices]
     if missing:
         raise DesktopSetupError("roles_invalid", f"a runtime is needed for: {missing}")
 
     person_member_id: uuid.UUID | None = None
-    if human_stages:
+    if human_roles:
         try:
             person_member_id = uuid.UUID(str((await resolve_member(auth, org_id, db, project_id)).id))
         except Exception as exc:  # noqa: BLE001 — no member row in this project for the person: say so, don't guess
             raise DesktopSetupError("human_stage_needs_member") from exc
 
-    members: list[dict] = []
-    for stage in agent_stages:  # the recipe's own order
-        if stage in human_stages:
-            member_id = person_member_id
-            members.append({"stage": stage, "member_id": str(member_id), "kind": "human", "runtime": None})
-        else:
-            if settings.is_ee_enabled:
-                from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
+    # one member per role: the person for a human role, one new agent for every other role
+    role_member: dict[str, uuid.UUID] = {}
+    for role in role_order:  # the recipe's own order
+        if role in human_roles:
+            role_member[role] = person_member_id
+            continue
+        if settings.is_ee_enabled:
+            from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
 
-                await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
-            agent, _no_key = await create_org_level_agent(
-                db, org_id=org_id, created_by=user_id, name=f"{stage} · {setup.device_name}"[:120], role="member",
-                project_ids=[project_id], defer_key_issuance=True,
-            )
-            await TeamMemberRepository(db, org_id).apply_anchor_update(agent, {"runtime_type": RUNTIME_TYPES[choices[stage]]})
-            member_id = agent.id
-            members.append({"stage": stage, "member_id": str(member_id), "kind": "agent", "runtime": choices[stage]})
+            await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
+        agent, _no_key = await create_org_level_agent(
+            db, org_id=org_id, created_by=user_id, name=f"{role} · {setup.device_name}"[:120], role="member",
+            project_ids=[project_id], defer_key_issuance=True,
+        )
+        await TeamMemberRepository(db, org_id).apply_anchor_update(agent, {"runtime_type": RUNTIME_TYPES[choices[role]]})
+        role_member[role] = agent.id
+
+    members: list[dict] = []
+    for stage in agent_stages:
+        role = stage_role(definition, stage)
+        human = role in human_roles
+        members.append({
+            "stage": stage, "role": role, "member_id": str(role_member[role]), "kind": "human" if human else "agent",
+            "runtime": None if human else choices[role],
+        })
         await upsert_role_binding(
             db, org_id=org_id, project_id=project_id, definition_key=definition.key, stage=stage, target="agent",
-            value_id=member_id, actor_id=user_id,
+            value_id=role_member[role], actor_id=user_id,
         )
 
     setup.org_id = org_id
@@ -220,14 +251,24 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
     if setup.confirmed_at is None:
         return None
 
-    agents: list[dict] = []
+    api_url, mcp_url = exchange_urls()
+    if not mcp_url or not api_url:
+        # no address to hand over: an agent would run without its tools — refuse before any key exists (PO 08:31Z ③)
+        raise DesktopSetupError("service_unavailable", "the MCP or API address is not configured")
+
+    # one key per new agent (a role's agent appears once per stage in `members`)
+    per_agent: dict[str, dict] = {}
     for m in setup.members or []:
         if m["kind"] != "agent":
             continue
+        entry = per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "role": m.get("role") or m["stage"], "stages": [], "runtime": m["runtime"]})
+        entry["stages"].append(m["stage"])
+    agents: list[dict] = []
+    for entry in per_agent.values():
         _key, plaintext = await ApiKeyRepository(db).create(
-            team_member_id=uuid.UUID(m["member_id"]), scope=list(ALL_GROUPS), expires_at=None, desktop_setup_id=setup.id,
+            team_member_id=uuid.UUID(entry["member_id"]), scope=list(ALL_GROUPS), expires_at=None, desktop_setup_id=setup.id,
         )
-        agents.append({"member_id": m["member_id"], "stage": m["stage"], "runtime": m["runtime"], "api_key": plaintext})
+        agents.append({**entry, "api_key": plaintext})
     setup.exchanged_at = _now()
     setup.keys_issued = len(agents)
     await db.flush()
@@ -297,7 +338,7 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         "recipe_key": r.event_definition_key, "confirmed_by": r.confirmed_by, "confirmed_at": r.confirmed_at,
         "exchanged_at": r.exchanged_at, "revoked_at": r.revoked_at, "keys_issued": r.keys_issued,
         "active_keys": active.get(r.id, 0),
-        "members": [{k: m.get(k) for k in ("stage", "member_id", "kind", "runtime")} for m in (r.members or [])],
+        "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime")} for m in (r.members or [])],
     } for r in rows]
 
 

@@ -44,6 +44,7 @@ _STATUS = {
     "already_confirmed": 409,
     "roles_invalid": 422,
     "request_invalid": 422,
+    "service_unavailable": 503,
     "human_stage_needs_member": 422,
 }
 
@@ -67,6 +68,7 @@ class SetupCodeRequest(BaseModel):
 class SetupCodeResponse(BaseModel):
     code: str
     expires_at: datetime
+    setup_id: uuid.UUID  # not a secret — the app passes it to the web page (`&setup=`) so pre-confirm steps can be keyed
 
 
 @router.post("/setup-codes", status_code=201, response_model=SetupCodeResponse)
@@ -74,15 +76,15 @@ class SetupCodeResponse(BaseModel):
 async def post_setup_code(request: Request, response: Response, body: SetupCodeRequest, db: AsyncSession = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
     try:
-        code, expires_at = await create_setup_code(db, challenge=body.challenge, device_name=body.device_name)
+        code, expires_at, setup_id = await create_setup_code(db, challenge=body.challenge, device_name=body.device_name)
     except DesktopSetupError as e:
         raise _error(e) from None
     await db.commit()
-    return SetupCodeResponse(code=code, expires_at=expires_at)
+    return SetupCodeResponse(code=code, expires_at=expires_at, setup_id=setup_id)
 
 
 class RoleIn(BaseModel):
-    stage: str = Field(min_length=1, max_length=200)
+    role: str = Field(min_length=1, max_length=200)  # a recipe role (stage_metadata[stage].role), not a stage
     runtime: Literal["claude", "codex"]
 
 
@@ -104,6 +106,7 @@ class ConfirmRequest(BaseModel):
 
 class ConfirmedMember(BaseModel):
     stage: str
+    role: str
     member_id: str
     kind: Literal["agent", "human"]
 
@@ -125,14 +128,14 @@ async def post_confirm(
     try:
         setup_id, members = await confirm_setup(
             db, code=code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
-            roles=[RoleChoice(stage=r.stage, runtime=r.runtime) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            roles=[RoleChoice(role=r.role, runtime=r.runtime) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
         )
     except DesktopSetupError as e:
         # AC2: any error leaves the request by raising, and get_db rolls the whole session back — e.g. the plan's agent
         # limit (402) on the second agent takes the first one with it
         raise _error(e) from None
     await db.commit()
-    return ConfirmResponse(setup_id=setup_id, members=[ConfirmedMember(**{k: m[k] for k in ("stage", "member_id", "kind")}) for m in members])
+    return ConfirmResponse(setup_id=setup_id, members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members])
 
 
 class ExchangeRequest(BaseModel):
@@ -168,6 +171,7 @@ async def post_exchange(request: Request, code: str, body: ExchangeRequest, db: 
 
 class SetupMember(BaseModel):
     stage: str
+    role: str | None = None
     member_id: str
     kind: Literal["agent", "human"]
     runtime: Literal["claude", "codex"] | None = None

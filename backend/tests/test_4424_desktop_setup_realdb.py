@@ -39,17 +39,24 @@ RECIPE_KEY = "org.d4424-org.desktop_recipe"
 
 # writer · reviewer = agents; approver = a person (role_actor_kinds); publisher = a channel (left for later)
 STAGES = {
-    "writer": {"label": "Writer"},
-    "reviewer": {"label": "Reviewer"},
-    "approver": {"label": "Approver"},
-    "publisher": {"label": "Publisher", "capability": {"kind": "publish", "target": "channel_connection"}},
+    "writer": {"role": "Writer"},
+    "reviewer": {"role": "Reviewer"},
+    "approver": {"role": "Approver"},
+    "publisher": {"role": "Publisher", "capability": {"kind": "publish", "target": "channel_connection"}},
 }
-KINDS = {"approver": "human"}
+KINDS = {"Approver": "human"}  # keyed by role, as events.py reads it
 
 
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _addresses(monkeypatch):
+    """The two addresses the exchange hands over (deployments set them; a test sets its own)."""
+    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.d4424.test/mcp")
+    monkeypatch.setenv("FASTAPI_URL", "https://api.d4424.test")
 
 
 @pytest.fixture(autouse=True)
@@ -146,10 +153,12 @@ async def _code(c, device: str = "d4424 laptop") -> tuple[str, str]:
     r = await c.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": device})
     assert r.status_code == 201, r.text
     assert r.headers["cache-control"] == "no-store"
+    setup_id = r.json()["setup_id"]  # PO 08:31Z ② — the id the web's pre-confirm steps are keyed by
+    assert (await _sql(fetch=f"SELECT device_name FROM desktop_setups WHERE id='{setup_id}'"))[0][0] == device
     return r.json()["code"], verifier
 
 
-_ROLES = {"project_id": str(PROJ), "recipe_id": str(RECIPE), "roles": [{"stage": "writer", "runtime": "claude"}, {"stage": "reviewer", "runtime": "codex"}]}
+_ROLES = {"project_id": str(PROJ), "recipe_id": str(RECIPE), "roles": [{"role": "Writer", "runtime": "claude"}, {"role": "Reviewer", "runtime": "codex"}]}
 
 
 async def _confirm(c, code: str, who: uuid.UUID = OWNER, org: uuid.UUID = ORG, body: dict | None = None):
@@ -187,7 +196,7 @@ async def test_ac1_pending_then_the_keys_once_then_never_again(world, caplog):
         assert r.status_code == 200, r.text
         members = {m["stage"]: m for m in r.json()["members"]}
         assert set(members) == {"writer", "reviewer", "approver"}  # the channel stage is left for later
-        assert members["approver"] == {"stage": "approver", "member_id": str(OWNER_TM), "kind": "human"}
+        assert members["approver"] == {"stage": "approver", "role": "Approver", "member_id": str(OWNER_TM), "kind": "human"}
         assert members["writer"]["kind"] == members["reviewer"]["kind"] == "agent"
         assert "api_key" not in r.text  # the confirmation never carries a key
 
@@ -195,10 +204,10 @@ async def test_ac1_pending_then_the_keys_once_then_never_again(world, caplog):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["setup_id"] == str((await _sql(fetch=f"SELECT id FROM desktop_setups WHERE org_id='{ORG}'"))[0][0])
-        agents = {a["stage"]: a for a in body["agents"]}
-        assert set(agents) == {"writer", "reviewer"}
-        assert (agents["writer"]["runtime"], agents["reviewer"]["runtime"]) == ("claude", "codex")
-        assert agents["writer"]["member_id"] == members["writer"]["member_id"]
+        agents = {a["role"]: a for a in body["agents"]}
+        assert set(agents) == {"Writer", "Reviewer"}
+        assert (agents["Writer"]["runtime"], agents["Reviewer"]["runtime"]) == ("claude", "codex")
+        assert (agents["Writer"]["member_id"], agents["Writer"]["stages"]) == (members["writer"]["member_id"], ["writer"])
         assert all(a["api_key"].startswith("sk_live_") for a in agents.values())
         assert "api_url" in body and "mcp_url" in body
         assert body["workdir_hint"] is None  # none was chosen
@@ -257,9 +266,10 @@ async def test_ac1_refusals(world):
         # a runtime the app does not have, a stage that is a person's or a channel's, a missing agent stage
         code3, _ = await _code(c, "d4424 roles")
         for roles in (
-            [{"stage": "writer", "runtime": "claude"}],  # reviewer missing
-            [{"stage": "writer", "runtime": "claude"}, {"stage": "reviewer", "runtime": "codex"}, {"stage": "approver", "runtime": "claude"}],
-            [{"stage": "writer", "runtime": "claude"}, {"stage": "reviewer", "runtime": "codex"}, {"stage": "publisher", "runtime": "claude"}],
+            [{"role": "Writer", "runtime": "claude"}],  # Reviewer missing
+            [{"role": "Writer", "runtime": "claude"}, {"role": "Reviewer", "runtime": "codex"}, {"role": "Approver", "runtime": "claude"}],
+            [{"role": "Writer", "runtime": "claude"}, {"role": "Reviewer", "runtime": "codex"}, {"role": "Publisher", "runtime": "claude"}],
+            [{"role": "writer", "runtime": "claude"}, {"role": "Reviewer", "runtime": "codex"}],  # a stage name is not a role
         ):
             r = await _confirm(c, code3, body={**_ROLES, "roles": roles})
             assert (r.status_code, r.json()["error"]["code"]) == (422, "roles_invalid"), roles
@@ -440,3 +450,63 @@ async def test_the_folder_chosen_on_the_web_comes_back_in_the_exchange_as_is(wor
         hint = "~/work/sprintable ../ 한글 폴더"  # not checked by the server: the app judges the path
         assert (await _confirm(c, code, body={**_ROLES, "workdir_hint": hint})).status_code == 200
         assert (await _exchange(c, code, verifier)).json()["workdir_hint"] == hint
+
+
+# ─── PO 08:31Z ① — one agent per role, on the real preset (not a hand-made shape) ─
+
+
+@pytest.mark.anyio
+async def test_the_video_recipe_makes_one_agent_for_the_creator_and_gives_the_director_stages_to_the_person(world):
+    preset = (await _sql(fetch="SELECT id, stage_metadata, role_actor_kinds FROM event_definitions WHERE key='preset.marketing.video_production' AND org_id IS NULL"))
+    assert preset, "the migrated DB carries the preset"
+    preset_id, stage_metadata, kinds = preset[0]
+    # the shape this test relies on (so a changed preset turns this red here, not silently)
+    creator = sorted(s for s, m in stage_metadata.items()
+                     if m.get("role") == "Creator" and (m.get("capability") or {}).get("target") in (None, "agent"))
+    director = sorted(s for s, m in stage_metadata.items() if m.get("role") == "Director")
+    assert kinds["Director"] == "human" and kinds["Creator"] == "agent"
+    assert len(creator) == 4 and len(director) == 3, (creator, director)
+
+    before = await _counts()
+    async with _client() as c:
+        code, verifier = await _code(c)
+        body = {"project_id": str(PROJ), "recipe_id": str(preset_id), "roles": [{"role": "Creator", "runtime": "claude"}]}
+        r = await _confirm(c, code, body=body)
+        assert r.status_code == 200, r.text
+        members = {m["stage"]: m for m in r.json()["members"]}
+        assert (await _counts())["agents"] == before["agents"] + 1  # exactly one new agent
+        agent_ids = {members[s]["member_id"] for s in creator}
+        assert len(agent_ids) == 1 and all(members[s]["kind"] == "agent" and members[s]["role"] == "Creator" for s in creator)
+        assert {members[s]["member_id"] for s in director} == {str(OWNER_TM)}
+        assert all(members[s]["kind"] == "human" for s in director)
+        assert "published" not in members and "live_generation" not in members  # channel · compute stages stay unbound
+        bound = dict(await _sql(fetch=(
+            "SELECT stage, coalesce(agent_member_id::text, channel_connection_id::text, generation_connector_id::text) FROM recipe_role_bindings "
+            f"WHERE org_id='{ORG}' AND event_definition_key='preset.marketing.video_production'"
+        )))
+        assert set(bound) == set(creator) | set(director)
+        name = (await _sql(fetch=f"SELECT name FROM members WHERE id='{next(iter(agent_ids))}'"))[0][0]
+        assert name == "Creator · d4424 laptop"
+        # the exchange: one key for the one agent, carrying its role and all its stages
+        ex = (await _exchange(c, code, verifier)).json()
+        assert [(a["role"], sorted(a["stages"]), a["runtime"]) for a in ex["agents"]] == [("Creator", creator, "claude")]
+        # a role the recipe does not have / a person's role / a stage name → 422
+        code2, _ = await _code(c, "d4424 roles2")
+        for roles in ([{"role": "Director", "runtime": "claude"}, {"role": "Creator", "runtime": "claude"}], [{"role": "draft", "runtime": "claude"}]):
+            assert (await _confirm(c, code2, body={**body, "roles": roles})).status_code == 422, roles
+
+
+@pytest.mark.anyio
+async def test_no_mcp_address_no_keys(world, monkeypatch):
+    """PO 08:31Z ③ — without an MCP address an agent would run without its tools: refused before any key is made."""
+    async with _client() as c:
+        code, verifier = await _code(c)
+        assert (await _confirm(c, code)).status_code == 200
+        keys_before = (await _counts())["keys"]
+        monkeypatch.delenv("MCP_PUBLIC_URL")
+        r = await _exchange(c, code, verifier)
+        assert (r.status_code, r.json()["error"]["code"]) == (503, "service_unavailable")
+        assert (await _counts())["keys"] == keys_before
+        monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.d4424.test/mcp")
+        r = await _exchange(c, code, verifier)
+        assert r.status_code == 200 and r.json()["mcp_url"] == "https://mcp.d4424.test/mcp"
