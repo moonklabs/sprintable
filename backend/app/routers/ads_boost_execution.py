@@ -24,6 +24,7 @@ from app.services.ads_boost_execution import (
     AdsBoostGateNotApprovedError,
     AdsBoostGateNotFoundError,
     AdsBoostNotPausedError,
+    AdsBoostSpendBlockedError,
     AdsBoostNotStartedError,
     request_ads_boost_pause,
     request_ads_boost_resume,
@@ -243,6 +244,11 @@ async def _resume_ads_boost_endpoint(
         )
     except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
         _raise_common_error(exc, resolved_locale)
+    except AdsBoostSpendBlockedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_SPEND_UNREADABLE", "message": t("ads_boost.spend_unreadable_no_resume", resolved_locale)},
+        ) from exc
     except AdsBoostNotPausedError as exc:
         raise HTTPException(
             status_code=409,
@@ -293,6 +299,11 @@ class SpendSummaryResponse(BaseModel):
     # 시각(ads_boost_runs.cap_reached_at, 0368) — run 자체가 없거나 미도달이면
     # null(지어내지 않는다).
     cap_reached_at: str | None
+    # story #4417 — the spend could not be checked against the budget: when and why (the run is paused, resume refused)
+    spend_blocked_at: str | None = None
+    spend_blocked_code: str | None = None
+    # story #4417 — the ad account's currency read before the start (null = not read yet)
+    account_currency: str | None = None
     start_command: StartCommandView | None = None
     # story #4416 — the run's campaign for the «stop in Ads Manager» link (null without a run; campaign_id also null while
     # the run has no campaign yet) and the ad channel (`conn.channel` as is: ads_sandbox · meta_ads · …).
@@ -357,6 +368,8 @@ async def _get_ads_boost_spend_endpoint(
         campaign_id=summary["campaign_id"] if caller_is_human else None,
         ad_account_id=summary["ad_account_id"] if caller_is_human else None,
         campaign_name=summary["campaign_name"], ad_channel=summary["ad_channel"],
+        spend_blocked_at=summary["spend_blocked_at"].isoformat() if summary["spend_blocked_at"] else None,
+        spend_blocked_code=summary["spend_blocked_code"], account_currency=summary["account_currency"],
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,

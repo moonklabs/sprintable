@@ -51,6 +51,14 @@ class AdsBoostRun(Base):
     # 재-중지 요청을 안 보내는 멱등 게이트(ads_spend_snapshots.py::_enforce_spend_cap).
     cap_reached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4417 (0421) — the spend could not be checked against the budget (another currency · a currency outside the table ·
+    # repeated read failures): set once, the run is paused by the scheduler and cannot be resumed while this is set.
+    spend_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    spend_blocked_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4417 (0421 · Qadir 01a0eb71 B) — the notice went out (null = not yet: tried again on the next tick)
+    spend_blocked_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4417 (0421) — the ad account's currency as read before the start touched the provider (null = not read yet)
+    account_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4404 (0419) — campaign creation at most once: the claim (conditional UPDATE) and the marker committed right before the
     # create call. Expired claim + marker + no ids = outcome unknown → needs_check, never re-created automatically.
     create_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

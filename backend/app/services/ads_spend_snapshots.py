@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ads_boost_run import AdsBoostRun
 from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
+from app.services.meta_ads_campaign import SPEND_CURRENCY_ERROR_CODES, MetaAdsCampaignError
 
 logger = logging.getLogger(__name__)
 
@@ -209,8 +210,16 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
     run.cap_reached_at = now
     await db.commit()
 
+    await _pause_by_scheduler(db, gate=gate, run=run)
+    return True
+
+
+async def _pause_by_scheduler(db: AsyncSession, *, gate: Gate, run) -> bool:
+    """The scheduler's pause request for a boost (the cap · story #4417 an unreadable spend). Extracted from `_enforce_spend_cap`.
+    story #4417 (Qadir 01a0eb71 B) — returns whether a pause is requested or already in place; False = try again later."""
     if gate.resolver_id is None:
-        return True  # PR6과 동형 방어 — 귀속 불가 상태는 이론상 불가하나 침묵 안 함.
+        logger.error("ads_spend_pause_no_resolver gate_id=%s", gate.id)
+        return False  # PR6과 동형 방어 — 귀속 불가 상태는 이론상 불가하나 침묵 안 함.
 
     from app.services.ads_boost_execution import (
         AdsBoostAlreadyInStateError,
@@ -220,12 +229,16 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
         request_ads_boost_pause,
     )
 
+    gate_id = gate.id  # plain value: the rollback below expires the loaded gate
     try:
         await request_ads_boost_pause(
             db, org_id=gate.org_id, gate_id=gate.id, requester_member_id=gate.resolver_id,
             initiated_by="scheduler",
         )
-    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError, AdsBoostAlreadyInStateError, AdsBoostNotStartedError) as exc:
+        return True
+    except AdsBoostAlreadyInStateError:
+        return True  # a pause is already queued or done
+    except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError, AdsBoostNotStartedError) as exc:
         # 이미 중지됐거나(사람이 먼저 pause) 게이트가 그 사이 재오픈된 경우 —
         # 「상한 도달」 관측 자체는 위에서 이미 확정됐으니 이 건은 이 워커의
         # 실패가 아니다(재-raise 안 함). 다만 story #3806(Phase3·3-2 PR 13, 페드루
@@ -236,13 +249,189 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
         logger.warning(
             "ads_spend_cap_pause_request_skipped gate_id=%s exception=%s", gate.id, type(exc).__name__,
         )
+        return False
     except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
         await db.rollback()
+        logger.error("ads_spend_pause_request_failed gate_id=%s", gate_id, exc_info=True)
         # story #4272 — rollback이 run · gate를 만료시킨다. 호출부(워커 배치 · 새로고침 라우트)가 곧바로 run.status 등을 읽으니
         # 여기서 다시 읽어 둔다(안 그러면 비동기 지연 적재 MissingGreenlet).
         await db.refresh(run)
         await db.refresh(gate)
+        return False
+
+
+# story #4417 (Qadir 01a0eb3b ①③ · PO 03:49Z) — the cap decision never ends silently. A spend that can't be checked against the
+# budget stops the boost the same way the cap does (scheduler pause), marks the run (`spend_blocked_*`, no resume while set) and
+# tells the people on the boost. A read that failed is closed (failed) and tried again later; this many failures in a row stop.
+SPEND_READ_FAILURES_BEFORE_STOP = 3
+_SPEND_READ_RETRY_BACKOFF = (timedelta(hours=1), timedelta(hours=3))  # after the 1st · 2nd failure in a row
+SPEND_READ_FAILED_REPEATEDLY_CODE = "ADS_SPEND_READ_FAILED_REPEATEDLY"
+# story #4417 (Qadir 01a0eb71 A) — the boost's ad connection is gone while it runs: we can't read its spend and can't pause it at
+# Meta (no token). Marked and told (the owners too) so a person stops it in Ads Manager.
+SPEND_CONTEXT_LOST_CODE = "ADS_SPEND_CONTEXT_LOST"
+_BLOCK_FOLLOW_UP = timedelta(hours=1)  # a failed pause/notice is tried again this much later
+
+
+async def _consecutive_spend_read_failures(db: AsyncSession, *, publication_id: uuid.UUID) -> int:
+    """Failed captures in a row, newest first, for this publication's paid snapshots (pending ones are not reads yet)."""
+    statuses = (await db.execute(
+        paid_snapshots_only(select(InsightSnapshot.status).where(
+            InsightSnapshot.publication_id == publication_id, InsightSnapshot.status.in_(("captured", "failed")),
+        )).order_by(InsightSnapshot.due_at.desc(), InsightSnapshot.captured_at.desc().nulls_last())
+        .limit(SPEND_READ_FAILURES_BEFORE_STOP)
+    )).scalars().all()
+    count = 0
+    for status in statuses:
+        if status != "failed":
+            break
+        count += 1
+    return count
+
+
+async def _block_unreadable_spend(
+    db: AsyncSession, *, gate_id: uuid.UUID, run_id: uuid.UUID, code: str, now: datetime,
+) -> bool:
+    """Mark the run (once), then pause and notify (`_follow_through_block`). Returns whether it was newly blocked."""
+    gate = await db.get(Gate, gate_id)
+    run = await db.get(AdsBoostRun, run_id)
+    if gate is None or run is None:
+        return False
+    if run.spend_blocked_at is not None:
+        await _follow_through_block(db, gate=gate, run=run, now=now)
+        return False
+    run.spend_blocked_at = now
+    run.spend_blocked_code = code
+    await db.commit()
+    logger.error("ads_spend_blocked gate_id=%s run_id=%s code=%s", gate_id, run_id, code)
+    await _follow_through_block(db, gate=gate, run=run, now=now)
     return True
+
+
+async def _follow_through_block(db: AsyncSession, *, gate: Gate, run, now: datetime) -> None:
+    """story #4417 (Qadir 01a0eb71 B) — a marked run is paused (unless we can't reach Meta: context lost) and its people told once.
+    Whatever did not happen yet (the pause is not in effect · the notice failed) is tried again at a follow-up capture: the block
+    never ends as a one-shot attempt."""
+    code = run.spend_blocked_code
+    paused = code == SPEND_CONTEXT_LOST_CODE or run.status in ("paused", "pause_pending")
+    if not paused:
+        await _pause_by_scheduler(db, gate=gate, run=run)
+    if run.spend_blocked_notified_at is None:
+        told = await _notify_spend_blocked(db, gate=gate, code=code, run_status=run.status)
+        await db.refresh(run)  # a failed notice rolled back and expired the loaded rows
+        await db.refresh(gate)
+        if told:
+            run.spend_blocked_notified_at = now
+            await db.commit()
+    if not paused or run.spend_blocked_notified_at is None:
+        await _schedule_capture(db, gate=gate, due_at=now + _BLOCK_FOLLOW_UP)
+
+
+async def _schedule_capture(db: AsyncSession, *, gate: Gate, due_at: datetime) -> None:
+    """One pending paid capture for the gate's publication (idempotent per due_at)."""
+    from app.models.channel_connection import ChannelConnection
+
+    channel = (await db.execute(
+        select(ChannelConnection.channel).where(ChannelConnection.id == gate.sealed_ads_connection_id)
+    )).scalar_one_or_none() or "meta_ads"
+    await db.execute(pg_insert(InsightSnapshot).values(
+        id=uuid.uuid4(), org_id=gate.org_id, work_item_id=gate.work_item_id, publication_id=uuid.UUID(gate.scope_key),
+        publication_kind="channel_publication", channel=channel, external_id=None, due_at=due_at, status="pending",
+    ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at"))
+    await db.commit()
+
+
+async def _gate_and_run_for(db: AsyncSession, snapshot: InsightSnapshot):
+    gate = (await db.execute(
+        select(Gate).where(
+            Gate.org_id == snapshot.org_id, Gate.gate_type == _ADS_BOOST_GATE_TYPE,
+            Gate.scope_key == str(snapshot.publication_id),
+        )
+    )).scalar_one_or_none()
+    run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate.id))).scalar_one_or_none() if gate else None
+    return gate, run
+
+
+async def _notify_spend_blocked(db: AsyncSession, *, gate: Gate, code: str | None, run_status: str | None) -> bool:
+    """The approver of the boost and whoever asked for its start — and, when the connection is gone (nothing we can pause), the
+    org's owners/admins too. Returns whether it went out (a failed notice is tried again by `_follow_through_block`)."""
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_BOOST_START
+    from app.services.gate_service import resolve_work_item_project_id
+    from app.services.i18n_catalog import t
+    from app.services.notification_dispatch import dispatch_notification
+
+    gate_id = gate.id  # plain value: a rollback below expires the loaded gate
+    try:
+        requested_by = (await db.execute(
+            select(PublicationCommand.requested_by_member_id).where(
+                PublicationCommand.gate_id == gate.id, PublicationCommand.operation == OP_BOOST_START,
+            ).order_by(PublicationCommand.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        owners: list = []
+        if code == SPEND_CONTEXT_LOST_CODE:
+            from app.models.project import OrgMember
+
+            owners = list((await db.execute(
+                select(OrgMember.id).where(
+                    OrgMember.org_id == gate.org_id, OrgMember.role.in_(("owner", "admin")), OrgMember.deleted_at.is_(None),
+                )
+            )).scalars().all())
+        targets = [m for m in dict.fromkeys((gate.resolver_id, requested_by, *owners)) if m is not None]
+        if not targets:
+            logger.error("ads_spend_blocked_no_recipient gate_id=%s", gate.id)
+            return False
+        # story #4417 (Yuna 5884175792) — say only what is true about the money: connection lost = not paused, the person
+        # pauses it · paused = no more spend · a pause requested but not in effect yet = pausing
+        if code == SPEND_CONTEXT_LOST_CODE:
+            title_key, body_key = "ads_boost.spend_context_lost_title", "ads_boost.spend_context_lost_body"
+        elif run_status == "paused":
+            title_key, body_key = "ads_boost.spend_unreadable_title", "ads_boost.spend_unreadable_body"
+        else:
+            title_key, body_key = "ads_boost.spend_unreadable_pausing_title", "ads_boost.spend_unreadable_pausing_body"
+        await dispatch_notification(
+            db, org_id=gate.org_id, event_type="ads_boost_spend_unreadable", target_member_ids=targets,
+            title=t(title_key, "ko"), body=t(body_key, "ko"),
+            reference_type="gate", reference_id=gate.id,
+            source_project_id=await resolve_work_item_project_id(db, gate.org_id, gate.work_item_type, gate.work_item_id),
+            via_outbox=True,
+        )
+        await db.commit()
+        return True
+    except Exception:  # noqa: BLE001 — the stop stands; the notice is tried again, never silent
+        await db.rollback()
+        logger.error("ads_spend_blocked_notify_failed gate_id=%s", gate_id, exc_info=True)
+        return False
+
+
+async def _after_failed_spend_read(
+    db: AsyncSession, *, snapshot_id: uuid.UUID, ids: dict | None, code: str, now: datetime,
+) -> bool:
+    """A read failed: close the capture (failed, with the code), then either try again later or — after
+    `SPEND_READ_FAILURES_BEFORE_STOP` in a row — stop the boost. Returns whether the boost was blocked."""
+    failed = await db.get(InsightSnapshot, snapshot_id)
+    if failed is not None:
+        failed.error_code = code
+        failed.status = "failed"
+        failed.captured_at = now
+        await db.commit()
+    if ids is None:
+        return False  # the gate/run were not resolved (logged by the caller) — nothing to retry against
+    streak = await _consecutive_spend_read_failures(db, publication_id=ids["publication_id"])
+    if streak >= SPEND_READ_FAILURES_BEFORE_STOP:
+        return await _block_unreadable_spend(
+            db, gate_id=ids["gate_id"], run_id=ids["run_id"], code=SPEND_READ_FAILED_REPEATEDLY_CODE, now=now,
+        )
+    run = await db.get(AdsBoostRun, ids["run_id"])
+    if failed is not None and run is not None and run.status == "running" and run.spend_blocked_at is None:
+        # the failure just closed is in the streak (≥ 1): 1st → 1h, 2nd → 3h
+        backoff = _SPEND_READ_RETRY_BACKOFF[min(max(streak, 1), len(_SPEND_READ_RETRY_BACKOFF)) - 1]
+        await db.execute(pg_insert(InsightSnapshot).values(
+            id=uuid.uuid4(), org_id=failed.org_id, work_item_id=failed.work_item_id, publication_id=failed.publication_id,
+            publication_kind=failed.publication_kind, channel=failed.channel, external_id=None, due_at=now + backoff,
+            status="pending",
+        ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at"))
+        await db.commit()
+    return False
 
 
 class AdsSpendRefreshRateLimitedError(Exception):
@@ -312,9 +501,11 @@ async def refresh_ads_boost_spend_now(
         # module을 스냅샷 하나로부터 다시 도출하는 그 계약을 그대로 탄다(드리프트
         # 없는 재사용, 위에서 이미 확認한 gate·conn을 또 손으로 안 옮긴다).
         ctx = await _resolve_spend_context(db, snapshot)
+        blocked_ids = {"gate_id": ctx["gate"].id, "run_id": ctx["run"].id}
         async with httpx.AsyncClient(timeout=20) as client:
             spend_minor = await ctx["module"].get_campaign_spend_minor(
                 client, campaign_id=ctx["campaign_id"], access_token=ctx["access_token"],
+                currency=ctx["gate"].sealed_ads_currency,
             )
         snapshot.normalized = {key: (spend_minor if key == "spend" else None) for key in NORMALIZED_KEYS}
         snapshot.source = _PAID_SOURCE
@@ -322,6 +513,13 @@ async def refresh_ads_boost_spend_now(
         snapshot.status = "captured"
         snapshot.error_code = None
         await db.commit()
+    except MetaAdsCampaignError as exc:
+        await db.rollback()
+        if exc.code in SPEND_CURRENCY_ERROR_CODES:
+            # story #4417 — a person's «collect again» that reads a spend in another currency stops the boost like the worker
+            logger.error("ads_spend_currency_unreadable gate_id=%s code=%s (refresh)", gate_id, exc.code)
+            await _block_unreadable_spend(db, gate_id=blocked_ids["gate_id"], run_id=blocked_ids["run_id"], code=exc.code, now=now)
+        raise
     except Exception:
         await db.rollback()
         raise
@@ -373,17 +571,30 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
     # 원시 id만 들고 돌며 건마다 다시 읽는다(publication_command.py 배치 루프와 같은 처방).
     snapshot_ids = [snapshot.id for snapshot in rows]
     for snapshot_id in snapshot_ids:
+        ids: dict | None = None  # story #4417 — plain ids: a rollback expires the loaded gate/run
         try:
             snapshot = await db.get(InsightSnapshot, snapshot_id)
             if snapshot is None:
                 continue
             ctx = await _resolve_spend_context(db, snapshot)
+            ids = {"gate_id": ctx["gate"].id, "run_id": ctx["run"].id, "publication_id": snapshot.publication_id}
+            if ctx["run"].spend_blocked_at is not None:
+                # story #4417 (Qadir 01a0eb71 B) — a follow-up capture of a blocked boost: no spend read (it can't be checked
+                # against the budget), only what the block still owes — the pause and the notice.
+                snapshot.status = "failed"
+                snapshot.error_code = "ADS_SPEND_BLOCKED"
+                snapshot.captured_at = now
+                await db.commit()
+                await _follow_through_block(db, gate=ctx["gate"], run=ctx["run"], now=now)
+                counts["failed"] += 1
+                continue
             from app.services.external_call_tx import end_transaction_before_external_call
 
             await end_transaction_before_external_call(db)  # story #4404 — the worker loop; reads only before the call
             async with httpx.AsyncClient(timeout=20) as client:
                 spend_minor = await ctx["module"].get_campaign_spend_minor(
                     client, campaign_id=ctx["campaign_id"], access_token=ctx["access_token"],
+                    currency=ctx["gate"].sealed_ads_currency,
                 )
             from app.services.insight_snapshots import NORMALIZED_KEYS
 
@@ -428,8 +639,50 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
             snapshot.captured_at = now
             await db.commit()
             counts["failed"] += 1
-        except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
+            # story #4417 (Qadir 01a0eb71 A) — no fetch-error branch ends silently:
+            gate, run = await _gate_and_run_for(db, snapshot)
+            if exc.code == "ADS_SPEND_NOT_STARTED" and gate is not None:
+                # the campaign isn't there yet: a normal wait — look again later (until the sealed period is over)
+                if gate.sealed_ads_ends_at is None or now < gate.sealed_ads_ends_at:
+                    await _schedule_capture(db, gate=gate, due_at=now + _SPEND_READ_RETRY_BACKOFF[0])
+            elif exc.code == "ADS_SPEND_CONNECTION_MISSING" and gate is not None and run is not None:
+                # the ad connection is gone while the boost may be running: mark it and tell people to stop it in Ads Manager
+                await _block_unreadable_spend(db, gate_id=gate.id, run_id=run.id, code=SPEND_CONTEXT_LOST_CODE, now=now)
+            else:
+                # ADS_SPEND_GATE_MISSING: no boost left to pause or show (the gate behind this capture is gone) — logged
+                logger.error("ads_spend_capture_orphan snapshot_id=%s code=%s", snapshot_id, exc.code)
+        except MetaAdsCampaignError as exc:
             await db.rollback()
+            if exc.code in SPEND_CURRENCY_ERROR_CODES and ids is not None:
+                # story #4417 — the spend is in a currency we can't convert (not the sealed one, or not in the table): it can't
+                # be checked against the budget and a retry would read the same — the capture fails and the boost stops.
+                logger.error(
+                    "ads_spend_currency_unreadable snapshot_id=%s code=%s message=%s", snapshot_id, exc.code, exc.message,
+                )
+                failed = await db.get(InsightSnapshot, snapshot_id)
+                if failed is not None:
+                    failed.error_code = exc.code
+                    failed.status = "failed"
+                    failed.captured_at = now
+                    await db.commit()
+                await _block_unreadable_spend(db, gate_id=ids["gate_id"], run_id=ids["run_id"], code=exc.code, now=now)
+                counts["failed"] += 1
+                continue
+            logger.error("ads_spend_read_failed snapshot_id=%s code=%s message=%s", snapshot_id, exc.code, exc.message)
+            await _after_failed_spend_read(db, snapshot_id=snapshot_id, ids=ids, code=exc.code, now=now)
+            counts["failed"] += 1
+        except Exception as exc:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
+            await db.rollback()
+            # story #4417 — before: the capture stayed in_progress and nothing was scheduled again (the cap was never checked
+            # for this boost again). Now it is closed and retried like a failed read.
+            logger.error("ads_spend_capture_error snapshot_id=%s", snapshot_id, exc_info=True)
+            try:
+                await _after_failed_spend_read(
+                    db, snapshot_id=snapshot_id, ids=ids, code=getattr(exc, "code", None) or "ADS_SPEND_CAPTURE_ERROR", now=now,
+                )
+            except Exception:  # noqa: BLE001
+                await db.rollback()
+                logger.error("ads_spend_capture_error_followup_failed snapshot_id=%s", snapshot_id, exc_info=True)
             counts["error"] += 1
     return counts
 
@@ -546,6 +799,11 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         # 없으면(미실행) 당연히 null, run은 있는데 아직 미도달이어도 null(지어내지
         # 않는다) — 도달한 시각이 찍혀야만 값이 있다.
         "cap_reached_at": run.cap_reached_at if run is not None else None,
+        # story #4417 — the spend could not be checked against the budget (the run was paused and can't be resumed) · the ad
+        # account's currency as read before the start (the Ads Manager link comes from 4416's human-only ids)
+        "spend_blocked_at": run.spend_blocked_at if run is not None else None,
+        "spend_blocked_code": run.spend_blocked_code if run is not None else None,
+        "account_currency": run.account_currency if run is not None else None,
         "snapshots": [
             {
                 "due_at": s.due_at, "captured_at": s.captured_at, "status": s.status,

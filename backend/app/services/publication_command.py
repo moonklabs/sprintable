@@ -204,6 +204,9 @@ _RETRY_SAFE_CODES = frozenset({
     "SANDBOX_PROVIDER_ERROR", "SANDBOX_INSTAGRAM_PROVIDER_ERROR",
     # 캐러셀 자식(부모 게시 전) 실패 sandbox 마커 — 실 `FACEBOOK_/INSTAGRAM_CREATE_CAROUSEL_CHILD_FAILED`와 같은 칸(까디르 codex P2 · PO 18:51Z).
     "SANDBOX_FACEBOOK_CAROUSEL_CHILD_FAILED", "SANDBOX_INSTAGRAM_CAROUSEL_CHILD_FAILED",
+    # story #4417 — reading the ad account's currency before an ads boost start creates or switches on anything (a read: nothing
+    # was written). A currency that differs (`ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH`) stays needs_check by default — deterministic.
+    "META_ADS_ACCOUNT_READ_FAILED",
 })
 # `CHANNEL_PUBLISH_PROVIDER_ERROR`는 읽기 경로(인사이트 · 댓글 수집의 공급자 5xx — 재시도 안전)가 쓰는 코드라 transient 유지. 발행
 # 경로는 이제 이 코드를 내지 않는다(`provider_error_code`가 코드 그대로 · 블로그 쓰기는 `SITE_POST_PROVIDER_ERROR`).

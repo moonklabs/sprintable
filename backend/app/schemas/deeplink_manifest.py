@@ -400,6 +400,21 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
         DeepLinkManifestEntry(
+            # story #4417 — an ads boost was paused because its spend can't be checked against the budget (another currency ·
+            # repeated read failures). Lands on the boost's gate, where the card says why and hides «resume». The dispatch
+            # resolves the project from the gate's work item (ads_spend_snapshots.py::_notify_spend_blocked).
+            app=DeepLinkAppFields(
+                type="ads_boost_spend_unreadable", target="gate_detail", parent_tab=ParentTab.approvals,
+                counts_toward_queue_badge=False,
+                target_promotion_pending=True,  # gate_detail 공통 사유 — 위 결재함 섹션 헤더 주석 참고.
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
+        ),
+        DeepLinkManifestEntry(
             # 열린 질문 6번 답변(유나, 3자 검토): target은 approvals 그대로 유지 — 이미
             # 확정된 FYI 통보라 결재함 화면 자체에 남기는 게 맞다. 다만 액션이 불필요하므로
             # 결재함 큐/배지 카운트에서는 제외(counts_toward_queue_badge=False) — 스키마에

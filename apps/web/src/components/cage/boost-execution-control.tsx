@@ -58,6 +58,16 @@ interface StartCommand {
 }
 // Meta may have created the campaign: retried only after the person confirms it does not exist in the ad account.
 const OUTCOME_UNKNOWN = 'ADS_BOOST_CREATE_OUTCOME_UNKNOWN';
+// story #4417 — the ad account's currency is not the approved one: nothing was created (the next step is a new request)
+const ACCOUNT_CURRENCY_MISMATCH = 'ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH';
+// story #4417 (Yuna 5883612567) — only these codes mean «the spend came in another currency»; every other reason the server
+// stopped the boost (e.g. repeated read failures, or a code added later) gets the line without a reason — never a wrong one.
+const SPEND_CURRENCY_CODES: ReadonlySet<string> = new Set(['META_ADS_SPEND_CURRENCY_MISMATCH', 'META_ADS_SPEND_UNKNOWN_CURRENCY']);
+// story #4417 (Qadir 01a0eb71 A) — the ad connection is gone: nothing we can read or pause; the person stops it in Ads Manager
+const SPEND_CONTEXT_LOST = 'ADS_SPEND_CONTEXT_LOST';
+export function isSpendCurrencyCode(code: string): boolean {
+  return SPEND_CURRENCY_CODES.has(code);
+}
 
 interface SpendData {
   run_status: RunStatus | null;
@@ -68,6 +78,10 @@ interface SpendData {
   ad_account_id?: string | null;
   campaign_name?: string | null;
   ad_channel?: string | null;
+  // story #4417 — why the server blocked the spend check (the run is paused · no resume) · the ad account's currency read before
+  // the start
+  spend_blocked_code?: string | null;
+  account_currency?: string | null;
 }
 
 // story #4416 — start · retry · pause · resume are queued commands the worker runs later (every minute, transient failures
@@ -111,6 +125,10 @@ export function BoostExecutionControl({
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [initiatedBy, setInitiatedBy] = useState<InitiatedBy | null>(null);
   const [startCommand, setStartCommand] = useState<StartCommand | null>(null);
+  // story #4417 — the spend could not be checked against the budget (the server paused the boost and refuses resume) · the
+  // ad account's currency read before the start (the Ads Manager link uses 4416's run ids)
+  const [spendBlockedCode, setSpendBlockedCode] = useState<string | null>(null);
+  const [accountCurrency, setAccountCurrency] = useState<string | null>(null);
   const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
   const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
   // story #4412 — «it is already in my ad account»: the lookup's answer when it did not adopt
@@ -206,6 +224,8 @@ export function BoostExecutionControl({
       // story #3806 PR 9② — PR8(#4185) 착지 前엔 이 필드가 응답에 없어 항상
       // undefined→null로 떨어진다(falsy-safe, 아래 렌더가 자동으로 숨는다).
       setInitiatedBy(d.initiated_by ?? null);
+      setSpendBlockedCode(d.spend_blocked_code ?? null);
+      setAccountCurrency(d.account_currency ?? null);
       setRunAd({
         campaign_id: d.campaign_id ?? null, ad_account_id: d.ad_account_id ?? null,
         campaign_name: d.campaign_name ?? null, ad_channel: d.ad_channel ?? null,
@@ -433,15 +453,23 @@ export function BoostExecutionControl({
   const needsCheck = startCommand?.status === 'dead_letter' && startCommand.failure_kind === 'needs_check';
   if (needsCheck && runStatus !== 'running' && runStatus !== 'paused') {
     const outcomeUnknown = startCommand.error_code === OUTCOME_UNKNOWN;
+    const currencyMismatch = startCommand.error_code === ACCOUNT_CURRENCY_MISMATCH;
     return (
       <div className="space-y-2 break-keep" data-testid="boost-execution-control">
         <p className="text-xs">
           <span className="font-medium text-foreground" data-testid="boost-needs-check">{t('boostNeedsCheckTitle')}</span>
         </p>
-        <p className="text-xs text-muted-foreground">
-          {outcomeUnknown ? t('boostNeedsCheckOutcomeUnknown') : t('boostNeedsCheckStopped')}
+        <p className="text-xs text-muted-foreground" data-testid="boost-needs-check-reason">
+          {currencyMismatch
+            ? (accountCurrency && sealedAdsCurrency
+              ? t('boostAccountCurrencyMismatch', { accountCurrency, approvedCurrency: sealedAdsCurrency })
+              : t('boostAccountCurrencyMismatchNoCodes'))
+            : outcomeUnknown ? t('boostNeedsCheckOutcomeUnknown') : t('boostNeedsCheckStopped')}
         </p>
         {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
+        {/* story #4417 — a different account currency: retry and link are hidden (the sealed values give the same answer
+            every time; the next step is a new request with a matching account — Yuna) */}
+        {currencyMismatch ? null : (
         <div className="flex flex-wrap gap-2">
           {outcomeUnknown ? (
             // story #4412 — link the campaign this start may have made (Yuna 00:49Z: link first, then retry, both outline)
@@ -456,6 +484,7 @@ export function BoostExecutionControl({
             {t('boostNeedsCheckRetry')}
           </Button>
         </div>
+        )}
         {/* the lookup's answer stays in the card (not a toast); success needs no line — the card turns «running» */}
         {adoptOutcome?.result === 'not_found' ? (
           <p className="text-xs text-muted-foreground" data-testid="boost-adopt-not-found">{t('boostAdoptNotFound')}</p>
@@ -637,17 +666,52 @@ export function BoostExecutionControl({
           })}
         </p>
       ) : null}
+      {/* story #4417 — paused by the server because the spend can't be checked against the budget: said once the pause is
+          in effect (before that the card is still «pausing»), with the way to check what was spent (meta only) — Yuna */}
+      {spendBlockedCode === SPEND_CONTEXT_LOST ? (
+        // shown whatever the run status says: we could not pause it ourselves
+        <div className="space-y-1 text-xs" data-testid="boost-spend-blocked">
+          <p className="text-foreground" data-testid="boost-spend-context-lost">{t('boostSpendContextLost')}</p>
+          {/* the connection is gone, so there is usually no account to link to: name the campaign to look for (Yuna) */}
+          {runAd.campaign_name ? (
+            <p className="text-muted-foreground" data-testid="boost-spend-context-lost-campaign">
+              {t('boostNeedsCheckCampaignToFind', { campaignName: runAd.campaign_name })}
+            </p>
+          ) : null}
+          {runAd.ad_channel === 'meta_ads' ? (
+            <a
+              href={adsManagerCampaignUrl(runAd.ad_account_id, runAd.campaign_id)} target="_blank" rel="noopener noreferrer"
+              className="text-primary hover:underline" data-testid="boost-ads-manager-link"
+            >
+              {t('boostOpenAdsManager')}<span aria-hidden="true"> ↗</span>
+            </a>
+          ) : null}
+        </div>
+      ) : spendBlockedCode && runStatus === 'paused' ? (
+        <div className="space-y-1 text-xs" data-testid="boost-spend-blocked">
+          <p className="text-muted-foreground" data-testid="boost-spend-unreadable">{isSpendCurrencyCode(spendBlockedCode) ? t('boostSpendUnreadablePaused') : t('boostSpendUncheckedPaused')}</p>
+          {/* the same link shape as the cap notice (4820): its own line · text-primary · ↗ */}
+          {runAd.ad_channel === 'meta_ads' ? (
+            <a
+              href={adsManagerCampaignUrl(runAd.ad_account_id, runAd.campaign_id)} target="_blank" rel="noopener noreferrer"
+              className="text-primary hover:underline" data-testid="boost-ads-manager-link"
+            >
+              {t('boostOpenAdsManager')}<span aria-hidden="true"> ↗</span>
+            </a>
+          ) : null}
+        </div>
+      ) : null}
       {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
       {waitingLine}
       {capNoticeBlock}
-      {runStatus === 'running' ? (
+      {spendBlockedCode === SPEND_CONTEXT_LOST ? null /* no connection: our pause/resume can't reach Meta */ : runStatus === 'running' ? (
         <Button
           variant="outline" size="sm" disabled={submitting || waiting === 'pause'}
           onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger"
         >
           {t('boostExecutionPause')}
         </Button>
-      ) : (
+      ) : spendBlockedCode ? null /* story #4417 — resuming would spend with no cap (the server refuses it too) */ : (
         <Button
           variant="outline" size="sm" disabled={submitting || waiting === 'resume'}
           onClick={() => void doAction('resume', () => {})} data-testid="boost-resume-trigger"

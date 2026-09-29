@@ -166,6 +166,15 @@ async def create_boost_campaign(
     def fail(code: str, message: str, *, outcome_known: bool = False) -> MetaAdsCampaignError:
         return MetaAdsCampaignError(code, message, partial=ids, outcome_known=outcome_known)
 
+    # story #4417 — the budget in Meta's units for the sealed currency, before any call: an unknown currency creates nothing
+    # (a known «not created»).
+    from app.services.currency_minor import UnknownCurrencyError, meta_budget_units
+
+    try:
+        budget_units = meta_budget_units(budget_minor, currency)
+    except UnknownCurrencyError as exc:
+        raise fail("META_ADS_UNKNOWN_CURRENCY", str(exc), outcome_known=True) from exc
+
     if not ids.get("campaign_id"):
         campaign_resp = await client.post(
             f"{_GRAPH_BASE}/act_{ad_account_id}/campaigns",
@@ -188,7 +197,7 @@ async def create_boost_campaign(
             f"{_GRAPH_BASE}/act_{ad_account_id}/adsets",
             params={
                 "access_token": access_token, "name": boost_adset_name(object_story_id),
-                "campaign_id": ids["campaign_id"], BOOST_ADSET_BUDGET_FIELD: budget_minor, "billing_event": "IMPRESSIONS",
+                "campaign_id": ids["campaign_id"], BOOST_ADSET_BUDGET_FIELD: budget_units, "billing_event": "IMPRESSIONS",
                 "optimization_goal": "REACH", "start_time": starts_at_iso, "end_time": ends_at_iso,
                 "status": "PAUSED",
             },
@@ -234,26 +243,79 @@ async def set_campaign_status(
         raise MetaAdsCampaignError("META_ADS_CAMPAIGN_STATUS_UPDATE_FAILED", resp.text[:500])
 
 
-async def get_campaign_spend_minor(
-    client: httpx.AsyncClient, *, campaign_id: str, access_token: str,
-) -> int:
-    """story #3806(Phase3·3-2 PR4, 페드루 PO 確定 2026-09-11) — 캠페인 누적 지출(그
-    캠페인 전체 lifetime, `date_preset` 미지정 시 Meta 기본값 — ⚠️미확認: Insights
-    API가 기본으로 lifetime을 주는지 별도 date_preset이 필요한지는 공식 문서 fetch로
-    재확認 못함, meta_ads_oauth.py 상단과 동일 딱지). `spend` 필드는 Meta가 통화
-    소수점 문자열("12.34")로 낸다 — 이 레포 관례(minor unit int, gate.sealed_ads_
-    budget_minor와 같은 단위)로 맞추려 100을 곱해 반올림한다(⚠️미확認: 모든 통화가
-    2자리 소수인지는 통화별로 다를 수 있어 재확認 필요 — KRW는 소수점이 없는 통화라
-    이 가정이 깨질 수 있는 자리, 출시 前 재확認)."""
+# story #4417 — the Insights period for the spend read. Meta's default is `last_30d` (Marketing API reference, «Ad Campaign
+# Insights» · `date_preset`: «Default value: last_30d», enum includes `maximum`; read 2026-09-29), so a boost longer than 30
+# days would read less than it spent and the cap would stop it late. `maximum` = everything the campaign has.
+SPEND_INSIGHTS_DATE_PRESET = "maximum"
+
+# story #4417 — spend read errors that a retry can't fix (the currency, not the call): the capture fails with the code.
+SPEND_CURRENCY_ERROR_CODES = frozenset({"META_ADS_SPEND_CURRENCY_MISMATCH", "META_ADS_SPEND_UNKNOWN_CURRENCY"})
+
+
+def spend_minor_from_insights(data: list, *, currency: str) -> int:
+    """story #4417 — Insights rows → spend in our minor units, one rule for the real adapter and the sandbox.
+
+    `spend` is a decimal string in the ad account's currency («5000» won · «12.34» dollars); `currency_minor` turns it into
+    minor units (KRW ×1 · USD ×100). `account_currency` must be the sealed currency — a different one (or a currency outside
+    the table) is an error, not a conversion: the spend stays unknown and no cap decision is taken on it. No rows = nothing
+    spent yet (0)."""
+    from app.services.currency_minor import UnknownCurrencyError, decimal_amount_to_minor
+
+    if not data:
+        return 0  # 아직 노출/지출 이력 0 — "미제공"이 아니라 "0"으로 정직하게 낸다.
+    row = data[0]
+    spend_str = row.get("spend")
+    if spend_str is None:
+        raise MetaAdsCampaignError("META_ADS_SPEND_MISSING_FIELD", "spend missing in insights response")
+    account_currency = row.get("account_currency")
+    if account_currency != currency:
+        raise MetaAdsCampaignError(
+            "META_ADS_SPEND_CURRENCY_MISMATCH",
+            f"insights account_currency {account_currency!r} is not the sealed currency {currency!r}",
+        )
+    try:
+        return decimal_amount_to_minor(spend_str, currency)
+    except UnknownCurrencyError as exc:
+        raise MetaAdsCampaignError("META_ADS_SPEND_UNKNOWN_CURRENCY", str(exc)) from exc
+    except ValueError as exc:
+        raise MetaAdsCampaignError("META_ADS_SPEND_NOT_A_NUMBER", str(exc)) from exc
+
+
+async def get_ad_account_currency(
+    client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, expected_currency: str | None = None,
+    objective: str = "",
+) -> str:
+    """story #4417 (Qadir 01a0eb3b ②) — the ad account's currency (Marketing API «Ad Account» field `currency`), read before a
+    boost start creates or switches on anything: budgets are sent in the account's currency, so a sealed KRW amount on a USD
+    account would be read as cents (50,000 won → $500). `expected_currency` · `objective` are for the sandbox only (same
+    signature). Nothing is written at the provider, so a failure here is a known «not created»."""
     resp = await client.get(
-        f"{_GRAPH_BASE}/{campaign_id}/insights", params={"access_token": access_token, "fields": "spend"},
+        f"{_GRAPH_BASE}/act_{ad_account_id}", params={"access_token": access_token, "fields": "currency"},
+    )
+    if resp.status_code != 200:
+        raise MetaAdsCampaignError("META_ADS_ACCOUNT_READ_FAILED", resp.text[:500], outcome_known=True)
+    currency = resp.json().get("currency")
+    if not currency:
+        raise MetaAdsCampaignError(
+            "META_ADS_ACCOUNT_CURRENCY_MISSING", "currency missing in ad account response", outcome_known=True,
+        )
+    return str(currency)
+
+
+async def get_campaign_spend_minor(
+    client: httpx.AsyncClient, *, campaign_id: str, access_token: str, currency: str,
+) -> int:
+    """story #3806(Phase3·3-2 PR4, 페드루 PO 確定 2026-09-11) — 캠페인 누적 지출(minor unit int, gate.sealed_ads_budget_minor와
+    같은 단위). story #4417 — the period is asked for explicitly (`SPEND_INSIGHTS_DATE_PRESET`, not Meta's 30-day default) and
+    the conversion goes by the sealed `currency` (`spend_minor_from_insights`), not a fixed ×100."""
+    resp = await client.get(
+        f"{_GRAPH_BASE}/{campaign_id}/insights",
+        params={
+            "access_token": access_token, "fields": "spend,account_currency", "date_preset": SPEND_INSIGHTS_DATE_PRESET,
+            # one row for the whole period (Qadir 01a0eb3b) — `spend_minor_from_insights` reads data[0]
+            "time_increment": "all_days",
+        },
     )
     if resp.status_code != 200:
         raise MetaAdsCampaignError("META_ADS_SPEND_FETCH_FAILED", resp.text[:500])
-    data = resp.json().get("data") or []
-    if not data:
-        return 0  # 아직 노출/지출 이력 0 — "미제공"이 아니라 "0"으로 정직하게 낸다.
-    spend_str = data[0].get("spend")
-    if spend_str is None:
-        raise MetaAdsCampaignError("META_ADS_SPEND_MISSING_FIELD", "spend missing in insights response")
-    return round(float(spend_str) * 100)
+    return spend_minor_from_insights(resp.json().get("data") or [], currency=currency)

@@ -5896,7 +5896,13 @@
     "boostAdoptWhat": "This finds the campaign by name in your ad account and links it to this boost. Once linked, the boost starts right away.",
     "boostAdoptWeight": "Once linked, ad spend starts right away.",
     "boostAdoptConfirm": "Link and start",
-    "boostAdoptAlreadyLinked": "This campaign is already linked to another boost, so we didn't link it. If this boost has no campaign of its own, use Retry."
+    "boostAdoptAlreadyLinked": "This campaign is already linked to another boost, so we didn't link it. If this boost has no campaign of its own, use Retry.",
+    "boostAccountCurrencyMismatch": "Your ad account uses {accountCurrency}, not the approved {approvedCurrency}, so we didn't create the boost — nothing was spent. Request the boost again with an ad account in the matching currency.",
+    "boostAccountCurrencyMismatchNoCodes": "Your ad account doesn't use the approved currency, so we didn't create the boost — nothing was spent. Request the boost again with an ad account in the matching currency.",
+    "boostSpendUnreadablePaused": "The ad spend came back in a different currency from the approved one, so we couldn't check it against the budget and paused the boost — no more ad spend. Check what was spent so far in Ads Manager.",
+    "boostSpendUncheckedPaused": "We couldn't check the ad spend against the budget, so we paused the boost — no more ad spend. Check what was spent so far in Ads Manager.",
+    "boostSpendContextLost": "The ad account connection is gone, so we can't pause the boost — ad spend may continue until it's paused. Please pause it in Ads Manager.",
+    "boostOpenAdsManager": "Check in Ads Manager"
   },
   "recruiter": {
     "title": "Recruiter",
