@@ -10,7 +10,7 @@ import koMessages from '../../../messages/ko.json';
 const { ctx } = vi.hoisted(() => ({ ctx: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 
-import { DesktopSetup, OpenInDesktopApp, SETUP_APP_LINK, failureForCode } from './desktop-setup';
+import { DesktopSetup, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode } from './desktop-setup';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -134,6 +134,37 @@ describe('[SID:4427] desktop setup page', () => {
     await act(async () => { setValue.call(input, '~'); input.dispatchEvent(new Event('input', { bubbles: true })); });
     expect(startButton().disabled).toBe(true);
     expect(text()).toContain('홈 폴더 안의 한 폴더를 적어 주세요');
+  });
+
+  it('⑥(가) Claude blocked: Codex takes the roles, the blocked choice is only a turned-off option, one note line', async () => {
+    stub(() => new Response(JSON.stringify({ data: {} }), { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} blocked={['claude']} />);
+    expect(text()).toContain('Codex · 이 컴퓨터에 있음'); // 조사: only Codex left → text, no picker
+    const select = container.querySelector('select') as HTMLSelectElement; // 작성(either): Codex · 나 · (꺼진) Claude Code
+    expect(select.value).toBe('codex');
+    const off = [...select.options].find((o) => o.value === 'claude-blocked')!;
+    expect(off.disabled).toBe(true);
+    expect(off.textContent).toBe('Claude Code · 회사 설정으로 쓸 수 없어요');
+    expect(container.querySelectorAll('[data-testid=setup-blocked-note]')).toHaveLength(1);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect((calls.find((c) => c.body)!.body as { roles: unknown }).roles).toEqual([{ role: '조사', runtime: 'codex' }, { role: '작성', runtime: 'codex' }]);
+  });
+
+  it('⑥ only blocked runtimes found → the full ⑥ screen; nothing found at all → ①', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} blocked={['claude']} />);
+    expect(text()).toContain('회사 설정 때문에 이 컴퓨터에서는 연결할 수 없어요');
+    expect(text()).not.toContain('에이전트를 찾지 못했어요');
+  });
+
+  it('⑥(나) cause unknown: a neutral card that does not claim the cause', async () => {
+    const retry = vi.fn();
+    stub(() => new Response('{}'));
+    await mount(<ToolsNotConnected onRetry={retry} />);
+    expect(text()).toContain('에이전트에 Sprintable이 연결되지 않았어요');
+    await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 
   it('opened without a code (a browser, AC5): «데스크톱 앱에서 열어 주세요» with «앱 열기»', async () => {

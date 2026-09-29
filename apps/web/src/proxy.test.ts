@@ -190,7 +190,7 @@ describe('proxy', () => {
     expect(next).toBe(target);
     expect(safeNextPath(next)).toBe(target);
     const back = new URL(safeNextPath(next), 'https://app.example.com');
-    expect(parseSetupQuery(back.searchParams)).toEqual({ code, runtimes: ['claude', 'codex'], setupId: null });
+    expect(parseSetupQuery(back.searchParams)).toEqual({ code, runtimes: ['claude', 'codex'], setupId: null, blocked: [] });
   });
 
   it('clears sp_at/sp_rt cookies on definitive refresh failure — UI path (story e5225c0a P0)', async () => {

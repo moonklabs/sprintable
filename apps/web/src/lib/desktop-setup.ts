@@ -19,7 +19,7 @@ export type DesktopRuntime = (typeof DESKTOP_RUNTIMES)[number];
 const CODE_RE = /^[A-Za-z0-9_-]{43}$/;
 
 /** `setup` = 설정 id(setup-codes 201) — 이 흐름의 이벤트 session_id. 모양이 틀리면 없음으로. */
-export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null }
+export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null; /** 찾았지만 이 컴퓨터에서 도구를 못 붙이는 것(⑥ · 회사 관리 MCP) — runtimes의 부분집합. */ blocked: DesktopRuntime[] }
 
 /** `?code=&runtimes=claude,codex` → 코드 · 런타임(모르는 값 버림 · 중복 제거 · 고정 순서). 코드가 없거나 틀리면 null
  * (= «데스크톱 앱에서 열어 주세요»). 런타임이 비어 있어도 코드가 맞으면 페이지는 열린다(실패 ① 화면). */
@@ -28,7 +28,9 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   if (!CODE_RE.test(code)) return null;
   const asked = new Set((params.get('runtimes') ?? '').split(',').map((s) => s.trim()));
   const setup = params.get('setup') ?? '';
-  return { code, runtimes: DESKTOP_RUNTIMES.filter((r) => asked.has(r)), setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null };
+  const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r));
+  const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)) };
 }
 
 export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime };

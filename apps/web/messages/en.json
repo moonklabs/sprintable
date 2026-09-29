@@ -6518,6 +6518,13 @@
       "startedTitle": "Starting your agents",
       "startedBody": "Your agents keep working even if you close this window.",
       "genericError": "This can't start right now — try again in a moment",
+      "blockedClaudeOption": "Claude Code · Blocked by your company's settings",
+      "blockedClaudeNote": "Claude Code can't connect to Sprintable on this computer because of your company's settings, so Codex takes these roles",
+      "notConnected": {
+        "title": "Sprintable didn't connect to your agent",
+        "body": "Your agent started, but its connection to Sprintable tasks didn't come up. This can be your company's settings or your network — check with your IT admin that Sprintable is allowed and that your network isn't blocking it, then check again.",
+        "action": "Check again"
+      },
       "failure": {
         "copy": "Copy",
         "copyAria": "Copy the {runtime} install command",

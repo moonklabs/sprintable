@@ -64,7 +64,10 @@ type View =
 
 function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
 
-export function DesktopSetup({ code, runtimes }: { code: string; runtimes: DesktopRuntime[] }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [] }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[] }) {
+  // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
+  const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
+  const claudeBlocked = blocked.includes('claude');
   const t = useTranslations('desktop.setup');
   const tPreset = useTranslations('recipePreset');
   const tOrg = useTranslations('organization');
@@ -134,7 +137,8 @@ export function DesktopSetup({ code, runtimes }: { code: string; runtimes: Deskt
   if (!isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') return <Failure failure={view.failure} onRetry={view.failure === 'offline' ? () => void start() : undefined} />;
-  if (runtimes.length === 0 && needsAnAgent(rows, runtimes)) return <Failure failure="no-agent" />;
+  // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
+  if (runtimes.length === 0 && needsAnAgent(rows, runtimes)) return <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
   if (view.kind === 'started') return <Card className="p-6"><h1 className="text-lg font-semibold">{t('startedTitle')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p></Card>;
 
   const setOwner = (role: string, key: string) => setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
@@ -177,11 +181,13 @@ export function DesktopSetup({ code, runtimes }: { code: string; runtimes: Deskt
                   <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="rounded-md border bg-background px-2 py-1 text-sm"
                     value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
                     {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: userName ?? '' }) : RUNTIME_LABEL[c.runtime]}</option>)}
+                    {claudeBlocked && r.actor !== 'human' ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
                   </select>
                 )}
             </li>
           ))}
         </ul>
+        {claudeBlocked && runtimes.length > 0 ? <p className="mt-2 text-xs text-muted-foreground" data-testid="setup-blocked-note">{t('blockedClaudeNote')}</p> : null}
         <p className="mt-2 text-xs text-muted-foreground">{t('humanNote')}</p>
       </section>
 
@@ -236,6 +242,21 @@ function Failure({ failure, onRetry }: { failure: SetupFailure; onRetry?: () => 
           : failure === 'not-admin' || failure === 'managed' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
           : null}
       </div>
+    </Card>
+  );
+}
+
+/**
+ * ⑥ 갈래 나 — 원인 모름. PO 08:37Z · 유나 08:38Z. 에이전트는 켜졌지만 우리 도구 연결이 붙지 않은 경우. 원인을 단정하지 않는다.
+ * 띄우는 신호(설정 상태의 tools_connected)는 디디군 측정 뒤 — 화면과 문구만 먼저.
+ */
+export function ToolsNotConnected({ onRetry }: { onRetry: () => void }) {
+  const t = useTranslations('desktop.setup');
+  return (
+    <Card className="flex flex-col gap-3 p-6">
+      <h2 className="text-base font-semibold">{t('notConnected.title')}</h2>
+      <p className="text-sm text-muted-foreground">{t('notConnected.body')}</p>
+      <div><Button onClick={onRetry}>{t('notConnected.action')}</Button></div>
     </Card>
   );
 }

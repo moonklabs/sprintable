@@ -6518,6 +6518,13 @@
       "startedTitle": "에이전트를 시작하고 있어요",
       "startedBody": "창을 닫아도 에이전트는 계속 일해요.",
       "genericError": "지금은 시작할 수 없어요 — 잠시 뒤 다시 눌러 주세요",
+      "blockedClaudeOption": "Claude Code · 회사 설정으로 쓸 수 없어요",
+      "blockedClaudeNote": "Claude Code는 회사 설정 때문에 이 컴퓨터에서 Sprintable에 연결할 수 없어 Codex가 맡아요",
+      "notConnected": {
+        "title": "에이전트에 Sprintable이 연결되지 않았어요",
+        "body": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 붙지 않았어요. 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
+        "action": "다시 확인"
+      },
       "failure": {
         "copy": "복사",
         "copyAria": "{runtime} 설치 명령 복사",

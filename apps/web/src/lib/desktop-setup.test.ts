@@ -25,9 +25,12 @@ const recipe: SetupRecipe = {
 
 describe('[SID:4427] desktop setup page rules', () => {
   it('reads the code and the runtimes the app found (fixed order, unknown dropped); no/bad code → null', () => {
-    expect(parseSetupQuery(q(`code=${CODE}&runtimes=codex,claude,gemini,codex&setup=7c0e1a2b-0000-4000-8000-000000000001`))).toEqual({ code: CODE, runtimes: ['claude', 'codex'], setupId: '7c0e1a2b-0000-4000-8000-000000000001' });
-    expect(parseSetupQuery(q(`code=${CODE}&runtimes=`))).toEqual({ code: CODE, runtimes: [], setupId: null });
-    expect(parseSetupQuery(q(`code=${CODE}&setup=../x`))).toEqual({ code: CODE, runtimes: [], setupId: null });
+    expect(parseSetupQuery(q(`code=${CODE}&runtimes=codex,claude,gemini,codex&setup=7c0e1a2b-0000-4000-8000-000000000001`))).toEqual({ code: CODE, runtimes: ['claude', 'codex'], setupId: '7c0e1a2b-0000-4000-8000-000000000001', blocked: [] });
+    expect(parseSetupQuery(q(`code=${CODE}&runtimes=`))).toEqual({ code: CODE, runtimes: [], setupId: null, blocked: [] });
+    expect(parseSetupQuery(q(`code=${CODE}&setup=../x`))).toEqual({ code: CODE, runtimes: [], setupId: null, blocked: [] });
+    // blocked = found AND blocked only (an id that was not found is dropped)
+    expect(parseSetupQuery(q(`code=${CODE}&runtimes=claude,codex&blocked=claude,gemini`))!.blocked).toEqual(['claude']);
+    expect(parseSetupQuery(q(`code=${CODE}&runtimes=codex&blocked=claude`))!.blocked).toEqual([]);
     for (const bad of ['', 'code=', `code=${CODE}x`, `code=${CODE.slice(1)}`, `code=${CODE.slice(1)}%2F`]) expect(parseSetupQuery(q(bad)), bad).toBeNull();
   });
 
