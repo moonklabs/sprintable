@@ -689,7 +689,7 @@ export default function RetroSessionPage() {
             readOnly
             value={exportCopyFailedMarkdown}
             onFocus={(e) => e.currentTarget.select()}
-            className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+            className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base lg:text-xs text-foreground"
             rows={6}
             data-testid="retro-export-copy-failed-raw-markdown"
           />

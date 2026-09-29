@@ -424,14 +424,14 @@ export function EvidenceSection({
                   value={addRef}
                   onChange={(e) => setAddRef(e.target.value)}
                   placeholder={t('evidenceRefPlaceholder')}
-                  className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs"
                 />
                 <input
                   type="text"
                   value={addNote}
                   onChange={(e) => setAddNote(e.target.value)}
                   placeholder={t('evidenceNotePlaceholder')}
-                  className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs"
                 />
                 {addError ? <p className="text-[11px] text-destructive">{t('evidenceAddFailed')}</p> : null}
                 <div className="flex justify-end gap-1.5">

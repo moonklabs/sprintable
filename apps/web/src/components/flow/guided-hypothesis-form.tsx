@@ -134,7 +134,7 @@ export function GuidedHypothesisForm({
           value={value.statement}
           onChange={(e) => { setActiveExample(null); setValue((v) => ({ ...v, statement: e.target.value })); }}
           placeholder={t('guidedStatementPlaceholder')}
-          className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </div>
 
@@ -145,7 +145,7 @@ export function GuidedHypothesisForm({
             value={value.metric}
             onChange={(e) => { setActiveExample(null); setValue((v) => ({ ...v, metric: e.target.value })); }}
             placeholder={t('guidedMetricPlaceholder')}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <input
             type="number"
@@ -153,7 +153,7 @@ export function GuidedHypothesisForm({
             value={value.target}
             onChange={(e) => { setActiveExample(null); setValue((v) => ({ ...v, target: e.target.value === '' ? '' : Number(e.target.value) })); }}
             placeholder={t('guidedTargetPlaceholder')}
-            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-24"
+            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-24"
           />
           <div className="flex overflow-hidden rounded-xl border border-border">
             {(['up', 'down'] as const).map((dir) => (
