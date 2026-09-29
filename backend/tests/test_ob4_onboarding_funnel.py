@@ -168,7 +168,8 @@ async def test_post_authed_derives_server_truth():
         user_id=str(real_agent),
         claims={"app_metadata": {"org_id": str(real_org), "project_id": None, "api_key_id": "k"}},
     )
-    body = OnboardingEventBody(event="first_auth_seen", agent_id=uuid.uuid4())  # 클라가 보낸 가짜 agent_id
+    # story #4424 — a web name (the server's own names are refused from outside now)
+    body = OnboardingEventBody(event="config_copied", agent_id=uuid.uuid4())  # 클라가 보낸 가짜 agent_id
     with patch("app.routers.onboarding._resolve_api_key", new=AsyncMock(return_value=ctx)):
         await post_onboarding_event(
             body, db=db, credentials=None, x_agent_api_key="sk_" + "live_" + "z" * 26

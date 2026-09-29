@@ -22,6 +22,8 @@ class DesktopSetup(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code_hash: Mapped[str] = mapped_column(Text, nullable=False)
     code_challenge: Mapped[str] = mapped_column(Text, nullable=False)
+    # alembic 0424 — sha256 of the per-setup event token (the plaintext exists only in the setup code answer)
+    event_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     device_name: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True)

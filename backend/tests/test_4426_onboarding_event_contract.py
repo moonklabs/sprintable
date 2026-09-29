@@ -48,6 +48,8 @@ def anyio_backend():
 
 def _db():
     db = MagicMock()
+    none = MagicMock(); none.first.return_value = None  # no desktop setup behind the session id
+    db.execute = AsyncMock(return_value=none)
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()

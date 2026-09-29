@@ -69,6 +69,8 @@ class SetupCodeRequest(BaseModel):
 class SetupCodeResponse(BaseModel):
     code: str
     expires_at: datetime
+    # PO 12:21Z — the app's step events carry it (header `X-Setup-Event-Token`) to be counted; given once, only its hash kept
+    event_token: str
     setup_id: uuid.UUID  # not a secret — the app passes it to the web page (`&setup=`) so pre-confirm steps can be keyed
 
 
@@ -77,11 +79,11 @@ class SetupCodeResponse(BaseModel):
 async def post_setup_code(request: Request, response: Response, body: SetupCodeRequest, db: AsyncSession = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
     try:
-        code, expires_at, setup_id = await create_setup_code(db, challenge=body.challenge, device_name=body.device_name)
+        code, expires_at, setup_id, event_token = await create_setup_code(db, challenge=body.challenge, device_name=body.device_name)
     except DesktopSetupError as e:
         raise _error(e) from None
     await db.commit()
-    return SetupCodeResponse(code=code, expires_at=expires_at, setup_id=setup_id)
+    return SetupCodeResponse(code=code, expires_at=expires_at, setup_id=setup_id, event_token=event_token)
 
 
 class RoleIn(BaseModel):
@@ -238,6 +240,7 @@ class SetupSignals(BaseModel):
     tools_connected: list[ToolsConnected]  # per agent: its first MCP connection (the manifest fetch)
     first_task_handed_at: datetime | None
     first_result_at: datetime | None
+    first_screen_human_input_at: datetime | None  # the person typed on the agent's first screen (PO 12:23Z · web ⑦)
     workdir_fallback_at: datetime | None
     blocked: SetupBlocked | None
 

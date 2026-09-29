@@ -44,6 +44,13 @@ EVENT_TOOLS_CONNECTED = "desktop_tools_connected"  # written by the MCP manifest
 EVENT_FIRST_TASK_HANDED = "desktop_first_task_handed"
 EVENT_WORKDIR_FALLBACK = "desktop_workdir_fallback"
 EVENT_BLOCKED = "desktop_setup_blocked"
+EVENT_FIRST_SCREEN_INPUT = "desktop_first_screen_human_input"
+# PO 12:21Z — the reasons a desktop app may give for «blocked»: the protocol's closed reason codes and the daemon's refusal
+# codes a start can end with. Anything else is dropped (the web never shows free text as a reason).
+BLOCKED_REASONS = frozenset({
+    "agent_error", "agent_rate_limited", "agent_overloaded", "agent_auth_failed", "agent_context_limit",
+    "host_fault", "host_restarted", "process_gone_after_sleep", "profile_invalid", "credentials_missing", "session_limit",
+})
 EVENT_DOC_OPENED = "desktop_doc_opened"
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
@@ -69,7 +76,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: str) -> tuple[str, datetime, uuid.UUID]:
+async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: str) -> tuple[str, datetime, uuid.UUID, str]:
     if not _CHALLENGE_RE.match(challenge):
         raise DesktopSetupError("request_invalid", "challenge must be base64url(sha256(verifier)) without padding")
     name = device_name.strip()[:80]
@@ -78,14 +85,46 @@ async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: st
     from app.services.onboarding_funnel import emit_onboarding_event
 
     code = secrets.token_urlsafe(32)
+    # PO 12:21Z — the app's step events prove their setup with this; only its hash is kept
+    event_token = secrets.token_urlsafe(32)
     expires_at = _now() + SETUP_CODE_TTL
-    setup = DesktopSetup(code_hash=_hash(code), code_challenge=challenge, device_name=name, expires_at=expires_at)
+    setup = DesktopSetup(
+        code_hash=_hash(code), code_challenge=challenge, device_name=name, expires_at=expires_at,
+        event_token_hash=_hash(event_token),
+    )
     db.add(setup)
     await db.flush()
     await emit_onboarding_event(db, EVENT_CODE_ISSUED, session_id=setup.id, meta={"flow": "desktop_setup"})
     # the setup id is not a secret (nothing can be done with it without an admin session); the app passes it to the web page
     # so steps before the confirmation (a sign-in) can be keyed by it (PO 08:31Z)
-    return code, expires_at, setup.id
+    return code, expires_at, setup.id, event_token
+
+
+async def verify_setup_event(
+    db: AsyncSession, *, event: str, setup_id: uuid.UUID | None, event_token: str | None, user_id: uuid.UUID | None,
+) -> bool:
+    """Is this step event proven for its setup (PO 12:21Z)? A desktop app name: the header token matches the setup's hash
+    (constant time). A web name: sent by a signed-in member of the setup's org. Anything else — or no such setup — is not."""
+    from app.services.onboarding_funnel import DESKTOP_SHELL_EMIT_EVENTS, FE_EMIT_EVENTS
+
+    if setup_id is None or not event.startswith("desktop_"):
+        return False  # only the desktop setup's own step names are ever counted by the setup reads
+    setup = (await db.execute(
+        select(DesktopSetup.event_token_hash, DesktopSetup.org_id).where(DesktopSetup.id == setup_id)
+    )).first()
+    if setup is None:
+        return False
+    token_hash, org_id = setup
+    if event in DESKTOP_SHELL_EMIT_EVENTS:
+        return bool(event_token and token_hash and hmac.compare_digest(_hash(event_token).encode(), token_hash.encode()))
+    if event in FE_EMIT_EVENTS and user_id is not None and org_id is not None:
+        from app.models.project import OrgMember
+
+        member = (await db.execute(
+            select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+        )).first()
+        return member is not None
+    return False
 
 
 async def _setup_by_code(db: AsyncSession, code: str) -> DesktopSetup:
@@ -418,6 +457,17 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
     } for r in rows]
 
 
+def _counted_row():
+    """PO 12:21Z — what the setup reads believe: rows the server wrote itself (its names can no longer be sent from outside)
+    and client rows the server proved for this setup (0424). Others are kept for analysis but never counted."""
+    from sqlalchemy import or_
+
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.onboarding_funnel import BE_EMIT_EVENTS
+
+    return or_(OnboardingEvent.event.in_(BE_EMIT_EVENTS), OnboardingEvent.desktop_setup_verified.is_(True))
+
+
 async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> dict:
     """story #4426 ② — one line for one setup: how many times a person had to act, minutes from the code to the first result
     the person saw, how many docs they opened. None where the step has not happened yet (never a guessed number)."""
@@ -435,7 +485,7 @@ async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UU
         raise DesktopSetupError("not_org_admin")
     rows = (await db.execute(
         select(OnboardingEvent.event, OnboardingEvent.meta, OnboardingEvent.server_ts)
-        .where(OnboardingEvent.session_id == setup_id).order_by(OnboardingEvent.server_ts)
+        .where(OnboardingEvent.session_id == setup_id, _counted_row()).order_by(OnboardingEvent.server_ts)
     )).all()
     hands = sum(1 for _e, meta, _t in rows if (meta or {}).get("human_hand") is True)
     started = next((t for e, _m, t in rows if e == EVENT_CODE_ISSUED), None)
@@ -462,7 +512,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         raise DesktopSetupError("not_org_admin")
     rows = (await db.execute(
         select(OnboardingEvent.event, OnboardingEvent.meta, OnboardingEvent.server_ts)
-        .where(OnboardingEvent.session_id == setup_id).order_by(OnboardingEvent.server_ts)
+        .where(OnboardingEvent.session_id == setup_id, _counted_row()).order_by(OnboardingEvent.server_ts)
     )).all()
 
     def first(name: str):
@@ -480,6 +530,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     handed = first(EVENT_FIRST_TASK_HANDED)
     result = first(EVENT_FIRST_RESULT)
     reason = (blocked[0].get("reason") if blocked else None)
+    screen_input = first(EVENT_FIRST_SCREEN_INPUT)
     return {
         "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
         "recipe_name": await _recipe_name(db, setup),
@@ -490,7 +541,8 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             "first_task_handed_at": handed[1] if handed else None,
             "first_result_at": result[1] if result else None,
             "workdir_fallback_at": fallback[1] if fallback else None,
-            "blocked": {"at": blocked[1], "reason": reason if isinstance(reason, str) else None} if blocked else None,
+            "first_screen_human_input_at": screen_input[1] if screen_input else None,
+            "blocked": {"at": blocked[1], "reason": reason if reason in BLOCKED_REASONS else None} if blocked else None,
         },
     }
 
