@@ -228,7 +228,9 @@ async def test_capture_exceeding_budget_auto_pauses_and_stamps_cap_reached_at():
 
         async with Session() as s:
             rows = await _get_spend_snapshots(s, org_id, gate_id)
-        assert len(rows) == 1, "상한 도달 뒤엔 다음 캡처를 이어 예약하지 않아야 한다(PO: 중지 뒤 예약 0)"
+        # story #4417 (Qadir 01a0ebb1 A) — until the pause is in effect one follow-up stays scheduled (a queued pause can still
+        # fail); once paused, none (PO: 중지 뒤 예약 0 — pinned in test_the_cap_follow_up_chain_ends_once_paused)
+        assert [r.status for r in rows] == ["captured", "pending"]
     finally:
         await engine.dispose()
 
@@ -839,6 +841,119 @@ async def test_an_agent_reading_spend_finds_the_account_and_campaign_ids_nowhere
         assert "adsmanager" not in text
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def _due_now(Session, org_id, gate_id):
+    async with Session() as s:
+        pending = [r for r in await _get_spend_snapshots(s, org_id, gate_id) if r.status == "pending"]
+        for r in pending:
+            r.due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        await s.commit()
+    return len(pending)
+
+
+@pytest.mark.anyio
+async def test_the_cap_follow_up_asks_again_after_a_dead_lettered_pause():
+    """story #4417 (Qadir 01a0ebb1 A) — the cap's pause command was made, then ended as dead_letter: the next follow-up asks
+    again (a new toggle), instead of the chain having ended with the capture that reached the cap."""
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory(), budget_minor=10_000)
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        [first] = await _pause_commands(Session, gate_id)
+        async with Session() as s:
+            await _mark_command_status(s, first.id, "dead_letter")
+        assert await _due_now(Session, org_id, gate_id) == 1
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        pauses = await _pause_commands(Session, gate_id)
+        assert [p.toggle_seq for p in pauses] == [first.toggle_seq, first.toggle_seq + 1]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_cap_follow_up_only_waits_while_the_pause_is_in_flight_and_ends_once_paused():
+    """story #4417 (Qadir 01a0ebb1 A) — pause_pending: no new request, the follow-up keeps going; paused: the chain ends."""
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from app.services.publication_command import process_due_publication_commands
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory(), budget_minor=10_000)
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        from app.models.ads_boost_run import AdsBoostRun
+
+        async with Session() as s:  # the pause is in flight
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            run.status = "pause_pending"
+            await s.commit()
+        assert await _due_now(Session, org_id, gate_id) == 1
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert len(await _pause_commands(Session, gate_id)) == 1  # no new request while it is in flight
+        assert await _pending_count(Session, org_id, gate_id) == 1  # but the follow-up goes on
+
+        async with Session() as s:  # the pause lands
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            run.status = "running"
+            await s.commit()
+        async with Session() as s:
+            await process_due_publication_commands(s)
+        assert (await _run_row(Session, gate_id)).status == "paused"
+        assert await _due_now(Session, org_id, gate_id) == 1
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert await _pending_count(Session, org_id, gate_id) == 0  # paused: the chain ends (PO: 중지 뒤 예약 0)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failures", [1, 3])
+async def test_a_failure_before_the_capture_context_is_built_still_retries_and_blocks(monkeypatch, failures):
+    """story #4417 (Qadir 01a0ebb1 B) — an exception while building the capture's context (here: the credential can't be
+    decrypted) used to close the capture with no retry. Now the gate and run are found by the publication alone: one failure
+    → retried; three in a row → blocked and told."""
+    import app.services.channel_credential_crypto as crypto
+    from app.services.ads_spend_snapshots import SPEND_READ_FAILED_REPEATEDLY_CODE, process_due_ads_spend_snapshots
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent = _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+
+        def broken(_value):
+            raise ValueError("credential could not be decrypted")
+
+        monkeypatch.setattr(crypto, "decrypt_channel_credential", broken)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        for i in range(failures):
+            if i:
+                assert await _due_now(Session, org_id, gate_id) == 1
+            async with Session() as s:
+                await process_due_ads_spend_snapshots(s)
+        run = await _run_row(Session, gate_id)
+        if failures == 1:
+            assert await _pending_count(Session, org_id, gate_id) == 1 and run.spend_blocked_at is None
+        else:
+            assert run.spend_blocked_code == SPEND_READ_FAILED_REPEATEDLY_CODE
+            assert [n["event_type"] for n in sent] == ["ads_boost_spend_unreadable"]
+    finally:
         await engine.dispose()
 
 

@@ -194,9 +194,7 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
     `_request_toggle`의 더블클릭 재사용/거부 방어와는 별개의 앞단 게이트).
     반환값은 이번 호출에서 실제로 상한을 새로 판정했는지(테스트 가시성용)."""
     if run.cap_reached_at is not None:
-        # story #4417 (Qadir 01a0eba4 ②) — the cap was reached but the boost is not paused (the first pause failed): try again
-        if run.status not in ("paused", "pause_pending") and not await _pause_by_scheduler(db, gate=gate, run=run):
-            await _schedule_capture(db, gate=gate, due_at=now + _BLOCK_FOLLOW_UP)
+        await _follow_through_cap(db, gate=gate, run=run, now=now)
         return False
     if gate.sealed_ads_budget_minor is None or not gate.scope_key:
         return False
@@ -213,10 +211,20 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
     run.cap_reached_at = now
     await db.commit()
 
-    if not await _pause_by_scheduler(db, gate=gate, run=run):
-        # story #4417 (Qadir 01a0eba4 ②) — the pause did not go through: a follow-up capture tries again (the cap line above)
-        await _schedule_capture(db, gate=gate, due_at=now + _BLOCK_FOLLOW_UP)
+    await _follow_through_cap(db, gate=gate, run=run, now=now)
     return True
+
+
+async def _follow_through_cap(db: AsyncSession, *, gate: Gate, run, now: datetime) -> None:
+    """story #4417 (Qadir 01a0eba4 ② · 01a0ebb1 A) — the cap is reached: until the boost is really paused, a follow-up capture
+    stays scheduled (the normal chain stops once `cap_reached_at` is set). Paused → nothing more. A pause in flight
+    (pause_pending) → only the follow-up. Otherwise (the pause failed, or its command ended as dead_letter/failed — which now
+    allows a new toggle) → ask again, then the follow-up."""
+    if run.status == "paused":
+        return
+    if run.status != "pause_pending":
+        await _pause_by_scheduler(db, gate=gate, run=run)
+    await _schedule_capture(db, gate=gate, due_at=now + _BLOCK_FOLLOW_UP)
 
 
 async def _pause_by_scheduler(db: AsyncSession, *, gate: Gate, run) -> bool:
@@ -424,8 +432,23 @@ async def _after_failed_spend_read(
         failed.status = "failed"
         failed.captured_at = now
         await db.commit()
+    if ids is None and failed is not None:
+        # story #4417 (Qadir 01a0ebb1 B) — the failure came before the capture's context was built (e.g. the credential could
+        # not be decrypted · a passing DB error): find the gate and run by the publication alone (plain rows, no decryption)
+        try:
+            gate, run = await _gate_and_run_for(db, failed)
+        except Exception:  # noqa: BLE001
+            await db.rollback()
+            gate = run = None
+        if gate is not None and run is not None:
+            ids = {"gate_id": gate.id, "run_id": run.id, "publication_id": failed.publication_id}
+        else:
+            # even that did not work: say why and keep trying — never end the chain quietly
+            logger.error("ads_spend_capture_context_unresolved snapshot_id=%s code=%s — retrying", snapshot_id, code)
+            await _reschedule_read(db, failed=failed, due_at=now + _SPEND_READ_RETRY_BACKOFF[0])
+            return False
     if ids is None:
-        return False  # the gate/run were not resolved (logged by the caller) — nothing to retry against
+        return False  # the capture row itself is gone
     streak = await _consecutive_spend_read_failures(db, publication_id=ids["publication_id"])
     if streak >= SPEND_READ_FAILURES_BEFORE_STOP:
         return await _block_unreadable_spend(
@@ -435,13 +458,18 @@ async def _after_failed_spend_read(
     if failed is not None and run is not None and run.status == "running" and run.spend_blocked_at is None:
         # the failure just closed is in the streak (≥ 1): 1st → 1h, 2nd → 3h
         backoff = _SPEND_READ_RETRY_BACKOFF[min(max(streak, 1), len(_SPEND_READ_RETRY_BACKOFF)) - 1]
-        await db.execute(pg_insert(InsightSnapshot).values(
-            id=uuid.uuid4(), org_id=failed.org_id, work_item_id=failed.work_item_id, publication_id=failed.publication_id,
-            publication_kind=failed.publication_kind, channel=failed.channel, external_id=None, due_at=now + backoff,
-            status="pending",
-        ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at"))
-        await db.commit()
+        await _reschedule_read(db, failed=failed, due_at=now + backoff)
     return False
+
+
+async def _reschedule_read(db: AsyncSession, *, failed: InsightSnapshot, due_at: datetime) -> None:
+    """A new pending capture for the same publication, from the failed one's own fields (no gate or connection needed)."""
+    await db.execute(pg_insert(InsightSnapshot).values(
+        id=uuid.uuid4(), org_id=failed.org_id, work_item_id=failed.work_item_id, publication_id=failed.publication_id,
+        publication_kind=failed.publication_kind, channel=failed.channel, external_id=None, due_at=due_at,
+        status="pending",
+    ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at"))
+    await db.commit()
 
 
 class AdsSpendRefreshRateLimitedError(Exception):
