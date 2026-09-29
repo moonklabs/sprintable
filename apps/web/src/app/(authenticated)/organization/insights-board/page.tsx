@@ -718,7 +718,7 @@ export default function InsightsBoardPage() {
           value={channelParam}
           onChange={(e) => updateQuery({ channel: e.target.value || null })}
           placeholder={t('channelFilterPlaceholder')}
-          className="w-40 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-foreground placeholder:text-muted-foreground"
+          className="w-40 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-base lg:text-[12px] text-foreground placeholder:text-muted-foreground"
           data-testid="insights-board-channel-filter"
         />
 

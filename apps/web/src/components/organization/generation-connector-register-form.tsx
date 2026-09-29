@@ -129,7 +129,7 @@ export function GenerationConnectorRegisterForm({
         <label className="text-xs font-medium text-muted-foreground" htmlFor="gc-field-location">{t('gcFieldLocation')}</label>
         <select
           id="gc-field-location"
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
           data-testid="gc-field-location"
@@ -146,7 +146,7 @@ export function GenerationConnectorRegisterForm({
         <input
           id="gc-field-label"
           type="text"
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder={t('gcFieldLabelPlaceholder')}
@@ -163,7 +163,7 @@ export function GenerationConnectorRegisterForm({
             <input
               id="gc-field-model-image"
               type="text"
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-xs"
+              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-base lg:text-xs"
               value={modelImage}
               onChange={(e) => setModelImage(e.target.value)}
               autoComplete="off"
@@ -174,7 +174,7 @@ export function GenerationConnectorRegisterForm({
             <input
               id="gc-field-model-video"
               type="text"
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-xs"
+              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-base lg:text-xs"
               value={modelVideo}
               onChange={(e) => setModelVideo(e.target.value)}
               autoComplete="off"
@@ -185,7 +185,7 @@ export function GenerationConnectorRegisterForm({
             <input
               id="gc-field-model-voice"
               type="text"
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-xs"
+              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-base lg:text-xs"
               value={modelVoice}
               onChange={(e) => setModelVoice(e.target.value)}
               autoComplete="off"
@@ -199,7 +199,7 @@ export function GenerationConnectorRegisterForm({
         <label className="text-xs font-medium text-muted-foreground" htmlFor="gc-field-credential">{t('gcFieldCredential')}</label>
         <textarea
           id="gc-field-credential"
-          className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-xs"
+          className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-base lg:text-xs"
           value={credentials}
           onChange={(e) => setCredentials(e.target.value)}
           placeholder={t('gcCredentialPlaceholder')}

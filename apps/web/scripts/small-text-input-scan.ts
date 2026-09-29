@@ -72,11 +72,25 @@ export function baseFontPx(classes: string): number | null {
   return px;
 }
 
+/**
+ * lg 미만(폰 · 태블릿) 폭에서 실제로 쓰이는 가장 작은 크기. 구간 셋 — <640(접두사 없음) · 640~767(sm: ?? 앞) ·
+ * 768~1023(md: ?? 앞) — 마다 적용되는 값을 구해 최솟값. `sm:` · `md:`는 데스크톱이 아니다(까디르 4821 · 아이패드 세로 768/820).
+ * 크기가 한 구간도 없으면 null(부모를 물려받음).
+ */
+export function belowLgFontPx(classes: string): number | null {
+  const at = (prefix: string) => baseFontPx(classes.split(/\s+/).filter((t) => t.startsWith(prefix)).map((t) => t.slice(prefix.length)).join(' '));
+  const phone = baseFontPx(classes);
+  const small = at('sm:') ?? phone;
+  const medium = at('md:') ?? small;
+  const bands = [phone, small, medium].filter((px): px is number => px !== null);
+  return bands.length ? Math.min(...bands) : null;
+}
+
 /** lg 이상(데스크톱)에서의 크기 — `lg:` 크기 클래스가 있으면 그것(마지막이 이김), 없으면 모바일 기본값. */
 export function desktopFontPx(classes: string): number | null {
-  // 1024px 이상에서는 md: · lg: 둘 다 적용되고 Tailwind가 lg 규칙을 뒤에 싣으므로 lg가 이긴다 — lg → md → 접두사 없음 순.
+  // 1024px 이상에서는 sm: · md: · lg: 모두 적용되고 Tailwind가 큰 쪽 규칙을 뒤에 싣으므로 lg → md → sm → 접두사 없음 순(sm:도 데스크톱에 적용된다).
   const at = (prefix: string) => baseFontPx(classes.split(/\s+/).filter((t) => t.startsWith(prefix)).map((t) => t.slice(prefix.length)).join(' '));
-  return at('lg:') ?? at('md:') ?? baseFontPx(classes);
+  return at('lg:') ?? at('md:') ?? at('sm:') ?? baseFontPx(classes);
 }
 
 /** 래퍼를 반응형으로 바꾸기 전 모양 — 접두사 없는 크기를 빼고 `lg:` 크기를 접두사 없이 편다(`text-base lg:text-sm` → `text-sm`). */
@@ -142,7 +156,7 @@ export function scanSource(
         const init = attr(node, 'className')?.initializer;
         const own = init ? classText(init, constants) : '';
         const final = cn(wrapper.inner, cn(wrapper.classes, own));
-        const px = baseFontPx(final) ?? wrapper.px;
+        const px = belowLgFontPx(final) ?? wrapper.px;
         const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
         if (px !== null && px < 16) sites.push({ file, line, tag, px });
         // 데스크톱 무변: 래퍼를 반응형으로 바꾸기 전 모양(같은 호출부)과 데스크톱 크기가 같아야 한다.
@@ -155,7 +169,7 @@ export function scanSource(
         if (!(typeText && NON_TEXT_TYPES.has(typeText))) {
           const init = attr(node, 'className')?.initializer;
           const classes = init ? classText(init, constants) : '';
-          const px = baseFontPx(classes);
+          const px = belowLgFontPx(classes);
           const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
           if (px !== null && px < 16) sites.push({ file, line, tag, px });
           else if (px === null && RAW_TAGS.has(tag)) inherits += 1;
@@ -240,7 +254,7 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, Wr
           const init = attr(node, 'className')?.initializer;
           classes = init ? classText(init, constants) : '';
           inner = SHARED_TAGS.has(tag) ? sharedBase(tag) : '';
-          px = baseFontPx(cn(inner, classes)) ?? null;
+          px = belowLgFontPx(cn(inner, classes)) ?? null;
           return;
         }
       }
@@ -286,7 +300,7 @@ export function discoverWrappers(contents: ReadonlyMap<string, string>, sharedBa
       const tag = el.tagName.getText(sf);
       const classes = clsAttr?.initializer ? classText(clsAttr.initializer, constants) : '';
       const inner = SHARED_TAGS.has(tag) ? sharedBase(tag) : '';
-      const px = baseFontPx(cn(inner, classes)) ?? (SHARED_TAGS.has(tag) ? 16 : null);
+      const px = belowLgFontPx(cn(inner, classes)) ?? (SHARED_TAGS.has(tag) ? 16 : null);
       const info = { inner, classes, px, file: rel };
       const prev = out.get(name);
       if (prev && (prev.classes !== classes || prev.inner !== inner)) {

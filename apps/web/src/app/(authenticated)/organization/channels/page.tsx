@@ -370,7 +370,7 @@ function MeasurementConnectionsSection({
                 ) : (
                   <div className="flex flex-wrap items-center gap-2">
                     <select
-                      className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+                      className="rounded-md border border-border bg-background px-2 py-1 text-base lg:text-sm text-foreground"
                       value={ga4SelectedPropertyId}
                       onChange={(e) => setGa4SelectedPropertyId(e.target.value)}
                       data-testid="measurement-ga4-property-dropdown"

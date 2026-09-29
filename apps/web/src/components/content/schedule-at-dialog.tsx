@@ -48,7 +48,7 @@ export function ScheduleAtDialog({ open, onOpenChange, onSubmit, submitting, ser
           type="datetime-local"
           value={value}
           onChange={(e) => { setValue(e.target.value); setTouched(true); }}
-          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
           data-testid="channel-post-schedule-at-input"
         />
         {showError ? (

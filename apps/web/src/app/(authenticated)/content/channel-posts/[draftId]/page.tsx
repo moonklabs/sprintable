@@ -3173,7 +3173,7 @@ export default function ChannelPostEditPage() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={6}
-          className="w-full rounded-md border border-border p-3 text-sm"
+          className="w-full rounded-md border border-border p-3 text-base lg:text-sm"
           data-testid="channel-post-text-field"
         />
         {/* AC6 — 500은 화면에 박지 않는다: maxTextLength가 실제 어댑터 선언값. */}
@@ -3211,7 +3211,7 @@ export default function ChannelPostEditPage() {
           value={linkUrl}
           onChange={(e) => setLinkUrl(e.target.value)}
           placeholder="https://…"
-          className="w-full rounded-md border border-border p-2 text-sm"
+          className="w-full rounded-md border border-border p-2 text-base lg:text-sm"
           data-testid="channel-post-link-field"
         />
         <ContentRuleViolationList
@@ -3256,7 +3256,7 @@ export default function ChannelPostEditPage() {
                       setThreadSegments(next);
                     }}
                     rows={3}
-                    className="w-full bg-transparent text-sm"
+                    className="w-full bg-transparent text-base lg:text-sm"
                     data-testid={`channel-post-thread-segment-field-${i}`}
                   />
                   <Button
@@ -3354,7 +3354,7 @@ export default function ChannelPostEditPage() {
               id="channel-post-youtube-category"
               value={youtubeCategoryId}
               onChange={(e) => setYoutubeCategoryId(e.target.value)}
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
               data-testid="channel-post-youtube-category-field"
             >
               <option value="">{t('channelPostsYoutubeCategoryNone')}</option>
@@ -3372,7 +3372,7 @@ export default function ChannelPostEditPage() {
               value={youtubePrivacyLocked ? 'private' : youtubePrivacyStatus}
               onChange={(e) => setYoutubePrivacyStatus(e.target.value as 'public' | 'unlisted' | 'private')}
               disabled={youtubePrivacyLocked}
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
               data-testid="channel-post-youtube-privacy-field"
             >
               <option value="public">{t('channelPostsYoutubePrivacyPublic')}</option>
@@ -3650,7 +3650,7 @@ export default function ChannelPostEditPage() {
               step={1}
               value={estimatedCostInput}
               onChange={(e) => setEstimatedCostInput(e.target.value)}
-              className="w-28 rounded-md border border-border bg-background px-2 py-1 text-sm"
+              className="w-28 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-sm"
               data-testid="channel-post-estimated-cost-input"
             />
             <span className="text-xs text-muted-foreground">{generationBudgetCurrency}</span>

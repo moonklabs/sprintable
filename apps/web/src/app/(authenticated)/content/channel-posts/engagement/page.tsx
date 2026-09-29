@@ -358,7 +358,7 @@ export default function ChannelPostsEngagementPage() {
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">{t('engagementFilterStatusLabel')}</span>
           <select
-            className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+            className="rounded-md border border-border bg-background px-2 py-1 text-base lg:text-sm"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as TriageStatus | 'all')}
             data-testid="engagement-filter-status"
@@ -372,7 +372,7 @@ export default function ChannelPostsEngagementPage() {
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">{t('engagementFilterChannelLabel')}</span>
           <select
-            className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+            className="rounded-md border border-border bg-background px-2 py-1 text-base lg:text-sm"
             value={channelFilter}
             onChange={(e) => setChannelFilter(e.target.value)}
             data-testid="engagement-filter-channel"
@@ -386,7 +386,7 @@ export default function ChannelPostsEngagementPage() {
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">{t('engagementFilterKindLabel')}</span>
           <select
-            className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+            className="rounded-md border border-border bg-background px-2 py-1 text-base lg:text-sm"
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value as ItemKind | 'all')}
             data-testid="engagement-filter-kind"
@@ -485,7 +485,7 @@ export default function ChannelPostsEngagementPage() {
                     </td>
                     <td className="px-3 py-2 align-top">
                       <select
-                        className={`inline-flex items-center gap-1.5 rounded-full border-0 px-2 py-0.5 text-xs font-medium ${tone.bg} ${tone.text}`}
+                        className={`inline-flex items-center gap-1.5 rounded-full border-0 px-2 py-0.5 text-base lg:text-xs font-medium ${tone.bg} ${tone.text}`}
                         value={item.triage_status}
                         onChange={(e) => void patchItem(item.id, { triage_status: e.target.value })}
                         data-testid="engagement-status-select"
@@ -502,7 +502,7 @@ export default function ChannelPostsEngagementPage() {
                     </td>
                     <td className="px-3 py-2 align-top">
                       <select
-                        className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                        className="rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs"
                         value={item.assignee_member_id ?? ''}
                         onChange={(e) => void patchItem(item.id, { assignee_member_id: e.target.value || null })}
                         data-testid="engagement-assignee-select"

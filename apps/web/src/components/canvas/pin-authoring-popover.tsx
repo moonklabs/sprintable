@@ -75,7 +75,7 @@ export function PinAuthoringPopover({ open, onOpenChange, initialDescription, on
           onChange={(e) => setDescription(e.target.value)}
           placeholder={t('specPinDescriptionPlaceholder')}
           rows={4}
-          className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
         {error ? <p className="mt-1 text-[10px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('saveFailedNote')}</p> : null}
 

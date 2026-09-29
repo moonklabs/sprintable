@@ -118,7 +118,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
                   readOnly
                   value={result.download_url}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground"
+                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-base lg:text-[11px] text-foreground"
                   data-testid="export-dialog-copy-failed-raw-link"
                 />
               </div>

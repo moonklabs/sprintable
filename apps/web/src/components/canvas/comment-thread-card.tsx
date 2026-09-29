@@ -97,7 +97,7 @@ export function CommentThreadCard({
               onChange={(e) => setReplyDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
               placeholder={t('replyPlaceholder')}
-              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
             />
             <button
               type="button"

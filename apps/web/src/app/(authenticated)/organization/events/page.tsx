@@ -872,7 +872,7 @@ function EventFormDialog({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('eventNamePlaceholder')}
-              className="text-sm"
+              className="text-base lg:text-sm"
             />
             {!name.trim() ? <p className="mt-1 text-[11px] text-muted-foreground">{t('eventNameHint')}</p> : null}
           </div>
@@ -897,7 +897,7 @@ function EventFormDialog({
                   <>
                     <div className="flex items-center gap-1">
                       <span className="shrink-0 font-mono text-xs text-muted-foreground">{prefix}</span>
-                      <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-sm" />
+                      <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-base lg:text-sm" />
                     </div>
                     {advancedKeyError ? (
                       <p className="mt-1 text-[11px] text-destructive">
@@ -908,7 +908,7 @@ function EventFormDialog({
                     )}
                   </>
                 ) : (
-                  <Input id="event-key" value={target?.key ?? ''} readOnly disabled className="font-mono text-sm" />
+                  <Input id="event-key" value={target?.key ?? ''} readOnly disabled className="font-mono text-base lg:text-sm" />
                 )}
               </div>
               <JsonField id="event-payload-schema" label={t('eventPayloadSchemaLabel')} value={payloadSchema} onChange={setPayloadSchema} />
@@ -923,7 +923,7 @@ function EventFormDialog({
                   value={rolesCsv}
                   onChange={(e) => setRolesCsv(e.target.value)}
                   placeholder={t('eventActionAuthRolePlaceholder')}
-                  className="text-sm"
+                  className="text-base lg:text-sm"
                 />
               </div>
             </div>
@@ -965,7 +965,7 @@ function JsonField({ id, label, value, onChange }: { id: string; label: string; 
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
-        className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 font-mono text-base lg:text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
       />
     </div>
   );
