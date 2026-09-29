@@ -483,6 +483,19 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_org_today_direct_call.py
 
+  # story #4407 AC5 — `:name::type` in SQL text. SQLAlchemy's text() does not bind a `:name` directly followed by `::`, so the
+  # statement fails on every call (account/delete until #4400; seed_builtin_personas). Write CAST(:name AS type).
+  bind-param-cast-lint:
+    name: bind parameter cast lint (guard, story #4407)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend app/ ee/ alembic/ for ':name::type'
+        working-directory: backend
+        run: python3 scripts/lint_no_bind_param_cast.py
+
   # story #2255(69d7380e, 2026-07-28~09-02) — app/models/*.py에 __tablename__ 보유 모델이
   # 새로 생겼는데 app/models/__init__.py에 import 안 되면 create_all()이 그 테이블을 조용히
   # 안 만든다(#2201이 처음 적발한 결함 클래스, 11개 중 10개가 이 스토리로 뒤늦게 등재됨 —

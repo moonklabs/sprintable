@@ -332,15 +332,6 @@ class AgentPersonaRepository:
         await self.session.flush()
         return True
 
-    async def seed_builtin(self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
-        from sqlalchemy import text
-        await self.session.execute(
-            text("SELECT seed_builtin_personas(:org_id::uuid, :project_id::uuid, :agent_id::uuid)"),
-            {"org_id": str(org_id), "project_id": str(project_id), "agent_id": str(agent_id)},
-        )
-        await self.session.flush()
-        return {"seeded": True}
-
     async def _clear_default(self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID, exclude_id: uuid.UUID | None = None) -> None:
         q = update(AgentPersona).where(
             AgentPersona.org_id == org_id,
