@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import uuid
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -473,6 +473,141 @@ async def expected_campaign_name(db: AsyncSession, gate) -> str | None:
     return boost_campaign_name(object_story_id_for(origin_conn, publication)) if origin_conn is not None else None
 
 
+# story #4412 — a candidate must have been created by *this* run's create call: not before its call marker (minus a clock
+# skew between Meta and us).
+ADOPT_CLOCK_SKEW = timedelta(minutes=5)
+
+
+class AdsBoostAdoptNotApplicableError(Exception):
+    """story #4412 — the gate's boost start is not stopped as «outcome unknown» (nothing to adopt for)."""
+
+    code = "ADS_BOOST_ADOPT_NOT_APPLICABLE"
+
+
+async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID) -> dict:
+    """story #4412 — «it is already in my ad account»: find the campaign (and its ad set · ad) this run's create call may have
+    made, and adopt it instead of creating another.
+
+    Only for a boost start stopped as ADS_BOOST_CREATE_OUTCOME_UNKNOWN (call marker set, ids incomplete). A candidate counts
+    only when all of these hold:
+    - its name is exactly the one the create call uses (`boost_*_name(object_story_id)`), checked here, not by Meta's filter;
+    - it hangs under the adopted parent (ad set → campaign · ad → ad set);
+    - it was created at or after this run's call marker minus ADOPT_CLOCK_SKEW (an earlier boost of the same post has the same
+      name);
+    - its id is not already recorded on another run.
+    Exactly one campaign → adopt it, and each lower level whose single eligible match is found; a level with none is left for
+    the usual continuation (4268); two or more at any level → no adoption, the candidates are returned. The lookups run with
+    no transaction or lock held (provider calls); the run is then locked and re-checked before writing. On adoption the claim
+    and marker are cleared and the start command is queued again (with all ids the worker only switches the campaign on).
+
+    Money (PO 00:48Z): the budget lives on the ad set. An ad set is adopted only when its `daily_budget` equals the gate's
+    sealed amount — otherwise switching it on would spend an amount nobody approved (someone may have changed it in the ad
+    account). A different or unreadable budget → nothing adopted, `budget_mismatch` with both amounts.
+
+    Two runs adopting the same object at once: the unique indexes (0420) let only one write; the other → `already_linked`.
+
+    Returns {"result": "adopted"|"not_found"|"ambiguous"|"budget_mismatch"|"already_linked", "level"?, "candidates"?, "campaign_id"?,
+    "adset_id"?, "ad_id"?, "adset_budget_minor"?, "sealed_budget_minor"?}.
+    """
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.services.external_call_tx import end_transaction_before_external_call
+    from app.services.meta_ads_campaign import parse_meta_time
+    from app.services.publication_command import retry_dead_letter_command
+
+    command = (await db.execute(
+        select(PublicationCommand).where(
+            PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id,
+            PublicationCommand.operation == OP_BOOST_START,
+        ).order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    run = (await db.execute(
+        select(AdsBoostRun).where(AdsBoostRun.org_id == org_id, AdsBoostRun.gate_id == gate_id)
+    )).scalar_one_or_none()
+    if (
+        command is None or command.status != "dead_letter" or command.reason_code != ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE
+        or run is None or run.create_call_started_at is None or (run.campaign_id and run.adset_id and run.ad_id)
+    ):
+        raise AdsBoostAdoptNotApplicableError()
+    ctx = await _resolve_execution_context(db, command)
+    gate, module = ctx["gate"], ctx["module"]
+    osid, objective = ctx["object_story_id"], gate.sealed_ads_objective or ""
+    marker_at, run_id = run.create_call_started_at, run.id
+    other_ids = {
+        value
+        for row in (await db.execute(
+            select(AdsBoostRun.campaign_id, AdsBoostRun.adset_id, AdsBoostRun.ad_id).where(AdsBoostRun.id != run_id)
+        )).all()
+        for value in row if value
+    }
+
+    def eligible(item: dict, *, parent_field: str | None = None, parent_id: str | None = None) -> bool:
+        created = parse_meta_time(item.get("created_time"))
+        return (
+            bool(item.get("id")) and item["id"] not in other_ids
+            and created is not None and created >= marker_at - ADOPT_CLOCK_SKEW
+            and (parent_field is None or item.get(parent_field) == parent_id)
+        )
+
+    def view(items: list[dict]) -> list[dict]:
+        return [{"id": i.get("id"), "name": i.get("name"), "created_time": i.get("created_time")} for i in items]
+
+    await end_transaction_before_external_call(db)  # story #4404 — no transaction held during the lookups
+    access_token = ctx["access_token"]
+    adopted: dict = {}
+    async with provider_client(timeout=20) as client:
+        campaigns = [c for c in await module.find_boost_campaigns(
+            client, ad_account_id=ctx["ad_account_id"], access_token=access_token, object_story_id=osid, objective=objective,
+        ) if eligible(c)]
+        if not campaigns:
+            return {"result": "not_found"}
+        if len(campaigns) > 1:
+            return {"result": "ambiguous", "level": "campaign", "candidates": view(campaigns)}
+        adopted["campaign_id"] = campaigns[0]["id"]
+        adsets = [a for a in await module.find_boost_adsets(
+            client, campaign_id=adopted["campaign_id"], access_token=access_token, object_story_id=osid, objective=objective,
+            expected_budget_minor=gate.sealed_ads_budget_minor,
+        ) if eligible(a, parent_field="campaign_id", parent_id=adopted["campaign_id"])]
+        if len(adsets) > 1:
+            return {"result": "ambiguous", "level": "adset", "candidates": view(adsets)}
+        if adsets:
+            from app.services.meta_ads_campaign import boost_adset_budget_minor
+
+            adset_budget = boost_adset_budget_minor(adsets[0])  # the same field the create call sets (4415)
+            if adset_budget is None or adset_budget != gate.sealed_ads_budget_minor:
+                return {
+                    "result": "budget_mismatch", "level": "adset",
+                    "adset_budget_minor": adset_budget, "sealed_budget_minor": gate.sealed_ads_budget_minor,
+                }
+            adopted["adset_id"] = adsets[0]["id"]
+            ads = [a for a in await module.find_boost_ads(
+                client, adset_id=adopted["adset_id"], access_token=access_token, object_story_id=osid, objective=objective,
+            ) if eligible(a, parent_field="adset_id", parent_id=adopted["adset_id"])]
+            if len(ads) > 1:
+                return {"result": "ambiguous", "level": "ad", "candidates": view(ads)}
+            if ads:
+                adopted["ad_id"] = ads[0]["id"]
+
+    run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.id == run_id).with_for_update())).scalar_one()
+    if run.create_call_started_at != marker_at or (run.campaign_id and run.adset_id and run.ad_id):
+        raise AdsBoostAdoptNotApplicableError()  # someone else resolved it meanwhile
+    # The unique indexes (0420) are the guard against two runs adopting one campaign at the same time: each run locks only
+    # its own row, so the «not recorded on another run» filter above can pass for both. A violation → nothing adopted.
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with db.begin_nested():
+            run.campaign_id = adopted["campaign_id"]
+            run.adset_id = adopted.get("adset_id") or run.adset_id
+            run.ad_id = adopted.get("ad_id") or run.ad_id
+            run.create_claimed_at = None
+            run.create_call_started_at = None
+            await db.flush()
+    except IntegrityError:
+        return {"result": "already_linked"}
+    await retry_dead_letter_command(db, org_id=org_id, command_id=command.id)
+    return {"result": "adopted", **adopted}
+
+
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
     """`app/services/publication_command.py::_process_one_command`의 content_kind==
     "ads_boost" 분기가 이 함수로 넘긴다(site_post/comment_reply와 동형 위임 패턴).
@@ -525,7 +660,7 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                             object_story_id=ctx["object_story_id"], budget_minor=gate.sealed_ads_budget_minor,
                             currency=gate.sealed_ads_currency, starts_at_iso=gate.sealed_ads_starts_at.isoformat(),
                             ends_at_iso=gate.sealed_ads_ends_at.isoformat(), objective=gate.sealed_ads_objective,
-                            existing=existing,
+                            existing=existing, gate_id=str(gate.id),
                         )
                     except Exception as create_exc:
                         partial = getattr(create_exc, "partial", None) or {}

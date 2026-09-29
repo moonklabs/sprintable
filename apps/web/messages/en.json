@@ -5877,7 +5877,15 @@
     "boostNeedsCheckWhatOutcomeUnknown": "This starts the boost again — we couldn't confirm whether its campaign was created.",
     "boostNeedsCheckWeightOutcomeUnknown": "If the campaign already exists, the ad runs twice and you pay twice.",
     "boostNeedsCheckCampaignToFind": "Campaign to look for: {campaignName}",
-    "boostNeedsCheckWhatStopped": "This starts the boost again."
+    "boostNeedsCheckWhatStopped": "This starts the boost again.",
+    "boostAdoptNotFound": "We couldn't find this campaign in your ad account. If it really isn't there, use Retry.",
+    "boostAdoptAmbiguous": "More than one campaign has this name, so we didn't link any. Keep just one in your ad account, then link again.",
+    "boostAdoptBudgetMismatch": "The approved total budget is {approved}, but the campaign we found has a lifetime budget of {found}, so we didn't link it. Set its lifetime budget to {approved} in your ad account, then link again.",
+    "boostAdoptTitle": "Link existing campaign",
+    "boostAdoptWhat": "This finds the campaign by name in your ad account and links it to this boost. Once linked, the boost starts right away.",
+    "boostAdoptWeight": "Once linked, ad spend starts right away.",
+    "boostAdoptConfirm": "Link and start",
+    "boostAdoptAlreadyLinked": "This campaign is already linked to another boost, so we didn't link it. If this boost has no campaign of its own, use Retry."
   },
   "recruiter": {
     "title": "Recruiter",

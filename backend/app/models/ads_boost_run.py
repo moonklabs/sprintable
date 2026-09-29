@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Index, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,10 @@ class AdsBoostRun(Base):
     __tablename__ = "ads_boost_runs"
     __table_args__ = (
         UniqueConstraint("gate_id", name="uq_ads_boost_runs_gate_id"),
+        # story #4412 (0420) — a Meta object is linked to at most one run (adoption can no longer attach one campaign to two).
+        Index("uq_ads_boost_runs_campaign_id", "campaign_id", unique=True, postgresql_where=text("campaign_id IS NOT NULL")),
+        Index("uq_ads_boost_runs_adset_id", "adset_id", unique=True, postgresql_where=text("adset_id IS NOT NULL")),
+        Index("uq_ads_boost_runs_ad_id", "ad_id", unique=True, postgresql_where=text("ad_id IS NOT NULL")),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

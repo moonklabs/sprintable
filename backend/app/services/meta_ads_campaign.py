@@ -16,6 +16,9 @@ campaign의 `status` 필드(ACTIVE|PAUSED)만 바꾸면 계층 전체가 따라�
 집행 중지된다)."""
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 import httpx
 
 _GRAPH_BASE = "https://graph.facebook.com/v21.0"
@@ -44,10 +47,104 @@ def boost_campaign_name(object_story_id: str) -> str:
     return f"Boost {object_story_id}"
 
 
+def boost_adset_name(object_story_id: str) -> str:
+    return f"Boost adset {object_story_id}"
+
+
+def boost_ad_name(object_story_id: str) -> str:
+    return f"Boost ad {object_story_id}"
+
+
+# story #4412(PO 00:50Z) — the ad set field that carries the approved amount: one place for the create call, the lookup's
+# fields and the adoption's budget check (4415 will change it — e.g. to lifetime_budget — and the check follows).
+BOOST_ADSET_BUDGET_FIELD = "daily_budget"
+
+
+def boost_adset_budget_minor(adset: dict) -> int | None:
+    """The approved-amount field of an ad set as Meta returns it (a string of minor units). None when missing or unreadable."""
+    try:
+        return int(adset.get(BOOST_ADSET_BUDGET_FIELD))
+    except (TypeError, ValueError):
+        return None
+
+
+# story #4412 — a lookup never decides on a partial list: past this many pages it refuses (META_ADS_LOOKUP_TOO_MANY).
+BOOST_LOOKUP_MAX_PAGES = 20
+
+
+def parse_meta_time(value: str | None) -> datetime | None:
+    """Meta's `created_time` («2026-09-28T23:10:00+0000»). None when missing or unreadable."""
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+async def _list_named(client: httpx.AsyncClient, url: str, *, access_token: str, name: str, fields: str) -> list[dict]:
+    """story #4412 — every object on `url` whose name is exactly `name`. The `filtering` name CONTAIN only narrows the pages
+    (Meta does not document the name operators on these edges); the exact match is ours, so a different filter meaning never
+    adopts a wrong object. Default visibility: deleted and archived objects are not returned (they cannot be reused)."""
+    params: dict | None = {
+        "access_token": access_token, "fields": fields, "limit": 100,
+        "filtering": json.dumps([{"field": "name", "operator": "CONTAIN", "value": name}]),
+    }
+    found: list[dict] = []
+    next_url: str | None = url
+    for _ in range(BOOST_LOOKUP_MAX_PAGES):
+        resp = await client.get(next_url, params=params)
+        if resp.status_code != 200:
+            raise MetaAdsCampaignError("META_ADS_LOOKUP_FAILED", resp.text[:500])
+        body = resp.json()
+        found += [item for item in body.get("data") or [] if item.get("name") == name]
+        next_url = (body.get("paging") or {}).get("next")
+        params = None  # the next URL carries the query
+        if not next_url:
+            return found
+    raise MetaAdsCampaignError("META_ADS_LOOKUP_TOO_MANY", f"more than {BOOST_LOOKUP_MAX_PAGES} pages for «{name}»")
+
+
+async def find_boost_campaigns(
+    client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, object_story_id: str, objective: str = "",
+) -> list[dict]:
+    """story #4412 — campaigns named `boost_campaign_name(object_story_id)` in the ad account: id · name · created_time.
+    `objective` is only for the sandbox's markers (same signature)."""
+    return await _list_named(
+        client, f"{_GRAPH_BASE}/act_{ad_account_id}/campaigns", access_token=access_token,
+        name=boost_campaign_name(object_story_id), fields="id,name,created_time,effective_status",
+    )
+
+
+async def find_boost_adsets(
+    client: httpx.AsyncClient, *, campaign_id: str, access_token: str, object_story_id: str, objective: str = "",
+    expected_budget_minor: int | None = None,
+) -> list[dict]:
+    """Ad sets named `boost_adset_name` under `campaign_id`: id · name · campaign_id · created_time · daily_budget (the budget
+    lives on the ad set — PO 00:48Z: an adopted ad set must still carry the sealed amount). `expected_budget_minor` is for the
+    sandbox only (same signature)."""
+    return await _list_named(
+        client, f"{_GRAPH_BASE}/{campaign_id}/adsets", access_token=access_token,
+        name=boost_adset_name(object_story_id), fields=f"id,name,campaign_id,created_time,{BOOST_ADSET_BUDGET_FIELD}",
+    )
+
+
+async def find_boost_ads(
+    client: httpx.AsyncClient, *, adset_id: str, access_token: str, object_story_id: str, objective: str = "",
+) -> list[dict]:
+    """Ads named `boost_ad_name` under `adset_id`: id · name · adset_id · created_time."""
+    return await _list_named(
+        client, f"{_GRAPH_BASE}/{adset_id}/ads", access_token=access_token,
+        name=boost_ad_name(object_story_id), fields="id,name,adset_id,created_time",
+    )
+
+
 async def create_boost_campaign(
     client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, object_story_id: str,
     budget_minor: int, currency: str, starts_at_iso: str, ends_at_iso: str, objective: str,
-    existing: dict | None = None,
+    existing: dict | None = None, gate_id: str = "",
 ) -> dict:
     """반환 {"campaign_id","adset_id","ad_id"}(전부 str). 3단계 순차 생성 — 앞 단계가
     실패하면 뒤 단계를 아예 안 부른다(실패 시 이미 만든 객체를 지우려 하지 않는다 — publish_channel_
@@ -55,7 +152,10 @@ async def create_boost_campaign(
 
     story #4268 — `existing`에 이미 만든 id가 있으면 그 단계는 건너뛰고 이어서 만든다(재시도가 캠페인 · 광고 세트를 또 만들어
     고객 계정에 PAUSED 객체가 중복으로 쌓이던 결함). 중간에 실패하면 그때까지 만든 id를 `MetaAdsCampaignError.partial`에
-    실어 올린다(워커가 실행 행에 남겨 다음 재시도가 이어 간다)."""
+    실어 올린다(워커가 실행 행에 남겨 다음 재시도가 이어 간다).
+
+    `gate_id` is not sent to Meta (Meta makes its own ids); it is in the signature for the sandbox, which derives its ids from
+    it (story #4412 · Qadir 01a0eb0b)."""
     ids = {k: v for k, v in (existing or {}).items() if v}
 
     def fail(code: str, message: str, *, outcome_known: bool = False) -> MetaAdsCampaignError:
@@ -82,8 +182,8 @@ async def create_boost_campaign(
         adset_resp = await client.post(
             f"{_GRAPH_BASE}/act_{ad_account_id}/adsets",
             params={
-                "access_token": access_token, "name": f"Boost adset {object_story_id}",
-                "campaign_id": ids["campaign_id"], "daily_budget": budget_minor, "billing_event": "IMPRESSIONS",
+                "access_token": access_token, "name": boost_adset_name(object_story_id),
+                "campaign_id": ids["campaign_id"], BOOST_ADSET_BUDGET_FIELD: budget_minor, "billing_event": "IMPRESSIONS",
                 "optimization_goal": "REACH", "start_time": starts_at_iso, "end_time": ends_at_iso,
                 "status": "PAUSED",
             },
@@ -101,7 +201,7 @@ async def create_boost_campaign(
         ad_resp = await client.post(
             f"{_GRAPH_BASE}/act_{ad_account_id}/ads",
             params={
-                "access_token": access_token, "name": f"Boost ad {object_story_id}", "adset_id": ids["adset_id"],
+                "access_token": access_token, "name": boost_ad_name(object_story_id), "adset_id": ids["adset_id"],
                 "creative": f'{{"object_story_id":"{object_story_id}"}}', "status": "PAUSED",
             },
         )

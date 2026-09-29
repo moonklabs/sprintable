@@ -791,6 +791,11 @@ export const EXEMPT_PAIRS = new Set<string>([
   // «확인 필요» state (a start stopped as dead_letter/needs_check), the rate-limit line only while the boost runs or is paused —
   // never on screen together. Look again if the needs-check state ever renders next to the spend refresh.
   'cage.boostExecutionSpendRefreshRateLimited <-> cage.boostNeedsCheckRetry',
+  // story #4412 — «총예산» (the approved-conditions label) sits inside the budget-mismatch line on purpose: Yuna aligned the line
+  // to that word (same concept, same word). They are never on screen together: the line lives in the card of a start that
+  // needs a check and is cleared when the «link existing campaign» confirmation (which shows the label) opens; the start
+  // confirmation belongs to another state of the card. Look again if the result line ever stays under an open confirmation.
+  'cage.adsBoostBudgetLabel <-> cage.boostAdoptBudgetMismatch',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

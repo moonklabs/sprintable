@@ -13,10 +13,43 @@ import uuid
 
 import httpx
 
-from app.services.meta_ads_campaign import MetaAdsCampaignError
+from datetime import UTC, datetime
+
+from app.services.meta_ads_campaign import (
+    BOOST_ADSET_BUDGET_FIELD,
+    MetaAdsCampaignError,
+    boost_ad_name,
+    boost_adset_name,
+    boost_campaign_name,
+)
 
 _BUDGET_EXCEEDED_MARKER = "[sandbox:budget-exceeded]"
 _PAUSE_DELAYED_MARKER = "[sandbox:pause-delayed]"
+# story #4412 — «outcome unknown» and the lookup that adopts, end to end on dev (PO run after deploy):
+# - `[sandbox:create-unknown]`: the create answers like a 503 (outcome unknown) while the campaign «exists» — the lookup finds
+#   the campaign · ad set · ad (the adopt path). Once adopted (ids complete), the worker no longer calls create.
+# - `[sandbox:create-unknown-none]`: same create, the lookup finds nothing («찾지 못했어요»).
+# - `[sandbox:create-unknown-twice]`: same create, the lookup finds two campaigns of that name (no automatic adoption · a list).
+# Sandbox ids are deterministic, so «none» after a confirmed retry would answer the same way again — it is for the lookup
+# screens, not for a second creation.
+_CREATE_UNKNOWN_MARKER = "[sandbox:create-unknown]"
+_CREATE_UNKNOWN_NONE_MARKER = "[sandbox:create-unknown-none]"
+_CREATE_UNKNOWN_TWICE_MARKER = "[sandbox:create-unknown-twice]"
+# story #4412(PO 00:48Z) — same as create-unknown, but the found ad set's budget was changed in the ad account (not the sealed one).
+_CREATE_UNKNOWN_BUDGET_CHANGED_MARKER = "[sandbox:create-unknown-budget-changed]"
+_CREATE_UNKNOWN_MARKERS = (
+    _CREATE_UNKNOWN_MARKER, _CREATE_UNKNOWN_NONE_MARKER, _CREATE_UNKNOWN_TWICE_MARKER, _CREATE_UNKNOWN_BUDGET_CHANGED_MARKER,
+)
+_FOUND_MARKERS = (_CREATE_UNKNOWN_MARKER, _CREATE_UNKNOWN_BUDGET_CHANGED_MARKER)
+
+
+def _sandbox_ids(ad_account_id: str, object_story_id: str) -> dict:
+    ns = uuid.uuid5(uuid.NAMESPACE_URL, f"{ad_account_id}:{object_story_id}")
+    return {"campaign_id": f"sandbox-campaign-{ns}", "adset_id": f"sandbox-adset-{ns}", "ad_id": f"sandbox-ad-{ns}"}
+
+
+def _now_meta() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+0000")
 
 # sandbox_publish.py 카탈로그 갱신(story #3806 §5, 이 PR이 신규 구현) —
 # `[sandbox:budget-exceeded]` objective에 포함되면 campaign 생성 자체가 Meta의
@@ -37,7 +70,7 @@ _PAUSE_DELAYED_MARKER = "[sandbox:pause-delayed]"
 async def create_boost_campaign(
     client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, object_story_id: str,
     budget_minor: int, currency: str, starts_at_iso: str, ends_at_iso: str, objective: str,
-    existing: dict | None = None,
+    existing: dict | None = None, gate_id: str = "",
 ) -> dict:
     """real과 같은 시그니처(story #4268 `existing` 포함). sandbox는 id가 결정적이라 이어 만들기와 새로 만들기의 결과가 같다."""
     if _BUDGET_EXCEEDED_MARKER in objective and not (existing or {}).get("campaign_id"):
@@ -46,12 +79,54 @@ async def create_boost_campaign(
             "sandbox: [sandbox:budget-exceeded] marker simulation — ad account spend cap reached",
             outcome_known=True,  # story #4409 — simulates Meta rejecting the create (nothing made)
         )
-    seed = f"{ad_account_id}:{object_story_id}"
-    ns = uuid.uuid5(uuid.NAMESPACE_URL, seed)
-    return {
-        "campaign_id": f"sandbox-campaign-{ns}", "adset_id": f"sandbox-adset-{ns}",
-        "ad_id": f"sandbox-ad-{ns}",
-    }
+    if any(m in objective for m in _CREATE_UNKNOWN_MARKERS) and not all((existing or {}).get(k) for k in ("campaign_id", "adset_id", "ad_id")):
+        raise MetaAdsCampaignError(
+            "META_ADS_CAMPAIGN_CREATE_FAILED", "sandbox: create-unknown marker — no definite answer (like a 503)",
+        )  # outcome_known left False: the campaign may exist
+    # story #4412 (0420) — ids unique per run, like Meta's: two boosts of the same post in one ad account get different ids
+    # (the lookup markers keep using `_sandbox_ids`, which the create-unknown flow never returns from create). The seed carries
+    # the boost's gate (Qadir 01a0eb0b): without it two boosts of one post with the same sealed period · budget · objective got
+    # the same ids, and the second run's write hit the unique indexes.
+    ns = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"{gate_id}:{ad_account_id}:{object_story_id}:{starts_at_iso}:{ends_at_iso}:{budget_minor}:{objective}",
+    )
+    return {"campaign_id": f"sandbox-campaign-{ns}", "adset_id": f"sandbox-adset-{ns}", "ad_id": f"sandbox-ad-{ns}"}
+
+
+async def find_boost_campaigns(
+    client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, object_story_id: str, objective: str = "",
+) -> list[dict]:
+    """story #4412 — same signature as the real lookup; answers from the create-unknown markers."""
+    if not any(m in objective for m in (*_FOUND_MARKERS, _CREATE_UNKNOWN_TWICE_MARKER)):
+        return []
+    ids = _sandbox_ids(ad_account_id, object_story_id)
+    found = [{"id": ids["campaign_id"], "name": boost_campaign_name(object_story_id), "created_time": _now_meta()}]
+    if _CREATE_UNKNOWN_TWICE_MARKER in objective:
+        found.append({"id": ids["campaign_id"] + "-copy", "name": boost_campaign_name(object_story_id), "created_time": _now_meta()})
+    return found
+
+
+async def find_boost_adsets(
+    client: httpx.AsyncClient, *, campaign_id: str, access_token: str, object_story_id: str, objective: str = "",
+    expected_budget_minor: int | None = None,
+) -> list[dict]:
+    if not any(m in objective for m in _FOUND_MARKERS):
+        return []
+    ns = campaign_id.removeprefix("sandbox-campaign-")
+    budget = (expected_budget_minor or 0) + (1000 if _CREATE_UNKNOWN_BUDGET_CHANGED_MARKER in objective else 0)
+    return [{"id": f"sandbox-adset-{ns}", "name": boost_adset_name(object_story_id), "campaign_id": campaign_id,
+             "created_time": _now_meta(), BOOST_ADSET_BUDGET_FIELD: str(budget)}]
+
+
+async def find_boost_ads(
+    client: httpx.AsyncClient, *, adset_id: str, access_token: str, object_story_id: str, objective: str = "",
+) -> list[dict]:
+    if not any(m in objective for m in _FOUND_MARKERS):
+        return []
+    ns = adset_id.removeprefix("sandbox-adset-")
+    return [{"id": f"sandbox-ad-{ns}", "name": boost_ad_name(object_story_id), "adset_id": adset_id,
+             "created_time": _now_meta()}]
 
 
 async def set_campaign_status(

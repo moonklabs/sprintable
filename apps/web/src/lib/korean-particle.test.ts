@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from './korean-particle';
+import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa, pickIRaJosa } from './korean-particle';
 
 // story #3698(IA·후속) — 커맨드 팔레트 "{label}(으)로 이동" 동적 조립에서 실측으로 잡힌
 // 회귀(알림→"로" 오생성)의 근본 수정. 받침 유무의 기계적 규칙 — 유나 § 대상 아님(어휘
@@ -120,3 +120,13 @@ describe('숫자 끝 — 받침 有/無 한글 숫자 읽기 표(4종 피커 공
     expect(pickIGaJosa('v9')).toBe('가'); // 구=받침없음
   });
 });
+
+describe('pickIRaJosa (story #4412)', () => {
+  it('follows the last syllable: batchim → 이라, none → 라', () => {
+    expect(pickIRaJosa('60,000원')).toBe('이라');
+    expect(pickIRaJosa('캠페인')).toBe('이라');
+    expect(pickIRaJosa('예산')).toBe('이라');
+    expect(pickIRaJosa('하루')).toBe('라');
+  });
+});
+
