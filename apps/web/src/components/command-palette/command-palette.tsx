@@ -366,7 +366,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
               <Autocomplete.Input
                 autoFocus
                 placeholder={t('placeholder')}
-                className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                className="flex-1 bg-transparent text-base lg:text-sm text-foreground outline-none placeholder:text-muted-foreground"
                 aria-label={t('placeholder')}
                 // combobox엔 aria-expanded가 꼭 있어야 한다(ARIA) — inline이면 Base UI가 안 단다. 목록은 항목이 있을 때 펼쳐져 보인다.
                 aria-expanded={hasResults}
