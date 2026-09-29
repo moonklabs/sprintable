@@ -13,7 +13,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { emitOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
-  agentRowCount, confirmBody, rememberActiveSetup, takeDesktopSetupLogin, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, parseSetupFragment, rememberActiveSetup, takeDesktopSetupLogin, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -65,7 +65,7 @@ type View =
 
 function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, signedIn = false }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; /** this visit came back from a login (4426) */ signedIn?: boolean }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -87,8 +87,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   useEffect(() => {
     if (!setupId) return;
     rememberActiveSetup(setupId); // 이 탭에서 문서를 열면 desktop_doc_opened로 셈(DesktopSetupDocWatch)
-    if (takeDesktopSetupLogin()) emitOnboardingEvent('desktop_setup_signed_in', { session_id: setupId, flow: 'onboarding' });
-  }, [setupId]);
+    if (signedIn) emitOnboardingEvent('desktop_setup_signed_in', { session_id: setupId, flow: 'onboarding' });
+  }, [setupId, signedIn]);
 
   useEffect(() => {
     let off = false;
@@ -129,9 +129,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     if (!recipe || !projectId) return;
     setView({ kind: 'starting' });
     try {
-      const res = await fetchWithAuth(`/api/desktop/setup-codes/${code}/confirm`, {
+      const res = await fetchWithAuth('/api/desktop/setup-codes/confirm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(confirmBody(rows, projectId, recipe.id, workdir)),
+        body: JSON.stringify(confirmBody(code, rows, projectId, recipe.id, workdir)),
       });
       if (res.ok) { setView({ kind: 'started' }); return; }
       const body = await res.json().catch(() => null);
@@ -267,6 +267,25 @@ export function ToolsNotConnected({ onRetry }: { onRetry: () => void }) {
       <div><Button onClick={onRetry}>{t('notConnected.action')}</Button></div>
     </Card>
   );
+}
+
+/**
+ * 주소의 `#` 뒤에서 설정 값을 읽고 곧바로 주소에서 지운다(코드는 어떤 URL에도 남기지 않는다 — PO 09:45Z). 로그인을 거쳐 온
+ * 경우는 로그인 페이지가 맡긴 값을 한 번 꺼낸다. 값은 이 컴포넌트의 메모리에만 있다.
+ */
+export function DesktopSetupEntry() {
+  const [entry, setEntry] = useState<{ query: SetupQuery | null; signedIn: boolean } | null>(null);
+  useEffect(() => {
+    const hash = window.location.hash;
+    const carried = takeDesktopSetupLogin();
+    const query = parseSetupFragment(hash) ?? (carried.fragment ? parseSetupFragment(carried.fragment) : null);
+    if (hash) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+    setEntry({ query, signedIn: carried.signedIn });
+  }, []);
+  if (!entry) return null;
+  return entry.query
+    ? <DesktopSetup code={entry.query.code} runtimes={entry.query.runtimes} blocked={entry.query.blocked} setupId={entry.query.setupId} signedIn={entry.signedIn} />
+    : <OpenInDesktopApp />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */

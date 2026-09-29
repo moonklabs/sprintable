@@ -14,7 +14,7 @@ vi.mock('jose', async (importOriginal) => {
 import { proxy as middleware, RENAMED_RESOURCES, RETIRED_RESOURCES } from './proxy';
 import { stubFetch } from '@/test-utils/as-fetch-response';
 import { safeNextPath } from '@/lib/auth/session-redirect';
-import { parseSetupQuery } from '@/lib/desktop-setup';
+import { parseSetupFragment } from '@/lib/desktop-setup';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 
@@ -178,19 +178,21 @@ describe('proxy', () => {
     expect(loc).not.toContain('reason=session_expired');
   });
 
-  it('[SID:4427] the desktop setup address survives the login round trip (code + runtimes kept in next) — PO 08:22Z ③', async () => {
-    // 데스크톱 앱이 로그인 전 창에서 /desktop/setup?code=…&runtimes=… 를 열면 로그인 뒤 같은 주소로 돌아와야 설정이 이어진다.
+  it('[SID:4427] the desktop setup request carries no code to the server; the login round trip returns to the setup page (PO 09:45Z)', async () => {
+    // 앱은 설정 값을 `#` 뒤로 넘긴다 — 브라우저는 fragment를 서버로 보내지 않으므로 서버가 받는 요청은 경로뿐이다.
     const code = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
-    const target = `/desktop/setup?code=${code}&runtimes=claude,codex`;
-    const response = await middleware(makeRequest(target));
+    const opened = new URL(`https://app.example.com/desktop/setup#code=${code}&runtimes=claude,codex`);
+    const serverSees = opened.pathname + opened.search; // what reaches proxy.ts and the request log
+    expect(serverSees).toBe('/desktop/setup');
+    const response = await middleware(makeRequest(serverSees));
     expect(response.status).toBe(307);
     const loc = new URL(response.headers.get('location') ?? '');
     expect(loc.pathname).toBe('/login');
-    const next = loc.searchParams.get('next');
-    expect(next).toBe(target);
-    expect(safeNextPath(next)).toBe(target);
-    const back = new URL(safeNextPath(next), 'https://app.example.com');
-    expect(parseSetupQuery(back.searchParams)).toEqual({ code, runtimes: ['claude', 'codex'], setupId: null, blocked: [] });
+    expect(loc.searchParams.get('next')).toBe('/desktop/setup');
+    expect(response.headers.get('location')).not.toContain(code);
+    expect(safeNextPath(loc.searchParams.get('next'))).toBe('/desktop/setup');
+    // the values themselves come back through the login page's carry (desktop-setup.test.ts)
+    expect(parseSetupFragment(opened.hash)).toEqual({ code, runtimes: ['claude', 'codex'], setupId: null, blocked: [] });
   });
 
   it('clears sp_at/sp_rt cookies on definitive refresh failure — UI path (story e5225c0a P0)', async () => {

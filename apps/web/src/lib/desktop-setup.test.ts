@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  activeSetupId, isGuideLink, markDesktopSetupLogin, rememberActiveSetup, takeDesktopSetupLogin, ACTIVE_SETUP_TTL_MS,
+  activeSetupId, isGuideLink, markDesktopSetupLogin, parseSetupFragment, rememberActiveSetup, takeDesktopSetupLogin, ACTIVE_SETUP_TTL_MS, LOGIN_CARRY_TTL_MS,
   agentRowCount, confirmBody, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
   type SetupRecipe,
 } from './desktop-setup';
@@ -61,20 +61,21 @@ describe('[SID:4427] desktop setup page rules', () => {
       role_actor_kinds: { Director: 'human', Creator: 'agent' } };
     const rows = setupRoleRows(video, ['claude']);
     expect(rows.map((r) => [r.role, r.stages.length])).toEqual([['Director', 1], ['Creator', 4]]);
-    expect(confirmBody(rows, 'p', 'v', '~/x').roles).toEqual([{ role: 'Creator', runtime: 'claude' }]);
+    expect(confirmBody(CODE, rows, 'p', 'v', '~/x').roles).toEqual([{ role: 'Creator', runtime: 'claude' }]);
   });
 
   it('confirm carries {role, runtime} for agent rows only; people rows are bound by the BE to whoever pressed «시작»', () => {
     const rows = setupRoleRows(recipe, ['claude', 'codex']);
     const draft = rows.find((r) => r.role === '작성')!;
     draft.owner = { kind: 'agent', runtime: 'codex' };
-    expect(confirmBody(rows, 'p-1', 'rec-1', ' ~/Sprintable/마케팅 루프 ')).toEqual({
+    expect(confirmBody(CODE, rows, 'p-1', 'rec-1', ' ~/Sprintable/마케팅 루프 ')).toEqual({
+      code: CODE,
       project_id: 'p-1', recipe_id: 'rec-1',
       roles: [{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'codex' }],
       workdir_hint: '~/Sprintable/마케팅 루프',
     });
     draft.owner = { kind: 'me' };
-    expect(confirmBody(rows, 'p', 'r', '~/x').roles).toEqual([{ role: '조사', runtime: 'claude' }]);
+    expect(confirmBody(CODE, rows, 'p', 'r', '~/x').roles).toEqual([{ role: '조사', runtime: 'claude' }]);
     expect(agentRowCount(rows)).toBe(1);
   });
 
@@ -99,13 +100,27 @@ describe('[SID:4427] 4426 signals from the web (signed_in · doc_opened)', () =>
 
   it('signed_in: marked only by a login that returns to the setup page; taken once', () => {
     const st = mem();
-    markDesktopSetupLogin('/dashboard', st);
-    expect(takeDesktopSetupLogin(st)).toBe(false);
-    markDesktopSetupLogin(`/desktop/setup?code=${CODE}&setup=s1`, st);
-    expect(takeDesktopSetupLogin(st)).toBe(true);
-    expect(takeDesktopSetupLogin(st)).toBe(false);
-    markDesktopSetupLogin(null, st);
-    expect(takeDesktopSetupLogin(st)).toBe(false);
+    markDesktopSetupLogin('/dashboard', '', st);
+    expect(takeDesktopSetupLogin(st).signedIn).toBe(false);
+    markDesktopSetupLogin('/desktop/setup', '', st);
+    expect(takeDesktopSetupLogin(st)).toEqual({ signedIn: true, fragment: null });
+    expect(takeDesktopSetupLogin(st).signedIn).toBe(false);
+    markDesktopSetupLogin(null, '', st);
+    expect(takeDesktopSetupLogin(st).signedIn).toBe(false);
+  });
+
+  it('the setup values survive the login round trip (carried after #, only within the code lifetime, taken once)', () => {
+    const st = mem();
+    const hash = `#code=${CODE}&setup=s1&runtimes=claude`;
+    markDesktopSetupLogin('/desktop/setup', hash, st, 1000);
+    const t = takeDesktopSetupLogin(st, 1000 + LOGIN_CARRY_TTL_MS);
+    expect(t.signedIn).toBe(true);
+    expect(parseSetupFragment(t.fragment!)).toEqual({ code: CODE, runtimes: ['claude'], setupId: 's1', blocked: [] });
+    expect(takeDesktopSetupLogin(st).fragment).toBeNull();
+    markDesktopSetupLogin('/desktop/setup', hash, st, 1000);
+    expect(takeDesktopSetupLogin(st, 1001 + LOGIN_CARRY_TTL_MS).fragment).toBeNull(); // past the code lifetime
+    markDesktopSetupLogin('/desktop/setup', '#code=bad', st, 1000);
+    expect(takeDesktopSetupLogin(st, 1000).fragment).toBeNull(); // not a setup value: not carried
   });
 
   it('doc_opened: the setup counts for 30 minutes in this tab', () => {

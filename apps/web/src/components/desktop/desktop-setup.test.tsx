@@ -10,7 +10,7 @@ import koMessages from '../../../messages/ko.json';
 const { ctx } = vi.hoisted(() => ({ ctx: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 
-import { DesktopSetup, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode } from './desktop-setup';
+import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { markDesktopSetupLogin } from '@/lib/desktop-setup';
 
@@ -79,8 +79,9 @@ describe('[SID:4427] desktop setup page', () => {
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const posts = calls.filter((c) => c.body !== undefined);
     expect(posts).toHaveLength(1);
-    expect(posts[0].url).toContain(`/api/desktop/setup-codes/${CODE}/confirm`);
-    expect(posts[0].body).toEqual({ project_id: 'p-1', recipe_id: 'rec-1', roles: [{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'claude' }], workdir_hint: '~/Sprintable/마케팅 루프' });
+    expect(posts[0].url).toContain('/api/desktop/setup-codes/confirm');
+    expect(posts[0].url).not.toContain(CODE); // the code rides in the body only
+    expect(posts[0].body).toEqual({ code: CODE, project_id: 'p-1', recipe_id: 'rec-1', roles: [{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'claude' }], workdir_hint: '~/Sprintable/마케팅 루프' });
     expect(text()).toContain('에이전트를 시작하고 있어요');
   });
 
@@ -170,14 +171,32 @@ describe('[SID:4427] desktop setup page', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
-  it('4426: a setup that needed a login sends desktop_setup_signed_in once, with the setup id', async () => {
+  it('the setup values come after # and leave the address as soon as they are read (PO 09:45Z)', async () => {
     stub(() => new Response('{}'));
-    markDesktopSetupLogin(`/desktop/setup?code=${CODE}&setup=s-1`);
-    await mount(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-0&runtimes=claude`);
+    await mount(<DesktopSetupEntry />);
+    expect(window.location.hash).toBe('');
+    expect(window.location.href).not.toContain(CODE);
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    window.history.replaceState(null, '', '/desktop/setup');
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('데스크톱 앱에서 열어 주세요'); // nothing after # and nothing carried: a browser visit (AC5)
+  });
+
+  it('4426 + login round trip: the values carried by the login page are used once, and desktop_setup_signed_in goes with the setup id', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup'); // the login page sent us back without the #
+    markDesktopSetupLogin('/desktop/setup', `#code=${CODE}&setup=s-1&runtimes=claude`);
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
     expect(events().map((e) => [e.event, e.session_id])).toEqual([['desktop_setup_signed_in', 's-1']]);
+    expect(JSON.stringify({ ...sessionStorage })).not.toContain(CODE); // taken: nothing left in storage
     await act(async () => { root.unmount(); }); root = createRoot(container);
     stub(() => new Response('{}'));
-    await mount(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />); // no login this time
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-1&runtimes=claude`);
+    await mount(<DesktopSetupEntry />); // no login this time
     expect(events()).toEqual([]);
   });
 

@@ -102,6 +102,8 @@ export function defaultWorkdirHint(recipeName: string): string {
 }
 
 export interface ConfirmBody {
+  /** 설정 코드는 본문으로만(경로 X — PO 09:45Z · 디디 4825). */
+  code: string;
   project_id: string;
   recipe_id: string;
   /** 에이전트 단위 = 역할(PO 08:31Z · 4825 CHANGES): 한 역할이 여러 stage를 맡아도 에이전트 하나. */
@@ -111,8 +113,9 @@ export interface ConfirmBody {
 
 /** 확인 요청(4424 confirm) — 에이전트가 맡는 역할마다 {role, runtime}(역할 하나 = 에이전트 하나). 사람이 맡는 줄은 싣지
  * 않는다(BE가 확인을 누른 사람에게 묶는다 — PO 07:14Z). */
-export function confirmBody(rows: readonly SetupRoleRow[], projectId: string, recipeId: string, workdirHint: string): ConfirmBody {
+export function confirmBody(code: string, rows: readonly SetupRoleRow[], projectId: string, recipeId: string, workdirHint: string): ConfirmBody {
   return {
+    code,
     project_id: projectId,
     recipe_id: recipeId,
     roles: rows.flatMap((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime }] : [])),
@@ -120,24 +123,37 @@ export function confirmBody(rows: readonly SetupRoleRow[], projectId: string, re
   };
 }
 
-// ── story #4427 · 4426 — «로그인이 필요했을 때만» desktop_setup_signed_in ──
-// 로그인 방법(비밀번호 · Firebase · Google/Apple 핸드오프)마다 성공 자리가 달라, 로그인 페이지가 «이 로그인은 설정 페이지로
-// 돌아가는 길»이라는 표시만 남기고(sessionStorage · 같은 탭), 설정 페이지가 그 표시를 보면 한 번 보내고 지운다.
+// ── story #4427 · 4426 — «로그인이 필요했을 때만» desktop_setup_signed_in + 코드가 로그인 왕복을 살아남기 ──
+// 설정 코드는 어떤 URL에도 싣지 않는다(까디르 4825 · PO 09:45Z): 앱은 `#` 뒤(fragment)로 넘기고 — 서버 요청 · 로그 ·
+// Referer에 안 남는다 — 페이지는 읽자마자 주소에서 지우고 메모리에만 둔다.
+// 로그인 전이면 서버 307 뒤 브라우저가 fragment를 /login 주소에 이어 붙이지만, 로그인 방법(비밀번호 · Firebase · Google/Apple
+// 핸드오프)마다 돌아가는 길이 달라 fragment가 따라오지 않는다. 그래서 로그인 페이지가 «설정으로 돌아가는 로그인» 표시와 함께
+// fragment를 같은 탭 sessionStorage에 잠깐(코드 수명 10분) 맡기고 주소에서 지우며, 설정 페이지가 한 번 꺼내고 곧바로 지운다.
 const SIGNED_IN_MARK = 'sprintable_desktop_setup_login';
+export const LOGIN_CARRY_TTL_MS = 10 * 60_000;
 
-/** 로그인 페이지: next가 설정 페이지면 표시를 남긴다. */
-export function markDesktopSetupLogin(next: string | null, storage: Pick<Storage, 'setItem'> | undefined = globalThis.sessionStorage): void {
-  if (!next || !next.startsWith('/desktop/setup')) return;
-  try { storage?.setItem(SIGNED_IN_MARK, '1'); } catch { /* 저장이 막힌 창 — 측정만 빠진다 */ }
+/** `#code=…&setup=…&runtimes=…` → SetupQuery (모양이 틀리면 null). */
+export function parseSetupFragment(hash: string): SetupQuery | null {
+  return parseSetupQuery(new URLSearchParams(hash.replace(/^#/, '')));
 }
 
-/** 설정 페이지: 표시가 있으면 true를 돌려주고 지운다(한 번만). */
-export function takeDesktopSetupLogin(storage: Pick<Storage, 'getItem' | 'removeItem'> | undefined = globalThis.sessionStorage): boolean {
+/** 로그인 페이지: next가 설정 페이지면 표시를 남기고, 주소의 fragment(설정 값)가 있으면 함께 맡긴다. */
+export function markDesktopSetupLogin(next: string | null, hash = '', storage: Pick<Storage, 'setItem'> | undefined = globalThis.sessionStorage, now = Date.now()): void {
+  if (!next || !next.startsWith('/desktop/setup')) return;
+  const fragment = parseSetupFragment(hash) ? hash.replace(/^#/, '') : null;
+  try { storage?.setItem(SIGNED_IN_MARK, JSON.stringify({ at: now, fragment })); } catch { /* 저장이 막힌 창 — 측정만 빠진다 */ }
+}
+
+/** 설정 페이지: 표시가 있으면 꺼내고 지운다(한 번만). fragment는 코드 수명 안에서만 돌려준다. */
+export function takeDesktopSetupLogin(storage: Pick<Storage, 'getItem' | 'removeItem'> | undefined = globalThis.sessionStorage, now = Date.now()): { signedIn: boolean; fragment: string | null } {
   try {
-    if (storage?.getItem(SIGNED_IN_MARK) !== '1') return false;
-    storage.removeItem(SIGNED_IN_MARK);
-    return true;
-  } catch { return false; }
+    const raw = storage?.getItem(SIGNED_IN_MARK);
+    if (!raw) return { signedIn: false, fragment: null };
+    storage!.removeItem(SIGNED_IN_MARK);
+    const v = JSON.parse(raw) as { at?: unknown; fragment?: unknown };
+    const fresh = typeof v.at === 'number' && now - v.at <= LOGIN_CARRY_TTL_MS;
+    return { signedIn: true, fragment: fresh && typeof v.fragment === 'string' ? v.fragment : null };
+  } catch { return { signedIn: false, fragment: null }; }
 }
 
 // ── story #4427 · AC2 «문서 0» — desktop_doc_opened(PO 08:44Z) ──
