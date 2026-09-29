@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -14,7 +15,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
 import {
-  agentRowCount, confirmBody, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, hasSetupFragment, isStartableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -108,7 +109,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         const body = await res.json();
         const list: (SetupRecipe & { enabled?: boolean; payload_schema?: SetupRecipe['payload_schema'] })[] = Array.isArray(body) ? body : body?.data ?? [];
         // 레시피 = 흐름(stage 목록)이 있고 켜져 있는 정의 · 목록 순서 그대로(첫째가 기본값 — 추천 딱지 없음)
-        const usable = list.filter((d) => d.enabled !== false && (d.payload_schema?.properties?.stage?.enum?.length ?? 0) > 0);
+        // 시작할 수 있는 것만(켜짐 · 흐름 · 에이전트 역할 ≥ 1 · 화면 이름 있음 — PO 15:38Z dev 실측: 키 그대로 · 에이전트 0인 정의가 보였다)
+        const usable = list.filter((d) => isStartableRecipe(d, presetName(d, tPreset)));
         if (off) return;
         setRecipes(usable);
         if (usable[0]) pick(usable[0]);
@@ -295,16 +297,34 @@ export function ToolsNotConnected({ onRetry }: { onRetry: () => void }) {
  */
 export function DesktopSetupEntry() {
   const [entry, setEntry] = useState<{ query: SetupQuery | null } | null>(null);
+  const searchParams = useSearchParams();
+  const strip = () => window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   useEffect(() => {
     const hash = window.location.hash;
     const query = parseSetupFragment(hash);
     // off the address at once; the state change follows on the next microtask (no cascading render inside the effect)
-    if (hash) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+    if (hash) strip();
     void Promise.resolve().then(() => setEntry({ query }));
+    // The values can also arrive AFTER this page is up: after an email login the desktop app reopens the same page with its `#`,
+    // and that is a same-document fragment change, not a new load (dev 실측 15:24Z — the page showed «데스크톱 앱에서 열어 주세요»).
+    // A newer code replaces an older one (the app restarted the setup).
+    const onHash = () => {
+      const q = parseSetupFragment(window.location.hash);
+      if (!q) return;
+      strip();
+      setEntry({ query: q });
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
   }, []);
+  // The dashboard shell adds `?p=` with a router replace; the setup `#` came back with it in the dev run (15:31Z). Whenever the
+  // query changes, take the setup values off the address again (they are already in memory).
+  useEffect(() => {
+    if (hasSetupFragment(window.location.hash)) strip();
+  }, [searchParams]);
   if (!entry) return null;
   return entry.query
-    ? <DesktopSetup code={entry.query.code} runtimes={entry.query.runtimes} blocked={entry.query.blocked} setupId={entry.query.setupId} />
+    ? <DesktopSetup key={entry.query.code} code={entry.query.code} runtimes={entry.query.runtimes} blocked={entry.query.blocked} setupId={entry.query.setupId} />
     : <OpenInDesktopApp />;
 }
 
