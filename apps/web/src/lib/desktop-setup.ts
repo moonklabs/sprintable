@@ -44,7 +44,10 @@ export interface SetupRoleRow {
 
 export interface SetupRecipe {
   id: string;
+  key: string;
+  org_id?: string | null;
   name: string;
+  description?: string | null;
   stage_metadata?: RecipeStageMetadata | null;
   role_actor_kinds?: RoleActorKinds | null;
   payload_schema?: { properties?: { stage?: { enum?: string[] } } } | null;

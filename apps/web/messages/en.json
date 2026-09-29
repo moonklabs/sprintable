@@ -6493,7 +6493,71 @@
     "notarizationNotice": "For internal use before Apple notarization.",
     "gatekeeperNotice": "The first time you open it, right-click the file and choose \"Open\".",
     "downloadCta": "Download",
-    "unavailable": "Not available right now."
+    "unavailable": "Not available right now.",
+    "setup": {
+      "loading": "Loading setup",
+      "eyebrow": "Start on this computer",
+      "title": "Start your agents on this computer",
+      "lead": "Pick a recipe and each role gets an agent on this computer, with its first task right away. Everything below is already filled in.",
+      "recipe": "Recipe",
+      "rolesTitle": "Roles and who takes them",
+      "found": "Agents found on this computer: {list}",
+      "whoHuman": "Person",
+      "whoAgent": "An agent on this computer",
+      "whoEither": "An agent on this computer · or me",
+      "me": "Me · {name}",
+      "onThisComputer": "{runtime} · on this computer",
+      "ownerFor": "Who takes {role}",
+      "humanNote": "Person roles don't get a new agent — whoever presses Start takes them. Roles either can take default to an agent; switch to Me in the picker.",
+      "folder": "Working folder",
+      "change": "Change",
+      "folderHint": "Enter a folder inside your home folder",
+      "start": "Start",
+      "startNote": "Creates {n} agents on this computer and hands them their first tasks",
+      "startNoteWithMe": "Creates {n} agents on this computer and hands them their first tasks · you take {roles}",
+      "startedTitle": "Starting your agents",
+      "startedBody": "Your agents keep working even if you close this window.",
+      "genericError": "This can't start right now — try again in a moment",
+      "failure": {
+        "copy": "Copy",
+        "copyAria": "Copy the {runtime} install command",
+        "no-agent": {
+          "title": "We couldn't find an agent on this computer",
+          "body": "Install and sign in to Claude Code or Codex, then look again. You can install them from a terminal.",
+          "action": "Look again"
+        },
+        "not-admin": {
+          "title": "You need to be an org admin to create agents",
+          "body": "This account isn't an admin of this organization. Ask an admin to start from this screen, or open it again once you're an admin.",
+          "action": "Check again"
+        },
+        "agent-limit": {
+          "title": "This is more agents than your org can add",
+          "body": "Remove agents you don't use, or pick a recipe with fewer roles.",
+          "action": "Choose another recipe"
+        },
+        "expired": {
+          "title": "This setup has expired",
+          "body": "For security, this page is only open for a short time. Start again from the app to open it again.",
+          "action": "Start again in the app"
+        },
+        "offline": {
+          "title": "You're offline",
+          "body": "Check your internet connection and try again. Your recipe and settings are kept.",
+          "action": "Try again"
+        },
+        "managed": {
+          "title": "Your company's settings block this connection",
+          "body": "Your company manages the agent settings on this computer, so agents here can't receive Sprintable tasks. Ask your IT admin to allow Sprintable, then check again.",
+          "action": "Check again"
+        }
+      },
+      "direct": {
+        "title": "Open this in the desktop app",
+        "body": "This setup can only be done in the Sprintable app on the computer your agents run on.",
+        "action": "Open the app"
+      }
+    }
   },
   "recipePreset": {
     "blogArticleName": "Blog post",

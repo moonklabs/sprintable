@@ -13,6 +13,8 @@ vi.mock('jose', async (importOriginal) => {
 
 import { proxy as middleware, RENAMED_RESOURCES, RETIRED_RESOURCES } from './proxy';
 import { stubFetch } from '@/test-utils/as-fetch-response';
+import { safeNextPath } from '@/lib/auth/session-redirect';
+import { parseSetupQuery } from '@/lib/desktop-setup';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 
@@ -174,6 +176,21 @@ describe('proxy', () => {
     expect(loc).toContain('https://app.example.com/login?');
     expect(loc).toContain(`next=${encodeURIComponent('/dashboard')}`);
     expect(loc).not.toContain('reason=session_expired');
+  });
+
+  it('[SID:4427] the desktop setup address survives the login round trip (code + runtimes kept in next) — PO 08:22Z ③', async () => {
+    // 데스크톱 앱이 로그인 전 창에서 /desktop/setup?code=…&runtimes=… 를 열면 로그인 뒤 같은 주소로 돌아와야 설정이 이어진다.
+    const code = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
+    const target = `/desktop/setup?code=${code}&runtimes=claude,codex`;
+    const response = await middleware(makeRequest(target));
+    expect(response.status).toBe(307);
+    const loc = new URL(response.headers.get('location') ?? '');
+    expect(loc.pathname).toBe('/login');
+    const next = loc.searchParams.get('next');
+    expect(next).toBe(target);
+    expect(safeNextPath(next)).toBe(target);
+    const back = new URL(safeNextPath(next), 'https://app.example.com');
+    expect(parseSetupQuery(back.searchParams)).toEqual({ code, runtimes: ['claude', 'codex'] });
   });
 
   it('clears sp_at/sp_rt cookies on definitive refresh failure — UI path (story e5225c0a P0)', async () => {

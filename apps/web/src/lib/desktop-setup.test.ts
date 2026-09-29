@@ -10,6 +10,8 @@ const q = (s: string) => new URLSearchParams(s);
 // 조사(agent) · 작성(either) · 연출(human, 게이트) · 발행(채널 연결)
 const recipe: SetupRecipe = {
   id: 'rec-1',
+  key: 'org.marketing_loop',
+  org_id: 'o-1',
   name: '마케팅 루프',
   payload_schema: { properties: { stage: { enum: ['research', 'draft', 'review', 'publish'] } } },
   stage_metadata: {
