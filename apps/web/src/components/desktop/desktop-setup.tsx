@@ -9,10 +9,12 @@ import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { SetupProgressView } from './desktop-setup-progress';
 import {
-  agentRowCount, confirmBody, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, flowStages, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -54,12 +56,19 @@ export function failureForCode(code: string | undefined, resource?: string): Set
   }
 }
 
+/** ③ 한도의 수는 서버 오류가 준 값만(유나 표) — 이번 설정에 필요한 수와 더 만들 수 있는 수가 둘 다 있을 때만 수 문장. */
+export interface LimitCounts { need: number; left: number }
+export function limitCounts(error: { needed?: unknown; available?: unknown } | undefined): LimitCounts | null {
+  const need = error?.needed; const left = error?.available;
+  return typeof need === 'number' && typeof left === 'number' && need > left && left >= 0 ? { need, left } : null;
+}
+
 type View =
   | { kind: 'loading' }
   | { kind: 'choose' }
   | { kind: 'starting' }
   | { kind: 'started' }
-  | { kind: 'failed'; failure: SetupFailure }
+  | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null }
   | { kind: 'error' };
 
 function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
@@ -134,7 +143,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       if (res.ok) { setView({ kind: 'started' }); return; }
       const body = await res.json().catch(() => null);
       const failure = failureForCode(body?.error?.code, body?.error?.resource);
-      setView(failure ? { kind: 'failed', failure } : { kind: 'error' });
+      setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null } : { kind: 'error' });
     } catch {
       setView({ kind: 'failed', failure: 'offline' });
     }
@@ -142,10 +151,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   if (!isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
-  if (view.kind === 'failed') return <Failure failure={view.failure} onRetry={view.failure === 'offline' ? () => void start() : undefined} />;
+  if (view.kind === 'failed') {
+    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={view.failure === 'offline' ? () => void start() : undefined}
+      onChooseRecipe={view.failure === 'agent-limit' ? () => setView({ kind: 'choose' }) : undefined} />;
+  }
   // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
   if (runtimes.length === 0 && needsAnAgent(rows, runtimes)) return <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
-  if (view.kind === 'started') return <Card className="p-6"><h1 className="text-lg font-semibold">{t('startedTitle')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p></Card>;
+  if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} />;
 
   const setOwner = (role: string, key: string) => setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
   const canStart = !!recipe && !!projectId && workdirInputOk(workdir) && view.kind === 'choose';
@@ -165,7 +177,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
               <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1" />
               <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
-                {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}</span>
+                {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
+                <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
             </label>
           ))}
         </div>
@@ -184,7 +197,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               {r.choices.length === 1
                 ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: userName ?? '' }) : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
                 : (
-                  <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="rounded-md border bg-background px-2 py-1 text-sm"
+                  <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
                     value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
                     {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: userName ?? '' }) : RUNTIME_LABEL[c.runtime]}</option>)}
                     {claudeBlocked && r.actor !== 'human' ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
@@ -223,14 +236,17 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   );
 }
 
-function Failure({ failure, onRetry }: { failure: SetupFailure; onRetry?: () => void }) {
+export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; onChooseRecipe?: () => void }) {
   const t = useTranslations('desktop.setup');
+  const flatHref = useFlatHref();
   const key = (part: 'title' | 'body' | 'action') => FAILURE_KEY[`${failure}.${part}`]!;
   const appButton = (label: string) => <Button asChild><a href={SETUP_APP_LINK}>{label}</a></Button>;
   return (
     <Card className="flex flex-col gap-3 p-6">
       <h1 className="text-lg font-semibold">{t(key('title'))}</h1>
-      <p className="text-sm text-muted-foreground">{t(key('body'))}</p>
+      <p className="text-sm text-muted-foreground">
+        {failure === 'agent-limit' && counts ? <>{t('failure.agent-limit.bodyWithCounts', { need: counts.need, left: counts.left })} </> : null}{t(key('body'))}
+      </p>
       {failure === 'no-agent' ? (
         <ul className="flex flex-col gap-2">
           {(Object.keys(INSTALL) as DesktopRuntime[]).map((r) => (
@@ -246,6 +262,10 @@ function Failure({ failure, onRetry }: { failure: SetupFailure; onRetry?: () => 
           : failure === 'expired' ? appButton(t(key('action')))
           : failure === 'offline' && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
           : failure === 'not-admin' || failure === 'managed' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
+          : failure === 'agent-limit' ? <>
+            {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
+            <Button variant="outline" asChild><a href={flatHref('/organization/workforce')}>{t('failure.agent-limit.manage')}</a></Button>
+          </>
           : null}
       </div>
     </Card>
@@ -253,8 +273,8 @@ function Failure({ failure, onRetry }: { failure: SetupFailure; onRetry?: () => 
 }
 
 /**
- * ⑥ 갈래 나 — 원인 모름. PO 08:37Z · 유나 08:38Z. 에이전트는 켜졌지만 우리 도구 연결이 붙지 않은 경우. 원인을 단정하지 않는다.
- * 띄우는 신호(설정 상태의 tools_connected)는 디디군 측정 뒤 — 화면과 문구만 먼저.
+ * ⑦ 원인 모름 — 에이전트는 켜졌지만 우리 도구 연결이 «아직» 붙지 않음(단정 X · 유나 v13). 뜨는 때와 걷히는 때는
+ * setupProgress(사람 입력 + 30초 · 받은 것을 본 때 + 180초 — PO 12:25Z). 연결이 뒤늦게 붙으면 단계로 돌아간다.
  */
 export function ToolsNotConnected({ onRetry }: { onRetry: () => void }) {
   const t = useTranslations('desktop.setup');
@@ -296,4 +316,16 @@ export function OpenInDesktopApp() {
       <div><Button asChild><a href={SETUP_APP_LINK}>{t('direct.action')}</a></Button></div>
     </Card>
   );
+}
+
+/** 레시피 카드 아래 줄 «역할 {n} · {역할 목록}»(유나 표). */
+function RecipeRolesLine({ recipe, runtimes }: { recipe: SetupRecipe; runtimes: DesktopRuntime[] }) {
+  const t = useTranslations('desktop.setup');
+  const tOrg = useTranslations('organization');
+  // in the recipe's flow order (the card reads as the recipe runs), not the rows' order below
+  const flow = flowStages(recipe);
+  const at = (r: SetupRoleRow) => { const i = flow.indexOf(r.stages[0] ?? ''); return i < 0 ? flow.length : i; };
+  const roles = [...setupRoleRows(recipe, runtimes)].sort((a, b) => at(a) - at(b)).map((r) => stageRoleLabel(r.role, tOrg));
+  if (roles.length === 0) return null;
+  return <span className="block text-xs text-muted-foreground">{t('recipeRoles', { n: roles.length, roles: roles.join(' · ') })}</span>;
 }

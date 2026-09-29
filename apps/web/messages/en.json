@@ -6521,8 +6521,8 @@
       "blockedClaudeOption": "Claude Code · Blocked by your company's settings",
       "blockedClaudeNote": "Claude Code can't connect to Sprintable on this computer because of your company's settings, so Codex takes these roles",
       "notConnected": {
-        "title": "Sprintable didn't connect to your agent",
-        "body": "Your agent started, but its connection to Sprintable tasks didn't come up. This can be your company's settings or your network — check with your IT admin that Sprintable is allowed and that your network isn't blocking it, then check again.",
+        "title": "Sprintable hasn't connected to your agent yet",
+        "body": "Your agent started, but its connection to Sprintable tasks hasn't come up yet. If its terminal is asking whether to trust the working folder, answer that first. If it still doesn't connect, it can be your company's settings or your network — check with your IT admin that Sprintable is allowed and that your network isn't blocking it, then check again.",
         "action": "Check again"
       },
       "failure": {
@@ -6530,18 +6530,20 @@
         "copyAria": "Copy the {runtime} install command",
         "no-agent": {
           "title": "We couldn't find an agent on this computer",
-          "body": "Install and sign in to Claude Code or Codex, then look again. You can install them from a terminal.",
+          "body": "Install and sign in to Claude Code or Codex, then look again. You can install them from the terminal.",
           "action": "Look again"
         },
         "not-admin": {
           "title": "You need to be an org admin to create agents",
-          "body": "This account isn't an admin of this organization. Ask an admin to start from this screen, or open it again once you're an admin.",
+          "body": "This account isn't an admin of this organization. Ask an admin to start from this screen, or get admin rights and open it again.",
           "action": "Check again"
         },
         "agent-limit": {
           "title": "This is more agents than your org can add",
           "body": "Remove agents you don't use, or pick a recipe with fewer roles.",
-          "action": "Choose another recipe"
+          "action": "Choose another recipe",
+          "bodyWithCounts": "This recipe needs {need, plural, one {# agent} other {# agents}}, but you can add {left} more.",
+          "manage": "Manage agents"
         },
         "expired": {
           "title": "This setup has expired",
@@ -6561,9 +6563,21 @@
       },
       "direct": {
         "title": "Open this in the desktop app",
-        "body": "This setup can only be done in the Sprintable app on the computer your agents run on.",
+        "body": "This setup can only be done in the Sprintable app on the computer where your agents run.",
         "action": "Open the app"
-      }
+      },
+      "recipeRoles": "{n, plural, one {# role} other {# roles}} · {roles}",
+      "stepReadyRunning": "Getting your agents ready",
+      "stepReadyDone": "Your agents are ready",
+      "stepHandedRunning": "Handing over the first task",
+      "stepHandedDone": "First task handed over",
+      "stepHandedDetail": "Handing «{task}» to the {role} agent",
+      "stepResultRunning": "Waiting for the first result",
+      "stepResultDone": "The first result is in",
+      "workdirFallback": "We couldn't use the folder you chose, so we started in the default folder (~/Sprintable/{recipe}) — the working folder needs to be a folder inside your home folder",
+      "trustHint": "When an agent starts for the first time, it may ask whether to trust the working folder. If it does, select that agent in the «Agents on this computer» bar at the bottom of the window and answer in its terminal — setup continues once you do.",
+      "seeResult": "See the result",
+      "seeResultReason": "Once the result is in, this takes you to the task"
     }
   },
   "recipePreset": {

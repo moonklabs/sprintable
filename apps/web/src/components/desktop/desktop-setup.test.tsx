@@ -33,6 +33,8 @@ const RECIPES = [
 let container: HTMLDivElement;
 let root: Root;
 let calls: { url: string; body?: unknown }[];
+/** What GET /api/desktop/setups/{id} answers now (the progress tests change it between polls). */
+let statusNow: () => unknown = () => ({});
 
 function stub(confirm: () => Response | Promise<Response>) {
   calls = [];
@@ -41,12 +43,13 @@ function stub(confirm: () => Response | Promise<Response>) {
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.endsWith('/api/events/definitions')) return new Response(JSON.stringify({ data: RECIPES }), { status: 200 });
     if (url.includes('/api/desktop/setup-codes/')) return confirm();
+    if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
     return new Response('{}', { status: 404 });
   }));
 }
 
 async function mount(node: React.ReactNode, role = 'owner') {
-  ctx.mockReturnValue({ projectId: 'p-1', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role }] });
+  ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role }] });
   await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>); });
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
 }
@@ -165,7 +168,8 @@ describe('[SID:4427] desktop setup page', () => {
     const retry = vi.fn();
     stub(() => new Response('{}'));
     await mount(<ToolsNotConnected onRetry={retry} />);
-    expect(text()).toContain('에이전트에 Sprintable이 연결되지 않았어요');
+    expect(text()).toContain('에이전트에 Sprintable이 아직 연결되지 않았어요');
+    expect(text()).toContain('터미널에서 작업 폴더를 믿을지 묻고 있다면 먼저 답해 주세요');
     await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
     expect(retry).toHaveBeenCalledTimes(1);
   });
@@ -212,6 +216,114 @@ describe('[SID:4427] desktop setup page', () => {
     await mount(<OpenInDesktopApp />);
     expect(text()).toContain('데스크톱 앱에서 열어 주세요');
     expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('앱 열기');
+  });
+});
+
+const SETUP_ID = '11111111-2222-4333-8444-555555555555';
+type Sig = { tools_connected: { member_id: string; at: string }[]; first_task_handed_at: string | null; first_result_at: string | null; workdir_fallback_at: string | null; blocked: { at: string; reason: string | null } | null };
+const status = (state: string, sig: Partial<Sig> = {}) => ({
+  setup_id: SETUP_ID, device_name: 'mac', state, recipe_name: '마케팅 루프', work_item_id: 'w-1',
+  members: [
+    { stage: 'research', role: '조사', member_id: 'm1', kind: 'agent', runtime: 'claude' },
+    { stage: 'draft', role: '작성', member_id: 'm2', kind: 'agent', runtime: 'codex' },
+    { stage: 'review', role: '연출', member_id: 'h1', kind: 'human', runtime: null },
+  ],
+  signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null, ...sig },
+});
+
+describe('[SID:4427] after «시작» — progress from the setup status (PO 12:25Z rules · Yuna v13 copy)', () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'Date'] }); vi.setSystemTime(Date.parse('2026-09-30T00:00:00Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+  const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); }); };
+  const startSetup = async () => {
+    stub(() => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1' }), { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    await act(async () => { startButton().click(); });
+    await tick(0);
+  };
+  const polls = () => calls.filter((c) => c.url.includes('/api/desktop/setups/')).length;
+  const resultButton = () => [...container.querySelectorAll('a, button')].find((b) => b.textContent === '결과 보기') as HTMLElement;
+
+  it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
+    statusNow = () => status('waiting_for_app');
+    await startSetup();
+    expect(text()).toContain('에이전트를 준비하고 있어요');
+    expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
+    expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
+    expect((resultButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(text()).toContain('결과가 나오면 눌러서 일감으로 가요');
+
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
+    await tick(2_000);
+    expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toContain('처음 켤 때 에이전트가 작업 폴더를 믿을지 물을 수 있어요');
+
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], workdir_fallback_at: 'x' });
+    await tick(2_000);
+    expect(text()).toContain('에이전트를 준비했어요');
+    expect(text()).toContain('조사 · Claude Code, 작성 · Codex');
+    expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
+    expect(container.querySelector('[data-testid=setup-workdir-fallback]')?.textContent).toBe('고른 폴더를 쓸 수 없어 기본 폴더(~/Sprintable/마케팅 루프)에서 시작했어요 — 작업 폴더는 홈 폴더 안의 한 폴더여야 해요');
+
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    await tick(2_000);
+    expect(text()).toContain('첫 일감을 맡겼어요'); // a result means it was handed over
+    expect(text()).toContain('첫 결과가 나왔어요');
+    expect(resultButton().getAttribute('href')).toBe('/o/proj/flow?story=w-1');
+    expect(text()).not.toContain('결과가 나오면 눌러서 일감으로 가요');
+    const n = polls();
+    await tick(10_000);
+    expect(polls()).toBe(n); // stops once the result is in
+  });
+
+  it('⑦ «아직» after handed over + 180 s with a missing connection; it goes away when the connection comes', async () => {
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
+    await startSetup();
+    await tick(178_000);
+    expect(text()).not.toContain('에이전트에 Sprintable이 아직 연결되지 않았어요');
+    await tick(4_000);
+    expect(text()).toContain('에이전트에 Sprintable이 아직 연결되지 않았어요');
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] });
+    await tick(2_000);
+    expect(text()).not.toContain('아직 연결되지 않았어요');
+    expect(text()).toContain('에이전트를 준비했어요');
+  });
+
+  it('blocked after start → ⑥ · the code ran out before the app took it → ④', async () => {
+    statusNow = () => status('handed_over', { blocked: { at: 'x', reason: 'managed_mcp' } });
+    await startSetup();
+    expect(text()).toContain('회사 설정 때문에 이 컴퓨터에서는 연결할 수 없어요');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    statusNow = () => status('not_handed_over');
+    await startSetup();
+    expect(text()).toContain('설정 시간이 지났어요');
+  });
+});
+
+describe('[SID:4427] ③ limit and the recipe line (Yuna table)', () => {
+  it('numbers only when the server gives both; otherwise the second sentence alone · [에이전트 정리하기]', async () => {
+    stub(() => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'agent', needed: 2, available: 1 } }), { status: 402 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('이 레시피는 에이전트 2개가 필요한데, 지금 1개만 더 만들 수 있어요. 쓰지 않는 에이전트를 정리하거나');
+    expect(([...container.querySelectorAll('a')].find((a) => a.textContent === '에이전트 정리하기') as HTMLAnchorElement).getAttribute('href')).toContain('/organization/workforce');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    stub(() => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'agent', limit: 5, current: 5 } }), { status: 402 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('이 조직에서 만들 수 있는 에이전트 수를 넘어요');
+    expect(text()).not.toContain('필요한데');
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '레시피 다시 고르기') as HTMLButtonElement).click(); });
+    expect(startButton()).toBeTruthy(); // back to the choices
+  });
+
+  it('each recipe card says its roles: «역할 3 · 조사 · 작성 · 연출»', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(text()).toContain('역할 3 · 조사 · 작성 · 연출');
+    expect(text()).toContain('역할 1 · 조사');
   });
 });
 

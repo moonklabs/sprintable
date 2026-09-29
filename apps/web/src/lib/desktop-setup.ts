@@ -163,3 +163,82 @@ export function isGuideLink(href: string, appOrigin: string): boolean {
   if (u.origin !== new URL(appOrigin).origin) return false;
   return /^\/(llms|help)(\/|$|\.)/.test(u.pathname) || /guide/i.test(u.pathname.split('/').pop() ?? '');
 }
+
+/**
+ * «시작» 뒤 진행 표시(유나 시안 v12 · PO 12:25Z) — `GET /api/v2/desktop/setups/{id}`(4826) 한 번의 응답을 세 단계로 읽는다.
+ * - ① 준비: 앱이 설정을 받았고(handed_over) 에이전트마다 도구 연결(tools_connected)이 왔으면 끝.
+ * - ② 맡김: 건넴(first_task_handed_at) 또는 결과(first_result_at)가 있으면 끝 — 결과가 있으면 건넴은 반드시 있었다(영구 규칙).
+ * - ③ 결과: first_result_at.
+ * - 신뢰 창 안내: 앱이 받은 뒤 · 도구 연결이 다 오기 전(창이 떴는지는 잴 수 없어 단정하지 않는 문구 · PO 12:25Z).
+ * - ⑦ 연결 안 붙음: 받은 뒤 도구 연결이 없는 에이전트가 있고, (사람 입력 + 30초) 또는 (받은 것을 본 때 + 180초)가 지남 —
+ *   처음 켤 때 폴더 신뢰 창에 답하기 전엔 연결이 붙지 않으므로 고정 60초는 거짓 경보(PO 12:25Z).
+ */
+export interface SetupStatus {
+  state: 'waiting_for_app' | 'handed_over' | 'not_handed_over' | 'disconnected';
+  recipe_name: string | null;
+  work_item_id: string | null;
+  members: { stage: string; role: string | null; member_id: string; kind: 'agent' | 'human'; runtime: DesktopRuntime | null }[];
+  signals: {
+    tools_connected: { member_id: string; at: string }[];
+    first_task_handed_at: string | null;
+    first_result_at: string | null;
+    workdir_fallback_at: string | null;
+    blocked: { at: string; reason: string | null } | null;
+    /** 디디군 이벤트 신뢰 PR에서 더해질 값 — 없으면 180초 쪽만 쓴다. */
+    first_screen_human_input_at?: string | null;
+  };
+}
+
+export type StepState = 'running' | 'done';
+export const NOT_CONNECTED_AFTER_INPUT_MS = 30_000;
+export const NOT_CONNECTED_AFTER_HANDOVER_MS = 180_000;
+
+export interface SetupProgress {
+  ready: StepState;
+  handed: StepState;
+  result: StepState;
+  /** ① 끝 줄 «{역할} · {런타임}, …» — 에이전트 역할마다 한 번(한 역할이 여러 stage에 걸쳐도). */
+  pairs: { role: string; runtime: DesktopRuntime }[];
+  /** ② 설명의 «{역할} 에이전트» — 흐름 순서의 첫 에이전트 역할. */
+  firstAgentRole: string | null;
+  workdirFallback: boolean;
+  trustHint: boolean;
+  notConnected: boolean;
+  /** 받은 뒤 회사 설정으로 막힘(⑥ · 셸의 after_start 신호) → ⑥ 화면. */
+  blocked: boolean;
+  /** 코드가 먼저 끝나 앱이 받지 못함 → ④ 화면(앱에서 다시 시작). */
+  expired: boolean;
+}
+
+/** `handedOverSeenAt` = 이 페이지가 handed_over를 처음 본 때(상태 조회에 받은 시각이 없어 페이지 시계로 잰다). */
+export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: number | null): SetupProgress {
+  const agents = s.members.filter((m) => m.kind === 'agent');
+  const agentIds = [...new Set(agents.map((m) => m.member_id))];
+  const connected = new Set(s.signals.tools_connected.map((c) => c.member_id));
+  const handedOver = s.state === 'handed_over';
+  const allConnected = agentIds.length > 0 && agentIds.every((id) => connected.has(id));
+  const ready: StepState = handedOver && allConnected ? 'done' : 'running';
+  const result: StepState = s.signals.first_result_at ? 'done' : 'running';
+  const handed: StepState = s.signals.first_task_handed_at || s.signals.first_result_at ? 'done' : 'running';
+  const pairs: SetupProgress['pairs'] = [];
+  for (const m of agents) {
+    if (m.role && m.runtime && !pairs.some((p) => p.role === m.role)) pairs.push({ role: m.role, runtime: m.runtime });
+  }
+  const input = s.signals.first_screen_human_input_at ? Date.parse(s.signals.first_screen_human_input_at) : NaN;
+  const waitingForTools = handedOver && !allConnected && result === 'running';
+  const notConnected = waitingForTools && (
+    (Number.isFinite(input) && now - input >= NOT_CONNECTED_AFTER_INPUT_MS)
+    || (handedOverSeenAt !== null && now - handedOverSeenAt >= NOT_CONNECTED_AFTER_HANDOVER_MS));
+  return {
+    ready, handed, result, pairs,
+    firstAgentRole: agents.find((m) => m.role)?.role ?? null,
+    workdirFallback: !!s.signals.workdir_fallback_at,
+    trustHint: waitingForTools && !notConnected,
+    notConnected,
+    blocked: !!s.signals.blocked,
+    expired: s.state === 'not_handed_over',
+  };
+}
+
+/** 폴링 간격(PO 12:25Z). 결과가 나오거나 화면이 실패로 바뀌면 멈춘다. */
+export const SETUP_STATUS_POLL_MS = 2_000;

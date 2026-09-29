@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activeSetupId, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
-  type SetupRecipe,
+  setupProgress, type SetupRecipe, type SetupStatus,
 } from './desktop-setup';
 
 const CODE = 'A'.repeat(20) + '_-' + 'b'.repeat(21); // 43
@@ -112,5 +112,69 @@ describe('[SID:4427] 4426 signal from the web (doc_opened)', () => {
       expect(isGuideLink(yes, app), yes).toBe(true);
     for (const no of ['/docs/7c0e1a2b', '/kanban', 'https://sprintable.ai/', 'https://sprintable.ai/pricing', 'https://example.com/blog/x', 'mailto:a@b.c', 'javascript:alert(1)'])
       expect(isGuideLink(no, app), no).toBe(false);
+  });
+});
+
+describe('[SID:4427] 진행 표시 — 상태 조회 한 번을 세 단계로(PO 12:25Z 규칙)', () => {
+  const base = (): SetupStatus => ({
+    state: 'waiting_for_app', recipe_name: '마케팅 루프', work_item_id: 'story-1',
+    members: [
+      { stage: 'research', role: '조사', member_id: 'm1', kind: 'agent', runtime: 'claude' },
+      { stage: 'research_review', role: '조사', member_id: 'm1', kind: 'agent', runtime: 'claude' },
+      { stage: 'draft', role: '작성', member_id: 'm2', kind: 'agent', runtime: 'codex' },
+      { stage: 'direction', role: '연출', member_id: 'h1', kind: 'human', runtime: null },
+    ],
+    signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null },
+  });
+  const T0 = Date.parse('2026-09-30T00:00:00Z');
+
+  it('앱이 받기 전: 모두 도는 중 · 안내 없음 · ⑦ 없음', () => {
+    const p = setupProgress(base(), T0, null);
+    expect([p.ready, p.handed, p.result]).toEqual(['running', 'running', 'running']);
+    expect(p.trustHint).toBe(false);
+    expect(p.notConnected).toBe(false);
+    expect(p.pairs).toEqual([{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'codex' }]); // 역할마다 한 번 · 사람 빠짐
+    expect(p.firstAgentRole).toBe('조사');
+  });
+
+  it('받았고 연결이 하나만: ① 도는 중 · 신뢰 안내 보임 · 179초까진 ⑦ 아님 · 180초에 ⑦(안내는 ⑦로 바뀜)', () => {
+    const s = { ...base(), state: 'handed_over' as const };
+    s.signals = { ...s.signals, tools_connected: [{ member_id: 'm1', at: '2026-09-30T00:00:01Z' }] };
+    expect(setupProgress(s, T0 + 179_999, T0)).toMatchObject({ ready: 'running', trustHint: true, notConnected: false });
+    expect(setupProgress(s, T0 + 180_000, T0)).toMatchObject({ ready: 'running', trustHint: false, notConnected: true });
+  });
+
+  it('사람이 입력한 뒤 30초면 ⑦(180초 전이라도) · 29초면 아직', () => {
+    const s = { ...base(), state: 'handed_over' as const };
+    s.signals = { ...s.signals, first_screen_human_input_at: new Date(T0 + 10_000).toISOString() };
+    expect(setupProgress(s, T0 + 39_999, T0).notConnected).toBe(false);
+    expect(setupProgress(s, T0 + 40_000, T0).notConnected).toBe(true);
+  });
+
+  it('에이전트마다 연결이 오면 ① 끝 · 안내 사라짐 · ⑦ 없음(시간이 지나도)', () => {
+    const s = { ...base(), state: 'handed_over' as const };
+    s.signals = { ...s.signals, tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] };
+    expect(setupProgress(s, T0 + 600_000, T0)).toMatchObject({ ready: 'done', trustHint: false, notConnected: false });
+  });
+
+  it('② = 건넴 또는 결과 · ③ = 결과', () => {
+    const s = { ...base(), state: 'handed_over' as const };
+    s.signals = { ...s.signals, first_task_handed_at: 'x' };
+    expect(setupProgress(s, T0, T0)).toMatchObject({ handed: 'done', result: 'running' });
+    s.signals = { ...s.signals, first_task_handed_at: null, first_result_at: 'y' };
+    expect(setupProgress(s, T0, T0)).toMatchObject({ handed: 'done', result: 'done' });
+  });
+
+  it('결과가 나온 뒤엔 연결 신호가 비어도 ⑦ 아님(결과가 연결의 증거)', () => {
+    const s = { ...base(), state: 'handed_over' as const };
+    s.signals = { ...s.signals, first_result_at: 'y' };
+    expect(setupProgress(s, T0 + 600_000, T0).notConnected).toBe(false);
+  });
+
+  it('폴더 대체 · 막힘(⑥) · 코드 먼저 끝남(④)', () => {
+    const s = base();
+    s.signals = { ...s.signals, workdir_fallback_at: 'x', blocked: { at: 'x', reason: 'managed_mcp' } };
+    expect(setupProgress(s, T0, null)).toMatchObject({ workdirFallback: true, blocked: true, expired: false });
+    expect(setupProgress({ ...base(), state: 'not_handed_over' }, T0, null).expired).toBe(true);
   });
 });
