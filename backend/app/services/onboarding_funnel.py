@@ -30,6 +30,8 @@ FE_EMIT_EVENTS = frozenset({
 BE_EMIT_EVENTS = frozenset({
     "agent_created", "config_generated", "first_auth_seen", "stream_connected",
     "event_sent", "ack_received", "verified", "abandoned",
+    # story #4424 — the desktop setup's own steps, written by its endpoints (services/desktop_setup.py)
+    "desktop_setup_code_issued", "desktop_setup_confirmed", "desktop_setup_exchanged",
 })
 # §1 canonical = FE-emit ∪ BE-emit (one source each; the router accepts exactly this).
 EVENT_CATALOG = FE_EMIT_EVENTS | BE_EMIT_EVENTS
