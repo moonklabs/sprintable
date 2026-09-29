@@ -9,6 +9,7 @@ import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
 
 // story #3806(Phase3·3-2 PR5, 유나 §절 §2 「중지 스위치」) — 실행 중인 홍보의 중지/재개.
 // 자리 = 상세(이 컴포넌트, gates/[id]/page.tsx에서 마운트)·성과 보드 행(조각⑥, 같은
@@ -71,6 +72,16 @@ export function BoostExecutionControl({
   const [startCommand, setStartCommand] = useState<StartCommand | null>(null);
   const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
   const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
+  // story #4412 — «it is already in my ad account»: the lookup's answer when it did not adopt
+  const [adoptOutcome, setAdoptOutcome] = useState<
+    | { result: 'not_found' }
+    | { result: 'ambiguous'; candidates: { id: string | null; name: string | null; created_time: string | null }[] }
+    // the found ad set's budget is not the approved amount (PO 00:48Z) — nothing linked
+    | { result: 'budget_mismatch'; adsetBudgetMinor: number | null; sealedBudgetMinor: number | null }
+    | null
+  >(null);
+  const [adopting, setAdopting] = useState(false);
+  const [adoptOpen, setAdoptOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
@@ -181,7 +192,76 @@ export function BoostExecutionControl({
     }
   };
 
+  const doAdoptExisting = async () => {
+    setAdopting(true);
+    setActionError(null);
+    setAdoptOutcome(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/adopt-existing`, { method: 'POST' });
+      if (!res.ok) {
+        setActionError(t('boostExecutionActionError'));
+        return;
+      }
+      const json = (await res.json()) as {
+        data?: {
+          result: string;
+          candidates?: { id: string | null; name: string | null; created_time: string | null }[];
+          adset_budget_minor?: number | null;
+          sealed_budget_minor?: number | null;
+        };
+      };
+      setAdoptOpen(false); // every answer closes the confirmation; the result line (if any) stays in the card
+      if (json.data?.result === 'adopted') {
+        load();
+      } else if (json.data?.result === 'budget_mismatch') {
+        setAdoptOutcome({
+          result: 'budget_mismatch',
+          adsetBudgetMinor: json.data.adset_budget_minor ?? null, sealedBudgetMinor: json.data.sealed_budget_minor ?? null,
+        });
+      } else if (json.data?.result === 'ambiguous') {
+        setAdoptOutcome({ result: 'ambiguous', candidates: json.data.candidates ?? [] });
+      } else {
+        setAdoptOutcome({ result: 'not_found' });
+      }
+    } catch {
+      setActionError(t('boostExecutionActionError'));
+    } finally {
+      setAdopting(false);
+    }
+  };
+
   if (!loaded) return null;
+
+  // the approved conditions (budget · schedule · objective) — the start confirmation and the «link existing campaign»
+  // confirmation show the same lines (Yuna 00:49Z)
+  const sealedFacts = (
+    <div className="space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
+      <p>
+        <span className="text-muted-foreground">{t('adsBoostBudgetLabel')} · </span>
+        <span className="text-foreground font-medium">
+          {sealedAdsBudgetMinor !== null && sealedAdsCurrency
+            ? formatMinorCurrency(sealedAdsBudgetMinor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent)
+            : null}
+        </span>
+      </p>
+      {sealedAdsStartsAt && sealedAdsEndsAt ? (
+        <p>
+          <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
+          <span className="text-foreground">
+            {formatScheduledAt(sealedAdsStartsAt, displayTimezone).display}
+            {' ~ '}
+            {formatScheduledAt(sealedAdsEndsAt, displayTimezone).display}
+          </span>
+        </p>
+      ) : null}
+      {sealedAdsObjective ? (
+        <p>
+          <span className="text-muted-foreground">{t('adsBoostObjectiveLabel')} · </span>
+          <span className="text-foreground">{adsBoostObjectiveLabel(sealedAdsObjective, tContent)}</span>
+        </p>
+      ) : null}
+    </div>
+  );
 
   const needsCheck = startCommand?.status === 'dead_letter' && startCommand.failure_kind === 'needs_check';
   if (needsCheck && runStatus !== 'running' && runStatus !== 'paused') {
@@ -195,9 +275,79 @@ export function BoostExecutionControl({
           {outcomeUnknown ? t('boostNeedsCheckOutcomeUnknown') : t('boostNeedsCheckStopped')}
         </p>
         {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
-        <Button variant="outline" size="sm" onClick={() => setNeedsCheckOpen(true)} data-testid="boost-needs-check-retry-trigger">
-          {t('boostNeedsCheckRetry')}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {outcomeUnknown ? (
+            // story #4412 — link the campaign this start may have made (Yuna 00:49Z: link first, then retry, both outline)
+            <Button
+              variant="outline" size="sm" disabled={adopting}
+              onClick={() => { setAdoptOutcome(null); setAdoptOpen(true); }} data-testid="boost-adopt-trigger"
+            >
+              {t('boostAdoptTitle')}
+            </Button>
+          ) : null}
+          <Button variant="outline" size="sm" onClick={() => setNeedsCheckOpen(true)} data-testid="boost-needs-check-retry-trigger">
+            {t('boostNeedsCheckRetry')}
+          </Button>
+        </div>
+        {/* the lookup's answer stays in the card (not a toast); success needs no line — the card turns «running» */}
+        {adoptOutcome?.result === 'not_found' ? (
+          <p className="text-xs text-muted-foreground" data-testid="boost-adopt-not-found">{t('boostAdoptNotFound')}</p>
+        ) : null}
+        {adoptOutcome?.result === 'budget_mismatch' ? (() => {
+          const approved = adoptOutcome.sealedBudgetMinor !== null && sealedAdsCurrency
+            ? formatMinorCurrency(adoptOutcome.sealedBudgetMinor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent)
+            : '—';
+          const found = adoptOutcome.adsetBudgetMinor !== null && sealedAdsCurrency
+            ? formatMinorCurrency(adoptOutcome.adsetBudgetMinor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent)
+            : '—';
+          return (
+            <p className="text-xs text-muted-foreground" data-testid="boost-adopt-budget-mismatch">
+              {/* the particles follow the amount's last syllable (ko): «…원이라» · «…원으로» */}
+              {t('boostAdoptBudgetMismatch', {
+                approved, found,
+                foundRa: pickIRaJosa(found),
+                approvedRo: pickEuroJosa(approved),
+              })}
+            </p>
+          );
+        })() : null}
+        {adoptOutcome?.result === 'ambiguous' ? (
+          <div className="space-y-1" data-testid="boost-adopt-ambiguous">
+            <p className="text-xs text-muted-foreground">{t('boostAdoptAmbiguous')}</p>
+            <ul className="text-xs text-foreground">
+              {adoptOutcome.candidates.map((c) => (
+                <li key={c.id ?? ''} className="break-all">{c.name} · {c.id}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {/* story #4412 — one stop before money moves, the same shape as the start confirmation (what · money · conditions);
+            no checkbox: the server itself checks that it exists, is the only one and carries the approved budget */}
+        <Dialog open={adoptOpen} onOpenChange={setAdoptOpen}>
+          <DialogContent data-testid="boost-adopt-dialog">
+            <DialogHeader>
+              <DialogTitle>{t('boostAdoptTitle')}</DialogTitle>
+              <DialogDescription>{t('boostAdoptWhat')}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1 text-sm">
+              {startCommand.campaign_name ? (
+                <p className="text-muted-foreground" data-testid="boost-adopt-campaign">
+                  {t('boostNeedsCheckCampaignToFind', { campaignName: startCommand.campaign_name })}
+                </p>
+              ) : null}
+              <p className="text-foreground" data-testid="boost-adopt-weight">{t('boostAdoptWeight')}</p>
+            </div>
+            {sealedFacts}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAdoptOpen(false)} disabled={adopting}>
+                {t('boostExecutionCancel')}
+              </Button>
+              <Button onClick={() => void doAdoptExisting()} disabled={adopting} data-testid="boost-adopt-confirm">
+                {t('boostAdoptConfirm')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <Dialog
           open={needsCheckOpen}
           onOpenChange={(open) => { setNeedsCheckOpen(open); if (!open) setNeedsCheckConfirmed(false); }}
@@ -276,32 +426,7 @@ export function BoostExecutionControl({
             </DialogHeader>
             {/* 봉인 3값 그대로 재확인(페드루 PO 콜①) — RecipeApprovalFactsBlock과 같은
                 포맷터 재사용(formatMinorCurrency·formatScheduledAt), 새 표시 로직 0. */}
-            <div className="space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
-              <p>
-                <span className="text-muted-foreground">{t('adsBoostBudgetLabel')} · </span>
-                <span className="text-foreground font-medium">
-                  {sealedAdsBudgetMinor !== null && sealedAdsCurrency
-                    ? formatMinorCurrency(sealedAdsBudgetMinor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent)
-                    : null}
-                </span>
-              </p>
-              {sealedAdsStartsAt && sealedAdsEndsAt ? (
-                <p>
-                  <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
-                  <span className="text-foreground">
-                    {formatScheduledAt(sealedAdsStartsAt, displayTimezone).display}
-                    {' ~ '}
-                    {formatScheduledAt(sealedAdsEndsAt, displayTimezone).display}
-                  </span>
-                </p>
-              ) : null}
-              {sealedAdsObjective ? (
-                <p>
-                  <span className="text-muted-foreground">{t('adsBoostObjectiveLabel')} · </span>
-                  <span className="text-foreground">{adsBoostObjectiveLabel(sealedAdsObjective, tContent)}</span>
-                </p>
-              ) : null}
-            </div>
+            {sealedFacts}
             <DialogFooter>
               <Button variant="outline" onClick={() => setStartConfirmOpen(false)} disabled={submitting}>
                 {t('boostExecutionCancel')}

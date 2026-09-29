@@ -124,6 +124,57 @@ async def _start_ads_boost_endpoint(
     return _to_response(command)
 
 
+class AdoptCandidateView(BaseModel):
+    id: str | None
+    name: str | None
+    created_time: str | None
+
+
+class AdoptExistingResponse(BaseModel):
+    """story #4412 — adopted (ids filled, the start queued again) · not_found · ambiguous (candidates listed, nothing adopted) ·
+    budget_mismatch (the found ad set's budget is not the approved amount; nothing adopted)."""
+    result: str
+    level: str | None = None
+    campaign_id: str | None = None
+    adset_id: str | None = None
+    ad_id: str | None = None
+    candidates: list[AdoptCandidateView] = []
+    # budget_mismatch: the found ad set's budget vs the approved (sealed) amount, both in minor units
+    adset_budget_minor: int | None = None
+    sealed_budget_minor: int | None = None
+
+
+@router.post("/{org_id}/ads-boosts/{gate_id}/adopt-existing", response_model=AdoptExistingResponse)
+async def adopt_existing_ads_boost_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> AdoptExistingResponse:
+    """story #4412 — «it is already in my ad account» for a boost start stopped as «outcome unknown». Human only."""
+    from app.services.ads_boost_execution import (
+        AdsBoostAdapterUnavailableError,
+        AdsBoostAdoptNotApplicableError,
+        adopt_existing_boost_objects,
+    )
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
+
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+    await _require_human(db, auth, org_id, resolved_locale)
+    try:
+        outcome = await adopt_existing_boost_objects(db, org_id=org_id, gate_id=gate_id)
+    except AdsBoostAdoptNotApplicableError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": "Nothing to adopt for this boost."}) from exc
+    except (AdsBoostAdapterUnavailableError, MetaAdsCampaignError) as exc:
+        raise HTTPException(
+            status_code=502, detail={"code": getattr(exc, "code", "ADS_BOOST_LOOKUP_FAILED"), "message": str(exc)[:500]},
+        ) from exc
+    return AdoptExistingResponse(**outcome)
+
+
 @router.post("/{org_id}/ads-boosts/{gate_id}/pause", response_model=CommandResponse, status_code=201)
 async def pause_ads_boost_endpoint(
     org_id: uuid.UUID, gate_id: uuid.UUID,

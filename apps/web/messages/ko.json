@@ -5877,7 +5877,14 @@
     "boostNeedsCheckWhatOutcomeUnknown": "광고 계정에 캠페인이 만들어졌는지 확인하지 못한 홍보를 다시 시작해요.",
     "boostNeedsCheckWeightOutcomeUnknown": "이미 만들어진 캠페인이 있다면 광고가 두 번 집행돼 광고비도 두 번 나가요.",
     "boostNeedsCheckCampaignToFind": "찾을 캠페인: {campaignName}",
-    "boostNeedsCheckWhatStopped": "시작하지 못한 이 홍보를 다시 시작해요."
+    "boostNeedsCheckWhatStopped": "시작하지 못한 이 홍보를 다시 시작해요.",
+    "boostAdoptNotFound": "광고 계정에서 이 캠페인을 찾지 못했어요. 없는 게 맞다면 «다시 시도»를 눌러 주세요.",
+    "boostAdoptAmbiguous": "같은 이름의 캠페인이 둘 이상이라 연결하지 않았어요. 광고 계정에서 하나만 남긴 뒤 다시 연결해 주세요.",
+    "boostAdoptBudgetMismatch": "승인한 총예산은 {approved}인데 찾은 캠페인은 {found}{foundRa} 연결하지 않았어요. 광고 계정에서 {approved}{approvedRo} 맞춘 뒤 다시 연결해 주세요.",
+    "boostAdoptTitle": "이미 있는 캠페인 연결",
+    "boostAdoptWhat": "광고 계정에서 이 이름의 캠페인을 찾아 이 홍보에 연결해요. 연결되면 바로 홍보가 시작돼요.",
+    "boostAdoptWeight": "연결되면 곧바로 광고비가 나가기 시작해요.",
+    "boostAdoptConfirm": "연결하고 시작"
   },
   "recruiter": {
     "title": "채용관",
