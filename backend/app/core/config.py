@@ -503,6 +503,10 @@ class Settings(BaseSettings):
     # cron.py CRON_SECRET과 동일 패턴 — 미설정(로컬 개발) 시 인증 생략.
     firebase_bff_internal_secret: str = ""
 
+    # story #4398: 프런트(BFF)가 정한 사용자 IP(`X-Sprintable-Client-IP`)를 믿을지 가르는 공유 비밀(`X-Sprintable-Edge-Key`).
+    # 미설정이면 그 헤더를 안 믿고 Cloud Run 앞단이 붙인 접속 주소(XFF 오른쪽 끝)로 센다 — 배포 순서에 안 막힌다.
+    edge_client_ip_secret: str = ""
+
     # story 4dee942b(Phase1-S5): 네이티브 부트스트랩 — custom token→ID token 교환용 Firebase
     # Web API key(공개 클라이언트 키, ADC와 별개). App Check 검증용 project number(project_id와
     # 다른 값 — doc §9.3/산티아고 §9). App Check 필수 여부 게이트(기본 off — 모바일 클라이언트

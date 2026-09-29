@@ -10,6 +10,7 @@ import { backendSignal, BFF_BACKEND_TIMEOUT_MS, classifyBackendAbort } from '@/l
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
 import { formatRouteTiming, isServerTimingEnabled, logRouteTiming, routeKindForPath, startRouteTimer, withServerTiming, type RouteTimer } from '@/lib/server-timing';
 import { bffEnvelopeError } from '@/lib/bff-envelope-error';
+import { edgeClientIpHeaders, fetchCarryingEdgeSecret } from '@/lib/client-ip';
 
 // story #2499 — 이 파일이 packages/storage-api/src/utils.ts와 완전 동일한 mapApiError/
 // fastapiCall 사본을 따로 갖고 있어(#2488에서 같은 버그를 두 곳에 각각 고쳐야 했다),
@@ -112,6 +113,10 @@ async function proxyToFastapiImpl(
     const v = request.headers.get(h);
     if (v) headers[h] = v;
   }
+  // story #4398 — 요청 상한이 셀 사용자 IP를 여기서 한 번 정해 비밀과 함께 싣는다(client-ip.ts). 비밀이 없으면 안 싣는다.
+  const edgeHeaders = edgeClientIpHeaders(request.headers);
+  Object.assign(headers, edgeHeaders);
+  const carriesEdgeSecret = Object.keys(edgeHeaders).length > 0;
   // story #3786 후속(유나 실측·페드루 그라운딩 2026-09-10) — getLocale()(쿠키→
   // Accept-Language 헤더→기본값 순, src/i18n/request.ts)이 앱 화면이 실제로 그리는
   // 그 언어를 그대로 돌려준다 — 화면과 BE 응답 언어가 갈리지 않게 항상 싣는다.
@@ -133,13 +138,12 @@ async function proxyToFastapiImpl(
 
   let res: Response;
   try {
-    res = await fetch(targetUrl, {
-      method: request.method,
-      headers,
-      body,
-      // story #4320 — 원 요청 취소(브라우저가 끊음)를 백엔드까지 전하고 · 백엔드가 멈추면 제한 시간에 끊는다.
-      signal: backendSignal(options.timeLimitOnly ? null : request, options.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS),
-    });
+    // story #4320 — 원 요청 취소(브라우저가 끊음)를 백엔드까지 전하고 · 백엔드가 멈추면 제한 시간에 끊는다.
+    const signal = backendSignal(options.timeLimitOnly ? null : request, options.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS);
+    // story #4398 — 비밀을 실었으면 리다이렉트를 직접 따라간다(다른 origin으로는 안 감 · client-ip.ts).
+    res = carriesEdgeSecret
+      ? await fetchCarryingEdgeSecret(targetUrl, { method: request.method, headers, body }, (to, init) => fetch(to, { ...init, signal }))
+      : await fetch(targetUrl, { method: request.method, headers, body, signal });
   } catch (err) {
     // story #4320 — 시간 초과는 «연결 못 함»과 다른 코드(같은 503 계열 · 사용자 문장은 «응답이 늦다»).
     const kind = classifyBackendAbort(err);

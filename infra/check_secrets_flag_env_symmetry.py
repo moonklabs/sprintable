@@ -32,6 +32,12 @@ _DEV_ONLY_EXCEPTIONS: dict[str, str] = {
         "SUPPORT_GATEWAY_OPERATOR_REPLY_URL 등)에서 `_DEPLOY_ENV != prod`로 걸려 있어 "
         "prod 백엔드는 이 값을 쓸 코드 경로 자체가 배선 안 됨 — 값 누락이 아니라 기능 자체가 dev 전용."
     ),
+    "EDGE_CLIENT_IP_SECRET": (
+        "story #4398 — dev부터 배선(PO 2026-09-29 · Secret Manager EDGE_CLIENT_IP_SECRET_DEV), prod는 승격 때 "
+        "PO가 _PROD 시크릿을 만들어 prod 갈래에 넣고 이 예외를 걷는다. 그 전 prod의 부재는 안전: "
+        "backend/app/core/client_ip.py `client_ip()`가 `if secret:`일 때만 머리글을 믿고(빈 값 = 불신 → 오른쪽 끝 XFF · "
+        "소켓 주소), apps/web/src/lib/client-ip.ts `edgeClientIpHeaders`는 값이 없으면 머리글을 아예 안 싣는다 — 오늘과 같은 동작."
+    ),
 }
 
 # prod에만 있고 dev엔 없어도 되는 키 — 근거는 코드에서 직접 확認된 것만 등재.

@@ -347,6 +347,7 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     assert len(highest) == 1, highest
     assert len(high) == 1, high
     assert len(low) == 9, low
+    # story #4398 — EDGE_CLIENT_IP_SECRET은 dev 배포(프런트 · 백엔드 --update-secrets)에 배선돼 covered — exempt 없음(34).
     assert len(exempt) == 34
 
 
