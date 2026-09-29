@@ -234,6 +234,7 @@ async def test_ac1_pending_then_the_keys_once_then_never_again(world, caplog):
         assert "api_url" in body and "mcp_url" in body
         assert body["workdir_hint"] is None  # none was chosen
         assert body["recipe_name"] == RECIPE_NAME  # the app's default folder ~/Sprintable/{recipe}
+        assert body["org_name"] == "O"  # the org the desktop joined — shown to the person (Qadir 4825)
 
         r = await _exchange(c, code, verifier)
         assert r.status_code == 410  # once

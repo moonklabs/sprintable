@@ -177,7 +177,7 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
         status_code=200,
         content={
             "setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url,
-            "workdir_hint": done.workdir_hint, "recipe_name": done.recipe_name,
+            "workdir_hint": done.workdir_hint, "recipe_name": done.recipe_name, "org_name": done.org_name,
         },
         headers=headers,
     )

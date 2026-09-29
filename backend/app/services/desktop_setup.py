@@ -273,6 +273,7 @@ class Exchanged:
     agents: list[dict]
     workdir_hint: str | None
     recipe_name: str | None
+    org_name: str | None
 
 
 async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Exchanged | None:
@@ -323,7 +324,13 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
         db, EVENT_EXCHANGED, session_id=setup.id, org_id=setup.org_id, project_id=setup.project_id,
         meta={"flow": "desktop_setup", "keys": len(agents)},
     )
-    return Exchanged(setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup))
+    from app.models.organization import Organization
+
+    # the org the desktop is now joined to (Qadir 4825): the app shows it, so a person notices a setup confirmed by another org
+    org_name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
+    return Exchanged(
+        setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup), org_name=org_name,
+    )
 
 
 async def _recipe_name(db: AsyncSession, setup: DesktopSetup) -> str | None:
