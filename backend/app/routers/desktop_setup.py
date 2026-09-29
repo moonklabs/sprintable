@@ -28,6 +28,7 @@ from app.services.desktop_setup import (
     list_setups,
     revoke_setup,
     setup_hands,
+    setup_status,
 )
 
 router = APIRouter(prefix="/api/v2/desktop", tags=["desktop"])
@@ -219,6 +220,49 @@ async def get_setups(
     user_id = _human_only(auth)
     try:
         return SetupListResponse(setups=[SetupItem(**s) for s in await list_setups(db, user_id=user_id, org_id=org_id)])
+    except DesktopSetupError as e:
+        raise _error(e) from None
+
+
+class ToolsConnected(BaseModel):
+    member_id: str
+    at: datetime
+
+
+class SetupBlocked(BaseModel):
+    at: datetime
+    reason: str | None
+
+
+class SetupSignals(BaseModel):
+    tools_connected: list[ToolsConnected]  # per agent: its first MCP connection (the manifest fetch)
+    first_task_handed_at: datetime | None
+    first_result_at: datetime | None
+    workdir_fallback_at: datetime | None
+    blocked: SetupBlocked | None
+
+
+class SetupStatusResponse(BaseModel):
+    setup_id: uuid.UUID
+    device_name: str
+    state: Literal["waiting_for_app", "handed_over", "not_handed_over", "disconnected"]
+    recipe_name: str | None
+    work_item_id: str | None
+    members: list[SetupMember]
+    signals: SetupSignals
+
+
+@router.get("/setups/{setup_id}", response_model=SetupStatusResponse)
+async def get_setup_status(
+    setup_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """PO 08:31Z — one setup's state and the signals read from its events (web progress · folder fallback · failure ⑥)."""
+    user_id = _human_only(auth)
+    try:
+        return SetupStatusResponse(**await setup_status(db, setup_id=setup_id, user_id=user_id, org_id=org_id))
     except DesktopSetupError as e:
         raise _error(e) from None
 

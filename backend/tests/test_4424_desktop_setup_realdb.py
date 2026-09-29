@@ -690,3 +690,53 @@ async def test_a_failed_first_publish_undoes_the_whole_confirmation(world, monke
         assert (await _exchange(c, code, verifier)).status_code == 202
         monkeypatch.undo()
         assert (await _confirm(c, code)).status_code == 200  # the same code confirms fine afterwards
+
+
+# ─── PO 08:31Z · 08:39Z — one setup's status and the MCP connection mark ──────
+
+
+@pytest.mark.anyio
+async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_tools_connected_once(world):
+    async with _client() as c:
+        code, verifier = await _code(c)
+        confirmed = (await _confirm(c, code)).json()
+        agents = (await _exchange(c, code, verifier)).json()["agents"]
+        setup_id = confirmed["setup_id"]
+        status = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()
+        assert (status["state"], status["recipe_name"], status["work_item_id"]) == ("handed_over", RECIPE_NAME, confirmed["work_item_id"])
+        assert status["signals"] == {
+            "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "workdir_fallback_at": None, "blocked": None,
+        }
+
+        # the MCP server fetches the manifest at tools/list with the agent's key: marked once for that member (a second
+        # connection, or the same member again, adds nothing); a key that no setup handed out marks nothing
+        writer = next(a for a in agents if a["role"] == "Writer")
+        for _ in range(2):
+            assert (await c.get("/api/v2/mcp/manifest", headers={"Authorization": f"Bearer {writer['api_key']}"})).status_code == 200
+        marks = await _sql(fetch=f"SELECT meta->>'member_id' FROM onboarding_events WHERE session_id='{setup_id}' AND event='desktop_tools_connected'")
+        assert marks == [(writer["member_id"],)]
+        # the daemon's agent stream uses the same key but never this route — nothing else marks it
+        status = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()
+        assert [t["member_id"] for t in status["signals"]["tools_connected"]] == [writer["member_id"]]
+
+        # what the desktop app reports (rows as the sending PR will write them)
+        await _sql(
+            "INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES "
+            f"(gen_random_uuid(), 'desktop_first_task_handed', '{setup_id}', '{{}}', now()),"
+            f"(gen_random_uuid(), 'desktop_workdir_fallback', '{setup_id}', '{{}}', now()),"
+            f"(gen_random_uuid(), 'desktop_setup_blocked', '{setup_id}', '{{\"reason\": \"agent_auth_failed\"}}', now()),"
+            f"(gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}', now())"
+        )
+        signals = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()["signals"]
+        assert all(signals[k] for k in ("first_task_handed_at", "first_result_at", "workdir_fallback_at"))
+        assert signals["blocked"]["reason"] == "agent_auth_failed"
+        assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(PLAIN))).status_code == 403
+        assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OUTSIDER, ORG2))).status_code == 404
+
+    # an ordinary agent key (not from a setup) fetching the manifest marks nothing
+    before = (await _sql(fetch="SELECT count(*) FROM onboarding_events WHERE event='desktop_tools_connected'"))[0][0]
+    from app.services.desktop_setup import mark_tools_connected
+
+    existing_key = (await _sql(fetch=f"SELECT id FROM agent_api_keys WHERE team_member_id='{EXISTING}'"))[0][0]
+    await mark_tools_connected(existing_key)
+    assert (await _sql(fetch="SELECT count(*) FROM onboarding_events WHERE event='desktop_tools_connected'"))[0][0] == before

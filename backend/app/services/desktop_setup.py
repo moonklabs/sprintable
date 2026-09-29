@@ -39,6 +39,11 @@ EVENT_CODE_ISSUED = "desktop_setup_code_issued"
 EVENT_CONFIRMED = "desktop_setup_confirmed"
 EVENT_EXCHANGED = "desktop_setup_exchanged"
 EVENT_FIRST_RESULT = "desktop_first_result_seen"
+EVENT_TOOLS_CONNECTED = "desktop_tools_connected"  # written by the MCP manifest route (below)
+# sent by the desktop app — read here, carried into the catalog by the PR that sends them (this exact spelling)
+EVENT_FIRST_TASK_HANDED = "desktop_first_task_handed"
+EVENT_WORKDIR_FALLBACK = "desktop_workdir_fallback"
+EVENT_BLOCKED = "desktop_setup_blocked"
 EVENT_DOC_OPENED = "desktop_doc_opened"
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
@@ -218,22 +223,26 @@ async def confirm_setup(
     setup.workdir_hint = workdir_hint
     await db.flush()
 
-    work_item_id = await _start_first_work_item(
-        db, org_id=org_id, project_id=project_id, definition=definition, auth=auth, background_tasks=background_tasks,
-    )
+    from app.repositories.story import StoryRepository
     from app.services.onboarding_funnel import emit_onboarding_event
 
+    story = await StoryRepository(db, org_id).create(project_id=project_id, title=(definition.name or definition.key)[:500])
     await emit_onboarding_event(
         db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
-        meta={"flow": "desktop_setup", "human_hand": True, "agents": sum(m["kind"] == "agent" for m in members)},
+        meta={
+            "flow": "desktop_setup", "human_hand": True, "agents": len({m["member_id"] for m in members if m["kind"] == "agent"}),
+            "work_item_id": str(story.id),  # the setup's first work item (the status read shows it)
+        },
     )
-    return setup.id, members, work_item_id
+    # last: its message commit is the confirmation's one commit (see _publish_first_stage)
+    await _publish_first_stage(db, org_id=org_id, story_id=story.id, definition=definition, auth=auth, background_tasks=background_tasks)
+    return setup.id, members, story.id
 
 
-async def _start_first_work_item(
-    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, definition, auth, background_tasks,
-) -> uuid.UUID:
-    """PO 08:22Z — the first work item, in the confirmation's transaction: a story (title = the recipe's name) and the recipe's
+async def _publish_first_stage(
+    db: AsyncSession, *, org_id: uuid.UUID, story_id: uuid.UUID, definition, auth, background_tasks,
+) -> None:
+    """PO 08:22Z — the first work item, in the confirmation's transaction: a story (title = the recipe's name, made by the caller) and the recipe's
     first stage published on it by the confirming person, through the same publish core and checks as the board's «Start»
     (`_publish_registry_event_core`, stage_origin «member»). A recipe run is keyed by its work item, so a publish without one
     would cut progress and stage hand-offs; publishing from a second browser call could leave a half setup if the window
@@ -247,18 +256,15 @@ async def _start_first_work_item(
     response. A recipe without stages gets its story and no publish (the caller commits)."""
     from fastapi import BackgroundTasks
 
-    from app.repositories.story import StoryRepository
     from app.routers.events import _publish_registry_event_core
 
-    story = await StoryRepository(db, org_id).create(project_id=project_id, title=(definition.name or definition.key)[:500])
     stages = ((definition.payload_schema or {}).get("properties") or {}).get("stage", {}).get("enum") or []
     if stages:
         await _publish_registry_event_core(
             db, org_id, auth, definition.key,
-            {"work_item_type": "story", "work_item_id": str(story.id), "stage": stages[0]},
+            {"work_item_type": "story", "work_item_id": str(story_id), "stage": stages[0]},
             background_tasks if background_tasks is not None else BackgroundTasks(), stage_origin="member",
         )
-    return story.id
 
 
 @dataclass
@@ -422,6 +428,98 @@ async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UU
         "setup_id": setup_id, "human_hands": hands, "minutes_to_first_result": minutes,
         "docs_opened": sum(1 for e, _m, _t in rows if e == EVENT_DOC_OPENED),
     }
+
+
+async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> dict:
+    """PO 08:31Z — one read for the web's progress line, the folder-fallback notice and failure ⑥: the setup's state and the
+    signals read from its events (session_id = the setup id). A signal that has not happened is None, never guessed."""
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.project_auth import is_org_owner_or_admin
+
+    setup = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.org_id == org_id)
+    )).scalar_one_or_none()
+    if setup is None:
+        raise DesktopSetupError("setup_not_found")
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise DesktopSetupError("not_org_admin")
+    rows = (await db.execute(
+        select(OnboardingEvent.event, OnboardingEvent.meta, OnboardingEvent.server_ts)
+        .where(OnboardingEvent.session_id == setup_id).order_by(OnboardingEvent.server_ts)
+    )).all()
+
+    def first(name: str):
+        return next(((meta or {}, at) for e, meta, at in rows if e == name), None)
+
+    def last(name: str):
+        return next(((meta or {}, at) for e, meta, at in reversed(rows) if e == name), None)
+
+    confirmed = first(EVENT_CONFIRMED)
+    tools: dict[str, datetime] = {}
+    for e, meta, at in rows:
+        if e == EVENT_TOOLS_CONNECTED and (meta or {}).get("member_id"):
+            tools.setdefault(str(meta["member_id"]), at)
+    blocked = last(EVENT_BLOCKED)
+    fallback = last(EVENT_WORKDIR_FALLBACK)
+    handed = first(EVENT_FIRST_TASK_HANDED)
+    result = first(EVENT_FIRST_RESULT)
+    reason = (blocked[0].get("reason") if blocked else None)
+    return {
+        "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
+        "recipe_name": await _recipe_name(db, setup),
+        "work_item_id": (confirmed[0].get("work_item_id") if confirmed else None),
+        "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime")} for m in (setup.members or [])],
+        "signals": {
+            "tools_connected": [{"member_id": k, "at": v} for k, v in tools.items()],
+            "first_task_handed_at": handed[1] if handed else None,
+            "first_result_at": result[1] if result else None,
+            "workdir_fallback_at": fallback[1] if fallback else None,
+            "blocked": {"at": blocked[1], "reason": reason if isinstance(reason, str) else None} if blocked else None,
+        },
+    }
+
+
+
+
+async def mark_tools_connected(api_key_id) -> None:
+    """`desktop_tools_connected` (session_id = the setup · meta.member_id) the first time a key handed out by a desktop setup
+    fetches the MCP manifest. Once per setup · member (an advisory lock keeps two concurrent first calls to one row). Own
+    short session; any failure is logged, never raised — the manifest answer must not depend on this."""
+    import logging
+
+    from sqlalchemy import func
+
+    from app.core.database import async_session_factory
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.onboarding_funnel import record_onboarding_event
+
+    try:
+        key_id = uuid.UUID(str(api_key_id))
+    except (TypeError, ValueError):
+        return
+    try:
+        async with async_session_factory() as s:
+            row = (await s.execute(
+                select(ApiKey.desktop_setup_id, ApiKey.team_member_id).where(ApiKey.id == key_id)
+            )).first()
+            if row is None or row[0] is None:
+                return
+            setup_id, member_id = row
+            await s.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop_tools_connected:{setup_id}:{member_id}"))))
+            seen = (await s.execute(
+                select(OnboardingEvent.id).where(
+                    OnboardingEvent.session_id == setup_id, OnboardingEvent.event == EVENT_TOOLS_CONNECTED,
+                    OnboardingEvent.meta["member_id"].astext == str(member_id),
+                ).limit(1)
+            )).first()
+            if seen is None:
+                await record_onboarding_event(
+                    s, event=EVENT_TOOLS_CONNECTED, session_id=setup_id, agent_id=member_id,
+                    meta={"flow": "desktop_setup", "member_id": str(member_id)},
+                )
+            await s.commit()
+    except Exception:  # noqa: BLE001 — a measurement; the manifest answer goes on
+        logging.getLogger(__name__).error("desktop_tools_connected mark failed api_key_id=%s", key_id, exc_info=True)
 
 
 def exchange_urls() -> tuple[str | None, str | None]:
