@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import {
   canDisconnect, canManageDevices, deviceAgentCount, deviceDateOptions, markDisconnected, orderDevices, readDevices,
   type DesktopDevice,
@@ -69,6 +70,10 @@ export function DesktopDevices() {
     }
   };
 
+  // the dialog says the row's own «에이전트 N개» (one key); its particle follows that word (ko — en ignores {josa})
+  const agentsText = t('agents', { count: asking ? deviceAgentCount(asking) : 0 });
+  const confirmBody = t('confirmBody', { agents: agentsText, josa: pickIGaJosa(agentsText) });
+
   return (
     <section className="space-y-2" data-testid="desktop-devices" aria-labelledby="desktop-devices-heading">
       <h2 id="desktop-devices-heading" ref={headingRef} tabIndex={-1} className="text-sm font-semibold text-foreground outline-none">
@@ -110,7 +115,7 @@ export function DesktopDevices() {
         <DialogContent showCloseButton={false} initialFocus={cancelRef}>
           <DialogHeader>
             <DialogTitle className="truncate" title={asking?.device_name}>{t('confirmTitle', { device: asking?.device_name ?? '' })}</DialogTitle>
-            <DialogDescription>{t('confirmBody', { agents: t('agents', { count: asking ? deviceAgentCount(asking) : 0 }) })}</DialogDescription>
+            <DialogDescription>{confirmBody}</DialogDescription>
           </DialogHeader>
           {failed ? <p role="alert" className="text-sm text-destructive" data-testid="desktop-devices-failed">{t('failed')}</p> : null}
           <DialogFooter>
