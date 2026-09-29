@@ -83,3 +83,12 @@ async def test_the_sweep_counts_an_explicit_leave_as_over():
     sql = str(check.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
     for event in ("verified", "abandoned", "abandoned_explicit"):
         assert f"'{event}'" in sql, sql
+
+
+def test_the_desktop_setup_writes_only_names_in_the_backend_list():
+    """story #4424 (PO 08:42Z) — every name the desktop setup endpoints write is a listed server-written name (the catalog is
+    «every name that can be recorded»); the sending side carries this test."""
+    from app.services import desktop_setup as d
+
+    written = {d.EVENT_CODE_ISSUED, d.EVENT_CONFIRMED, d.EVENT_EXCHANGED}
+    assert written <= f.BE_EMIT_EVENTS, sorted(written - f.BE_EMIT_EVENTS)

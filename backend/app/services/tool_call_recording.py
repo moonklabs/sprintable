@@ -110,6 +110,9 @@ async def sweep_old_tool_calls(session: AsyncSession, *, now: datetime | None = 
     return result.rowcount or 0
 
 
+UNRECORDED_PREFIXES: tuple[str, ...] = ("/api/v2/desktop/",)
+
+
 class ToolCallRecordingMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
@@ -122,6 +125,11 @@ class ToolCallRecordingMiddleware(BaseHTTPMiddleware):
         # 아니다(AU 계측과 동일 denylist 재사용 — 두 축이 같은 예외를 따로 관리하면 드리프트
         # 재발 클래스, feedback_shared_primitive_move_test_sweep 동형).
         if request.url.path in STREAMING_PATHS:
+            return await call_next(request)
+        # story #4424 (Qadir 4825 · PO 10:08Z) — the desktop setup API is not an agent's tool call, and its bodies carry a
+        # one-time setup code and a PKCE verifier: never recorded (a confirm refused with 403 would still have been). Skipped
+        # by path rather than masking «code» — a common field name elsewhere that the audit table should keep.
+        if request.url.path.startswith(UNRECORDED_PREFIXES):
             return await call_next(request)
 
         # 카디르 QA①(2026-09-09) — call_next() 前 전부(지금은 바디 파싱뿐)를 감싼다.
