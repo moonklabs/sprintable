@@ -81,6 +81,7 @@ async def _sql(*stmts: str, params: dict | None = None, fetch: str | None = None
 
 
 _CLEAN = [
+    f"DELETE FROM agent_run_tool_calls WHERE org_id IN ('{ORG}','{ORG2}')",
     "DELETE FROM onboarding_events WHERE session_id IN (SELECT id FROM desktop_setups WHERE device_name LIKE 'd4424%')",
     f"DELETE FROM agent_api_keys WHERE team_member_id IN (SELECT id FROM members WHERE org_id IN ('{ORG}','{ORG2}'))",
     f"DELETE FROM desktop_setups WHERE org_id IN ('{ORG}','{ORG2}') OR device_name LIKE 'd4424%'",
@@ -564,3 +565,31 @@ def test_no_desktop_route_takes_a_code_in_its_path():
     desktop = [r.path for r in app.routes if getattr(r, "path", "").startswith("/api/v2/desktop")]
     assert desktop, "the desktop routes are registered"
     assert [p for p in desktop if re.search(r"\{[^}]*code[^}]*\}", p)] == [], desktop
+
+
+@pytest.mark.anyio
+async def test_agent_key_requests_to_the_setup_api_are_not_recorded_as_tool_calls(world):
+    """Qadir 4825 (PO 10:08Z) — an agent key's request bodies go to agent_run_tool_calls (an audit table org admins read);
+    the setup API's code and verifier must not: its path is not recorded at all."""
+    async with _client() as c:
+        code, verifier = await _code(c)
+        assert (await _confirm(c, code)).status_code == 200
+        key = (await _exchange(c, code, verifier)).json()["agents"][0]["api_key"]
+        code2, verifier2 = await _code(c, "d4424 recorded?")
+        bearer = {"Authorization": f"Bearer {key}"}
+        assert (await c.post("/api/v2/desktop/setup-codes/confirm", json={**_ROLES, "code": code2}, headers=bearer)).status_code == 403
+        await c.post("/api/v2/desktop/setup-codes/exchange", json={"code": code2, "verifier": verifier2}, headers=bearer)
+        # positive control: the same key's ordinary call is recorded (so the table is really being written in this test)
+        assert (await c.get("/api/v2/me", headers=bearer)).status_code == 200
+    import asyncio
+
+    for _ in range(50):  # the recording is written after the response
+        rows = await _sql(fetch=f"SELECT coalesce(string_agg(to_jsonb(t)::text, ''), '') FROM agent_run_tool_calls t WHERE org_id='{ORG}'")
+        if "/api/v2/me" in rows[0][0]:
+            break
+        await asyncio.sleep(0.1)
+    dump = rows[0][0]
+    assert "/api/v2/me" in dump, "positive control: the ordinary call was recorded"
+    for secret in (code2, verifier2, code, verifier):
+        assert secret not in dump
+    assert "/api/v2/desktop" not in dump
