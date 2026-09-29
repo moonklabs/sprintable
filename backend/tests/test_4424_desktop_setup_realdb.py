@@ -437,6 +437,9 @@ async def test_ac3_to_ac6_least_privilege_other_keys_disconnect_and_the_record(w
         assert (listed["d4424 laptop"]["state"], listed["d4424 laptop"]["active_keys"]) == ("disconnected", 0)
         assert (listed["d4424 other device"]["state"], listed["d4424 other device"]["active_keys"]) == ("handed_over", 2)
         assert {m["stage"] for m in listed["d4424 laptop"]["members"]} == {"writer", "reviewer", "approver"}
+        # the list carries the people's names (the web does not look each one up): who connected · who disconnected
+        assert (listed["d4424 laptop"]["confirmed_by_name"], listed["d4424 laptop"]["revoked_by_name"]) == ("Owner", "Owner")
+        assert (listed["d4424 other device"]["confirmed_by_name"], listed["d4424 other device"]["revoked_by_name"]) == ("Owner", None)
         assert (await c.get("/api/v2/desktop/setups", headers=_person(PLAIN))).status_code == 403
         assert (await c.get("/api/v2/desktop/setups", headers=_person(OUTSIDER, ORG2))).json()["setups"] == []
 

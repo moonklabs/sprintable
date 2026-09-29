@@ -520,10 +520,21 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
             ApiKey.desktop_setup_id.in_([r.id for r in rows]), ApiKey.revoked_at.is_(None),
         ).group_by(ApiKey.desktop_setup_id)
     )).all()) if rows else {}
+    # story #4424 (Yuna's /desktop list) — «connected by {name}» · «disconnected by {name}»: the person's name in this org
+    from app.models.member import Member
+
+    people = {r.confirmed_by for r in rows} | {r.revoked_by for r in rows}
+    people.discard(None)
+    names = dict((await db.execute(
+        select(Member.user_id, Member.name).where(
+            Member.org_id == org_id, Member.type == "human", Member.user_id.in_(people), Member.deleted_at.is_(None),
+        )
+    )).all()) if people else {}
     now = _now()
     return [{
         "setup_id": r.id, "device_name": r.device_name, "state": setup_state(r, now), "project_id": r.project_id,
         "recipe_key": r.event_definition_key, "confirmed_by": r.confirmed_by, "confirmed_at": r.confirmed_at,
+        "confirmed_by_name": names.get(r.confirmed_by), "revoked_by_name": names.get(r.revoked_by),
         "exchanged_at": r.exchanged_at, "revoked_at": r.revoked_at, "keys_issued": r.keys_issued,
         "active_keys": active.get(r.id, 0),
         "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime")} for m in (r.members or [])],

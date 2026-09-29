@@ -745,7 +745,7 @@
     "gcFieldModelVoice": "음성",
     "gcModelHint": "비워 두면 그 모달리티는 이 커넥터로 생성하지 않아요.",
     "gcFieldCredential": "서비스 계정 자격 (JSON)",
-    "gcCredentialPlaceholder": "'{ \"type\": \"service_account\", \"project_id\": \"…\", \"private_key\": \"…\" }'\u2060를 붙여넣어요",
+    "gcCredentialPlaceholder": "'{ \"type\": \"service_account\", \"project_id\": \"…\", \"private_key\": \"…\" }'⁠를 붙여넣어요",
     "gcRevokeAction": "해지",
     "gcRevokeAriaLabel": "{n}번째 연산 커넥터 {label} 해지",
     "gcRevokeConfirmTitle": "{name}{josa} 해지할까요",
@@ -6579,6 +6579,35 @@
       "trustHint": "처음 켤 때 에이전트가 작업 폴더를 믿을지 물을 수 있어요. 그러면 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널에서 답해 주세요 — 답하면 이어서 진행돼요.",
       "seeResult": "결과 보기",
       "seeResultReason": "결과가 나오면 눌러서 일감으로 가요"
+    },
+    "devices": {
+      "title": "연결된 기기",
+      "description": "데스크톱 앱으로 이 조직에 연결한 컴퓨터예요.",
+      "state": {
+        "handed_over": "연결됨",
+        "waiting_for_app": "앱이 받아 가기를 기다리는 중",
+        "not_handed_over": "연결되지 않음",
+        "disconnected": "연결 끊김"
+      },
+      "notHandedOverWhy": "설정 시간이 지나 이 기기가 에이전트를 받아 가지 못했어요",
+      "agents": "에이전트 {count}개",
+      "connectedOn": "{date} 연결",
+      "connectedBy": "연결한 사람 {name}",
+      "disconnectedOn": "{date} 연결 끊음",
+      "disconnectedBy": "끊은 사람 {name}",
+      "disconnect": "연결 끊기",
+      "disconnectAria": "{device} 연결 끊기",
+      "confirmTitle": "{device} 연결을 끊을까요?",
+      "confirmBody": "끊으면 이 기기의 에이전트 {count}개가 더는 Sprintable 일감을 받지 못해요. 에이전트는 조직에 그대로 남고, 이 기기를 다시 쓰려면 그 기기에서 설정을 새로 해야 해요.",
+      "cancel": "취소",
+      "disconnecting": "끊는 중…",
+      "failed": "연결을 끊지 못했어요 — 다시 시도해 주세요",
+      "done": "{device} 연결을 끊었어요",
+      "emptyTitle": "아직 연결된 기기가 없어요",
+      "emptyBody": "위에서 데스크톱 앱을 받아 설정을 마치면 이 조직의 기기가 여기에 보여요.",
+      "loadFailed": "목록을 불러오지 못했어요",
+      "retry": "다시 시도",
+      "member": "이 조직의 데스크톱 연결은 조직 관리자가 관리해요."
     }
   },
   "recipePreset": {
