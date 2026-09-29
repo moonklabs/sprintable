@@ -12,7 +12,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rate_limit import limiter
@@ -90,7 +90,16 @@ class ConfirmRequest(BaseModel):
     project_id: uuid.UUID
     recipe_id: uuid.UUID
     roles: list[RoleIn] = Field(max_length=50)
-    workdir_hint: str | None = Field(default=None, max_length=500)  # the app's, shown back on the web; not stored
+    # the folder chosen on the web, handed back as is in the exchange (≤200 · no control characters); the desktop app judges
+    # the path itself (under home · no `..`), the server does not
+    workdir_hint: str | None = Field(default=None, max_length=200)
+
+    @field_validator("workdir_hint")
+    @classmethod
+    def _no_control_characters(cls, v: str | None) -> str | None:
+        if v is not None and any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise ValueError("workdir_hint must not contain control characters")
+        return v
 
 
 class ConfirmedMember(BaseModel):
@@ -116,7 +125,7 @@ async def post_confirm(
     try:
         setup_id, members = await confirm_setup(
             db, code=code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
-            roles=[RoleChoice(stage=r.stage, runtime=r.runtime) for r in body.roles], auth=auth,
+            roles=[RoleChoice(stage=r.stage, runtime=r.runtime) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
         )
     except DesktopSetupError as e:
         # AC2: any error leaves the request by raising, and get_db rolls the whole session back — e.g. the plan's agent
@@ -149,7 +158,10 @@ async def post_exchange(request: Request, code: str, body: ExchangeRequest, db: 
     api_url, mcp_url = exchange_urls()
     return JSONResponse(
         status_code=200,
-        content={"setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url},
+        content={
+            "setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url,
+            "workdir_hint": done.workdir_hint,
+        },
         headers=headers,
     )
 

@@ -201,6 +201,7 @@ async def test_ac1_pending_then_the_keys_once_then_never_again(world, caplog):
         assert agents["writer"]["member_id"] == members["writer"]["member_id"]
         assert all(a["api_key"].startswith("sk_live_") for a in agents.values())
         assert "api_url" in body and "mcp_url" in body
+        assert body["workdir_hint"] is None  # none was chosen
 
         r = await _exchange(c, code, verifier)
         assert r.status_code == 410  # once
@@ -413,12 +414,12 @@ async def test_4426_the_setup_steps_and_the_one_line_read(world):
         read = (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OWNER))).json()
         assert (read["human_hands"], read["minutes_to_first_result"], read["docs_opened"]) == (1, None, 0)  # no result yet
 
-        # the code was asked for 3 minutes before the person confirmed; the app later reports a folder-trust prompt the person
-        # answered, a doc, and the first result 7 minutes after the confirmation → 10 minutes from the code
+        # the code was asked for 3 minutes before the person confirmed; the app later reports that the person typed on the first
+        # screen before the first done (a hand), a doc, and the first result 7 minutes after the confirmation → 10 minutes from the code
         await _sql(f"UPDATE onboarding_events SET server_ts = server_ts - interval '3 minutes' WHERE session_id='{setup_id}' AND event='desktop_setup_code_issued'")
         await _sql(
             "INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES "
-            f"(gen_random_uuid(), 'desktop_cli_prompt_answered', '{setup_id}', '{{\"human_hand\": true, \"prompt\": \"folder_trust\"}}', now()),"
+            f"(gen_random_uuid(), 'desktop_first_screen_human_input', '{setup_id}', '{{\"human_hand\": true}}', now()),"
             f"(gen_random_uuid(), 'desktop_doc_opened', '{setup_id}', '{{}}', now()),"
             f"(gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}',"
             f" (SELECT server_ts FROM onboarding_events WHERE session_id='{setup_id}' AND event='desktop_setup_confirmed') + interval '7 minutes')"
@@ -427,3 +428,15 @@ async def test_4426_the_setup_steps_and_the_one_line_read(world):
         assert (read["human_hands"], read["minutes_to_first_result"], read["docs_opened"]) == (2, 10.0, 1)
         assert (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(PLAIN))).status_code == 403
         assert (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OUTSIDER, ORG2))).status_code == 404
+
+
+@pytest.mark.anyio
+async def test_the_folder_chosen_on_the_web_comes_back_in_the_exchange_as_is(world):
+    async with _client() as c:
+        code, verifier = await _code(c)
+        # control characters are refused, 200 characters is the limit
+        assert (await _confirm(c, code, body={**_ROLES, "workdir_hint": "~/work/a\nb"})).status_code == 422
+        assert (await _confirm(c, code, body={**_ROLES, "workdir_hint": "x" * 201})).status_code == 422
+        hint = "~/work/sprintable ../ 한글 폴더"  # not checked by the server: the app judges the path
+        assert (await _confirm(c, code, body={**_ROLES, "workdir_hint": hint})).status_code == 200
+        assert (await _exchange(c, code, verifier)).json()["workdir_hint"] == hint

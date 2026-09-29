@@ -104,6 +104,7 @@ async def confirm_setup(
     recipe_id: uuid.UUID,
     roles: list[RoleChoice],
     auth,
+    workdir_hint: str | None = None,
 ) -> tuple[uuid.UUID, list[dict]]:
     """Returns (setup_id, members). Writes only through `db` and never commits — the caller commits, or rolls back on any
     error so nothing of a half-made setup stays."""
@@ -182,6 +183,7 @@ async def confirm_setup(
     setup.confirmed_by = user_id
     setup.confirmed_at = _now()
     setup.members = members
+    setup.workdir_hint = workdir_hint
     await db.flush()
     from app.services.onboarding_funnel import emit_onboarding_event
 
@@ -196,6 +198,7 @@ async def confirm_setup(
 class Exchanged:
     setup_id: uuid.UUID
     agents: list[dict]
+    workdir_hint: str | None
 
 
 async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Exchanged | None:
@@ -235,7 +238,7 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
         db, EVENT_EXCHANGED, session_id=setup.id, org_id=setup.org_id, project_id=setup.project_id,
         meta={"flow": "desktop_setup", "keys": len(agents)},
     )
-    return Exchanged(setup_id=setup.id, agents=agents)
+    return Exchanged(setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint)
 
 
 async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> int:

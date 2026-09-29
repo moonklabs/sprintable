@@ -30,6 +30,8 @@ class DesktopSetup(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # [{stage, member_id, kind: agent|human, runtime}] — what the confirmation bound
     members: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # the folder chosen on the web — handed back as is in the exchange; the desktop app is the judge of the path
+    workdir_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     exchanged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     keys_issued: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,7 +1,8 @@
 """story #4424 — desktop setup: one setup code → a person confirms on the web → the desktop app exchanges once for the keys.
 
 - `desktop_setups`: one row per setup code. Only `code_hash` (sha256) of the code is stored, and the PKCE `code_challenge`
-  (S256). The web confirmation fills org/project/recipe/who/when and `members` (the stage → member it bound, kind agent|human,
+  (S256). `workdir_hint`: the folder the person chose on the web, handed back in the exchange as is (≤200 characters, no
+  control characters — the desktop app decides whether it is a place it will use). The web confirmation fills org/project/recipe/who/when and `members` (the stage → member it bound, kind agent|human,
   runtime); the exchange sets `exchanged_at` (the keys were handed over, once); «disconnect this device» sets `revoked_at` /
   `revoked_by`. The row itself is the audit record (who · which device · how many agents/keys · when handed · when cut).
 - `agent_api_keys.desktop_setup_id`: the setup a key was handed out by — «disconnect this device» revokes exactly those.
@@ -35,6 +36,7 @@ def upgrade() -> None:
         sa.Column("confirmed_by", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("confirmed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("members", postgresql.JSONB(), nullable=True),
+        sa.Column("workdir_hint", sa.Text(), nullable=True),
         sa.Column("exchanged_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("keys_issued", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
