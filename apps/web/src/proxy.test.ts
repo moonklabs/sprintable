@@ -191,7 +191,7 @@ describe('proxy', () => {
     expect(loc.searchParams.get('next')).toBe('/desktop/setup');
     expect(response.headers.get('location')).not.toContain(code);
     expect(safeNextPath(loc.searchParams.get('next'))).toBe('/desktop/setup');
-    // the values themselves come back through the login page's carry (desktop-setup.test.ts)
+    // the values themselves: after the login the desktop app reopens the page with its # (the shell holds the code)
     expect(parseSetupFragment(opened.hash)).toEqual({ code, runtimes: ['claude', 'codex'], setupId: null, blocked: [] });
   });
 

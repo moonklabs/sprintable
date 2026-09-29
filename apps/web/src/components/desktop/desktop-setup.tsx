@@ -10,10 +10,9 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
 import { stageRoleLabel } from '@/lib/stage-role';
-import { emitOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
-  agentRowCount, confirmBody, parseSetupFragment, rememberActiveSetup, takeDesktopSetupLogin, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -65,7 +64,7 @@ type View =
 
 function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, signedIn = false }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; /** this visit came back from a login (4426) */ signedIn?: boolean }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -87,8 +86,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   useEffect(() => {
     if (!setupId) return;
     rememberActiveSetup(setupId); // 이 탭에서 문서를 열면 desktop_doc_opened로 셈(DesktopSetupDocWatch)
-    if (signedIn) emitOnboardingEvent('desktop_setup_signed_in', { session_id: setupId, flow: 'onboarding' });
-  }, [setupId, signedIn]);
+  }, [setupId]);
 
   useEffect(() => {
     let off = false;
@@ -270,21 +268,21 @@ export function ToolsNotConnected({ onRetry }: { onRetry: () => void }) {
 }
 
 /**
- * 주소의 `#` 뒤에서 설정 값을 읽고 곧바로 주소에서 지운다(코드는 어떤 URL에도 남기지 않는다 — PO 09:45Z). 로그인을 거쳐 온
- * 경우는 로그인 페이지가 맡긴 값을 한 번 꺼낸다. 값은 이 컴포넌트의 메모리에만 있다.
+ * 주소의 `#` 뒤에서 설정 값을 읽고 곧바로 주소에서 지운다(코드는 어떤 URL에도 남기지 않는다 — PO 09:45Z). 값은 이 컴포넌트의
+ * 메모리에만 있다. 로그인을 거쳐 `#` 없이 돌아오면 데스크톱 앱이 값을 붙여 다시 연다(PO 09:58Z) — 웹은 맡아 두지 않는다.
  */
 export function DesktopSetupEntry() {
-  const [entry, setEntry] = useState<{ query: SetupQuery | null; signedIn: boolean } | null>(null);
+  const [entry, setEntry] = useState<{ query: SetupQuery | null } | null>(null);
   useEffect(() => {
     const hash = window.location.hash;
-    const carried = takeDesktopSetupLogin();
-    const query = parseSetupFragment(hash) ?? (carried.fragment ? parseSetupFragment(carried.fragment) : null);
+    const query = parseSetupFragment(hash);
+    // off the address at once; the state change follows on the next microtask (no cascading render inside the effect)
     if (hash) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
-    setEntry({ query, signedIn: carried.signedIn });
+    void Promise.resolve().then(() => setEntry({ query }));
   }, []);
   if (!entry) return null;
   return entry.query
-    ? <DesktopSetup code={entry.query.code} runtimes={entry.query.runtimes} blocked={entry.query.blocked} setupId={entry.query.setupId} signedIn={entry.signedIn} />
+    ? <DesktopSetup code={entry.query.code} runtimes={entry.query.runtimes} blocked={entry.query.blocked} setupId={entry.query.setupId} />
     : <OpenInDesktopApp />;
 }
 

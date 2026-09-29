@@ -190,27 +190,4 @@ describe('story #4318 — 로그인 화면 링크 글자는 brand-text(밝은 7.
       expect(cls).not.toContain('text-brand');
     }
   });
-
-  it('[SID:4427] a login that returns to the desktop setup page carries the # values in this tab and takes them off its own address (PO 09:45Z)', async () => {
-    const code = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
-    searchParamsRef.current = new URLSearchParams({ next: '/desktop/setup' });
-    window.history.replaceState(null, '', `/login?next=%2Fdesktop%2Fsetup#code=${code}&setup=s-9&runtimes=codex`);
-    await mount();
-    expect(window.location.hash).toBe('');
-    expect(window.location.href).not.toContain(code);
-    const { takeDesktopSetupLogin, parseSetupFragment } = await import('@/lib/desktop-setup');
-    const carried = takeDesktopSetupLogin();
-    expect(carried.signedIn).toBe(true);
-    expect(parseSetupFragment(carried.fragment ?? '')?.code).toBe(code);
-  });
-
-  it('[SID:4427] any other login leaves no desktop setup mark and keeps its address', async () => {
-    searchParamsRef.current = new URLSearchParams({ next: '/dashboard' });
-    window.history.replaceState(null, '', '/login?next=%2Fdashboard#keep');
-    await mount();
-    expect(window.location.hash).toBe('#keep');
-    const { takeDesktopSetupLogin } = await import('@/lib/desktop-setup');
-    expect(takeDesktopSetupLogin().signedIn).toBe(false);
-    window.history.replaceState(null, '', '/');
-  });
 });

@@ -18,8 +18,6 @@ export type OnboardingEvent =
   // 복사가 웹 설정 복사로 섞여 들어가 ④가 가르려던 퍼널이 다시 흐려진다 —
   // 별도 이름.
   | 'desktop_key_copied'
-  // story #4427(PO 08:15Z) — 데스크톱 첫 실행 설정에서 로그인이 필요했을 때 한 번(session_id = setup_id · 사람 손 셈).
-  | 'desktop_setup_signed_in'
   // story #4427(PO 08:44Z · AC2 «문서 0») — 설정이 진행 중인 탭에서 문서 · 가이드 링크를 열 때(session_id = setup_id).
   | 'desktop_doc_opened';
 

@@ -12,7 +12,6 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => c
 
 import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
-import { markDesktopSetupLogin } from '@/lib/desktop-setup';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -185,24 +184,21 @@ describe('[SID:4427] desktop setup page', () => {
     expect(text()).toContain('데스크톱 앱에서 열어 주세요'); // nothing after # and nothing carried: a browser visit (AC5)
   });
 
-  it('4426 + login round trip: the values carried by the login page are used once, and desktop_setup_signed_in goes with the setup id', async () => {
-    stub(() => new Response('{}'));
-    window.history.replaceState(null, '', '/desktop/setup'); // the login page sent us back without the #
-    markDesktopSetupLogin('/desktop/setup', `#code=${CODE}&setup=s-1&runtimes=claude`);
-    await mount(<DesktopSetupEntry />);
-    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
-    expect(events().map((e) => [e.event, e.session_id])).toEqual([['desktop_setup_signed_in', 's-1']]);
-    expect(JSON.stringify({ ...sessionStorage })).not.toContain(CODE); // taken: nothing left in storage
-    await act(async () => { root.unmount(); }); root = createRoot(container);
+  it('the web keeps no setup value anywhere (no storage) and has no login-page branch for the desktop (PO 09:58Z)', async () => {
     stub(() => new Response('{}'));
     window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-1&runtimes=claude`);
-    await mount(<DesktopSetupEntry />); // no login this time
-    expect(events()).toEqual([]);
+    await mount(<DesktopSetupEntry />);
+    expect(JSON.stringify({ ...sessionStorage }) + JSON.stringify({ ...localStorage })).not.toContain(CODE);
+    expect(events().filter((e) => e.event === 'desktop_setup_signed_in')).toEqual([]); // the shell sends it now
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const login = fs.readFileSync(path.join(__dirname, '../../app/login/page.tsx'), 'utf8');
+    expect(login).not.toMatch(/desktop/i);
   });
 
   it('4426 · AC2: while a setup runs in this tab, opening a guide link sends desktop_doc_opened; other links and other tabs send nothing', async () => {
     stub(() => new Response('{}'));
-    await mount(<><DesktopSetup code={CODE} runtimes={['claude']} setupId="s-2" /><DesktopSetupDocWatch /><a href="https://sprintable.ai/ko/blog/desktop" onClick={(e) => e.preventDefault()}>guide</a><a href="/kanban" onClick={(e) => e.preventDefault()}>board</a></>);
+    await mount(<><DesktopSetup code={CODE} runtimes={['claude']} setupId="s-2" /><DesktopSetupDocWatch /><a href="https://sprintable.ai/ko/blog/desktop" onClick={(e) => e.preventDefault()}>guide</a><a href="https://example.com/kanban" onClick={(e) => e.preventDefault()}>board</a></>);
     const [guide, board] = [...container.querySelectorAll('a')].filter((a) => ['guide', 'board'].includes(a.textContent ?? ''));
     await act(async () => { board!.click(); guide!.click(); });
     expect(events().map((e) => [e.event, e.session_id])).toEqual([['desktop_doc_opened', 's-2']]);

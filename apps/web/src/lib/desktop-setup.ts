@@ -123,37 +123,14 @@ export function confirmBody(code: string, rows: readonly SetupRoleRow[], project
   };
 }
 
-// ── story #4427 · 4426 — «로그인이 필요했을 때만» desktop_setup_signed_in + 코드가 로그인 왕복을 살아남기 ──
-// 설정 코드는 어떤 URL에도 싣지 않는다(까디르 4825 · PO 09:45Z): 앱은 `#` 뒤(fragment)로 넘기고 — 서버 요청 · 로그 ·
-// Referer에 안 남는다 — 페이지는 읽자마자 주소에서 지우고 메모리에만 둔다.
-// 로그인 전이면 서버 307 뒤 브라우저가 fragment를 /login 주소에 이어 붙이지만, 로그인 방법(비밀번호 · Firebase · Google/Apple
-// 핸드오프)마다 돌아가는 길이 달라 fragment가 따라오지 않는다. 그래서 로그인 페이지가 «설정으로 돌아가는 로그인» 표시와 함께
-// fragment를 같은 탭 sessionStorage에 잠깐(코드 수명 10분) 맡기고 주소에서 지우며, 설정 페이지가 한 번 꺼내고 곧바로 지운다.
-const SIGNED_IN_MARK = 'sprintable_desktop_setup_login';
-export const LOGIN_CARRY_TTL_MS = 10 * 60_000;
+// ── story #4427 — 설정 값은 `#` 뒤로만 ──
+// 설정 코드는 어떤 URL에도 싣지 않는다(까디르 4825 · PO 09:45Z): 앱이 `#` 뒤(fragment)로 넘기고 — 서버 요청 · 로그 · Referer에
+// 안 남는다 — 페이지는 읽자마자 주소에서 지우고 메모리에만 둔다. 로그인을 거치면 `#`이 따라오지 않는데, 그때는 코드를 쥔
+// 데스크톱 앱이 설정 페이지를 다시 연다(PO 09:58Z) — 웹은 코드를 맡아 두지 않는다.
 
 /** `#code=…&setup=…&runtimes=…` → SetupQuery (모양이 틀리면 null). */
 export function parseSetupFragment(hash: string): SetupQuery | null {
   return parseSetupQuery(new URLSearchParams(hash.replace(/^#/, '')));
-}
-
-/** 로그인 페이지: next가 설정 페이지면 표시를 남기고, 주소의 fragment(설정 값)가 있으면 함께 맡긴다. */
-export function markDesktopSetupLogin(next: string | null, hash = '', storage: Pick<Storage, 'setItem'> | undefined = globalThis.sessionStorage, now = Date.now()): void {
-  if (!next || !next.startsWith('/desktop/setup')) return;
-  const fragment = parseSetupFragment(hash) ? hash.replace(/^#/, '') : null;
-  try { storage?.setItem(SIGNED_IN_MARK, JSON.stringify({ at: now, fragment })); } catch { /* 저장이 막힌 창 — 측정만 빠진다 */ }
-}
-
-/** 설정 페이지: 표시가 있으면 꺼내고 지운다(한 번만). fragment는 코드 수명 안에서만 돌려준다. */
-export function takeDesktopSetupLogin(storage: Pick<Storage, 'getItem' | 'removeItem'> | undefined = globalThis.sessionStorage, now = Date.now()): { signedIn: boolean; fragment: string | null } {
-  try {
-    const raw = storage?.getItem(SIGNED_IN_MARK);
-    if (!raw) return { signedIn: false, fragment: null };
-    storage!.removeItem(SIGNED_IN_MARK);
-    const v = JSON.parse(raw) as { at?: unknown; fragment?: unknown };
-    const fresh = typeof v.at === 'number' && now - v.at <= LOGIN_CARRY_TTL_MS;
-    return { signedIn: true, fragment: fresh && typeof v.fragment === 'string' ? v.fragment : null };
-  } catch { return { signedIn: false, fragment: null }; }
 }
 
 // ── story #4427 · AC2 «문서 0» — desktop_doc_opened(PO 08:44Z) ──
