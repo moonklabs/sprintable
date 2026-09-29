@@ -22,13 +22,15 @@ def _row(status="pending", embedding_text="loop: 신규 온보딩 개선", retry
     return SimpleNamespace(
         id=uuid.uuid4(), status=status, embedding_text=embedding_text,
         embedding=None, model_version=None, dimension=None, error_message=None,
-        retry_count=retry_count,
+        retry_count=retry_count, content_hash="h",
     )
 
 
 def _result(items):
     r = MagicMock()
     r.scalars.return_value.all.return_value = items
+    # story #4405 — 기록 단계는 행마다 다시 읽는다(claim 순서대로).
+    r.scalar_one_or_none.side_effect = list(items)
     return r
 
 
@@ -107,6 +109,7 @@ async def test_empty_backlog_returns_zero_counts():
     summary = await backlog.process_embedding_backlog(session)
     assert summary == {
         "scanned": 0, "embedded": [], "pending_retry": [], "failed": [], "terminal": [],
+        "superseded": [],
     }
 
 

@@ -1797,12 +1797,12 @@ async def test_run_retro_generation_synthesize_persists_and_failure_keeps_cache(
 
     existing = _mock_session()
     get_p, upd_p = _svc_repo(existing)
-    with get_p, upd_p as update, patch.object(svc, "synthesize", new=AsyncMock(return_value={"learned": [{"text": "배운 것"}]})):
+    with get_p, upd_p as update, patch.object(svc, "_synthesis_prompt", new=AsyncMock(return_value="p")), patch.object(svc, "_synthesize_from_prompt", new=AsyncMock(return_value={"learned": [{"text": "배운 것"}]})):
         await svc.run_retro_generation(AsyncMock(), org_id=ORG_ID, session_id=SESSION_ID, mode="synthesize")
     update.assert_awaited_once_with(SESSION_ID, synthesis={"learned": [{"text": "배운 것"}]})
 
     get_p, upd_p = _svc_repo(existing)
-    with get_p, upd_p as update, patch.object(svc, "synthesize", new=AsyncMock(return_value=None)):
+    with get_p, upd_p as update, patch.object(svc, "_synthesis_prompt", new=AsyncMock(return_value="p")), patch.object(svc, "_synthesize_from_prompt", new=AsyncMock(return_value=None)):
         with pytest.raises(svc.RetroGenerationError) as ei:
             await svc.run_retro_generation(AsyncMock(), org_id=ORG_ID, session_id=SESSION_ID, mode="synthesize")
     assert (ei.value.status_code, ei.value.detail["code"]) == (502, "SYNTHESIS_GENERATION_FAILED")
@@ -1837,7 +1837,7 @@ async def test_run_retro_generation_synthesis_combined_l3_failure_keeps_l2():
     get_p, upd_p = _svc_repo(existing)
     with (
         get_p, upd_p as update,
-        patch.object(svc, "synthesize", new=AsyncMock(return_value={"learned": [{"text": "배운 것"}]})),
+        patch.object(svc, "_synthesis_prompt", new=AsyncMock(return_value="p")), patch.object(svc, "_synthesize_from_prompt", new=AsyncMock(return_value={"learned": [{"text": "배운 것"}]})),
         patch.object(svc, "recommend_next", new=AsyncMock(return_value=None)),
     ):
         await svc.run_retro_generation(AsyncMock(), org_id=ORG_ID, session_id=SESSION_ID, mode="synthesis")

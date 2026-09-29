@@ -8,12 +8,13 @@ import asyncio
 import time
 import logging
 import os
+import random
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -426,6 +427,11 @@ async def zero_referenced_entities_check(
 
 # ─── POST /api/v2/internal/cron/score-ga4-outcomes ────────────────────────────
 
+# story #4405(AC2) — 한 판 상한. 넘은 대상은 pending 그대로 다음 판(매시). 시간 상한은 Cloud Scheduler 기본
+# attempt deadline(180초, infra/cloud-scheduler/jobs.json에 따로 안 둠)보다 짧게.
+_GA4_SCORE_MAX_CALLS = 50
+_GA4_SCORE_TIME_BUDGET_S = 150.0
+
 @router.post("/score-ga4-outcomes")
 async def score_ga4_outcomes(
     request: Request,
@@ -448,7 +454,17 @@ async def score_ga4_outcomes(
     방지 아님)로 원래부터 동작해 왔다 — 이 PR은 그 전제를 바꾸지 않는다(worker pool 이관+
     to_thread 포장 모두 SELECT/커밋 시점 자체는 안 건드림). 겹침 시 최악은 같은 GA4 채점
     호출 중복(비용·quota 낭비)이지 데이터 훼손은 아니다(마지막 write가 이김, 멱등). 실 겹침
-    위험이 실측되면 별도 스토리로 SKIP LOCKED/advisory lock 도입 검토."""
+    위험이 실측되면 별도 스토리로 SKIP LOCKED/advisory lock 도입 검토.
+
+    story #4405 — **GA4 호출 동안 트랜잭션 · 행 잠금을 쥐지 않는다.** 예전엔 한 트랜잭션 안에서 대상마다 GA4
+    (기본 deadline 60초)를 부르고 ORM 필드를 set(autoflush = UPDATE)해, 채점한 sprint · story · goal 행의 UPDATE
+    잠금이 끝 커밋까지 쌓였다(그 행을 사용자가 고치면 대기). 이제: ①대상의 값(id · org · metric_definition)만
+    읽고 트랜잭션을 끝냄 → ②GA4는 트랜잭션 없이 → ③대상마다 짧은 트랜잭션으로 `outcome_status='pending'`일 때만
+    기록(그 사이 사람이 판정했으면 덮지 않는다 — 위 겹침도 이 조건으로 마지막 write가 판정을 덮는 일은 없어짐).
+    상한(AC2): 한 판 GA4 호출 `_GA4_SCORE_MAX_CALLS`개 · 전체 `_GA4_SCORE_TIME_BUDGET_S`초 — 넘은 대상은
+    pending 그대로 다음 판(`deferred`). 실패한 GA4 대상은 pending으로 남아 매 판 다시 오므로, 앞줄이 늘 같은
+    실패 대상으로 차지 않게 대상 순서를 섞는다(updated_at을 건드려 순번을 돌리지 않음 — Story는 updated_at이
+    CAS 토큰)."""
     verify_cron(request)
 
     from app.models.pm import Goal, Sprint, Story
@@ -458,115 +474,104 @@ async def score_ga4_outcomes(
     now = datetime.now(timezone.utc)
     scored: list[dict] = []
     failed: list[dict] = []
+    deferred: list[dict] = []
 
     try:
-        # Sprint GA4 채점
-        sprint_result = await session.execute(
-            select(Sprint).where(
-                Sprint.outcome_status == "pending",
-                Sprint.measure_after.isnot(None),
-                Sprint.measure_after <= now,
-            )
-        )
-        for sprint in sprint_result.scalars().all():
-            md = sprint.metric_definition
-            if not md or md.get("source") != "ga4":
-                continue
-            try:
-                # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
-                org_timezone = await get_org_timezone(session, sprint.org_id)
-                scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
-                sprint.outcome_status = scoring["outcome_status"]
-                sprint.outcome_result = scoring["outcome_result"]
-                scored.append({"type": "sprint", "id": str(sprint.id), "outcome_status": scoring["outcome_status"]})
-            except Exception as exc:
-                logger.warning("ga4 sprint scoring failed id=%s: %s", sprint.id, exc)
-                failed.append({"type": "sprint", "id": str(sprint.id), "error": str(exc)})
+        # ① 읽기 — 값만 들고 트랜잭션을 끝낸다(행 객체를 들고 외부 호출로 가지 않음).
+        targets: list[tuple[str, type, uuid.UUID, uuid.UUID, dict]] = []
+        org_timezones: dict[uuid.UUID, str | None] = {}
+        for kind, model, extra in (
+            ("sprint", Sprint, ()),
+            ("story", Story, (Story.deleted_at.is_(None),)),
+            ("epic", Goal, ()),
+        ):
+            rows = (await session.execute(
+                select(model.id, model.org_id, model.metric_definition, model.outcome_result).where(
+                    model.outcome_status == "pending",
+                    model.measure_after.isnot(None),
+                    model.measure_after <= now,
+                    *extra,
+                )
+            )).all()
+            for row_id, org_id, md, outcome_result in rows:
+                if not md:
+                    continue
+                if kind != "epic" and md.get("source") != "ga4":
+                    continue
+                # story #2843(PO collision 규칙①) — 사람이 done 전이로 먼저 수동 판정했으면 cron이 덮지 않는다.
+                # 기록 단계에서 한 번 더 본다(읽은 뒤 사람이 판정한 경우).
+                if kind == "epic" and isinstance(outcome_result, dict) and outcome_result.get("source") == "manual":
+                    continue
+                targets.append((kind, model, row_id, org_id, md))
+                if md.get("source") == "ga4" and org_id not in org_timezones:
+                    # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
+                    org_timezones[org_id] = await get_org_timezone(session, org_id)
+        await session.commit()
+        random.shuffle(targets)
 
-        # Story GA4 채점
-        story_result = await session.execute(
-            select(Story).where(
-                Story.outcome_status == "pending",
-                Story.measure_after.isnot(None),
-                Story.measure_after <= now,
-                Story.deleted_at.is_(None),
-            )
-        )
-        for story in story_result.scalars().all():
-            md = story.metric_definition
-            if not md or md.get("source") != "ga4":
-                continue
-            try:
-                # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
-                org_timezone = await get_org_timezone(session, story.org_id)
-                scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
-                story.outcome_status = scoring["outcome_status"]
-                story.outcome_result = scoring["outcome_result"]
-                scored.append({"type": "story", "id": str(story.id), "outcome_status": scoring["outcome_status"]})
-            except Exception as exc:
-                logger.warning("ga4 story scoring failed id=%s: %s", story.id, exc)
-                failed.append({"type": "story", "id": str(story.id), "error": str(exc)})
-
-        # Goal(구 Epic) 채점 (GA4 + internal_ops)
-        epic_result = await session.execute(
-            select(Goal).where(
-                Goal.outcome_status == "pending",
-                Goal.measure_after.isnot(None),
-                Goal.measure_after <= now,
-            )
-        )
-        for epic in epic_result.scalars().all():
-            # story #2843(PO collision 규칙①) — 사람이 done 전이로 먼저 수동 판정(hit/miss/
-            # unmeasurable)했으면 cron이 덮지 않는다. WHERE의 outcome_status=="pending"이 이미
-            # 대부분 걸러내지만(수동 판정은 status를 pending 밖으로 옮긴다), source=manual
-            # 마커로 명시 스킵을 한 겹 더 둔다(방어심층 — 동시성 경합 등 엣지 대비).
-            if isinstance(epic.outcome_result, dict) and epic.outcome_result.get("source") == "manual":
-                continue
-            md = epic.metric_definition
-            if not md:
-                continue
+        deadline = time.monotonic() + _GA4_SCORE_TIME_BUDGET_S
+        ga4_calls = 0
+        for kind, model, row_id, org_id, md in targets:
             source = md.get("source")
             try:
+                ga4_scoring: dict | None = None
                 if source == "ga4":
-                    # story #3674(BE 確定 2026-09-07) — GA4 "어제" 계산을 org 시간대로.
-                    org_timezone = await get_org_timezone(session, epic.org_id)
-                    scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezone)
+                    if ga4_calls >= _GA4_SCORE_MAX_CALLS or time.monotonic() >= deadline:
+                        deferred.append({"type": kind, "id": str(row_id)})
+                        continue
+                    ga4_calls += 1
+                    # ② 트랜잭션 없이 — 동기 blocking gRPC라 스레드로(story #2041).
+                    ga4_scoring = await asyncio.to_thread(score_ga4_outcome, md, org_timezones.get(org_id))
+
+                # ③ 대상마다 짧은 트랜잭션 — 아직 pending일 때만 기록.
+                target = (await session.execute(
+                    select(model).where(model.id == row_id, model.outcome_status == "pending").with_for_update()
+                )).scalar_one_or_none()
+                if target is None or (
+                    kind == "epic" and isinstance(target.outcome_result, dict)
+                    and target.outcome_result.get("source") == "manual"
+                ):
+                    await session.commit()
+                    continue
+
+                if ga4_scoring is not None:
+                    scoring = ga4_scoring
                 elif source == "internal_ops":
                     # 하위 스토리 진행률 계산
                     story_rows = await session.execute(
                         select(Story.status).where(
-                            Story.epic_id == epic.id,
+                            Story.epic_id == row_id,
                             Story.deleted_at.is_(None),
                         )
                     )
-                    rows = story_rows.scalars().all()
-                    total = len(rows)
-                    done = sum(1 for s in rows if s == "done")
+                    statuses = story_rows.scalars().all()
+                    total = len(statuses)
+                    done = sum(1 for st in statuses if st == "done")
                     pct = round((done / total * 100) if total > 0 else 0.0, 2)
                     result = score_epic_outcome(md, pct)
                     if result is None:
+                        await session.commit()
                         continue
                     scoring = result
                 else:
                     scoring = {"outcome_status": "pending", "outcome_result": None}
                 # status는 건드리지 않음 — outcome_status/outcome_result만 기록
-                epic.outcome_status = scoring["outcome_status"]
-                epic.outcome_result = scoring["outcome_result"]
-                scored.append({"type": "epic", "id": str(epic.id), "outcome_status": scoring["outcome_status"]})
+                target.outcome_status = scoring["outcome_status"]
+                target.outcome_result = scoring["outcome_result"]
 
                 # story #2791(P0, event-workflow-unification-design-2790) — preset.goal.measured
                 # 서버 자동발행. "pending"(아직 실측 안 됨)은 발행 대상 아님 — hit/miss처럼
                 # 실제 값이 확정됐을 때만("목표 측정"이라는 사건 자체가 성립한 시점).
                 # best-effort 격리는 호출자(여기) 몫 — cron 잡 자체를 안 깬다.
-                if scoring["outcome_status"] in ("hit", "miss") and scoring.get("outcome_result"):
+                if kind == "epic" and scoring["outcome_status"] in ("hit", "miss") and scoring.get("outcome_result"):
                     try:
                         from app.routers.events import publish_preset_event
 
                         outcome_result = scoring["outcome_result"]
                         await publish_preset_event(
-                            session, epic.org_id, "preset.goal.measured",
+                            session, org_id, "preset.goal.measured",
                             {
-                                "goal_id": str(epic.id),
+                                "goal_id": str(row_id),
                                 "metric_value": outcome_result.get("actual"),
                                 "metric_unit": outcome_result.get("metric"),
                                 "source": source,
@@ -576,15 +581,19 @@ async def score_ga4_outcomes(
                     except Exception:
                         logger.warning(
                             "preset.goal.measured 자동발행 실패(goal=%s org=%s)",
-                            epic.id, epic.org_id, exc_info=True,
+                            row_id, org_id, exc_info=True,
                         )
+                await session.commit()
+                scored.append({"type": kind, "id": str(row_id), "outcome_status": scoring["outcome_status"]})
             except Exception as exc:
-                logger.warning("epic scoring failed id=%s: %s", epic.id, exc)
-                failed.append({"type": "epic", "id": str(epic.id), "error": str(exc)})
+                await session.rollback()
+                logger.warning("%s scoring failed id=%s: %s", kind, row_id, exc)
+                failed.append({"type": kind, "id": str(row_id), "error": str(exc)})
 
-        await session.commit()
-
-        return _ok({"scored": scored, "failed": failed, "total": len(scored) + len(failed)})
+        return _ok({
+            "scored": scored, "failed": failed, "deferred": deferred,
+            "total": len(scored) + len(failed),
+        })
     except Exception as exc:
         logger.exception("cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
@@ -753,25 +762,37 @@ async def assets_grace_hard_delete(
     story #2041(그라운딩 doc 67b44d1e, PR-D) 근본수정 — 최대 500건 순차 GCS 왕복(provider.
     delete_object, 내부적으로 이미 to_thread 포장돼 이벤트루프는 안 막음) 동안 세션을 붙들고
     있었다. `get_db`(요청 primary pool) 대신 `get_worker_db`(#2461과 동일 전용 소형 풀)로
-    이관 — 이 배치가 아무리 오래 걸려도 요청 커넥션 예산과 무관해진다."""
+    이관 — 이 배치가 아무리 오래 걸려도 요청 커넥션 예산과 무관해진다.
+
+    story #4405 — 풀을 옮겨도 그 연결 하나는 GCS 왕복 내내 idle in transaction이었다(대상 SELECT로 연 트랜잭션을
+    끝 커밋까지 들고 있음 · 삭제 표시는 커밋 때 한꺼번에 flush). 이제 대상 값(id · container · object_path)만
+    읽고 트랜잭션을 끝냄 → GCS 삭제는 트랜잭션 없이 → 성공한 것만 행마다 짧은 트랜잭션으로 row 삭제. row 삭제는
+    `deleted_at IS NOT NULL`일 때만 — GCS 삭제 도중 복원(deleted_at 비움)됐으면 row는 남기고 경고(blob은 이미 없음)."""
     verify_cron(request)
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(days=_ASSET_GRACE_DAYS)
-        rows = list((await session.execute(
-            select(Asset)
+        targets = (await session.execute(
+            select(Asset.id, Asset.container, Asset.object_path)
             .where(Asset.deleted_at.is_not(None), Asset.deleted_at < cutoff)
             .limit(500)
-        )).scalars().all())
+        )).all()
+        await session.commit()
         provider = get_storage_provider()
         deleted = 0
         failed = 0
-        for a in rows:
-            if await provider.delete_object(a.container, a.object_path):
-                await session.delete(a)  # asset_links 는 FK ondelete=CASCADE 로 자동 삭제
+        for asset_id, container, object_path in targets:
+            if not await provider.delete_object(container, object_path):
+                failed += 1  # blob delete 실패 → row 보존(다음 tick 재시도)
+                continue
+            # asset_links 는 FK ondelete=CASCADE 로 자동 삭제
+            result = await session.execute(
+                delete(Asset).where(Asset.id == asset_id, Asset.deleted_at.is_not(None))
+            )
+            await session.commit()
+            if result.rowcount:
                 deleted += 1
             else:
-                failed += 1  # blob delete 실패 → row 보존(다음 tick 재시도)
-        await session.commit()
+                logger.warning("assets-grace-hard-delete: asset %s restored during blob delete — row kept, blob gone", asset_id)
         return _ok({"hard_deleted": deleted, "blob_delete_failed": failed})
     except Exception as exc:
         logger.exception("assets-grace-hard-delete cron error: %s", exc)

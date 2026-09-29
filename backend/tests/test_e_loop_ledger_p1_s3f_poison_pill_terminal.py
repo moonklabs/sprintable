@@ -38,7 +38,7 @@ def _row(status="pending", retry_count=0, embedding_text="x"):
     return SimpleNamespace(
         id=uuid.uuid4(), status=status, embedding_text=embedding_text,
         embedding=None, model_version=None, dimension=None, error_message=None,
-        retry_count=retry_count,
+        retry_count=retry_count, content_hash="h",
     )
 
 
@@ -46,6 +46,8 @@ def _session(rows):
     s = AsyncMock()
     res = MagicMock()
     res.scalars.return_value.all.return_value = rows
+    # story #4405 — 기록 단계는 행마다 다시 읽는다(claim 순서대로).
+    res.scalar_one_or_none.side_effect = list(rows)
     s.execute = AsyncMock(return_value=res)
     return s
 
