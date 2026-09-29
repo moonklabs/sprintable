@@ -294,6 +294,12 @@ class SpendSummaryResponse(BaseModel):
     # null(지어내지 않는다).
     cap_reached_at: str | None
     start_command: StartCommandView | None = None
+    # story #4416 — the run's campaign for the «stop in Ads Manager» link (null without a run; campaign_id also null while
+    # the run has no campaign yet) and the ad channel (`conn.channel` as is: ads_sandbox · meta_ads · …).
+    campaign_id: str | None = None
+    ad_account_id: str | None = None
+    campaign_name: str | None = None
+    ad_channel: str | None = None
     snapshots: list[SpendSnapshotView]
 
 
@@ -310,12 +316,23 @@ async def get_ads_boost_spend_endpoint(
     이 파일 상단 모듈 docstring 참고)."""
     return await _get_ads_boost_spend_endpoint(
         org_id, gate_id, db=db, verified_org_id=verified_org_id,
-        resolved_locale=resolve_locale_from_request(locale, accept_language),
+        resolved_locale=resolve_locale_from_request(locale, accept_language), auth=_auth,
     )
+
+
+async def _caller_is_human(db: AsyncSession, auth: AuthContext | None, org_id: uuid.UUID) -> bool:
+    """story #4416 — fail-closed: an unresolvable caller counts as not human."""
+    if auth is None:
+        return False
+    try:
+        return (await resolve_member(auth, org_id, db)).type == "human"
+    except Exception:  # noqa: BLE001 — any failure to resolve hides the ids, it never fails the read
+        return False
 
 
 async def _get_ads_boost_spend_endpoint(
     org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID, resolved_locale: str,
+    auth: AuthContext | None = None,
 ) -> SpendSummaryResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
@@ -326,6 +343,7 @@ async def _get_ads_boost_spend_endpoint(
             status_code=404,
             detail={"code": "ADS_BOOST_GATE_NOT_FOUND", "message": t("ads_boost.gate_not_found", resolved_locale)},
         ) from exc
+    caller_is_human = await _caller_is_human(db, auth, org_id) if summary["run_status"] is not None else False
     return SpendSummaryResponse(
         gate_id=summary["gate_id"], sealed_ads_budget_minor=summary["sealed_ads_budget_minor"],
         sealed_ads_currency=summary["sealed_ads_currency"], captured_spend_minor=summary["captured_spend_minor"],
@@ -333,6 +351,12 @@ async def _get_ads_boost_spend_endpoint(
         initiated_by=summary["initiated_by"],
         start_command=StartCommandView(**summary["start_command"]) if summary.get("start_command") else None,
         cap_reached_at=summary["cap_reached_at"].isoformat() if summary["cap_reached_at"] else None,
+        # story #4416 — the ad account id is human-only in the channel-connection list (the agent list leaves it out on
+        # purpose), and this read is open to agents: the account and campaign ids (for the Ads Manager link on the human
+        # screen) go to people only. The name and channel are already visible to agents (start_command · agent list).
+        campaign_id=summary["campaign_id"] if caller_is_human else None,
+        ad_account_id=summary["ad_account_id"] if caller_is_human else None,
+        campaign_name=summary["campaign_name"], ad_channel=summary["ad_channel"],
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,

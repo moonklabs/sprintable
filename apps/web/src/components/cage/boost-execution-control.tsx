@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -59,6 +59,47 @@ interface StartCommand {
 // Meta may have created the campaign: retried only after the person confirms it does not exist in the ad account.
 const OUTCOME_UNKNOWN = 'ADS_BOOST_CREATE_OUTCOME_UNKNOWN';
 
+interface SpendData {
+  run_status: RunStatus | null;
+  initiated_by?: InitiatedBy | null;
+  start_command?: StartCommand | null;
+  // story #4416 — the run's campaign for «stop in Ads Manager» and the ad channel (null without a run)
+  campaign_id?: string | null;
+  ad_account_id?: string | null;
+  campaign_name?: string | null;
+  ad_channel?: string | null;
+}
+
+// story #4416 — start · retry · pause · resume are queued commands the worker runs later (every minute, transient failures
+// retried 2 → 4 → 8 → 16 min), so the card reads /spend until the state it waits for lands (PO A, 2026-09-29 01:01Z): 5 s for
+// the first 3 min, then 30 s, up to 35 min for a start; pause and resume wait 3 min for run_status. The cap is wall-clock
+// from the start of the wait; the tab being hidden stops the timer and a return reads once.
+type WaitOp = 'start' | 'pause' | 'resume';
+const POLL_FAST_MS = 5_000;
+const POLL_SLOW_MS = 30_000;
+const POLL_FAST_WINDOW_MS = 3 * 60_000;
+const POLL_CAP_MS: Record<WaitOp, number> = { start: 35 * 60_000, pause: 3 * 60_000, resume: 3 * 60_000 };
+const ACTIVE_COMMAND_STATUSES = new Set(['pending', 'in_progress']);
+
+function waitSettled(op: WaitOp, d: SpendData): boolean {
+  const run = d.run_status ?? null;
+  if (op === 'pause') return run === 'paused' || run === 'failed';
+  if (op === 'resume') return run === 'running' || run === 'failed';
+  if (run === 'running' || run === 'paused' || run === 'failed') return true;
+  // completed · failed · dead_letter · voided · blocked (or no command at all) — nothing left to wait for
+  return !d.start_command || !ACTIVE_COMMAND_STATUSES.has(d.start_command.status);
+}
+
+const ADS_MANAGER_CAMPAIGNS_URL = 'https://adsmanager.facebook.com/adsmanager/manage/campaigns';
+
+/** The Ads Manager page that opens the campaign (account + campaign), else the account, else its first screen. */
+export function adsManagerCampaignUrl(adAccountId: string | null | undefined, campaignId: string | null | undefined): string {
+  if (!adAccountId) return ADS_MANAGER_CAMPAIGNS_URL;
+  const query = new URLSearchParams({ act: adAccountId });
+  if (campaignId) query.set('selected_campaign_ids', campaignId);
+  return `${ADS_MANAGER_CAMPAIGNS_URL}?${query.toString()}`;
+}
+
 export function BoostExecutionControl({
   orgId, gateId, sealedAdsBudgetMinor, sealedAdsCurrency, sealedAdsStartsAt, sealedAdsEndsAt, sealedAdsObjective,
   onSpendRefreshed,
@@ -99,25 +140,104 @@ export function BoostExecutionControl({
   // 前/後 화면이 바이트 동일」 결함 처방. POST 응답값을 그대로 실어 즉시 렌더(재조회
   // 왕복 0 — 이미 응답에 다 있다).
   const [lastRefresh, setLastRefresh] = useState<{ spendMinor: number; capturedAt: string } | null>(null);
+  // story #4416 — what the card is waiting for (the waiting line) and the notice left when the cap passed first
+  const [waiting, setWaiting] = useState<WaitOp | null>(null);
+  const [capNotice, setCapNotice] = useState<WaitOp | null>(null);
+  const [runAd, setRunAd] = useState<Pick<SpendData, 'campaign_id' | 'ad_account_id' | 'campaign_name' | 'ad_channel'>>({});
+  const waitRef = useRef<{ op: WaitOp; startedAt: number } | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightRef = useRef(false);
+  const unmountedRef = useRef(false);
 
-  const load = () => {
-    fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/spend`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
-      .then((json: {
-        data?: { run_status: RunStatus | null; initiated_by?: InitiatedBy | null; start_command?: StartCommand | null };
-      }) => {
-        setRunStatus(json.data?.run_status ?? null);
-        setStartCommand(json.data?.start_command ?? null);
-        // story #3806 PR 9② — PR8(#4185) 착지 前엔 이 필드가 응답에 없어 항상
-        // undefined→null로 떨어진다(falsy-safe, 아래 렌더가 자동으로 숨는다).
-        setInitiatedBy(json.data?.initiated_by ?? null);
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
+  const clearTimer = () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
   };
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [orgId, gateId]);
+  const beginWait = (op: WaitOp) => {
+    clearTimer();
+    waitRef.current = { op, startedAt: Date.now() };
+    setWaiting(op);
+  };
+
+  const endWait = (cappedOp: WaitOp | null) => {
+    clearTimer();
+    waitRef.current = null;
+    setWaiting(null);
+    setCapNotice(cappedOp);
+  };
+
+  // The one place that decides the next read — after a response or a failed read alike — so the cap (wall-clock
+  // from the start of the wait) always ends it: a /spend that keeps failing leaves the notice instead of polling on.
+  const scheduleNext = () => {
+    clearTimer();
+    const wait = waitRef.current;
+    if (!wait || unmountedRef.current) return;
+    if (Date.now() - wait.startedAt >= POLL_CAP_MS[wait.op]) { endWait(wait.op); return; }
+    if (document.hidden) return;
+    const slow = Date.now() - wait.startedAt >= POLL_FAST_WINDOW_MS;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      if (inFlightRef.current) { scheduleNext(); return; } // the previous read has not come back: skip this tick
+      void load(false);
+    }, slow ? POLL_SLOW_MS : POLL_FAST_MS);
+  };
+
+  // After each /spend response: a start command still queued starts the wait on its own (mount · after «link existing
+  // campaign» · after a retry), the wait ends when its state lands, and the cap leaves a notice instead of polling on.
+  const afterSpend = (d: SpendData, mayBeginStartWait: boolean) => {
+    if (unmountedRef.current) return;
+    if (!waitRef.current && mayBeginStartWait && !waitSettled('start', d)) beginWait('start');
+    const wait = waitRef.current;
+    if (!wait) return;
+    if (waitSettled(wait.op, d)) { endWait(null); return; }
+    scheduleNext();
+  };
+
+  const load = async (mayBeginStartWait = true) => {
+    inFlightRef.current = true;
+    try {
+      const r = await fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/spend`);
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      const json = (await r.json()) as { data?: SpendData };
+      const d: SpendData = json.data ?? { run_status: null };
+      if (unmountedRef.current) return;
+      setRunStatus(d.run_status ?? null);
+      setStartCommand(d.start_command ?? null);
+      // story #3806 PR 9② — PR8(#4185) 착지 前엔 이 필드가 응답에 없어 항상
+      // undefined→null로 떨어진다(falsy-safe, 아래 렌더가 자동으로 숨는다).
+      setInitiatedBy(d.initiated_by ?? null);
+      setRunAd({
+        campaign_id: d.campaign_id ?? null, ad_account_id: d.ad_account_id ?? null,
+        campaign_name: d.campaign_name ?? null, ad_channel: d.ad_channel ?? null,
+      });
+      setCapNotice(null); // a cap notice lasts until the next /spend response
+      setLoaded(true);
+      afterSpend(d, mayBeginStartWait);
+    } catch {
+      if (unmountedRef.current) return;
+      setLoaded(true);
+      if (waitRef.current) scheduleNext(); // a failed read does not end the wait; the cap in scheduleNext still does
+    } finally {
+      inFlightRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    void load();
+    const onVisibility = () => {
+      if (document.hidden) { clearTimer(); return; }
+      if (waitRef.current && !inFlightRef.current) void load(false); // back in view: read once, then go on within the cap
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      unmountedRef.current = true;
+      clearTimer();
+      waitRef.current = null;
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, gateId]);
 
   const doAction = async (operation: 'start' | 'pause' | 'resume', onDone: () => void) => {
     setSubmitting(true);
@@ -129,7 +249,8 @@ export function BoostExecutionControl({
         return;
       }
       onDone();
-      load();
+      beginWait(operation);
+      void load();
     } catch {
       setActionError(t('boostExecutionActionError'));
     } finally {
@@ -161,7 +282,7 @@ export function BoostExecutionControl({
       if (json.data) {
         setLastRefresh({ spendMinor: json.data.spend_minor, capturedAt: json.data.captured_at });
       }
-      load();
+      void load();
       onSpendRefreshed?.();
     } catch {
       setSpendRefreshError(t('boostExecutionActionError'));
@@ -186,7 +307,8 @@ export function BoostExecutionControl({
       }
       setNeedsCheckOpen(false);
       setNeedsCheckConfirmed(false);
-      load();
+      beginWait('start');
+      void load();
     } catch {
       setActionError(t('boostExecutionActionError'));
     } finally {
@@ -214,7 +336,7 @@ export function BoostExecutionControl({
       };
       setAdoptOpen(false); // every answer closes the confirmation; the result line (if any) stays in the card
       if (json.data?.result === 'adopted') {
-        load();
+        void load(); // the start command is queued again: the wait begins from its state
       } else if (json.data?.result === 'already_linked') {
         setAdoptOutcome({ result: 'already_linked' });
       } else if (json.data?.result === 'budget_mismatch') {
@@ -266,6 +388,47 @@ export function BoostExecutionControl({
       ) : null}
     </div>
   );
+
+  // story #4416 — the line while waiting (the button words, or «trying again» while the start retries on its own)
+  const startRetrying = startCommand !== null && startCommand.failure_kind === 'transient'
+    && ACTIVE_COMMAND_STATUSES.has(startCommand.status);
+  const waitingLine = waiting ? (
+    <p className="text-xs text-muted-foreground" data-testid="boost-execution-waiting" role="status">
+      {waiting === 'start'
+        ? (startRetrying ? t('boostExecutionStartRetrying') : t('boostExecutionStarting'))
+        : waiting === 'pause' ? t('boostExecutionPausing') : t('boostExecutionResuming')}
+    </p>
+  ) : null;
+  // After the cap: start and resume only ask for a refresh; a pause that has not landed may still be spending, so it says so
+  // and, for Meta ads, names the campaign and links to stopping it in Ads Manager. The sandbox never spends (refresh only);
+  // an unknown channel keeps the money line (no name or link — the address is unknown).
+  const capNoticeBlock = capNotice === 'start' ? (
+    <p className="text-xs text-muted-foreground break-keep" data-testid="boost-execution-cap-notice">{t('boostExecutionStartCapNotice')}</p>
+  ) : capNotice === 'resume' ? (
+    <p className="text-xs text-muted-foreground break-keep" data-testid="boost-execution-cap-notice">{t('boostExecutionResumeCapNotice')}</p>
+  ) : capNotice === 'pause' ? (
+    runAd.ad_channel === 'ads_sandbox' ? (
+      <p className="text-xs text-muted-foreground break-keep" data-testid="boost-execution-cap-notice">{t('boostExecutionPauseCapSandbox')}</p>
+    ) : (
+      <div className="space-y-1 text-xs break-keep" data-testid="boost-execution-cap-notice">
+        <p className="text-foreground">{t('boostExecutionPauseCapSpend')}</p>
+        {runAd.ad_channel === 'meta_ads' && runAd.campaign_name ? (
+          <p className="text-muted-foreground" data-testid="boost-execution-cap-campaign">
+            {t('boostNeedsCheckCampaignToFind', { campaignName: runAd.campaign_name })}
+          </p>
+        ) : null}
+        {runAd.ad_channel === 'meta_ads' ? (
+          <a
+            href={adsManagerCampaignUrl(runAd.ad_account_id, runAd.campaign_id)}
+            target="_blank" rel="noopener noreferrer"
+            className="text-primary hover:underline" data-testid="boost-execution-ads-manager-link"
+          >
+            {t('boostExecutionStopInAdsManager')}<span aria-hidden="true"> ↗</span>
+          </a>
+        ) : null}
+      </div>
+    )
+  ) : null;
 
   const needsCheck = startCommand?.status === 'dead_letter' && startCommand.failure_kind === 'needs_check';
   if (needsCheck && runStatus !== 'running' && runStatus !== 'paused') {
@@ -413,8 +576,10 @@ export function BoostExecutionControl({
     return (
       <div className="space-y-2 break-keep" data-testid="boost-execution-control">
         {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
+        {waitingLine}
+        {capNoticeBlock}
         <Button
-          variant="outline" size="sm" disabled={beforeStart}
+          variant="outline" size="sm" disabled={beforeStart || waiting === 'start'}
           onClick={() => setStartConfirmOpen(true)} data-testid="boost-start-trigger"
         >
           {t('boostExecutionStart')}
@@ -473,13 +638,18 @@ export function BoostExecutionControl({
         </p>
       ) : null}
       {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
+      {waitingLine}
+      {capNoticeBlock}
       {runStatus === 'running' ? (
-        <Button variant="outline" size="sm" onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger">
+        <Button
+          variant="outline" size="sm" disabled={submitting || waiting === 'pause'}
+          onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger"
+        >
           {t('boostExecutionPause')}
         </Button>
       ) : (
         <Button
-          variant="outline" size="sm" disabled={submitting}
+          variant="outline" size="sm" disabled={submitting || waiting === 'resume'}
           onClick={() => void doAction('resume', () => {})} data-testid="boost-resume-trigger"
         >
           {submitting ? t('boostExecutionResuming') : t('boostExecutionResume')}
