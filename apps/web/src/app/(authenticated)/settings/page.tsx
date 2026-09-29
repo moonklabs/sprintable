@@ -741,7 +741,8 @@ export default function SettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="appearance">
               <Palette className="h-4 w-4" />
-              {t('tabAppearance')}
+              {/* story #4413 — 이 탭은 테마와 언어를 담는다(폰에서 언어를 바꾸는 유일한 자리) → 탭 이름은 «화면» · 사이드바 테마 토글 묶음은 tabAppearance(«테마») 그대로. */}
+              {t('tabDisplay')}
             </TabsTrigger>
             <TabsTrigger value="notifications">
               <Bell className="h-4 w-4" />

@@ -62,6 +62,17 @@ async function mount(node: React.ReactNode) {
   await act(async () => { root.render(wrap(node)); });
 }
 
+describe('SettingsPage — «화면» 탭(story #4413)', () => {
+  it('⭐테마 · 언어를 담는 탭 이름은 «화면»(폰에서 언어를 찾게) · 탭에 «테마» 이름은 없다 · 언어 카드가 그 탭에 있다', async () => {
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    const tabNames = Array.from(container.querySelectorAll('[role="tab"]')).map((el) => el.textContent?.trim());
+    expect(tabNames).toContain('화면');
+    expect(tabNames).not.toContain('테마');
+    expect(container.textContent).toContain(koMessages.settings.languageSettingsTitle);
+  });
+});
+
 describe('SettingsPage — 전역 법적 고지 푸터 (story #2865)', () => {
   it('profile이 아닌 탭(appearance)이 활성이어도 정책·사업자정보가 렌더된다', async () => {
     const { default: SettingsPage } = await import('./page');

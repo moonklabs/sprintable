@@ -12,6 +12,7 @@ import enMessages from '../../../messages/en.json';
 
 const { applyLocaleSpy } = vi.hoisted(() => ({ applyLocaleSpy: vi.fn() }));
 vi.mock('@/components/locale-switcher', async (orig) => ({ ...(await orig<object>()), applyLocale: applyLocaleSpy }));
+vi.mock('next-themes', () => ({ useTheme: () => ({ theme: 'light', setTheme: vi.fn(), resolvedTheme: 'light', systemTheme: 'light' }) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -81,5 +82,18 @@ describe('applyLocale(story #4413 · 사이드바 전환기와 한 원천)', () 
     } finally {
       Object.defineProperty(window, 'location', { value: original, configurable: true, writable: true });
     }
+  });
+});
+
+describe('사이드바 테마 토글 묶음 이름(story #4413)', () => {
+  it('탭 이름이 «화면»으로 바뀌어도 토글 묶음 aria-label은 «테마» 그대로(tabAppearance 키)', async () => {
+    const { ThemeToggle } = await import('@/components/nav/theme-toggle');
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ThemeToggle /></NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('테마');
   });
 });
