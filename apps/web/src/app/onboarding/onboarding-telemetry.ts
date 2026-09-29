@@ -17,7 +17,9 @@ export type OnboardingEvent =
   // config_copied(웹 경로 이벤트·verify rail 첫 상태)를 재사용하면 데스크톱
   // 복사가 웹 설정 복사로 섞여 들어가 ④가 가르려던 퍼널이 다시 흐려진다 —
   // 별도 이름.
-  | 'desktop_key_copied';
+  | 'desktop_key_copied'
+  // story #4427(PO 08:44Z · AC2 «문서 0») — 설정이 진행 중인 탭에서 문서 · 가이드 링크를 열 때(session_id = setup_id).
+  | 'desktop_doc_opened';
 
 // story(2026-08-02, 채용 흐름 텔레메트리 부재) — 두 흐름(onboarding/connect-step.tsx ·
 // recruiter STEP5)이 같은 이벤트 이름을 쏘게 되면서, 합계만 보고는 어느 흐름에서 온
@@ -27,6 +29,8 @@ export type OnboardingEvent =
 export type OnboardingFlow = 'onboarding' | 'recruit';
 
 interface EventPayload {
+  /** 이 흐름의 조인 키를 따로 쓸 때(데스크톱 설정 = setup_id). 없으면 wizard session id. */
+  session_id?: string;
   agent_id?: string | null;
   runtime?: string;
   failure_reason?: string;
@@ -54,7 +58,7 @@ export function getOnboardingSessionId(): string {
 function buildBody(event: OnboardingEvent, payload?: EventPayload): string {
   return JSON.stringify({
     event,
-    session_id: getOnboardingSessionId(),
+    session_id: payload?.session_id ?? getOnboardingSessionId(),
     agent_id: payload?.agent_id ?? null,
     runtime: payload?.runtime ?? 'claude-code',
     failure_reason: payload?.failure_reason ?? null,

@@ -23,12 +23,12 @@ def anyio_backend():
 
 # ─── 카탈로그 / PII 가드 ──────────────────────────────────────────────────────
 
-def test_event_catalog_has_canonical_24():
+def test_event_catalog_has_canonical_25():
     # story #4426 — 11 → 14: the three names the web was already sending (silent 422 before)
     # story #4424 — 14 → 17: the desktop setup's three server-written steps (code issued · confirmed · exchanged)
     # story #4424 — 17 → 24: two server marks (tools connected · first result) and the desktop app's five steps
-    # (`desktop_doc_opened` comes with the web page that sends it — 4427)
-    assert len(f.EVENT_CATALOG) == 24
+    # story #4427 — 24 → 25: the desktop setup page's desktop_doc_opened (the login hand is the shell's — PO 09:58Z)
+    assert len(f.EVENT_CATALOG) == 25
     assert "config_generated" in f.EVENT_CATALOG and "verified" in f.EVENT_CATALOG
     assert len(f.BE_EMIT_EVENTS) == 13
     assert len(f.FAILURE_REASONS) == 8

@@ -6493,7 +6493,93 @@
     "notarizationNotice": "For internal use before Apple notarization.",
     "gatekeeperNotice": "The first time you open it, right-click the file and choose \"Open\".",
     "downloadCta": "Download",
-    "unavailable": "Not available right now."
+    "unavailable": "Not available right now.",
+    "setup": {
+      "loading": "Loading setup",
+      "eyebrow": "Start on this computer",
+      "title": "Start your agents on this computer",
+      "lead": "Pick a recipe, and agents on this computer take its roles and start on the first task right away. Everything below is already filled in.",
+      "recipe": "Recipe",
+      "rolesTitle": "Roles and who takes them",
+      "found": "Agents found on this computer: {list}",
+      "whoHuman": "Person",
+      "whoAgent": "An agent on this computer",
+      "whoEither": "An agent on this computer · or me",
+      "me": "Me · {name}",
+      "onThisComputer": "{runtime} · on this computer",
+      "ownerFor": "Who takes {role}",
+      "humanNote": "Person roles don't get a new agent — whoever presses Start takes them. Roles open to either start with an agent — pick Me to take one yourself.",
+      "folder": "Working folder",
+      "change": "Change",
+      "folderHint": "Enter a folder inside your home folder",
+      "start": "Start",
+      "startNote": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task",
+      "startNoteWithMe": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task · you take {roles}",
+      "startedTitle": "Starting your agents",
+      "startedDoneTitle": "Your agents have started",
+      "startedBody": "Your agents keep working even if you close this window.",
+      "genericError": "This can't start right now — try again in a moment",
+      "blockedClaudeOption": "Claude Code · Blocked by your company's settings",
+      "blockedClaudeNote": "Claude Code can't connect to Sprintable on this computer because of your company's settings, so Codex takes these roles",
+      "notConnected": {
+        "title": "Sprintable hasn't connected to your agent yet",
+        "body": "Your agent started, but its connection to Sprintable tasks hasn't come up yet. If its terminal is asking whether to trust the working folder, answer that first. If it still doesn't connect, it can be your company's settings or your network — check with your IT admin that Sprintable is allowed and that your network isn't blocking it, then check again.",
+        "action": "Check again"
+      },
+      "failure": {
+        "copy": "Copy",
+        "copyAria": "Copy the {runtime} install command",
+        "no-agent": {
+          "title": "We couldn't find an agent on this computer",
+          "body": "Install and sign in to Claude Code or Codex, then look again. You can install them from the terminal.",
+          "action": "Look again"
+        },
+        "not-admin": {
+          "title": "You need to be an org admin to create agents",
+          "body": "This account isn't an admin of this organization. Ask an admin to start from this screen, or get admin rights and open it again.",
+          "action": "Check again"
+        },
+        "agent-limit": {
+          "title": "This is more agents than your org can add",
+          "body": "Remove agents you don't use, or pick a recipe with fewer roles.",
+          "action": "Choose another recipe",
+          "bodyWithCounts": "This recipe needs {need, plural, one {# agent} other {# agents}}, but you can add {left} more.",
+          "manage": "Manage agents"
+        },
+        "expired": {
+          "title": "This setup has expired",
+          "body": "For security, this page is only open for a short time. Start again from the app to open it again.",
+          "action": "Start again in the app"
+        },
+        "offline": {
+          "title": "You're offline",
+          "body": "Check your internet connection and try again. Your recipe and settings are kept.",
+          "action": "Try again"
+        },
+        "managed": {
+          "title": "Your company's settings block this connection",
+          "body": "Your company manages the agent settings on this computer, so agents here can't receive Sprintable tasks. Ask your IT admin to allow Sprintable, then check again.",
+          "action": "Check again"
+        }
+      },
+      "direct": {
+        "title": "Open this in the desktop app",
+        "body": "This setup can only be done in the Sprintable app on the computer where your agents run.",
+        "action": "Open the app"
+      },
+      "recipeRoles": "{n, plural, one {# role} other {# roles}} · {roles}",
+      "stepReadyRunning": "Getting your agents ready",
+      "stepReadyDone": "Your agents are ready",
+      "stepHandedRunning": "Handing over the first task",
+      "stepHandedDone": "First task handed over",
+      "stepHandedDetail": "Handing «{task}» to the {role} agent",
+      "stepResultRunning": "Waiting for the first result",
+      "stepResultDone": "The first result is in",
+      "workdirFallback": "We couldn't use the folder you chose, so we started in the default folder (~/Sprintable/{recipe}) — the working folder needs to be a folder inside your home folder",
+      "trustHint": "When an agent starts for the first time, it may ask whether to trust the working folder. If it does, select that agent in the «Agents on this computer» bar at the bottom of the window and answer in its terminal — setup continues once you do.",
+      "seeResult": "See the result",
+      "seeResultReason": "Once the result is in, this takes you to the task"
+    }
   },
   "recipePreset": {
     "blogArticleName": "Blog post",

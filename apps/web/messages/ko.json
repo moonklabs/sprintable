@@ -6493,7 +6493,93 @@
     "notarizationNotice": "Apple 공증 전 내부용이에요.",
     "gatekeeperNotice": "처음 열 때는 파일을 우클릭한 뒤 「열기」를 선택하세요.",
     "downloadCta": "다운로드",
-    "unavailable": "지금은 받을 수 없어요."
+    "unavailable": "지금은 받을 수 없어요.",
+    "setup": {
+      "loading": "설정을 불러오고 있어요",
+      "eyebrow": "이 컴퓨터에서 시작하기",
+      "title": "에이전트를 이 컴퓨터에서 시작해요",
+      "lead": "레시피를 고르면 이 컴퓨터의 에이전트가 역할을 맡아 바로 첫 일감을 시작해요. 아래는 모두 기본값이 채워져 있어요.",
+      "recipe": "레시피",
+      "rolesTitle": "역할과 맡는 쪽",
+      "found": "이 컴퓨터에서 찾은 에이전트: {list}",
+      "whoHuman": "사람",
+      "whoAgent": "이 컴퓨터의 에이전트",
+      "whoEither": "이 컴퓨터의 에이전트 · 또는 나",
+      "me": "나 · {name}",
+      "onThisComputer": "{runtime} · 이 컴퓨터에 있음",
+      "ownerFor": "{role} 맡는 쪽",
+      "humanNote": "사람 역할은 새 에이전트를 만들지 않고 «시작»을 누른 사람이 맡아요. 에이전트와 사람 둘 다 되는 역할은 에이전트가 기본이고, 목록에서 «나»를 고르면 직접 맡을 수 있어요.",
+      "folder": "작업 폴더",
+      "change": "바꾸기",
+      "folderHint": "홈 폴더 안의 한 폴더를 적어 주세요",
+      "start": "시작",
+      "startNote": "에이전트 {n}개를 이 컴퓨터에 만들고 첫 일감을 맡겨요",
+      "startNoteWithMe": "에이전트 {n}개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · {roles}{josa} 내가 맡아요",
+      "startedTitle": "에이전트를 시작하고 있어요",
+      "startedDoneTitle": "에이전트를 시작했어요",
+      "startedBody": "창을 닫아도 에이전트는 계속 일해요.",
+      "genericError": "지금은 시작할 수 없어요 — 잠시 뒤 다시 눌러 주세요",
+      "blockedClaudeOption": "Claude Code · 회사 설정으로 쓸 수 없어요",
+      "blockedClaudeNote": "Claude Code는 회사 설정 때문에 이 컴퓨터에서 Sprintable에 연결할 수 없어 Codex가 맡아요",
+      "notConnected": {
+        "title": "에이전트에 Sprintable이 아직 연결되지 않았어요",
+        "body": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. 터미널에서 작업 폴더를 믿을지 묻고 있다면 먼저 답해 주세요. 답했는데도 안 붙으면 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
+        "action": "다시 확인"
+      },
+      "failure": {
+        "copy": "복사",
+        "copyAria": "{runtime} 설치 명령 복사",
+        "no-agent": {
+          "title": "이 컴퓨터에서 에이전트를 찾지 못했어요",
+          "body": "Claude Code나 Codex를 설치하고 로그인한 뒤 다시 찾아 주세요. 터미널에서 설치할 수 있어요.",
+          "action": "다시 찾기"
+        },
+        "not-admin": {
+          "title": "에이전트를 만들려면 조직 관리자여야 해요",
+          "body": "지금 계정은 이 조직의 관리자가 아니에요. 관리자에게 이 화면에서 시작해 달라고 요청하거나, 관리자 권한을 받은 뒤 다시 열어 주세요.",
+          "action": "다시 확인"
+        },
+        "agent-limit": {
+          "title": "이 조직에서 만들 수 있는 에이전트 수를 넘어요",
+          "body": "쓰지 않는 에이전트를 정리하거나 역할이 적은 레시피를 골라 주세요.",
+          "action": "레시피 다시 고르기",
+          "bodyWithCounts": "이 레시피는 에이전트 {need}개가 필요한데, 지금 {left}개만 더 만들 수 있어요.",
+          "manage": "에이전트 정리하기"
+        },
+        "expired": {
+          "title": "설정 시간이 지났어요",
+          "body": "보안을 위해 이 설정 화면은 잠깐만 열려 있어요. 앱에서 다시 시작하면 새로 열려요.",
+          "action": "앱에서 다시 시작"
+        },
+        "offline": {
+          "title": "연결이 끊겼어요",
+          "body": "인터넷 연결을 확인한 뒤 다시 시도해 주세요. 고른 레시피와 설정은 그대로 남아 있어요.",
+          "action": "다시 시도"
+        },
+        "managed": {
+          "title": "회사 설정 때문에 이 컴퓨터에서는 연결할 수 없어요",
+          "body": "회사가 이 컴퓨터의 에이전트 설정을 관리하고 있어서, 여기 에이전트가 Sprintable 일감을 받을 수 없어요. 회사 IT 관리자에게 Sprintable 연결을 허용해 달라고 요청한 뒤 다시 확인해 주세요.",
+          "action": "다시 확인"
+        }
+      },
+      "direct": {
+        "title": "데스크톱 앱에서 열어 주세요",
+        "body": "이 설정은 에이전트가 있는 컴퓨터의 Sprintable 앱에서만 할 수 있어요.",
+        "action": "앱 열기"
+      },
+      "recipeRoles": "역할 {n} · {roles}",
+      "stepReadyRunning": "에이전트를 준비하고 있어요",
+      "stepReadyDone": "에이전트를 준비했어요",
+      "stepHandedRunning": "첫 일감을 맡기고 있어요",
+      "stepHandedDone": "첫 일감을 맡겼어요",
+      "stepHandedDetail": "«{task}»{josa} {role} 에이전트에게 건네는 중이에요",
+      "stepResultRunning": "첫 결과를 기다려요",
+      "stepResultDone": "첫 결과가 나왔어요",
+      "workdirFallback": "고른 폴더를 쓸 수 없어 기본 폴더(~/Sprintable/{recipe})에서 시작했어요 — 작업 폴더는 홈 폴더 안의 한 폴더여야 해요",
+      "trustHint": "처음 켤 때 에이전트가 작업 폴더를 믿을지 물을 수 있어요. 그러면 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널에서 답해 주세요 — 답하면 이어서 진행돼요.",
+      "seeResult": "결과 보기",
+      "seeResultReason": "결과가 나오면 눌러서 일감으로 가요"
+    }
   },
   "recipePreset": {
     "blogArticleName": "블로그 글",
