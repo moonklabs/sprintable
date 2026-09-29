@@ -162,11 +162,11 @@ _ROLES = {"project_id": str(PROJ), "recipe_id": str(RECIPE), "roles": [{"role": 
 
 
 async def _confirm(c, code: str, who: uuid.UUID = OWNER, org: uuid.UUID = ORG, body: dict | None = None):
-    return await c.post(f"/api/v2/desktop/setup-codes/{code}/confirm", json=body or _ROLES, headers=_person(who, org))
+    return await c.post("/api/v2/desktop/setup-codes/confirm", json={**(body or _ROLES), "code": code}, headers=_person(who, org))
 
 
 async def _exchange(c, code: str, verifier: str):
-    return await c.post(f"/api/v2/desktop/setup-codes/{code}/exchange", json={"verifier": verifier})
+    return await c.post("/api/v2/desktop/setup-codes/exchange", json={"code": code, "verifier": verifier})
 
 
 async def _counts() -> dict:
@@ -282,7 +282,7 @@ async def test_an_agent_key_cannot_confirm(world):
         assert (await _confirm(c, code)).status_code == 200
         key = (await _exchange(c, code, verifier)).json()["agents"][0]["api_key"]
         code2, _ = await _code(c, "d4424 second")
-        r = await c.post(f"/api/v2/desktop/setup-codes/{code2}/confirm", json=_ROLES, headers={"Authorization": f"Bearer {key}"})
+        r = await c.post("/api/v2/desktop/setup-codes/confirm", json={**_ROLES, "code": code2}, headers={"Authorization": f"Bearer {key}"})
         assert (r.status_code, r.json()["error"]["code"]) == (403, "person_session_required"), r.text
         r = await c.delete(f"/api/v2/desktop/setups/{uuid.uuid4()}", headers={"Authorization": f"Bearer {key}"})
         assert (r.status_code, r.json()["error"]["code"]) == (403, "person_session_required"), r.text
@@ -510,3 +510,57 @@ async def test_no_mcp_address_no_keys(world, monkeypatch):
         monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.d4424.test/mcp")
         r = await _exchange(c, code, verifier)
         assert r.status_code == 200 and r.json()["mcp_url"] == "https://mcp.d4424.test/mcp"
+
+
+@pytest.mark.anyio
+async def test_the_setup_code_is_in_no_url_and_no_log(world, caplog):
+    """Qadir 4825 (PO 09:45Z) — the code travels in bodies only: no request URL of the whole flow carries it, and nothing
+    logged while it runs does (incl. a refused and a failing request, whose paths the error handler logs)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    caplog.set_level(logging.DEBUG)
+    urls: list[str] = []
+
+    async def record(request):
+        urls.append(str(request.url))
+
+    async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
+                           event_hooks={"request": [record]}) as c:
+        code, verifier = await _code(c)
+        other, _ = _pkce()
+        assert (await _exchange(c, code, other)).status_code == 403  # refused
+        assert (await _exchange(c, code, verifier)).status_code == 202
+        assert (await _confirm(c, code)).status_code == 200
+        assert (await _exchange(c, code, verifier)).status_code == 200
+        assert (await _exchange(c, code, verifier)).status_code == 410
+    assert urls and not [u for u in urls if code in u], urls
+    assert code not in caplog.text
+
+
+@pytest.mark.anyio
+async def test_no_api_address_no_keys(world, monkeypatch):
+    """PO 09:45Z — FASTAPI_URL unset used to fall back to localhost silently; like a missing MCP address, refused before any key."""
+    async with _client() as c:
+        code, verifier = await _code(c)
+        assert (await _confirm(c, code)).status_code == 200
+        keys_before = (await _counts())["keys"]
+        monkeypatch.delenv("FASTAPI_URL")
+        r = await _exchange(c, code, verifier)
+        assert (r.status_code, r.json()["error"]["code"]) == (503, "service_unavailable")
+        assert (await _counts())["keys"] == keys_before
+        monkeypatch.setenv("FASTAPI_URL", "https://api.d4424.test")
+        r = await _exchange(c, code, verifier)
+        assert r.status_code == 200 and r.json()["api_url"] == "https://api.d4424.test"
+
+
+def test_no_desktop_route_takes_a_code_in_its_path():
+    """The class guard (Qadir 4825): whatever a client does, no /api/v2/desktop route can put a setup code in a URL."""
+    import re
+
+    from app.main import app
+
+    desktop = [r.path for r in app.routes if getattr(r, "path", "").startswith("/api/v2/desktop")]
+    assert desktop, "the desktop routes are registered"
+    assert [p for p in desktop if re.search(r"\{[^}]*code[^}]*\}", p)] == [], desktop

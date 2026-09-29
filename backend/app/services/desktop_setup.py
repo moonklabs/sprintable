@@ -253,7 +253,8 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
 
     api_url, mcp_url = exchange_urls()
     if not mcp_url or not api_url:
-        # no address to hand over: an agent would run without its tools — refuse before any key exists (PO 08:31Z ③)
+        # no configured address to hand over: an agent would run without its tools, or against a wrong server — refuse before
+        # any key exists (PO 08:31Z ③ · 09:45Z)
         raise DesktopSetupError("service_unavailable", "the MCP or API address is not configured")
 
     # one key per new agent (a role's agent appears once per stage in `members`)
@@ -371,8 +372,13 @@ async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UU
     }
 
 
-def exchange_urls() -> tuple[str, str | None]:
-    """The addresses the desktop app writes into its agents' config (not secrets): the API and the hosted MCP."""
+def exchange_urls() -> tuple[str | None, str | None]:
+    """The addresses the desktop app writes into its agents' config (not secrets): the API and the hosted MCP. None when the
+    deployment did not set one — never the local fallback `resolve_backend_direct_url` gives other callers (Qadir 4825: an
+    agent would quietly run against localhost)."""
+    import os
+
     from app.services.agent_onboarding_config import resolve_backend_direct_url, resolve_mcp_public_url
 
-    return resolve_backend_direct_url(), resolve_mcp_public_url()
+    api = resolve_backend_direct_url() if os.environ.get("FASTAPI_URL", "").strip() else None
+    return api, resolve_mcp_public_url()

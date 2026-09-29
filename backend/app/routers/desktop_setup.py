@@ -88,7 +88,14 @@ class RoleIn(BaseModel):
     runtime: Literal["claude", "codex"]
 
 
+# Qadir 4825 (PO 09:45Z) — the setup code travels in bodies only, never in a URL: a path is written to the access log and the
+# error handler's log (the exchange polls for ten minutes, a line each time), and a code plus any org's admin session could
+# bind someone else's desktop to that org. So neither route has the code in its path.
+SETUP_CODE_FIELD = Field(min_length=20, max_length=128)
+
+
 class ConfirmRequest(BaseModel):
+    code: str = SETUP_CODE_FIELD
     project_id: uuid.UUID
     recipe_id: uuid.UUID
     roles: list[RoleIn] = Field(max_length=50)
@@ -116,9 +123,8 @@ class ConfirmResponse(BaseModel):
     members: list[ConfirmedMember]
 
 
-@router.post("/setup-codes/{code}/confirm", response_model=ConfirmResponse)
+@router.post("/setup-codes/confirm", response_model=ConfirmResponse)
 async def post_confirm(
-    code: str,
     body: ConfirmRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -127,7 +133,7 @@ async def post_confirm(
     user_id = _human_only(auth)
     try:
         setup_id, members = await confirm_setup(
-            db, code=code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
+            db, code=body.code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
             roles=[RoleChoice(role=r.role, runtime=r.runtime) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
         )
     except DesktopSetupError as e:
@@ -139,15 +145,16 @@ async def post_confirm(
 
 
 class ExchangeRequest(BaseModel):
+    code: str = SETUP_CODE_FIELD
     verifier: str = Field(min_length=43, max_length=128)
 
 
-@router.post("/setup-codes/{code}/exchange")
+@router.post("/setup-codes/exchange")
 @limiter.limit("60/minute")  # the app asks every 1.5 s while the person confirms
-async def post_exchange(request: Request, code: str, body: ExchangeRequest, db: AsyncSession = Depends(get_db)):
+async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSession = Depends(get_db)):
     headers = {"Cache-Control": "no-store"}
     try:
-        done = await exchange_setup(db, code=code, verifier=body.verifier)
+        done = await exchange_setup(db, code=body.code, verifier=body.verifier)
     except DesktopSetupError as e:
         await db.rollback()  # returned, not raised: nothing may be committed on the way out
         err = _error(e)
