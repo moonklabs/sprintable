@@ -137,3 +137,32 @@ async def test_ad_channel_is_the_connection_channel_as_is(channel):
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def test_an_agent_reads_the_name_and_channel_but_not_the_account_or_campaign_ids():
+    """The ad account id is human-only in the channel-connection list (the agent list leaves it out on purpose); /spend is
+    open to agents, so the ids for the Ads Manager link go to people only."""
+    from app.main import app
+    from tests.test_e4fc29fa_site_post_orchestration import _seed_agent, _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        await _set_ad_connection(Session, gate_id, account_id="1234567890", channel="meta_ads")
+        async with Session() as s:
+            agent_id = await _seed_agent(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend")
+        assert r.status_code == 200, r.text  # the read itself stays open to agents
+        body = r.json()
+        assert body["run_status"] == "running"
+        assert body["campaign_id"] is None and body["ad_account_id"] is None
+        assert body["campaign_name"] == await _expected_name(Session, gate_id)
+        assert body["ad_channel"] == "meta_ads"
+
+        human = await _spend(app, Session, org_id, owner_id, gate_id)  # the same read by a person carries both
+        assert human["campaign_id"] and human["ad_account_id"] == "1234567890"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
