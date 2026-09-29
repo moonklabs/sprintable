@@ -232,6 +232,37 @@ describe('[SID:4416] BoostExecutionControl — reads /spend until the queued com
     expect($('boost-execution-cap-notice')?.textContent).toBe(cage.boostExecutionResumeCapNotice);
   });
 
+  it('pause and resume buttons are locked while their command waits, and unlock when the wait ends', async () => {
+    spendNow = { run_status: 'running', start_command: startCommand('completed'), ...RUN_AD };
+    await mount();
+    expect(($('boost-pause-trigger') as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { $('boost-pause-trigger')!.click(); });
+    await act(async () => { $('boost-pause-confirm')!.click(); });
+    await settle();
+    expect(($('boost-pause-trigger') as HTMLButtonElement).disabled).toBe(true); // no second pause while it waits
+    await settle(3 * 60_000);
+    expect(($('boost-pause-trigger') as HTMLButtonElement).disabled).toBe(false); // the cap ended the wait
+
+    spendNow = { ...spendNow, run_status: 'paused' };
+    await act(async () => { $('boost-spend-refresh-trigger')!.click(); });
+    await settle();
+    await act(async () => { $('boost-resume-trigger')!.click(); });
+    await settle();
+    expect(($('boost-resume-trigger') as HTMLButtonElement).disabled).toBe(true);
+    spendNow = { ...spendNow, run_status: 'running' };
+    await settle(5_000);
+    expect(($('boost-pause-trigger') as HTMLButtonElement).disabled).toBe(false); // resumed: the wait is over
+  });
+
+  it('cap notices keep Korean words whole when they wrap (break-keep)', async () => {
+    spendNow = { run_status: 'running', start_command: startCommand('completed'), ...RUN_AD };
+    await mount();
+    await act(async () => { $('boost-pause-trigger')!.click(); });
+    await act(async () => { $('boost-pause-confirm')!.click(); });
+    await settle(3 * 60_000);
+    expect($('boost-execution-cap-notice')!.className).toContain('break-keep');
+  });
+
   describe('pause after 3 min — the notice by ad channel', () => {
     async function pauseAndWaitOut(adChannel: string | null) {
       spendNow = { run_status: 'running', start_command: startCommand('completed'), ...RUN_AD, ad_channel: adChannel };

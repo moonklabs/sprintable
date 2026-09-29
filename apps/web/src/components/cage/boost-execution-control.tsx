@@ -400,14 +400,14 @@ export function BoostExecutionControl({
   // and, for Meta ads, names the campaign and links to stopping it in Ads Manager. The sandbox never spends (refresh only);
   // an unknown channel keeps the money line (no name or link — the address is unknown).
   const capNoticeBlock = capNotice === 'start' ? (
-    <p className="text-xs text-muted-foreground" data-testid="boost-execution-cap-notice">{t('boostExecutionStartCapNotice')}</p>
+    <p className="text-xs text-muted-foreground break-keep" data-testid="boost-execution-cap-notice">{t('boostExecutionStartCapNotice')}</p>
   ) : capNotice === 'resume' ? (
-    <p className="text-xs text-muted-foreground" data-testid="boost-execution-cap-notice">{t('boostExecutionResumeCapNotice')}</p>
+    <p className="text-xs text-muted-foreground break-keep" data-testid="boost-execution-cap-notice">{t('boostExecutionResumeCapNotice')}</p>
   ) : capNotice === 'pause' ? (
     runAd.ad_channel === 'ads_sandbox' ? (
-      <p className="text-xs text-muted-foreground" data-testid="boost-execution-cap-notice">{t('boostExecutionPauseCapSandbox')}</p>
+      <p className="text-xs text-muted-foreground break-keep" data-testid="boost-execution-cap-notice">{t('boostExecutionPauseCapSandbox')}</p>
     ) : (
-      <div className="space-y-1 text-xs" data-testid="boost-execution-cap-notice">
+      <div className="space-y-1 text-xs break-keep" data-testid="boost-execution-cap-notice">
         <p className="text-foreground">{t('boostExecutionPauseCapSpend')}</p>
         {runAd.ad_channel === 'meta_ads' && runAd.campaign_name ? (
           <p className="text-muted-foreground" data-testid="boost-execution-cap-campaign">
@@ -638,12 +638,15 @@ export function BoostExecutionControl({
       {waitingLine}
       {capNoticeBlock}
       {runStatus === 'running' ? (
-        <Button variant="outline" size="sm" onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger">
+        <Button
+          variant="outline" size="sm" disabled={waiting === 'pause'}
+          onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger"
+        >
           {t('boostExecutionPause')}
         </Button>
       ) : (
         <Button
-          variant="outline" size="sm" disabled={submitting}
+          variant="outline" size="sm" disabled={submitting || waiting === 'resume'}
           onClick={() => void doAction('resume', () => {})} data-testid="boost-resume-trigger"
         >
           {submitting ? t('boostExecutionResuming') : t('boostExecutionResume')}
