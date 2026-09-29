@@ -3902,9 +3902,9 @@ async def apply_recipe_role_bindings(
     from app.models.channel_connection import ChannelConnection
     from app.models.event_definition import EventDefinition
     from app.models.org_generation_connector import OrgGenerationConnector
-    from app.models.recipe_role_binding import RecipeRoleBinding
     from app.models.team import TeamMember
     from app.services.project_auth import require_project_access
+    from app.services.recipe_role_bindings import stage_target, upsert_role_binding
 
     if body.project_id is not None:
         # story #2697 SSOT — require_project_access로 수렴(raw inline has_project_access+raise
@@ -3951,10 +3951,9 @@ async def apply_recipe_role_bindings(
     # "agent" = 오늘 계약 그대로).
     # story #4101(alembic 0391) — 두 값 판별을 세 값으로 확장. "agent"가 기본(무선언 stage
     # 회귀 0)은 그대로.
+    # story #4424 — the rule and the upsert below live in services/recipe_role_bindings.py (shared with the desktop setup).
     def _stage_target(stage: str) -> str:
-        capability = (definition.stage_metadata.get(stage) or {}).get("capability")
-        target = (capability or {}).get("target")
-        return target if target in ("channel_connection", "generation_connector") else "agent"
+        return stage_target(definition, stage)
 
     channel_stage_values = {s: v for s, v in body.role_mapping.items() if _stage_target(s) == "channel_connection"}
     generation_stage_values = {
@@ -4118,44 +4117,12 @@ async def apply_recipe_role_bindings(
     except Exception:
         pass
 
-    # SQL NULL은 `= NULL`로 안 잡힌다(IS NULL 필요) — project_id 스코프 절을 조건부로 구성.
-    project_scope_clause = (
-        RecipeRoleBinding.project_id.is_(None) if body.project_id is None
-        else RecipeRoleBinding.project_id == body.project_id
-    )
-
     upserted = 0
     for stage, value_str in body.role_mapping.items():
-        value_id = uuid.UUID(value_str)
-        target = _stage_target(stage)
-        col_agent = value_id if target == "agent" else None
-        col_channel = value_id if target == "channel_connection" else None
-        col_generation = value_id if target == "generation_connector" else None
-        existing = (await db.execute(
-            select(RecipeRoleBinding).where(
-                RecipeRoleBinding.org_id == org_id,
-                project_scope_clause,
-                RecipeRoleBinding.event_definition_key == definition.key,
-                RecipeRoleBinding.stage == stage,
-            )
-        )).scalar_one_or_none()
-        if existing is not None:
-            # story #4090/#4101 — 재-apply가 같은 stage를 다른 target kind로 바꿀 수도 있다
-            # (예: 정의 개정으로 capability가 붙거나 빠짐) — 세 컬럼 다 명시로 재설정해야
-            # CHECK(ck_recipe_role_bindings_exactly_one_target)가 안 걸린다(한쪽만
-            # setattr하면 구 값이 다른 컬럼에 남아 XOR 위반).
-            existing.agent_member_id = col_agent
-            existing.channel_connection_id = col_channel
-            existing.generation_connector_id = col_generation
-        else:
-            db.add(RecipeRoleBinding(
-                org_id=org_id, project_id=body.project_id, event_definition_key=definition.key,
-                stage=stage,
-                agent_member_id=col_agent,
-                channel_connection_id=col_channel,
-                generation_connector_id=col_generation,
-                created_by=actor_id,
-            ))
+        await upsert_role_binding(
+            db, org_id=org_id, project_id=body.project_id, definition_key=definition.key, stage=stage,
+            target=_stage_target(stage), value_id=uuid.UUID(value_str), actor_id=actor_id,
+        )
         upserted += 1
 
     await db.commit()

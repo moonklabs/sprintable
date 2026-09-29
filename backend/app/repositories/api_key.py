@@ -71,6 +71,7 @@ class ApiKeyRepository:
         scope: list[str] | None = None,
         *,
         expires_at: datetime | None,
+        desktop_setup_id: uuid.UUID | None = None,
     ) -> tuple[ApiKey, str]:
         """story #2838(PO AC 정정 2026-08-20) — expires_at은 **기본값 없는 필수 kwarg**. 최초
         sentinel(_UNSET) 안은 이 repo가 인자를 안 받은 호출부에 옛 90일 기본값을 여전히
@@ -86,6 +87,7 @@ class ApiKeyRepository:
             key_hash=key_hash,
             scope=scope,
             expires_at=expires_at,
+            desktop_setup_id=desktop_setup_id,
         )
         self.session.add(key)
         await self.session.flush()
