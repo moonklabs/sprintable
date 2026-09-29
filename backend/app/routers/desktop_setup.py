@@ -239,7 +239,13 @@ async def delete_setup(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
+    from app.services.project_auth import is_org_owner_or_admin
+
     user_id = _human_only(auth)
+    # a setup is an org-level record (who connected which device): the org owner/admin gate is its guard, checked here at the
+    # route and again in the service; the lookup below is scoped to this org, so another org's id is «not found»
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise _error(DesktopSetupError("not_org_admin"))
     try:
         n = await revoke_setup(db, setup_id=setup_id, user_id=user_id, org_id=org_id)
     except DesktopSetupError as e:
