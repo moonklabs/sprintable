@@ -23,6 +23,7 @@ from app.models.api_key import ApiKey
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.project import OrgMember
 from app.models.team import TeamMember
+from app.services.member_resolver import resolve_member_display_name
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ws-chat", "Organization"])
@@ -33,9 +34,10 @@ _rooms: dict[str, set[WebSocket]] = defaultdict(set)
 
 @dataclass(frozen=True)
 class _CallerIdentity:
-    """#2216: owner-floor 휴먼(team_members뷰에 행 없음)용 최소 caller 신원 — 이 라우터가
-    실제로 쓰는 필드(.id/.org_id)만 담는다. TeamMember와 duck-type 호환(caller.id/caller.org_id
-    로만 소비됨, 아래 ws_chat_hub 참조)."""
+    """#2216: owner-floor 휴먼(team_members뷰에 행 없음)용 최소 caller 신원 — .id/.org_id만 담는다.
+    TeamMember와 duck-type 호환(caller.id/caller.org_id로만 소비됨). story #4418 — 방송의 보낸 사람
+    이름은 caller 객체에서 읽지 않고 `resolve_member_display_name`으로 해소한다(이 객체엔 이름이 없어
+    `caller.name`이 AttributeError로 방송을 죽이고 보낸 사람 소켓까지 끊었다)."""
     id: uuid.UUID
     org_id: uuid.UUID
 
@@ -163,7 +165,8 @@ async def _broadcast(room_key: str, payload: str) -> None:
     for ws in list(_rooms[room_key]):
         try:
             await ws.send_text(payload)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — one receiver failing must not stop the others (story #4418)
+            logger.warning("ws_chat: broadcast send failed room=%s error=%s", room_key, type(exc).__name__)
             dead.add(ws)
     _rooms[room_key] -= dead
     if not _rooms[room_key]:
@@ -224,11 +227,17 @@ async def ws_chat_hub(
         _rooms[room_key].discard(websocket)
         return
 
-    conv_id = await _get_or_create_conversation(
-        agent_id, caller.id, agent_member.org_id, agent_member.project_id
-    )
-
     try:
+        # story #4418 (Qadir 01a0eb42) — inside the try: if either fails, the `finally` below takes the socket out of the room
+        # (before, a failure here left it registered).
+        conv_id = await _get_or_create_conversation(
+            agent_id, caller.id, agent_member.org_id, agent_member.project_id
+        )
+        # story #4418 — the sender's name once per connection, the same way for every caller kind: TeamMember.name, or the
+        # owner-floor person's users.display_name, or None (#3747 contract — no email, no id string).
+        async with async_session_factory() as db:
+            sender_name = await resolve_member_display_name(caller.id, caller.org_id, db)
+
         while True:
             raw = await websocket.receive_text()
             # 평문 또는 {"content": "..."} 모두 허용
@@ -255,11 +264,22 @@ async def ws_chat_hub(
                 "id": str(msg.id),
                 "conversation_id": str(conv_id),
                 "sender_id": str(caller.id),
-                "sender_name": caller.name,
+                "sender_name": sender_name,
                 "content": content,
                 "ts": msg.created_at.isoformat(),
             })
-            await _broadcast(room_key, payload)
+            # story #4418 — the message is saved; a failure while broadcasting it must not close the sender's socket
+            # (before, the exception left the handler and the connection dropped on every message). It is logged, and
+            # the sender still gets the saved message back as its confirmation.
+            try:
+                await _broadcast(room_key, payload)
+            except WebSocketDisconnect:
+                raise  # a disconnect is not a broadcast failure: the handler's own cleanup below (Qadir 01a0eb42)
+            except Exception:  # noqa: BLE001
+                logger.error(
+                    "ws_chat: broadcast failed after save agent_id=%s message_id=%s", agent_id, msg.id, exc_info=True,
+                )
+                await websocket.send_text(payload)
 
     except WebSocketDisconnect:
         logger.info("ws_chat: disconnected agent_id=%s caller=%s", agent_id, caller.id)
