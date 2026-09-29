@@ -227,15 +227,17 @@ async def ws_chat_hub(
         _rooms[room_key].discard(websocket)
         return
 
-    conv_id = await _get_or_create_conversation(
-        agent_id, caller.id, agent_member.org_id, agent_member.project_id
-    )
-    # story #4418 — the sender's name once per connection, the same way for every caller kind: TeamMember.name, or the
-    # owner-floor person's users.display_name, or None (#3747 contract — no email, no id string).
-    async with async_session_factory() as db:
-        sender_name = await resolve_member_display_name(caller.id, caller.org_id, db)
-
     try:
+        # story #4418 (Qadir 01a0eb42) — inside the try: if either fails, the `finally` below takes the socket out of the room
+        # (before, a failure here left it registered).
+        conv_id = await _get_or_create_conversation(
+            agent_id, caller.id, agent_member.org_id, agent_member.project_id
+        )
+        # story #4418 — the sender's name once per connection, the same way for every caller kind: TeamMember.name, or the
+        # owner-floor person's users.display_name, or None (#3747 contract — no email, no id string).
+        async with async_session_factory() as db:
+            sender_name = await resolve_member_display_name(caller.id, caller.org_id, db)
+
         while True:
             raw = await websocket.receive_text()
             # 평문 또는 {"content": "..."} 모두 허용
@@ -271,6 +273,8 @@ async def ws_chat_hub(
             # the sender still gets the saved message back as its confirmation.
             try:
                 await _broadcast(room_key, payload)
+            except WebSocketDisconnect:
+                raise  # a disconnect is not a broadcast failure: the handler's own cleanup below (Qadir 01a0eb42)
             except Exception:  # noqa: BLE001
                 logger.error(
                     "ws_chat: broadcast failed after save agent_id=%s message_id=%s", agent_id, msg.id, exc_info=True,

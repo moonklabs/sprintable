@@ -193,3 +193,81 @@ def test_one_receiver_failing_does_not_stop_the_others():
         assert ws_chat._rooms.get("room-4418") == {ok}
     finally:
         ws_chat._rooms.pop("room-4418", None)
+
+
+def test_an_owner_floor_person_delivering_through_the_channel_route_is_saved_and_broadcast(world, client, monkeypatch):
+    """Qadir 01a0eb42 — `routers/channel.py` uses the same `_authenticate`, and its `_persist_and_broadcast` read `caller.name`
+    after the commit: saved, then a 500 and nothing broadcast. A listener in the agent's room now gets the message."""
+    monkeypatch.setattr(
+        "app.routers.channel.async_session_factory",
+        async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False),
+    )
+    with client.websocket_connect(f"/ws/chat/{AGENT}?token={_token(TM_USER)}") as listener:
+        resp = client.post(
+            f"/api/v2/channel/deliver?token={_token(OWNER_USER)}", json={"agent_id": str(AGENT), "content": "via route"},
+        )
+        got = json.loads(listener.receive_text())
+    assert resp.status_code == 204, resp.text
+    assert (got["content"], got["sender_name"]) == ("via route", "Owner")
+    assert _saved() == ["via route"]
+
+
+def test_a_failure_before_the_loop_takes_the_socket_out_of_the_room(world, client, monkeypatch):
+    """Qadir 01a0eb42 — resolving the name (and the conversation) happens inside the handler's try/finally: if it fails, the
+    socket does not stay registered in the room."""
+    import app.routers.ws_chat as ws_chat
+
+    async def broken_resolver(*args, **kwargs):
+        raise RuntimeError("injected resolver failure")
+
+    monkeypatch.setattr(ws_chat, "resolve_member_display_name", broken_resolver)
+    with pytest.raises(Exception):  # noqa: B017 — the server-side error surfaces through the test client
+        with client.websocket_connect(f"/ws/chat/{AGENT}?token={_token(OWNER_USER)}") as ws:
+            ws.receive_text()
+    assert str(AGENT) not in ws_chat._rooms
+
+
+def test_a_disconnect_while_broadcasting_is_a_disconnect_not_a_broadcast_failure(world, client, monkeypatch, caplog):
+    """Qadir 01a0eb42 — the broad `except` around the broadcast let a `WebSocketDisconnect` through as «broadcast failed»; it is
+    re-raised to the handler's own disconnect path (no error log, socket out of the room)."""
+    import time
+
+    from fastapi import WebSocketDisconnect
+
+    import app.routers.ws_chat as ws_chat
+
+    async def disconnecting_broadcast(room_key, payload):
+        raise WebSocketDisconnect(code=1001)
+
+    caplog.set_level(logging.INFO, logger="app.routers.ws_chat")
+    with client.websocket_connect(f"/ws/chat/{AGENT}?token={_token(OWNER_USER)}") as ws:
+        assert _say(ws, "hi")["content"] == "hi"  # the handler is in its loop
+        monkeypatch.setattr(ws_chat, "_broadcast", disconnecting_broadcast)
+        ws.send_text(json.dumps({"content": "bye"}))
+        for _ in range(200):  # the handler runs on the client's own loop thread; wait for it to leave (bounded)
+            if str(AGENT) not in ws_chat._rooms:
+                break
+            time.sleep(0.05)
+    assert _saved() == ["hi", "bye"]
+    assert not [r for r in caplog.records if "broadcast failed after save" in r.getMessage()]
+    assert [r for r in caplog.records if "ws_chat: disconnected" in r.getMessage()]
+    assert str(AGENT) not in ws_chat._rooms
+
+
+def test_a_broadcast_failure_on_the_channel_route_is_logged_and_the_delivery_still_succeeds(world, client, monkeypatch, caplog):
+    """The message is saved: the route answers 204 and logs the broadcast failure instead of a 500."""
+    import app.routers.channel as channel
+
+    async def broken_broadcast(room_key, payload):
+        raise RuntimeError("injected broadcast failure")
+
+    monkeypatch.setattr(
+        "app.routers.channel.async_session_factory",
+        async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False),
+    )
+    monkeypatch.setattr(channel, "_broadcast", broken_broadcast)
+    caplog.set_level(logging.ERROR, logger="app.routers.channel")
+    resp = client.post(f"/api/v2/channel/deliver?token={_token(OWNER_USER)}", json={"agent_id": str(AGENT), "content": "x"})
+    assert resp.status_code == 204, resp.text
+    assert _saved() == ["x"]
+    assert len([r for r in caplog.records if "broadcast failed after save" in r.getMessage()]) == 1
