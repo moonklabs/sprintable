@@ -1088,6 +1088,21 @@ async def test_setup_codes_are_limited_per_user_ip_not_for_everyone_together(wor
 
 
 @pytest.mark.anyio
+async def test_a_made_up_api_key_does_not_buy_a_fresh_count_on_the_open_routes(world, per_ip_limits):
+    """Qadir 4828 — these routes take no login, so a `Bearer sk_live_…` is never checked; a different fake one on every request
+    must still be counted as the same IP."""
+    async with _client() as c:
+        async def ask(n: int):
+            _v, challenge = _pkce()
+            fake = ["sk", "live", f"{n:02d}" + "q" * 28]  # differs inside the first 30 characters the old key used
+            return await c.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "d4424 fake"},
+                                headers={"X-Forwarded-For": "198.51.100.7", "Authorization": "Bearer " + "_".join(fake)})
+        for n in range(10):
+            assert (await ask(n % 3)).status_code == 201
+        assert (await ask(10)).status_code == 429
+
+
+@pytest.mark.anyio
 async def test_onboarding_events_are_limited_per_user_ip(world, per_ip_limits):
     async with _client() as c:
         async def send(ip: str):

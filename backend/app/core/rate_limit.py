@@ -58,7 +58,15 @@ resend_verification_limiter = Limiter(
 # user IP. The shared `limiter` keys on the socket address, which on Cloud Run is the front end's — every user in one count.
 # In-memory like the shared one (fail-open: a counting problem never blocks a setup); not the resend limiter's Redis
 # fail-closed. Moving the shared limiter's 8 auth routes is 4398's second step, not this.
+def _rate_key_client_ip_only(request: Request) -> str:
+    """The user's IP and nothing else (Qadir 4828): these routes take no login, so an `Authorization: Bearer sk_live_…` on
+    them is never checked — keying on it would let every request bring its own count."""
+    from app.core.client_ip import client_ip
+
+    return client_ip(request)
+
+
 open_setup_limiter = Limiter(
-    key_func=_rate_key_by_client_ip,
+    key_func=_rate_key_client_ip_only,
     enabled=not _TESTING,
 )
