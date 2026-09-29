@@ -96,7 +96,13 @@ export function OrgHintBanner() {
       {/* AlertTitle · AlertDescription are <p>: only text inside them; the error and the buttons are their own blocks, placed in
           the Alert grid's text column (col-start-2) like the title and description — column 1 is the icon slot */}
       <AlertDescription>{t('orgHintBody', { org: target.orgName })}</AlertDescription>
-      {failed ? <p role="alert" className="col-start-2 text-sm">{t('switcherSwitchOrgError')}</p> : null}
+      {/* the same type as the description (AlertDescription: text-xs · leading-relaxed) — Yuna 4797 side note: at text-sm the
+          error line read larger than the body */}
+      {failed ? (
+        <p role="alert" className="col-start-2 text-xs leading-relaxed break-keep [overflow-wrap:anywhere]">
+          {t('switcherSwitchOrgError')}
+        </p>
+      ) : null}
       <div className="col-start-2 mt-2 flex flex-wrap gap-2">
         <Button size="sm" disabled={pending} onClick={() => void switchNow()}>
           {t('switcherSwitchToOrg')}
