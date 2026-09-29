@@ -21,6 +21,7 @@ from app.services.meta_ads_campaign import (
     boost_ad_name,
     boost_adset_name,
     boost_campaign_name,
+    spend_minor_from_insights,
 )
 
 _BUDGET_EXCEEDED_MARKER = "[sandbox:budget-exceeded]"
@@ -73,6 +74,13 @@ async def create_boost_campaign(
     existing: dict | None = None, gate_id: str = "",
 ) -> dict:
     """real과 같은 시그니처(story #4268 `existing` 포함). sandbox는 id가 결정적이라 이어 만들기와 새로 만들기의 결과가 같다."""
+    # story #4417 — the same currency rule as the real create (an unknown currency creates nothing)
+    from app.services.currency_minor import UnknownCurrencyError, meta_budget_units
+
+    try:
+        meta_budget_units(budget_minor, currency)
+    except UnknownCurrencyError as exc:
+        raise MetaAdsCampaignError("META_ADS_UNKNOWN_CURRENCY", str(exc), outcome_known=True) from exc
     if _BUDGET_EXCEEDED_MARKER in objective and not (existing or {}).get("campaign_id"):
         raise MetaAdsCampaignError(
             "META_ADS_CAMPAIGN_CREATE_FAILED",
@@ -142,7 +150,32 @@ async def set_campaign_status(
 _FIXED_SPEND_MINOR = 12_345
 
 
+# story #4417 — `[sandbox:account-currency-usd]` in the objective: the ad account answers USD (a KRW-sealed boost then stops
+# before anything is created). Without it the account has the sealed currency.
+_ACCOUNT_CURRENCY_USD_MARKER = "[sandbox:account-currency-usd]"
+
+
+async def get_ad_account_currency(
+    client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, expected_currency: str | None = None,
+    objective: str = "",
+) -> str:
+    """story #4417 — same signature as the real read (plus `objective` for the marker)."""
+    if _ACCOUNT_CURRENCY_USD_MARKER in objective:
+        return "USD"
+    if not expected_currency:
+        raise MetaAdsCampaignError("META_ADS_ACCOUNT_CURRENCY_MISSING", "sandbox: no expected currency", outcome_known=True)
+    return expected_currency
+
+
 async def get_campaign_spend_minor(
-    client: httpx.AsyncClient, *, campaign_id: str, access_token: str,
+    client: httpx.AsyncClient, *, campaign_id: str, access_token: str, currency: str,
 ) -> int:
-    return _FIXED_SPEND_MINOR
+    """story #4417 — the fixed spend comes back through the real conversion: an Insights row in major units for the sealed
+    currency («12345» won · «123.45» dollars), read by `spend_minor_from_insights` like Meta's answer."""
+    from app.services.currency_minor import UnknownCurrencyError, minor_to_decimal_amount
+
+    try:
+        spend = minor_to_decimal_amount(_FIXED_SPEND_MINOR, currency)
+    except UnknownCurrencyError as exc:
+        raise MetaAdsCampaignError("META_ADS_SPEND_UNKNOWN_CURRENCY", str(exc)) from exc
+    return spend_minor_from_insights([{"spend": spend, "account_currency": currency}], currency=currency)

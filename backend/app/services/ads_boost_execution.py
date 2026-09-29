@@ -174,6 +174,16 @@ class AdsBoostNotStartedError(Exception):
         super().__init__(f"ads_boost not started yet, cannot pause: {gate_id}")
 
 
+class AdsBoostSpendBlockedError(Exception):
+    """story #4417 — the boost was stopped because its spend can't be checked against the budget (`ads_boost_runs.spend_blocked_at`):
+    switching it on again would spend with no cap, so resume is refused."""
+
+    def __init__(self, gate_id: uuid.UUID, code: str | None):
+        self.gate_id = gate_id
+        self.code = code
+        super().__init__(f"ads_boost spend is unreadable ({code}), cannot resume: {gate_id}")
+
+
 class AdsBoostNotPausedError(Exception):
     """되돌아갈 paused 상태가 없는데 resume을 요청(토글 이력 0 또는 최신 토글이 pause가
     아님)."""
@@ -259,6 +269,15 @@ async def _request_toggle(
     if started is None:
         raise AdsBoostNotStartedError(gate.id)
 
+    if operation == OP_RESUME:
+        from app.models.ads_boost_run import AdsBoostRun
+
+        blocked = (await db.execute(
+            select(AdsBoostRun.spend_blocked_at, AdsBoostRun.spend_blocked_code).where(AdsBoostRun.gate_id == gate.id)
+        )).first()
+        if blocked is not None and blocked[0] is not None:
+            raise AdsBoostSpendBlockedError(gate.id, blocked[1])
+
     latest = await _latest_toggle(db, gate_id=gate.id)
 
     if latest is None:
@@ -268,8 +287,13 @@ async def _request_toggle(
     elif latest.operation == operation:
         if latest.status in _NON_TERMINAL_STATUSES:
             toggle_seq = latest.toggle_seq  # 더블클릭 — 같은 행 재사용
-        else:
+        elif latest.status == "completed":
             raise AdsBoostAlreadyInStateError(gate.id, operation)
+        else:
+            # story #4417 (Qadir 01a0eba4 ①) — the last pause/resume ended without taking effect (dead_letter · failed ·
+            # voided): the boost is not in that state, so asking again makes a new command (before: «already paused», and
+            # neither the scheduler's retry nor a person's second press could stop a boost whose pause failed at Meta).
+            toggle_seq = latest.toggle_seq + 1
     else:
         if operation == OP_RESUME and latest.operation != OP_PAUSE:
             raise AdsBoostNotPausedError(gate.id)
@@ -609,11 +633,18 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
     return {"result": "adopted", **adopted}
 
 
+# story #4417 — the ad account's currency is not the sealed one: nothing created, the start stops for a person (needs_check).
+ACCOUNT_CURRENCY_MISMATCH_CODE = "ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH"
+# story #4417 — a start/resume that reaches the worker after the run was blocked for an unreadable spend
+SPEND_BLOCKED_CODE = "ADS_BOOST_SPEND_BLOCKED"
+
+
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
     """`app/services/publication_command.py::_process_one_command`의 content_kind==
     "ads_boost" 분기가 이 함수로 넘긴다(site_post/comment_reply와 동형 위임 패턴).
     실패 시 `apply_command_failure`(publication_command.py)를 그대로 재사용 —
     백오프·connection 승격 로직 재구현 금지."""
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
     from app.services.provider_call_mark import provider_call_marked
     from app.services.publication_command import (
         PRE_CALL_ERROR_CODE,
@@ -639,9 +670,34 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     is_sandbox = getattr(module, "__name__", "").endswith("ads_sandbox_campaign")
 
     try:
+        # story #4417 (Qadir 01a0eb71 C) — a start or resume queued before the spend became unreadable: checked again when it
+        # runs (the request-time check can't see a block that came later). Refused with the reason; nothing reaches Meta.
+        if command.operation in (OP_BOOST_START, OP_RESUME) and run.spend_blocked_at is not None:
+            raise MetaAdsCampaignError(
+                SPEND_BLOCKED_CODE, f"spend can't be checked against the budget ({run.spend_blocked_code})", outcome_known=True,
+            )
 
         async with provider_client(timeout=20) as client:
             if command.operation == OP_BOOST_START:
+                # story #4417 (Qadir 01a0eb3b ② · PO 03:49Z) — before anything is created or switched on: the budget goes to the
+                # provider in the ad account's currency, so an account whose currency is not the sealed one would run a
+                # different amount (a sealed KRW 50,000 on a USD account = $500). A different currency creates nothing and
+                # stops the start for a person (needs_check); the next step is a new request with a matching account.
+                from app.services.external_call_tx import end_transaction_before_external_call as _end_tx
+
+                await _end_tx(db)
+                account_currency = await module.get_ad_account_currency(
+                    client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
+                    expected_currency=gate.sealed_ads_currency, objective=gate.sealed_ads_objective or "",
+                )
+                run.account_currency = account_currency
+                if account_currency != gate.sealed_ads_currency:
+                    await db.commit()
+                    raise MetaAdsCampaignError(
+                        ACCOUNT_CURRENCY_MISMATCH_CODE,
+                        f"ad account currency {account_currency!r} is not the sealed currency {gate.sealed_ads_currency!r}",
+                        outcome_known=True,
+                    )
                 # story #4268 — 재시도(ACTIVE 전환 실패 · 생성 중간 실패 뒤)가 이미 만든 캠페인 · 광고 세트 · 광고를 다시 만들지
                 # 않는다(고객 광고 계정에 PAUSED 객체가 중복으로 쌓이던 결함). 셋이 다 있으면 생성을 건너뛰고 상태 전환만,
                 # 일부만 있으면 이어서 만든다. 중간 실패의 부분 id도 실행 행에 남긴다(이 명령의 결과와 같은 커밋 — 워커가 틱마다

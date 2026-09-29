@@ -811,6 +811,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "시작 시각은 종료 시각보다 빨라야 해요.",
         "en": "The start time must be earlier than the end time.",
     },
+    # story #4417 — a boost currency outside the minor-unit table (app/services/currency_minor.py)
+    "ads_boost.unknown_currency": {
+        "ko": "이 통화로는 홍보를 요청할 수 없어요 — {supported} 중 하나로 요청해 주세요.",
+        "en": "Boosts can't be requested in this currency — use one of {supported}.",
+    },
     "ads_boost.publication_not_found": {
         "ko": "이 조직에 없는 발행물이에요.",
         "en": "Publication not found in this organization.",
@@ -853,6 +858,37 @@ _CATALOG: dict[str, dict[str, str]] = {
     "ads_boost.already_paused": {
         "ko": "이미 중지된 광고 홍보(boost) 건이에요.",
         "en": "This ads boost is already paused.",
+    },
+    # story #4417 — the spend can't be checked against the budget (another currency · repeated read failures)
+    "ads_boost.spend_unreadable_no_resume": {
+        "ko": "광고비를 예산과 맞춰 볼 수 없어 멈춘 홍보라 다시 켤 수 없어요.",
+        "en": "This boost was paused because its ad spend can't be checked against the budget, so it can't be resumed.",
+    },
+    "ads_boost.spend_unreadable_title": {
+        "ko": "광고 홍보를 멈췄어요",
+        "en": "We paused an ad boost",
+    },
+    # story #4417 (Qadir 01a0eb71 A) — the ad connection is gone: we can't read the spend and can't pause it at Meta ourselves
+    "ads_boost.spend_context_lost_title": {
+        "ko": "광고 관리자에서 홍보를 직접 멈춰 주세요",
+        "en": "Pause your ad boost in Ads Manager",
+    },
+    "ads_boost.spend_context_lost_body": {
+        "ko": "광고 계정 연결이 끊겨 홍보를 멈출 수 없어요 — 멈추기 전까지 광고비가 계속 나갈 수 있어요. 광고 관리자에서 직접 멈춰 주세요.",
+        "en": "The ad account connection is gone, so we can't pause the boost — ad spend may continue until it's paused. Please pause it in Ads Manager.",
+    },
+    # story #4417 (Yuna 5884175792) — sent while the pause is requested but not in effect yet: never «paused» before it is
+    "ads_boost.spend_unreadable_pausing_title": {
+        "ko": "광고 홍보를 멈추고 있어요",
+        "en": "We're pausing an ad boost",
+    },
+    "ads_boost.spend_unreadable_pausing_body": {
+        "ko": "광고비를 승인한 예산과 맞춰 볼 수 없어 홍보를 멈추고 있어요. 멈추면 더는 광고비가 나가지 않아요.",
+        "en": "We couldn't check the ad spend against the approved budget, so we're pausing the boost. Once it's paused, no more ad spend.",
+    },
+    "ads_boost.spend_unreadable_body": {
+        "ko": "광고비를 승인한 예산과 맞춰 볼 수 없어 홍보를 멈췄어요. 더는 광고비가 나가지 않아요.",
+        "en": "We couldn't check the ad spend against the approved budget, so we paused the boost. No more ad spend.",
     },
     "ads_boost.not_paused": {
         "ko": "중지 상태가 아닌 광고 홍보(boost) 건이에요.",

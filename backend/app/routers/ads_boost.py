@@ -110,6 +110,18 @@ async def _create_ads_boost_endpoint(
                 "message": t("ads_boost.invalid_schedule", resolved_locale),
             },
         )
+    # story #4417 — the sealed amount is in minor units of this currency: one outside the table (currency_minor) has no unit to
+    # compare the spend with, so it is refused here instead of being sealed.
+    from app.services.currency_minor import CURRENCY_EXPONENTS
+
+    if body.currency not in CURRENCY_EXPONENTS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "ADS_BOOST_UNKNOWN_CURRENCY",
+                "message": t("ads_boost.unknown_currency", resolved_locale, supported=", ".join(sorted(CURRENCY_EXPONENTS))),
+            },
+        )
 
     try:
         gate = await request_ads_boost(

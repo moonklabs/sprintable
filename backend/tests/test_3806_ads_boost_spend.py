@@ -228,7 +228,9 @@ async def test_capture_exceeding_budget_auto_pauses_and_stamps_cap_reached_at():
 
         async with Session() as s:
             rows = await _get_spend_snapshots(s, org_id, gate_id)
-        assert len(rows) == 1, "상한 도달 뒤엔 다음 캡처를 이어 예약하지 않아야 한다(PO: 중지 뒤 예약 0)"
+        # story #4417 (Qadir 01a0ebb1 A) — until the pause is in effect one follow-up stays scheduled (a queued pause can still
+        # fail); once paused, none (PO: 중지 뒤 예약 0 — pinned in test_the_cap_follow_up_chain_ends_once_paused)
+        assert [r.status for r in rows] == ["captured", "pending"]
     finally:
         await engine.dispose()
 
@@ -267,6 +269,726 @@ async def test_capture_within_budget_does_not_trigger_cap():
             )).scalar_one_or_none()
         assert pause_cmd is None
     finally:
+        await engine.dispose()
+
+
+def _spy_notifications(monkeypatch):
+    """story #4417 — the «boost paused» notices, as the dispatch receives them."""
+    import app.services.notification_dispatch as nd
+
+    sent: list[dict] = []
+
+    async def spy(db, **kwargs):
+        if kwargs.get("event_type") == "ads_boost_spend_unreadable":  # not the gate's own approval notices
+            sent.append(kwargs)
+        return len(kwargs.get("target_member_ids") or [])  # like the real dispatch: how many got a notice
+
+    monkeypatch.setattr(nd, "dispatch_notification", spy)
+    return sent
+
+
+async def _pause_commands(Session, gate_id):
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_PAUSE
+    from sqlalchemy import select
+
+    async with Session() as s:
+        return (await s.execute(
+            select(PublicationCommand).where(PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_PAUSE)
+        )).scalars().all()
+
+
+async def _run_row(Session, gate_id):
+    from app.models.ads_boost_run import AdsBoostRun
+    from sqlalchemy import select
+
+    async with Session() as s:
+        return (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+
+
+@pytest.mark.anyio
+async def test_a_spend_in_a_currency_we_cannot_convert_stops_the_boost_and_says_why(monkeypatch):
+    """story #4417 (Qadir 01a0eb3b ① · PO 03:49Z) — a sealed currency outside the table (a row sealed before the request refused
+    it): the spend can't be checked against the budget. The capture fails with the code, the run is marked
+    (`spend_blocked_*`), the scheduler pauses it (like the cap), the people on the boost are told once, no capture is scheduled
+    again — and resuming is refused (it would spend with no cap). The budget (10,000 < the sandbox's 12,345) is not what
+    stops it: no `cap_reached_at`."""
+    from app.models.gate import Gate
+    from app.services.ads_boost_execution import AdsBoostSpendBlockedError, request_ads_boost_resume
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent = _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(
+        await _session_factory(), budget_minor=10_000,
+    )
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.sealed_ads_currency = "JPY"
+            await s.commit()
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+
+        async with Session() as s:
+            counts = await process_due_ads_spend_snapshots(s)
+        assert counts["failed"] == 1 and counts["captured"] == 0 and counts["capped"] == 0, counts
+
+        async with Session() as s:
+            rows = await _get_spend_snapshots(s, org_id, gate_id)
+        # no spend read again — only one follow-up capture that makes sure the pause takes effect (Qadir 01a0eb71 B)
+        assert [(r.status, r.error_code) for r in rows] == [("failed", "META_ADS_SPEND_UNKNOWN_CURRENCY"), ("pending", None)]
+        run = await _run_row(Session, gate_id)
+        assert run.spend_blocked_at is not None and run.spend_blocked_code == "META_ADS_SPEND_UNKNOWN_CURRENCY"
+        assert run.cap_reached_at is None
+        pauses = await _pause_commands(Session, gate_id)
+        assert [(c.initiated_by, c.status) for c in pauses] == [("scheduler", "pending")]
+        assert [(n["event_type"], n["reference_type"], n["reference_id"]) for n in sent] == [
+            ("ads_boost_spend_unreadable", "gate", gate_id),
+        ]
+        assert owner_id in sent[0]["target_member_ids"]
+        # the pause is requested, not in effect yet: the notice says «pausing», never «paused» (Yuna 5884175792)
+        assert "멈췄어요" not in sent[0]["title"] + sent[0]["body"]
+        assert "멈추고 있어요" in sent[0]["body"]
+
+        # the same capture again (a second worker tick) marks nothing twice and notifies once
+        async with Session() as s:
+            assert (await process_due_ads_spend_snapshots(s))["failed"] == 0
+
+        from app.services.publication_command import process_due_publication_commands
+
+        async with Session() as s:
+            await process_due_publication_commands(s)  # the scheduler's pause runs
+        async with Session() as s:
+            with pytest.raises(AdsBoostSpendBlockedError):
+                await request_ads_boost_resume(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        assert len(sent) == 1
+    finally:
+        await engine.dispose()
+
+
+async def _failing_read(monkeypatch, exc):
+    import app.services.ads_sandbox_campaign as sandbox
+
+    async def fail(client, **kwargs):
+        raise exc
+
+    monkeypatch.setattr(sandbox, "get_campaign_spend_minor", fail)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("error", ["provider", "unexpected"])
+async def test_a_failed_spend_read_closes_the_capture_and_tries_again_later(monkeypatch, error):
+    """story #4417 (Qadir 01a0eb3b ③) — before: the capture stayed in_progress and nothing was scheduled again, so the cap was
+    never checked for this boost again. Now the capture is closed (failed, with the code) and a retry is scheduled (1h); the
+    boost keeps running (one failed read is not a stop)."""
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent = _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        await _failing_read(
+            monkeypatch,
+            MetaAdsCampaignError("META_ADS_SPEND_FETCH_FAILED", "503") if error == "provider" else RuntimeError("boom"),
+        )
+        before = datetime.now(timezone.utc)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+
+        async with Session() as s:
+            rows = await _get_spend_snapshots(s, org_id, gate_id)
+        code = "META_ADS_SPEND_FETCH_FAILED" if error == "provider" else "ADS_SPEND_CAPTURE_ERROR"
+        assert [(r.status, r.error_code) for r in rows] == [("failed", code), ("pending", None)]
+        assert timedelta(minutes=55) < rows[1].due_at - before < timedelta(minutes=65)
+        run = await _run_row(Session, gate_id)
+        assert run.spend_blocked_at is None and run.status == "running"
+        assert await _pause_commands(Session, gate_id) == [] and sent == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_three_failed_spend_reads_in_a_row_stop_the_boost(monkeypatch):
+    """story #4417 (Qadir 01a0eb3b ③) — the retries don't go on forever with no cap: the third failure in a row stops the boost
+    like an unreadable currency (scheduler pause · marked · notified)."""
+    from app.services.ads_spend_snapshots import (
+        SPEND_READ_FAILED_REPEATEDLY_CODE,
+        SPEND_READ_FAILURES_BEFORE_STOP,
+        process_due_ads_spend_snapshots,
+    )
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent = _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        await _failing_read(monkeypatch, MetaAdsCampaignError("META_ADS_SPEND_FETCH_FAILED", "503"))
+        for round_ in range(SPEND_READ_FAILURES_BEFORE_STOP):
+            async with Session() as s:
+                pending = [r for r in await _get_spend_snapshots(s, org_id, gate_id) if r.status == "pending"]
+                assert len(pending) == 1, (round_, pending)
+                pending[0].due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+                await s.commit()
+            async with Session() as s:
+                await process_due_ads_spend_snapshots(s)
+            blocked = (await _run_row(Session, gate_id)).spend_blocked_at is not None
+            assert blocked == (round_ == SPEND_READ_FAILURES_BEFORE_STOP - 1), round_
+
+        run = await _run_row(Session, gate_id)
+        assert run.spend_blocked_code == SPEND_READ_FAILED_REPEATEDLY_CODE
+        async with Session() as s:
+            rows = await _get_spend_snapshots(s, org_id, gate_id)
+        # no read after the stop — one follow-up capture until the pause is in effect (Qadir 01a0eb71 B)
+        assert [r.status for r in rows] == ["failed"] * SPEND_READ_FAILURES_BEFORE_STOP + ["pending"]
+        assert [(c.initiated_by, c.status) for c in await _pause_commands(Session, gate_id)] == [("scheduler", "pending")]
+        assert [n["event_type"] for n in sent] == ["ads_boost_spend_unreadable"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_person_s_refresh_that_reads_another_currency_stops_the_boost_too(monkeypatch):
+    """story #4417 — «collect again» takes the same stop as the worker when the spend is in a currency it can't convert."""
+    from app.models.gate import Gate
+    from app.services.ads_spend_snapshots import refresh_ads_boost_spend_now
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent = _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.sealed_ads_currency = "JPY"
+            await s.commit()
+        async with Session() as s:
+            with pytest.raises(MetaAdsCampaignError):
+                await refresh_ads_boost_spend_now(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        run = await _run_row(Session, gate_id)
+        assert run.spend_blocked_code == "META_ADS_SPEND_UNKNOWN_CURRENCY"
+        assert [(c.initiated_by, c.status) for c in await _pause_commands(Session, gate_id)] == [("scheduler", "pending")]
+        assert len(sent) == 1
+    finally:
+        await engine.dispose()
+
+
+async def _pending_count(Session, org_id, gate_id):
+    async with Session() as s:
+        return len([r for r in await _get_spend_snapshots(s, org_id, gate_id) if r.status == "pending"])
+
+
+async def _break(Session, gate_id, how, monkeypatch):
+    """Put the boost in one of the worker's failure branches (story #4417 · Qadir 01a0eb71)."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.models.gate import Gate
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
+    from sqlalchemy import select
+
+    async with Session() as s:
+        gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+        if how == "currency":
+            gate.sealed_ads_currency = "JPY"
+        elif how == "not_started":
+            run.campaign_id = None
+        elif how == "connection_missing":
+            gate.sealed_ads_connection_id = uuid.uuid4()
+        await s.commit()
+    if how == "provider_error":
+        await _failing_read(monkeypatch, MetaAdsCampaignError("META_ADS_SPEND_FETCH_FAILED", "503"))
+    elif how == "unexpected":
+        await _failing_read(monkeypatch, RuntimeError("boom"))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("how", ["currency", "provider_error", "unexpected", "not_started", "connection_missing"])
+async def test_every_failure_branch_of_the_worker_either_retries_or_blocks_and_tells(monkeypatch, how):
+    """story #4417 (Qadir 01a0eb71 A · PO) — the class: whatever branch a capture fails in, afterwards there is a capture
+    scheduled again, or the run is marked and the people on it were told. A new branch that does neither turns this red."""
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent = _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        await _break(Session, gate_id, how, monkeypatch)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+
+        run = await _run_row(Session, gate_id)
+        retried = await _pending_count(Session, org_id, gate_id) > 0
+        blocked_and_told = run.spend_blocked_at is not None and run.spend_blocked_notified_at is not None and len(sent) == 1
+        assert retried or blocked_and_told, (how, run.spend_blocked_code, sent)
+        if how == "connection_missing":
+            assert run.spend_blocked_code == "ADS_SPEND_CONTEXT_LOST"
+            assert "광고 관리자에서 직접 멈춰" in sent[0]["body"]  # we can't pause it ourselves
+            assert sent[0]["title"] == "광고 관리자에서 홍보를 직접 멈춰 주세요"  # not «we paused it» (Yuna 5884175792)
+            assert "광고비가 계속 나갈 수 있어요" in sent[0]["body"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_capture_whose_gate_is_gone_is_logged_as_the_one_orphan_branch(monkeypatch, caplog):
+    """story #4417 — the only branch with nothing to retry or block: the gate behind the capture no longer exists (no boost to
+    pause or show). It is closed and logged as an orphan, not silent."""
+    import logging
+
+    from app.models.gate import Gate
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            real_scope = gate.scope_key
+            gate.scope_key = str(uuid.uuid4())
+            await s.commit()
+        caplog.set_level(logging.ERROR, logger="app.services.ads_spend_snapshots")
+        async with Session() as s:
+            counts = await process_due_ads_spend_snapshots(s)
+        assert counts["failed"] == 1
+        assert [r for r in caplog.records if "ads_spend_capture_orphan" in r.getMessage()]
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.scope_key = real_scope
+            await s.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_pause_or_notice_that_failed_is_tried_again_on_the_next_tick_and_the_notice_goes_once(monkeypatch):
+    """story #4417 (Qadir 01a0eb71 B) — before: the mark was committed, a failed pause was swallowed and the next capture
+    returned early. Now a follow-up capture retries whatever is still owed: the pause, and a notice that failed."""
+    import app.services.ads_boost_execution as execution
+    import app.services.notification_dispatch as nd
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent: list[dict] = []
+    attempts = {"pause": 0, "notice": 0}
+
+    async def notice(db, **kwargs):
+        if kwargs.get("event_type") != "ads_boost_spend_unreadable":
+            return
+        attempts["notice"] += 1
+        if attempts["notice"] == 1:
+            raise RuntimeError("push down")
+        sent.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(nd, "dispatch_notification", notice)
+    real_pause = execution.request_ads_boost_pause
+
+    async def flaky_pause(*args, **kwargs):
+        attempts["pause"] += 1
+        if attempts["pause"] == 1:
+            raise RuntimeError("db hiccup")
+        return await real_pause(*args, **kwargs)
+
+    monkeypatch.setattr(execution, "request_ads_boost_pause", flaky_pause)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        await _break(Session, gate_id, "currency", monkeypatch)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        run = await _run_row(Session, gate_id)
+        assert run.spend_blocked_at is not None and run.spend_blocked_notified_at is None
+        assert await _pause_commands(Session, gate_id) == [] and sent == []
+        assert await _pending_count(Session, org_id, gate_id) == 1  # the follow-up
+
+        async with Session() as s:  # the follow-up is due
+            pending = [r for r in await _get_spend_snapshots(s, org_id, gate_id) if r.status == "pending"][0]
+            pending.due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            await s.commit()
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert [(c.initiated_by, c.status) for c in await _pause_commands(Session, gate_id)] == [("scheduler", "pending")]
+        assert len(sent) == 1
+        assert (await _run_row(Session, gate_id)).spend_blocked_notified_at is not None
+
+        # the pause is queued but not in effect yet: the next follow-up checks again — and does not tell anyone twice
+        async with Session() as s:
+            pending = [r for r in await _get_spend_snapshots(s, org_id, gate_id) if r.status == "pending"]
+            assert len(pending) == 1
+            pending[0].due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            await s.commit()
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert len(sent) == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_resume_queued_before_the_block_is_refused_when_it_runs(monkeypatch):
+    """story #4417 (Qadir 01a0eb71 C) — the request-time check can't see a block that came later: the worker checks again."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_RESUME, request_ads_boost_pause, request_ads_boost_resume
+    from app.services.publication_command import process_due_publication_commands
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        async with Session() as s:
+            await process_due_publication_commands(s)
+        async with Session() as s:
+            await request_ads_boost_resume(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        async with Session() as s:  # the block lands while the resume waits in the queue
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            run.spend_blocked_at = datetime.now(timezone.utc)
+            run.spend_blocked_code = "META_ADS_SPEND_CURRENCY_MISMATCH"
+            await s.commit()
+        async with Session() as s:
+            await process_due_publication_commands(s)
+        async with Session() as s:
+            resume = (await s.execute(select(PublicationCommand).where(
+                PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_RESUME,
+            ))).scalar_one()
+        assert (resume.status, resume.reason_code) == ("dead_letter", "ADS_BOOST_SPEND_BLOCKED")
+        assert (await _run_row(Session, gate_id)).status == "paused"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_notice_says_paused_only_when_the_run_is_paused(monkeypatch):
+    """story #4417 (Yuna 5884175792) — the notice's words follow the run's real state at the time it is sent."""
+    from app.models.gate import Gate
+    from app.services.ads_spend_snapshots import _notify_spend_blocked
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent = _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            for status in ("paused", "pause_pending", "running"):
+                assert await _notify_spend_blocked(s, gate=gate, code="META_ADS_SPEND_CURRENCY_MISMATCH", run_status=status)
+        said_paused = ["멈췄어요" in n["title"] + n["body"] for n in sent]
+        assert said_paused == [True, False, False]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_pause_that_ended_without_taking_effect_can_be_asked_again(monkeypatch):
+    """story #4417 (Qadir 01a0eba4 ①) — a dead-lettered pause is not «already paused»: the scheduler's retry and a person's
+    second press make a new command. A completed pause still is «already paused»."""
+    from app.services.ads_boost_execution import AdsBoostAlreadyInStateError, OP_PAUSE, request_ads_boost_pause
+    from app.services.publication_command import process_due_publication_commands
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            first = await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        async with Session() as s:
+            await _mark_command_status(s, first.id, "dead_letter")  # Meta did not take the pause
+        async with Session() as s:
+            again = await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        assert again.id != first.id and again.toggle_seq == first.toggle_seq + 1
+        async with Session() as s:
+            await process_due_publication_commands(s)  # this one lands
+        async with Session() as s:
+            with pytest.raises(AdsBoostAlreadyInStateError):
+                await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        assert [c.operation for c in await _pause_commands(Session, gate_id)] == [OP_PAUSE, OP_PAUSE]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_cap_pause_that_failed_is_tried_again_on_a_follow_up_capture(monkeypatch):
+    """story #4417 (Qadir 01a0eba4 ②) — the cap path takes the same «try again» as the block: before, the cap was stamped, the
+    failed pause swallowed, and no capture followed."""
+    import app.services.ads_boost_execution as execution
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    real_pause = execution.request_ads_boost_pause
+    calls = {"n": 0}
+
+    async def flaky_pause(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("db hiccup")
+        return await real_pause(*args, **kwargs)
+
+    monkeypatch.setattr(execution, "request_ads_boost_pause", flaky_pause)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(
+        await _session_factory(), budget_minor=10_000,  # below the sandbox's 12,345: the first capture reaches the cap
+    )
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert (await _run_row(Session, gate_id)).cap_reached_at is not None
+        assert await _pause_commands(Session, gate_id) == []
+        assert await _pending_count(Session, org_id, gate_id) == 1  # the follow-up
+
+        async with Session() as s:
+            pending = [r for r in await _get_spend_snapshots(s, org_id, gate_id) if r.status == "pending"][0]
+            pending.due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            await s.commit()
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert [(c.initiated_by, c.status) for c in await _pause_commands(Session, gate_id)] == [("scheduler", "pending")]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_notice_is_marked_sent_only_when_a_notice_was_created(monkeypatch):
+    """story #4417 (Qadir 01a0eba4 ③) — the dispatch returns normally even when nobody got anything; «notified» is marked only
+    when it created at least one notice, otherwise the next follow-up tries again."""
+    import app.services.notification_dispatch as nd
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    created = {"n": 0}
+
+    async def dispatch(db, **kwargs):
+        if kwargs.get("event_type") != "ads_boost_spend_unreadable":
+            return len(kwargs.get("target_member_ids") or [])
+        created["n"] += 1
+        return 0 if created["n"] == 1 else 1  # the first one reached nobody
+
+    monkeypatch.setattr(nd, "dispatch_notification", dispatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        await _break(Session, gate_id, "currency", monkeypatch)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert (await _run_row(Session, gate_id)).spend_blocked_notified_at is None
+        async with Session() as s:
+            pending = [r for r in await _get_spend_snapshots(s, org_id, gate_id) if r.status == "pending"][0]
+            pending.due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            await s.commit()
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert (await _run_row(Session, gate_id)).spend_blocked_notified_at is not None
+        assert created["n"] == 2
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_an_agent_reading_spend_finds_the_account_and_campaign_ids_nowhere_in_the_body(monkeypatch):
+    """story #4417 (PO 05:35Z) — 4416 hides the ad account and campaign ids from agents (field by field). This checks the whole
+    body, so a new field that carries them in another shape (the removed `ads_manager_url` did, as a URL) turns this red."""
+    import json
+
+    from app.main import app
+    from app.models.ads_boost_run import AdsBoostRun
+    from sqlalchemy import select
+    from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
+    from tests.test_4416_spend_run_ad_fields_realdb import _set_ad_connection
+    from tests.test_e4fc29fa_site_post_orchestration import _seed_agent, _session_factory
+
+    _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        await _set_ad_connection(Session, gate_id, account_id="9876543210", channel="meta_ads")
+        async with Session() as s:
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            campaign_id = run.campaign_id
+            run.spend_blocked_at = datetime.now(timezone.utc)  # a blocked boost: the card state that shows the link to people
+            run.spend_blocked_code = "META_ADS_SPEND_CURRENCY_MISMATCH"
+            await s.commit()
+            agent_id = await _seed_agent(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            r = await client.get(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend")
+        assert r.status_code == 200, r.text
+        text = json.dumps(r.json())
+        assert "9876543210" not in text and campaign_id not in text
+        assert "adsmanager" not in text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def _due_now(Session, org_id, gate_id):
+    async with Session() as s:
+        pending = [r for r in await _get_spend_snapshots(s, org_id, gate_id) if r.status == "pending"]
+        for r in pending:
+            r.due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        await s.commit()
+    return len(pending)
+
+
+@pytest.mark.anyio
+async def test_the_cap_follow_up_asks_again_after_a_dead_lettered_pause():
+    """story #4417 (Qadir 01a0ebb1 A) — the cap's pause command was made, then ended as dead_letter: the next follow-up asks
+    again (a new toggle), instead of the chain having ended with the capture that reached the cap."""
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory(), budget_minor=10_000)
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        [first] = await _pause_commands(Session, gate_id)
+        async with Session() as s:
+            await _mark_command_status(s, first.id, "dead_letter")
+        assert await _due_now(Session, org_id, gate_id) == 1
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        pauses = await _pause_commands(Session, gate_id)
+        assert [p.toggle_seq for p in pauses] == [first.toggle_seq, first.toggle_seq + 1]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_cap_follow_up_only_waits_while_the_pause_is_in_flight_and_ends_once_paused():
+    """story #4417 (Qadir 01a0ebb1 A) — pause_pending: no new request, the follow-up keeps going; paused: the chain ends."""
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from app.services.publication_command import process_due_publication_commands
+    from sqlalchemy import select
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory(), budget_minor=10_000)
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        from app.models.ads_boost_run import AdsBoostRun
+
+        async with Session() as s:  # the pause is in flight
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            run.status = "pause_pending"
+            await s.commit()
+        assert await _due_now(Session, org_id, gate_id) == 1
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert len(await _pause_commands(Session, gate_id)) == 1  # no new request while it is in flight
+        assert await _pending_count(Session, org_id, gate_id) == 1  # but the follow-up goes on
+
+        async with Session() as s:  # the pause lands
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            run.status = "running"
+            await s.commit()
+        async with Session() as s:
+            await process_due_publication_commands(s)
+        assert (await _run_row(Session, gate_id)).status == "paused"
+        assert await _due_now(Session, org_id, gate_id) == 1
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+        assert await _pending_count(Session, org_id, gate_id) == 0  # paused: the chain ends (PO: 중지 뒤 예약 0)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failures", [1, 3])
+async def test_a_failure_before_the_capture_context_is_built_still_retries_and_blocks(monkeypatch, failures):
+    """story #4417 (Qadir 01a0ebb1 B) — an exception while building the capture's context (here: the credential can't be
+    decrypted) used to close the capture with no retry. Now the gate and run are found by the publication alone: one failure
+    → retried; three in a row → blocked and told."""
+    import app.services.channel_credential_crypto as crypto
+    from app.services.ads_spend_snapshots import SPEND_READ_FAILED_REPEATEDLY_CODE, process_due_ads_spend_snapshots
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    sent = _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+
+        def broken(_value):
+            raise ValueError("credential could not be decrypted")
+
+        monkeypatch.setattr(crypto, "decrypt_channel_credential", broken)
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        for i in range(failures):
+            if i:
+                assert await _due_now(Session, org_id, gate_id) == 1
+            async with Session() as s:
+                await process_due_ads_spend_snapshots(s)
+        run = await _run_row(Session, gate_id)
+        if failures == 1:
+            assert await _pending_count(Session, org_id, gate_id) == 1 and run.spend_blocked_at is None
+        else:
+            assert run.spend_blocked_code == SPEND_READ_FAILED_REPEATEDLY_CODE
+            assert [n["event_type"] for n in sent] == ["ads_boost_spend_unreadable"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_spend_summary_says_why_the_boost_stopped(monkeypatch):
+    """story #4417 — the card reads `spend_blocked_code` (and hides «resume»)."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from sqlalchemy import select
+    from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    _spy_notifications(monkeypatch)
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            gate.sealed_ads_currency = "JPY"
+            await s.commit()
+        async with Session() as s:
+            await _make_spend_snapshots_due(s, org_id, gate_id)
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            body = (await client.get(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend")).json()
+            resume = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/resume")
+        assert body["spend_blocked_code"] == "META_ADS_SPEND_UNKNOWN_CURRENCY" and body["spend_blocked_at"]
+        assert body["account_currency"] == "KRW"  # read before the start (the sandbox answers the sealed currency then)
+        assert resume.status_code == 409 and resume.json()["error"]["code"] == "ADS_BOOST_SPEND_UNREADABLE"
+    finally:
+        app.dependency_overrides.clear()
         await engine.dispose()
 
 

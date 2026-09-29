@@ -250,7 +250,7 @@ async def dispatch_notification(
     sprint_id: uuid.UUID | None = None,
     via_outbox: bool = True,
     human_event_recorded_for: frozenset[uuid.UUID] = frozenset(),
-) -> None:
+) -> int:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
     ``human_event_recorded_for``: story #4281 — 호출부(`agent_dispatch._finalize_dispatch`)가 이미 사람 몫 Event(dispatched)를
@@ -291,7 +291,7 @@ async def dispatch_notification(
     알고 있는 값을 그대로 실어 보내는 통과 파라미터(신규 조회는 호출부 책임, 여기선 없음).
     """
     if not target_member_ids:
-        return
+        return 0
 
     try:
         # P0(message-loss class fix, 2026-08-08): 이 함수 전체를 SAVEPOINT로 감싼다 — 이전엔
@@ -320,7 +320,7 @@ async def dispatch_notification(
             ]
 
             if not enabled_member_ids:
-                return
+                return 0
 
             # 활성 webhook_configs가 있는 멤버 집합 — 웹훅 채널로 전달되므로 내장 알림 스킵.
             # E-EVENT-1CONFIG: 메시지 경로 SSE-skip과 공용 SSOT(active_webhook_member_ids) —
@@ -400,6 +400,7 @@ async def dispatch_notification(
 
             inserted = False
             created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
+            created_for: set[uuid.UUID] = set()  # story #4417 — recipients a notice was actually created for
             for member_row in members:
                 if member_row.type == "agent":
                     # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵(단, muted면
@@ -443,6 +444,7 @@ async def dispatch_notification(
                         db.add(dispatch_event)
                         created_events.append(dispatch_event)
                         inserted = True
+                        created_for.add(member_row.id)
                 elif member_row.user_id:
                     # human: Notification + Event 각각 독립 savepoint — 하나 실패해도 다른 쪽 롤백 방지
                     try:
@@ -460,6 +462,7 @@ async def dispatch_notification(
                             )
                             db.add(notification)
                         inserted = True
+                        created_for.add(member_row.id)
                     except Exception:
                         logger.warning("Notification INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
                     if member_row.project_id and member_row.id not in human_event_recorded_for:
@@ -497,6 +500,7 @@ async def dispatch_notification(
                                 db.add(dispatch_event)
                             created_events.append(dispatch_event)
                             inserted = True
+                            created_for.add(member_row.id)
                         except Exception:
                             logger.warning("Event INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
 
@@ -561,6 +565,10 @@ async def dispatch_notification(
                     via_outbox=via_outbox,
                 )
 
+        # story #4417 (Qadir 01a0eba4 ③) — how many recipients got a notice: a caller that must know it went out (a
+        # «notified» mark) checks this instead of trusting a return that also happens when nobody got anything
+        return len(created_for)
     except Exception:
         # BUG-1 수정: 에러 삼킴 제거 → 스택 트레이스 로깅
         logger.exception("dispatch_notification failed org_id=%s event_type=%s", org_id, event_type)
+        return 0

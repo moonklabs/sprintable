@@ -101,6 +101,9 @@ RETRY_SAFE = [
     "THREADS_DELETE_MEDIA_FAILED", "FACEBOOK_DELETE_POST_FAILED",  # 회수(삭제) — 다시 해도 같은 결과
     "SANDBOX_PROVIDER_ERROR", "SANDBOX_INSTAGRAM_PROVIDER_ERROR",  # sandbox 컨테이너 생성 단계(실 코드와 같은 부류)
     "SANDBOX_FACEBOOK_CAROUSEL_CHILD_FAILED", "SANDBOX_INSTAGRAM_CAROUSEL_CHILD_FAILED",  # sandbox 캐러셀 자식(부모 게시 전)
+    # story #4417 — the ad account's currency is read (GET act_{id}?fields=currency) before a boost start creates or switches on
+    # anything: a failed read wrote nothing at Meta, so trying again is safe.
+    "META_ADS_ACCOUNT_READ_FAILED",
 ]
 NOT_SENT = [
     "YOUTUBE_UPLOAD_PREP_TIMEOUT",  # story #4336 — 업로드 전체 상한을 PUT 전(원본 받기 · 세션 열기)에 넘김(영상 없음)
@@ -130,6 +133,11 @@ UNCHANGED = {
     "META_ADS_CAMPAIGN_STATUS_UPDATE_FAILED": "needs_check", "NEWSLETTER_SEND_PROVIDER_ERROR": "needs_check",
     "ADS_BOOST_PROVIDER_ERROR": "needs_check", "SOMETHING_UNKNOWN": "needs_check", None: "needs_check",
     "CHANNEL_PUBLISH_PROVIDER_CODE_MISSING": "needs_check",
+    # story #4417 — refused before any call (positive evidence nothing was sent), but a person has to act: a matching ad
+    # account in a new request (currency) · the boost is blocked for an unreadable spend. needs_check is what the boost card
+    # reads for «확인이 필요해요» with the reason line; `not_sent` would show the generic «자동 재시도를 멈췄어요» instead.
+    "ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH": "needs_check", "ADS_BOOST_SPEND_BLOCKED": "needs_check",
+    "META_ADS_UNKNOWN_CURRENCY": "needs_check", "META_ADS_ACCOUNT_CURRENCY_MISSING": "needs_check",
 }
 
 
