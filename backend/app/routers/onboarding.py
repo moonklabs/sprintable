@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.datetime_query import OffsetDatetime
 from app.dependencies.auth import _resolve_api_key, bearer_scheme
 from app.dependencies.database import get_db
-from app.core.rate_limit import limiter
+from app.core.rate_limit import open_setup_limiter
 from app.services.onboarding_funnel import (
     DESKTOP_SHELL_EMIT_EVENTS,
     FAILURE_REASONS,
@@ -55,7 +55,7 @@ META_MAX_BYTES = 2048
 
 
 @router.post("/events", status_code=202)
-@limiter.limit("120/minute")  # public (no login needed): the same shared limiter as the other open endpoints
+@open_setup_limiter.limit("120/minute")  # public (no login needed): per user IP, not the shared limiter's one count (PO 13:04Z)
 async def post_onboarding_event(
     body: OnboardingEventBody,
     request: Request = None,  # type: ignore[assignment]  # slowapi reads it; direct calls in tests pass none

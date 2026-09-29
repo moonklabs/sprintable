@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.rate_limit import limiter
+from app.core.rate_limit import open_setup_limiter
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.services.desktop_setup import (
@@ -75,7 +75,7 @@ class SetupCodeResponse(BaseModel):
 
 
 @router.post("/setup-codes", status_code=201, response_model=SetupCodeResponse)
-@limiter.limit("10/minute")
+@open_setup_limiter.limit("10/minute")  # per user IP (PO 13:04Z)
 async def post_setup_code(request: Request, response: Response, body: SetupCodeRequest, db: AsyncSession = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
     try:
@@ -159,7 +159,9 @@ class ExchangeRequest(BaseModel):
 
 
 @router.post("/setup-codes/exchange")
-@limiter.limit("60/minute")  # the app asks every 1.5 s while the person confirms
+# per user IP; the app asks every 1.5 s (40/minute) while the person confirms, and several can sit behind one NAT — the
+# exchange is guarded by the verifier, so this limit is only against load (PO 13:04Z)
+@open_setup_limiter.limit("240/minute")
 async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSession = Depends(get_db)):
     headers = {"Cache-Control": "no-store"}
     try:

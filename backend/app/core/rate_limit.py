@@ -52,3 +52,13 @@ resend_verification_limiter = Limiter(
     storage_options={"wrap_exceptions": True},
     enabled=not _TESTING,
 )
+
+
+# story #4424 (PO 13:04Z) — the desktop setup's open routes (no login: setup-codes · exchange · onboarding events), counted per
+# user IP. The shared `limiter` keys on the socket address, which on Cloud Run is the front end's — every user in one count.
+# In-memory like the shared one (fail-open: a counting problem never blocks a setup); not the resend limiter's Redis
+# fail-closed. Moving the shared limiter's 8 auth routes is 4398's second step, not this.
+open_setup_limiter = Limiter(
+    key_func=_rate_key_by_client_ip,
+    enabled=not _TESTING,
+)

@@ -1056,3 +1056,57 @@ async def test_the_plan_limit_refusal_says_how_many_are_needed_and_available(wor
         error = r.json()["error"]
         assert (error["code"], error["needed"], error["available"]) == ("PLAN_LIMIT_EXCEEDED", 2, expected_available)
         assert await _counts() == before  # rolled back as before
+
+
+# ─── PO 13:04Z — the open setup routes count per user IP ───────────────────────
+
+
+@pytest.fixture
+def per_ip_limits(monkeypatch):
+    """Cloud Run (K_SERVICE: the user's IP is the right end of X-Forwarded-For) with the open-setup limiter on, fresh counts."""
+    from app.core.rate_limit import open_setup_limiter
+
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend-dev")
+    monkeypatch.setattr(open_setup_limiter, "enabled", True)
+    open_setup_limiter.reset()
+    yield
+    open_setup_limiter.reset()
+
+
+@pytest.mark.anyio
+async def test_setup_codes_are_limited_per_user_ip_not_for_everyone_together(world, per_ip_limits):
+    async with _client() as c:
+        async def ask(ip: str):
+            _v, challenge = _pkce()
+            # the client may put anything in front; the front end adds the connecting address at the right end
+            return await c.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "d4424 ip"},
+                                headers={"X-Forwarded-For": f"203.0.113.250, {ip}"})
+        for _ in range(10):
+            assert (await ask("198.51.100.1")).status_code == 201
+        assert (await ask("198.51.100.1")).status_code == 429  # the same person over 10/minute
+        assert (await ask("198.51.100.2")).status_code == 201  # someone else is counted apart
+
+
+@pytest.mark.anyio
+async def test_onboarding_events_are_limited_per_user_ip(world, per_ip_limits):
+    async with _client() as c:
+        async def send(ip: str):
+            return await c.post("/api/v2/onboarding/events", json={"event": "config_copied", "meta": {}},
+                                headers={"X-Forwarded-For": ip})
+        for _ in range(120):
+            assert (await send("198.51.100.3")).status_code == 202
+        assert (await send("198.51.100.3")).status_code == 429
+        assert (await send("198.51.100.4")).status_code == 202
+
+
+@pytest.mark.anyio
+async def test_the_exchange_allows_several_apps_behind_one_address(world, per_ip_limits):
+    """240/minute per IP: six apps asking every 1.5 s (40/minute each) behind one NAT still get through."""
+    async with _client() as c:
+        async def ask(ip: str):
+            return await c.post("/api/v2/desktop/setup-codes/exchange", json={"code": "no-such-code-" + "x" * 20, "verifier": "v" * 43},
+                                headers={"X-Forwarded-For": ip})
+        for _ in range(240):
+            assert (await ask("198.51.100.5")).status_code == 404
+        assert (await ask("198.51.100.5")).status_code == 429
+        assert (await ask("198.51.100.6")).status_code == 404
