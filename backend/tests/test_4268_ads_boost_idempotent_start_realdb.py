@@ -188,6 +188,7 @@ async def test_a_partial_creation_is_resumed_by_the_retry(monkeypatch):
 
     partial_error = MetaAdsCampaignError(
         "META_ADS_ADSET_CREATE_FAILED", "adset 실패(주입)", partial={"campaign_id": "existing-campaign-1"},
+        outcome_known=True,  # story #4409 — a rejection of the adset (4xx): known, the claim is released and the retry resumes
     )
     calls = _spy_sandbox_create(monkeypatch, first_raises=partial_error)
     engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())

@@ -211,6 +211,16 @@ class SpendSnapshotView(BaseModel):
     spend_minor: int | None
 
 
+class StartCommandView(BaseModel):
+    """story #4409 — the boost_start command's state (dead_letter + needs_check = the person has to look)."""
+    id: uuid.UUID
+    status: str
+    failure_kind: str | None
+    error_code: str | None
+    # the campaign name to look for in the ad account — only for ADS_BOOST_CREATE_OUTCOME_UNKNOWN
+    campaign_name: str | None = None
+
+
 class SpendSummaryResponse(BaseModel):
     gate_id: uuid.UUID
     sealed_ads_budget_minor: int
@@ -231,6 +241,7 @@ class SpendSummaryResponse(BaseModel):
     # 시각(ads_boost_runs.cap_reached_at, 0368) — run 자체가 없거나 미도달이면
     # null(지어내지 않는다).
     cap_reached_at: str | None
+    start_command: StartCommandView | None = None
     snapshots: list[SpendSnapshotView]
 
 
@@ -268,6 +279,7 @@ async def _get_ads_boost_spend_endpoint(
         sealed_ads_currency=summary["sealed_ads_currency"], captured_spend_minor=summary["captured_spend_minor"],
         remaining_minor=summary["remaining_minor"], run_status=summary["run_status"],
         initiated_by=summary["initiated_by"],
+        start_command=StartCommandView(**summary["start_command"]) if summary.get("start_command") else None,
         cap_reached_at=summary["cap_reached_at"].isoformat() if summary["cap_reached_at"] else None,
         snapshots=[
             SpendSnapshotView(

@@ -44,6 +44,19 @@ type RunStatus = 'pending' | 'running' | 'paused' | 'failed';
 // (CommandResponse)에도 있지만 scheduler 기동분은 이 화면이 그 POST를 절대 안
 // 거치므로(PR6 워커가 직접 실행) /spend가 유일한 관측 축(PR8 diff 확認).
 type InitiatedBy = 'scheduler' | 'human';
+// story #4409 — the start command's own state (/spend `start_command`). A start stopped for a person to check
+// (dead_letter + needs_check) used to be invisible: the run stays «pending», so the screen offered «start» again, which only
+// returned the same stopped command.
+interface StartCommand {
+  id: string;
+  status: string;
+  failure_kind: string | null;
+  error_code: string | null;
+  // the campaign to look for in the ad account — only for «outcome unknown» (BE boost_campaign_name)
+  campaign_name?: string | null;
+}
+// Meta may have created the campaign: retried only after the person confirms it does not exist in the ad account.
+const OUTCOME_UNKNOWN = 'ADS_BOOST_CREATE_OUTCOME_UNKNOWN';
 
 export function BoostExecutionControl({
   orgId, gateId, sealedAdsBudgetMinor, sealedAdsCurrency, sealedAdsStartsAt, sealedAdsEndsAt, sealedAdsObjective,
@@ -55,6 +68,9 @@ export function BoostExecutionControl({
   const displayTimezone = resolveDisplayTimezone().tz;
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [initiatedBy, setInitiatedBy] = useState<InitiatedBy | null>(null);
+  const [startCommand, setStartCommand] = useState<StartCommand | null>(null);
+  const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
+  const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
@@ -74,8 +90,11 @@ export function BoostExecutionControl({
   const load = () => {
     fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/spend`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
-      .then((json: { data?: { run_status: RunStatus | null; initiated_by?: InitiatedBy | null } }) => {
+      .then((json: {
+        data?: { run_status: RunStatus | null; initiated_by?: InitiatedBy | null; start_command?: StartCommand | null };
+      }) => {
         setRunStatus(json.data?.run_status ?? null);
+        setStartCommand(json.data?.start_command ?? null);
         // story #3806 PR 9② — PR8(#4185) 착지 前엔 이 필드가 응답에 없어 항상
         // undefined→null로 떨어진다(falsy-safe, 아래 렌더가 자동으로 숨는다).
         setInitiatedBy(json.data?.initiated_by ?? null);
@@ -138,7 +157,94 @@ export function BoostExecutionControl({
     }
   };
 
+  const doRetryStart = async () => {
+    if (!startCommand) return;
+    setSubmitting(true);
+    setActionError(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${startCommand.id}/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed_no_campaign: startCommand.error_code === OUTCOME_UNKNOWN }),
+      });
+      if (!res.ok) {
+        setActionError(t('boostExecutionActionError'));
+        return;
+      }
+      setNeedsCheckOpen(false);
+      setNeedsCheckConfirmed(false);
+      load();
+    } catch {
+      setActionError(t('boostExecutionActionError'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   if (!loaded) return null;
+
+  const needsCheck = startCommand?.status === 'dead_letter' && startCommand.failure_kind === 'needs_check';
+  if (needsCheck && runStatus !== 'running' && runStatus !== 'paused') {
+    const outcomeUnknown = startCommand.error_code === OUTCOME_UNKNOWN;
+    return (
+      <div className="space-y-2" data-testid="boost-execution-control">
+        <p className="text-xs">
+          <span className="font-medium text-foreground" data-testid="boost-needs-check">{t('boostNeedsCheckTitle')}</span>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {outcomeUnknown ? t('boostNeedsCheckOutcomeUnknown') : t('boostNeedsCheckStopped')}
+        </p>
+        {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
+        <Button variant="outline" size="sm" onClick={() => setNeedsCheckOpen(true)} data-testid="boost-needs-check-retry-trigger">
+          {t('boostNeedsCheckRetry')}
+        </Button>
+        <Dialog
+          open={needsCheckOpen}
+          onOpenChange={(open) => { setNeedsCheckOpen(open); if (!open) setNeedsCheckConfirmed(false); }}
+        >
+          <DialogContent data-testid="boost-needs-check-dialog">
+            <DialogHeader>
+              <DialogTitle>{t('boostNeedsCheckConfirmTitle')}</DialogTitle>
+              <DialogDescription>
+                {outcomeUnknown ? t('boostNeedsCheckWhatOutcomeUnknown') : t('boostNeedsCheckWhatStopped')}
+              </DialogDescription>
+            </DialogHeader>
+            {outcomeUnknown ? (
+              <div className="space-y-1 text-sm">
+                {/* the weight of a wrong confirmation, then what to look for (Yuna 23:18Z) */}
+                <p className="text-foreground" data-testid="boost-needs-check-weight">{t('boostNeedsCheckWeightOutcomeUnknown')}</p>
+                {startCommand.campaign_name ? (
+                  <p className="text-muted-foreground" data-testid="boost-needs-check-campaign">
+                    {t('boostNeedsCheckCampaignToFind', { campaignName: startCommand.campaign_name })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {/* the same two steps as the post screen's needs_check retry: the confirm button stays locked until checked */}
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox" checked={needsCheckConfirmed}
+                onChange={(e) => setNeedsCheckConfirmed(e.target.checked)}
+                data-testid="boost-needs-check-confirm-checklist"
+              />
+              {outcomeUnknown ? t('boostNeedsCheckConfirmNoCampaign') : t('boostNeedsCheckConfirmChecked')}
+            </label>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setNeedsCheckOpen(false)} disabled={submitting}>
+                {t('boostExecutionCancel')}
+              </Button>
+              <Button
+                onClick={() => void doRetryStart()} disabled={submitting || !needsCheckConfirmed}
+                data-testid="boost-needs-check-confirm"
+              >
+                {t('boostNeedsCheckRetry')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
 
   if (runStatus !== 'running' && runStatus !== 'paused') {
     // 아직 시작 前(run_status=null·pending·failed는 이 조각에선 미시작과 동형 취급 —

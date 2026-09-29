@@ -24,13 +24,24 @@ _GRAPH_BASE = "https://graph.facebook.com/v21.0"
 class MetaAdsCampaignError(Exception):
     """meta_ads_oauth.py::MetaAdsOAuthError와 동형 — .code/.message 속성."""
 
-    def __init__(self, code: str, message: str, *, partial: dict | None = None):
+    def __init__(self, code: str, message: str, *, partial: dict | None = None, outcome_known: bool = False):
         self.code = code
         self.message = message
+        # story #4409(Qadir 4805 · PO 23:39Z) — True only when Meta's answer says the object was **not** created (a 4xx rejection),
+        # and only where a raise site says so explicitly. The default is False: a new error path that forgets it stops as
+        # «outcome unknown» for a person to check (the safe side), instead of releasing the claim and letting a retry create a
+        # second campaign (customer ad spend).
+        self.outcome_known = outcome_known
         # story #4268 — 3단계 생성 중 앞 단계가 이미 만들어진 뒤 실패하면 그 id들(campaign_id · adset_id). 워커가 실행 행에 남겨
         # 재시도가 이어서 만들게 한다(다시 만들면 고객 광고 계정에 PAUSED 객체가 중복으로 쌓인다).
         self.partial = dict(partial or {})
         super().__init__(message)
+
+
+def boost_campaign_name(object_story_id: str) -> str:
+    """story #4409 — the campaign's name at Meta, one rule for the create call, the «campaign to look for» line of the check
+    dialog (/spend) and the lookup that adopts an existing campaign (4412)."""
+    return f"Boost {object_story_id}"
 
 
 async def create_boost_campaign(
@@ -47,22 +58,24 @@ async def create_boost_campaign(
     실어 올린다(워커가 실행 행에 남겨 다음 재시도가 이어 간다)."""
     ids = {k: v for k, v in (existing or {}).items() if v}
 
-    def fail(code: str, message: str) -> MetaAdsCampaignError:
-        return MetaAdsCampaignError(code, message, partial=ids)
+    def fail(code: str, message: str, *, outcome_known: bool = False) -> MetaAdsCampaignError:
+        return MetaAdsCampaignError(code, message, partial=ids, outcome_known=outcome_known)
 
     if not ids.get("campaign_id"):
         campaign_resp = await client.post(
             f"{_GRAPH_BASE}/act_{ad_account_id}/campaigns",
             params={
-                "access_token": access_token, "name": f"Boost {object_story_id}",
+                "access_token": access_token, "name": boost_campaign_name(object_story_id),
                 "objective": objective, "status": "PAUSED", "special_ad_categories": "[]",
             },
         )
         if campaign_resp.status_code != 200:
-            raise fail("META_ADS_CAMPAIGN_CREATE_FAILED", campaign_resp.text[:500])
+            raise fail(
+                "META_ADS_CAMPAIGN_CREATE_FAILED", campaign_resp.text[:500], outcome_known=400 <= campaign_resp.status_code < 500,
+            )
         campaign_id = campaign_resp.json().get("id")
         if not campaign_id:
-            raise fail("META_ADS_CAMPAIGN_CREATE_MISSING_FIELD", "id missing")
+            raise fail("META_ADS_CAMPAIGN_CREATE_MISSING_FIELD", "id missing", outcome_known=False)
         ids["campaign_id"] = str(campaign_id)
 
     if not ids.get("adset_id"):
@@ -76,10 +89,12 @@ async def create_boost_campaign(
             },
         )
         if adset_resp.status_code != 200:
-            raise fail("META_ADS_ADSET_CREATE_FAILED", adset_resp.text[:500])
+            raise fail(
+                "META_ADS_ADSET_CREATE_FAILED", adset_resp.text[:500], outcome_known=400 <= adset_resp.status_code < 500,
+            )
         adset_id = adset_resp.json().get("id")
         if not adset_id:
-            raise fail("META_ADS_ADSET_CREATE_MISSING_FIELD", "id missing")
+            raise fail("META_ADS_ADSET_CREATE_MISSING_FIELD", "id missing", outcome_known=False)
         ids["adset_id"] = str(adset_id)
 
     if not ids.get("ad_id"):
@@ -91,10 +106,10 @@ async def create_boost_campaign(
             },
         )
         if ad_resp.status_code != 200:
-            raise fail("META_ADS_AD_CREATE_FAILED", ad_resp.text[:500])
+            raise fail("META_ADS_AD_CREATE_FAILED", ad_resp.text[:500], outcome_known=400 <= ad_resp.status_code < 500)
         ad_id = ad_resp.json().get("id")
         if not ad_id:
-            raise fail("META_ADS_AD_CREATE_MISSING_FIELD", "id missing")
+            raise fail("META_ADS_AD_CREATE_MISSING_FIELD", "id missing", outcome_known=False)
         ids["ad_id"] = str(ad_id)
 
     return {"campaign_id": ids["campaign_id"], "adset_id": ids["adset_id"], "ad_id": ids["ad_id"]}

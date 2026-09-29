@@ -44,6 +44,7 @@ async def create_boost_campaign(
         raise MetaAdsCampaignError(
             "META_ADS_CAMPAIGN_CREATE_FAILED",
             "sandbox: [sandbox:budget-exceeded] marker simulation — ad account spend cap reached",
+            outcome_known=True,  # story #4409 — simulates Meta rejecting the create (nothing made)
         )
     seed = f"{ad_account_id}:{object_story_id}"
     ns = uuid.uuid5(uuid.NAMESPACE_URL, seed)
