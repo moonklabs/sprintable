@@ -83,7 +83,12 @@ async def create_boost_campaign(
         raise MetaAdsCampaignError(
             "META_ADS_CAMPAIGN_CREATE_FAILED", "sandbox: create-unknown marker — no definite answer (like a 503)",
         )  # outcome_known left False: the campaign may exist
-    return _sandbox_ids(ad_account_id, object_story_id)
+    # story #4412 (0420) — ids unique per run, like Meta's: two boosts of the same post in one ad account get different ids
+    # (the lookup markers keep using `_sandbox_ids`, which the create-unknown flow never returns from create).
+    ns = uuid.uuid5(
+        uuid.NAMESPACE_URL, f"{ad_account_id}:{object_story_id}:{starts_at_iso}:{ends_at_iso}:{budget_minor}:{objective}",
+    )
+    return {"campaign_id": f"sandbox-campaign-{ns}", "adset_id": f"sandbox-adset-{ns}", "ad_id": f"sandbox-ad-{ns}"}
 
 
 async def find_boost_campaigns(

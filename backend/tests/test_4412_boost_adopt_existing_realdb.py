@@ -240,3 +240,70 @@ async def test_an_adset_whose_budget_differs_from_the_sealed_amount_is_not_adopt
     finally:
         await engine.dispose()
 
+
+async def test_an_ad_of_that_name_under_another_adset_is_not_adopted(monkeypatch):
+    """Qadir 01a0eada — the ad → ad set parent check had no test of its own (dropping it kept 8 green)."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    engine, Session, org_id, owner_id, gate_id, _command_row, _creates = await _stopped_unknown(
+        "[sandbox:create-unknown]", monkeypatch,
+    )
+    try:
+        real_find = sandbox.find_boost_ads
+
+        async def ad_elsewhere(client, **kwargs):
+            return [{**a, "adset_id": "some-other-adset"} for a in await real_find(client, **kwargs)]
+
+        monkeypatch.setattr(sandbox, "find_boost_ads", ad_elsewhere)
+        body = (await _adopt(Session, org_id, owner_id, gate_id)).json()
+        assert body["result"] == "adopted" and body["adset_id"] and body["ad_id"] is None
+        assert (await _run(Session, gate_id)).ad_id is None
+    finally:
+        await engine.dispose()
+
+
+async def test_two_runs_adopting_the_same_campaign_at_once_only_one_wins(monkeypatch):
+    """Qadir 01a0eada ① (PO 01:59Z) — each run locks only its own row, so the «not recorded on another run» filter can pass
+    for both; the unique indexes (0420) let only one of the two writes through, the other gets already_linked."""
+    import asyncio
+
+    import app.services.ads_sandbox_campaign as sandbox
+
+    now = (datetime.now(UTC) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S+0000")
+
+    async def the_same_campaign(client, **kwargs):
+        return [{"id": "shared-campaign", "name": sandbox.boost_campaign_name(kwargs["object_story_id"]), "created_time": now}]
+
+    async def the_same_adset(client, **kwargs):
+        return [{"id": "shared-adset", "name": sandbox.boost_adset_name(kwargs["object_story_id"]), "campaign_id": "shared-campaign",
+                 "created_time": now, sandbox.BOOST_ADSET_BUDGET_FIELD: str(kwargs.get("expected_budget_minor"))}]
+
+    async def the_same_ad(client, **kwargs):
+        return [{"id": "shared-ad", "name": sandbox.boost_ad_name(kwargs["object_story_id"]), "adset_id": "shared-adset",
+                 "created_time": now}]
+
+    first = await _stopped_unknown("[sandbox:create-unknown]", monkeypatch)
+    second = await _stopped_unknown("[sandbox:create-unknown]", monkeypatch)
+    monkeypatch.setattr(sandbox, "find_boost_campaigns", the_same_campaign)
+    monkeypatch.setattr(sandbox, "find_boost_adsets", the_same_adset)
+    monkeypatch.setattr(sandbox, "find_boost_ads", the_same_ad)
+    from app.services.ads_boost_execution import adopt_existing_boost_objects
+
+    async def adopt_in_its_own_session(world):
+        # the service directly, each call in its own session and transaction — the race is in the DB (both HTTP requests
+        # would override auth on the one shared app object, which is a harness artefact, not the product)
+        async with world[1]() as s:
+            outcome = await adopt_existing_boost_objects(s, org_id=world[2], gate_id=world[4])
+            await s.commit()
+            return outcome
+
+    try:
+        answers = await asyncio.gather(adopt_in_its_own_session(first), adopt_in_its_own_session(second))
+        results = sorted(a["result"] for a in answers)
+        assert results == ["adopted", "already_linked"], answers
+        runs = [await _run(first[1], first[4]), await _run(second[1], second[4])]
+        assert sorted(r.campaign_id or "" for r in runs) == ["", "shared-campaign"]
+    finally:
+        await first[0].dispose()
+        await second[0].dispose()
+

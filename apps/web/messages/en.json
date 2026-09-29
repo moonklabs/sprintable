@@ -5884,7 +5884,8 @@
     "boostAdoptTitle": "Link existing campaign",
     "boostAdoptWhat": "This finds the campaign by name in your ad account and links it to this boost. Once linked, the boost starts right away.",
     "boostAdoptWeight": "Once linked, ad spend starts right away.",
-    "boostAdoptConfirm": "Link and start"
+    "boostAdoptConfirm": "Link and start",
+    "boostAdoptAlreadyLinked": "This campaign is already linked to another boost, so we didn't link it."
   },
   "recruiter": {
     "title": "Recruiter",

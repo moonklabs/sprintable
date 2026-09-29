@@ -132,7 +132,8 @@ class AdoptCandidateView(BaseModel):
 
 class AdoptExistingResponse(BaseModel):
     """story #4412 — adopted (ids filled, the start queued again) · not_found · ambiguous (candidates listed, nothing adopted) ·
-    budget_mismatch (the found ad set's budget is not the approved amount; nothing adopted)."""
+    budget_mismatch (the found ad set's budget is not the approved amount; nothing adopted) · already_linked (another boost
+    holds that campaign; nothing adopted)."""
     result: str
     level: str | None = None
     campaign_id: str | None = None

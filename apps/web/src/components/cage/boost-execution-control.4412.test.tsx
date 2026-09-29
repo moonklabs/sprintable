@@ -131,5 +131,11 @@ describe('[SID:4412] «link existing campaign» (Yuna 00:49Z)', () => {
     await act(async () => { $('boost-adopt-trigger')!.click(); });
     expect($('boost-adopt-budget-mismatch')).toBeNull();
   });
+
+  it('already linked to another boost: nothing linked, a line in the card', async () => {
+    await mountCard();
+    await linkAndStart({ result: 'already_linked' });
+    expect($('boost-adopt-already-linked')?.textContent).toBe(koMessages.cage.boostAdoptAlreadyLinked);
+  });
 });
 

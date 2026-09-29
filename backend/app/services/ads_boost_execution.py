@@ -504,7 +504,9 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
     sealed amount — otherwise switching it on would spend an amount nobody approved (someone may have changed it in the ad
     account). A different or unreadable budget → nothing adopted, `budget_mismatch` with both amounts.
 
-    Returns {"result": "adopted"|"not_found"|"ambiguous"|"budget_mismatch", "level"?, "candidates"?, "campaign_id"?,
+    Two runs adopting the same object at once: the unique indexes (0420) let only one write; the other → `already_linked`.
+
+    Returns {"result": "adopted"|"not_found"|"ambiguous"|"budget_mismatch"|"already_linked", "level"?, "candidates"?, "campaign_id"?,
     "adset_id"?, "ad_id"?, "adset_budget_minor"?, "sealed_budget_minor"?}.
     """
     from app.models.ads_boost_run import AdsBoostRun
@@ -588,11 +590,20 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
     run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.id == run_id).with_for_update())).scalar_one()
     if run.create_call_started_at != marker_at or (run.campaign_id and run.adset_id and run.ad_id):
         raise AdsBoostAdoptNotApplicableError()  # someone else resolved it meanwhile
-    run.campaign_id = adopted["campaign_id"]
-    run.adset_id = adopted.get("adset_id") or run.adset_id
-    run.ad_id = adopted.get("ad_id") or run.ad_id
-    run.create_claimed_at = None
-    run.create_call_started_at = None
+    # The unique indexes (0420) are the guard against two runs adopting one campaign at the same time: each run locks only
+    # its own row, so the «not recorded on another run» filter above can pass for both. A violation → nothing adopted.
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with db.begin_nested():
+            run.campaign_id = adopted["campaign_id"]
+            run.adset_id = adopted.get("adset_id") or run.adset_id
+            run.ad_id = adopted.get("ad_id") or run.ad_id
+            run.create_claimed_at = None
+            run.create_call_started_at = None
+            await db.flush()
+    except IntegrityError:
+        return {"result": "already_linked"}
     await retry_dead_letter_command(db, org_id=org_id, command_id=command.id)
     return {"result": "adopted", **adopted}
 

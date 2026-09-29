@@ -75,6 +75,8 @@ export function BoostExecutionControl({
   // story #4412 — «it is already in my ad account»: the lookup's answer when it did not adopt
   const [adoptOutcome, setAdoptOutcome] = useState<
     | { result: 'not_found' }
+    // another boost already holds that campaign (the server's unique ids, 0420) — nothing linked
+    | { result: 'already_linked' }
     | { result: 'ambiguous'; candidates: { id: string | null; name: string | null; created_time: string | null }[] }
     // the found ad set's budget is not the approved amount (PO 00:48Z) — nothing linked
     | { result: 'budget_mismatch'; adsetBudgetMinor: number | null; sealedBudgetMinor: number | null }
@@ -213,6 +215,8 @@ export function BoostExecutionControl({
       setAdoptOpen(false); // every answer closes the confirmation; the result line (if any) stays in the card
       if (json.data?.result === 'adopted') {
         load();
+      } else if (json.data?.result === 'already_linked') {
+        setAdoptOutcome({ result: 'already_linked' });
       } else if (json.data?.result === 'budget_mismatch') {
         setAdoptOutcome({
           result: 'budget_mismatch',
@@ -292,6 +296,9 @@ export function BoostExecutionControl({
         {/* the lookup's answer stays in the card (not a toast); success needs no line — the card turns «running» */}
         {adoptOutcome?.result === 'not_found' ? (
           <p className="text-xs text-muted-foreground" data-testid="boost-adopt-not-found">{t('boostAdoptNotFound')}</p>
+        ) : null}
+        {adoptOutcome?.result === 'already_linked' ? (
+          <p className="text-xs text-muted-foreground" data-testid="boost-adopt-already-linked">{t('boostAdoptAlreadyLinked')}</p>
         ) : null}
         {adoptOutcome?.result === 'budget_mismatch' ? (() => {
           const approved = adoptOutcome.sealedBudgetMinor !== null && sealedAdsCurrency
