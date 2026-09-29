@@ -122,7 +122,7 @@ export function HypothesisResolveDialog({
               // placeholder 키를 신설.
               placeholder={t('resolveActualPlaceholder')}
               autoFocus
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
 
@@ -153,7 +153,7 @@ export function HypothesisResolveDialog({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder={t('reasonInputPlaceholder')}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             {/* 힌트는 유지(PO 지시) — "제품이 파는 것을 직접 말해주는 자리"라 3중 반복이어도 값어치가 큼. */}
             <p className="text-[11px] text-muted-foreground">{t('reasonHint')}</p>

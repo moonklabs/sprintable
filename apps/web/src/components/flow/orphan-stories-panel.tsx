@@ -92,7 +92,7 @@ function OrphanRow({
           <select
             value={selectedEpicId}
             onChange={(e) => setSelectedEpicId(e.target.value)}
-            className="rounded border border-border bg-card px-1.5 py-1 text-[11px]"
+            className="rounded border border-border bg-card px-1.5 py-1 text-base lg:text-[11px]"
           >
             <option value="">{t('orphanPickPlaceholder')}</option>
             {activeGoals.map((g) => (
