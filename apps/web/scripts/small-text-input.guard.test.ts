@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { baseFontPx, scanSource, scanTree, wrapperSizes } from './small-text-input-scan';
+import { baseFontPx, beforeResponsive, desktopFontPx, scanSource, scanTree, wrapperSizes } from './small-text-input-scan';
 import { measureFsReads } from './test-utils/fs-work';
 
 // story #4406 — 모바일 폭에서 글자가 16px 미만인 입력칸(iOS WebKit이 초점 때 화면을 확대)을 새로 만들지 않는다.
@@ -43,36 +43,53 @@ describe('scanSource — 셀프테스트', () => {
     expect(scanSource(src, 'c.tsx').sites).toEqual([]);
   });
 
-  it('⭐공용 래퍼 호출부 — 래퍼 클래스와 호출부 className을 cn()(tailwind-merge)으로 합친 최종값으로 판정(PR 4807: onboarding-form의 OperatorInput 6칸)', () => {
-    const src = `
-      export const D = () => (<>
-        <OperatorInput value={a} />
-        <OperatorInput className="h-10 text-base lg:text-sm" />
-        <OperatorTextarea className="text-base lg:text-xs" />
-      </>);`;
-    const small = new Map([['OperatorInput', { classes: 'px-3 text-sm', px: 14 }], ['OperatorTextarea', { classes: 'px-3 text-sm', px: 14 }]]);
-    expect(scanSource(src, 'd.tsx', small).sites.map((s) => [s.tag, s.px])).toEqual([['OperatorInput', 14]]);
-    const fixed = new Map([['OperatorInput', { classes: 'px-3 text-base lg:text-sm', px: 16 }], ['OperatorTextarea', { classes: 'px-3 text-base lg:text-sm', px: 16 }]]);
-    const r = scanSource(src, 'd.tsx', fixed);
-    expect(r.sites).toEqual([]);
-    expect(r.drift).toEqual([]);
+  // 유나 4807 실측 표 그대로: shadcn Input 밑단(text-base md:text-sm) ← 래퍼 ← 호출부, 세 겹을 cn()으로 합친 값.
+  const INPUT_BASE = 'h-9 px-3 text-base md:text-sm';
+  const RESPONSIVE = 'flex w-full px-3 text-base lg:text-sm';
+  const inputWrapper = { inner: INPUT_BASE, classes: `${RESPONSIVE} h-10`, px: 16 };
+  const textareaWrapper = { inner: '', classes: `${RESPONSIVE} min-h-[96px]`, px: 16 };
+
+  it('⭐공용 래퍼 호출부 — 밑단 · 래퍼 · 호출부를 cn()으로 합친 최종값으로 판정(PR 4807: onboarding-form의 OperatorInput 6칸)', () => {
+    const src = `export const D = () => (<><OperatorInput value={a} /><OperatorInput className="h-10" /></>);`;
+    const small = new Map([['OperatorInput', { inner: INPUT_BASE, classes: 'flex w-full px-3 text-sm h-10', px: 14 }]]);
+    expect(scanSource(src, 'd.tsx', small).sites.map((s) => s.px)).toEqual([14, 14]);
+    const r = scanSource(src, 'd.tsx', new Map([['OperatorInput', inputWrapper]]));
+    expect([r.sites, r.drift]).toEqual([[], []]);
   });
 
-  it('⭐데스크톱이 바뀌는 자리 — 호출부 text-xs는 래퍼 text-base만 지우고 lg:text-sm은 남긴다(유나 4807 실측): 모바일 12 그대로 + 데스크톱 12 → 14', () => {
-    const wrappers = new Map([['OperatorInput', { classes: 'px-3 text-base lg:text-sm', px: 16 }]]);
-    const r = scanSource('export const E = () => <OperatorInput className="flex-1 font-mono text-xs" />;', 'e.tsx', wrappers);
-    expect(r.sites.map((s) => s.px)).toEqual([12]);
-    expect(r.drift.map((d) => [d.intendedPx, d.mergedPx])).toEqual([[12, 14]]);
-    // 처방 모양(text-base lg:text-xs)은 모바일 16 · 데스크톱 12 그대로.
-    const ok = scanSource('export const F = () => <OperatorInput className="flex-1 font-mono text-base lg:text-xs" />;', 'f.tsx', wrappers);
-    expect([ok.sites, ok.drift]).toEqual([[], []]);
+  it.each([
+    // [설명, 래퍼, 호출부 className, 모바일 px(16 미만일 때만 셈), 데스크톱 바뀜]
+    ['입력칸(shadcn 밑단) · 호출부 text-xs — 모바일 12 · 데스크톱 14 그대로(md:text-sm이 남음)', 'input', 'min-w-0 flex-1 font-mono text-xs', 12, null],
+    ['입력칸 · 호출부 크기 뺌 — 모바일 16 · 데스크톱 14 그대로(맞는 처방)', 'input', 'min-w-0 flex-1 font-mono', null, null],
+    ['textarea(밑단 없음) · 호출부 text-xs — 모바일 12 · 데스크톱 12 → 14(래퍼 lg:text-sm이 남음)', 'textarea', 'min-h-[52px] text-xs', 12, [12, 14]],
+    ['textarea · 호출부 text-base lg:text-xs — 모바일 16 · 데스크톱 12 그대로(맞는 처방)', 'textarea', 'min-h-[52px] text-base lg:text-xs', null, null],
+  ] as const)('⭐%s', (_name, kind, own, mobile, drift) => {
+    const tag = kind === 'input' ? 'OperatorInput' : 'OperatorTextarea';
+    const r = scanSource(`export const X = () => <${tag} className="${own}" />;`, 'x.tsx', new Map([[tag, kind === 'input' ? inputWrapper : textareaWrapper]]));
+    expect(r.sites.map((s) => s.px)).toEqual(mobile === null ? [] : [mobile]);
+    expect(r.drift.map((d) => [d.intendedPx, d.mergedPx])).toEqual(drift === null ? [] : [drift]);
   });
 
-  it('래퍼 크기는 정의 파일에서 읽는다 — 정의가 없거나 입력칸을 안 그리면 던진다(표가 헛돌지 않게)', () => {
-    const def = `const cls = 'px-3 text-sm'; export function OperatorInput(p) { return <Input className={cn(cls, p.className)} />; }
-      export function OperatorTextarea(p) { return <textarea className={cn(cls, 'min-h-24')} />; }
-      export function OperatorSelect(p) { return <select className={cn(cls)} />; }`;
-    expect([...wrapperSizes(() => def)].map(([n, w]) => [n, w.px])).toEqual([['OperatorInput', 14], ['OperatorTextarea', 14], ['OperatorSelect', 14]]);
+  it('beforeResponsive · desktopFontPx — 래퍼를 반응형으로 바꾸기 전 모양 · 1024px 이상 크기(lg → md → 접두사 없음)', () => {
+    expect(beforeResponsive('flex text-base lg:text-sm h-10')).toBe('flex h-10 text-sm');
+    expect(beforeResponsive('flex text-sm')).toBe('flex text-sm');
+    expect(desktopFontPx('md:text-sm lg:text-sm text-xs')).toBe(14);
+    expect(desktopFontPx('md:text-sm text-xs')).toBe(14);
+    expect(desktopFontPx('lg:text-sm text-xs')).toBe(14);
+    expect(desktopFontPx('text-xs')).toBe(12);
+  });
+
+  it('래퍼 크기는 정의 파일(과 밑단 공용 부품)에서 읽는다 — 정의가 없거나 입력칸을 안 그리면 던진다(표가 헛돌지 않게)', () => {
+    const files: Record<string, string> = {
+      'components/ui/operator-control.tsx': `const cls = 'px-3 text-sm'; export function OperatorInput(p) { return <Input className={cn(cls, p.className)} />; }
+        export function OperatorTextarea(p) { return <textarea className={cn(cls, 'min-h-24')} />; }
+        export function OperatorSelect(p) { return <select className={cn(cls)} />; }`,
+      'components/ui/input.tsx': `function Input({ className }) { return <InputPrimitive className={cn('h-9 text-base md:text-sm', className)} />; }`,
+    };
+    const w = wrapperSizes((rel) => files[rel]!);
+    expect([...w].map(([n, i]) => [n, i.inner, i.px])).toEqual([
+      ['OperatorInput', 'h-9 text-base md:text-sm', 14], ['OperatorTextarea', '', 14], ['OperatorSelect', '', 14],
+    ]);
     expect(() => wrapperSizes(() => 'export const Nothing = 1;')).toThrow(/정의가/);
   });
 

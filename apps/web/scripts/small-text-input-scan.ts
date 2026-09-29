@@ -31,6 +31,8 @@ export const WRAPPERS: Readonly<Record<string, string>> = {
 
 /** 래퍼 정의에서 읽은 것 — 입력칸의 클래스 문자열(호출부와 병합할 원본)과 모바일 크기. */
 export interface WrapperInfo {
+  /** 래퍼가 그리는 공용 부품(예: shadcn Input)이 스스로 가진 클래스 — 래퍼 클래스 · 호출부 className이 그 뒤에 합쳐진다. 날 요소면 빈 문자열. */
+  inner: string;
   classes: string;
   px: number;
 }
@@ -65,8 +67,17 @@ export function baseFontPx(classes: string): number | null {
 
 /** lg 이상(데스크톱)에서의 크기 — `lg:` 크기 클래스가 있으면 그것(마지막이 이김), 없으면 모바일 기본값. */
 export function desktopFontPx(classes: string): number | null {
-  const lg = classes.split(/\s+/).filter((t) => t.startsWith('lg:')).map((t) => t.slice(3)).join(' ');
-  return baseFontPx(lg) ?? baseFontPx(classes);
+  // 1024px 이상에서는 md: · lg: 둘 다 적용되고 Tailwind가 lg 규칙을 뒤에 싣으므로 lg가 이긴다 — lg → md → 접두사 없음 순.
+  const at = (prefix: string) => baseFontPx(classes.split(/\s+/).filter((t) => t.startsWith(prefix)).map((t) => t.slice(prefix.length)).join(' '));
+  return at('lg:') ?? at('md:') ?? baseFontPx(classes);
+}
+
+/** 래퍼를 반응형으로 바꾸기 전 모양 — 접두사 없는 크기를 빼고 `lg:` 크기를 접두사 없이 편다(`text-base lg:text-sm` → `text-sm`). */
+export function beforeResponsive(classes: string): string {
+  const tokens = classes.split(/\s+/).filter(Boolean);
+  const lgSizes = tokens.filter((t) => t.startsWith('lg:') && baseFontPx(t.slice(3)) !== null).map((t) => t.slice(3));
+  if (!lgSizes.length) return classes;
+  return [...tokens.filter((t) => baseFontPx(t) === null && !(t.startsWith('lg:') && baseFontPx(t.slice(3)) !== null)), ...lgSizes].join(' ');
 }
 
 function stringConstants(sf: ts.SourceFile): Map<string, string> {
@@ -118,17 +129,19 @@ export function scanSource(
       const tag = node.tagName.getText(sf);
       const wrapper = wrappers.get(tag);
       if (wrapper !== undefined) {
-        // 호출부 className은 래퍼 안에서 cn()(tailwind-merge)으로 래퍼 클래스 뒤에 합쳐진다 — 같은 수식자끼리만 지우므로
-        // 호출부 `text-xs`는 래퍼 `text-base`만 지우고 `lg:text-sm`은 남긴다(유나 4807 실측). 그래서 최종 병합 결과로 판정한다.
+        // 최종 클래스 = 공용 부품 자기 클래스 ← 래퍼 클래스 ← 호출부 className 순서로 cn()(tailwind-merge) 병합. tailwind-merge는 같은
+        // 수식자끼리만 지우므로 호출부 `text-xs`는 `text-base`만 지우고 `md:text-sm`(shadcn Input) · `lg:text-sm`(래퍼)은 남긴다
+        // (유나 4807 실측 두 번). 그래서 세 겹을 실제로 합친 값으로 잰다.
         const init = attr(node, 'className')?.initializer;
         const own = init ? classText(init, constants) : '';
-        const merged = cn(wrapper.classes, own);
-        const px = baseFontPx(merged) ?? wrapper.px;
+        const final = cn(wrapper.inner, cn(wrapper.classes, own));
+        const px = baseFontPx(final) ?? wrapper.px;
         const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
         if (px < 16) sites.push({ file, line, tag, px });
-        const intendedPx = desktopFontPx(own);
-        const mergedPx = desktopFontPx(merged) ?? px;
-        if (intendedPx !== null && intendedPx !== mergedPx) drift.push({ file, line, tag, intendedPx, mergedPx });
+        // 데스크톱 무변: 래퍼를 반응형으로 바꾸기 전 모양(같은 호출부)과 데스크톱 크기가 같아야 한다.
+        const before = desktopFontPx(cn(wrapper.inner, cn(beforeResponsive(wrapper.classes), own)));
+        const after = desktopFontPx(final);
+        if (before !== null && after !== null && before !== after) drift.push({ file, line, tag, intendedPx: before, mergedPx: after });
       } else if (RAW_TAGS.has(tag) || SHARED_TAGS.has(tag)) {
         const type = attr(node, 'type')?.initializer;
         const typeText = type && ts.isStringLiteral(type) ? type.text : null;
@@ -162,8 +175,43 @@ function tsxFiles(dir: string, out: string[] = []): string[] {
  * 래퍼 이름 → 모바일 글자 크기(px). 정의 파일에서 그 이름의 함수가 그리는 입력칸 하나의 크기를 같은 규칙으로 읽는다
  * (날 칸이면 접두사 없는 크기 · 공용 Input/Textarea면 준 크기 없을 때 16). 정의나 입력칸을 못 찾으면 던진다(표가 헛돌지 않게).
  */
+/** 공용 부품 → 정의 파일. 그 부품이 스스로 가진 className(첫 JSX 요소의 cn 첫 문자열들)을 읽는다. */
+export const SHARED_DEFS: Readonly<Record<string, string>> = {
+  Input: 'components/ui/input.tsx',
+};
+
+function componentClasses(content: string, rel: string, name: string): string {
+  const sf = ts.createSourceFile(rel, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const constants = stringConstants(sf);
+  let body: ts.Node | undefined;
+  sf.forEachChild((n) => {
+    if (ts.isFunctionDeclaration(n) && n.name?.text === name) body = n;
+    if (ts.isVariableStatement(n)) for (const d of n.declarationList.declarations) if (ts.isIdentifier(d.name) && d.name.text === name) body = d;
+  });
+  if (!body) throw new Error(`공용 부품 ${name}의 정의가 ${rel}에 없다 — SHARED_DEFS 표를 고칠 것`);
+  let found: string | undefined;
+  const visit = (node: ts.Node) => {
+    if (found !== undefined) return;
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const init = attr(node, 'className')?.initializer;
+      if (init) { found = classText(init, constants); return; }
+    }
+    node.forEachChild(visit);
+  };
+  visit(body);
+  if (found === undefined) throw new Error(`공용 부품 ${name}(${rel})에 className이 없다 — SHARED_DEFS 표를 고칠 것`);
+  return found;
+}
+
 export function wrapperSizes(contentOf: (rel: string) => string): Map<string, WrapperInfo> {
   const out = new Map<string, WrapperInfo>();
+  const sharedCache = new Map<string, string>();
+  const sharedBase = (tag: string): string => {
+    const rel = SHARED_DEFS[tag];
+    if (!rel) return '';
+    if (!sharedCache.has(tag)) sharedCache.set(tag, componentClasses(contentOf(rel), rel, tag));
+    return sharedCache.get(tag)!;
+  };
   for (const [name, rel] of Object.entries(WRAPPERS)) {
     const content = contentOf(rel);
     const sf = ts.createSourceFile(rel, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -176,6 +224,7 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, Wr
     if (!body) throw new Error(`래퍼 ${name}의 정의가 ${rel}에 없다 — WRAPPERS 표를 고칠 것`);
     let px: number | null | undefined;
     let classes = '';
+    let inner = '';
     const visit = (node: ts.Node) => {
       if (px !== undefined) return;
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
@@ -183,7 +232,8 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, Wr
         if (RAW_TAGS.has(tag) || SHARED_TAGS.has(tag)) {
           const init = attr(node, 'className')?.initializer;
           classes = init ? classText(init, constants) : '';
-          px = baseFontPx(classes) ?? (SHARED_TAGS.has(tag) ? 16 : null);
+          inner = SHARED_TAGS.has(tag) ? sharedBase(tag) : '';
+          px = baseFontPx(cn(inner, classes)) ?? null;
           return;
         }
       }
@@ -192,7 +242,7 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, Wr
     visit(body);
     if (px === undefined) throw new Error(`래퍼 ${name}(${rel})가 입력칸을 그리지 않는다 — WRAPPERS 표를 고칠 것`);
     if (px === null) throw new Error(`래퍼 ${name}(${rel})의 글자 크기를 정적으로 못 정한다(부모를 물려받음) — 래퍼에 크기를 줄 것`);
-    out.set(name, { classes, px });
+    out.set(name, { inner, classes, px });
   }
   return out;
 }
