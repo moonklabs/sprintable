@@ -26,7 +26,9 @@ import {
  */
 export const SETUP_APP_LINK = 'ai.sprintable:/desktop/setup';
 const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
-const INSTALL: Record<DesktopRuntime, string> = { claude: 'npm install -g @anthropic-ai/claude-code', codex: 'npm install -g @openai/codex' };
+// each provider's recommended install (no Node.js needed; fixed provider addresses with no version in them — PO 13:10Z from
+// code.claude.com/docs/en/setup and github.com/openai/codex)
+const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
 export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed';
 

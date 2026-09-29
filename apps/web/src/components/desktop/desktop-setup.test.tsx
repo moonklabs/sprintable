@@ -97,7 +97,9 @@ describe('[SID:4427] desktop setup page', () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={[]} />);
     expect(text()).toContain('이 컴퓨터에서 에이전트를 찾지 못했어요');
-    expect(text()).toContain('npm install -g @anthropic-ai/claude-code');
+    expect(text()).toContain('curl -fsSL https://claude.ai/install.sh | bash');
+    expect(text()).toContain('curl -fsSL https://chatgpt.com/codex/install.sh | sh');
+    expect(text()).not.toContain('npm install');
     expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('다시 찾기');
     await act(async () => { root.unmount(); }); root = createRoot(container);
 
