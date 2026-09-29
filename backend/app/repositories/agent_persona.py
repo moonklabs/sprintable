@@ -332,20 +332,6 @@ class AgentPersonaRepository:
         await self.session.flush()
         return True
 
-    async def seed_builtin(self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
-        from sqlalchemy import text
-        await self.session.execute(
-            # story #4407 AC5 — `:name::uuid` is not bound by SQLAlchemy's text() (a `:name` directly followed by `::` stays
-            # literal text → a syntax error on every call, the same class as account/delete). CAST(... AS uuid) binds.
-            text(
-                "SELECT seed_builtin_personas("
-                "CAST(:org_id AS uuid), CAST(:project_id AS uuid), CAST(:agent_id AS uuid))"
-            ),
-            {"org_id": str(org_id), "project_id": str(project_id), "agent_id": str(agent_id)},
-        )
-        await self.session.flush()
-        return {"seeded": True}
-
     async def _clear_default(self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID, exclude_id: uuid.UUID | None = None) -> None:
         q = update(AgentPersona).where(
             AgentPersona.org_id == org_id,

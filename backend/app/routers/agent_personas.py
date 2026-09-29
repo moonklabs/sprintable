@@ -89,19 +89,11 @@ async def create_persona(
         return _err("VALIDATION_ERROR", str(e), 400)
 
 
-@router.post("/seed")
-async def seed_builtin_personas(
-    agent_id: uuid.UUID = Query(...),
-    auth: AuthContext = Depends(get_current_user),
-    repo: AgentPersonaRepository = Depends(_repo),
-) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
-    if not org_id:
-        return _err("FORBIDDEN", "org_id required", 403)
-    # story #4000 — create_persona와 동일 축(위 참고).
-    await assert_agent_owner(agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
-    result = await repo.seed_builtin(org_id, project_id, agent_id)
-    return _ok(result)
+# story #4407 AC5 (PO 01:54Z) — `POST /seed` (builtin persona seeding) is removed. It never worked after the move to alembic:
+# it called the Postgres function seed_builtin_personas(uuid, uuid, uuid), which exists only in the old Supabase migration
+# (packages/db/supabase/migrations/20260406210000…) and was never ported (dev DB: neither the function nor its trigger), and
+# its `:org_id::uuid` binding failed first anyway. No caller in the repository, the web or the MCP server. Listing builtins
+# (`include_builtin`) and the builtin edit/delete guards stay — they are harmless.
 
 
 @router.get("/{id}")
