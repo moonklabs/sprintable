@@ -31,7 +31,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 function asRole(role: 'owner' | 'admin' | 'member') {
   useDashboardContextMock.mockReturnValue({
-    orgId: ORG_ID, orgMemberships: [{ orgId: ORG_ID, orgName: '뭉클랩', orgSlug: 'moonklabs', role }], projectMemberships: [],
+    orgId: ORG_ID, orgMemberships: [{ orgId: ORG_ID, orgName: '뭉클랩', orgSlug: 'moonklabs', role }], projectMemberships: [], userName: '김지우',
   });
 }
 
@@ -116,6 +116,8 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['office mac', 'studio mac']);
     expect([...q('desktop-device-state')].map((n) => n.textContent)).toEqual(['연결됨', '연결 끊김']);
     expect(q('desktop-devices-done')[0].textContent).toBe('studio mac 연결을 끊었어요');
+    // who disconnected it shows at once (the person pressing), not only after a reload
+    expect(q('desktop-device-meta')[1].textContent).toMatch(/끊은 사람 김지우$/);
     expect(q('desktop-device-disconnect')).toHaveLength(1);
     expect(document.activeElement?.id).toBe('desktop-devices-heading');
     expect(q('desktop-devices-confirm')).toHaveLength(0); // the dialog closed

@@ -18,8 +18,8 @@ describe('desktop devices rules (4424)', () => {
     expect(orderDevices([d('x', 'disconnected'), d('a', 'handed_over'), d('b', 'waiting_for_app')]).map((v) => v.setup_id)).toEqual(['a', 'b', 'x']);
   });
   it('marking one disconnected leaves the others untouched', () => {
-    const out = markDisconnected([d('a', 'handed_over'), d('b', 'handed_over')], 'a', '2026-09-29T00:00:00Z');
-    expect(out.map((v) => [v.state, v.active_keys])).toEqual([['disconnected', 0], ['handed_over', 1]]);
+    const out = markDisconnected([d('a', 'handed_over'), d('b', 'handed_over')], 'a', '2026-09-29T00:00:00Z', '김지우');
+    expect(out.map((v) => [v.state, v.active_keys, v.revoked_by_name ?? null])).toEqual([['disconnected', 0, '김지우'], ['handed_over', 1, null]]);
   });
   it('a 403 or an unreadable answer is null (the section hides)', async () => {
     expect(await readDevices(new Response('{}', { status: 403 }))).toBeNull();

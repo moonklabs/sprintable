@@ -24,7 +24,7 @@ import {
 export function DesktopDevices() {
   const t = useTranslations('desktop.devices');
   const tDesktop = useTranslations('desktop');
-  const { orgId, orgMemberships } = useDashboardContext();
+  const { orgId, orgMemberships, userName } = useDashboardContext();
   const manage = canManageDevices(orgMemberships.find((o) => o.orgId === orgId)?.role);
   const [devices, setDevices] = useState<DesktopDevice[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -58,7 +58,7 @@ export function DesktopDevices() {
     try {
       const res = await fetchWithAuth(`/api/desktop/setups/${device.setup_id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(String(res.status));
-      setDevices((list) => (list ? markDisconnected(list, device.setup_id, new Date().toISOString()) : list));
+      setDevices((list) => (list ? markDisconnected(list, device.setup_id, new Date().toISOString(), userName ?? null) : list));
       setDone(device.device_name);
       setAsking(null);
       headingRef.current?.focus(); // the pressed button is gone — focus goes to the list heading
@@ -110,7 +110,7 @@ export function DesktopDevices() {
         <DialogContent showCloseButton={false} initialFocus={cancelRef}>
           <DialogHeader>
             <DialogTitle className="truncate" title={asking?.device_name}>{t('confirmTitle', { device: asking?.device_name ?? '' })}</DialogTitle>
-            <DialogDescription>{t('confirmBody', { count: asking ? deviceAgentCount(asking) : 0 })}</DialogDescription>
+            <DialogDescription>{t('confirmBody', { agents: t('agents', { count: asking ? deviceAgentCount(asking) : 0 }) })}</DialogDescription>
           </DialogHeader>
           {failed ? <p role="alert" className="text-sm text-destructive" data-testid="desktop-devices-failed">{t('failed')}</p> : null}
           <DialogFooter>
@@ -147,8 +147,8 @@ function DeviceRow({ device, onDisconnect }: { device: DesktopDevice; onDisconne
             <span className={device.state === 'handed_over' ? 'text-success' : undefined}>{stateLabel}</span>
           </span>
         </p>
-        {device.state === 'not_handed_over' ? <p className="mt-0.5 text-xs text-muted-foreground">{t('notHandedOverWhy')}</p> : null}
-        <p className="mt-0.5 text-xs text-muted-foreground" data-testid="desktop-device-meta">
+        {device.state === 'not_handed_over' ? <p className="mt-0.5 break-keep text-xs text-muted-foreground">{t('notHandedOverWhy')}</p> : null}
+        <p className="mt-0.5 break-keep text-xs text-muted-foreground" data-testid="desktop-device-meta">
           {t('agents', { count })}
           {date ? <>{' · '}{t(off ? 'disconnectedOn' : 'connectedOn', { date })}</> : null}
           {who ? <>{' · '}{t(off ? 'disconnectedBy' : 'connectedBy', { name: who })}</> : null}

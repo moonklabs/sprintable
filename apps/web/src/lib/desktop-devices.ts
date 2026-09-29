@@ -35,9 +35,11 @@ export function orderDevices(devices: readonly DesktopDevice[]): DesktopDevice[]
   return [...devices.filter((d) => d.state !== 'disconnected'), ...devices.filter((d) => d.state === 'disconnected')];
 }
 
-/** After «연결 끊기» answers: that device shows disconnected at once (no refetch needed to be right). */
-export function markDisconnected(devices: readonly DesktopDevice[], setupId: string, at: string): DesktopDevice[] {
-  return devices.map((d) => (d.setup_id === setupId ? { ...d, state: 'disconnected', revoked_at: d.revoked_at ?? at, active_keys: 0 } : d));
+/** After «연결 끊기» answers: that device shows disconnected at once, by the person who pressed it (no refetch needed to be right). */
+export function markDisconnected(devices: readonly DesktopDevice[], setupId: string, at: string, byName: string | null): DesktopDevice[] {
+  return devices.map((d) => (d.setup_id === setupId
+    ? { ...d, state: 'disconnected', revoked_at: d.revoked_at ?? at, revoked_by_name: d.revoked_by_name ?? byName, active_keys: 0 }
+    : d));
 }
 
 /** The list answer → devices; a 403 (not an owner/admin) or anything unreadable → null, which hides the section (no error). */
