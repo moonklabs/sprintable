@@ -120,6 +120,8 @@ describe('[SID:4427] desktop setup page', () => {
     expect(failureForCode('person_session_required')).toBe('not-admin');
     expect(failureForCode('code_used')).toBe('expired');
     expect(failureForCode('roles_invalid')).toBeNull();
+    expect(failureForCode('PLAN_LIMIT_EXCEEDED', 'agent')).toBe('agent-limit');
+    expect(failureForCode('PLAN_LIMIT_EXCEEDED', 'storage')).toBeNull();
     expect(failureForCode(undefined)).toBeNull();
   });
 
@@ -139,5 +141,16 @@ describe('[SID:4427] desktop setup page', () => {
     await mount(<OpenInDesktopApp />);
     expect(text()).toContain('데스크톱 앱에서 열어 주세요');
     expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('앱 열기');
+  });
+});
+
+describe('[SID:4427] en copy (Yuna 08:34Z)', () => {
+  it('agent count is plural-aware in English', async () => {
+    const { createTranslator } = await import('next-intl');
+    const en = (await import('../../../messages/en.json')).default as Record<string, unknown>;
+    const t = createTranslator({ locale: 'en', messages: en, namespace: 'desktop.setup' }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    expect(t('startNote', { n: 1 })).toBe('Creates 1 agent on this computer and hands over the first task');
+    expect(t('startNote', { n: 2 })).toBe('Creates 2 agents on this computer and hands over the first task');
+    expect(t('startNoteWithMe', { n: 1, roles: 'Director', josa: '' })).toBe('Creates 1 agent on this computer and hands over the first task · you take Director');
   });
 });

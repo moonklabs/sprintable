@@ -39,7 +39,9 @@ const FAILURE_KEY: Record<string, string> = {
 };
 
 /** confirm 오류 코드(4424 닫힌 목록) → 실패 화면. 목록 밖 코드는 null(화면이 지어내지 않는다 — 한 줄 일반 문구). */
-export function failureForCode(code: string | undefined): SetupFailure | null {
+export function failureForCode(code: string | undefined, resource?: string): SetupFailure | null {
+  // 에이전트 한도(Didi 08:34Z): 402 PLAN_LIMIT_EXCEEDED · resource=agent — 요금제 말 없이 ③
+  if (code === 'PLAN_LIMIT_EXCEEDED') return resource === 'agent' ? 'agent-limit' : null;
   switch (code) {
     case 'not_org_admin':
     case 'person_session_required':
@@ -122,7 +124,7 @@ export function DesktopSetup({ code, runtimes }: { code: string; runtimes: Deskt
       });
       if (res.ok) { setView({ kind: 'started' }); return; }
       const body = await res.json().catch(() => null);
-      const failure = failureForCode(body?.error?.code);
+      const failure = failureForCode(body?.error?.code, body?.error?.resource);
       setView(failure ? { kind: 'failed', failure } : { kind: 'error' });
     } catch {
       setView({ kind: 'failed', failure: 'offline' });
