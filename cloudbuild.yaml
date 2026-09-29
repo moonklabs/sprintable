@@ -725,13 +725,6 @@ steps:
           # story #4219 C1(PO 판정) — 첫 문서 서버 구간 마커(Server-Timing 헤더·로그 한 줄 · 이름·시간만). dev 분기에서만
           # 싣고 prod엔 안 실어 미설정 = 꺼짐(값이 정확히 "true"일 때만 켜진다 — lib/server-timing.isServerTimingEnabled).
           ENV_VARS="$${ENV_VARS},SERVER_TIMING_MARKERS=true"
-          # #4398 ④ XFF_PROBE_ENABLED(임시 관측 · dev만).
-          ENV_VARS="$${ENV_VARS},XFF_PROBE_ENABLED=true"
-        fi
-        # #4398 ④ — dev 밖은 명시 제거(--update-env-vars는 추가형 · 손으로 켜도 다음 배포가 끔).
-        FE_REMOVE_ENV=""
-        if [ "${_DEPLOY_ENV}" != "dev" ]; then
-          FE_REMOVE_ENV="--remove-env-vars=XFF_PROBE_ENABLED"
         fi
         gcloud run deploy sprintable-frontend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA} \
@@ -741,7 +734,7 @@ steps:
           --max-instances=${_FRONTEND_MAX_INSTANCES} \
           --cpu-boost \
           --update-env-vars="$${ENV_VARS}" \
-          $${FE_REMOVE_ENV} \
+          --remove-env-vars=XFF_PROBE_ENABLED \
           --quiet
     waitFor: [push-frontend]
 
@@ -845,12 +838,12 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},SANDBOX_CHANNEL_ENABLED=true"
         fi
-        # #4332 DB_TIMING_LOG_ENABLED · #4398 XFF_PROBE_ENABLED(dev만 · 밖은 명시 제거 · 사유는 아카이브).
-        REMOVE_ENV_VARS="REDIS_CONSUME_ENABLED"
+        # #4332 DB_TIMING_LOG_ENABLED(dev만) · #4398 XFF_PROBE_ENABLED(걷은 관측 · 전 환경 제거) — 사유는 아카이브.
+        REMOVE_ENV_VARS="REDIS_CONSUME_ENABLED,XFF_PROBE_ENABLED"
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          ENV_VARS="$${ENV_VARS},DB_TIMING_LOG_ENABLED=true,XFF_PROBE_ENABLED=true"
+          ENV_VARS="$${ENV_VARS},DB_TIMING_LOG_ENABLED=true"
         else
-          REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED,XFF_PROBE_ENABLED"
+          REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED"
         fi
         # story e4fc29fa — WORDPRESS/WEBHOOK_TEST_STUB_ENABLED(dev만 · 서사는 아카이브).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then

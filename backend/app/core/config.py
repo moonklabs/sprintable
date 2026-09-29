@@ -80,8 +80,6 @@ class Settings(BaseSettings):
     # story #4332 — 요청마다 «풀 체크아웃 대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(app/core/request_db_timing.py). 폴링 경로 때문에
     # 양이 커서 환경 값으로만 켠다(dev 켬 · PO). 응답 헤더엔 어떤 경우에도 싣지 않는다(존재 여부 누출 · test_2261_c3).
     db_timing_log_enabled: bool = False
-    # story #4398 ④ — 임시 관측: 요청마다 XFF 칸 수 · 맨 오른쪽 · 소켓 주소 · trace 한 줄(app/core/xff_probe.py). dev만 켬 · ④ 판정 뒤 걷음.
-    xff_probe_enabled: bool = False
     # story #4336(PO 04:52Z) — 발행 명령 워커 틱 예산 = min(스케줄러 시한, 이 서비스의 요청 시한) − 여유(publication_command.py).
     # 요청 시한은 배포가 Cloud Run `--timeout`과 같은 값을 넣는다(cloudbuild `_BACKEND_TIMEOUT`). 모르면 보수적으로 300(옛 prod 값).
     backend_request_timeout_seconds: int = 300
