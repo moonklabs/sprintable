@@ -142,7 +142,7 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
                 id="boost-ad-connection"
                 value={adConnectionId}
                 onChange={(e) => setAdConnectionId(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
                 data-testid="boost-ad-connection-select"
               >
                 <option value="">{t('boostRequestAdConnectionPlaceholder')}</option>
@@ -162,14 +162,14 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
                 id="boost-budget" type="number" min={0} step={1}
                 value={budgetMajor}
                 onChange={(e) => setBudgetMajor(e.target.value)}
-                className="w-32 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="w-32 rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
                 data-testid="boost-budget-input"
               />
             </div>
             <select
               value={currency}
               onChange={(e) => setCurrency(e.target.value as GenerationBudgetCurrency)}
-              className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
               data-testid="boost-currency-select"
             >
               <option value="KRW">KRW</option>
@@ -188,7 +188,7 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
               id="boost-starts-at" type="datetime-local"
               value={startsAtLocal}
               onChange={(e) => setStartsAtLocal(e.target.value)}
-              className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
               data-testid="boost-starts-at-input"
             />
           </div>
@@ -200,7 +200,7 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
               id="boost-ends-at" type="datetime-local"
               value={endsAtLocal}
               onChange={(e) => setEndsAtLocal(e.target.value)}
-              className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
               data-testid="boost-ends-at-input"
             />
           </div>
@@ -218,7 +218,7 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
               id="boost-objective"
               value={objective}
               onChange={(e) => setObjective(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
               data-testid="boost-objective-select"
             >
               {OBJECTIVE_OPTIONS.map((o) => (

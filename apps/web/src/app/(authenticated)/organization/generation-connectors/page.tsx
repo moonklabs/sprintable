@@ -227,7 +227,7 @@ export default function OrganizationGenerationConnectorsPage() {
                       <select
                         aria-label={t('gcLocationChangeAriaLabel', { n: index + 1, label: c.label })}
                         data-testid={`gc-location-select-${c.id}`}
-                        className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground disabled:opacity-60"
+                        className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-base lg:text-[10px] text-muted-foreground disabled:opacity-60"
                         value={locationDraft[c.id] ?? c.location}
                         disabled={locationPatchTargetId === c.id}
                         onChange={(e) => void handleLocationChange(c.id, e.target.value)}

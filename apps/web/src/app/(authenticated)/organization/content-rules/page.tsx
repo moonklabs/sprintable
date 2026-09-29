@@ -183,7 +183,7 @@ function TagListEditor({
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
         placeholder={placeholder}
-        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
         data-testid={`${testIdPrefix}-input`}
       />
     </div>
@@ -635,7 +635,7 @@ export default function ContentRulesPage() {
                     <input
                       id="content-rules-tone"
                       type="text" value={draft ?? ''} onChange={(e) => setDraft(e.target.value || null)}
-                      placeholder={t('tonePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                      placeholder={t('tonePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
                       data-testid="content-rules-tone"
                     />
                   )}
@@ -844,7 +844,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
             <input
               id="content-rules-utm-default-source" type="text" value={draft.default_source ?? ''}
               onChange={(e) => setDraft((d) => ({ ...d, default_source: e.target.value || null }))}
-              placeholder={t('utmRulesDefaultSourcePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              placeholder={t('utmRulesDefaultSourcePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
               data-testid="content-rules-utm-default-source"
             />
           </div>
@@ -853,7 +853,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
             <input
               id="content-rules-utm-default-medium" type="text" value={draft.default_medium ?? ''}
               onChange={(e) => setDraft((d) => ({ ...d, default_medium: e.target.value || null }))}
-              placeholder={t('utmRulesDefaultMediumPlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              placeholder={t('utmRulesDefaultMediumPlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
               data-testid="content-rules-utm-default-medium"
             />
           </div>
@@ -863,7 +863,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
             <select
               id="content-rules-utm-content-from" value={draft.content_from}
               onChange={(e) => setDraft((d) => ({ ...d, content_from: e.target.value as UtmRules['content_from'] }))}
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" data-testid="content-rules-utm-content-from"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm" data-testid="content-rules-utm-content-from"
             >
               <option value="draft_id">{t('utmRulesContentFromDraftId')}</option>
               <option value="none">{t('utmRulesContentFromNone')}</option>
@@ -904,7 +904,7 @@ function GenerationBudgetEditForm({ value, onSave, onCancel, saving, t }: {
             const currency = draft?.currency ?? 'KRW';
             setDraft({ limit_minor: majorToMinor(majorValue, currency), currency, period: 'month' });
           }}
-          placeholder={t('generationBudgetLimitPlaceholder')} className="w-32 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          placeholder={t('generationBudgetLimitPlaceholder')} className="w-32 rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
           data-testid="content-rules-generation-budget-limit"
         />
         {draft ? (
@@ -915,7 +915,7 @@ function GenerationBudgetEditForm({ value, onSave, onCancel, saving, t }: {
               const majorValue = minorToMajor(draft.limit_minor, draft.currency);
               setDraft({ limit_minor: majorToMinor(majorValue, nextCurrency), currency: nextCurrency, period: 'month' });
             }}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm" data-testid="content-rules-generation-budget-currency"
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm" data-testid="content-rules-generation-budget-currency"
           >
             <option value="KRW">KRW</option>
             <option value="USD">USD</option>
@@ -949,7 +949,7 @@ function BrandKitEditForm({ value, onSave, onCancel, saving, t }: {
         <input
           id="content-rules-brand-logo" type="text" value={draft.logo_url ?? ''}
           onChange={(e) => setDraft((d) => ({ ...d, logo_url: e.target.value || undefined }))}
-          placeholder={t('brandKitLogoPlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          placeholder={t('brandKitLogoPlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
         />
         <BrandLogoPreview key={draft.logo_url ?? ''} url={draft.logo_url} t={t} />
       </div>

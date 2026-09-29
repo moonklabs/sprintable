@@ -242,7 +242,7 @@ export function CommentReplyDialog({
                 onChange={(e) => setText(e.target.value)}
                 placeholder={t('commentsReplyTextPlaceholder')}
                 rows={4}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
 

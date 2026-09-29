@@ -167,7 +167,7 @@ export default function OrganizationRolesPage() {
                         actions={
                           canEdit ? (
                             <select
-                              className="rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                              className="rounded-md border border-input bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-ring"
                               value={member.role}
                               disabled={changingId === member.id}
                               onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}

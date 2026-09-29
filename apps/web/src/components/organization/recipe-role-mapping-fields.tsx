@@ -110,7 +110,7 @@ export function RecipeRoleMappingFields({
               </span>
             ) : target === 'channel_connection' ? (
               <select
-                className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 value={roleMapping[stage] ?? ''}
                 onChange={(e) => onChange(stage, e.target.value)}
               >
@@ -121,7 +121,7 @@ export function RecipeRoleMappingFields({
               </select>
             ) : target === 'generation_connector' ? (
               <select
-                className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 value={roleMapping[stage] ?? ''}
                 onChange={(e) => onChange(stage, e.target.value)}
               >
@@ -133,7 +133,7 @@ export function RecipeRoleMappingFields({
             ) : (
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <select
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                   value={roleMapping[stage] ?? ''}
                   onChange={(e) => onChange(stage, e.target.value)}
                 >

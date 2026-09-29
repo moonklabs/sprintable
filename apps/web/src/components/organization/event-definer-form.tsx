@@ -256,12 +256,12 @@ function StagesSection({ stages, onChange, t }: { stages: DefinerStage[]; onChan
                 update(s.id, { name, slug: slugify(name, i) });
               }}
               placeholder={t('definerStageNamePlaceholder')}
-              className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
+              className="min-w-0 flex-1 bg-transparent text-base lg:text-sm text-foreground outline-none"
             />
             <input
               value={s.slug}
               onChange={(e) => update(s.id, { slug: e.target.value })}
-              className="w-32 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground outline-none"
+              className="w-32 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-base lg:text-[11px] text-muted-foreground outline-none"
             />
             <button type="button" onClick={() => onChange(stages.filter((x) => x.id !== s.id))} className="shrink-0 text-muted-foreground hover:text-destructive" aria-label={t('definerRemoveRow')}>✕</button>
           </div>
@@ -346,14 +346,14 @@ function FieldsSection({ fields, onChange, t }: { fields: DefinerField[]; onChan
                     <input
                       value={f.name}
                       onChange={(e) => update(f.id, { name: e.target.value })}
-                      className={`w-full rounded-md border px-1.5 py-1 text-xs ${invalid ? 'border-destructive' : 'border-border'} bg-background text-foreground`}
+                      className={`w-full rounded-md border px-1.5 py-1 text-base lg:text-xs ${invalid ? 'border-destructive' : 'border-border'} bg-background text-foreground`}
                     />
                   </td>
                   <td className="py-1 pr-1.5">
                     <select
                       value={f.type}
                       onChange={(e) => update(f.id, { type: e.target.value as DefinerField['type'] })}
-                      className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+                      className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-base lg:text-xs text-foreground"
                     >
                       <option value="string">{t('definerFieldTypeString')}</option>
                       <option value="number">{t('definerFieldTypeNumber')}</option>
@@ -365,7 +365,7 @@ function FieldsSection({ fields, onChange, t }: { fields: DefinerField[]; onChan
                     <select
                       value={f.required ? '1' : '0'}
                       onChange={(e) => update(f.id, { required: e.target.value === '1' })}
-                      className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+                      className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-base lg:text-xs text-foreground"
                     >
                       <option value="1">{t('definerFieldRequired')}</option>
                       <option value="0">{t('definerFieldOptional')}</option>

@@ -1191,7 +1191,7 @@ export default function ContentPostEditPage() {
               <select
                 value={selectedCampaignId}
                 onChange={(e) => { setSelectedCampaignId(e.target.value); if (e.target.value) setNewCampaignName(''); }}
-                className="rounded-md border border-border px-2 py-1.5 text-sm"
+                className="rounded-md border border-border px-2 py-1.5 text-base lg:text-sm"
                 data-testid="content-campaign-select"
               >
                 <option value="">{t('campaignSelectPlaceholder')}</option>
@@ -1205,7 +1205,7 @@ export default function ContentPostEditPage() {
               value={newCampaignName}
               onChange={(e) => { setNewCampaignName(e.target.value); if (e.target.value) setSelectedCampaignId(''); }}
               placeholder={t('campaignNewNamePlaceholder')}
-              className="rounded-md border border-border px-2 py-1.5 text-sm"
+              className="rounded-md border border-border px-2 py-1.5 text-base lg:text-sm"
               data-testid="content-campaign-new-name-input"
             />
             <Button
@@ -1406,7 +1406,7 @@ export default function ContentPostEditPage() {
             <select
               value={selectedConnectionId}
               onChange={(e) => setSelectedConnectionId(e.target.value)}
-              className="rounded-md border border-border px-2 py-1.5 text-sm"
+              className="rounded-md border border-border px-2 py-1.5 text-base lg:text-sm"
               data-testid="content-create-variant-connection-select"
             >
               <option value="">{t('channelPostsCreateVariantSelectPlaceholder')}</option>
@@ -1563,7 +1563,7 @@ export default function ContentPostEditPage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={saving}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground"
           />
           {/* story #3483(§16-7) — "그 필드 아래" 그 필드 것만 목록. */}
           <ContentRuleViolationList violations={violations.filter((v) => v.field === 'title')} testId="content-rule-violation-title" t={t} />
@@ -1577,7 +1577,7 @@ export default function ContentPostEditPage() {
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
             disabled={saving}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground"
           />
           <ContentRuleViolationList violations={violations.filter((v) => v.field === 'summary')} testId="content-rule-violation-summary" t={t} />
         </div>
@@ -1591,7 +1591,7 @@ export default function ContentPostEditPage() {
             onChange={(e) => setTagsText(e.target.value)}
             disabled={saving}
             placeholder={t('fieldTagsPlaceholder')}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground"
           />
         </div>
 
@@ -1603,7 +1603,7 @@ export default function ContentPostEditPage() {
             onChange={(e) => setBodyMd(e.target.value)}
             disabled={saving}
             rows={16}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground"
+            className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-base lg:text-sm text-foreground"
           />
           <ContentRuleViolationList violations={violations.filter((v) => v.field === 'body_md')} testId="content-rule-violation-body-md" t={t} />
         </div>
@@ -1647,7 +1647,7 @@ export default function ContentPostEditPage() {
                 step={1}
                 value={estimatedCostInput}
                 onChange={(e) => setEstimatedCostInput(e.target.value)}
-                className="w-28 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                className="w-28 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-sm"
                 data-testid="content-estimated-cost-input"
               />
               <span className="text-xs text-muted-foreground">{generationBudgetCurrency}</span>
