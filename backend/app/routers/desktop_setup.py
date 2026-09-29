@@ -25,6 +25,7 @@ from app.services.desktop_setup import (
     create_setup_code,
     exchange_setup,
     exchange_urls,
+    list_setup_recipes,
     list_setups,
     revoke_setup,
     setup_hands,
@@ -212,6 +213,36 @@ class SetupItem(BaseModel):
 
 class SetupListResponse(BaseModel):
     setups: list[SetupItem]
+
+
+class SetupRecipeRole(BaseModel):
+    role: str
+    kind: Literal["human", "agent", "either"]  # human → the person confirming · agent/either → a runtime is needed
+    stages: list[str]
+
+
+class SetupRecipe(BaseModel):
+    id: uuid.UUID
+    key: str
+    name: str
+    description: str | None
+    roles: list[SetupRecipeRole]
+
+
+class SetupRecipesResponse(BaseModel):
+    recipes: list[SetupRecipe]
+
+
+@router.get("/recipes", response_model=SetupRecipesResponse)
+async def get_setup_recipes(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """PO 16:03Z — the recipes the desktop setup page can start, each with its setup rows worked out by the same function the
+    confirmation checks with (the web draws them as they come)."""
+    _human_only(auth)
+    return SetupRecipesResponse(recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=org_id)])
 
 
 @router.get("/setups", response_model=SetupListResponse)
