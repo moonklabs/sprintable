@@ -106,3 +106,27 @@ async def test_sandbox_ids_come_from_the_gate_too():
     b = await sandbox.create_boost_campaign(None, **same, gate_id="gate-b")
     assert all(a[k] != b[k] for k in ("campaign_id", "adset_id", "ad_id")), (a, b)
     assert await sandbox.create_boost_campaign(None, **same, gate_id="gate-a") == a
+
+
+def test_the_approved_total_is_sent_as_the_lifetime_budget_and_no_daily_budget():
+    """story #4415 — the sealed amount is a total for the whole period (screens «총예산» · the spend cap); a daily budget would try
+    to spend the whole total every day."""
+    sent = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/adsets"):
+            sent["adset"] = dict(request.url.params)
+            return httpx.Response(200, json={"id": "as1"})
+        return httpx.Response(200, json={"id": "x1"})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await meta.create_boost_campaign(
+                client, ad_account_id="1", access_token="t", object_story_id="10_20", budget_minor=300_000, currency="KRW",
+                starts_at_iso="2026-09-29T00:00:00+00:00", ends_at_iso="2026-10-06T00:00:00+00:00", objective="POST_ENGAGEMENT",
+            )
+
+    asyncio.run(go())
+    assert sent["adset"]["lifetime_budget"] == "300000"
+    assert "daily_budget" not in sent["adset"]
+    assert sent["adset"]["end_time"] == "2026-10-06T00:00:00+00:00"  # Meta requires an end_time with a lifetime budget

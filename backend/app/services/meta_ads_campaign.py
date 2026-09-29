@@ -56,8 +56,13 @@ def boost_ad_name(object_story_id: str) -> str:
 
 
 # story #4412(PO 00:50Z) — the ad set field that carries the approved amount: one place for the create call, the lookup's
-# fields and the adoption's budget check (4415 will change it — e.g. to lifetime_budget — and the check follows).
-BOOST_ADSET_BUDGET_FIELD = "daily_budget"
+# fields and the adoption's budget check.
+# story #4415 — `lifetime_budget`, not `daily_budget`. The approved amount is a **total** for the whole period: the screens show
+# it as «총예산» and the spend cap stops at it (ads_boost_runs.cap_reached_at). Sent as a daily budget, a multi-day boost tried
+# to spend the whole total on day one, and the cap stopped it only a capture interval late. Meta: lifetime_budget needs an
+# end_time (sent: the sealed period) and is in the same units as ours (cents for USD, the basic unit for KRW); only one of the
+# two budgets is set.
+BOOST_ADSET_BUDGET_FIELD = "lifetime_budget"
 
 
 def boost_adset_budget_minor(adset: dict) -> int | None:
@@ -122,8 +127,8 @@ async def find_boost_adsets(
     client: httpx.AsyncClient, *, campaign_id: str, access_token: str, object_story_id: str, objective: str = "",
     expected_budget_minor: int | None = None,
 ) -> list[dict]:
-    """Ad sets named `boost_adset_name` under `campaign_id`: id · name · campaign_id · created_time · daily_budget (the budget
-    lives on the ad set — PO 00:48Z: an adopted ad set must still carry the sealed amount). `expected_budget_minor` is for the
+    """Ad sets named `boost_adset_name` under `campaign_id`: id · name · campaign_id · created_time · the budget field
+    (`BOOST_ADSET_BUDGET_FIELD`; the budget lives on the ad set — PO 00:48Z: an adopted ad set must still carry the sealed amount). `expected_budget_minor` is for the
     sandbox only (same signature)."""
     return await _list_named(
         client, f"{_GRAPH_BASE}/{campaign_id}/adsets", access_token=access_token,
