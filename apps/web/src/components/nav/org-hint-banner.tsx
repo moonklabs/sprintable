@@ -51,11 +51,16 @@ export function OrgHintBanner() {
     if (landing.current?.key !== key) landing.current = { key, path: cleanUrl() };
   }
 
+  // Keyed on the whole address, not only the hint: on a flat path the shell's `?p=` normalization replaces the address in the
+  // same commit, from the search params it rendered with (the hint still in them), and that later replace wins (#4397 dev round:
+  // /inbox?tab=gates&org_id=… kept org_id for a non-member, empty and current org). When that address lands, this runs again and
+  // drops the hint from it (it already has `p`); the shell then has nothing to fix — both settle on the same address.
+  const query = searchParams.toString();
   useEffect(() => {
     // not an org of theirs, already the current org, malformed or empty → just drop the hint
     if (hint !== null && !offer) router.replace(cleanUrl());
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanUrl reads the same searchParams/pathname
-  }, [hint, offer]);
+  }, [hint, offer, query, pathname]);
 
   if (!offer || !target) return null;
 

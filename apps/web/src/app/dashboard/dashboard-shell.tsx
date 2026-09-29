@@ -110,7 +110,9 @@ interface DashboardContext {
   inShell?: boolean;
 }
 
-const DashboardCtx = createContext<DashboardContext>({
+// exported for the #4397 harness (the real context around the org hint banner; mocking this module cannot reach the banner,
+// which this module imports itself)
+export const DashboardCtx = createContext<DashboardContext>({
   projectMemberships: [], orgMemberships: [], orgSyncPending: false,
   bottomDockBannerSlot: null, setBottomDockBannerSlot: () => {},
 });
@@ -331,7 +333,8 @@ function ScrollShell({
  * `useDashboardContext().projectId` 소비부가 이 값으로 자동 URL-aware 가 된다. fetch 인터셉터가
  * 같은 값을 `X-Project-Id` 헤더로 실어 mutation 을 탭의 URL 프로젝트에 바인딩(BE 가 멤버십 검증).
  */
-function useProjectSsot(
+// exported for the #4397 harness (org hint banner + this `?p=` normalization, both replacing the same address)
+export function useProjectSsot(
   serverProjectId: string | undefined,
   memberships: DashboardProjectOption[],
   pathProjectId: string | undefined,
