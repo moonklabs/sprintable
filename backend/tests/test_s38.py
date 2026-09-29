@@ -126,8 +126,11 @@ async def test_account_delete_updates_org_and_team_members():
         async with client as c:
             await c.post("/api/v2/account/delete")
 
-        # AC3-4 2-2 anchor-only: org_members + **members**(anchor) UPDATE = 2 (레거시 team_members UPDATE 제거)
-        assert session.execute.call_count == 2
+        # AC3-4 2-2 anchor-only: org_members + **members**(anchor) UPDATE (레거시 team_members UPDATE 제거)
+        # + story #4400: every refresh token of the account revoked = 3
+        assert session.execute.call_count == 3
+        revoke = str(session.execute.call_args_list[2].args[0])
+        assert "UPDATE refresh_tokens" in revoke and "revoked_at" in revoke
     finally:
         app.dependency_overrides.clear()
 
