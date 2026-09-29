@@ -95,7 +95,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
             onKeyDown={handleKeyDown}
             onBlur={applyUrl}
             placeholder={t('embedUrlPlaceholder')}
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="flex-1 bg-transparent text-base lg:text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
       )}

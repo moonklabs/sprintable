@@ -1958,7 +1958,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     onPaste={handlePasteAttach}
                     projectId={projectId}
                     placeholder={t('markdownPlaceholder')}
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
                     entityCandidatesLabel={t('entityCandidatesLabel')}
@@ -2018,7 +2018,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     onChange={setAcDraft}
                     projectId={projectId}
                     placeholder={t('markdownPlaceholder')}
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
                     entityCandidatesLabel={t('entityCandidatesLabel')}
@@ -2222,7 +2222,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           onChange={(e) => setNewLabelName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
                           placeholder={t('newLabelNamePlaceholder')}
-                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                         <Button
                           type="button"
@@ -2399,7 +2399,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     value={depQuery}
                     onChange={(e) => setDepQuery(e.target.value)}
                     placeholder={t('dep.searchPlaceholder')}
-                    className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   {/* story #2328(C-11 ㉡층): 2글자 미만이면 후보(depCandidates), 2글자
                       이상이면 검색 결과(depQueryResults) — 절대 안 섞는다(갈아치움). */}
@@ -2548,7 +2548,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     placeholder={t('commentInputPlaceholder')}
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
-                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         void handleSubmitComment();

@@ -144,7 +144,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   value={s.searchQuery}
                   onChange={(e) => s.setSearchQuery(e.target.value)}
                   placeholder={t('switcherProjectSearchPlaceholder')}
-                  className="h-10 w-full rounded-[10px] border border-border bg-muted pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="h-10 w-full rounded-[10px] border border-border bg-muted pl-9 pr-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
             </div>
@@ -363,7 +363,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               </label>
               <input
                 id="chip-proj-name"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder={t('switcherProjectNamePlaceholder')}
                 value={s.newProjectName}
                 onChange={(e) => s.setNewProjectName(e.target.value)}
@@ -377,7 +377,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               </label>
               <textarea
                 id="chip-proj-desc"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder={t('switcherProjectDescPlaceholder')}
                 rows={3}
                 value={s.newProjectDesc}

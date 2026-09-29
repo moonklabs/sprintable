@@ -959,8 +959,12 @@
 .tiptap-content .tiptap {
   outline: none;
   min-height: 400px;
-  font-size: 15px;
+  /* story #4410 — 편집 본문은 폰 · 태블릿 16px(iOS WebKit은 16px 미만 편집 칸에 초점이 가면 화면을 확대) · lg 이상 15px(데스크톱 무변 · 아래 @media). */
+  font-size: 16px;
   line-height: 1.8;
+}
+@media (width >= 64rem) {
+  .tiptap-content .tiptap { font-size: 15px; }
 }
 .tiptap-content .tiptap p { margin: 0.5em 0; }
 .tiptap-content .tiptap h1 { font-size: 24px; font-weight: 700; margin: 1em 0 0.5em; }

@@ -483,7 +483,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             }}
             placeholder={t('newFolderPlaceholder')}
             disabled={folderSubmitting}
-            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
           />
           {folderCreateError ? (
             <p className="text-[11px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>

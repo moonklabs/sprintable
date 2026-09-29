@@ -1633,7 +1633,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onChange={(e) => setSearchQuery(e.target.value)}
               onBlur={() => { if (!searchQuery) setShowSearch(false); }}
               placeholder={t('searchPlaceholder')}
-              className="h-7 w-36 text-xs"
+              className="h-7 w-36"
             />
           ) : (
             <Button

@@ -70,6 +70,18 @@ describe('scanSource — 셀프테스트', () => {
     expect(r.drift.map((d) => [d.intendedPx, d.mergedPx])).toEqual(drift === null ? [] : [drift]);
   });
 
+  it('⭐호출부가 크기 주는 래퍼(story #4410 · EntityAwareTextarea) — 호출부 크기로 판정 · 크기 없는 호출은 세지 않음', () => {
+    const wrappers = new Map([['EntityAwareTextarea', { inner: '', classes: '', px: null }]]);
+    const src = `export const G = () => (<>
+      <EntityAwareTextarea className="w-full font-mono text-sm" />
+      <EntityAwareTextarea className="w-full font-mono text-base lg:text-sm" />
+      <EntityAwareTextarea value={v} />
+    </>);`;
+    const r = scanSource(src, 'g.tsx', wrappers);
+    expect(r.sites.map((x) => [x.tag, x.px])).toEqual([['EntityAwareTextarea', 14]]);
+    expect(r.drift).toEqual([]);
+  });
+
   it('beforeResponsive · desktopFontPx — 래퍼를 반응형으로 바꾸기 전 모양 · 1024px 이상 크기(lg → md → 접두사 없음)', () => {
     expect(beforeResponsive('flex text-base lg:text-sm h-10')).toBe('flex h-10 text-sm');
     expect(beforeResponsive('flex text-sm')).toBe('flex text-sm');
@@ -85,10 +97,12 @@ describe('scanSource — 셀프테스트', () => {
         export function OperatorTextarea(p) { return <textarea className={cn(cls, 'min-h-24')} />; }
         export function OperatorSelect(p) { return <select className={cn(cls)} />; }`,
       'components/ui/input.tsx': `function Input({ className }) { return <InputPrimitive className={cn('h-9 text-base md:text-sm', className)} />; }`,
+      'components/shared/entity-aware-textarea.tsx': `export function EntityAwareTextarea({ className }) { return <div className="relative"><textarea className={className} /></div>; }`,
     };
     const w = wrapperSizes((rel) => files[rel]!);
     expect([...w].map(([n, i]) => [n, i.inner, i.px])).toEqual([
       ['OperatorInput', 'h-9 text-base md:text-sm', 14], ['OperatorTextarea', '', 14], ['OperatorSelect', '', 14],
+      ['EntityAwareTextarea', '', null],
     ]);
     expect(() => wrapperSizes(() => 'export const Nothing = 1;')).toThrow(/정의가/);
   });

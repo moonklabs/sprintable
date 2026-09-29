@@ -364,7 +364,7 @@ export default function DocSlugPage() {
               readOnly
               value={mdCopyFailedRaw}
               onFocus={(e) => e.currentTarget.select()}
-              className="w-full resize-none rounded border border-border bg-background p-1.5 font-mono text-xs text-foreground"
+              className="w-full resize-none rounded border border-border bg-background p-1.5 font-mono text-base lg:text-xs text-foreground"
               rows={4}
               data-testid="docs-copy-markdown-failed-raw"
             />

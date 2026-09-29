@@ -218,7 +218,7 @@ export function UnifiedSwitcher({
               </label>
               <input
                 id="unified-proj-name"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder={t('switcherProjectNamePlaceholder')}
                 value={s.newProjectName}
                 onChange={(e) => s.setNewProjectName(e.target.value)}
@@ -232,7 +232,7 @@ export function UnifiedSwitcher({
               </label>
               <textarea
                 id="unified-proj-desc"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder={t('switcherProjectDescPlaceholder')}
                 rows={3}
                 value={s.newProjectDesc}

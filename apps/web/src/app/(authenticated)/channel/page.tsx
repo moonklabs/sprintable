@@ -281,7 +281,7 @@ export default function ChannelPage() {
               onKeyDown={handleKeyDown}
               rows={2}
               placeholder={t('inputPlaceholder')}
-              className="min-h-[44px] flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="min-h-[44px] flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <input
               ref={fileInputRef}

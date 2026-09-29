@@ -27,14 +27,21 @@ export const WRAPPERS: Readonly<Record<string, string>> = {
   OperatorInput: 'components/ui/operator-control.tsx',
   OperatorTextarea: 'components/ui/operator-control.tsx',
   OperatorSelect: 'components/ui/operator-control.tsx',
+  // story #4410 — 자기 크기 없이 호출부 className을 그대로 받는 래퍼(«호출부가 크기 주는 래퍼»). 정의에 크기가 없어도 던지지 않고,
+  // 호출부가 준 크기로 판정한다(호출부도 크기가 없으면 부모를 물려받아 정적으로 모름 → 세지 않음).
+  EntityAwareTextarea: 'components/shared/entity-aware-textarea.tsx',
 };
+
+/** 크기를 호출부에게 맡기는 래퍼 — 정의에 크기가 없는 것이 정상. */
+export const CALLER_SIZED_WRAPPERS: ReadonlySet<string> = new Set(['EntityAwareTextarea']);
 
 /** 래퍼 정의에서 읽은 것 — 입력칸의 클래스 문자열(호출부와 병합할 원본)과 모바일 크기. */
 export interface WrapperInfo {
   /** 래퍼가 그리는 공용 부품(예: shadcn Input)이 스스로 가진 클래스 — 래퍼 클래스 · 호출부 className이 그 뒤에 합쳐진다. 날 요소면 빈 문자열. */
   inner: string;
   classes: string;
-  px: number;
+  /** 모바일 크기 — 호출부가 크기를 주는 래퍼(CALLER_SIZED_WRAPPERS)는 null. */
+  px: number | null;
 }
 
 /** 래퍼 호출부가 스스로 준 크기가 병합 뒤 데스크톱(lg 이상)에서 달라지는 자리 — 4406의 «데스크톱 무변» 약속을 깨는 것. */
@@ -137,7 +144,7 @@ export function scanSource(
         const final = cn(wrapper.inner, cn(wrapper.classes, own));
         const px = baseFontPx(final) ?? wrapper.px;
         const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-        if (px < 16) sites.push({ file, line, tag, px });
+        if (px !== null && px < 16) sites.push({ file, line, tag, px });
         // 데스크톱 무변: 래퍼를 반응형으로 바꾸기 전 모양(같은 호출부)과 데스크톱 크기가 같아야 한다.
         const before = desktopFontPx(cn(wrapper.inner, cn(beforeResponsive(wrapper.classes), own)));
         const after = desktopFontPx(final);
@@ -241,7 +248,7 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, Wr
     };
     visit(body);
     if (px === undefined) throw new Error(`래퍼 ${name}(${rel})가 입력칸을 그리지 않는다 — WRAPPERS 표를 고칠 것`);
-    if (px === null) throw new Error(`래퍼 ${name}(${rel})의 글자 크기를 정적으로 못 정한다(부모를 물려받음) — 래퍼에 크기를 줄 것`);
+    if (px === null && !CALLER_SIZED_WRAPPERS.has(name)) throw new Error(`래퍼 ${name}(${rel})의 글자 크기를 정적으로 못 정한다(부모를 물려받음) — 래퍼에 크기를 줄 것`);
     out.set(name, { inner, classes, px });
   }
   return out;

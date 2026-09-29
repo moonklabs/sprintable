@@ -160,7 +160,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('assetPickerSearchPlaceholder')}
-          className="w-full border-0 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
+          className="w-full border-0 bg-transparent text-base lg:text-xs text-foreground outline-none placeholder:text-muted-foreground"
         />
       </div>
 

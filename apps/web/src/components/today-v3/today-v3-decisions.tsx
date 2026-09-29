@@ -176,7 +176,7 @@ function HitlAnswerCard({ item, onDone }: { item: TodayNeedsMeItem; onDone: () =
         onChange={(e) => setResponseText(e.target.value)}
         placeholder={t('hitlResponsePlaceholder')}
         aria-label={t('hitlResponsePlaceholder')}
-        className="mt-2 h-8 text-xs"
+        className="mt-2 h-8"
         data-testid="today-v3-hitl-response-input"
       />
       {error ? <p role="alert" className="mt-1.5 text-xs text-destructive">{error}</p> : null}
