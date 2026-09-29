@@ -139,6 +139,16 @@ async def emit_story_status_changed(
     스토리(#2132) 스코프 밖 — 별도 판단 필요."""
     if old_status == story.status:
         return
+    # story #4424 (PO 11:48Z) — «first result» for a desktop setup, here once for every status path (the board PATCH, bulk,
+    # workflow report-done, gate resolutions — and any later one): a setup agent moving its first work item to a status that
+    # shows a result. Isolated like every side-effect here (the contract above: nothing propagates to the caller).
+    if actor_id is not None and story.status in ("in-review", "done"):
+        try:
+            from app.services.desktop_setup import mark_first_result
+
+            await mark_first_result(story.id, actor_id, db=db)
+        except Exception:  # noqa: BLE001
+            logger.error("desktop first-result mark failed story_id=%s", getattr(story, "id", None), exc_info=True)
     # lazy import — service→router/pipeline 순환 회피.
     from app.models.pm import StoryActivity
     from app.services.member_resolver import canonicalize_member_id

@@ -32,9 +32,20 @@ BE_EMIT_EVENTS = frozenset({
     "event_sent", "ack_received", "verified", "abandoned",
     # story #4424 — the desktop setup's own steps, written by its endpoints (services/desktop_setup.py)
     "desktop_setup_code_issued", "desktop_setup_confirmed", "desktop_setup_exchanged",
+    # the MCP manifest route marks an agent's first tools connection (services/desktop_setup.mark_tools_connected)
+    "desktop_tools_connected", "desktop_first_result_seen",
+})
+# story #4424 (PO 08:42Z) — the names the desktop app (sprintable-mobile) sends through `POST /onboarding/events`, keyed by
+# the setup id. That repository cannot carry a line of this list, so the PR that *reads* them (the setup status) carries it;
+# the app keeps a copy of these names with a «sent names ⊆ copy» test pointing here. Merge this before the app sends them.
+DESKTOP_SHELL_EMIT_EVENTS = frozenset({
+    "desktop_workdir_fallback", "desktop_setup_blocked", "desktop_first_screen_human_input", "desktop_first_task_handed",
+    # PO 09:58Z — the shell reopens the setup page after a sign-in (the code never sits in the web), so it is the one that
+    # knows a sign-in happened: a human hand, sent by the shell
+    "desktop_setup_signed_in",
 })
 # §1 canonical = FE-emit ∪ BE-emit (one source each; the router accepts exactly this).
-EVENT_CATALOG = FE_EMIT_EVENTS | BE_EMIT_EVENTS
+EVENT_CATALOG = FE_EMIT_EVENTS | BE_EMIT_EVENTS | DESKTOP_SHELL_EMIT_EVENTS
 # §4 실패사유 taxonomy(8).
 FAILURE_REASONS = frozenset({
     "config_error", "no_copy", "no_auth", "stream_unreachable",

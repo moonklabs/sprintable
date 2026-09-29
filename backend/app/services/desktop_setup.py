@@ -38,7 +38,12 @@ SETUP_CODE_TTL = timedelta(minutes=10)
 EVENT_CODE_ISSUED = "desktop_setup_code_issued"
 EVENT_CONFIRMED = "desktop_setup_confirmed"
 EVENT_EXCHANGED = "desktop_setup_exchanged"
-EVENT_FIRST_RESULT = "desktop_first_result_seen"
+EVENT_FIRST_RESULT = "desktop_first_result_seen"  # written by the story comment · status · stage publish paths (below)
+EVENT_TOOLS_CONNECTED = "desktop_tools_connected"  # written by the MCP manifest route (below)
+# sent by the desktop app — read here, carried into the catalog by the PR that sends them (this exact spelling)
+EVENT_FIRST_TASK_HANDED = "desktop_first_task_handed"
+EVENT_WORKDIR_FALLBACK = "desktop_workdir_fallback"
+EVENT_BLOCKED = "desktop_setup_blocked"
 EVENT_DOC_OPENED = "desktop_doc_opened"
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
@@ -124,8 +129,9 @@ async def confirm_setup(
     roles: list[RoleChoice],
     auth,
     workdir_hint: str | None = None,
-) -> tuple[uuid.UUID, list[dict]]:
-    """Returns (setup_id, members). Writes only through `db` and never commits — the caller commits, or rolls back on any
+    background_tasks=None,
+) -> tuple[uuid.UUID, list[dict], uuid.UUID]:
+    """Returns (setup_id, members, work_item_id). Writes only through `db` and never commits — the caller commits, or rolls back on any
     error so nothing of a half-made setup stays."""
     from app.models.event_definition import EventDefinition
     from app.repositories.team_member import TeamMemberRepository
@@ -135,6 +141,13 @@ async def confirm_setup(
     from app.services.recipe_role_bindings import upsert_role_binding
 
     setup = await _setup_by_code(db, code)
+    # PO 11:48Z — the same person confirming the same setup again gets it as it is (200): after a confirmation whose commit
+    # went through but whose answer did not (a 500 from a hook after the commit), pressing again must not look like a failure.
+    # Nothing is made or re-applied (a different body changes nothing). Anyone else is still refused.
+    if (
+        setup.confirmed_at is not None and setup.confirmed_by == user_id and setup.org_id == org_id and setup.revoked_at is None
+    ):
+        return setup.id, list(setup.members or []), setup.work_item_id
     if setup.revoked_at is not None or setup.exchanged_at is not None:
         raise DesktopSetupError("code_used")
     if _now() >= setup.expires_at:
@@ -216,13 +229,52 @@ async def confirm_setup(
     setup.members = members
     setup.workdir_hint = workdir_hint
     await db.flush()
+
+    from app.repositories.story import StoryRepository
     from app.services.onboarding_funnel import emit_onboarding_event
 
+    story = await StoryRepository(db, org_id).create(project_id=project_id, title=(definition.name or definition.key)[:500])
+    setup.work_item_id = story.id  # the product's link (PO 11:04Z) — the funnel meta below is for analysis only
+    await db.flush()
     await emit_onboarding_event(
         db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
-        meta={"flow": "desktop_setup", "human_hand": True, "agents": sum(m["kind"] == "agent" for m in members)},
+        meta={
+            "flow": "desktop_setup", "human_hand": True, "agents": len({m["member_id"] for m in members if m["kind"] == "agent"}),
+            "work_item_id": str(story.id),  # for analysis; the product reads desktop_setups.work_item_id
+        },
     )
-    return setup.id, members
+    # last: its message commit is the confirmation's one commit (see _publish_first_stage)
+    await _publish_first_stage(db, org_id=org_id, story_id=story.id, definition=definition, auth=auth, background_tasks=background_tasks)
+    return setup.id, members, story.id
+
+
+async def _publish_first_stage(
+    db: AsyncSession, *, org_id: uuid.UUID, story_id: uuid.UUID, definition, auth, background_tasks,
+) -> None:
+    """PO 08:22Z — the first work item, in the confirmation's transaction: a story (title = the recipe's name, made by the caller) and the recipe's
+    first stage published on it by the confirming person, through the same publish core and checks as the board's «Start»
+    (`_publish_registry_event_core`, stage_origin «member»). A recipe run is keyed by its work item, so a publish without one
+    would cut progress and stage hand-offs; publishing from a second browser call could leave a half setup if the window
+    closed in between.
+
+    The publish is the **last** write of the confirmation and its message commit is the confirmation's one commit: a person's
+    message cannot join a caller's transaction (`send_message_core(after_commit=…)` is for server-issued messages — a person's
+    message runs the `process_event` hook on the committed session), so instead nothing else is written after it. Any failure
+    before that commit raises out of here and the caller rolls everything back (agents · bindings · story · the code's state);
+    nothing is swallowed, so no SAVEPOINT. The deliveries it registers run on the request's `background_tasks`, after the
+    response. A recipe without stages gets its story and no publish (the caller commits)."""
+    from fastapi import BackgroundTasks
+
+    from app.routers.events import _publish_registry_event_core
+
+    stages = ((definition.payload_schema or {}).get("properties") or {}).get("stage", {}).get("enum") or []
+    if stages:
+        await _publish_registry_event_core(
+            db, org_id, auth, definition.key,
+            {"work_item_type": "story", "work_item_id": str(story_id), "stage": stages[0]},
+            # stage_origin left at its default «member»: the confirming person's publish gets the board «Start» checks
+            background_tasks if background_tasks is not None else BackgroundTasks(),
+        )
 
 
 @dataclass
@@ -230,6 +282,8 @@ class Exchanged:
     setup_id: uuid.UUID
     agents: list[dict]
     workdir_hint: str | None
+    recipe_name: str | None
+    org_name: str | None
 
 
 async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Exchanged | None:
@@ -280,7 +334,28 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
         db, EVENT_EXCHANGED, session_id=setup.id, org_id=setup.org_id, project_id=setup.project_id,
         meta={"flow": "desktop_setup", "keys": len(agents)},
     )
-    return Exchanged(setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint)
+    from app.models.organization import Organization
+
+    # the org the desktop is now joined to (Qadir 4825): the app shows it, so a person notices a setup confirmed by another org
+    org_name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
+    return Exchanged(
+        setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup), org_name=org_name,
+    )
+
+
+async def _recipe_name(db: AsyncSession, setup: DesktopSetup) -> str | None:
+    """The recipe's display name (PO 08:22Z — the app's default folder ~/Sprintable/{recipe}). The org's own definition wins
+    over a preset with the same key, as in the publish path."""
+    from app.models.event_definition import EventDefinition
+
+    if not setup.event_definition_key:
+        return None
+    return (await db.execute(
+        select(EventDefinition.name).where(
+            EventDefinition.key == setup.event_definition_key,
+            (EventDefinition.org_id == setup.org_id) | (EventDefinition.org_id.is_(None)),
+        ).order_by(EventDefinition.org_id.is_(None)).limit(1)
+    )).scalar_one_or_none()
 
 
 async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> int:
@@ -370,6 +445,149 @@ async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UU
         "setup_id": setup_id, "human_hands": hands, "minutes_to_first_result": minutes,
         "docs_opened": sum(1 for e, _m, _t in rows if e == EVENT_DOC_OPENED),
     }
+
+
+async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> dict:
+    """PO 08:31Z — one read for the web's progress line, the folder-fallback notice and failure ⑥: the setup's state and the
+    signals read from its events (session_id = the setup id). A signal that has not happened is None, never guessed."""
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.project_auth import is_org_owner_or_admin
+
+    setup = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.org_id == org_id)
+    )).scalar_one_or_none()
+    if setup is None:
+        raise DesktopSetupError("setup_not_found")
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise DesktopSetupError("not_org_admin")
+    rows = (await db.execute(
+        select(OnboardingEvent.event, OnboardingEvent.meta, OnboardingEvent.server_ts)
+        .where(OnboardingEvent.session_id == setup_id).order_by(OnboardingEvent.server_ts)
+    )).all()
+
+    def first(name: str):
+        return next(((meta or {}, at) for e, meta, at in rows if e == name), None)
+
+    def last(name: str):
+        return next(((meta or {}, at) for e, meta, at in reversed(rows) if e == name), None)
+
+    tools: dict[str, datetime] = {}
+    for e, meta, at in rows:
+        if e == EVENT_TOOLS_CONNECTED and (meta or {}).get("member_id"):
+            tools.setdefault(str(meta["member_id"]), at)
+    blocked = last(EVENT_BLOCKED)
+    fallback = last(EVENT_WORKDIR_FALLBACK)
+    handed = first(EVENT_FIRST_TASK_HANDED)
+    result = first(EVENT_FIRST_RESULT)
+    reason = (blocked[0].get("reason") if blocked else None)
+    return {
+        "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
+        "recipe_name": await _recipe_name(db, setup),
+        "work_item_id": str(setup.work_item_id) if setup.work_item_id else None,
+        "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime")} for m in (setup.members or [])],
+        "signals": {
+            "tools_connected": [{"member_id": k, "at": v} for k, v in tools.items()],
+            "first_task_handed_at": handed[1] if handed else None,
+            "first_result_at": result[1] if result else None,
+            "workdir_fallback_at": fallback[1] if fallback else None,
+            "blocked": {"at": blocked[1], "reason": reason if isinstance(reason, str) else None} if blocked else None,
+        },
+    }
+
+
+async def _mark_once(s: AsyncSession, *, setup_id: uuid.UUID, member_id: uuid.UUID, event: str) -> None:
+    """One `event` row per setup · member (an advisory lock keeps two concurrent first writes to one row)."""
+    from sqlalchemy import func
+
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.onboarding_funnel import record_onboarding_event
+
+    await s.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"{event}:{setup_id}:{member_id}"))))
+    seen = (await s.execute(
+        select(OnboardingEvent.id).where(
+            OnboardingEvent.session_id == setup_id, OnboardingEvent.event == event,
+            OnboardingEvent.meta["member_id"].astext == str(member_id),
+        ).limit(1)
+    )).first()
+    if seen is None:
+        await record_onboarding_event(
+            s, event=event, session_id=setup_id, agent_id=member_id,
+            meta={"flow": "desktop_setup", "member_id": str(member_id)},
+        )
+
+
+async def mark_tools_connected(api_key_id) -> None:
+    """`desktop_tools_connected` (session_id = the setup · meta.member_id) the first time a key handed out by a desktop setup
+    fetches the MCP manifest. Once per setup · member. Own short session; any failure is logged, never raised — the manifest
+    answer must not depend on this."""
+    import logging
+
+    from app.core.database import async_session_factory
+
+    try:
+        key_id = uuid.UUID(str(api_key_id))
+    except (TypeError, ValueError):
+        return
+    try:
+        async with async_session_factory() as s:
+            row = (await s.execute(
+                select(ApiKey.desktop_setup_id, ApiKey.team_member_id).where(ApiKey.id == key_id)
+            )).first()
+            if row is None or row[0] is None:
+                return
+            await _mark_once(s, setup_id=row[0], member_id=row[1], event=EVENT_TOOLS_CONNECTED)
+            await s.commit()
+    except Exception:  # noqa: BLE001 — a measurement; the manifest answer goes on
+        logging.getLogger(__name__).error("desktop_tools_connected mark failed api_key_id=%s", key_id, exc_info=True)
+
+
+async def _setups_for_story(db: AsyncSession, story_uuid: uuid.UUID) -> list:
+    """The setups whose first work item is this story (one indexed read, alembic 0423)."""
+    return (await db.execute(
+        select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.work_item_id == story_uuid)
+    )).all()
+
+
+async def mark_first_result(story_id, member_id, *, db: AsyncSession | None = None) -> None:
+    """`desktop_first_result_seen` (PO 08:44Z · 11:04Z · 11:48Z): the first time one of a setup's **agents** shows a result on
+    that setup's first work item — a comment, a stage publish, or a status change to in-review/done (the status one is called
+    from `emit_story_status_changed`, the single path every status change passes). Once per setup · member.
+
+    Called after every such write in the product, so it must be cheap for everyone else: the lookup (one indexed read, 0423)
+    goes through the caller's session when there is one; a session of its own is opened only when this write really is a
+    setup agent's — and even then `_mark_once` keeps it to one row. A failure is logged, never raised."""
+    import logging
+
+    from app.core.database import async_session_factory
+
+    if story_id is None or member_id is None:
+        return
+    try:
+        story_uuid = uuid.UUID(str(story_id))
+    except ValueError:
+        return
+    try:
+        if db is not None:
+            # Qadir 4826 (PO 12:08Z): some callers emit before their commit (a gate resolution · advance_story_to_done), so
+            # this read runs inside their open transaction. In a savepoint: if it fails (a statement timeout…) only the
+            # savepoint is rolled back and the caller's write still commits — a measurement never blocks the real write.
+            async with db.begin_nested():
+                setups = await _setups_for_story(db, story_uuid)
+        else:
+            async with async_session_factory() as s:
+                setups = await _setups_for_story(s, story_uuid)
+        mine = [
+            setup_id for setup_id, members in setups
+            if str(member_id) in {m["member_id"] for m in (members or []) if m.get("kind") == "agent"}
+        ]
+        if not mine:
+            return
+        async with async_session_factory() as s:
+            for setup_id in mine:
+                await _mark_once(s, setup_id=setup_id, member_id=uuid.UUID(str(member_id)), event=EVENT_FIRST_RESULT)
+            await s.commit()
+    except Exception:  # noqa: BLE001 — a measurement; the write it follows is already done
+        logging.getLogger(__name__).error("desktop_first_result_seen mark failed story_id=%s", story_id, exc_info=True)
 
 
 def exchange_urls() -> tuple[str | None, str | None]:

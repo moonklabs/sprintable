@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,7 @@ from app.services.desktop_setup import (
     list_setups,
     revoke_setup,
     setup_hands,
+    setup_status,
 )
 
 router = APIRouter(prefix="/api/v2/desktop", tags=["desktop"])
@@ -121,27 +122,33 @@ class ConfirmedMember(BaseModel):
 class ConfirmResponse(BaseModel):
     setup_id: uuid.UUID
     members: list[ConfirmedMember]
+    work_item_id: uuid.UUID  # the story the recipe's first stage was published on
 
 
 @router.post("/setup-codes/confirm", response_model=ConfirmResponse)
 async def post_confirm(
     body: ConfirmRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     user_id = _human_only(auth)
     try:
-        setup_id, members = await confirm_setup(
+        setup_id, members, work_item_id = await confirm_setup(
             db, code=body.code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
             roles=[RoleChoice(role=r.role, runtime=r.runtime) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            background_tasks=background_tasks,
         )
     except DesktopSetupError as e:
         # AC2: any error leaves the request by raising, and get_db rolls the whole session back — e.g. the plan's agent
         # limit (402) on the second agent takes the first one with it
         raise _error(e) from None
     await db.commit()
-    return ConfirmResponse(setup_id=setup_id, members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members])
+    return ConfirmResponse(
+        setup_id=setup_id, work_item_id=work_item_id,
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members],
+    )
 
 
 class ExchangeRequest(BaseModel):
@@ -170,7 +177,7 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
         status_code=200,
         content={
             "setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url,
-            "workdir_hint": done.workdir_hint,
+            "workdir_hint": done.workdir_hint, "recipe_name": done.recipe_name, "org_name": done.org_name,
         },
         headers=headers,
     )
@@ -213,6 +220,49 @@ async def get_setups(
     user_id = _human_only(auth)
     try:
         return SetupListResponse(setups=[SetupItem(**s) for s in await list_setups(db, user_id=user_id, org_id=org_id)])
+    except DesktopSetupError as e:
+        raise _error(e) from None
+
+
+class ToolsConnected(BaseModel):
+    member_id: str
+    at: datetime
+
+
+class SetupBlocked(BaseModel):
+    at: datetime
+    reason: str | None
+
+
+class SetupSignals(BaseModel):
+    tools_connected: list[ToolsConnected]  # per agent: its first MCP connection (the manifest fetch)
+    first_task_handed_at: datetime | None
+    first_result_at: datetime | None
+    workdir_fallback_at: datetime | None
+    blocked: SetupBlocked | None
+
+
+class SetupStatusResponse(BaseModel):
+    setup_id: uuid.UUID
+    device_name: str
+    state: Literal["waiting_for_app", "handed_over", "not_handed_over", "disconnected"]
+    recipe_name: str | None
+    work_item_id: str | None
+    members: list[SetupMember]
+    signals: SetupSignals
+
+
+@router.get("/setups/{setup_id}", response_model=SetupStatusResponse)
+async def get_setup_status(
+    setup_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """PO 08:31Z — one setup's state and the signals read from its events (web progress · folder fallback · failure ⑥)."""
+    user_id = _human_only(auth)
+    try:
+        return SetupStatusResponse(**await setup_status(db, setup_id=setup_id, user_id=user_id, org_id=org_id))
     except DesktopSetupError as e:
         raise _error(e) from None
 

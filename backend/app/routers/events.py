@@ -3113,6 +3113,12 @@ async def _publish_registry_event_core(
     msg_response = await send_message_core(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id, after_commit=after_commit,
     )
+    if sender.type == "agent" and payload.get("work_item_type") == "story" and payload.get("work_item_id"):
+        # story #4424 — a desktop setup agent's first write on its first work item = its first result (no-op for others;
+        # the server's own publishes come from the system publisher, never a setup's agent)
+        from app.services.desktop_setup import mark_first_result
+
+        await mark_first_result(payload.get("work_item_id"), sender.id, db=db)
 
     # story #2636(P1b) 갭 1호 처방 — 전환 실측(가동 1시간, 페드루군)에서 실제로 걸린
     # 정황: work_item이 보드에 미배정이면 work_item_stakeholders 해석이 빈 집합이라 발행은

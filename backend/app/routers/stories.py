@@ -2980,6 +2980,10 @@ async def add_comment(
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
+    # story #4424 — a desktop setup agent's first write on its first work item = its first result (no-op for anyone else)
+    from app.services.desktop_setup import mark_first_result
+
+    await mark_first_result(id, created_by, db=db)
 
     # E-CANVAS C0-S1(story cfa61434) §F4: comment.created 이벤트 전파 — 기반층 검증 케이스
     # (blueprint 제1원칙 "이벤트 없는 기능 금지"). 수신자 = story assignee(멀티) + mentioned_ids
