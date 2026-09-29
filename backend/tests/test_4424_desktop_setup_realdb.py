@@ -269,8 +269,10 @@ async def test_ac1_refusals(world):
         r = await _confirm(c, code, who=OUTSIDER, org=ORG2)
         assert r.status_code in (403, 404), r.text  # the project/recipe are not in that org either way
         assert (await _counts())["agents"] == 1  # only the existing one
-        assert (await _confirm(c, code)).status_code == 200
-        assert (await _confirm(c, code)).status_code == 409  # a second confirmation makes nothing
+        first_confirm = await _confirm(c, code)
+        assert first_confirm.status_code == 200
+        again = await _confirm(c, code)  # the same person again: the setup as it is (PO 11:48Z), nothing new
+        assert again.status_code == 200 and again.json()["setup_id"] == first_confirm.json()["setup_id"]
         assert (await _exchange(c, code, verifier)).status_code == 200
 
         # expired: 10 minutes after the code was made
@@ -834,3 +836,75 @@ async def test_the_setup_finds_its_work_item_even_when_the_funnel_event_fails(wo
         assert r.status_code == 201, r.text
         rows = await _sql(fetch=f"SELECT meta->>'member_id' FROM onboarding_events WHERE session_id='{confirmed['setup_id']}' AND event='desktop_first_result_seen'")
         assert rows == [(writer["member_id"],)]
+
+
+@pytest.mark.anyio
+async def test_the_same_person_confirming_again_gets_the_setup_as_it_is_and_nothing_is_made(world):
+    """PO 11:48Z — a confirmation whose commit went through but whose answer was lost: pressing again answers the same setup
+    (200, the same setup_id · members · work_item_id), makes nothing and re-applies nothing even with another body; someone
+    else is still refused."""
+    async with _client() as c:
+        code, _ = await _code(c)
+        first = await _confirm(c, code)
+        assert first.status_code == 200
+        counts = await _counts()
+        stories = (await _sql(fetch=f"SELECT count(*) FROM stories WHERE project_id='{PROJ}'"))[0][0]
+        other_body = {**_ROLES, "roles": [{"role": "Writer", "runtime": "codex"}, {"role": "Reviewer", "runtime": "codex"}], "workdir_hint": "~/elsewhere"}
+        again = await _confirm(c, code, body=other_body)
+        assert again.status_code == 200, again.text
+        assert {k: again.json()[k] for k in ("setup_id", "members", "work_item_id")} == {k: first.json()[k] for k in ("setup_id", "members", "work_item_id")}
+        assert await _counts() == counts
+        assert (await _sql(fetch=f"SELECT count(*) FROM stories WHERE project_id='{PROJ}'"))[0][0] == stories
+        assert (await _sql(fetch="SELECT workdir_hint FROM desktop_setups WHERE device_name='d4424 laptop'"))[0][0] is None
+        # another admin of the same org is refused as before
+        await _sql(f"INSERT INTO org_members (id,org_id,user_id,role) VALUES (gen_random_uuid(),'{ORG}','{PLAIN}','admin') ON CONFLICT DO NOTHING")
+        await _sql(f"UPDATE org_members SET role='admin' WHERE org_id='{ORG}' AND user_id='{PLAIN}'")
+        r = await _confirm(c, code, who=PLAIN)
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "already_confirmed")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", ["report-done", "bulk"])
+async def test_every_status_path_marks_the_first_result(world, path):
+    """PO 11:48Z — the mark lives in emit_story_status_changed, the one path every status change takes: the workflow
+    report-done (the agents' usual way to finish a stage) and the board's bulk update mark it too, not only PATCH /status."""
+    async with _client() as c:
+        code, verifier = await _code(c)
+        confirmed = (await _confirm(c, code)).json()
+        agents = (await _exchange(c, code, verifier)).json()["agents"]
+        writer = next(a for a in agents if a["role"] == "Writer")
+        bearer = {"Authorization": f"Bearer {writer['api_key']}"}
+        wid = confirmed["work_item_id"]
+        if path == "report-done":
+            r = await c.post("/api/v2/workflow/report-done", json={"story_id": wid, "stage": "dev", "agent_id": writer["member_id"]}, headers=bearer)
+        else:
+            r = await c.patch("/api/v2/stories/bulk", json={"items": [{"id": wid, "status": "in-review"}]}, headers=bearer)
+        assert r.status_code == 200, r.text
+        assert (await _sql(fetch=f"SELECT status FROM stories WHERE id='{wid}'"))[0][0] == "in-review"
+        rows = await _sql(fetch=f"SELECT meta->>'member_id' FROM onboarding_events WHERE session_id='{confirmed['setup_id']}' AND event='desktop_first_result_seen'")
+        assert rows == [(writer["member_id"],)]
+
+
+@pytest.mark.anyio
+async def test_an_ordinary_write_opens_no_session_for_the_first_result_check(world, monkeypatch):
+    """PO 11:48Z (Qadir 2nd line) — the check runs after every comment / status change / agent publish in the product: with
+    the caller's session it is one read and no new session; a new one is opened only for a setup agent's write."""
+    import app.core.database as database
+
+    opened = {"n": 0}
+    real = database.async_session_factory
+
+    def counting(*a, **kw):
+        opened["n"] += 1
+        return real(*a, **kw)
+
+    from app.services.desktop_setup import mark_first_result
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(eng)() as s:
+            monkeypatch.setattr(database, "async_session_factory", counting)
+            await mark_first_result(uuid.uuid4(), uuid.uuid4(), db=s)  # a story no setup made, anyone
+            assert opened["n"] == 0
+    finally:
+        await eng.dispose()

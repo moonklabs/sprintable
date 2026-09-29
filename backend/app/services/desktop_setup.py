@@ -141,6 +141,13 @@ async def confirm_setup(
     from app.services.recipe_role_bindings import upsert_role_binding
 
     setup = await _setup_by_code(db, code)
+    # PO 11:48Z — the same person confirming the same setup again gets it as it is (200): after a confirmation whose commit
+    # went through but whose answer did not (a 500 from a hook after the commit), pressing again must not look like a failure.
+    # Nothing is made or re-applied (a different body changes nothing). Anyone else is still refused.
+    if (
+        setup.confirmed_at is not None and setup.confirmed_by == user_id and setup.org_id == org_id and setup.revoked_at is None
+    ):
+        return setup.id, list(setup.members or []), setup.work_item_id
     if setup.revoked_at is not None or setup.exchanged_at is not None:
         raise DesktopSetupError("code_used")
     if _now() >= setup.expires_at:
@@ -534,11 +541,14 @@ async def mark_tools_connected(api_key_id) -> None:
         logging.getLogger(__name__).error("desktop_tools_connected mark failed api_key_id=%s", key_id, exc_info=True)
 
 
-async def mark_first_result(story_id, member_id) -> None:
-    """`desktop_first_result_seen` (PO 08:44Z): the first time one of a setup's **agents** writes on that setup's first work
-    item — a comment, a status change or a stage publish, whichever comes first — i.e. when its result is recorded on the
-    server (what the person sees on the web). Once per setup · member. Called after the write committed, in its own session;
-    a failure is logged, never raised."""
+async def mark_first_result(story_id, member_id, *, db: AsyncSession | None = None) -> None:
+    """`desktop_first_result_seen` (PO 08:44Z · 11:04Z · 11:48Z): the first time one of a setup's **agents** shows a result on
+    that setup's first work item — a comment, a stage publish, or a status change to in-review/done (the status one is called
+    from `emit_story_status_changed`, the single path every status change passes). Once per setup · member.
+
+    Called after every such write in the product, so it must be cheap for everyone else: the lookup (one indexed read, 0423)
+    goes through the caller's session when there is one; a session of its own is opened only when this write really is a
+    setup agent's — and even then `_mark_once` keeps it to one row. A failure is logged, never raised."""
     import logging
 
     from app.core.database import async_session_factory
@@ -550,15 +560,21 @@ async def mark_first_result(story_id, member_id) -> None:
     except ValueError:
         return
     try:
+        query = select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.work_item_id == story_uuid)
+        if db is not None:
+            setups = (await db.execute(query)).all()
+        else:
+            async with async_session_factory() as s:
+                setups = (await s.execute(query)).all()
+        mine = [
+            setup_id for setup_id, members in setups
+            if str(member_id) in {m["member_id"] for m in (members or []) if m.get("kind") == "agent"}
+        ]
+        if not mine:
+            return
         async with async_session_factory() as s:
-            # one indexed lookup (0423) — this runs after every comment, status change and agent publish in the product
-            setups = (await s.execute(
-                select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.work_item_id == story_uuid)
-            )).all()
-            for setup_id, members in setups:
-                agents = {m["member_id"] for m in (members or []) if m.get("kind") == "agent"}
-                if str(member_id) in agents:
-                    await _mark_once(s, setup_id=setup_id, member_id=uuid.UUID(str(member_id)), event=EVENT_FIRST_RESULT)
+            for setup_id in mine:
+                await _mark_once(s, setup_id=setup_id, member_id=uuid.UUID(str(member_id)), event=EVENT_FIRST_RESULT)
             await s.commit()
     except Exception:  # noqa: BLE001 — a measurement; the write it follows is already done
         logging.getLogger(__name__).error("desktop_first_result_seen mark failed story_id=%s", story_id, exc_info=True)
