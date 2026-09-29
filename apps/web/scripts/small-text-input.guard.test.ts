@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { baseFontPx, beforeResponsive, desktopFontPx, discoverWrappers, scanSource, scanTree, wrapperSizes } from './small-text-input-scan';
+import { baseFontPx, beforeResponsive, belowLgFontPx, desktopFontPx, discoverWrappers, scanSource, scanTree, wrapperSizes } from './small-text-input-scan';
 import { measureFsReads } from './test-utils/fs-work';
 
 // story #4406 — 모바일 폭에서 글자가 16px 미만인 입력칸(iOS WebKit이 초점 때 화면을 확대)을 새로 만들지 않는다.
@@ -43,8 +43,8 @@ describe('scanSource — 셀프테스트', () => {
     expect(scanSource(src, 'c.tsx').sites).toEqual([]);
   });
 
-  // 유나 4807 실측 표 그대로: shadcn Input 밑단(text-base md:text-sm) ← 래퍼 ← 호출부, 세 겹을 cn()으로 합친 값.
-  const INPUT_BASE = 'h-9 px-3 text-base md:text-sm';
+  // 유나 4807 실측 표: shadcn Input 밑단 ← 래퍼 ← 호출부, 세 겹을 cn()으로 합친 값. 밑단은 4410 A 뒤의 실제 모양(`md:` → `lg:`).
+  const INPUT_BASE = 'h-9 px-3 text-base lg:text-sm';
   const RESPONSIVE = 'flex w-full px-3 text-base lg:text-sm';
   const inputWrapper = { inner: INPUT_BASE, classes: `${RESPONSIVE} h-10`, px: 16 };
   const textareaWrapper = { inner: '', classes: `${RESPONSIVE} min-h-[96px]`, px: 16 };
@@ -57,9 +57,14 @@ describe('scanSource — 셀프테스트', () => {
     expect([r.sites, r.drift]).toEqual([[], []]);
   });
 
+  it('4410 A 이전 밑단(text-base md:text-sm)이면 태블릿(768~1023) 14px로 잡힌다 — md:는 데스크톱이 아니다(까디르 4821)', () => {
+    const old = new Map([['OperatorInput', { inner: 'h-9 px-3 text-base md:text-sm', classes: `${RESPONSIVE} h-10`, px: 14 }]]);
+    expect(scanSource('export const Z = () => <OperatorInput className="min-w-0" />;', 'z.tsx', old).sites.map((x) => x.px)).toEqual([14]);
+  });
+
   it.each([
     // [설명, 래퍼, 호출부 className, 모바일 px(16 미만일 때만 셈), 데스크톱 바뀜]
-    ['입력칸(shadcn 밑단) · 호출부 text-xs — 모바일 12 · 데스크톱 14 그대로(md:text-sm이 남음)', 'input', 'min-w-0 flex-1 font-mono text-xs', 12, null],
+    ['입력칸(shadcn 밑단) · 호출부 text-xs — 모바일 12 · 데스크톱 14 그대로(lg:text-sm이 남음)', 'input', 'min-w-0 flex-1 font-mono text-xs', 12, null],
     ['입력칸 · 호출부 크기 뺌 — 모바일 16 · 데스크톱 14 그대로(맞는 처방)', 'input', 'min-w-0 flex-1 font-mono', null, null],
     ['textarea(밑단 없음) · 호출부 text-xs — 모바일 12 · 데스크톱 12 → 14(래퍼 lg:text-sm이 남음)', 'textarea', 'min-h-[52px] text-xs', 12, [12, 14]],
     ['textarea · 호출부 text-base lg:text-xs — 모바일 16 · 데스크톱 12 그대로(맞는 처방)', 'textarea', 'min-h-[52px] text-base lg:text-xs', null, null],
@@ -122,6 +127,19 @@ describe('scanSource — 셀프테스트', () => {
       ['EntityAwareTextarea', '', null],
     ]);
     expect(() => wrapperSizes(() => 'export const Nothing = 1;')).toThrow(/정의가/);
+  });
+
+  it('belowLgFontPx — lg 미만 세 구간(폰 · sm · md) 중 가장 작은 실제 크기: sm: · md: 접두 14px도 잡는다(까디르 4821 · 아이패드 세로)', () => {
+    expect(belowLgFontPx('text-base sm:text-sm')).toBe(14);
+    expect(belowLgFontPx('text-base md:text-xs')).toBe(12);
+    expect(belowLgFontPx('text-base lg:text-sm')).toBe(16);
+    expect(belowLgFontPx('sm:text-sm')).toBe(14);
+    expect(belowLgFontPx('text-base')).toBe(16);
+    expect(belowLgFontPx('w-full')).toBeNull();
+    expect(scanSource('export const A = () => (<textarea className="text-base sm:text-sm" />);', 'a.tsx').sites.map((x) => x.px)).toEqual([14]);
+    expect(scanSource('export const A = () => (<input className="text-base md:text-sm" />);', 'a.tsx').sites.map((x) => x.px)).toEqual([14]);
+    expect(scanSource('export const A = () => (<input className="text-base lg:text-sm" />);', 'a.tsx').sites).toEqual([]);
+    expect(desktopFontPx('text-base sm:text-sm')).toBe(14);
   });
 
   it('baseFontPx — 접두사 있는 크기(lg: · placeholder:)는 모바일 기본값이 아니다', () => {
