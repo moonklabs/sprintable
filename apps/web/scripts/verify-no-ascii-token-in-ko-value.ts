@@ -150,6 +150,9 @@ export function wholeValueRefKey(r: Pick<WholeValueAsciiRef, 'key'>): string {
 // 여러 키에 반복돼도 키마다 등재 필요). story #3922(§⑤ 낱말 드리프트 전량 정리)가
 // baseline 69건을 분류해 이관 — 각 그룹 사유는 PO 判定(2026-09-15) 그대로.
 export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // story #4413 — 언어 선택지는 지금 UI 언어와 무관하게 늘 자기 언어 이름(한국어 · English)이다 — 못 읽는 언어로 바뀌어 있어도
+  // 찾게 하려는 것이라 번역 대상이 아님(브랜드명과 같은 부류).
+  'settings.languageOptionEn',
   // 채널 브랜드명(제3자 서비스 고유명사, 번역 대상 아님) — channelConnect·content·
   // organization 3개 네임스페이스에 동일 브랜드 라벨이 반복(각 표면이 독립 소비처).
   'channelConnect.channelLabelFacebook', 'channelConnect.channelLabelGhost',
