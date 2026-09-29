@@ -61,11 +61,12 @@ describe('scanContent — AST literal extraction only (story #2710 lesson)', () 
 });
 
 describe('repo state (story #2420 destructive pilot)', () => {
-  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
+  // story #4333 — 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
+  // story #4408 — 실 트리 전수라 행 가드(story #4333)를 기본 5초보다 넉넉히: CI work 26 run(2026-09-28) 이 테스트 중앙값 3507ms · 최댓값 3771ms로 기본 5초의 75%까지 차 있었다(부하로 넘으면 까닭 없는 RED). 30초 ≈ 최댓값의 8.0배.
   it('has zero closed-family subtle alpha bg across src (destructive fully migrated to bg-destructive-tint)', () => {
     const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(SRC_ROOT));
     expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
     expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(__scan).toEqual([]);
-  });
+  }, 30_000);
 });

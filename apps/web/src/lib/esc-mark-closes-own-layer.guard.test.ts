@@ -90,11 +90,12 @@ describe('Esc 표시(preventDefault)는 자기 층을 닫는 갈래에서만([SI
     expect(sw.map((s) => s.closes)).toEqual([false]);
   });
 
+  // story #4408 — 실 트리 전수라 행 가드(story #4333)를 기본 5초보다 넉넉히: CI work 26 run(2026-09-28) 이 테스트 중앙값 3049ms · 최댓값 3676ms로 기본 5초의 74%까지 차 있었다(부하로 넘으면 까닭 없는 RED). 30초 ≈ 최댓값의 8.2배.
   it('앱 소스 — Esc에 표시하는 자리 전부가 같은 갈래에서 자기 층을 닫는다', () => {
     const sites = sourceFiles(SRC).flatMap((f) => escMarkSites(path.relative(SRC, f), fs.readFileSync(f, 'utf8')));
     // 훑개가 아무것도 못 찾아 초록이 되는 일이 없게 — 알려진 자리(새 폴더 둘 · 포털 메뉴 · 첨부 고르개 · flow 연결 초안 …)가 잡혀야 한다.
     expect(sites.length, JSON.stringify(sites.map((s) => `${s.file}:${s.line}`))).toBeGreaterThanOrEqual(6);
     const trapped = sites.filter((s) => !s.closes);
     expect(trapped, `닫지 않고 Esc에 표시만 하는 자리(바깥 창 · 시트 · 서랍 · 패널이 Esc로 안 닫힘):\n${trapped.map((s) => `${s.file}:${s.line} ${s.text}`).join('\n')}`).toEqual([]);
-  });
+  }, 30_000);
 });

@@ -116,10 +116,11 @@ describe('이름이 바뀐 자원은 지금 이름으로 조립한다(story #432
     expect(count("const u = 'https://app.example.com/boards'"), '절대 주소 · 다른 단어').toBe(0);
   });
 
+  // story #4408 — 실 트리 전수라 행 가드(story #4333)를 기본 5초보다 넉넉히: CI work 26 run(2026-09-28) 이 테스트 중앙값 3499ms · 최댓값 3733ms로 기본 5초의 75%까지 차 있었다(부하로 넘으면 까닭 없는 RED). 30초 ≈ 최댓값의 8.0배.
   it('⭐실 저장소 — 옛 이름 조립 0(proxy 등 리다이렉트 장치 제외)', () => {
     const v = scan();
     expect(v, v.join('\n')).toEqual([]);
-  });
+  }, 30_000);
 
   it('장치 파일이 실제로 있다(이름 바뀜으로 예외가 헛돌지 않게)', () => {
     for (const f of MACHINERY) expect(statSync(path.join(SRC, f)).isFile(), f).toBe(true);
