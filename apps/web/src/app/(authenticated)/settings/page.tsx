@@ -1102,7 +1102,7 @@ export default function SettingsPage() {
                           {(currentOrgRole === 'owner' || currentOrgRole === 'admin') ? (
                             <div className="flex items-center gap-2">
                               <input
-                                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                                 value={editOrgName}
                                 onChange={(e) => setEditOrgName(e.target.value)}
                                 onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveOrgName(); }}
@@ -1543,7 +1543,7 @@ export default function SettingsPage() {
                 {t('orgDeleteConfirmPrompt', { name: orgInfo.name })}
               </label>
               <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
                 placeholder={orgInfo.name}
                 value={deleteOrgConfirmName}
                 onChange={(e) => setDeleteOrgConfirmName(e.target.value)}

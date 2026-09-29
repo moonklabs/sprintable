@@ -103,7 +103,7 @@ export function StorageAssetList({
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t('searchPlaceholder')}
-            className="w-full min-w-0 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+            className="w-full min-w-0 bg-transparent text-base lg:text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
 

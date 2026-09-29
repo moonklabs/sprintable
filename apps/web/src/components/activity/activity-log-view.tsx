@@ -255,7 +255,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 onChange={(e) => setActionFilter(e.target.value || ALL)}
                 placeholder={t('filterAction')}
                 maxLength={ACTION_FILTER_MAX_LENGTH}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                className="rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
             </div>
             <div className="flex items-center gap-2 sm:ml-auto">
@@ -263,7 +263,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none"
+                className="rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm text-foreground outline-none"
                 aria-label={t('fromDate')}
               />
               <span className="text-xs text-muted-foreground">~</span>
@@ -271,7 +271,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none"
+                className="rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm text-foreground outline-none"
                 aria-label={t('toDate')}
               />
             </div>

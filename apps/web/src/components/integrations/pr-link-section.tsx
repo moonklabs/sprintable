@@ -273,7 +273,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             onChange={(e) => setRepoName(e.target.value)}
             placeholder={t('repoPlaceholder')}
             aria-label={t('repoAria')}
-            className="min-w-0 flex-1 bg-transparent font-mono text-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent font-mono text-base lg:text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
         <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-[11px]">
@@ -284,7 +284,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             inputMode="numeric"
             placeholder={t('prPlaceholder')}
             aria-label={t('prAria')}
-            className="w-16 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+            className="w-16 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-base lg:text-[11px]"
           />
         </div>
         <Button
