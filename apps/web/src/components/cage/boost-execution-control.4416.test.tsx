@@ -50,6 +50,10 @@ beforeEach(() => {
       if (holdSpend) await new Promise<void>((resolve) => { holdSpend = { release: resolve }; });
       return jsonResponse(body);
     }
+    if (String(url).endsWith('/adopt-existing')) {
+      spendNow = { run_status: 'pending', start_command: startCommand('pending') }; // linking queues the start again
+      return jsonResponse({ data: { result: 'adopted' } });
+    }
     if (String(url).endsWith('/spend/refresh')) {
       return jsonResponse({ data: { spend_minor: 1_000, captured_at: '2026-09-29T03:00:00Z', cap_reached: false, run_status: 'running' } }, 201);
     }
@@ -126,6 +130,25 @@ describe('[SID:4416] BoostExecutionControl — reads /spend until the queued com
     spendNow = { run_status: 'running', start_command: startCommand('completed'), ...RUN_AD };
     await settle(5_000);
     expect($('boost-pause-trigger')).not.toBeNull();
+  });
+
+  it('«link existing campaign» (4412): the link POST → pending → running shows «running · pause» without a refresh', async () => {
+    spendNow = {
+      run_status: 'pending',
+      start_command: { id: 'cmd-1', status: 'dead_letter', failure_kind: 'needs_check', error_code: 'ADS_BOOST_CREATE_OUTCOME_UNKNOWN', campaign_name: 'Boost 111_222' },
+    };
+    await mount();
+    await act(async () => { $('boost-adopt-trigger')!.click(); });
+    await act(async () => { $('boost-adopt-confirm')!.click(); });
+    await settle();
+    expect(posts('/adopt-existing')).toBe(1);
+    expect($('boost-execution-waiting')?.textContent).toBe(cage.boostExecutionStarting); // the wait begins from the command state
+    expect($('boost-pause-trigger')).toBeNull();
+
+    spendNow = { run_status: 'running', start_command: startCommand('completed'), ...RUN_AD }; // the worker linked it
+    await settle(5_000);
+    expect(container.textContent).toContain(cage.boostExecutionStatusRunning);
+    expect($('boost-pause-trigger')?.textContent).toBe(cage.boostExecutionPause);
   });
 
   it('a start retrying on its own (transient) says so instead of «starting…»', async () => {
