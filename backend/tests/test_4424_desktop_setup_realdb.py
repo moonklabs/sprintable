@@ -1002,6 +1002,12 @@ async def test_only_proven_step_events_are_counted(world):
         # the token is in no stored row
         assert not (await _sql(fetch=f"SELECT 1 FROM onboarding_events WHERE to_jsonb(onboarding_events)::text LIKE '%{EVENT_TOKENS[setup_id]}%'"))
 
+        # PO 12:51Z — no time limit, but a disconnected setup's token no longer counts
+        assert (await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).status_code in (200, 204)
+        before_fallback = (await status()).json()["signals"]["workdir_fallback_at"]
+        assert (await _app_event(c, setup_id, "desktop_workdir_fallback", {})).status_code == 202
+        assert (await status()).json()["signals"]["workdir_fallback_at"] == before_fallback is None
+
 
 @pytest.mark.anyio
 async def test_a_web_step_counts_only_from_a_signed_in_member_of_the_setups_org(world):

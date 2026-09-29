@@ -111,12 +111,15 @@ async def verify_setup_event(
     if setup_id is None or not event.startswith("desktop_"):
         return False  # only the desktop setup's own step names are ever counted by the setup reads
     setup = (await db.execute(
-        select(DesktopSetup.event_token_hash, DesktopSetup.org_id).where(DesktopSetup.id == setup_id)
+        select(DesktopSetup.event_token_hash, DesktopSetup.org_id, DesktopSetup.revoked_at).where(DesktopSetup.id == setup_id)
     )).first()
     if setup is None:
         return False
-    token_hash, org_id = setup
+    token_hash, org_id, revoked_at = setup
     if event in DESKTOP_SHELL_EMIT_EVENTS:
+        # PO 12:51Z — no time limit; the token ends when the setup is disconnected (DELETE)
+        if revoked_at is not None:
+            return False
         return bool(event_token and token_hash and hmac.compare_digest(_hash(event_token).encode(), token_hash.encode()))
     if event in FE_EMIT_EVENTS and user_id is not None and org_id is not None:
         from app.models.project import OrgMember
