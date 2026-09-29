@@ -12,7 +12,7 @@ export default async function DesktopSetupPage({ searchParams }: { searchParams:
   const query = parseSetupQuery({ get: one });
   return (
     <div className="mx-auto w-full max-w-2xl p-6">
-      {query ? <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} /> : <OpenInDesktopApp />}
+      {query ? <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} /> : <OpenInDesktopApp />}
     </div>
   );
 }

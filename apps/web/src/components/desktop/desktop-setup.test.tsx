@@ -11,6 +11,8 @@ const { ctx } = vi.hoisted(() => ({ ctx: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 
 import { DesktopSetup, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode } from './desktop-setup';
+import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
+import { markDesktopSetupLogin } from '@/lib/desktop-setup';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -53,7 +55,8 @@ const text = () => container.textContent ?? '';
 const startButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '시작') as HTMLButtonElement;
 
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
-afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
+const events = () => calls.filter((c) => c.url.endsWith('/api/onboarding/events')).map((c) => c.body as { event: string; session_id: string });
 
 describe('[SID:4427] desktop setup page', () => {
   it('opens with defaults: first recipe · human role «나 · 이름» · agent roles on the first runtime · folder ~/Sprintable/{recipe}', async () => {
@@ -165,6 +168,28 @@ describe('[SID:4427] desktop setup page', () => {
     expect(text()).toContain('에이전트에 Sprintable이 연결되지 않았어요');
     await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('4426: a setup that needed a login sends desktop_setup_signed_in once, with the setup id', async () => {
+    stub(() => new Response('{}'));
+    markDesktopSetupLogin(`/desktop/setup?code=${CODE}&setup=s-1`);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    expect(events().map((e) => [e.event, e.session_id])).toEqual([['desktop_setup_signed_in', 's-1']]);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />); // no login this time
+    expect(events()).toEqual([]);
+  });
+
+  it('4426 · AC2: while a setup runs in this tab, opening a guide link sends desktop_doc_opened; other links and other tabs send nothing', async () => {
+    stub(() => new Response('{}'));
+    await mount(<><DesktopSetup code={CODE} runtimes={['claude']} setupId="s-2" /><DesktopSetupDocWatch /><a href="https://sprintable.ai/ko/blog/desktop" onClick={(e) => e.preventDefault()}>guide</a><a href="/kanban" onClick={(e) => e.preventDefault()}>board</a></>);
+    const [guide, board] = [...container.querySelectorAll('a')].filter((a) => ['guide', 'board'].includes(a.textContent ?? ''));
+    await act(async () => { board!.click(); guide!.click(); });
+    expect(events().map((e) => [e.event, e.session_id])).toEqual([['desktop_doc_opened', 's-2']]);
+    sessionStorage.clear();
+    await act(async () => { guide!.click(); });
+    expect(events()).toHaveLength(1);
   });
 
   it('opened without a code (a browser, AC5): «데스크톱 앱에서 열어 주세요» with «앱 열기»', async () => {

@@ -119,3 +119,54 @@ export function confirmBody(rows: readonly SetupRoleRow[], projectId: string, re
     workdir_hint: workdirHint.trim(),
   };
 }
+
+// ── story #4427 · 4426 — «로그인이 필요했을 때만» desktop_setup_signed_in ──
+// 로그인 방법(비밀번호 · Firebase · Google/Apple 핸드오프)마다 성공 자리가 달라, 로그인 페이지가 «이 로그인은 설정 페이지로
+// 돌아가는 길»이라는 표시만 남기고(sessionStorage · 같은 탭), 설정 페이지가 그 표시를 보면 한 번 보내고 지운다.
+const SIGNED_IN_MARK = 'sprintable_desktop_setup_login';
+
+/** 로그인 페이지: next가 설정 페이지면 표시를 남긴다. */
+export function markDesktopSetupLogin(next: string | null, storage: Pick<Storage, 'setItem'> | undefined = globalThis.sessionStorage): void {
+  if (!next || !next.startsWith('/desktop/setup')) return;
+  try { storage?.setItem(SIGNED_IN_MARK, '1'); } catch { /* 저장이 막힌 창 — 측정만 빠진다 */ }
+}
+
+/** 설정 페이지: 표시가 있으면 true를 돌려주고 지운다(한 번만). */
+export function takeDesktopSetupLogin(storage: Pick<Storage, 'getItem' | 'removeItem'> | undefined = globalThis.sessionStorage): boolean {
+  try {
+    if (storage?.getItem(SIGNED_IN_MARK) !== '1') return false;
+    storage.removeItem(SIGNED_IN_MARK);
+    return true;
+  } catch { return false; }
+}
+
+// ── story #4427 · AC2 «문서 0» — desktop_doc_opened(PO 08:44Z) ──
+// 설정이 진행 중인 동안(설정 페이지가 setup id를 남긴 뒤 30분 · 같은 탭) 웹에서 문서 · 가이드 링크를 열면 한 번씩 보낸다.
+const ACTIVE_SETUP = 'sprintable_desktop_setup_active';
+export const ACTIVE_SETUP_TTL_MS = 30 * 60_000;
+
+export function rememberActiveSetup(setupId: string, now = Date.now(), storage: Pick<Storage, 'setItem'> | undefined = globalThis.sessionStorage): void {
+  try { storage?.setItem(ACTIVE_SETUP, JSON.stringify({ setupId, at: now })); } catch { /* 측정만 빠진다 */ }
+}
+
+export function activeSetupId(now = Date.now(), storage: Pick<Storage, 'getItem'> | undefined = globalThis.sessionStorage): string | null {
+  try {
+    const v = JSON.parse(storage?.getItem(ACTIVE_SETUP) ?? 'null') as { setupId?: unknown; at?: unknown } | null;
+    if (!v || typeof v.setupId !== 'string' || typeof v.at !== 'number' || now - v.at > ACTIVE_SETUP_TTL_MS) return null;
+    return v.setupId;
+  } catch { return null; }
+}
+
+/** 문서 · 가이드 링크인가 — sprintable.ai의 글(blog · docs · guide) · 앱의 연결 가이드(/llms · *guide*) · 도움말(/help). 앱 안
+ * 일감 문서(/docs/{id} — 조직 문서함)는 «가이드»가 아니라 셈하지 않는다. */
+export function isGuideLink(href: string, appOrigin: string): boolean {
+  let u: URL;
+  try { u = new URL(href, appOrigin); } catch { return false; }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+  const host = u.hostname;
+  if (host === 'sprintable.ai' || host === 'www.sprintable.ai' || host === 'docs.sprintable.ai') {
+    return host === 'docs.sprintable.ai' || /\/(blog|docs|guide|guides|help)(\/|$)/.test(u.pathname);
+  }
+  if (u.origin !== new URL(appOrigin).origin) return false;
+  return /^\/(llms|help)(\/|$|\.)/.test(u.pathname) || /guide/i.test(u.pathname.split('/').pop() ?? '');
+}

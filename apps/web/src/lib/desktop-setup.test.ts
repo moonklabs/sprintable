@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activeSetupId, isGuideLink, markDesktopSetupLogin, rememberActiveSetup, takeDesktopSetupLogin, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
   type SetupRecipe,
 } from './desktop-setup';
@@ -90,5 +91,36 @@ describe('[SID:4427] desktop setup page rules', () => {
     expect(defaultWorkdirHint('..')).toBe('~/Sprintable');
     for (const bad of ['', '  ', '~', '~/', '/']) expect(workdirInputOk(bad), bad).toBe(false);
     for (const ok of ['~/a', '/Users/me/work']) expect(workdirInputOk(ok), ok).toBe(true);
+  });
+});
+
+describe('[SID:4427] 4426 signals from the web (signed_in · doc_opened)', () => {
+  const mem = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) }; };
+
+  it('signed_in: marked only by a login that returns to the setup page; taken once', () => {
+    const st = mem();
+    markDesktopSetupLogin('/dashboard', st);
+    expect(takeDesktopSetupLogin(st)).toBe(false);
+    markDesktopSetupLogin(`/desktop/setup?code=${CODE}&setup=s1`, st);
+    expect(takeDesktopSetupLogin(st)).toBe(true);
+    expect(takeDesktopSetupLogin(st)).toBe(false);
+    markDesktopSetupLogin(null, st);
+    expect(takeDesktopSetupLogin(st)).toBe(false);
+  });
+
+  it('doc_opened: the setup counts for 30 minutes in this tab', () => {
+    const st = mem();
+    expect(activeSetupId(0, st)).toBeNull();
+    rememberActiveSetup('s1', 1000, st);
+    expect(activeSetupId(1000 + ACTIVE_SETUP_TTL_MS, st)).toBe('s1');
+    expect(activeSetupId(1001 + ACTIVE_SETUP_TTL_MS, st)).toBeNull();
+  });
+
+  it('guide links: sprintable.ai writing and the app\'s guides count; work documents and other sites do not', () => {
+    const app = 'https://dev-app.sprintable.ai';
+    for (const yes of ['https://sprintable.ai/ko/blog/desktop', 'https://docs.sprintable.ai/', 'https://www.sprintable.ai/guide/x', '/llms', '/llms.txt', '/connect-guide.txt', '/help'])
+      expect(isGuideLink(yes, app), yes).toBe(true);
+    for (const no of ['/docs/7c0e1a2b', '/kanban', 'https://sprintable.ai/', 'https://sprintable.ai/pricing', 'https://example.com/blog/x', 'mailto:a@b.c', 'javascript:alert(1)'])
+      expect(isGuideLink(no, app), no).toBe(false);
   });
 });

@@ -12,6 +12,7 @@ import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
 import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
 import { isAppleLoginEligible } from '@/lib/native-shell-bridge';
 import { LegalFooter } from '@/components/legal/legal-footer';
+import { markDesktopSetupLogin } from '@/lib/desktop-setup';
 
 export default function LoginPage() {
   const t = useTranslations('login');
@@ -21,6 +22,8 @@ export default function LoginPage() {
   // AC3: 세션 만료로 튕긴 경우 reason 배너 + next 로 작업 경로 복귀(오픈 리다이렉트 가드).
   const sessionExpired = searchParams.get('reason') === SESSION_EXPIRED_REASON;
   const nextParam = searchParams.get('next');
+  // story #4427 — 데스크톱 설정 페이지로 돌아가는 로그인이면 표시(설정 페이지가 desktop_setup_signed_in을 한 번 보낸다)
+  useEffect(() => { markDesktopSetupLogin(nextParam); }, [nextParam]);
   const oauthErrors: Record<string, string> = {
     oauth_init_failed: t('oauthInitFailed'),
     oauth_missing_params: t('oauthMissingParams'),

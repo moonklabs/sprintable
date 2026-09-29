@@ -10,9 +10,10 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
 import { stageRoleLabel } from '@/lib/stage-role';
+import { emitOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
-  agentRowCount, confirmBody, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, rememberActiveSetup, takeDesktopSetupLogin, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -64,7 +65,7 @@ type View =
 
 function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
 
-export function DesktopSetup({ code, runtimes: found, blocked = [] }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[] }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -81,6 +82,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [] }: { code: st
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
   const [view, setView] = useState<View>({ kind: 'loading' });
+
+  // 로그인이 필요했던 설정이면 한 번(4426 · 사람 손 셈) — 설정 id가 없으면 이 흐름에 묶을 수 없어 보내지 않는다
+  useEffect(() => {
+    if (!setupId) return;
+    rememberActiveSetup(setupId); // 이 탭에서 문서를 열면 desktop_doc_opened로 셈(DesktopSetupDocWatch)
+    if (takeDesktopSetupLogin()) emitOnboardingEvent('desktop_setup_signed_in', { session_id: setupId, flow: 'onboarding' });
+  }, [setupId]);
 
   useEffect(() => {
     let off = false;

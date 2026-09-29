@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 FE_EMIT_EVENTS = frozenset({
     "onboarding_started", "config_copied", "verify_started", "abandoned_explicit",
     "desktop_handoff_selected", "desktop_key_copied",
+    # story #4427 — 데스크톱 첫 실행 설정에서 로그인이 필요했을 때(웹 설정 페이지가 보냄 · session_id = setup_id).
+    "desktop_setup_signed_in",
+    # story #4427 — AC2 «문서 0»: 설정이 진행 중인 탭에서 문서 · 가이드 링크를 열 때(웹 · session_id = setup_id).
+    "desktop_doc_opened",
 })
 # BE-emit 8종(seam map).
 BE_EMIT_EVENTS = frozenset({

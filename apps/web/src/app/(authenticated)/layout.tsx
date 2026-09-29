@@ -8,6 +8,7 @@ import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
 import { AuUsageBanner } from '@/ee/components/billing/au-usage-banner';
+import { DesktopSetupDocWatch } from '@/components/desktop/desktop-setup-doc-watch';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { logServerTiming, withServerTiming } from '@/lib/server-timing';
 
@@ -229,6 +230,8 @@ async function AuthenticatedLayoutBody({
             <AuUsageBanner />
           </div>
           {children}
+          {/* story #4427 — 데스크톱 설정 진행 중 탭의 문서 · 가이드 열기 셈(설정 없는 탭은 아무것도 안 함) */}
+          <DesktopSetupDocWatch />
         </CrossProjectToastProvider>
       </StorageCapacityToastProvider>
     </DashboardShell>
