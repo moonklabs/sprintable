@@ -660,7 +660,7 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                             object_story_id=ctx["object_story_id"], budget_minor=gate.sealed_ads_budget_minor,
                             currency=gate.sealed_ads_currency, starts_at_iso=gate.sealed_ads_starts_at.isoformat(),
                             ends_at_iso=gate.sealed_ads_ends_at.isoformat(), objective=gate.sealed_ads_objective,
-                            existing=existing,
+                            existing=existing, gate_id=str(gate.id),
                         )
                     except Exception as create_exc:
                         partial = getattr(create_exc, "partial", None) or {}

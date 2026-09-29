@@ -307,3 +307,37 @@ async def test_two_runs_adopting_the_same_campaign_at_once_only_one_wins(monkeyp
         await first[0].dispose()
         await second[0].dispose()
 
+
+
+async def test_two_boosts_of_one_post_with_the_same_sealed_values_get_different_sandbox_ids(monkeypatch):
+    """Qadir 01a0eb0b (PO: this PR) — the sandbox derived its ids from the ad account · post · sealed period · budget · objective
+    only, so two boosts of one post with the same values got the same ids and the second run's write hit the unique indexes
+    (0420). The seed carries the boost's gate: both starts complete and every id differs. Leaving the gate out of the seed, or
+    the worker not passing it, turns this red."""
+    import app.services.ads_sandbox_campaign as sandbox
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    real = sandbox.create_boost_campaign
+
+    async def same_post_same_values(client, **kwargs):
+        # both boosts look the same to the sandbox except for their gate
+        return await real(client, **{
+            **kwargs, "ad_account_id": "act-same", "object_story_id": "page_same-post",
+            "starts_at_iso": "2026-10-01T00:00:00+00:00", "ends_at_iso": "2026-10-08T00:00:00+00:00",
+        })
+
+    monkeypatch.setattr(sandbox, "create_boost_campaign", same_post_same_values)
+    worlds = [await _setup_approved_gate(await _session_factory()) for _ in range(2)]
+    try:
+        commands = [await _start_command(w[1], w[2], w[5], w[4]) for w in worlds]
+        for _ in range(2):
+            await _tick(worlds[0][1])
+        for w, command in zip(worlds, commands):
+            assert (await _command(w[1], command.id)).status == "completed"
+        runs = [await _run(w[1], w[5]) for w in worlds]
+        for field in ("campaign_id", "adset_id", "ad_id"):
+            first, second = (getattr(r, field) for r in runs)
+            assert first and second and first != second, (field, first, second)
+    finally:
+        for w in worlds:
+            await w[0].dispose()

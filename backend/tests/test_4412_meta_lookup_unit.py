@@ -91,3 +91,18 @@ def test_the_budget_field_is_one_rule_for_create_lookup_and_check():
     assert field in sent["lookup_fields"].split(",")
     assert meta.boost_adset_budget_minor({field: "50000"}) == 50_000
     assert meta.boost_adset_budget_minor({}) is None
+
+
+async def test_sandbox_ids_come_from_the_gate_too():
+    """Qadir 01a0eb0b — same post · period · budget · objective, different gates → different ids; the same gate → the same ids
+    (a retry of one run continues its own objects)."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    same = dict(
+        ad_account_id="act-1", access_token="t", object_story_id="page_post", budget_minor=50_000, currency="KRW",
+        starts_at_iso="2026-10-01T00:00:00+00:00", ends_at_iso="2026-10-08T00:00:00+00:00", objective="REACH",
+    )
+    a = await sandbox.create_boost_campaign(None, **same, gate_id="gate-a")
+    b = await sandbox.create_boost_campaign(None, **same, gate_id="gate-b")
+    assert all(a[k] != b[k] for k in ("campaign_id", "adset_id", "ad_id")), (a, b)
+    assert await sandbox.create_boost_campaign(None, **same, gate_id="gate-a") == a

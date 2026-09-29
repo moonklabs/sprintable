@@ -144,7 +144,7 @@ async def find_boost_ads(
 async def create_boost_campaign(
     client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, object_story_id: str,
     budget_minor: int, currency: str, starts_at_iso: str, ends_at_iso: str, objective: str,
-    existing: dict | None = None,
+    existing: dict | None = None, gate_id: str = "",
 ) -> dict:
     """반환 {"campaign_id","adset_id","ad_id"}(전부 str). 3단계 순차 생성 — 앞 단계가
     실패하면 뒤 단계를 아예 안 부른다(실패 시 이미 만든 객체를 지우려 하지 않는다 — publish_channel_
@@ -152,7 +152,10 @@ async def create_boost_campaign(
 
     story #4268 — `existing`에 이미 만든 id가 있으면 그 단계는 건너뛰고 이어서 만든다(재시도가 캠페인 · 광고 세트를 또 만들어
     고객 계정에 PAUSED 객체가 중복으로 쌓이던 결함). 중간에 실패하면 그때까지 만든 id를 `MetaAdsCampaignError.partial`에
-    실어 올린다(워커가 실행 행에 남겨 다음 재시도가 이어 간다)."""
+    실어 올린다(워커가 실행 행에 남겨 다음 재시도가 이어 간다).
+
+    `gate_id` is not sent to Meta (Meta makes its own ids); it is in the signature for the sandbox, which derives its ids from
+    it (story #4412 · Qadir 01a0eb0b)."""
     ids = {k: v for k, v in (existing or {}).items() if v}
 
     def fail(code: str, message: str, *, outcome_known: bool = False) -> MetaAdsCampaignError:

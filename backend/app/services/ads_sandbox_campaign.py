@@ -70,7 +70,7 @@ def _now_meta() -> str:
 async def create_boost_campaign(
     client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, object_story_id: str,
     budget_minor: int, currency: str, starts_at_iso: str, ends_at_iso: str, objective: str,
-    existing: dict | None = None,
+    existing: dict | None = None, gate_id: str = "",
 ) -> dict:
     """real과 같은 시그니처(story #4268 `existing` 포함). sandbox는 id가 결정적이라 이어 만들기와 새로 만들기의 결과가 같다."""
     if _BUDGET_EXCEEDED_MARKER in objective and not (existing or {}).get("campaign_id"):
@@ -84,9 +84,12 @@ async def create_boost_campaign(
             "META_ADS_CAMPAIGN_CREATE_FAILED", "sandbox: create-unknown marker — no definite answer (like a 503)",
         )  # outcome_known left False: the campaign may exist
     # story #4412 (0420) — ids unique per run, like Meta's: two boosts of the same post in one ad account get different ids
-    # (the lookup markers keep using `_sandbox_ids`, which the create-unknown flow never returns from create).
+    # (the lookup markers keep using `_sandbox_ids`, which the create-unknown flow never returns from create). The seed carries
+    # the boost's gate (Qadir 01a0eb0b): without it two boosts of one post with the same sealed period · budget · objective got
+    # the same ids, and the second run's write hit the unique indexes.
     ns = uuid.uuid5(
-        uuid.NAMESPACE_URL, f"{ad_account_id}:{object_story_id}:{starts_at_iso}:{ends_at_iso}:{budget_minor}:{objective}",
+        uuid.NAMESPACE_URL,
+        f"{gate_id}:{ad_account_id}:{object_story_id}:{starts_at_iso}:{ends_at_iso}:{budget_minor}:{objective}",
     )
     return {"campaign_id": f"sandbox-campaign-{ns}", "adset_id": f"sandbox-adset-{ns}", "ad_id": f"sandbox-ad-{ns}"}
 
