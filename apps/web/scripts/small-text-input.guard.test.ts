@@ -148,4 +148,12 @@ describe('실 트리(apps/web/src)', () => {
     const stale = Object.entries(BASELINE).filter(([f, n]) => (perFile[f] ?? 0) < n).map(([f, n]) => `${f}: ${n} → ${perFile[f] ?? 0}`);
     expect(stale, '줄었다 — small-text-input-baseline.json도 같이 줄일 것').toEqual([]);
   }, 30_000);
+
+  // story #4410 C — 크기 없이 부모를 물려받던 칸을 실렌더로 판정(dev 배포 · 390px에서 계산된 font-size): two-factor 3칸은 14px(확대됨) ·
+  // pr-link 2칸은 부모 text-[11px]. 둘 다 `text-base lg:<원래 크기>`로 명시 — 크기를 다시 빼 물려받게 되돌리면 RED.
+  it.each(['components/settings/two-factor-section.tsx', 'components/integrations/pr-link-section.tsx'])('%s — 물려받는 입력칸 0(실렌더 판정 뒤 크기 명시)', (rel) => {
+    const r = scanSource(readFileSync(path.join(SRC_ROOT, rel), 'utf8'), rel);
+    expect(r.inherits).toBe(0);
+    expect(r.sites).toEqual([]);
+  });
 });

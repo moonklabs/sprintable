@@ -238,7 +238,7 @@ export function PastedSecretConnectCard({
               <input
                 id={`${channel}-${f.name}`}
                 type={f.type}
-                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
                 value={values[f.name] ?? ''}
                 onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
                 autoComplete="off"

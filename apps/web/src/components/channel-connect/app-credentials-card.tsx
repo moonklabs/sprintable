@@ -119,7 +119,7 @@ export function AppCredentialsCard({
               <input
                 id={`app-id-${channel}`}
                 type="text"
-                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
                 value={appId}
                 onChange={(e) => setAppId(e.target.value)}
                 autoComplete="off"
@@ -132,7 +132,7 @@ export function AppCredentialsCard({
               <input
                 id={`app-secret-${channel}`}
                 type="password"
-                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
                 value={appSecret}
                 onChange={(e) => setAppSecret(e.target.value)}
                 autoComplete="off"

@@ -204,7 +204,7 @@ export function StorageFolderTree({
             value={folderSearch}
             onChange={(e) => onFolderSearchChange(e.target.value)}
             placeholder={t('folderSearchPlaceholder')}
-            className="w-full min-w-0 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+            className="w-full min-w-0 bg-transparent text-base lg:text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
         <button
@@ -231,7 +231,7 @@ export function StorageFolderTree({
             }}
             placeholder={t('newFolderPlaceholder')}
             disabled={submitting}
-            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-[12px] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-[12px] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
           />
           {createError ? <p className="text-[11px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{createError}</p> : null}
           <div className="flex items-center justify-end gap-1.5">

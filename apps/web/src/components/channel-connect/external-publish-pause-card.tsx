@@ -138,7 +138,7 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
         <div className="space-y-2">
           <input
             type="text"
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm"
             placeholder={
               state.paused ? t('externalPublishResumeReasonPlaceholder') : t('externalPublishPauseReasonPlaceholder')
             }
