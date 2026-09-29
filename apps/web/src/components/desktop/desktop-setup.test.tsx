@@ -56,6 +56,15 @@ async function mount(node: React.ReactNode, role = 'owner') {
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
 }
 const text = () => container.textContent ?? '';
+/** Change the address `#` and wait for the page's own `hashchange` handling (listeners run in the order they were added,
+ * so the page's handler has run when this one does) — no sleeping. */
+const setHash = async (h: string) => {
+  await act(async () => {
+    const fired = new Promise<void>((r) => window.addEventListener('hashchange', () => r(), { once: true }));
+    window.location.hash = h;
+    await fired;
+  });
+};
 const startButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '시작') as HTMLButtonElement;
 
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
@@ -197,21 +206,21 @@ describe('[SID:4427] desktop setup page', () => {
     window.history.replaceState(null, '', '/desktop/setup');
     await mount(<DesktopSetupEntry />);
     expect(text()).toContain('데스크톱 앱에서 열어 주세요');
-    await act(async () => { window.location.hash = `code=${CODE}&setup=s-1&runtimes=claude`; await new Promise((r) => setTimeout(r, 20)); });
+    await setHash(`code=${CODE}&setup=s-1&runtimes=claude`);
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
     expect(window.location.hash).toBe('');
     expect(window.location.href).not.toContain(CODE);
     // a newer code (the app restarted the setup) replaces the older one — «시작» sends the newer code
     const NEWER = `${'Z'.repeat(20)}_-${'y'.repeat(21)}`;
-    await act(async () => { window.location.hash = `code=${NEWER}&setup=s-2&runtimes=claude`; await new Promise((r) => setTimeout(r, 20)); });
+    await setHash(`code=${NEWER}&setup=s-2&runtimes=claude`);
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(window.location.href).not.toContain(NEWER);
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect((calls.find((c) => c.url.includes('/confirm'))!.body as { code: string }).code).toBe(NEWER);
     // an unrelated # (an in-page anchor) is left alone and changes nothing
-    await act(async () => { window.location.hash = 'section-2'; await new Promise((r) => setTimeout(r, 20)); });
+    await setHash('section-2');
     expect(window.location.hash).toBe('#section-2');
   });
 
