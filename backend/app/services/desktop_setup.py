@@ -263,7 +263,8 @@ async def _publish_first_stage(
         await _publish_registry_event_core(
             db, org_id, auth, definition.key,
             {"work_item_type": "story", "work_item_id": str(story_id), "stage": stages[0]},
-            background_tasks if background_tasks is not None else BackgroundTasks(), stage_origin="member",
+            # stage_origin left at its default «member»: the confirming person's publish gets the board «Start» checks
+            background_tasks if background_tasks is not None else BackgroundTasks(),
         )
 
 
