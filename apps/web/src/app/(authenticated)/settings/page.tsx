@@ -20,6 +20,7 @@ import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-
 import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
 import { WorkflowLineEditorSection } from '@/components/settings/workflow-line-editor-section';
 import { ThemeSettings } from '@/components/settings/theme-settings';
+import { LanguageSettings } from '@/components/settings/language-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
@@ -902,7 +903,11 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="appearance">
-              <ThemeSettings />
+              {/* story #4413(유나) — 언어는 테마 바로 아래 · 같은 행 모양(폰에서 언어를 바꿀 유일한 자리). */}
+              <div className="space-y-6">
+                <ThemeSettings />
+                <LanguageSettings />
+              </div>
             </TabsContent>
 
             {isSupportWidgetEnabled() && (

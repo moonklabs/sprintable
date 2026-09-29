@@ -14,6 +14,7 @@ import { tabDestinationNavIds, visibleTabLabels } from '@/components/nav/mobile-
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { MoreTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { useCommandPaletteOpener } from '@/components/command-palette/command-palette-context';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
 // #1965)을 데스크톱 GNB(app-sidebar.tsx) 5 zones를 그대로 미러하는 그룹형 허브로 재건한다.
@@ -30,6 +31,7 @@ export default function MorePage() {
   // story #4226 — flat(static) 목적지 링크는 `?p=`를 싣는다(use-flat-href).
   const flatHref = useFlatHref();
   const t = useTranslations('nav');
+  const openPalette = useCommandPaletteOpener();
   const tMore = useTranslations('mobileTabBar');
   const [query, setQuery] = useState('');
 
@@ -102,6 +104,19 @@ export default function MorePage() {
           story #fddd0e6b(B) — 「전체」(mobileTabBar.more, 탭 이름)와 「전체 메뉴」(페이지
           제목, 새 키)는 다른 값이다 — 재사용 아님. */}
       <TopBarSlot title={<MoreTopBarTitle />} showContextChip />
+      {/* story #4413(유나 자리 결정) — 전역 검색(명령 팔레트) 폰 진입점. 사이드바 머리의 검색 단추와 같은 모양(돋보기 + «검색…») ·
+          이 목록 맨 위. «전체»는 시트가 아니라 페이지라 닫을 것 없이 팔레트 한 겹만 열린다. 아래 입력칸은 이 목록만 거르는 것(다른 일). */}
+      {openPalette && (
+        <button
+          type="button"
+          onClick={openPalette}
+          data-testid="more-global-search"
+          className="mb-4 flex min-h-11 w-full items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <Search className="size-4" aria-hidden="true" />
+          <span className="flex-1 truncate">{t('search')}</span>
+        </button>
+      )}
       {/* story #4222(유나 design) — space-y는 display:none 형제도 세어, 숨은 탭 문장(lg:hidden)이 마지막 자식이 되면 부제에
           margin 4px가 남아 데스크톱 검색창이 104→108px로 밀렸다. flex+gap은 숨은 자식에 간격을 안 준다. */}
       <div className="mb-4 flex flex-col gap-1">

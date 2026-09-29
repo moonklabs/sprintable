@@ -20,6 +20,7 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
+import { CommandPaletteProvider } from '@/components/command-palette/command-palette-context';
 import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, livePathProject, navProjectSlug } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
@@ -540,6 +541,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
+    <CommandPaletteProvider>
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
@@ -589,6 +591,7 @@ export function DashboardShell({
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>
+    </CommandPaletteProvider>
     </ToastProvider>
   );
 }

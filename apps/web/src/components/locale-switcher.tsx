@@ -4,7 +4,8 @@ import { Globe } from 'lucide-react';
 import { useCallback } from 'react';
 import { useLocale } from 'next-intl';
 
-function setLocaleCookie(locale: string) {
+/** 언어를 바꾼다 — `locale` 쿠키(1년) + 새로고침. 사이드바 전환기와 설정 화면 언어 행(story #4413)이 같은 동작을 쓴다. */
+export function applyLocale(locale: string) {
   if (typeof window !== 'undefined') {
     window.document.cookie = `locale=${locale};path=/;max-age=${60 * 60 * 24 * 365}`;
     window.location.reload();
@@ -15,7 +16,7 @@ export function LocaleSwitcher({ className = '' }: { className?: string }) {
   const locale = useLocale();
   const handleToggle = useCallback(() => {
     const next = locale === 'en' ? 'ko' : 'en';
-    setLocaleCookie(next);
+    applyLocale(next);
   }, [locale]);
 
   return (
