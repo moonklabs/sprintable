@@ -500,7 +500,27 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
     captured_spend_minor = await _captured_spend_minor_for_gate(
         db, org_id=org_id, publication_id=uuid.UUID(gate.scope_key),
     )
+    # story #4416 — what the card needs to point at the running campaign when a pause has not landed yet (money may still be
+    # going out): the campaign, its ad account (numeric, no `act_`) and name, and the ad channel (`conn.channel` as is — the
+    # screen decides which notice fits; an unknown value falls back to the money line only). All null without a run;
+    # `campaign_id` also null while the run has no campaign yet. Org-scoped like the rest of this read; no secrets.
+    run_ad = {"campaign_id": None, "ad_account_id": None, "campaign_name": None, "ad_channel": None}
+    if run is not None:
+        from app.models.channel_connection import ChannelConnection
+
+        ad_conn = (await db.execute(
+            select(ChannelConnection).where(
+                ChannelConnection.id == gate.sealed_ads_connection_id, ChannelConnection.org_id == org_id,
+            )
+        )).scalar_one_or_none() if gate.sealed_ads_connection_id is not None else None
+        run_ad = {
+            "campaign_id": run.campaign_id or None,
+            "ad_account_id": ((ad_conn.account_id or "").removeprefix("act_") or None) if ad_conn is not None else None,
+            "campaign_name": await expected_campaign_name(db, gate),
+            "ad_channel": ad_conn.channel if ad_conn is not None else None,
+        }
     return {
+        **run_ad,
         "gate_id": gate.id,
         "initiated_by": boost_start_command.initiated_by if boost_start_command is not None else None,
         "sealed_ads_budget_minor": gate.sealed_ads_budget_minor,

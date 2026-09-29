@@ -294,6 +294,12 @@ class SpendSummaryResponse(BaseModel):
     # null(지어내지 않는다).
     cap_reached_at: str | None
     start_command: StartCommandView | None = None
+    # story #4416 — the run's campaign for the «stop in Ads Manager» link (null without a run; campaign_id also null while
+    # the run has no campaign yet) and the ad channel (`conn.channel` as is: ads_sandbox · meta_ads · …).
+    campaign_id: str | None = None
+    ad_account_id: str | None = None
+    campaign_name: str | None = None
+    ad_channel: str | None = None
     snapshots: list[SpendSnapshotView]
 
 
@@ -333,6 +339,8 @@ async def _get_ads_boost_spend_endpoint(
         initiated_by=summary["initiated_by"],
         start_command=StartCommandView(**summary["start_command"]) if summary.get("start_command") else None,
         cap_reached_at=summary["cap_reached_at"].isoformat() if summary["cap_reached_at"] else None,
+        campaign_id=summary["campaign_id"], ad_account_id=summary["ad_account_id"],
+        campaign_name=summary["campaign_name"], ad_channel=summary["ad_channel"],
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,
