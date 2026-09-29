@@ -373,7 +373,9 @@ async def test_a_batch_of_two_commands_where_the_first_call_fails_still_complete
     async def first_fails(client, **kwargs):
         calls.append(1)
         if len(calls) == 1:
-            raise MetaAdsCampaignError("META_ADS_CAMPAIGN_CREATE_FAILED", "first command's create failed (injected)")
+            raise MetaAdsCampaignError(
+                "META_ADS_CAMPAIGN_CREATE_FAILED", "first command's create failed (injected)", outcome_known=True,
+            )
         return await real(client, **kwargs)
 
     monkeypatch.setattr(sandbox, "create_boost_campaign", first_fails)

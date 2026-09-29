@@ -5866,7 +5866,18 @@
     "gateActivityActionAdsBoostAutoPausedCapReached": "자동 중지(광고비 상한 도달)",
     "gateHeadChangedError": "게이트 대상 커밋이 승인 확인 이후 변경됐어요. 최신 내용을 다시 확인한 뒤 승인해 주세요.",
     "gateDraftChangedError": "그 사이 초안이 새 버전으로 바뀌어 승인되지 않았어요. 최신 초안을 확인한 뒤 다시 승인해 주세요.",
-    "gateAlreadyResolvedError": "이미 처리된 결재예요. 되돌리려면 PO에게 재검토를 요청해 주세요."
+    "gateAlreadyResolvedError": "이미 처리된 결재예요. 되돌리려면 PO에게 재검토를 요청해 주세요.",
+    "boostNeedsCheckTitle": "확인이 필요해요",
+    "boostNeedsCheckOutcomeUnknown": "광고 계정에 캠페인이 이미 만들어졌을 수 있어서 다시 시도하지 않았어요 — 광고 계정에서 먼저 확인해 주세요.",
+    "boostNeedsCheckStopped": "홍보를 시작하지 못했어요. 광고 계정을 확인한 뒤 다시 시도해 주세요.",
+    "boostNeedsCheckRetry": "다시 시도",
+    "boostNeedsCheckConfirmTitle": "홍보 다시 시도",
+    "boostNeedsCheckConfirmNoCampaign": "광고 계정에 이 캠페인이 없는 걸 확인했어요",
+    "boostNeedsCheckConfirmChecked": "광고 계정을 확인했어요",
+    "boostNeedsCheckWhatOutcomeUnknown": "광고 계정에 캠페인이 만들어졌는지 확인하지 못한 홍보를 다시 시작해요.",
+    "boostNeedsCheckWeightOutcomeUnknown": "이미 만들어진 캠페인이 있다면 광고가 두 번 집행돼 광고비도 두 번 나가요.",
+    "boostNeedsCheckCampaignToFind": "찾을 캠페인: {campaignName}",
+    "boostNeedsCheckWhatStopped": "시작하지 못한 이 홍보를 다시 시작해요."
   },
   "recruiter": {
     "title": "채용관",

@@ -5866,7 +5866,18 @@
     "gateActivityActionAdsBoostAutoPausedCapReached": "Auto-paused (ad spend cap reached)",
     "gateHeadChangedError": "The commit this gate targets changed after you confirmed. Please review the latest changes before approving.",
     "gateDraftChangedError": "The draft was updated in the meantime, so it wasn't approved. Review the latest draft, then approve again.",
-    "gateAlreadyResolvedError": "This approval has already been processed. Ask the PO for a re-review if you'd like it reconsidered."
+    "gateAlreadyResolvedError": "This approval has already been processed. Ask the PO for a re-review if you'd like it reconsidered.",
+    "boostNeedsCheckTitle": "Check needed",
+    "boostNeedsCheckOutcomeUnknown": "A campaign may already exist in your ad account, so we didn't retry — check your ad account first.",
+    "boostNeedsCheckStopped": "The boost couldn't start. Check your ad account, then try again.",
+    "boostNeedsCheckRetry": "Retry",
+    "boostNeedsCheckConfirmTitle": "Retry boost",
+    "boostNeedsCheckConfirmNoCampaign": "I confirmed this campaign isn't in my ad account",
+    "boostNeedsCheckConfirmChecked": "I checked my ad account",
+    "boostNeedsCheckWhatOutcomeUnknown": "This starts the boost again — we couldn't confirm whether its campaign was created.",
+    "boostNeedsCheckWeightOutcomeUnknown": "If the campaign already exists, the ad runs twice and you pay twice.",
+    "boostNeedsCheckCampaignToFind": "Campaign to look for: {campaignName}",
+    "boostNeedsCheckWhatStopped": "This starts the boost again."
   },
   "recruiter": {
     "title": "Recruiter",

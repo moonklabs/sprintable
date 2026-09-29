@@ -478,13 +478,19 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
     # 동형으로 이 GET에 얹는다(2개 모듈 순환import 회피를 위해 지연 import,
     # ads_boost_execution.py도 이 파일을 함수 내부에서만 부르는 동형 관례).
     from app.models.publication_command import PublicationCommand
-    from app.services.ads_boost_execution import OP_BOOST_START
+    from app.services.ads_boost_execution import (
+        ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE,
+        OP_BOOST_START,
+        expected_campaign_name,
+    )
 
+    # story #4409 — the newest start command: a re-approval gives the same gate a second boost_start (commands are unique per
+    # approved version), where scalar_one_or_none() raised MultipleResultsFound.
     boost_start_command = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id,
             PublicationCommand.operation == OP_BOOST_START,
-        )
+        ).order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc()).limit(1)
     )).scalar_one_or_none()
 
     # story #3806(Phase3·3-2 PR 11) — _enforce_spend_cap과 같은 계산(드리프트 금지,
@@ -502,6 +508,20 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         "captured_spend_minor": captured_spend_minor,
         "remaining_minor": (gate.sealed_ads_budget_minor or 0) - captured_spend_minor,
         "run_status": run.status if run is not None else None,
+        # story #4409 — the start command's own state: a needs_check stop used to be invisible (the run stays «pending»,
+        # so the screen looked «not started» while the command sat in dead_letter for good).
+        "start_command": (
+            {
+                "id": boost_start_command.id, "status": boost_start_command.status,
+                "failure_kind": boost_start_command.failure_kind, "error_code": boost_start_command.reason_code,
+                # the campaign the person has to look for — only when the outcome is unknown
+                "campaign_name": (
+                    await expected_campaign_name(db, gate)
+                    if boost_start_command.reason_code == ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE else None
+                ),
+            }
+            if boost_start_command is not None else None
+        ),
         # story #3806(Phase3·3-2 PR 11, §7 실측 열 「상한 초과 0건」의 장치) — run이
         # 없으면(미실행) 당연히 null, run은 있는데 아직 미도달이어도 null(지어내지
         # 않는다) — 도달한 시각이 찍혀야만 값이 있다.

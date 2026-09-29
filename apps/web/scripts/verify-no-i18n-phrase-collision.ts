@@ -786,6 +786,11 @@ export const EXEMPT_PAIRS = new Set<string>([
   //      `t(view.isRepublish ? 'publishRepublishCta' : 'publishCta')` — 안내 속 이름이
   //      실제 버튼 텍스트와 «같은 키»여야 하는 게 목적, #4015 CHANGES 2) — 겹침이 설계다.
   'content.channelPostsPublicationFailedRepublishNotice <-> content.publishCta',
+  // story #4409 — «다시 시도»(Yuna 23:18Z, the needs-check retry button) sits inside «{seconds}초 뒤 다시 시도할 수 있어요.» (the spend
+  // refresh rate-limit line). Both live in boost-execution-control.tsx but in exclusive states: the button only in the
+  // «확인 필요» state (a start stopped as dead_letter/needs_check), the rate-limit line only while the boost runs or is paused —
+  // never on screen together. Look again if the needs-check state ever renders next to the spend refresh.
+  'cage.boostExecutionSpendRefreshRateLimited <-> cage.boostNeedsCheckRetry',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

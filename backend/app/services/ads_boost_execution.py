@@ -65,6 +65,38 @@ _DUE_STARTS_BATCH_SIZE = 50
 ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE = "ADS_BOOST_CREATE_OUTCOME_UNKNOWN"
 
 
+ADS_BOOST_CAMPAIGN_CHECK_REQUIRED_CODE = "ADS_BOOST_CAMPAIGN_CHECK_REQUIRED"
+
+
+class AdsBoostCampaignCheckRequiredError(Exception):
+    """story #4409 — retrying an «outcome unknown» start needs the person to confirm the campaign does not exist at Meta."""
+
+    code = ADS_BOOST_CAMPAIGN_CHECK_REQUIRED_CODE
+
+
+async def prepare_ads_boost_retry(db: AsyncSession, command, *, confirmed_no_campaign: bool) -> None:
+    """story #4409 — before a person's retry of a publication command.
+
+    Only an ads boost start stopped as ADS_BOOST_CREATE_OUTCOME_UNKNOWN is special: a plain retry would reach the same verdict
+    (expired claim + call marker + no ids). The person must confirm «I checked the ad account: this campaign does not exist»;
+    only then the run's claim and call marker are cleared, so the retry creates it once. Without that confirmation →
+    AdsBoostCampaignCheckRequiredError (nothing changes — if the campaign did exist, clearing would double the ad spend).
+    Every other command (ADS_BOOST_PROVIDER_ERROR included) retries as before."""
+    if command.content_kind != _ADS_BOOST_CONTENT_KIND or command.reason_code != ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE:
+        return
+    if not confirmed_no_campaign:
+        raise AdsBoostCampaignCheckRequiredError()
+    from app.models.ads_boost_run import AdsBoostRun
+
+    run = (await db.execute(
+        select(AdsBoostRun).where(AdsBoostRun.org_id == command.org_id, AdsBoostRun.gate_id == command.gate_id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if run is not None and not (run.campaign_id and run.adset_id and run.ad_id):
+        run.create_claimed_at = None
+        run.create_call_started_at = None
+
+
 class _CreateClaimLost(Exception):
     def __init__(self, code: str, message: str):
         self.code = code
@@ -409,9 +441,36 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
     return {
         "gate": gate, "module": module,
         "ad_account_id": conn.account_id, "access_token": decrypt_channel_credential(conn.encrypted_access_token),
-        "object_story_id": f"{origin_conn.account_id}_{publication.external_id}",
+        "object_story_id": object_story_id_for(origin_conn, publication),
         "publication_id": publication.id, "ad_channel": conn.channel,
     }
+
+
+def object_story_id_for(origin_conn, publication) -> str:
+    """The boosted post as Meta knows it (page · post) — the single rule (execution context · expected_campaign_name)."""
+    return f"{origin_conn.account_id}_{publication.external_id}"
+
+
+async def expected_campaign_name(db: AsyncSession, gate) -> str | None:
+    """story #4409 — the name a boost start of this gate gives its campaign (for the person checking the ad account).
+    None when the boosted publication or its connection cannot be found (nothing is made up)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.services.meta_ads_campaign import boost_campaign_name
+
+    try:
+        publication_id = uuid.UUID(gate.scope_key)
+    except (TypeError, ValueError):
+        return None
+    publication = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == publication_id)
+    )).scalar_one_or_none()
+    if publication is None or not publication.external_id:
+        return None
+    origin_conn = (await db.execute(
+        select(ChannelConnection).where(ChannelConnection.id == publication.connection_id)
+    )).scalar_one_or_none()
+    return boost_campaign_name(object_story_id_for(origin_conn, publication)) if origin_conn is not None else None
 
 
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
@@ -473,12 +532,21 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                         run.campaign_id = partial.get("campaign_id") or run.campaign_id
                         run.adset_id = partial.get("adset_id") or run.adset_id
                         run.ad_id = partial.get("ad_id") or run.ad_id
-                        if getattr(create_exc, "code", None):
-                            # story #4404 — Meta answered with an error: known outcome (partial ids recorded above), the claim
-                            # is released so a retry may continue. A transport error / timeout keeps claim + marker (unknown).
+                        if getattr(create_exc, "code", None) and getattr(create_exc, "outcome_known", False):
+                            # story #4404 · #4409 — Meta rejected it (4xx): known «not created» (partial ids recorded above), the
+                            # claim is released so a retry may continue.
                             run.create_claimed_at = None
                             run.create_call_started_at = None
-                        raise
+                            raise
+                        # story #4409(Qadir 4805) — a 5xx, a 200 without an id, a transport error or a timeout: the campaign may
+                        # exist. Claim + marker stay, and the command stops as «outcome unknown» right away (a person checks the
+                        # ad account; only their confirmation clears the marker — never an automatic re-create).
+                        raise _CreateClaimLost(
+                            ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE,
+                            f"campaign creation for run {run.id} got no definite answer "
+                            f"({getattr(create_exc, 'code', None) or type(create_exc).__name__}) — Meta may have created it; "
+                            "check the ad account before retrying",
+                        ) from create_exc
                     run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
                     run.create_claimed_at = None  # story #4404 — ids recorded: the claim is done
                     run.create_call_started_at = None
