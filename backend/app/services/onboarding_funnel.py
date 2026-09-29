@@ -18,18 +18,21 @@ from app.models.onboarding_event import OnboardingEvent
 
 logger = logging.getLogger(__name__)
 
-# §1 canonical 11종 = FE 4(사용자행동) + BE 7(서버관측) + verify_started(FE).
-EVENT_CATALOG = frozenset({
-    "onboarding_started", "agent_created", "config_generated", "config_copied",
-    "first_auth_seen", "stream_connected", "verify_started", "event_sent",
-    "ack_received", "verified", "abandoned",
+# FE-emit — the names the web sends through `POST /onboarding/events` (apps/web/src/app/onboarding/onboarding-telemetry.ts
+# `OnboardingEvent`). story #4426 — three of them were never in the catalog and every send was a silent 422
+# (`abandoned_explicit` since OB-4 — named in this comment but left out of the set · `desktop_handoff_selected` ·
+# `desktop_key_copied` from #3983). The two lists are pinned equal by test_4426_onboarding_event_contract.py.
+FE_EMIT_EVENTS = frozenset({
+    "onboarding_started", "config_copied", "verify_started", "abandoned_explicit",
+    "desktop_handoff_selected", "desktop_key_copied",
 })
-# BE-emit 8종(seam map). FE 4종(onboarding_started/config_copied/verify_started/abandoned_explicit)은
-# OB-3 프록시로 들어온다.
+# BE-emit 8종(seam map).
 BE_EMIT_EVENTS = frozenset({
     "agent_created", "config_generated", "first_auth_seen", "stream_connected",
     "event_sent", "ack_received", "verified", "abandoned",
 })
+# §1 canonical = FE-emit ∪ BE-emit (one source each; the router accepts exactly this).
+EVENT_CATALOG = FE_EMIT_EVENTS | BE_EMIT_EVENTS
 # §4 실패사유 taxonomy(8).
 FAILURE_REASONS = frozenset({
     "config_error", "no_copy", "no_auth", "stream_unreachable",
@@ -154,6 +157,12 @@ def _derive_abandon_reason(events: set[str]) -> str:
     return "no_copy"                # config 생성됐으나 복사 안 함
 
 
+# The events after which an agent's onboarding is over — the sweep never adds `abandoned` after one of them. story #4426
+# (Qadir): `abandoned_explicit` (the web's leave signal) was in the docstring but not in the check; it was never stored before
+# (a silent 422), and once stored it would have been counted twice (explicit + the sweep's `abandoned`).
+SWEEP_TERMINAL_EVENTS = ("verified", "abandoned", "abandoned_explicit")
+
+
 async def sweep_abandoned_onboarding(
     db: AsyncSession, *, older_than_minutes: int = ABANDON_THRESHOLD_MINUTES
 ) -> int:
@@ -182,7 +191,7 @@ async def sweep_abandoned_onboarding(
         terminal = (await db.execute(
             select(OnboardingEvent.id).where(
                 OnboardingEvent.agent_id == agent_id,
-                OnboardingEvent.event.in_(("verified", "abandoned")),
+                OnboardingEvent.event.in_(SWEEP_TERMINAL_EVENTS),
             ).limit(1)
         )).first()
         if terminal:
