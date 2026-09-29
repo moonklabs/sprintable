@@ -5885,7 +5885,7 @@
     "boostAdoptWhat": "광고 계정에서 이 이름의 캠페인을 찾아 이 홍보에 연결해요. 연결되면 바로 홍보가 시작돼요.",
     "boostAdoptWeight": "연결되면 곧바로 광고비가 나가기 시작해요.",
     "boostAdoptConfirm": "연결하고 시작",
-    "boostAdoptAlreadyLinked": "이 캠페인은 이미 다른 홍보에 연결돼 있어 연결하지 않았어요."
+    "boostAdoptAlreadyLinked": "이 캠페인은 이미 다른 홍보에 연결돼 있어 연결하지 않았어요. 이 홍보용 캠페인이 따로 없다면 «다시 시도»를 눌러 주세요."
   },
   "recruiter": {
     "title": "채용관",
