@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  activeSetupId, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
+  activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
   setupProgress, type SetupRecipe, type SetupStatus,
 } from './desktop-setup';
@@ -104,6 +104,9 @@ describe('[SID:4427] 4426 signal from the web (doc_opened)', () => {
     rememberActiveSetup('s1', 1000, st);
     expect(activeSetupId(1000 + ACTIVE_SETUP_TTL_MS, st)).toBe('s1');
     expect(activeSetupId(1001 + ACTIVE_SETUP_TTL_MS, st)).toBeNull();
+    rememberActiveSetup('s1', 2000, st);
+    forgetActiveSetup(st);
+    expect(activeSetupId(2001, st)).toBeNull();
   });
 
   it('guide links: sprintable.ai writing and the app\'s guides count; work documents and other sites do not', () => {

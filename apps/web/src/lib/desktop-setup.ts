@@ -134,12 +134,18 @@ export function parseSetupFragment(hash: string): SetupQuery | null {
 }
 
 // ── story #4427 · AC2 «문서 0» — desktop_doc_opened(PO 08:44Z) ──
-// 설정이 진행 중인 동안(설정 페이지가 setup id를 남긴 뒤 30분 · 같은 탭) 웹에서 문서 · 가이드 링크를 열면 한 번씩 보낸다.
+// 설정이 진행 중인 동안(같은 탭) 웹에서 문서 · 가이드 링크를 열면 한 번씩 보낸다. 표시는 설정 페이지에 들어올 때 남기고, «시작» 뒤엔
+// 진행 조회(2초)마다 새로 적으며, 흐름이 끝나면(결과 · ④ · ⑥) 지운다 — 30분은 «마지막으로 적은 때부터»(진행이 30분을 넘겨도
+// 덜 세지 않는다 · PO 13:00Z «더 셀 수는 있어도 덜 세지 않음»).
 const ACTIVE_SETUP = 'sprintable_desktop_setup_active';
 export const ACTIVE_SETUP_TTL_MS = 30 * 60_000;
 
 export function rememberActiveSetup(setupId: string, now = Date.now(), storage: Pick<Storage, 'setItem'> | undefined = globalThis.sessionStorage): void {
   try { storage?.setItem(ACTIVE_SETUP, JSON.stringify({ setupId, at: now })); } catch { /* 측정만 빠진다 */ }
+}
+
+export function forgetActiveSetup(storage: Pick<Storage, 'removeItem'> | undefined = globalThis.sessionStorage): void {
+  try { storage?.removeItem(ACTIVE_SETUP); } catch { /* 측정만 빠진다 */ }
 }
 
 export function activeSetupId(now = Date.now(), storage: Pick<Storage, 'getItem'> | undefined = globalThis.sessionStorage): string | null {

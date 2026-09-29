@@ -117,7 +117,7 @@ export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
   'UI', 'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
   'QA', 'PO', 'PM', 'AU',
-  // story #4427(PO 승인 2026-09-29 08:31Z) — «회사 IT 관리자»(데스크톱 첫 실행 설정 실패 ⑥ · 유나 확정 문구). 한국어에서 굳은
+  // story #4427(유나 ⑥ 문구 채택 2026-09-29 07:16Z) — «회사 IT 관리자»(데스크톱 첫 실행 설정 실패 ⑥ · 유나 확정 문구). 한국어에서 굳은
   // 말이고 «전산 관리자»가 오히려 낯설다 — 낱말을 바꾸지 않고 토큰을 허용.
   'IT',
 ]);

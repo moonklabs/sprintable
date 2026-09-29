@@ -277,6 +277,17 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(polls()).toBe(n); // stops once the result is in
   });
 
+  it('«설정 진행 중» for doc counting (AC2): refreshed by every status read — a doc opened 31 min in still counts; gone once the result is in (PO 13:00Z)', async () => {
+    const { activeSetupId } = await import('@/lib/desktop-setup');
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] });
+    await startSetup();
+    await tick(31 * 60_000);
+    expect(activeSetupId()).toBe(SETUP_ID);
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    await tick(2_000);
+    expect(activeSetupId()).toBeNull();
+  });
+
   it('⑦ «아직» after handed over + 180 s with a missing connection; it goes away when the connection comes', async () => {
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
     await startSetup();

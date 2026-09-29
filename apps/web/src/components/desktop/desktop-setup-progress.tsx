@@ -11,7 +11,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { setupProgress, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepState } from '@/lib/desktop-setup';
+import { forgetActiveSetup, rememberActiveSetup, setupProgress, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepState } from '@/lib/desktop-setup';
 import { Failure, ToolsNotConnected } from './desktop-setup';
 
 /**
@@ -35,6 +35,9 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
       const body = (await res.json()) as SetupStatus | { data?: SetupStatus };
       const s = 'signals' in body ? body : body.data ?? null;
       if (!s) return;
+      // «설정 진행 중» 표시(문서 열림 셈 · AC2): 흐름이 끝나면 지우고, 아니면 읽을 때마다 새로 적는다(PO 13:00Z)
+      if (s.signals.first_result_at || s.signals.blocked || s.state === 'not_handed_over') forgetActiveSetup();
+      else rememberActiveSetup(setupId);
       const at = Date.now();
       setSnap((prev) => ({ status: s, at, handedOverSeenAt: prev?.handedOverSeenAt ?? (s.state === 'handed_over' ? at : null) }));
     } catch { /* 연결이 잠깐 끊겨도 다음 판에 다시 */ }
