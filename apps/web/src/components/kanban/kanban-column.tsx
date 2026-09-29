@@ -250,7 +250,7 @@ export function KanbanColumn({
                 if (e.key === 'Escape') onWipLimitRemove?.();
               }}
               placeholder={t('wipLimitLabel')}
-              className="h-7 w-20"
+              className="h-7 w-24"
               autoFocus
             />
             <Button size="sm" variant="default" className="h-7 px-2 text-xs" onClick={onWipLimitSave}>
