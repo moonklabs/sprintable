@@ -177,7 +177,21 @@ async def _code(c, device: str = "d4424 laptop") -> tuple[str, str]:
     assert r.headers["cache-control"] == "no-store"
     setup_id = r.json()["setup_id"]  # PO 08:31Z ② — the id the web's pre-confirm steps are keyed by
     assert (await _sql(fetch=f"SELECT device_name FROM desktop_setups WHERE id='{setup_id}'"))[0][0] == device
+    EVENT_TOKENS[setup_id] = r.json()["event_token"]  # PO 12:21Z — the app's step events carry it
     return r.json()["code"], verifier
+
+
+EVENT_TOKENS: dict[str, str] = {}
+
+
+async def _app_event(c, setup_id: str, event: str, meta: dict | None = None, token: str | None = "own"):
+    """A step event as the desktop app sends it: its setup's token in the header (token=None: none · a string: that one)."""
+    headers = {}
+    if token == "own":
+        headers["X-Setup-Event-Token"] = EVENT_TOKENS[str(setup_id)]
+    elif token is not None:
+        headers["X-Setup-Event-Token"] = token
+    return await c.post("/api/v2/onboarding/events", json={"event": event, "session_id": str(setup_id), "meta": meta or {}}, headers=headers)
 
 
 _ROLES = {"project_id": str(PROJ), "recipe_id": str(RECIPE), "roles": [{"role": "Writer", "runtime": "claude"}, {"role": "Reviewer", "runtime": "codex"}]}
@@ -453,12 +467,13 @@ async def test_4426_the_setup_steps_and_the_one_line_read(world):
         # the code was asked for 3 minutes before the person confirmed; the app later reports that the person typed on the first
         # screen before the first done (a hand), a doc, and the first result 7 minutes after the confirmation → 10 minutes from the code
         await _sql(f"UPDATE onboarding_events SET server_ts = server_ts - interval '3 minutes' WHERE session_id='{setup_id}' AND event='desktop_setup_code_issued'")
+        assert (await _app_event(c, setup_id, "desktop_first_screen_human_input", {"human_hand": True})).status_code == 202
+        # desktop_doc_opened is the web's (4427 adds it to the client list): stored here as a row the server proved
         await _sql(
-            "INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES "
-            f"(gen_random_uuid(), 'desktop_first_screen_human_input', '{setup_id}', '{{\"human_hand\": true}}', now()),"
-            f"(gen_random_uuid(), 'desktop_doc_opened', '{setup_id}', '{{}}', now()),"
+            "INSERT INTO onboarding_events (id, event, session_id, meta, server_ts, desktop_setup_verified) VALUES "
+            f"(gen_random_uuid(), 'desktop_doc_opened', '{setup_id}', '{{}}', now(), true),"
             f"(gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}',"
-            f" (SELECT server_ts FROM onboarding_events WHERE session_id='{setup_id}' AND event='desktop_setup_confirmed') + interval '7 minutes')"
+            f" (SELECT server_ts FROM onboarding_events WHERE session_id='{setup_id}' AND event='desktop_setup_confirmed') + interval '7 minutes', false)"
         )
         read = (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OWNER))).json()
         assert (read["human_hands"], read["minutes_to_first_result"], read["docs_opened"]) == (2, 10.0, 1)
@@ -708,7 +723,8 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         status = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()
         assert (status["state"], status["recipe_name"], status["work_item_id"]) == ("handed_over", RECIPE_NAME, confirmed["work_item_id"])
         assert status["signals"] == {
-            "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "workdir_fallback_at": None, "blocked": None,
+            "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "first_screen_human_input_at": None,
+            "workdir_fallback_at": None, "blocked": None,
         }
 
         # the MCP server fetches the manifest at tools/list with the agent's key: marked once for that member (a second
@@ -722,17 +738,14 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         status = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()
         assert [t["member_id"] for t in status["signals"]["tools_connected"]] == [writer["member_id"]]
 
-        # what the desktop app reports (rows as the sending PR will write them)
-        await _sql(
-            "INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES "
-            f"(gen_random_uuid(), 'desktop_first_task_handed', '{setup_id}', '{{}}', now()),"
-            f"(gen_random_uuid(), 'desktop_workdir_fallback', '{setup_id}', '{{}}', now()),"
-            f"(gen_random_uuid(), 'desktop_setup_blocked', '{setup_id}', '{{\"reason\": \"agent_auth_failed\"}}', now()),"
-            f"(gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}', now())"
-        )
+        # what the desktop app reports, sent as it will send it (its setup's token in the header)
+        for event, meta in (("desktop_first_task_handed", {}), ("desktop_workdir_fallback", {}),
+                            ("desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "claude", "when": "found"}), ("desktop_first_screen_human_input", {"human_hand": True})):
+            assert (await _app_event(c, setup_id, event, meta)).status_code == 202
+        await _sql(f"INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES (gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}', now())")
         signals = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()["signals"]
-        assert all(signals[k] for k in ("first_task_handed_at", "first_result_at", "workdir_fallback_at"))
-        assert signals["blocked"]["reason"] == "agent_auth_failed"
+        assert all(signals[k] for k in ("first_task_handed_at", "first_result_at", "workdir_fallback_at", "first_screen_human_input_at"))
+        assert (signals["blocked"]["reason"], signals["blocked"]["runtime"], signals["blocked"]["when"]) == ("managed_mcp", "claude", "found")
         assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(PLAIN))).status_code == 403
         assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OUTSIDER, ORG2))).status_code == 404
 
@@ -936,3 +949,179 @@ async def test_a_failing_first_result_read_does_not_abort_the_callers_open_trans
     rows = await _sql(fetch=f"SELECT count(*) FROM onboarding_events WHERE meta->>'flow' = '{marker}'")
     assert rows == [(1,)]
     await _sql(f"DELETE FROM onboarding_events WHERE meta->>'flow' = '{marker}'")
+
+
+# ─── PO 12:21Z — the setup reads count only what is proven ──────────────────────
+
+
+@pytest.mark.anyio
+async def test_only_proven_step_events_are_counted(world):
+    async with _client() as c:
+        code, verifier = await _code(c)
+        confirmed = (await _confirm(c, code)).json()
+        setup_id = confirmed["setup_id"]
+        other_code, _ = await _code(c, "d4424 other")  # another setup: its token must not work for this one
+        other_setup = (await _sql(fetch="SELECT id FROM desktop_setups WHERE device_name='d4424 other'"))[0][0]
+        status = lambda: c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))
+        hands = lambda: c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OWNER))
+
+        # ① the server's own names cannot be sent from outside
+        for name in ("desktop_setup_confirmed", "desktop_tools_connected", "desktop_first_result_seen", "verified"):
+            r = await c.post("/api/v2/onboarding/events", json={"event": name, "session_id": setup_id, "meta": {"human_hand": True}})
+            assert r.status_code == 422, name
+
+        # ②a a desktop app step without its setup's token is kept but not counted — no token, a wrong one, another setup's
+        base_hands = (await hands()).json()["human_hands"]
+        for token in (None, "not-the-token", EVENT_TOKENS[str(other_setup)]):
+            assert (await _app_event(c, setup_id, "desktop_first_screen_human_input", {"human_hand": True}, token=token)).status_code == 202
+            assert (await _app_event(c, setup_id, "desktop_first_task_handed", {}, token=token)).status_code == 202
+        s1 = (await status()).json()["signals"]
+        assert (s1["first_screen_human_input_at"], s1["first_task_handed_at"]) == (None, None)
+        assert (await hands()).json()["human_hands"] == base_hands
+        stored = (await _sql(fetch=f"SELECT count(*), bool_or(desktop_setup_verified) FROM onboarding_events WHERE session_id='{setup_id}' AND event IN ('desktop_first_screen_human_input','desktop_first_task_handed')"))[0]
+        assert stored == (6, False), "kept for analysis, never marked proven"
+        # with its own token it counts
+        assert (await _app_event(c, setup_id, "desktop_first_screen_human_input", {"human_hand": True})).status_code == 202
+        assert (await status()).json()["signals"]["first_screen_human_input_at"] is not None
+        assert (await hands()).json()["human_hands"] == base_hands + 1
+
+        # ③ a blocked reason outside the closed list is dropped; meta over the cap is refused
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "please call +1 555 0100"})).status_code == 202
+        assert (await status()).json()["signals"]["blocked"] == {"at": (await status()).json()["signals"]["blocked"]["at"], "reason": None, "runtime": None, "when": None}
+        # the shell's managed MCP block (4427 ⑥) keeps its runtime and when; values outside their lists are dropped
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "claude", "when": "after_start"})).status_code == 202
+        b = (await status()).json()["signals"]["blocked"]
+        assert (b["reason"], b["runtime"], b["when"]) == ("managed_mcp", "claude", "after_start")
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "vim", "when": "later"})).status_code == 202
+        b = (await status()).json()["signals"]["blocked"]
+        assert (b["reason"], b["runtime"], b["when"]) == ("managed_mcp", None, None)
+        # a reason the shell does not send (a daemon refusal code) is dropped too
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "agent_auth_failed"})).status_code == 202
+        assert (await status()).json()["signals"]["blocked"]["reason"] is None
+        assert (await _app_event(c, setup_id, "desktop_workdir_fallback", {"x": "a" * 3000})).status_code == 422
+        # the token is in no stored row
+        assert not (await _sql(fetch=f"SELECT 1 FROM onboarding_events WHERE to_jsonb(onboarding_events)::text LIKE '%{EVENT_TOKENS[setup_id]}%'"))
+
+        # PO 12:51Z — no time limit, but a disconnected setup's token no longer counts
+        assert (await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).status_code in (200, 204)
+        before_fallback = (await status()).json()["signals"]["workdir_fallback_at"]
+        assert (await _app_event(c, setup_id, "desktop_workdir_fallback", {})).status_code == 202
+        assert (await status()).json()["signals"]["workdir_fallback_at"] == before_fallback is None
+
+
+@pytest.mark.anyio
+async def test_a_web_step_counts_only_from_a_signed_in_member_of_the_setups_org(world):
+    from app.services.desktop_setup import verify_setup_event
+
+    async with _client() as c:
+        code, _ = await _code(c)
+        setup_id = uuid.UUID((await _confirm(c, code)).json()["setup_id"])
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(eng)() as s:
+            # a web desktop name (the web's list gets it with 4427): a member of the setup's org → proven; anyone else → not
+            async def check(user):
+                return await verify_setup_event(s, event="desktop_handoff_selected", setup_id=setup_id, event_token=None, user_id=user)
+            assert await check(OWNER) is True
+            assert await check(OUTSIDER) is False
+            assert await check(None) is False
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("limit, expected_available", [(2, 1), (1, 0)])
+async def test_the_plan_limit_refusal_says_how_many_are_needed_and_available(world, monkeypatch, limit, expected_available):
+    """PO 12:30Z — the 402 carries `needed` (new agents this setup makes: Writer · Reviewer = 2) and `available` (the limit minus
+    the agents there were before: 1 existing agent → limit 2 → 1 · limit 1 → 0). Nothing of the setup stays."""
+    from sqlalchemy import text as sql_text
+
+    from app.core.config import settings
+    from ee import plan_limits
+
+    async def limited(db, org_id):
+        current = (await db.execute(sql_text(
+            "SELECT COUNT(*) FROM members WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"
+        ), {"oid": str(org_id)})).scalar()
+        if current >= limit:
+            raise plan_limits._plan_limit_error("agent", limit, current=current, tier="free")
+
+    monkeypatch.setattr(type(settings), "is_ee_enabled", property(lambda _self: True))
+    monkeypatch.setattr("ee.plan_limits.check_agent_add_limit", limited)
+    before = await _counts()
+    async with _client() as c:
+        code, _ = await _code(c)
+        r = await _confirm(c, code)
+        assert r.status_code == 402, r.text
+        error = r.json()["error"]
+        assert (error["code"], error["needed"], error["available"]) == ("PLAN_LIMIT_EXCEEDED", 2, expected_available)
+        assert await _counts() == before  # rolled back as before
+
+
+# ─── PO 13:04Z — the open setup routes count per user IP ───────────────────────
+
+
+@pytest.fixture
+def per_ip_limits(monkeypatch):
+    """Cloud Run (K_SERVICE: the user's IP is the right end of X-Forwarded-For) with the open-setup limiter on, fresh counts."""
+    from app.core.rate_limit import open_setup_limiter
+
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend-dev")
+    monkeypatch.setattr(open_setup_limiter, "enabled", True)
+    open_setup_limiter.reset()
+    yield
+    open_setup_limiter.reset()
+
+
+@pytest.mark.anyio
+async def test_setup_codes_are_limited_per_user_ip_not_for_everyone_together(world, per_ip_limits):
+    async with _client() as c:
+        async def ask(ip: str):
+            _v, challenge = _pkce()
+            # the client may put anything in front; the front end adds the connecting address at the right end
+            return await c.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "d4424 ip"},
+                                headers={"X-Forwarded-For": f"203.0.113.250, {ip}"})
+        for _ in range(10):
+            assert (await ask("198.51.100.1")).status_code == 201
+        assert (await ask("198.51.100.1")).status_code == 429  # the same person over 10/minute
+        assert (await ask("198.51.100.2")).status_code == 201  # someone else is counted apart
+
+
+@pytest.mark.anyio
+async def test_a_made_up_api_key_does_not_buy_a_fresh_count_on_the_open_routes(world, per_ip_limits):
+    """Qadir 4828 — these routes take no login, so a `Bearer sk_live_…` is never checked; a different fake one on every request
+    must still be counted as the same IP."""
+    async with _client() as c:
+        async def ask(n: int):
+            _v, challenge = _pkce()
+            fake = ["sk", "live", f"{n:02d}" + "q" * 28]  # differs inside the first 30 characters the old key used
+            return await c.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "d4424 fake"},
+                                headers={"X-Forwarded-For": "198.51.100.7", "Authorization": "Bearer " + "_".join(fake)})
+        for n in range(10):
+            assert (await ask(n % 3)).status_code == 201
+        assert (await ask(10)).status_code == 429
+
+
+@pytest.mark.anyio
+async def test_onboarding_events_are_limited_per_user_ip(world, per_ip_limits):
+    async with _client() as c:
+        async def send(ip: str):
+            return await c.post("/api/v2/onboarding/events", json={"event": "config_copied", "meta": {}},
+                                headers={"X-Forwarded-For": ip})
+        for _ in range(120):
+            assert (await send("198.51.100.3")).status_code == 202
+        assert (await send("198.51.100.3")).status_code == 429
+        assert (await send("198.51.100.4")).status_code == 202
+
+
+@pytest.mark.anyio
+async def test_the_exchange_allows_several_apps_behind_one_address(world, per_ip_limits):
+    """240/minute per IP: six apps asking every 1.5 s (40/minute each) behind one NAT still get through."""
+    async with _client() as c:
+        async def ask(ip: str):
+            return await c.post("/api/v2/desktop/setup-codes/exchange", json={"code": "no-such-code-" + "x" * 20, "verifier": "v" * 43},
+                                headers={"X-Forwarded-For": ip})
+        for _ in range(240):
+            assert (await ask("198.51.100.5")).status_code == 404
+        assert (await ask("198.51.100.5")).status_code == 429
+        assert (await ask("198.51.100.6")).status_code == 404

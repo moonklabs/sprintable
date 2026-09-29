@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.rate_limit import limiter
+from app.core.rate_limit import open_setup_limiter
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.services.desktop_setup import (
@@ -69,19 +69,21 @@ class SetupCodeRequest(BaseModel):
 class SetupCodeResponse(BaseModel):
     code: str
     expires_at: datetime
+    # PO 12:21Z — the app's step events carry it (header `X-Setup-Event-Token`) to be counted; given once, only its hash kept
+    event_token: str
     setup_id: uuid.UUID  # not a secret — the app passes it to the web page (`&setup=`) so pre-confirm steps can be keyed
 
 
 @router.post("/setup-codes", status_code=201, response_model=SetupCodeResponse)
-@limiter.limit("10/minute")
+@open_setup_limiter.limit("10/minute")  # per user IP (PO 13:04Z)
 async def post_setup_code(request: Request, response: Response, body: SetupCodeRequest, db: AsyncSession = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
     try:
-        code, expires_at, setup_id = await create_setup_code(db, challenge=body.challenge, device_name=body.device_name)
+        code, expires_at, setup_id, event_token = await create_setup_code(db, challenge=body.challenge, device_name=body.device_name)
     except DesktopSetupError as e:
         raise _error(e) from None
     await db.commit()
-    return SetupCodeResponse(code=code, expires_at=expires_at, setup_id=setup_id)
+    return SetupCodeResponse(code=code, expires_at=expires_at, setup_id=setup_id, event_token=event_token)
 
 
 class RoleIn(BaseModel):
@@ -157,7 +159,9 @@ class ExchangeRequest(BaseModel):
 
 
 @router.post("/setup-codes/exchange")
-@limiter.limit("60/minute")  # the app asks every 1.5 s while the person confirms
+# per user IP; the app asks every 1.5 s (40/minute) while the person confirms, and several can sit behind one NAT — the
+# exchange is guarded by the verifier, so this limit is only against load (PO 13:04Z)
+@open_setup_limiter.limit("240/minute")
 async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSession = Depends(get_db)):
     headers = {"Cache-Control": "no-store"}
     try:
@@ -231,13 +235,16 @@ class ToolsConnected(BaseModel):
 
 class SetupBlocked(BaseModel):
     at: datetime
-    reason: str | None
+    reason: str | None  # closed list (services/desktop_setup.BLOCKED_REASONS); anything else → null
+    runtime: str | None = None  # claude | codex
+    when: str | None = None  # found (while finding the runtime) | after_start (the session ended right after start)
 
 
 class SetupSignals(BaseModel):
     tools_connected: list[ToolsConnected]  # per agent: its first MCP connection (the manifest fetch)
     first_task_handed_at: datetime | None
     first_result_at: datetime | None
+    first_screen_human_input_at: datetime | None  # the person typed on the agent's first screen (PO 12:23Z · web ⑦)
     workdir_fallback_at: datetime | None
     blocked: SetupBlocked | None
 

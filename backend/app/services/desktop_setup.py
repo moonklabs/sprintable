@@ -24,6 +24,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +45,13 @@ EVENT_TOOLS_CONNECTED = "desktop_tools_connected"  # written by the MCP manifest
 EVENT_FIRST_TASK_HANDED = "desktop_first_task_handed"
 EVENT_WORKDIR_FALLBACK = "desktop_workdir_fallback"
 EVENT_BLOCKED = "desktop_setup_blocked"
+EVENT_FIRST_SCREEN_INPUT = "desktop_first_screen_human_input"
+# PO 12:49Z — the reasons the desktop app actually sends for «blocked», taken from the sender: today only the company-managed
+# MCP policy (shell 4427, PR 184 `setup-flow.ts:160` found · `:237` after_start). A new reason is added here together with
+# the shell change that sends it. Anything else is dropped (the web never shows free text as a reason).
+BLOCKED_REASONS = frozenset({"managed_mcp"})
+BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
+BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
 EVENT_DOC_OPENED = "desktop_doc_opened"
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
@@ -69,7 +77,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: str) -> tuple[str, datetime, uuid.UUID]:
+async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: str) -> tuple[str, datetime, uuid.UUID, str]:
     if not _CHALLENGE_RE.match(challenge):
         raise DesktopSetupError("request_invalid", "challenge must be base64url(sha256(verifier)) without padding")
     name = device_name.strip()[:80]
@@ -78,14 +86,72 @@ async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: st
     from app.services.onboarding_funnel import emit_onboarding_event
 
     code = secrets.token_urlsafe(32)
+    # PO 12:21Z — the app's step events prove their setup with this; only its hash is kept
+    event_token = secrets.token_urlsafe(32)
     expires_at = _now() + SETUP_CODE_TTL
-    setup = DesktopSetup(code_hash=_hash(code), code_challenge=challenge, device_name=name, expires_at=expires_at)
+    setup = DesktopSetup(
+        code_hash=_hash(code), code_challenge=challenge, device_name=name, expires_at=expires_at,
+        event_token_hash=_hash(event_token),
+    )
     db.add(setup)
     await db.flush()
     await emit_onboarding_event(db, EVENT_CODE_ISSUED, session_id=setup.id, meta={"flow": "desktop_setup"})
     # the setup id is not a secret (nothing can be done with it without an admin session); the app passes it to the web page
     # so steps before the confirmation (a sign-in) can be keyed by it (PO 08:31Z)
-    return code, expires_at, setup.id
+    return code, expires_at, setup.id, event_token
+
+
+async def verify_setup_event(
+    db: AsyncSession, *, event: str, setup_id: uuid.UUID | None, event_token: str | None, user_id: uuid.UUID | None,
+) -> bool:
+    """Is this step event proven for its setup (PO 12:21Z)? A desktop app name: the header token matches the setup's hash
+    (constant time). A web name: sent by a signed-in member of the setup's org. Anything else — or no such setup — is not."""
+    from app.services.onboarding_funnel import DESKTOP_SHELL_EMIT_EVENTS, FE_EMIT_EVENTS
+
+    if setup_id is None or not event.startswith("desktop_"):
+        return False  # only the desktop setup's own step names are ever counted by the setup reads
+    setup = (await db.execute(
+        select(DesktopSetup.event_token_hash, DesktopSetup.org_id, DesktopSetup.revoked_at).where(DesktopSetup.id == setup_id)
+    )).first()
+    if setup is None:
+        return False
+    token_hash, org_id, revoked_at = setup
+    if event in DESKTOP_SHELL_EMIT_EVENTS:
+        # PO 12:51Z — no time limit; the token ends when the setup is disconnected (DELETE)
+        if revoked_at is not None:
+            return False
+        return bool(event_token and token_hash and hmac.compare_digest(_hash(event_token).encode(), token_hash.encode()))
+    if event in FE_EMIT_EVENTS and user_id is not None and org_id is not None:
+        from app.models.project import OrgMember
+
+        member = (await db.execute(
+            select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+        )).first()
+        return member is not None
+    return False
+
+
+async def _active_agent_count(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """The org's active agents — the same count the plan limit uses (ee/plan_limits.check_agent_add_limit, read only)."""
+    from sqlalchemy import text
+
+    return int((await db.execute(
+        text("SELECT COUNT(*) FROM members WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"),
+        {"oid": str(org_id)},
+    )).scalar() or 0)
+
+
+def _with_setup_numbers(exc: HTTPException, *, needed: int, agents_before: int) -> HTTPException:
+    """PO 12:30Z — the plan limit's 402 with two numbers the web's limit screen reads: `needed` (new agents this setup makes)
+    and `available` (the limit minus the agents there were before this setup, not below 0). The limit's own `current` counts
+    the agents this confirmation had already made, so limit − current is never above 0. Numbers only — no plan, price or
+    upgrade text; ee/plan_limits is not changed."""
+    detail = exc.detail if isinstance(exc.detail, dict) else None
+    if exc.status_code != 402 or not detail or detail.get("code") != "PLAN_LIMIT_EXCEEDED":
+        return exc
+    limit = detail.get("limit")
+    available = max(0, int(limit) - agents_before) if isinstance(limit, int) else None
+    return HTTPException(status_code=402, detail={**detail, "needed": needed, "available": available}, headers=exc.headers)
 
 
 async def _setup_by_code(db: AsyncSession, code: str) -> DesktopSetup:
@@ -193,6 +259,8 @@ async def confirm_setup(
 
     # one member per role: the person for a human role, one new agent for every other role
     role_member: dict[str, uuid.UUID] = {}
+    needed = len([r for r in role_order if r not in human_roles])
+    agents_before = await _active_agent_count(db, org_id) if settings.is_ee_enabled else 0
     for role in role_order:  # the recipe's own order
         if role in human_roles:
             role_member[role] = person_member_id
@@ -200,7 +268,10 @@ async def confirm_setup(
         if settings.is_ee_enabled:
             from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
 
-            await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
+            try:
+                await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
+            except HTTPException as exc:
+                raise _with_setup_numbers(exc, needed=needed, agents_before=agents_before) from None
         agent, _no_key = await create_org_level_agent(
             db, org_id=org_id, created_by=user_id, name=f"{role} · {setup.device_name}"[:120], role="member",
             project_ids=[project_id], defer_key_issuance=True,
@@ -418,6 +489,17 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
     } for r in rows]
 
 
+def _counted_row():
+    """PO 12:21Z — what the setup reads believe: rows the server wrote itself (its names can no longer be sent from outside)
+    and client rows the server proved for this setup (0424). Others are kept for analysis but never counted."""
+    from sqlalchemy import or_
+
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.onboarding_funnel import BE_EMIT_EVENTS
+
+    return or_(OnboardingEvent.event.in_(BE_EMIT_EVENTS), OnboardingEvent.desktop_setup_verified.is_(True))
+
+
 async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> dict:
     """story #4426 ② — one line for one setup: how many times a person had to act, minutes from the code to the first result
     the person saw, how many docs they opened. None where the step has not happened yet (never a guessed number)."""
@@ -435,7 +517,7 @@ async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UU
         raise DesktopSetupError("not_org_admin")
     rows = (await db.execute(
         select(OnboardingEvent.event, OnboardingEvent.meta, OnboardingEvent.server_ts)
-        .where(OnboardingEvent.session_id == setup_id).order_by(OnboardingEvent.server_ts)
+        .where(OnboardingEvent.session_id == setup_id, _counted_row()).order_by(OnboardingEvent.server_ts)
     )).all()
     hands = sum(1 for _e, meta, _t in rows if (meta or {}).get("human_hand") is True)
     started = next((t for e, _m, t in rows if e == EVENT_CODE_ISSUED), None)
@@ -462,7 +544,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         raise DesktopSetupError("not_org_admin")
     rows = (await db.execute(
         select(OnboardingEvent.event, OnboardingEvent.meta, OnboardingEvent.server_ts)
-        .where(OnboardingEvent.session_id == setup_id).order_by(OnboardingEvent.server_ts)
+        .where(OnboardingEvent.session_id == setup_id, _counted_row()).order_by(OnboardingEvent.server_ts)
     )).all()
 
     def first(name: str):
@@ -480,6 +562,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     handed = first(EVENT_FIRST_TASK_HANDED)
     result = first(EVENT_FIRST_RESULT)
     reason = (blocked[0].get("reason") if blocked else None)
+    screen_input = first(EVENT_FIRST_SCREEN_INPUT)
     return {
         "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
         "recipe_name": await _recipe_name(db, setup),
@@ -490,7 +573,13 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             "first_task_handed_at": handed[1] if handed else None,
             "first_result_at": result[1] if result else None,
             "workdir_fallback_at": fallback[1] if fallback else None,
-            "blocked": {"at": blocked[1], "reason": reason if isinstance(reason, str) else None} if blocked else None,
+            "first_screen_human_input_at": screen_input[1] if screen_input else None,
+            "blocked": {
+                "at": blocked[1],
+                "reason": reason if reason in BLOCKED_REASONS else None,
+                "runtime": blocked[0].get("runtime") if blocked[0].get("runtime") in BLOCKED_RUNTIMES else None,
+                "when": blocked[0].get("when") if blocked[0].get("when") in BLOCKED_WHEN else None,
+            } if blocked else None,
         },
     }
 
