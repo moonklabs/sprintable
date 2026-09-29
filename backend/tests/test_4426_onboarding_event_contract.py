@@ -34,9 +34,11 @@ def test_the_web_sends_exactly_the_fe_names_the_backend_accepts():
     assert web == f.FE_EMIT_EVENTS, {"web only": sorted(web - f.FE_EMIT_EVENTS), "backend only": sorted(f.FE_EMIT_EVENTS - web)}
 
 
-def test_the_catalog_is_exactly_the_fe_and_be_lists():
-    assert f.EVENT_CATALOG == f.FE_EMIT_EVENTS | f.BE_EMIT_EVENTS
+def test_the_catalog_is_exactly_the_fe_be_and_desktop_lists():
+    assert f.EVENT_CATALOG == f.FE_EMIT_EVENTS | f.BE_EMIT_EVENTS | f.DESKTOP_SHELL_EMIT_EVENTS
     assert not f.FE_EMIT_EVENTS & f.BE_EMIT_EVENTS
+    assert not f.FE_EMIT_EVENTS & f.DESKTOP_SHELL_EMIT_EVENTS
+    assert not f.BE_EMIT_EVENTS & f.DESKTOP_SHELL_EMIT_EVENTS
 
 
 @pytest.fixture
@@ -90,5 +92,22 @@ def test_the_desktop_setup_writes_only_names_in_the_backend_list():
     «every name that can be recorded»); the sending side carries this test."""
     from app.services import desktop_setup as d
 
-    written = {d.EVENT_CODE_ISSUED, d.EVENT_CONFIRMED, d.EVENT_EXCHANGED}
+    written = {d.EVENT_CODE_ISSUED, d.EVENT_CONFIRMED, d.EVENT_EXCHANGED, d.EVENT_TOOLS_CONNECTED}
     assert written <= f.BE_EMIT_EVENTS, sorted(written - f.BE_EMIT_EVENTS)
+
+
+def test_the_setup_reads_only_names_the_desktop_app_may_send():
+    """The status and hands reads count names the desktop app sends; a misspelling would count 0 silently."""
+    from app.services import desktop_setup as d
+
+    read = {d.EVENT_FIRST_TASK_HANDED, d.EVENT_WORKDIR_FALLBACK, d.EVENT_BLOCKED, d.EVENT_FIRST_RESULT, d.EVENT_DOC_OPENED}
+    assert read <= f.DESKTOP_SHELL_EMIT_EVENTS, sorted(read - f.DESKTOP_SHELL_EMIT_EVENTS)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("event", sorted(f.DESKTOP_SHELL_EMIT_EVENTS))
+async def test_every_name_the_desktop_app_sends_is_accepted(event):
+    body = OnboardingEventBody(event=event, session_id=uuid.uuid4(), meta={"flow": "desktop_setup"})
+    db = _db()
+    await post_onboarding_event(body, db=db, credentials=None, x_agent_api_key=None)
+    assert db.add.called
