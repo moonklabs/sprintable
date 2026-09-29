@@ -486,8 +486,6 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     }
 
 
-
-
 async def _mark_once(s: AsyncSession, *, setup_id: uuid.UUID, member_id: uuid.UUID, event: str) -> None:
     """One `event` row per setup · member (an advisory lock keeps two concurrent first writes to one row)."""
     from sqlalchemy import func
