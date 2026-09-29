@@ -247,6 +247,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
   it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
     statusNow = () => status('waiting_for_app');
     await startSetup();
+    expect(container.querySelector('h1')?.textContent).toBe('에이전트를 시작하고 있어요');
     expect(text()).toContain('에이전트를 준비하고 있어요');
     expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
@@ -268,6 +269,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     await tick(2_000);
     expect(text()).toContain('첫 일감을 맡겼어요'); // a result means it was handed over
     expect(text()).toContain('첫 결과가 나왔어요');
+    expect(container.querySelector('h1')?.textContent).toBe('에이전트를 시작했어요');
     expect(resultButton().getAttribute('href')).toBe('/o/proj/flow?story=w-1');
     expect(text()).not.toContain('결과가 나오면 눌러서 일감으로 가요');
     const n = polls();
@@ -319,10 +321,10 @@ describe('[SID:4427] ③ limit and the recipe line (Yuna table)', () => {
     expect(startButton()).toBeTruthy(); // back to the choices
   });
 
-  it('each recipe card says its roles: «역할 3 · 조사 · 작성 · 연출»', async () => {
+  it('each recipe card says its roles in the rows\' order (orderedRecipeRoles · Yuna 12:49Z): «역할 3 · 연출 · 조사 · 작성»', async () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
-    expect(text()).toContain('역할 3 · 조사 · 작성 · 연출');
+    expect(text()).toContain('역할 3 · 연출 · 조사 · 작성');
     expect(text()).toContain('역할 1 · 조사');
   });
 });

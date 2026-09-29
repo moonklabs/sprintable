@@ -73,7 +73,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
     <Card className="flex flex-col gap-4 p-6">
       <header>
         <p className="text-xs text-muted-foreground">{t('eyebrow')}{task ? ` · ${task}` : ''}</p>
-        <h1 className="text-lg font-semibold">{t('startedTitle')}</h1>
+        <h1 className="text-lg font-semibold">{progress.result === 'done' ? t('startedDoneTitle') : t('startedTitle')}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p>
       </header>
       <ol className="flex flex-col gap-3" aria-live="polite">

@@ -6516,6 +6516,7 @@
       "startNote": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task",
       "startNoteWithMe": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task · you take {roles}",
       "startedTitle": "Starting your agents",
+      "startedDoneTitle": "Your agents have started",
       "startedBody": "Your agents keep working even if you close this window.",
       "genericError": "This can't start right now — try again in a moment",
       "blockedClaudeOption": "Claude Code · Blocked by your company's settings",

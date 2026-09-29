@@ -6516,6 +6516,7 @@
       "startNote": "에이전트 {n}개를 이 컴퓨터에 만들고 첫 일감을 맡겨요",
       "startNoteWithMe": "에이전트 {n}개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · {roles}{josa} 내가 맡아요",
       "startedTitle": "에이전트를 시작하고 있어요",
+      "startedDoneTitle": "에이전트를 시작했어요",
       "startedBody": "창을 닫아도 에이전트는 계속 일해요.",
       "genericError": "지금은 시작할 수 없어요 — 잠시 뒤 다시 눌러 주세요",
       "blockedClaudeOption": "Claude Code · 회사 설정으로 쓸 수 없어요",

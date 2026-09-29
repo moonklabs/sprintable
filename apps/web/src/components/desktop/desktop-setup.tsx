@@ -14,7 +14,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
 import {
-  agentRowCount, confirmBody, flowStages, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -322,10 +322,8 @@ export function OpenInDesktopApp() {
 function RecipeRolesLine({ recipe, runtimes }: { recipe: SetupRecipe; runtimes: DesktopRuntime[] }) {
   const t = useTranslations('desktop.setup');
   const tOrg = useTranslations('organization');
-  // in the recipe's flow order (the card reads as the recipe runs), not the rows' order below
-  const flow = flowStages(recipe);
-  const at = (r: SetupRoleRow) => { const i = flow.indexOf(r.stages[0] ?? ''); return i < 0 ? flow.length : i; };
-  const roles = [...setupRoleRows(recipe, runtimes)].sort((a, b) => at(a) - at(b)).map((r) => stageRoleLabel(r.role, tOrg));
+  // the same order as the rows below and the recipe gallery (orderedRecipeRoles — one order per recipe · Yuna 12:49Z)
+  const roles = setupRoleRows(recipe, runtimes).map((r) => stageRoleLabel(r.role, tOrg));
   if (roles.length === 0) return null;
   return <span className="block text-xs text-muted-foreground">{t('recipeRoles', { n: roles.length, roles: roles.join(' · ') })}</span>;
 }
