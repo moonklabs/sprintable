@@ -500,7 +500,8 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
     no transaction or lock held (provider calls); the run is then locked and re-checked before writing. On adoption the claim
     and marker are cleared and the start command is queued again (with all ids the worker only switches the campaign on).
 
-    Money (PO 00:48Z): the budget lives on the ad set. An ad set is adopted only when its `daily_budget` equals the gate's
+    Money (PO 00:48Z): the budget lives on the ad set. An ad set is adopted only when its budget (`BOOST_ADSET_BUDGET_FIELD`,
+    the lifetime budget since 4415) equals the gate's
     sealed amount — otherwise switching it on would spend an amount nobody approved (someone may have changed it in the ad
     account). A different or unreadable budget → nothing adopted, `budget_mismatch` with both amounts.
 
