@@ -60,3 +60,26 @@ async def test_every_name_the_web_sends_is_accepted(event):
     db = _db()
     await post_onboarding_event(body, db=db, credentials=None, x_agent_api_key=None)
     assert db.add.called
+
+
+@pytest.mark.anyio
+async def test_the_sweep_counts_an_explicit_leave_as_over():
+    """Qadir (4824) — once `abandoned_explicit` is stored, the sweep must not add `abandoned` for the same agent (double count).
+    The terminal check the sweep runs includes it."""
+    from sqlalchemy.dialects import postgresql
+
+    agent = uuid.uuid4()
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    candidates = MagicMock()
+    candidates.scalars.return_value.all.return_value = [agent]
+    terminal = MagicMock()
+    terminal.first.return_value = (uuid.uuid4(),)  # a terminal row exists for this agent
+    db.execute = AsyncMock(side_effect=[MagicMock(), candidates, terminal])
+    assert await f.sweep_abandoned_onboarding(db) == 0
+    db.add.assert_not_called()
+    check = db.execute.await_args_list[2].args[0]
+    sql = str(check.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    for event in ("verified", "abandoned", "abandoned_explicit"):
+        assert f"'{event}'" in sql, sql

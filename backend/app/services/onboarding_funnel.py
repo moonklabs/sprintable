@@ -157,6 +157,12 @@ def _derive_abandon_reason(events: set[str]) -> str:
     return "no_copy"                # config 생성됐으나 복사 안 함
 
 
+# The events after which an agent's onboarding is over — the sweep never adds `abandoned` after one of them. story #4426
+# (Qadir): `abandoned_explicit` (the web's leave signal) was in the docstring but not in the check; it was never stored before
+# (a silent 422), and once stored it would have been counted twice (explicit + the sweep's `abandoned`).
+SWEEP_TERMINAL_EVENTS = ("verified", "abandoned", "abandoned_explicit")
+
+
 async def sweep_abandoned_onboarding(
     db: AsyncSession, *, older_than_minutes: int = ABANDON_THRESHOLD_MINUTES
 ) -> int:
@@ -185,7 +191,7 @@ async def sweep_abandoned_onboarding(
         terminal = (await db.execute(
             select(OnboardingEvent.id).where(
                 OnboardingEvent.agent_id == agent_id,
-                OnboardingEvent.event.in_(("verified", "abandoned")),
+                OnboardingEvent.event.in_(SWEEP_TERMINAL_EVENTS),
             ).limit(1)
         )).first()
         if terminal:
