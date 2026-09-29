@@ -47,6 +47,10 @@ class AdsBoostRun(Base):
     # 재-중지 요청을 안 보내는 멱등 게이트(ads_spend_snapshots.py::_enforce_spend_cap).
     cap_reached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4404 (0419) — campaign creation at most once: the claim (conditional UPDATE) and the marker committed right before the
+    # create call. Expired claim + marker + no ids = outcome unknown → needs_check, never re-created automatically.
+    create_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    create_call_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

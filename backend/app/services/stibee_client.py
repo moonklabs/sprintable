@@ -160,6 +160,33 @@ _LOGS_PAGE_LIMIT = 1000
 # 무한 페이지네이션을 막는 안전판 — 도달하면 그때까지 집계값을 그대로 쓴다
 # (부분 집계임을 raw_payload의 `truncated=True`로 남겨 지어내지 않는다).
 _LOGS_MAX_PAGES = 50
+# story #4404 — the 429 wait runs inside the publication worker's tick. A server-chosen Retry-After is honoured up to this cap;
+# a longer one gives up this round (a transient error — the snapshot is retried on a later tick), so a single header cannot
+# hold the worker for an hour.
+RETRY_AFTER_CAP_SECONDS = 60.0
+_RETRY_AFTER_DEFAULT_SECONDS = 1.0
+
+
+def _retry_after_seconds(value: str | None) -> float:
+    """Retry-After as seconds: a number of seconds, or an HTTP date. Missing, negative or unreadable → 1 s."""
+    if value is None:
+        return _RETRY_AFTER_DEFAULT_SECONDS
+    try:
+        seconds = float(value)
+    except ValueError:
+        from datetime import datetime, timezone
+        from email.utils import parsedate_to_datetime
+
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return _RETRY_AFTER_DEFAULT_SECONDS
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        seconds = (when - datetime.now(timezone.utc)).total_seconds()
+    if seconds != seconds or seconds < 0:  # NaN or negative
+        return _RETRY_AFTER_DEFAULT_SECONDS
+    return seconds
 
 
 async def fetch_send_result(client: httpx.AsyncClient, *, api_key: str, email_id: int) -> dict:
@@ -187,7 +214,12 @@ async def fetch_send_result(client: httpx.AsyncClient, *, api_key: str, email_id
             if resp.status_code == 429 and not retried:
                 import asyncio
 
-                wait_seconds = float(resp.headers.get("Retry-After", "1"))
+                wait_seconds = _retry_after_seconds(resp.headers.get("Retry-After"))
+                if wait_seconds > RETRY_AFTER_CAP_SECONDS:
+                    raise StibeeApiError(
+                        f"rate limited: Retry-After {wait_seconds:.0f}s exceeds {RETRY_AFTER_CAP_SECONDS:.0f}s — retry on a later tick",
+                        status_code=429,
+                    )
                 await asyncio.sleep(wait_seconds)
                 retried = True
                 continue

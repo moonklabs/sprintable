@@ -152,8 +152,11 @@ def test_the_two_sets_do_not_overlap_and_match_the_module():
     assert not pc._MAYBE_SENT_CODES & pc._NOT_SENT_CODES
     assert not pc._RETRY_SAFE_CODES & (pc._MAYBE_SENT_CODES | pc._NOT_SENT_CODES)
     # 4272(develop) — 공급자 쓰기 호출 전 코드 없는 예외(`PRE_CALL_ERROR_CODE`)도 «안 나감» 증거가 있는 재시도 안전 부류.
+    # story #4404 — ADS_BOOST_CREATE_IN_PROGRESS: another command holds the run's creation claim; this one sent nothing and a
+    # retry finds the winner's ids (created once). Added on purpose — the list stays explicit.
     assert pc._TRANSIENT_CODES == frozenset(
-        {"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", pc.PRE_CALL_ERROR_CODE, *RETRY_SAFE}
+        {"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", pc.PRE_CALL_ERROR_CODE,
+         pc.ADS_BOOST_CREATE_IN_PROGRESS_CODE, *RETRY_SAFE}
     ), "transient는 명시 목록만(까디르 codex P1)"
 
 

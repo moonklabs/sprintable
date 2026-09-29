@@ -378,6 +378,9 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
             if snapshot is None:
                 continue
             ctx = await _resolve_spend_context(db, snapshot)
+            from app.services.external_call_tx import end_transaction_before_external_call
+
+            await end_transaction_before_external_call(db)  # story #4404 — the worker loop; reads only before the call
             async with httpx.AsyncClient(timeout=20) as client:
                 spend_minor = await ctx["module"].get_campaign_spend_minor(
                     client, campaign_id=ctx["campaign_id"], access_token=ctx["access_token"],

@@ -209,7 +209,12 @@ _RETRY_SAFE_CODES = frozenset({
 # 경로는 이제 이 코드를 내지 않는다(`provider_error_code`가 코드 그대로 · 블로그 쓰기는 `SITE_POST_PROVIDER_ERROR`).
 # 속도 제한(429)은 요청 자체가 거절된 것.
 # 공급자 쓰기 호출 전 코드 없는 예외(4272 `PRE_CALL_ERROR_CODE`)도 «안 나감»의 증거가 있는 재시도 안전 부류.
-_TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE}) | _RETRY_SAFE_CODES
+# story #4404 — another command of the same ads boost run holds the campaign-creation claim: nothing was sent by this one, and a
+# retry finds the winner's ids and skips creation.
+ADS_BOOST_CREATE_IN_PROGRESS_CODE = "ADS_BOOST_CREATE_IN_PROGRESS"
+_TRANSIENT_CODES = frozenset({
+    "CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE, ADS_BOOST_CREATE_IN_PROGRESS_CODE,
+}) | _RETRY_SAFE_CODES
 
 # story #4264(PO 15:18Z) — 실패 코드 → 부류의 **한 표**. 분류(`classify_failure_kind`)와 어댑터 코드 승격(`provider_error_code`)이
 # 같은 두 모음을 읽는다(사본 0). 원칙: `not_sent`는 «안 나간 적극적 증거»가 있을 때만 — HTTP 호출 전 검사에서 막혔거나 공급자가
@@ -1235,6 +1240,9 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
 
         _publish_client = get_publish_client_module(comment.channel)
 
+        from app.services.external_call_tx import end_transaction_before_external_call
+
+        await end_transaction_before_external_call(db)  # story #4404 — reads only before the provider call
         try:
             async with provider_client() as client:
                 external_reply_id, external_reply_url = await _publish_client.reply(

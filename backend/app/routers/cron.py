@@ -1275,6 +1275,8 @@ async def refresh_channel_tokens(
         }
         _OAUTH_ERROR_TYPES = (ThreadsOAuthError, InstagramOAuthError, XOAuthError, YouTubeOAuthError)
 
+        from app.services.external_call_tx import end_transaction_before_external_call
+
         rows = await list_connections_due_for_refresh(session, now=datetime.now(timezone.utc))
         refreshed, failed = 0, 0
         async with _httpx.AsyncClient(timeout=15) as client:
@@ -1292,6 +1294,7 @@ async def refresh_channel_tokens(
                         failed += 1
                         continue
                     app_id, app_secret = app_credentials
+                    await end_transaction_before_external_call(session)  # story #4404 — reads only before the call
                     try:
                         new_access_token, new_refresh_token, expires_in = await rotating_refresh_fn(
                             client, refresh_token=current_refresh_token, app_id=app_id, app_secret=app_secret,
@@ -1317,6 +1320,7 @@ async def refresh_channel_tokens(
                     await apply_refresh_failure(session, connection=row, error_message="no stored access token")
                     failed += 1
                     continue
+                await end_transaction_before_external_call(session)  # story #4404 — reads only before the call
                 try:
                     new_token, expires_in = await refresh_fn(client, current_token=current_token)
                 except _OAUTH_ERROR_TYPES as exc:
