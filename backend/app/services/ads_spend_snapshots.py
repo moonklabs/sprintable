@@ -194,6 +194,9 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
     `_request_toggle`의 더블클릭 재사용/거부 방어와는 별개의 앞단 게이트).
     반환값은 이번 호출에서 실제로 상한을 새로 판정했는지(테스트 가시성용)."""
     if run.cap_reached_at is not None:
+        # story #4417 (Qadir 01a0eba4 ②) — the cap was reached but the boost is not paused (the first pause failed): try again
+        if run.status not in ("paused", "pause_pending") and not await _pause_by_scheduler(db, gate=gate, run=run):
+            await _schedule_capture(db, gate=gate, due_at=now + _BLOCK_FOLLOW_UP)
         return False
     if gate.sealed_ads_budget_minor is None or not gate.scope_key:
         return False
@@ -210,7 +213,9 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
     run.cap_reached_at = now
     await db.commit()
 
-    await _pause_by_scheduler(db, gate=gate, run=run)
+    if not await _pause_by_scheduler(db, gate=gate, run=run):
+        # story #4417 (Qadir 01a0eba4 ②) — the pause did not go through: a follow-up capture tries again (the cap line above)
+        await _schedule_capture(db, gate=gate, due_at=now + _BLOCK_FOLLOW_UP)
     return True
 
 
@@ -388,7 +393,7 @@ async def _notify_spend_blocked(db: AsyncSession, *, gate: Gate, code: str | Non
             title_key, body_key = "ads_boost.spend_unreadable_title", "ads_boost.spend_unreadable_body"
         else:
             title_key, body_key = "ads_boost.spend_unreadable_pausing_title", "ads_boost.spend_unreadable_pausing_body"
-        await dispatch_notification(
+        created = await dispatch_notification(
             db, org_id=gate.org_id, event_type="ads_boost_spend_unreadable", target_member_ids=targets,
             title=t(title_key, "ko"), body=t(body_key, "ko"),
             reference_type="gate", reference_id=gate.id,
@@ -396,6 +401,11 @@ async def _notify_spend_blocked(db: AsyncSession, *, gate: Gate, code: str | Non
             via_outbox=True,
         )
         await db.commit()
+        if not created:
+            # story #4417 (Qadir 01a0eba4 ③) — the dispatch returns normally when nobody got anything (settings off for all ·
+            # its own error swallowed): not «notified»; the next follow-up tries again
+            logger.error("ads_spend_blocked_notice_created_none gate_id=%s targets=%s", gate_id, len(targets))
+            return False
         return True
     except Exception:  # noqa: BLE001 — the stop stands; the notice is tried again, never silent
         await db.rollback()

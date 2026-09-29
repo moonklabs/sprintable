@@ -287,8 +287,13 @@ async def _request_toggle(
     elif latest.operation == operation:
         if latest.status in _NON_TERMINAL_STATUSES:
             toggle_seq = latest.toggle_seq  # 더블클릭 — 같은 행 재사용
-        else:
+        elif latest.status == "completed":
             raise AdsBoostAlreadyInStateError(gate.id, operation)
+        else:
+            # story #4417 (Qadir 01a0eba4 ①) — the last pause/resume ended without taking effect (dead_letter · failed ·
+            # voided): the boost is not in that state, so asking again makes a new command (before: «already paused», and
+            # neither the scheduler's retry nor a person's second press could stop a boost whose pause failed at Meta).
+            toggle_seq = latest.toggle_seq + 1
     else:
         if operation == OP_RESUME and latest.operation != OP_PAUSE:
             raise AdsBoostNotPausedError(gate.id)
