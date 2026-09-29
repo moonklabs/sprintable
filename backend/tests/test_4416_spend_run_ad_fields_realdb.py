@@ -166,3 +166,29 @@ async def test_an_agent_reads_the_name_and_channel_but_not_the_account_or_campai
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def test_a_person_of_another_org_gets_null_account_and_campaign_ids():
+    """Kadir 04:36Z — a human identity that is not a member of this org (even if the org check were passed) is not
+    «a person of this org»: the ids stay null (fail-closed), the rest of the read is unchanged."""
+    from app.main import app
+    from tests.test_3475_publishing_metrics import _seed_human
+    from tests.test_e4fc29fa_site_post_orchestration import _seed_org, _session_factory
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        await _set_ad_connection(Session, gate_id, account_id="1234567890", channel="meta_ads")
+        async with Session() as s:
+            other_org_id, _ = await _seed_org(s)
+            outsider_id = await _seed_human(s, other_org_id, role="owner")
+        body = await _spend(app, Session, org_id, outsider_id, gate_id)
+        assert body["run_status"] == "running"
+        assert body["campaign_id"] is None and body["ad_account_id"] is None
+        assert body["ad_channel"] == "meta_ads"
+
+        member = await _spend(app, Session, org_id, owner_id, gate_id)  # this org's person: both ids
+        assert member["campaign_id"] and member["ad_account_id"] == "1234567890"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

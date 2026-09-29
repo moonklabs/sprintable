@@ -25,6 +25,10 @@ let hidden = false;
 let spendNow: Record<string, unknown>;
 // a GET /spend that does not come back until the test lets it
 let holdSpend: { release: () => void } | null = null;
+// GET /spend answers 500 while this is set (a /spend that keeps failing)
+let failSpend = false;
+// a POST that does not come back until the test lets it
+let holdPost: { release: () => void } | null = null;
 
 const jsonResponse = (body: unknown, status = 200) =>
   ({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body), headers: { get: () => null } }) as unknown as Response;
@@ -42,14 +46,17 @@ beforeEach(() => {
   hidden = false;
   Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
   holdSpend = null;
+  failSpend = false;
+  holdPost = null;
   spendNow = { run_status: null, start_command: null };
   mockedFetch.mockReset();
   mockedFetch.mockImplementation(async (url, init) => {
     if (String(url).endsWith('/spend') && !init) {
       const body = { data: spendNow };
       if (holdSpend) await new Promise<void>((resolve) => { holdSpend = { release: resolve }; });
-      return jsonResponse(body);
+      return failSpend ? jsonResponse({ error: 'boom' }, 500) : jsonResponse(body);
     }
+    if (holdPost && init) await new Promise<void>((resolve) => { holdPost = { release: resolve }; });
     if (String(url).endsWith('/adopt-existing')) {
       spendNow = { run_status: 'pending', start_command: startCommand('pending') }; // linking queues the start again
       return jsonResponse({ data: { result: 'adopted' } });
@@ -222,6 +229,51 @@ describe('[SID:4416] BoostExecutionControl — reads /spend until the queued com
     await settle(10 * 60_000);
     expect(spendReads()).toBe(atUnmount);
     root = createRoot(container); // afterEach unmounts again
+  });
+
+  it('a /spend that keeps failing still ends at the cap: the notice shows and the reads stop (Kadir 04:36Z)', async () => {
+    spendNow = { run_status: 'running', start_command: startCommand('completed'), ...RUN_AD };
+    await mount();
+    await act(async () => { $('boost-pause-trigger')!.click(); });
+    failSpend = true; // from the read right after the POST on, every /spend fails
+    await act(async () => { $('boost-pause-confirm')!.click(); });
+    await settle();
+    expect($('boost-execution-waiting')?.textContent).toBe(cage.boostExecutionPausing);
+    const first = spendReads();
+    await settle(60_000);
+    expect(spendReads() - first).toBe(12); // failed reads keep the 5 s cadence inside the cap
+    await settle(2 * 60_000);
+    expect($('boost-execution-cap-notice')?.textContent).toContain(cage.boostExecutionPauseCapSpend);
+    expect($('boost-execution-waiting')).toBeNull();
+    const capped = spendReads();
+    await settle(10 * 60_000);
+    expect(spendReads()).toBe(capped); // no endless reads after the cap
+  });
+
+  it('a start whose /spend keeps failing ends at 35 min with the start notice', async () => {
+    spendNow = { run_status: 'pending', start_command: startCommand('pending') };
+    await mount();
+    failSpend = true;
+    await settle(36 * 60_000);
+    expect($('boost-execution-cap-notice')?.textContent).toBe(cage.boostExecutionStartCapNotice);
+    const capped = spendReads();
+    await settle(10 * 60_000);
+    expect(spendReads()).toBe(capped);
+  });
+
+  it('the pause button is locked while its POST is out, like resume (Kadir 04:36Z)', async () => {
+    spendNow = { run_status: 'running', start_command: startCommand('completed'), ...RUN_AD };
+    await mount();
+    await act(async () => { $('boost-pause-trigger')!.click(); });
+    holdPost = { release: () => {} };
+    await act(async () => { $('boost-pause-confirm')!.click(); });
+    await settle();
+    expect(($('boost-pause-trigger') as HTMLButtonElement).disabled).toBe(true); // submitting
+    const release = holdPost!.release;
+    holdPost = null;
+    release();
+    await settle();
+    expect(($('boost-pause-trigger') as HTMLButtonElement).disabled).toBe(true); // then waiting for the pause
   });
 
   it('a tick while another read has not come back is skipped', async () => {

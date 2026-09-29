@@ -166,10 +166,14 @@ export function BoostExecutionControl({
     setCapNotice(cappedOp);
   };
 
+  // The one place that decides the next read — after a response or a failed read alike — so the cap (wall-clock
+  // from the start of the wait) always ends it: a /spend that keeps failing leaves the notice instead of polling on.
   const scheduleNext = () => {
     clearTimer();
     const wait = waitRef.current;
-    if (!wait || unmountedRef.current || document.hidden) return;
+    if (!wait || unmountedRef.current) return;
+    if (Date.now() - wait.startedAt >= POLL_CAP_MS[wait.op]) { endWait(wait.op); return; }
+    if (document.hidden) return;
     const slow = Date.now() - wait.startedAt >= POLL_FAST_WINDOW_MS;
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
@@ -186,7 +190,6 @@ export function BoostExecutionControl({
     const wait = waitRef.current;
     if (!wait) return;
     if (waitSettled(wait.op, d)) { endWait(null); return; }
-    if (Date.now() - wait.startedAt >= POLL_CAP_MS[wait.op]) { endWait(wait.op); return; }
     scheduleNext();
   };
 
@@ -213,7 +216,7 @@ export function BoostExecutionControl({
     } catch {
       if (unmountedRef.current) return;
       setLoaded(true);
-      if (waitRef.current) scheduleNext(); // a failed read does not end the wait; the cap still does
+      if (waitRef.current) scheduleNext(); // a failed read does not end the wait; the cap in scheduleNext still does
     } finally {
       inFlightRef.current = false;
     }
@@ -639,7 +642,7 @@ export function BoostExecutionControl({
       {capNoticeBlock}
       {runStatus === 'running' ? (
         <Button
-          variant="outline" size="sm" disabled={waiting === 'pause'}
+          variant="outline" size="sm" disabled={submitting || waiting === 'pause'}
           onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger"
         >
           {t('boostExecutionPause')}
