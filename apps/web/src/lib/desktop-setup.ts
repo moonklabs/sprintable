@@ -90,6 +90,23 @@ export function agentRowCount(rows: readonly SetupRoleRow[]): number {
   return rows.filter((r) => r.owner.kind === 'agent').length;
 }
 
+/**
+ * 설정 페이지의 레시피 목록에 올려도 되는가(PO 15:38Z · dev 실측): 켜져 있고 · 흐름이 있고 · 에이전트가 맡을 역할이 하나 이상이고
+ * (사람 역할뿐이면 «이 컴퓨터에서 에이전트를 시작»할 게 없다) · 화면 이름이 있는 것(이름이 없어 키 그대로 보이는 정의는 올리지 않는다).
+ * `displayName` = presetName(번역 키 → name → key 순)으로 그린 값.
+ */
+export function isStartableRecipe(recipe: SetupRecipe & { enabled?: boolean }, displayName: string): boolean {
+  if (recipe.enabled === false || flowStages(recipe).length === 0) return false;
+  const name = displayName.trim();
+  if (!name || name === recipe.key) return false;
+  return setupRoleRows(recipe, []).some((r) => r.actor !== 'human');
+}
+
+/** 주소의 `#`가 설정 값(code=…)을 싣고 있으면 지운다 — 다른 `#`(문서 안 앵커 등)는 건드리지 않는다. */
+export function hasSetupFragment(hash: string): boolean {
+  return /(^#|&)code=/.test(hash);
+}
+
 /** 작업 폴더 입력칸의 미리 막기(유나 08:16Z): 빈 칸 · «~» · «~/» 그 자체는 «시작» 비활성. 나머지 판단은 로컬 층. */
 export function workdirInputOk(value: string): boolean {
   const v = value.trim();

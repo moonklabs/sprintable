@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
-  setupProgress, type SetupRecipe, type SetupStatus,
+  setupProgress, isStartableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
 } from './desktop-setup';
 
 const CODE = 'A'.repeat(20) + '_-' + 'b'.repeat(21); // 43
@@ -179,5 +179,25 @@ describe('[SID:4427] 진행 표시 — 상태 조회 한 번을 세 단계로(PO
     s.signals = { ...s.signals, workdir_fallback_at: 'x', blocked: { at: 'x', reason: 'managed_mcp' } };
     expect(setupProgress(s, T0, null)).toMatchObject({ workdirFallback: true, blocked: true, expired: false });
     expect(setupProgress({ ...base(), state: 'not_handed_over' }, T0, null).expired).toBe(true);
+  });
+});
+
+describe('[SID:4427] what the setup page lists and strips (dev 실측 15:31Z)', () => {
+  const base = { id: 'r', key: 'org.x', org_id: 'o', name: '엑스', payload_schema: { properties: { stage: { enum: ['a', 'b'] } } }, stage_metadata: { a: { role: '작업' }, b: { role: '검토' } } } as SetupRecipe;
+  it('startable = on · a flow · an agent role · a real name', () => {
+    expect(isStartableRecipe({ ...base, role_actor_kinds: { 작업: 'agent', 검토: 'human' } }, '엑스')).toBe(true);
+    expect(isStartableRecipe({ ...base, role_actor_kinds: { 작업: 'either', 검토: 'human' } }, '엑스')).toBe(true);
+    expect(isStartableRecipe({ ...base, role_actor_kinds: { 작업: 'human', 검토: 'human' } }, '엑스')).toBe(false);
+    expect(isStartableRecipe({ ...base, enabled: false }, '엑스')).toBe(false);
+    expect(isStartableRecipe(base, 'org.x')).toBe(false); // the key shown as a name
+    expect(isStartableRecipe(base, '  ')).toBe(false);
+    expect(isStartableRecipe({ ...base, payload_schema: { properties: { stage: { enum: [] } } } }, '엑스')).toBe(false);
+  });
+  it('only a # that carries setup values is stripped', () => {
+    expect(hasSetupFragment('#code=abc&setup=s')).toBe(true);
+    expect(hasSetupFragment('#setup=s&code=abc')).toBe(true);
+    expect(hasSetupFragment('#section-2')).toBe(false);
+    expect(hasSetupFragment('#decode=x')).toBe(false);
+    expect(hasSetupFragment('')).toBe(false);
   });
 });

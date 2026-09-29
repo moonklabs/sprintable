@@ -7,8 +7,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
-const { ctx } = vi.hoisted(() => ({ ctx: vi.fn() }));
+const { ctx, sp } = vi.hoisted(() => ({ ctx: vi.fn(), sp: { value: null as URLSearchParams | null } }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
+// the query the router reports (the dashboard shell adds ?p= with a router replace)
+vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next/navigation')>()), useSearchParams: () => sp.value }));
 
 import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
@@ -54,6 +56,15 @@ async function mount(node: React.ReactNode, role = 'owner') {
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
 }
 const text = () => container.textContent ?? '';
+/** Change the address `#` and wait for the page's own `hashchange` handling (listeners run in the order they were added,
+ * so the page's handler has run when this one does) — no sleeping. */
+const setHash = async (h: string) => {
+  await act(async () => {
+    const fired = new Promise<void>((r) => window.addEventListener('hashchange', () => r(), { once: true }));
+    window.location.hash = h;
+    await fired;
+  });
+};
 const startButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '시작') as HTMLButtonElement;
 
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
@@ -188,6 +199,61 @@ describe('[SID:4427] desktop setup page', () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetupEntry />);
     expect(text()).toContain('데스크톱 앱에서 열어 주세요'); // nothing after # and nothing carried: a browser visit (AC5)
+  });
+
+  it('values that arrive after the page is up (same-document # change — the app reopens after an email login) are read and taken off the address (dev 실측 15:24Z)', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('데스크톱 앱에서 열어 주세요');
+    await setHash(`code=${CODE}&setup=s-1&runtimes=claude`);
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    expect(window.location.hash).toBe('');
+    expect(window.location.href).not.toContain(CODE);
+    // a newer code (the app restarted the setup) replaces the older one — «시작» sends the newer code
+    const NEWER = `${'Z'.repeat(20)}_-${'y'.repeat(21)}`;
+    await setHash(`code=${NEWER}&setup=s-2&runtimes=claude`);
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(window.location.href).not.toContain(NEWER);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect((calls.find((c) => c.url.includes('/confirm'))!.body as { code: string }).code).toBe(NEWER);
+    // an unrelated # (an in-page anchor) is left alone and changes nothing
+    await setHash('section-2');
+    expect(window.location.hash).toBe('#section-2');
+  });
+
+  it('when the router query changes (the shell adds ?p=), setup values back in the address are taken off again (dev 실측 15:31Z)', async () => {
+    stub(() => new Response('{}'));
+    sp.value = new URLSearchParams('');
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-0&runtimes=claude`);
+    await mount(<DesktopSetupEntry />);
+    expect(window.location.hash).toBe('');
+    // the router's replace put the old address (with #) back and changed the query
+    window.history.replaceState(null, '', `/desktop/setup?p=p-1#code=${CODE}&setup=s-0&runtimes=claude`);
+    sp.value = new URLSearchParams('p=p-1');
+    await mount(<DesktopSetupEntry />);
+    expect(window.location.hash).toBe('');
+    expect(window.location.search).toBe('?p=p-1');
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요'); // the form stays (values were in memory)
+    sp.value = null;
+  });
+
+  it('the recipe list shows only what can start: on · a flow · at least one agent role · a real name (dev 실측: a key shown as a name, a people-only recipe)', async () => {
+    const extra = [
+      { id: 'rec-key', key: 'org.moonklabs.work.gate_cycle', org_id: 'o-1', name: '', enabled: true, payload_schema: { properties: { stage: { enum: ['a'] } } }, stage_metadata: { a: { role: '작업' } }, role_actor_kinds: { 작업: 'agent' } },
+      { id: 'rec-people', key: 'org.people_only', org_id: 'o-1', name: '사람만', enabled: true, payload_schema: { properties: { stage: { enum: ['a'] } } }, stage_metadata: { a: { role: '검토' } }, role_actor_kinds: { 검토: 'human' } },
+      { id: 'rec-off', key: 'org.off', org_id: 'o-1', name: '꺼진 것', enabled: false, payload_schema: { properties: { stage: { enum: ['a'] } } }, stage_metadata: { a: { role: '작업' } } },
+    ];
+    RECIPES.push(...(extra as never[]));
+    try {
+      stub(() => new Response('{}'));
+      await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      const ids = [...container.querySelectorAll('input[name=recipe]')].map((i) => (i as HTMLInputElement).value);
+      expect(ids).toEqual(['rec-1', 'rec-2']);
+      expect(text()).not.toContain('org.moonklabs.work.gate_cycle');
+    } finally { RECIPES.splice(RECIPES.length - extra.length, extra.length); }
   });
 
   it('the web keeps no setup value anywhere (no storage) and has no login-page branch for the desktop (PO 09:58Z)', async () => {
