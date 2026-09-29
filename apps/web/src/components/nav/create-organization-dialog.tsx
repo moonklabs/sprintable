@@ -166,7 +166,7 @@ export function CreateOrganizationDialog({
             </label>
             <input
               id="org-name"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder={t('createOrgNamePlaceholder')}
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}
@@ -180,7 +180,7 @@ export function CreateOrganizationDialog({
             </label>
             <input
               id="org-slug"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder={t('createOrgSlugPlaceholder')}
               value={slug}
               onChange={(e) => handleSlugChange(e.target.value)}

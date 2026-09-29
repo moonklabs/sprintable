@@ -201,7 +201,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t('policySearchPlaceholder')}
-                  className="w-full rounded-2xl border border-white/8 bg-muted/90 px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-brand/20 focus:outline-none"
+                  className="w-full rounded-2xl border border-white/8 bg-muted/90 px-4 py-2.5 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:border-brand/20 focus:outline-none"
                 />
               </div>
             </div>

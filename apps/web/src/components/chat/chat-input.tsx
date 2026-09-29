@@ -732,7 +732,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               aria-label={t('steerPanelTargetLabel')}
               value={steerTargetId}
               onChange={(e) => setSteerTargetId(e.target.value)}
-              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs text-foreground"
             >
               <option value="">{t('steerPanelTargetPlaceholder')}</option>
               {steerTargets.map((p) => (
@@ -755,7 +755,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
                 placeholder={t('steerPanelWorkItemPlaceholder')}
                 aria-label={t('steerPanelWorkItemLabel')}
-                className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs text-foreground placeholder:text-muted-foreground"
               />
               {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
                   멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
@@ -985,7 +985,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           }}
           disabled={disabled || sending || steerSending}
           placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
-          className="flex-1 resize-none rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40"
+          className="flex-1 resize-none rounded-xl border border-border bg-muted/30 px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />
 

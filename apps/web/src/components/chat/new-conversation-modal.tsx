@@ -184,7 +184,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                 value={groupTitle}
                 onChange={(e) => setGroupTitle(e.target.value)}
                 placeholder={t('groupTitlePlaceholder')}
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
           )}

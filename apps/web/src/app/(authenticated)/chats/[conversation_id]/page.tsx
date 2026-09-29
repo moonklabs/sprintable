@@ -300,7 +300,7 @@ export default function ConversationPage() {
                 }}
                 onBlur={() => void handleSaveTitle()}
                 aria-label={t('editRoomName')}
-                className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-base lg:text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             ) : meta?.type === 'group' ? (
               <button

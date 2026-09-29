@@ -571,7 +571,7 @@ export function DocEditor({
           value={rawMarkdown}
           onChange={handleTextareaChange}
           readOnly={!editable}
-          className="flex-1 w-full resize-none bg-transparent p-4 font-mono text-sm leading-relaxed outline-none"
+          className="flex-1 w-full resize-none bg-transparent p-4 font-mono text-base lg:text-sm leading-relaxed outline-none"
           placeholder={labels.placeholder}
         />
       ) : (

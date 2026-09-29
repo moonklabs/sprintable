@@ -78,7 +78,7 @@ export function EventDefinerForm({
               id="definer-key"
               value={state.keySuffix}
               onChange={(e) => set('keySuffix', e.target.value)}
-              className="border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0"
+              className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
             />
           </div>
           {keyError ? (
