@@ -2750,8 +2750,9 @@ async def update_story_status(
     # status 변경을 side effects 실행 전에 먼저 commit — process_event/webhook
     # 내부 DB 에러가 트랜잭션을 aborted 상태로 만들어 status 변경까지 rollback하는 버그 방지
     await db.commit()
-    if old_status != story.status:
-        # story #4424 — a desktop setup agent's first write on its first work item = its first result (no-op otherwise)
+    if old_status != story.status and story.status in ("in-review", "done"):
+        # story #4424 — a desktop setup agent's first write on its first work item = its first result (no-op otherwise).
+        # Only a status that shows a result counts (PO 11:04Z): moving to in-progress is starting, not a result.
         from app.services.desktop_setup import mark_first_result
 
         try:

@@ -227,11 +227,13 @@ async def confirm_setup(
     from app.services.onboarding_funnel import emit_onboarding_event
 
     story = await StoryRepository(db, org_id).create(project_id=project_id, title=(definition.name or definition.key)[:500])
+    setup.work_item_id = story.id  # the product's link (PO 11:04Z) — the funnel meta below is for analysis only
+    await db.flush()
     await emit_onboarding_event(
         db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
         meta={
             "flow": "desktop_setup", "human_hand": True, "agents": len({m["member_id"] for m in members if m["kind"] == "agent"}),
-            "work_item_id": str(story.id),  # the setup's first work item (the status read shows it)
+            "work_item_id": str(story.id),  # for analysis; the product reads desktop_setups.work_item_id
         },
     )
     # last: its message commit is the confirmation's one commit (see _publish_first_stage)
@@ -462,7 +464,6 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     def last(name: str):
         return next(((meta or {}, at) for e, meta, at in reversed(rows) if e == name), None)
 
-    confirmed = first(EVENT_CONFIRMED)
     tools: dict[str, datetime] = {}
     for e, meta, at in rows:
         if e == EVENT_TOOLS_CONNECTED and (meta or {}).get("member_id"):
@@ -475,7 +476,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     return {
         "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
         "recipe_name": await _recipe_name(db, setup),
-        "work_item_id": (confirmed[0].get("work_item_id") if confirmed else None),
+        "work_item_id": str(setup.work_item_id) if setup.work_item_id else None,
         "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime")} for m in (setup.members or [])],
         "signals": {
             "tools_connected": [{"member_id": k, "at": v} for k, v in tools.items()],
@@ -541,21 +542,21 @@ async def mark_first_result(story_id, member_id) -> None:
     import logging
 
     from app.core.database import async_session_factory
-    from app.models.onboarding_event import OnboardingEvent
 
     if story_id is None or member_id is None:
         return
     try:
+        story_uuid = uuid.UUID(str(story_id))
+    except ValueError:
+        return
+    try:
         async with async_session_factory() as s:
+            # one indexed lookup (0423) — this runs after every comment, status change and agent publish in the product
             setups = (await s.execute(
-                select(OnboardingEvent.session_id).where(
-                    OnboardingEvent.event == EVENT_CONFIRMED,
-                    OnboardingEvent.meta["work_item_id"].astext == str(story_id),
-                )
-            )).scalars().all()
-            for setup_id in setups:
-                setup = await s.get(DesktopSetup, setup_id)
-                agents = {m["member_id"] for m in (setup.members or []) if m.get("kind") == "agent"} if setup else set()
+                select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.work_item_id == story_uuid)
+            )).all()
+            for setup_id, members in setups:
+                agents = {m["member_id"] for m in (members or []) if m.get("kind") == "agent"}
                 if str(member_id) in agents:
                     await _mark_once(s, setup_id=setup_id, member_id=uuid.UUID(str(member_id)), event=EVENT_FIRST_RESULT)
             await s.commit()

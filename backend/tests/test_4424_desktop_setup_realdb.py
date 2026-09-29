@@ -795,8 +795,42 @@ async def test_a_status_change_by_the_agent_is_also_a_first_result(world):
         confirmed = (await _confirm(c, code)).json()
         agents = (await _exchange(c, code, verifier)).json()["agents"]
         reviewer = next(a for a in agents if a["role"] == "Reviewer")
-        r = await c.patch(f"/api/v2/stories/{confirmed['work_item_id']}/status", json={"status": "in-progress"},
-                          headers={"Authorization": f"Bearer {reviewer['api_key']}"})
+        bearer = {"Authorization": f"Bearer {reviewer['api_key']}"}
+        marks = lambda: _sql(fetch=f"SELECT meta->>'member_id' FROM onboarding_events WHERE session_id='{confirmed['setup_id']}' AND event='desktop_first_result_seen'")
+        # PO 11:04Z — starting work is not a result: in-progress marks nothing
+        r = await c.patch(f"/api/v2/stories/{confirmed['work_item_id']}/status", json={"status": "in-progress"}, headers=bearer)
         assert r.status_code == 200, r.text
+        assert await marks() == []
+        r = await c.patch(f"/api/v2/stories/{confirmed['work_item_id']}/status", json={"status": "in-review"}, headers=bearer)
+        assert r.status_code == 200, r.text
+        assert await marks() == [(reviewer["member_id"],)]
+
+
+@pytest.mark.anyio
+async def test_the_setup_finds_its_work_item_even_when_the_funnel_event_fails(world, monkeypatch):
+    """PO 11:04Z — the setup ↔ first work item link is on the setup row (0423), not in the funnel event (whose write fails
+    silently): with the confirmed event failing, the status read still has the work item and the first result is still marked."""
+    from app.services import onboarding_funnel
+
+    real = onboarding_funnel.record_onboarding_event
+
+    async def fail_confirmed(db, *, event, **kw):
+        if event == "desktop_setup_confirmed":
+            raise RuntimeError("sentinel: funnel write failed")
+        return await real(db, event=event, **kw)
+
+    async with _client() as c:
+        code, verifier = await _code(c)
+        monkeypatch.setattr(onboarding_funnel, "record_onboarding_event", fail_confirmed)
+        confirmed = (await _confirm(c, code)).json()
+        monkeypatch.setattr(onboarding_funnel, "record_onboarding_event", real)  # (not undo(): that would drop the address env too)
+        assert confirmed["work_item_id"]
+        assert await _sql(fetch=f"SELECT count(*) FROM onboarding_events WHERE session_id='{confirmed['setup_id']}' AND event='desktop_setup_confirmed'") == [(0,)]
+        status = (await c.get(f"/api/v2/desktop/setups/{confirmed['setup_id']}", headers=_person(OWNER))).json()
+        assert status["work_item_id"] == confirmed["work_item_id"]
+        agents = (await _exchange(c, code, verifier)).json()["agents"]
+        writer = next(a for a in agents if a["role"] == "Writer")
+        r = await c.post(f"/api/v2/stories/{confirmed['work_item_id']}/comments", json={"content": "done"}, headers={"Authorization": f"Bearer {writer['api_key']}"})
+        assert r.status_code == 201, r.text
         rows = await _sql(fetch=f"SELECT meta->>'member_id' FROM onboarding_events WHERE session_id='{confirmed['setup_id']}' AND event='desktop_first_result_seen'")
-        assert rows == [(reviewer["member_id"],)]
+        assert rows == [(writer["member_id"],)]
