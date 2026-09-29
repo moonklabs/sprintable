@@ -46,12 +46,12 @@ EVENT_FIRST_TASK_HANDED = "desktop_first_task_handed"
 EVENT_WORKDIR_FALLBACK = "desktop_workdir_fallback"
 EVENT_BLOCKED = "desktop_setup_blocked"
 EVENT_FIRST_SCREEN_INPUT = "desktop_first_screen_human_input"
-# PO 12:21Z — the reasons a desktop app may give for «blocked»: the protocol's closed reason codes and the daemon's refusal
-# codes a start can end with. Anything else is dropped (the web never shows free text as a reason).
-BLOCKED_REASONS = frozenset({
-    "agent_error", "agent_rate_limited", "agent_overloaded", "agent_auth_failed", "agent_context_limit",
-    "host_fault", "host_restarted", "process_gone_after_sleep", "profile_invalid", "credentials_missing", "session_limit",
-})
+# PO 12:49Z — the reasons the desktop app actually sends for «blocked», taken from the sender: today only the company-managed
+# MCP policy (shell 4427, PR 184 `setup-flow.ts:160` found · `:237` after_start). A new reason is added here together with
+# the shell change that sends it. Anything else is dropped (the web never shows free text as a reason).
+BLOCKED_REASONS = frozenset({"managed_mcp"})
+BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
+BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
 EVENT_DOC_OPENED = "desktop_doc_opened"
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
@@ -571,7 +571,12 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             "first_result_at": result[1] if result else None,
             "workdir_fallback_at": fallback[1] if fallback else None,
             "first_screen_human_input_at": screen_input[1] if screen_input else None,
-            "blocked": {"at": blocked[1], "reason": reason if reason in BLOCKED_REASONS else None} if blocked else None,
+            "blocked": {
+                "at": blocked[1],
+                "reason": reason if reason in BLOCKED_REASONS else None,
+                "runtime": blocked[0].get("runtime") if blocked[0].get("runtime") in BLOCKED_RUNTIMES else None,
+                "when": blocked[0].get("when") if blocked[0].get("when") in BLOCKED_WHEN else None,
+            } if blocked else None,
         },
     }
 

@@ -233,7 +233,9 @@ class ToolsConnected(BaseModel):
 
 class SetupBlocked(BaseModel):
     at: datetime
-    reason: str | None
+    reason: str | None  # closed list (services/desktop_setup.BLOCKED_REASONS); anything else → null
+    runtime: str | None = None  # claude | codex
+    when: str | None = None  # found (while finding the runtime) | after_start (the session ended right after start)
 
 
 class SetupSignals(BaseModel):

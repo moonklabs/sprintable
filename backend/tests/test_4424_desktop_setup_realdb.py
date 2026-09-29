@@ -740,12 +740,12 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
 
         # what the desktop app reports, sent as it will send it (its setup's token in the header)
         for event, meta in (("desktop_first_task_handed", {}), ("desktop_workdir_fallback", {}),
-                            ("desktop_setup_blocked", {"reason": "agent_auth_failed"}), ("desktop_first_screen_human_input", {"human_hand": True})):
+                            ("desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "claude", "when": "found"}), ("desktop_first_screen_human_input", {"human_hand": True})):
             assert (await _app_event(c, setup_id, event, meta)).status_code == 202
         await _sql(f"INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES (gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}', now())")
         signals = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()["signals"]
         assert all(signals[k] for k in ("first_task_handed_at", "first_result_at", "workdir_fallback_at", "first_screen_human_input_at"))
-        assert signals["blocked"]["reason"] == "agent_auth_failed"
+        assert (signals["blocked"]["reason"], signals["blocked"]["runtime"], signals["blocked"]["when"]) == ("managed_mcp", "claude", "found")
         assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(PLAIN))).status_code == 403
         assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OUTSIDER, ORG2))).status_code == 404
 
@@ -987,9 +987,17 @@ async def test_only_proven_step_events_are_counted(world):
 
         # ③ a blocked reason outside the closed list is dropped; meta over the cap is refused
         assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "please call +1 555 0100"})).status_code == 202
-        assert (await status()).json()["signals"]["blocked"] == {"at": (await status()).json()["signals"]["blocked"]["at"], "reason": None}
+        assert (await status()).json()["signals"]["blocked"] == {"at": (await status()).json()["signals"]["blocked"]["at"], "reason": None, "runtime": None, "when": None}
+        # the shell's managed MCP block (4427 ⑥) keeps its runtime and when; values outside their lists are dropped
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "claude", "when": "after_start"})).status_code == 202
+        b = (await status()).json()["signals"]["blocked"]
+        assert (b["reason"], b["runtime"], b["when"]) == ("managed_mcp", "claude", "after_start")
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "vim", "when": "later"})).status_code == 202
+        b = (await status()).json()["signals"]["blocked"]
+        assert (b["reason"], b["runtime"], b["when"]) == ("managed_mcp", None, None)
+        # a reason the shell does not send (a daemon refusal code) is dropped too
         assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "agent_auth_failed"})).status_code == 202
-        assert (await status()).json()["signals"]["blocked"]["reason"] == "agent_auth_failed"
+        assert (await status()).json()["signals"]["blocked"]["reason"] is None
         assert (await _app_event(c, setup_id, "desktop_workdir_fallback", {"x": "a" * 3000})).status_code == 422
         # the token is in no stored row
         assert not (await _sql(fetch=f"SELECT 1 FROM onboarding_events WHERE to_jsonb(onboarding_events)::text LIKE '%{EVENT_TOKENS[setup_id]}%'"))
