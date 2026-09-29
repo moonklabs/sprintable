@@ -24,6 +24,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,6 +126,29 @@ async def verify_setup_event(
         )).first()
         return member is not None
     return False
+
+
+async def _active_agent_count(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """The org's active agents — the same count the plan limit uses (ee/plan_limits.check_agent_add_limit, read only)."""
+    from sqlalchemy import text
+
+    return int((await db.execute(
+        text("SELECT COUNT(*) FROM members WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"),
+        {"oid": str(org_id)},
+    )).scalar() or 0)
+
+
+def _with_setup_numbers(exc: HTTPException, *, needed: int, agents_before: int) -> HTTPException:
+    """PO 12:30Z — the plan limit's 402 with two numbers the web's limit screen reads: `needed` (new agents this setup makes)
+    and `available` (the limit minus the agents there were before this setup, not below 0). The limit's own `current` counts
+    the agents this confirmation had already made, so limit − current is never above 0. Numbers only — no plan, price or
+    upgrade text; ee/plan_limits is not changed."""
+    detail = exc.detail if isinstance(exc.detail, dict) else None
+    if exc.status_code != 402 or not detail or detail.get("code") != "PLAN_LIMIT_EXCEEDED":
+        return exc
+    limit = detail.get("limit")
+    available = max(0, int(limit) - agents_before) if isinstance(limit, int) else None
+    return HTTPException(status_code=402, detail={**detail, "needed": needed, "available": available}, headers=exc.headers)
 
 
 async def _setup_by_code(db: AsyncSession, code: str) -> DesktopSetup:
@@ -232,6 +256,8 @@ async def confirm_setup(
 
     # one member per role: the person for a human role, one new agent for every other role
     role_member: dict[str, uuid.UUID] = {}
+    needed = len([r for r in role_order if r not in human_roles])
+    agents_before = await _active_agent_count(db, org_id) if settings.is_ee_enabled else 0
     for role in role_order:  # the recipe's own order
         if role in human_roles:
             role_member[role] = person_member_id
@@ -239,7 +265,10 @@ async def confirm_setup(
         if settings.is_ee_enabled:
             from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
 
-            await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
+            try:
+                await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
+            except HTTPException as exc:
+                raise _with_setup_numbers(exc, needed=needed, agents_before=agents_before) from None
         agent, _no_key = await create_org_level_agent(
             db, org_id=org_id, created_by=user_id, name=f"{role} · {setup.device_name}"[:120], role="member",
             project_ids=[project_id], defer_key_issuance=True,

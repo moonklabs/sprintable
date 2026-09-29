@@ -1013,3 +1013,32 @@ async def test_a_web_step_counts_only_from_a_signed_in_member_of_the_setups_org(
             assert await check(None) is False
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("limit, expected_available", [(2, 1), (1, 0)])
+async def test_the_plan_limit_refusal_says_how_many_are_needed_and_available(world, monkeypatch, limit, expected_available):
+    """PO 12:30Z — the 402 carries `needed` (new agents this setup makes: Writer · Reviewer = 2) and `available` (the limit minus
+    the agents there were before: 1 existing agent → limit 2 → 1 · limit 1 → 0). Nothing of the setup stays."""
+    from sqlalchemy import text as sql_text
+
+    from app.core.config import settings
+    from ee import plan_limits
+
+    async def limited(db, org_id):
+        current = (await db.execute(sql_text(
+            "SELECT COUNT(*) FROM members WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"
+        ), {"oid": str(org_id)})).scalar()
+        if current >= limit:
+            raise plan_limits._plan_limit_error("agent", limit, current=current, tier="free")
+
+    monkeypatch.setattr(type(settings), "is_ee_enabled", property(lambda _self: True))
+    monkeypatch.setattr("ee.plan_limits.check_agent_add_limit", limited)
+    before = await _counts()
+    async with _client() as c:
+        code, _ = await _code(c)
+        r = await _confirm(c, code)
+        assert r.status_code == 402, r.text
+        error = r.json()["error"]
+        assert (error["code"], error["needed"], error["available"]) == ("PLAN_LIMIT_EXCEEDED", 2, expected_available)
+        assert await _counts() == before  # rolled back as before
