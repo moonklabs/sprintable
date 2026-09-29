@@ -908,3 +908,31 @@ async def test_an_ordinary_write_opens_no_session_for_the_first_result_check(wor
             assert opened["n"] == 0
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_failing_first_result_read_does_not_abort_the_callers_open_transaction(world, monkeypatch):
+    """Qadir 4826 (PO 12:08Z) — a gate resolution emits before its commit, so the read runs in its open transaction: made to
+    fail, it must not abort that transaction (the resolution still commits)."""
+    from sqlalchemy import text as sql_text
+
+    from app.services import desktop_setup
+
+    async def broken(db, story_uuid):
+        await db.execute(sql_text("SELECT * FROM d4424_no_such_table"))  # a failing statement, like a statement timeout
+        return []
+
+    monkeypatch.setattr(desktop_setup, "_setups_for_story", broken)
+    marker = f"d4424-{uuid.uuid4()}"
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(eng)() as s:
+            # the caller's own write, not committed yet
+            await s.execute(sql_text("INSERT INTO onboarding_events (id, event, meta) VALUES (gen_random_uuid(), 'desktop_setup_code_issued', CAST(:m AS jsonb))"), {"m": json.dumps({"flow": marker})})
+            await desktop_setup.mark_first_result(uuid.uuid4(), uuid.uuid4(), db=s)  # swallowed, logged
+            await s.commit()  # an aborted transaction would fail here
+    finally:
+        await eng.dispose()
+    rows = await _sql(fetch=f"SELECT count(*) FROM onboarding_events WHERE meta->>'flow' = '{marker}'")
+    assert rows == [(1,)]
+    await _sql(f"DELETE FROM onboarding_events WHERE meta->>'flow' = '{marker}'")

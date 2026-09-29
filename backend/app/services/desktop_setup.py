@@ -541,6 +541,13 @@ async def mark_tools_connected(api_key_id) -> None:
         logging.getLogger(__name__).error("desktop_tools_connected mark failed api_key_id=%s", key_id, exc_info=True)
 
 
+async def _setups_for_story(db: AsyncSession, story_uuid: uuid.UUID) -> list:
+    """The setups whose first work item is this story (one indexed read, alembic 0423)."""
+    return (await db.execute(
+        select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.work_item_id == story_uuid)
+    )).all()
+
+
 async def mark_first_result(story_id, member_id, *, db: AsyncSession | None = None) -> None:
     """`desktop_first_result_seen` (PO 08:44Z · 11:04Z · 11:48Z): the first time one of a setup's **agents** shows a result on
     that setup's first work item — a comment, a stage publish, or a status change to in-review/done (the status one is called
@@ -560,12 +567,15 @@ async def mark_first_result(story_id, member_id, *, db: AsyncSession | None = No
     except ValueError:
         return
     try:
-        query = select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.work_item_id == story_uuid)
         if db is not None:
-            setups = (await db.execute(query)).all()
+            # Qadir 4826 (PO 12:08Z): some callers emit before their commit (a gate resolution · advance_story_to_done), so
+            # this read runs inside their open transaction. In a savepoint: if it fails (a statement timeout…) only the
+            # savepoint is rolled back and the caller's write still commits — a measurement never blocks the real write.
+            async with db.begin_nested():
+                setups = await _setups_for_story(db, story_uuid)
         else:
             async with async_session_factory() as s:
-                setups = (await s.execute(query)).all()
+                setups = await _setups_for_story(s, story_uuid)
         mine = [
             setup_id for setup_id, members in setups
             if str(member_id) in {m["member_id"] for m in (members or []) if m.get("kind") == "agent"}
