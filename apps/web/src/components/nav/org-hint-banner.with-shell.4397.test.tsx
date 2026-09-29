@@ -11,9 +11,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
-const nav = vi.hoisted(() => ({ pathname: '/inbox', search: '', replaced: [] as string[] }));
+const nav = vi.hoisted(() => ({ pathname: '/inbox', search: '', replaced: [] as string[], total: 0 }));
 const router = vi.hoisted(() => ({
-  replace: (url: string) => { nav.replaced.push(url); },
+  replace: (url: string) => { nav.replaced.push(url); nav.total += 1; },
   push: () => {},
   refresh: () => {},
   prefetch: () => {},
@@ -41,15 +41,13 @@ import { OrgHintBanner } from './org-hint-banner';
 const PROJECT = 'proj-1';
 const MEMBERSHIPS = [{ projectId: PROJECT, projectName: 'P' }];
 
-function Normalizer() {
-  useProjectSsot(PROJECT, MEMBERSHIPS, undefined); // flat path: no path project
-  return null;
-}
-
+// The same nesting as DashboardShell: the shell runs the `?p=` normalization and renders the context provider, and the banner is
+// its **child** — React runs the child's effect before the parent's in one commit, which is exactly the order the bug came from
+// (Qadir 01a0eac5: a sibling harness ran the normalization first and could not tell the fix from luck).
 function Shell() {
+  useProjectSsot(PROJECT, MEMBERSHIPS, undefined); // flat path: no path project
   return (
     <DashboardCtx.Provider value={ctx}>
-      <Normalizer />
       <OrgHintBanner />
     </DashboardCtx.Provider>
   );
@@ -58,8 +56,15 @@ function Shell() {
 let container: HTMLDivElement;
 let root: Root;
 
+const fetchMock = vi.hoisted(() => ({ fn: null as null | ((url: string, init?: RequestInit) => Promise<Response>) }));
+vi.mock('@/lib/db/client', () => ({
+  fetchWithAuth: (url: string, init?: RequestInit) => fetchMock.fn!(url, init),
+}));
+
 beforeEach(() => {
   nav.replaced = [];
+  nav.total = 0;
+  fetchMock.fn = async () => new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
   window.sessionStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -92,6 +97,7 @@ async function openAndSettle(url: string): Promise<URL> {
     await render();
   }
   expect(nav.replaced).toEqual([]); // settled
+  expect(nav.total).toBeLessThanOrEqual(4); // a handful of replaces in all — no ping-pong between the two effects
   return new URL(`${nav.pathname}?${nav.search}`, 'http://t');
 }
 
@@ -121,4 +127,17 @@ describe('[SID:4397] a hint that is not offered is removed even while the shell 
     expect(landed.searchParams.get('org_id')).toBe('11111111-2222-4333-8444-555555555555');
     expect(container.querySelector('[data-testid="org-hint-banner"]')).not.toBeNull();
   });
+
+  it('another org of theirs: switching lands on the notification path, even after the shell added `p`', async () => {
+    await openAndSettle('/inbox?tab=gates&org_id=11111111-2222-4333-8444-555555555555');
+    expect(nav.search).toContain('p='); // the shell normalized while the card was offered
+    const switchButton = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === koMessages.nav.switcherSwitchToOrg,
+    )!;
+    nav.replaced = [];
+    await act(async () => { switchButton.click(); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(nav.replaced[0]).toBe('/inbox?tab=gates'); // the notification's own path, without the hint
+  });
 });
+
