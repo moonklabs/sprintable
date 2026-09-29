@@ -18,7 +18,8 @@ export type DesktopRuntime = (typeof DESKTOP_RUNTIMES)[number];
 /** 설정 코드(BE 4424: 43자 base64url). 모양이 틀리면 «코드 없음»과 같게 본다. */
 const CODE_RE = /^[A-Za-z0-9_-]{43}$/;
 
-export interface SetupQuery { code: string; runtimes: DesktopRuntime[] }
+/** `setup` = 설정 id(setup-codes 201) — 이 흐름의 이벤트 session_id. 모양이 틀리면 없음으로. */
+export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null }
 
 /** `?code=&runtimes=claude,codex` → 코드 · 런타임(모르는 값 버림 · 중복 제거 · 고정 순서). 코드가 없거나 틀리면 null
  * (= «데스크톱 앱에서 열어 주세요»). 런타임이 비어 있어도 코드가 맞으면 페이지는 열린다(실패 ① 화면). */
@@ -26,7 +27,8 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const code = params.get('code') ?? '';
   if (!CODE_RE.test(code)) return null;
   const asked = new Set((params.get('runtimes') ?? '').split(',').map((s) => s.trim()));
-  return { code, runtimes: DESKTOP_RUNTIMES.filter((r) => asked.has(r)) };
+  const setup = params.get('setup') ?? '';
+  return { code, runtimes: DESKTOP_RUNTIMES.filter((r) => asked.has(r)), setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null };
 }
 
 export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime };
@@ -100,17 +102,18 @@ export function defaultWorkdirHint(recipeName: string): string {
 export interface ConfirmBody {
   project_id: string;
   recipe_id: string;
-  roles: { stage: string; runtime: DesktopRuntime }[];
+  /** 에이전트 단위 = 역할(PO 08:31Z · 4825 CHANGES): 한 역할이 여러 stage를 맡아도 에이전트 하나. */
+  roles: { role: string; runtime: DesktopRuntime }[];
   workdir_hint: string;
 }
 
-/** 확인 요청(4424 confirm) — 에이전트가 맡는 줄의 stage마다 {stage, runtime}. 사람이 맡는 줄은 싣지 않는다(BE가 확인을
- * 누른 사람에게 묶는다 — PO 07:14Z). */
+/** 확인 요청(4424 confirm) — 에이전트가 맡는 역할마다 {role, runtime}(역할 하나 = 에이전트 하나). 사람이 맡는 줄은 싣지
+ * 않는다(BE가 확인을 누른 사람에게 묶는다 — PO 07:14Z). */
 export function confirmBody(rows: readonly SetupRoleRow[], projectId: string, recipeId: string, workdirHint: string): ConfirmBody {
   return {
     project_id: projectId,
     recipe_id: recipeId,
-    roles: rows.flatMap((r) => (r.owner.kind === 'agent' ? r.stages.map((stage) => ({ stage, runtime: (r.owner as { runtime: DesktopRuntime }).runtime })) : [])),
+    roles: rows.flatMap((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime }] : [])),
     workdir_hint: workdirHint.trim(),
   };
 }

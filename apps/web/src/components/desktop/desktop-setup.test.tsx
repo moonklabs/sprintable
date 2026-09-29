@@ -69,7 +69,7 @@ describe('[SID:4427] desktop setup page', () => {
     expect(startButton().disabled).toBe(false);
   });
 
-  it('«시작» = one confirm with {stage, runtime} for agent rows and the folder hint — nothing else is called', async () => {
+  it('«시작» = one confirm with {role, runtime} for agent rows and the folder hint — nothing else is called', async () => {
     stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     await act(async () => { startButton().click(); });
@@ -77,7 +77,7 @@ describe('[SID:4427] desktop setup page', () => {
     const posts = calls.filter((c) => c.body !== undefined);
     expect(posts).toHaveLength(1);
     expect(posts[0].url).toContain(`/api/desktop/setup-codes/${CODE}/confirm`);
-    expect(posts[0].body).toEqual({ project_id: 'p-1', recipe_id: 'rec-1', roles: [{ stage: 'research', runtime: 'claude' }, { stage: 'draft', runtime: 'claude' }], workdir_hint: '~/Sprintable/마케팅 루프' });
+    expect(posts[0].body).toEqual({ project_id: 'p-1', recipe_id: 'rec-1', roles: [{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'claude' }], workdir_hint: '~/Sprintable/마케팅 루프' });
     expect(text()).toContain('에이전트를 시작하고 있어요');
   });
 

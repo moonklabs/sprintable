@@ -25,9 +25,9 @@ const recipe: SetupRecipe = {
 
 describe('[SID:4427] desktop setup page rules', () => {
   it('reads the code and the runtimes the app found (fixed order, unknown dropped); no/bad code → null', () => {
-    expect(parseSetupQuery(q(`code=${CODE}&runtimes=codex,claude,gemini,codex`))).toEqual({ code: CODE, runtimes: ['claude', 'codex'] });
-    expect(parseSetupQuery(q(`code=${CODE}&runtimes=`))).toEqual({ code: CODE, runtimes: [] });
-    expect(parseSetupQuery(q(`code=${CODE}`))).toEqual({ code: CODE, runtimes: [] });
+    expect(parseSetupQuery(q(`code=${CODE}&runtimes=codex,claude,gemini,codex&setup=7c0e1a2b-0000-4000-8000-000000000001`))).toEqual({ code: CODE, runtimes: ['claude', 'codex'], setupId: '7c0e1a2b-0000-4000-8000-000000000001' });
+    expect(parseSetupQuery(q(`code=${CODE}&runtimes=`))).toEqual({ code: CODE, runtimes: [], setupId: null });
+    expect(parseSetupQuery(q(`code=${CODE}&setup=../x`))).toEqual({ code: CODE, runtimes: [], setupId: null });
     for (const bad of ['', 'code=', `code=${CODE}x`, `code=${CODE.slice(1)}`, `code=${CODE.slice(1)}%2F`]) expect(parseSetupQuery(q(bad)), bad).toBeNull();
   });
 
@@ -50,17 +50,27 @@ describe('[SID:4427] desktop setup page rules', () => {
     expect(rows.find((r) => r.role === '조사')!.actor).toBe('agent');
   });
 
-  it('confirm carries {stage, runtime} for agent rows only; people rows are bound by the BE to whoever pressed «시작»', () => {
+  it('one agent per ROLE even when the role spans several stages (PO 08:31Z · 4825 CHANGES)', () => {
+    const video: SetupRecipe = { id: 'v', key: 'preset.marketing.video_production', org_id: null, name: 'video',
+      payload_schema: { properties: { stage: { enum: ['brief', 'draft', 'editing', 'animatic', 'verification'] } } },
+      stage_metadata: { brief: { role: 'Director', gate: { type: 'approval' } }, draft: { role: 'Creator' }, editing: { role: 'Creator' }, animatic: { role: 'Creator' }, verification: { role: 'Creator' } },
+      role_actor_kinds: { Director: 'human', Creator: 'agent' } };
+    const rows = setupRoleRows(video, ['claude']);
+    expect(rows.map((r) => [r.role, r.stages.length])).toEqual([['Director', 1], ['Creator', 4]]);
+    expect(confirmBody(rows, 'p', 'v', '~/x').roles).toEqual([{ role: 'Creator', runtime: 'claude' }]);
+  });
+
+  it('confirm carries {role, runtime} for agent rows only; people rows are bound by the BE to whoever pressed «시작»', () => {
     const rows = setupRoleRows(recipe, ['claude', 'codex']);
     const draft = rows.find((r) => r.role === '작성')!;
     draft.owner = { kind: 'agent', runtime: 'codex' };
     expect(confirmBody(rows, 'p-1', 'rec-1', ' ~/Sprintable/마케팅 루프 ')).toEqual({
       project_id: 'p-1', recipe_id: 'rec-1',
-      roles: [{ stage: 'research', runtime: 'claude' }, { stage: 'draft', runtime: 'codex' }],
+      roles: [{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'codex' }],
       workdir_hint: '~/Sprintable/마케팅 루프',
     });
     draft.owner = { kind: 'me' };
-    expect(confirmBody(rows, 'p', 'r', '~/x').roles).toEqual([{ stage: 'research', runtime: 'claude' }]);
+    expect(confirmBody(rows, 'p', 'r', '~/x').roles).toEqual([{ role: '조사', runtime: 'claude' }]);
     expect(agentRowCount(rows)).toBe(1);
   });
 
