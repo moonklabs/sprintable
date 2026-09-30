@@ -3,11 +3,12 @@
 Twice on 2026-09-30 a non-string field in an app event became a 500 on the read side (4828 `reason` · 4846 `runtime`: a
 list in `in BLOCKED_RUNTIMES`). The entrance (`POST /onboarding/events`) now refuses a meta that breaks its name's shape —
 422 `invalid_meta`, nothing stored — so the class is closed in one place. `tests/fixtures/desktop_shell_meta_shapes.json` is
-the contract with the app (sprintable-mobile keeps the same file next to its copy of the names): a field added, dropped or
-made optional on one side only turns this red.
+the contract with the app (sprintable-mobile keeps the same file next to its copy of the names): a field added, dropped,
+made optional or given other values on one side only turns this red, and the file's sha256 is pinned in both repos.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -23,10 +24,31 @@ _SNAPSHOT = Path(__file__).resolve().parent / "fixtures/desktop_shell_meta_shape
 M = str(uuid.uuid4())
 
 
-def test_every_name_the_app_sends_has_one_shape_and_the_contract_file_matches():
+# The contract file is byte-for-byte the same in sprintable-mobile (desktop-electron/src/shell-meta-shapes.json), and both
+# repos pin this sha256 in the same letters (Kadir 228 · PO 19:45Z): changing the file on one side turns that side red, and
+# the fix — a new pin — says in its PR that the other repo's copy goes with it.
+CONTRACT_SHA256 = "a88d7031b1b9943b8e4c60b18f90631e4b565d5d088646b6113ac4e12766a6ff"
+
+
+def test_every_name_the_app_sends_has_one_shape_and_the_contract_file_matches_values_included():
     assert set(f.DESKTOP_SHELL_META_SHAPES) == f.DESKTOP_SHELL_EMIT_EVENTS
-    table = {name: {field: ("required" if req else "optional") for field, (req, _c) in shape.items()} for name, shape in f.DESKTOP_SHELL_META_SHAPES.items()}
-    assert table == json.loads(_SNAPSHOT.read_text(encoding="utf-8"))
+    # the server's own table, required flags AND value specs (enum values · const · type), equals the contract file
+    assert f.DESKTOP_SHELL_META_SHAPES == json.loads(_SNAPSHOT.read_text(encoding="utf-8"))
+
+
+def test_the_contract_file_is_the_pinned_one():
+    assert hashlib.sha256(_SNAPSHOT.read_bytes()).hexdigest() == CONTRACT_SHA256
+
+
+def test_every_value_spec_is_one_the_check_knows_and_an_unknown_one_never_fits():
+    known = ({"required", "type"}, {"required", "enum"}, {"required", "const"})
+    for name, shape in f.DESKTOP_SHELL_META_SHAPES.items():
+        for field, spec in shape.items():
+            assert set(spec) in known, (name, field)
+            assert spec.get("type", "bool") in {"bool", "uuid", "int32"}, (name, field)
+    for v in (True, "x", 1, None, [], {}):
+        assert f._fits({"required": True, "type": "text"}, v) is False
+        assert f._fits({"required": True}, v) is False
 
 
 @pytest.fixture

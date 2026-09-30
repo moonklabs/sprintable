@@ -63,35 +63,45 @@ EXIT_CODE_RANGE = range(-(2**31), 2**31)
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
-def _is_bool(v: object) -> bool:
-    return isinstance(v, bool)
+def _fits(spec: dict, v: object) -> bool:
+    """One field's value against its spec (the contract file's words): `const` · `enum` (strings) · `type` bool | uuid | int32.
+    An unknown spec never fits (closed: a typo in the table refuses, it never lets anything through)."""
+    if "const" in spec:
+        return v is spec["const"]
+    if "enum" in spec:
+        return isinstance(v, str) and v in spec["enum"]
+    kind = spec.get("type")
+    if kind == "bool":
+        return isinstance(v, bool)
+    if kind == "uuid":
+        return isinstance(v, str) and bool(_UUID_RE.match(v))
+    if kind == "int32":
+        return isinstance(v, int) and not isinstance(v, bool) and v in EXIT_CODE_RANGE
+    return False
 
 
-def _is_true(v: object) -> bool:
-    return v is True
+def _field(required: bool, **spec: object) -> dict:
+    return {"required": required, **spec}
 
 
-def _one_of(values: frozenset[str]):
-    return lambda v: isinstance(v, str) and v in values
-
-
-def _is_uuid(v: object) -> bool:
-    return isinstance(v, str) and bool(_UUID_RE.match(v))
-
-
-def _is_exit_code(v: object) -> bool:
-    return isinstance(v, int) and not isinstance(v, bool) and v in EXIT_CODE_RANGE
-
-
-# name → field → (required, check). Optional fields are the ones an app build may leave out (older builds · unknown values).
-DESKTOP_SHELL_META_SHAPES: dict[str, dict[str, tuple[bool, object]]] = {
-    "desktop_workdir_fallback": {"hinted": (True, _is_bool)},
-    "desktop_setup_blocked": {"reason": (True, _one_of(BLOCKED_REASONS)), "runtime": (False, _one_of(BLOCKED_RUNTIMES)), "when": (False, _one_of(BLOCKED_WHEN))},
-    "desktop_first_screen_human_input": {"human_hand": (True, _is_true)},
-    "desktop_first_task_handed": {"via": (True, _one_of(frozenset({"start", "turn"})))},
+# name → field → {required, value spec}. Plain data, so the test holds it equal to the contract file, values included (Kadir
+# 228 · PO 19:45Z). Optional fields are the ones an app build may leave out (older builds · unknown values).
+DESKTOP_SHELL_META_SHAPES: dict[str, dict[str, dict]] = {
+    "desktop_workdir_fallback": {"hinted": _field(True, type="bool")},
+    "desktop_setup_blocked": {
+        "reason": _field(True, enum=sorted(BLOCKED_REASONS)),
+        "runtime": _field(False, enum=sorted(BLOCKED_RUNTIMES)),
+        "when": _field(False, enum=sorted(BLOCKED_WHEN)),
+    },
+    "desktop_first_screen_human_input": {"human_hand": _field(True, const=True)},
+    "desktop_first_task_handed": {"via": _field(True, enum=["start", "turn"])},
     "desktop_setup_signed_in": {},
-    "desktop_agent_ended_early": {"member_id": (True, _is_uuid), "runtime": (False, _one_of(AGENT_RUNTIMES)), "exit_code": (False, _is_exit_code)},
-    "desktop_agent_restarted": {"member_id": (True, _is_uuid)},
+    "desktop_agent_ended_early": {
+        "member_id": _field(True, type="uuid"),
+        "runtime": _field(False, enum=sorted(AGENT_RUNTIMES)),
+        "exit_code": _field(False, type="int32"),
+    },
+    "desktop_agent_restarted": {"member_id": _field(True, type="uuid")},
 }
 
 
@@ -103,12 +113,12 @@ def desktop_meta_error(event: str, meta: object) -> str | None:
         return None
     if not isinstance(meta, dict):
         return "meta"
-    for key, (required, check) in shape.items():
+    for key, spec in shape.items():
         if key not in meta:
-            if required:
+            if spec["required"]:
                 return key
             continue
-        if not check(meta[key]):  # type: ignore[operator]
+        if not _fits(spec, meta[key]):
             return key
     return None
 
