@@ -551,8 +551,9 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m1', 'claude')] } });
     await tick(2_000);
     expect(block()?.textContent).toContain('조사 에이전트가 멈췄어요 — 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 [다시 시작]을 눌러 주세요.');
-    expect(block()?.textContent).toContain('다시 시작하면 작업 폴더를 믿을지 다시 물을 수 있어요 — 물으면 ↓ 키로 «Yes, I trust this folder»를 고른 뒤 Enter를 눌러 주세요.');
+    expect(block()?.textContent).toContain('다시 시작하면 작업 폴더를 믿을지 다시 물을 수 있어요 — 물으면 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요.');
     expect(third()?.dataset.paused).toBe('true');
+    expect(block()?.textContent).not.toMatch(/↓/); // true on either Claude version: no fixed key direction (PO 12:11Z · Yuna v27)
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
     // the block comes after the steps and before «결과 보기»
     expect(!!(container.querySelector('ol')!.compareDocumentPosition(block()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
