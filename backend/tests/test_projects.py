@@ -98,8 +98,8 @@ async def test_create_project_201():
     client, session, app = await _client()
     try:
         with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
-                patch("app.routers.projects.ensure_human_member", new_callable=AsyncMock), \
-                patch("app.routers.projects.resolve_unique_project_slug", new=AsyncMock(return_value="sprintable")):
+                patch("app.services.org_project_create.ensure_human_member", new_callable=AsyncMock), \
+                patch("app.services.org_project_create.resolve_unique_project_slug", new=AsyncMock(return_value="sprintable")):
             mock_create.return_value = _mock_project()
 
             async with client as c:

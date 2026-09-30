@@ -83,7 +83,9 @@ async def test_create_organization_ensures_human_member():
     body.slug = "acme"
     body.owner_member_id = None
 
-    with patch.object(orgs, "ensure_human_member", new=AsyncMock()) as ehm, \
+    from app.services import org_project_create as svc  # story 4427 (나) piece 1 — the writes moved here
+
+    with patch.object(svc, "ensure_human_member", new=AsyncMock()) as ehm, \
             patch.object(orgs.OrganizationResponse, "model_validate", return_value=MagicMock()):
         await orgs.create_organization(body=body, auth=auth, repo=repo, session=session)
 
@@ -125,9 +127,11 @@ async def test_create_project_ensures_human_member():
     fake_repo = MagicMock()
     fake_repo.create = AsyncMock(return_value=project_obj)
 
-    with patch.object(projs, "ProjectRepository", return_value=fake_repo), \
-            patch.object(projs, "ensure_human_member", new=AsyncMock()) as ehm, \
-            patch.object(projs, "resolve_unique_project_slug", new=AsyncMock(return_value="board")), \
+    from app.services import org_project_create as svc  # story 4427 (나) piece 1 — the writes moved here
+
+    with patch.object(svc, "ProjectRepository", return_value=fake_repo), \
+            patch.object(svc, "ensure_human_member", new=AsyncMock()) as ehm, \
+            patch.object(svc, "resolve_unique_project_slug", new=AsyncMock(return_value="board")), \
             patch.object(projs.ProjectResponse, "model_validate", return_value=MagicMock()):
         await projs.create_project(body=body, session=session, auth=auth, org_id=org_id)
 
@@ -195,6 +199,11 @@ def test_three_paths_reference_ensure_human_member():
     from app.routers import projects as projs
     from app.repositories.org_invite import OrgInviteRepository
 
-    assert hasattr(orgs, "ensure_human_member")
-    assert hasattr(projs, "ensure_human_member")
+    # story 4427 (나) piece 1 — the org/project routers reach it through services/org_project_create
+    import inspect
+    from app.services import org_project_create as svc
+    assert "create_org_with_owner(" in inspect.getsource(orgs.create_organization)
+    assert "create_project_with_member(" in inspect.getsource(projs.create_project)
+    assert "ensure_human_member(" in inspect.getsource(svc.create_org_with_owner)
+    assert "ensure_human_member(" in inspect.getsource(svc.create_project_with_member)
     assert hasattr(OrgInviteRepository, "_ensure_member_anchor")
