@@ -567,9 +567,11 @@ export function progressFromFragment(hash: string): string | null {
 
 /** After that reload: renew the token first (a new page load may get it now), then the progress — or the same card again. */
 function ResumeProgress({ setupId }: { setupId: string }) {
+  const t = useTranslations('desktop.setup');
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => { let off = false; void renewToken().then((r) => { if (!off) setOk(r); }); return () => { off = true; }; }, []);
-  if (ok === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-hidden /></Card>;
+  // named like the page's other loading card, so a screen reader is not silent (Yuna 10:02Z)
+  if (ok === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   return ok ? <SetupProgressView setupId={setupId} recipeName="" /> : <SetupDoneReload setupId={setupId} />;
 }
 
