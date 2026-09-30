@@ -387,6 +387,15 @@ class SetupBlocked(BaseModel):
     when: str | None = None  # found (while finding the runtime) | after_start (the session ended right after start)
 
 
+class AgentEnded(BaseModel):
+    """story #4433 — an agent whose session ended early: its last report and the person's last restart (None if never)."""
+    member_id: str
+    at: datetime
+    runtime: Literal["claude", "codex"] | None = None
+    exit_code: int | None = None
+    restarted_at: datetime | None = None
+
+
 class SetupSignals(BaseModel):
     tools_connected: list[ToolsConnected]  # per agent: its first MCP connection (the manifest fetch)
     first_task_handed_at: datetime | None
@@ -394,6 +403,7 @@ class SetupSignals(BaseModel):
     first_screen_human_input_at: datetime | None  # the person typed on the agent's first screen (PO 12:23Z · web ⑦)
     workdir_fallback_at: datetime | None
     blocked: SetupBlocked | None
+    agents_ended: list[AgentEnded] = []  # story #4433 — one row per agent whose session ended early
 
 
 class SetupStatusRecipe(BaseModel):

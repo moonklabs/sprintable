@@ -53,6 +53,10 @@ BLOCKED_REASONS = frozenset({"managed_mcp"})
 BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
 BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
 EVENT_DOC_OPENED = "desktop_doc_opened"
+# story #4433 (Min 11:55Z) — sent by the desktop app: an agent's session ended early · the person restarted it
+EVENT_AGENT_ENDED_EARLY = "desktop_agent_ended_early"
+EVENT_AGENT_RESTARTED = "desktop_agent_restarted"
+_EXIT_CODE_RANGE = range(-(2**31), 2**31)
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
 _CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")  # base64url(sha256) without padding
@@ -732,6 +736,41 @@ async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UU
     }
 
 
+def _agents_ended(setup: DesktopSetup, rows) -> list[dict]:
+    """story #4433 (Min 11:55Z) — per agent of this setup whose session ended early: when it last ended (with the runtime and
+    exit code of that report) and when the person last restarted it (None if never). Proven rows only (the caller's rows);
+    a member id that is not one of this setup's agents is ignored; runtime outside claude · codex and a non-integer exit code
+    are None (the web never shows free text). The setup's own agent order."""
+    order: list[str] = []
+    for m in setup.members or []:
+        mid = str(m.get("member_id") or "")
+        if m.get("kind") == "agent" and mid and mid not in order:
+            order.append(mid)
+    ended: dict[str, tuple[dict, datetime]] = {}
+    restarted: dict[str, datetime] = {}
+    for e, meta, at in rows:  # oldest first — the last write wins
+        mid = str((meta or {}).get("member_id") or "")
+        if mid not in order:
+            continue
+        if e == EVENT_AGENT_ENDED_EARLY:
+            ended[mid] = (meta or {}, at)
+        elif e == EVENT_AGENT_RESTARTED:
+            restarted[mid] = at
+    out = []
+    for mid in order:
+        if mid not in ended:
+            continue
+        meta, at = ended[mid]
+        code = meta.get("exit_code")
+        out.append({
+            "member_id": mid, "at": at,
+            "runtime": meta.get("runtime") if meta.get("runtime") in BLOCKED_RUNTIMES else None,
+            "exit_code": code if isinstance(code, int) and not isinstance(code, bool) and code in _EXIT_CODE_RANGE else None,
+            "restarted_at": restarted.get(mid),
+        })
+    return out
+
+
 async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> dict:
     """PO 08:31Z — one read for the web's progress line, the folder-fallback notice and failure ⑥: the setup's state and the
     signals read from its events (session_id = the setup id). A signal that has not happened is None, never guessed."""
@@ -767,6 +806,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     reason = (blocked[0].get("reason") if blocked else None)
     screen_input = first(EVENT_FIRST_SCREEN_INPUT)
     recipe = await _recipe_ref(db, setup)
+    agents_ended = _agents_ended(setup, rows)
     return {
         "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
         "recipe_name": recipe["name"] if recipe else None,
@@ -779,6 +819,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             "first_result_at": result[1] if result else None,
             "workdir_fallback_at": fallback[1] if fallback else None,
             "first_screen_human_input_at": screen_input[1] if screen_input else None,
+            "agents_ended": agents_ended,
             "blocked": {
                 "at": blocked[1],
                 "reason": reason if reason in BLOCKED_REASONS else None,
