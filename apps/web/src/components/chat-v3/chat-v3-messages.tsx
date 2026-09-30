@@ -13,7 +13,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { WithheldDeliveryLine } from '@/components/chat/withheld-delivery-line';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import { seedFromCompose } from './chat-v3-compose';
-import { normalizeToMessage, sentMessageFromAnswer, type ChatMessage } from '@/hooks/use-chat-sse';
+import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 // story #4008 CHANGES 2(PO 지적, 2026-09-17) — 이 컴포넌트가 chat-v3-screen.tsx와 각자
@@ -210,7 +210,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
     const res = await fetchWithAuth(`/api/conversations/${threadId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, client_nonce: newClientNonce() }), // story #4440 — its echo is dropped here
     });
     setSending(false);
     if (res.ok) {

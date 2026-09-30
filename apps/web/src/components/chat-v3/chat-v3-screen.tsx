@@ -17,7 +17,7 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
-import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
+import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
@@ -32,6 +32,32 @@ import { useFlatHref } from '@/hooks/use-flat-href';
  * 옛 `/chats`·`ChatListView`·`ChatView`·`approval-request-card.tsx` 전부 무접촉
  * (재사용은 import/조각뿐, 그 파일들 자체는 1줄도 안 건드림).
  */
+/**
+ * The thread rail after a new message: the thread moves to the top with its latest line, and gains one unread unless it is
+ * open or the message is mine (story #4440 — my own message now arrives from my other tabs and devices, and is never unread).
+ * `unknown` = the thread is not in the rail yet (the caller reloads it).
+ */
+export function threadsAfterMessage(
+  prev: ChatV3Thread[] | null,
+  payload: Record<string, unknown>,
+  { selectedId, meId }: { selectedId: string | null | undefined; meId: string | undefined },
+): { next: ChatV3Thread[] | null; unknown: boolean } {
+  const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
+  if (!prev || !conversationId) return { next: prev, unknown: false };
+  const idx = prev.findIndex((th) => th.id === conversationId);
+  if (idx === -1) return { next: prev, unknown: true };
+  const content = payload.content as string | undefined;
+  const createdAt = payload.created_at as string | undefined;
+  const updated = [...prev];
+  const item = { ...updated[idx]! };
+  if (content && createdAt) {
+    item.latest_message = { content, created_at: createdAt };
+    if (conversationId !== selectedId && !isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
+  }
+  updated.splice(idx, 1);
+  return { next: [item, ...updated], unknown: false };
+}
+
 export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Flags }) {
   // story #4004 — 「오늘」 목적지는 더 이상 이 화면이 재조립하지 않는다(nav-v3-item-list.tsx가
   // resolveNavV3Destinations 그대로 씀). 이벤트 카드 서명·관련 링크는 "결정할 것" 맥락이라
@@ -239,17 +265,9 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
     // 밀어준다(그 컴포넌트는 더 이상 자기 useChatSse가 없다 — 위 import 주석).
     if (conversationId === selectedId) messagesRef.current?.receiveMessage(payload);
     setThreads((prev) => {
-      if (!prev) return prev;
-      const idx = prev.findIndex((th) => th.id === conversationId);
-      if (idx === -1) { if (me) loadConversations(me); return prev; }
-      const updated = [...prev];
-      const item = { ...updated[idx]! };
-      if (content && createdAt) {
-        item.latest_message = { content, created_at: createdAt };
-        if (conversationId !== selectedId) item.unread_count = (item.unread_count ?? 0) + 1;
-      }
-      updated.splice(idx, 1);
-      return [item, ...updated];
+      const { next, unknown } = threadsAfterMessage(prev, payload, { selectedId, meId: me?.id });
+      if (unknown && me) loadConversations(me);
+      return next;
     });
   }, [selectedId, loadConversations, me]);
 

@@ -1336,6 +1336,9 @@ class MessageAttachment(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str
     mentioned_ids: list[uuid.UUID] = []
+    # story #4440 (PO 19:37Z) — a token the sending tab makes before sending; returned only on the sender's own echo, so that
+    # tab knows its own message even when the echo arrives before the send answer. Never stored.
+    client_nonce: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     thread_id: uuid.UUID | None = None
     attachments: list[MessageAttachment] = []
     # E-ACTIVATION S1 (typed activation · additive): 발신자가 «응답 의무»를 구조로 선언.
@@ -3260,6 +3263,20 @@ async def send_message_core(
             ))
         except Exception:
             logger.warning("process_event failed for message.created message_id=%s", msg.id, exc_info=True)
+
+    # story #4440 — the person who sent it gets it on their other tabs and devices too: one transient push to all their
+    # connections (no Event row — nothing unread, no notification), with what only the sender sees (`delivery_withheld`) and
+    # the sending tab's nonce. An agent sender is still left out (its own message must not wake it). The sending tab drops
+    # its own echo by the nonce or the id.
+    if sender.type != "agent":
+        _echo = {
+            "event_type": "conversation.message_created",
+            **_msg_payload(msg, sender, references=msg_references, viewer_member_id=sender.id),
+            "recipient_id": str(sender.id),
+        }
+        if body.client_nonce:
+            _echo["client_nonce"] = body.client_nonce
+        pending_sse_pushes.append((str(sender.id), _echo))
 
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     def _push_pending_sse() -> None:

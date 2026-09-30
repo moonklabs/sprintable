@@ -19,7 +19,7 @@ import { useReadingPanelStack } from './use-reading-panel-stack';
 import { ReadingPanelProvider } from './reading-panel-context';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
 import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
 import type { HitlAnswer } from './hitl-approval-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
@@ -704,7 +704,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, []);
 
   const handleSend = useCallback(async (content: string, mentionedIds?: string[], attachments?: SendAttachment[]) => {
-    const body: Record<string, unknown> = { content };
+    const body: Record<string, unknown> = { content, client_nonce: newClientNonce() }; // story #4440 — its echo is dropped here
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
     if (attachments && attachments.length > 0) body.attachments = attachments;
     const res = await fetch(`${apiPrefix}/${threadId}/messages`, {

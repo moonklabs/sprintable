@@ -517,6 +517,12 @@ describe('ChatV3Messages — story #4430 «not delivered» line', () => {
     });
     const lines = [...container.querySelectorAll('[data-testid="withheld-delivery-line"]')];
     expect(lines.map((l) => l.textContent)).toEqual(['2명에게는 전달되지 않았어요 — 내 메시지를 받지 않도록 해 둔 사람이 있어요']);
+    // story #4440 — the send carries a nonce this tab remembers
+    const post = fetchMock.mock.calls.find((c) => (c[1] as { method?: string } | undefined)?.method === 'POST');
+    const body = JSON.parse((post![1] as { body: string }).body) as Record<string, unknown>;
+    const { isEchoOfSentHere } = await import('@/hooks/use-chat-sse');
+    expect(typeof body.client_nonce).toBe('string');
+    expect(isEchoOfSentHere({ client_nonce: body.client_nonce })).toBe(true);
   });
 
   it('a read that carries delivery_withheld on my message shows it; the other messages show nothing', async () => {

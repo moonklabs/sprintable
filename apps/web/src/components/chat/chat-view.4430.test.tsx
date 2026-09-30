@@ -84,8 +84,10 @@ async function mount() {
 
 describe('ChatView — story #4430 «not delivered» under my new bubble', () => {
   it('the send answer\'s `delivery` lands on my new message', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+    const posted: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
       if (init?.method === 'POST' && typeof url === 'string' && url.endsWith('/thread-1/messages')) {
+        posted.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>);
         return {
           ok: true,
           json: async () => ({
@@ -105,5 +107,9 @@ describe('ChatView — story #4430 «not delivered» under my new bubble', () =>
     for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
     expect(container.querySelector('[data-testid="withheld-delivery-line"]')?.textContent)
       .toBe('전달되지 않았어요 — 받는 사람이 내 메시지를 받지 않도록 해 두었어요');
+    // story #4440 — the send carries a nonce this tab remembers (its echo can arrive before this answer)
+    const { isEchoOfSentHere } = await import('@/hooks/use-chat-sse');
+    expect(typeof posted[0]?.client_nonce).toBe('string');
+    expect(isEchoOfSentHere({ client_nonce: posted[0]!.client_nonce })).toBe(true);
   });
 });

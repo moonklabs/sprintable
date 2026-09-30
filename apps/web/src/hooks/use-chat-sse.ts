@@ -124,6 +124,48 @@ export interface ChatMessage {
   } | null;
 }
 
+/**
+ * story #4440 — the server now also sends a person's own new message to all their connections (their other tabs and devices
+ * see it live). The tab that sent it already shows it (from the send answer), so it drops its own echo: by the nonce it made
+ * before sending (PO 19:37Z — the echo can arrive before the send answer, when the tab does not know the id yet) or by the id
+ * once the answer came. Per tab (module state); small and bounded.
+ */
+const SENT_HERE_MAX = 200;
+const sentHereNonces: string[] = [];
+const sentHereIds: string[] = [];
+
+function remember(list: string[], value: string) {
+  list.push(value);
+  if (list.length > SENT_HERE_MAX) list.splice(0, list.length - SENT_HERE_MAX);
+}
+
+/** A nonce for one send from this tab (goes in the request as `client_nonce`); remembered here. */
+export function newClientNonce(): string {
+  const nonce = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  remember(sentHereNonces, nonce);
+  return nonce;
+}
+
+/** The id of a message this tab sent (from the send answer). */
+export function rememberSentHere(messageId: string | undefined | null) {
+  if (messageId) remember(sentHereIds, messageId);
+}
+
+/** Is this payload this tab's own echo (sent from here)? */
+export function isEchoOfSentHere(payload: Record<string, unknown>): boolean {
+  const nonce = payload.client_nonce;
+  if (typeof nonce === 'string' && sentHereNonces.includes(nonce)) return true;
+  const id = payload.id;
+  return typeof id === 'string' && sentHereIds.includes(id);
+}
+
+/** story #4440 — «my message»: its sender is me. One rule for every place that counts unread (a message of mine never is). */
+export function isOwnMessage(payload: Record<string, unknown>, meId: string | undefined | null): boolean {
+  if (!meId) return false;
+  const sender = payload.sender as { id?: unknown } | undefined;
+  return (typeof sender?.id === 'string' && sender.id === meId) || payload.created_by === meId;
+}
+
 /** story #4430 — how many participants a block kept a message from, and the room's kind (from who is in it). */
 export interface DeliveryWithheld {
   withheld_count: number;
@@ -147,6 +189,7 @@ export function parseDeliveryWithheld(v: unknown): DeliveryWithheld | undefined 
  */
 export function sentMessageFromAnswer(raw: Record<string, unknown>): ChatMessage {
   const payload = (raw.data ?? raw) as Record<string, unknown>;
+  rememberSentHere(typeof payload.id === 'string' ? payload.id : null); // story #4440 — its echo is dropped here
   const delivery = parseDeliveryWithheld(raw.delivery);
   return normalizeToMessage(delivery ? { ...payload, delivery_withheld: delivery } : payload);
 }
@@ -256,7 +299,11 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   const handleConversationMessage = (raw: string) => {
     if (shouldSuppressDuplicateSseEvent(raw, seenIdsRef.current)) return;
     try {
-      onConversationMessageRef.current?.(JSON.parse(raw) as Record<string, unknown>);
+      const payload = JSON.parse(raw) as Record<string, unknown>;
+      // story #4440 — this tab sent it and already shows it: its echo changes nothing here (no second reply count, no
+      // second line). Other tabs and devices of the same person take it like any message.
+      if (isEchoOfSentHere(payload)) return;
+      onConversationMessageRef.current?.(payload);
     } catch { /* ignore parse errors */ }
   };
   const handleWorking = (raw: string) => {
