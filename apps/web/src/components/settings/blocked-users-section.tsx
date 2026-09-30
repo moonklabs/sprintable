@@ -38,9 +38,11 @@ export function BlockedUsersSection() {
       const res = await fetchWithAuth('/api/user-blocks', { cache: 'no-store' });
       if (!res.ok) { setLoadFailed(true); return; }
       // story #4444 — the backend answers a bare array (`response_model=list`, passed through by the proxy); reading
-      // `json.data` only left the list always empty, so the section never showed
-      const json = await res.json() as UserBlockRow[] | { data?: UserBlockRow[] };
-      const list = Array.isArray(json) ? json : (json.data ?? []);
+      // `json.data` only left the list always empty, so the section never showed. Only the contract's shape is read: any
+      // other answer is a failed read (the failure line), never a silent empty list (PO 23:57Z).
+      const json: unknown = await res.json();
+      if (!Array.isArray(json)) { setLoadFailed(true); return; }
+      const list = json as UserBlockRow[];
       setRows(list);
       // story #4444 — the list carries the name (a person without a project row has no team-member route to read it from);
       // only rows without it (an older server) are looked up one by one

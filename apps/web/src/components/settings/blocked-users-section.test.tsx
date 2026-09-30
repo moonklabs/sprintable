@@ -34,7 +34,7 @@ afterEach(async () => {
 // story #2349 — 0명이면 절 자체를 안 그린다(standup-history-section.tsx 선례 재사용).
 describe('BlockedUsersSection', () => {
   it('빈 목록이면 아무것도 안 그린다(절 자체가 없다)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ([]) })));
     await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
     // 마이크로태스크 큐 flush를 위해 한 틱 더
     await act(async () => { await Promise.resolve(); });
@@ -64,7 +64,7 @@ describe('BlockedUsersSection', () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === '/api/user-blocks') {
         if (fail) return { ok: false, status: 500, json: async () => ({}) };
-        return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'member-9', blocked_member_name: '까심', created_at: '2026-08-02T00:00:00Z' }] }) };
+        return { ok: true, json: async () => ([{ blocked_member_id: 'member-9', blocked_member_name: '까심', created_at: '2026-08-02T00:00:00Z' }]) };
       }
       return { ok: false, json: async () => ({}) };
     });
@@ -82,6 +82,16 @@ describe('BlockedUsersSection', () => {
     expect(container.textContent).toContain('까심');
   });
 
+  it('⭐#4444 — 배열이 아닌 응답(계약 밖 모양)은 조용한 빈 목록이 아니라 실패 줄', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/user-blocks') return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'm-1', created_at: '2026-10-01T00:00:00Z' }] }) };
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="blocked-users-load-failed"]')?.textContent).toContain('차단 목록을 불러오지 못했어요');
+  });
+
   it('⭐#4444 — 네트워크 실패(던짐)도 같은 줄 — 조용한 빈 목록 아님', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
     await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
@@ -95,10 +105,10 @@ describe('BlockedUsersSection', () => {
   it('⭐#4444 — 목록의 blocked_member_name을 쓴다(따로 이름 조회 0) · null이면 «이름 없는 구성원»', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === '/api/user-blocks') {
-        return { ok: true, json: async () => ({ data: [
+        return { ok: true, json: async () => ([
           { blocked_member_id: 'org-person-1', blocked_member_name: '김하나', created_at: '2026-10-01T00:00:00Z' },
           { blocked_member_id: 'org-person-2', blocked_member_name: null, created_at: '2026-10-01T00:00:00Z' },
-        ] }) };
+        ]) };
       }
       return { ok: false, status: 404, json: async () => ({}) };
     });
@@ -114,7 +124,7 @@ describe('BlockedUsersSection', () => {
   it('1건 이상이면 절이 뜨고 이름을 resolve해 보여준다', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === '/api/user-blocks') {
-        return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }] }) };
+        return { ok: true, json: async () => ([{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }]) };
       }
       if (url === '/api/team-members/member-9') {
         return { ok: true, json: async () => ({ data: { name: '까심' } }) };
@@ -132,7 +142,7 @@ describe('BlockedUsersSection', () => {
   it('차단 해제 클릭 → DELETE 성공 → 목록에서 즉시 빠진다(마지막 1건이면 절 전체가 사라진다)', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/user-blocks') {
-        return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }] }) };
+        return { ok: true, json: async () => ([{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }]) };
       }
       if (url === '/api/team-members/member-9') {
         return { ok: true, json: async () => ({ data: { name: '까심' } }) };
@@ -163,12 +173,10 @@ describe('BlockedUsersSection', () => {
       if (url === '/api/user-blocks') {
         return {
           ok: true,
-          json: async () => ({
-            data: [
-              { blocked_member_id: 'member-1', created_at: '2026-08-02T00:00:00Z' },
-              { blocked_member_id: 'member-2', created_at: '2026-08-02T00:00:00Z' },
-            ],
-          }),
+          json: async () => ([
+            { blocked_member_id: 'member-1', created_at: '2026-08-02T00:00:00Z' },
+            { blocked_member_id: 'member-2', created_at: '2026-08-02T00:00:00Z' },
+          ]),
         };
       }
       if (url === '/api/team-members/member-1') return { ok: true, json: async () => ({ data: { name: '까심' } }) };
@@ -197,7 +205,7 @@ describe('BlockedUsersSection', () => {
     const deletePending = new Promise<void>((resolve) => { resolveDelete = resolve; });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/user-blocks') {
-        return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }] }) };
+        return { ok: true, json: async () => ([{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }]) };
       }
       if (url === '/api/team-members/member-9') {
         return { ok: true, json: async () => ({ data: { name: '까심' } }) };
@@ -229,7 +237,7 @@ describe('BlockedUsersSection', () => {
   it('차단 해제 실패면 목록에 그대로 남고 에러 토스트가 뜬다', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/user-blocks') {
-        return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }] }) };
+        return { ok: true, json: async () => ([{ blocked_member_id: 'member-9', created_at: '2026-08-02T00:00:00Z' }]) };
       }
       if (url === '/api/team-members/member-9') {
         return { ok: true, json: async () => ({ data: { name: '까심' } }) };
@@ -257,7 +265,7 @@ describe('BlockedUsersSection', () => {
     async function renderWith(members: Record<string, { ok: boolean; name?: string | null } | 'throw'>) {
       vi.stubGlobal('fetch', vi.fn(async (url: string) => {
         if (url === '/api/user-blocks') {
-          return { ok: true, json: async () => ({ data: Object.keys(members).map((id) => ({ blocked_member_id: id, created_at: '2026-09-25T00:00:00Z' })) }) };
+          return { ok: true, json: async () => (Object.keys(members).map((id) => ({ blocked_member_id: id, created_at: '2026-09-25T00:00:00Z' }))) };
         }
         const id = url.replace('/api/team-members/', '');
         const m = members[id];
