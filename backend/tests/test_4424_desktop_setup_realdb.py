@@ -741,7 +741,7 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         assert status["recipe"] == {"key": RECIPE_KEY, "name": RECIPE_NAME, "org_id": str(ORG)}
         assert status["signals"] == {
             "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "first_screen_human_input_at": None,
-            "workdir_fallback_at": None, "blocked": None,
+            "workdir_fallback_at": None, "blocked": None, "agents_ended": [],
         }
 
         # the MCP server fetches the manifest at tools/list with the agent's key: marked once for that member (a second
@@ -1296,3 +1296,41 @@ async def test_the_status_names_a_platform_preset_with_a_null_org(world):
     assert status["recipe"]["key"] == "preset.workflow.two_step"
     assert status["recipe"]["org_id"] is None
     assert status["recipe_name"] == status["recipe"]["name"]
+
+
+# ─── story #4433 (Min 11:55Z) — an agent's session ended early · the person restarted it ──────────────
+
+
+@pytest.mark.anyio
+async def test_agents_ended_reads_the_last_report_and_the_last_restart_per_agent_of_this_setup(world):
+    async with _client() as c:
+        code, _verifier = await _code(c, "d4424 ended early")
+        confirmed = (await _confirm(c, code)).json()
+        setup_id = confirmed["setup_id"]
+        agent = {m["role"]: m["member_id"] for m in confirmed["members"] if m["kind"] == "agent"}
+        writer, reviewer = agent["Writer"], agent["Reviewer"]
+        status = lambda: c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))
+
+        assert (await status()).json()["signals"]["agents_ended"] == []
+
+        # not proven (no token) · not one of this setup's agents · → not counted
+        assert (await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": writer, "runtime": "claude", "exit_code": 1}, token=None)).status_code == 202
+        assert (await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": str(uuid.uuid4()), "runtime": "claude", "exit_code": 1})).status_code == 202
+        assert (await status()).json()["signals"]["agents_ended"] == []
+
+        # the writer ends early, is restarted, then ends again: the last report wins, the restart stays
+        await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": writer, "runtime": "claude", "exit_code": 1})
+        await _app_event(c, setup_id, "desktop_agent_restarted", {"member_id": writer})
+        await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": writer, "runtime": "claude", "exit_code": 137})
+        # the reviewer's report carries values the web must never show as they are
+        await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": reviewer, "runtime": "vim", "exit_code": "1"})
+        rows = (await status()).json()["signals"]["agents_ended"]
+        assert [r["member_id"] for r in rows] == [writer, reviewer], "the setup's own agent order"
+        w, r = rows
+        assert (w["runtime"], w["exit_code"]) == ("claude", 137) and w["restarted_at"] is not None and w["at"] > w["restarted_at"]
+        assert (r["runtime"], r["exit_code"], r["restarted_at"]) == (None, None, None)
+
+        # a boolean is not an exit code
+        await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": reviewer, "runtime": "codex", "exit_code": True})
+        r = (await status()).json()["signals"]["agents_ended"][1]
+        assert (r["runtime"], r["exit_code"]) == ("codex", None)

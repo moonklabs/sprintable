@@ -45,6 +45,9 @@ DESKTOP_SHELL_EMIT_EVENTS = frozenset({
     # PO 09:58Z — the shell reopens the setup page after a sign-in (the code never sits in the web), so it is the one that
     # knows a sign-in happened: a human hand, sent by the shell
     "desktop_setup_signed_in",
+    # story #4433 (Min 11:55Z) — an agent's session ended early (meta member_id · runtime · exit_code) and the person restarted
+    # it (meta member_id); the setup status reads them as signals.agents_ended
+    "desktop_agent_ended_early", "desktop_agent_restarted",
 })
 # §1 canonical = FE-emit ∪ BE-emit (one source each; the router accepts exactly this).
 EVENT_CATALOG = FE_EMIT_EVENTS | BE_EMIT_EVENTS | DESKTOP_SHELL_EMIT_EVENTS
