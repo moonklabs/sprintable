@@ -57,7 +57,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   }, [setupId, poll]);
 
   if (!progress || !status) {
-    return <Card className="p-6"><h1 className="text-lg font-semibold">{t('startedTitle')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p></Card>;
+    return <Card className="break-keep p-6"><h1 className="text-lg font-semibold">{t('startedTitle')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p></Card>;
   }
   if (progress.blocked) return <Failure failure="managed" />;
   if (progress.expired) return <Failure failure="expired" />;
@@ -73,7 +73,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   const resultReady = progress.result === 'done' && !!resultHref;
 
   return (
-    <Card className="flex flex-col gap-4 p-6">
+    <Card className="break-keep flex flex-col gap-4 p-6">
       <header>
         <p className="text-xs text-muted-foreground">{t('eyebrow')}{task ? ` · ${task}` : ''}</p>
         <h1 className="text-lg font-semibold">{progress.result === 'done' ? t('startedDoneTitle') : t('startedTitle')}</h1>

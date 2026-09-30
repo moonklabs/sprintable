@@ -6532,6 +6532,7 @@
       "start": "Start",
       "startNote": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task",
       "startNoteWithMe": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task · you take {roles}",
+      "toolNote": "Agents work in Sprintable without asking, and ask each time before changing files, running commands, or using other tools on this computer.",
       "startedTitle": "Starting your agents",
       "startedDoneTitle": "Your agents have started",
       "startedBody": "Your agents keep working even if you close this window.",
@@ -6540,7 +6541,7 @@
       "blockedClaudeNote": "Claude Code can't connect to Sprintable on this computer because of your company's settings, so Codex takes these roles",
       "notConnected": {
         "title": "Sprintable hasn't connected to your agent yet",
-        "body": "Your agent started, but its connection to Sprintable tasks hasn't come up yet. If its terminal is asking whether to trust the working folder, answer that first. If it still doesn't connect, it can be your company's settings or your network — check with your IT admin that Sprintable is allowed and that your network isn't blocking it, then check again.",
+        "body": "Your agent started, but its connection to Sprintable tasks hasn't come up yet. If its terminal is asking whether to trust the working folder, choose to trust it first. If it still doesn't connect, it can be your company's settings or your network — check with your IT admin that Sprintable is allowed and that your network isn't blocking it, then check again.",
         "action": "Check again"
       },
       "failure": {
@@ -6577,6 +6578,25 @@
           "title": "Your company's settings block this connection",
           "body": "Your company manages the agent settings on this computer, so agents here can't receive Sprintable tasks. Ask your IT admin to allow Sprintable, then check again.",
           "action": "Check again"
+        },
+        "no-recipe": {
+          "title": "There's no recipe you can start on this computer",
+          "body": "You need a recipe with at least one role an agent takes. Turn one on in your organization's recipes, then check again.",
+          "action": "Check again"
+        },
+        "recipes-offline": {
+          "title": "Couldn't load the recipes",
+          "body": "Check your internet connection or try again in a moment.",
+          "action": "Try again"
+        },
+        "recipe-too-big": {
+          "title": "This recipe can't be started here",
+          "body": "It has too many roles, or a role name is too long. Choose another recipe."
+        },
+        "recipes-changed": {
+          "title": "The recipe has changed",
+          "body": "The recipe or its roles changed after you opened this page, so it can't start as chosen. Reload the list and choose again.",
+          "action": "Reload recipes"
         }
       },
       "direct": {
@@ -6593,9 +6613,10 @@
       "stepResultRunning": "Waiting for the first result",
       "stepResultDone": "The first result is in",
       "workdirFallback": "We couldn't use the folder you chose, so we started in the default folder (~/Sprintable/{recipe}) — the working folder needs to be a folder inside your home folder",
-      "trustHint": "When an agent starts for the first time, it may ask whether to trust the working folder. If it does, select that agent in the «Agents on this computer» bar at the bottom of the window and answer in its terminal — setup continues once you do.",
+      "trustHint": "When an agent starts for the first time, it may ask whether to trust the working folder. If it does, select that agent in the «Agents on this computer» bar at the bottom of the window and choose to trust it in its terminal — setup continues once you do.",
       "seeResult": "See the result",
-      "seeResultReason": "Once the result is in, this takes you to the task"
+      "seeResultReason": "Once the result is in, this takes you to the task",
+      "noAgentRow": "At least one role needs an agent before you can start — switch a role back to an agent."
     },
     "devices": {
       "title": "Connected devices",
