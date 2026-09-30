@@ -72,8 +72,8 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   // roles shown as one group, and whether «에이전트» / «agent» is added after them: a name that already ends in it gets none
   // (the last one decides — Yuna v29), and the Korean particle follows the name then
   const roleGroup = (roles: string[]) => {
-    // judged and drawn by the same trimmed name (a trailing space would read «에이전트 가» — Kadir · PO 16:31Z)
-    const names = roles.map((r) => role(r).trim());
+    // the names come trimmed from setupProgress (one place — PO 16:41Z), so the check and the words see the same name
+    const names = roles.map(role);
     const last = names.at(-1) ?? '';
     return { text: names.join(' · '), last, bare: endsWithAgentWord(last, locale), count: names.length };
   };
@@ -115,7 +115,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         <Step state={progress.handed} paused={progress.handedPaused} label={progress.handed === 'done' ? t('stepHandedDone') : t('stepHandedRunning')}
           detail={progress.handed === 'running' && task && progress.firstAgentRole
             ? (() => {
-              const r = role(progress.firstAgentRole).trim();
+              const r = role(progress.firstAgentRole);
               return endsWithAgentWord(r, locale) ? t('stepHandedDetailBare', { task, josa: pickEulReulJosa(task), role: r }) : t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: r });
             })() : null}>
           {progress.trustHint && claude ? (
