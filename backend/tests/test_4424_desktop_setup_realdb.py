@@ -1545,3 +1545,129 @@ async def test_the_stream_s_key_check_fails_closed(world, monkeypatch):
     finally:
         ag._agent_connections.clear()
         shutdown_module.reset_shutdown_event()
+
+
+async def _put_task_rows_for(agent_id: str, n: int) -> None:
+    """Task rows for an agent as the product writes them (Event → assign_recipient_seq → commit), then a wake."""
+    import app.routers.agent_gateway as ag
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.models.event import Event
+    from app.services.event_seq import assign_recipient_seq
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    last = 0
+    try:
+        async with async_sessionmaker(eng)() as s:
+            for i in range(n):
+                event = Event(project_id=PROJ, org_id=ORG, event_type="dispatched", recipient_id=uuid.UUID(agent_id),
+                              recipient_type="agent", payload={"content": f"task after disconnect {i}"}, status="pending")
+                s.add(event)
+                await s.flush()
+                await assign_recipient_seq(s, event)
+                last = event.recipient_seq or last
+            await s.commit()
+    finally:
+        await eng.dispose()
+    ag.wake_agent(agent_id, last)
+
+
+async def _open_setup_stream(c, device: str):
+    import app.routers.agent_gateway as ag
+    from app.dependencies.auth import AuthContext
+
+    code, verifier = await _code(c, device)
+    setup_id = (await _confirm(c, code)).json()["setup_id"]
+    agent = (await _exchange(c, code, verifier)).json()["agents"][0]
+    key_id = (await _sql(fetch=(
+        f"SELECT id FROM agent_api_keys WHERE desktop_setup_id='{setup_id}' AND team_member_id='{agent['member_id']}'"
+    )))[0][0]
+    auth = AuthContext(user_id=agent["member_id"], email=None, claims={"app_metadata": {"api_key_id": str(key_id), "org_id": str(ORG)}})
+    return setup_id, agent["member_id"], (await ag.agent_stream(_StreamRequest(), auth=auth)).body_iterator
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", ["backfill", "wake", "push"])
+async def test_task_rows_put_after_a_disconnect_never_go_out_on_the_open_stream(world, monkeypatch, path):
+    """PO 14:35Z ② — before a batch goes out the stream rechecks (if its last check is old enough): rows put in front of a
+    disconnected device's open stream are not sent; the stream ends with access_revoked. The heartbeat is long here, so only
+    the recheck before the batch can catch it."""
+    import app.routers.agent_gateway as ag
+    from app.core import shutdown as shutdown_module
+
+    _quiet_stream_side_effects(monkeypatch)
+    monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 30.0)
+    monkeypatch.setattr(ag, "_ACCESS_RECHECK_BEFORE_BATCH_SEC", 0.0)
+    async with _client() as c:
+        setup_id, agent_id, agen = await _open_setup_stream(c, "d4434 batch after disconnect")
+        try:
+            import asyncio
+
+            assert "event: heartbeat" in await agen.__anext__()
+            pending_read = None
+            if path != "backfill":
+                # past the backfill (the setup leaves an event of its own) into the wait for a signal, so the rows come by
+                # wake / direct push — the same read is kept pending (a cancelled read would end the generator)
+                pending_read = asyncio.ensure_future(agen.__anext__())
+                for _ in range(20):
+                    await asyncio.sleep(0.2)
+                    if not pending_read.done():
+                        break
+                    assert "task after disconnect" not in pending_read.result()
+                    pending_read = asyncio.ensure_future(agen.__anext__())
+                assert not pending_read.done()
+            assert (await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).status_code == 200
+            if path == "push":
+                for q in list(ag._agent_connections.get(agent_id, ())):
+                    q.put_nowait({"event_type": "dispatched", "content": "task after disconnect (push)"})
+            else:
+                await _put_task_rows_for(agent_id, 3)
+            frames: list[str] = []
+            if pending_read is not None:
+                done, _ = await asyncio.wait({pending_read}, timeout=3.0)
+                assert done, "the stream must answer the signal"
+                frames.append(pending_read.result())
+            more, ended = await _frames_until_end(agen, 3.0)
+            frames += more
+        finally:
+            await agen.aclose()
+            ag._agent_connections.clear()
+            shutdown_module.reset_shutdown_event()
+    assert ended and any(f.startswith("event: access_revoked") for f in frames), (path, frames)
+    assert not any("task after disconnect" in f for f in frames), (path, frames)
+
+
+@pytest.mark.anyio
+async def test_a_failing_access_recheck_keeps_the_stream_and_the_next_one_runs(world, monkeypatch):
+    """PO 14:35Z ① — the recheck must not add a way to drop streams: its DB failing skips that check; the stream stays and
+    the next check runs as usual."""
+    import app.routers.agent_gateway as ag
+    from app.core import shutdown as shutdown_module
+
+    _quiet_stream_side_effects(monkeypatch)
+    monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 0.2)
+    real_db_check = ag._stream_access_revoked_db
+    calls = {"failed": 0, "real": 0}
+
+    async def down_then_up(*a, **k):
+        # the first three rechecks find the DB down; after that it answers again
+        if calls["failed"] < 3:
+            calls["failed"] += 1
+            raise RuntimeError("db down")
+        calls["real"] += 1
+        return await real_db_check(*a, **k)
+
+    async with _client() as c:
+        _setup_id, _agent_id, agen = await _open_setup_stream(c, "d4434 recheck db down")
+        try:
+            assert "event: heartbeat" in await agen.__anext__()
+            monkeypatch.setattr(ag, "_stream_access_revoked_db", down_then_up)
+            # one window (a timed-out read is cancelled, which ends the generator — so no second window)
+            frames, ended = await _frames_until_end(agen, 1.6)
+        finally:
+            await agen.aclose()
+            ag._agent_connections.clear()
+            shutdown_module.reset_shutdown_event()
+    assert not ended and not any("access_revoked" in f for f in frames), (frames, calls)
+    assert calls["failed"] == 3 and calls["real"] >= 1, calls  # skipped while down · the next checks ran as usual
