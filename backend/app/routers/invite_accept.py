@@ -33,6 +33,11 @@ async def get_my_invites(
     instead of making a new org. Only a **verified** email is looked up (an unverified one could be anyone's address): no
     user · unverified · an agent key → an empty list. No tokens in the answer — accepting stays the mail link.
     Declared before `/{token}` so «mine» is never read as a token."""
+    # An agent key is refused by name (Qadir 4833 · PO 05:12Z), with this endpoint's own answer for «not a person» — an
+    # empty list, like no user and unverified above. Before, it was empty only because an agent's member id happens not to
+    # be a users.id. Same signal the rest of the API reads an agent key by (stories.py actor type: app_metadata.api_key_id).
+    if (auth.claims or {}).get("app_metadata", {}).get("api_key_id"):
+        return MyInvitesResponse(invites=[])
     try:
         user_id = uuid.UUID(str(auth.user_id))
     except (TypeError, ValueError):

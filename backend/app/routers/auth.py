@@ -559,10 +559,12 @@ async def _build_app_metadata(
         # OrgInvite (org_invites 테이블 — canonical /api/v2/invites 경로).
         # 구 Invitation(invitations) 경로는 d3619e80 cutover로 제거 — org_invites가 단일 SSOT.
         # invite link 가입 후 explicit accept 없이 로그인 시 자동 수락 fallback.
+        from app.repositories.org_invite import invite_email_key, invite_email_key_sql
+
         now = datetime.now(timezone.utc)
         org_inv_result = await session.execute(
             select(OrgInvite).where(
-                OrgInvite.email == user.email.lower(),
+                invite_email_key_sql(OrgInvite.email) == invite_email_key(user.email),
                 OrgInvite.status == "pending",
                 OrgInvite.expires_at > now,
             ).order_by(OrgInvite.created_at.asc(), OrgInvite.id).limit(1)
