@@ -8,7 +8,7 @@
 // looked right by accident — pinned, it is RED on develop wherever it runs.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createRef } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { createRoot, hydrateRoot, type Root } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../messages/ko.json';
@@ -158,6 +158,23 @@ describe('[SID:4443] «오늘» on /today — drawn in the server render too', (
 
   it('the cookie says Seoul → the server render already reads «10월 1일 목요일» (a UTC server said «9월 30일 수요일»)', async () => {
     expect(visibleText(await serverHtml('Asia/Seoul'))).toContain('10월 1일 목요일');
+  });
+
+  it('a first visit hydrates with no hydration error, then the browser\'s own day appears (Seoul: «10월 1일 목요일»)', async () => {
+    const col = await serverHtml(null); // the first visit's server render (zone unknown)
+    const { TodayV3Screen } = await import('./today-v3/today-v3-screen');
+    const host = document.createElement('div');
+    host.innerHTML = renderToString(page(<TodayV3Screen />, null));
+    document.body.appendChild(host);
+    const recoverable: unknown[] = [];
+    let hydrated: Root | null = null;
+    await act(async () => { hydrated = hydrateRoot(host, page(<TodayV3Screen />, null), { onRecoverableError: (e) => recoverable.push(e) }); });
+    await act(async () => { await Promise.resolve(); });
+    expect(recoverable).toEqual([]);
+    expect(visibleText(col)).not.toMatch(/\d+월 \d+일 [월화수목금토일]요일/); // before: held
+    expect(visibleText(host.querySelector('[data-testid="today-v3-today-column"]')!)).toContain('10월 1일 목요일'); // after: the viewer's day
+    await act(async () => { hydrated?.unmount(); });
+    host.remove();
   });
 
   it('a first visit (no cookie): the server render holds the place — no date to read, so nothing to correct after hydration', async () => {

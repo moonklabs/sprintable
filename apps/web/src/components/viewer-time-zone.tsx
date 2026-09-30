@@ -6,7 +6,7 @@
 //   used from then on.
 // - While the zone is unknown (a first visit's server render and its hydration), a date is not drawn at all: Yuna 22:45Z — an
 //   invisible sample of the same shape holds its width, and a UTC date is never shown «for a moment».
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { VIEWER_TZ_COOKIE, runtimeTimeZone } from '@/lib/viewer-time-zone';
 
 // undefined = no provider above (a component rendered on its own, e.g. in a test): the runtime's zone, as before this story
@@ -21,13 +21,16 @@ function writeCookie(timeZone: string): void {
   } catch { /* a page that cannot write cookies still draws in the browser's zone */ }
 }
 
+// The browser's zone is a value from outside React: read it as one. The server render and hydration use the server's snapshot
+// (the cookie's zone · null on a first visit), so the two agree; right after hydration React takes the browser's own.
+const noSubscription = () => () => {};
+
 export function ViewerTimeZoneProvider({ serverTimeZone, children }: { serverTimeZone: string | null; children: ReactNode }) {
-  const [timeZone, setTimeZone] = useState<string | null>(serverTimeZone);
+  const timeZone = useSyncExternalStore(noSubscription, runtimeTimeZone, () => serverTimeZone);
+  // the effect only tells the server (the next server render then already knows the zone)
   useEffect(() => {
     const own = runtimeTimeZone();
-    if (!own) return;
-    if (own !== serverTimeZone) writeCookie(own);
-    setTimeZone(own);
+    if (own && own !== serverTimeZone) writeCookie(own);
   }, [serverTimeZone]);
   return <ViewerTimeZoneContext.Provider value={timeZone}>{children}</ViewerTimeZoneContext.Provider>;
 }
