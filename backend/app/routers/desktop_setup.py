@@ -12,7 +12,7 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rate_limit import open_setup_limiter
@@ -49,6 +49,7 @@ _STATUS = {
     "service_unavailable": 503,
     "human_stage_needs_member": 422,
     "no_agent_role": 422,
+    "recipe_too_large": 422,
 }
 
 
@@ -88,19 +89,22 @@ async def post_setup_code(request: Request, response: Response, body: SetupCodeR
     return SetupCodeResponse(code=code, expires_at=expires_at, setup_id=setup_id, event_token=event_token)
 
 
+# abuse caps for the request body (generous — the product's own limits are judged with a closed code, PO 06:04Z)
+ROLE_FIELD_CAP = 1000
+ROLES_FIELD_CAP = 500
+
+
 class RoleIn(BaseModel):
     """One setup row: `{role, runtime}` — a new agent on that runtime — or `{role, owner: "me"}` — the person confirming holds
-    it (an either row only · Qadir 4834 · PO 05:21Z ⒜). Exactly one of the two; the rows themselves are checked by
-    bind_setup_roles."""
-    role: str = Field(min_length=1, max_length=200)  # a recipe role (stage_metadata[stage].role), not a stage
-    runtime: Literal["claude", "codex"] | None = None
-    owner: Literal["me"] | None = None
+    it (an either row only · Qadir 4834 · PO 05:21Z ⒜). Exactly one of the two.
 
-    @model_validator(mode="after")
-    def _runtime_or_owner(self) -> "RoleIn":
-        if (self.runtime is None) == (self.owner is None):
-            raise ValueError("a role takes a runtime or owner 'me', exactly one")
-        return self
+    PO 06:04Z — the schema only caps sizes against abuse (generous); every rule a person can break — exactly one of runtime /
+    owner, a known runtime, a repeated role, the product's limits — is judged by bind_setup_roles with a closed code
+    (roles_invalid · recipe_too_large), so the web never has to read a generic 422's `loc` to tell a body defect from a recipe
+    that is too large."""
+    role: str = Field(max_length=ROLE_FIELD_CAP)  # a recipe role (stage_metadata[stage].role), not a stage
+    runtime: str | None = Field(default=None, max_length=32)
+    owner: str | None = Field(default=None, max_length=32)
 
 
 # Qadir 4825 (PO 09:45Z) — the setup code travels in bodies only, never in a URL: a path is written to the access log and the
@@ -113,7 +117,7 @@ class ConfirmRequest(BaseModel):
     code: str = SETUP_CODE_FIELD
     project_id: uuid.UUID
     recipe_id: uuid.UUID
-    roles: list[RoleIn] = Field(max_length=50)
+    roles: list[RoleIn] = Field(max_length=ROLES_FIELD_CAP)  # abuse cap only — the product limit is recipe_too_large
     # the folder chosen on the web, handed back as is in the exchange (≤200 · no control characters); the desktop app judges
     # the path itself (under home · no `..`), the server does not
     workdir_hint: str | None = Field(default=None, max_length=200)

@@ -61,7 +61,8 @@ _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 
 class DesktopSetupError(Exception):
     """A closed code: request_invalid · service_unavailable · code_not_found · code_expired · code_used · code_not_confirmed_yet · verifier_mismatch ·
-    already_confirmed · not_org_admin · recipe_not_found · roles_invalid · no_agent_role · human_stage_needs_member · setup_not_found."""
+    already_confirmed · not_org_admin · recipe_not_found · roles_invalid · recipe_too_large · no_agent_role · human_stage_needs_member ·
+    setup_not_found."""
 
     def __init__(self, code: str, detail: str | None = None):
         super().__init__(detail or code)
@@ -181,12 +182,22 @@ class RoleBinding:
     agent_runtimes: dict[str, str]
 
 
+# the product's limits for one setup (PO 06:04Z: judged here with recipe_too_large, not by the request schema)
+SETUP_MAX_ROLES = 50
+SETUP_ROLE_NAME_MAX = 200
+
+
 def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
     """The one place a confirmation body is checked against a recipe's setup rows (`setup_role_rows`) — every confirmation
     route uses it. A human row is never sent (it is the person); an agent row needs a runtime; an either row takes a runtime or
     owner «me». Anything else (an unknown or repeated role, a human row sent, «me» on an agent row, both or neither of runtime
     and owner, a row left out) → roles_invalid. When no row is left for an agent → no_agent_role: the setup exists to start
-    agents on this device (a person-only flow makes none)."""
+    agents on this device (a person-only flow makes none). More rows than SETUP_MAX_ROLES or a role name longer than
+    SETUP_ROLE_NAME_MAX (in the body or the recipe) → recipe_too_large."""
+    if len(roles) > SETUP_MAX_ROLES or len(rows) > SETUP_MAX_ROLES or any(
+        len(r.role) > SETUP_ROLE_NAME_MAX for r in roles
+    ) or any(len(r["role"]) > SETUP_ROLE_NAME_MAX for r in rows):
+        raise DesktopSetupError("recipe_too_large", f"up to {SETUP_MAX_ROLES} roles of up to {SETUP_ROLE_NAME_MAX} characters")
     order = [r["role"] for r in rows]
     kind = {r["role"]: r["kind"] for r in rows}
     person = {r["role"] for r in rows if r["kind"] == "human"}

@@ -1233,11 +1233,29 @@ async def test_the_setup_row_rules_for_me_and_runtime(world):
         ):
             r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": loop, "roles": roles})
             assert (r.status_code, r.json()["error"]["code"]) == (422, "roles_invalid"), roles
-        # a row with both a runtime and «me», or neither → the body is refused as a whole
-        for row in ({"role": "Maker", "runtime": "claude", "owner": "me"}, {"role": "Maker"}):
-            r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": two_step,
-                                              "roles": [row, {"role": "Reviewer", "runtime": "codex"}]})
-            assert r.status_code == 422, (row, r.text)
+        # PO 06:04Z — every body defect is a closed code the web can read (never a generic 422 whose `loc` says «roles»):
+        # both runtime and «me» · neither · a runtime the app does not have · an owner other than «me» · a repeated role
+        reviewer = {"role": "Reviewer", "runtime": "codex"}
+        for roles in (
+            [{"role": "Maker", "runtime": "claude", "owner": "me"}, reviewer],
+            [{"role": "Maker"}, reviewer],
+            [{"role": "Maker", "runtime": "vim"}, reviewer],
+            [{"role": "Maker", "owner": "you"}, reviewer],
+            [{"role": "Maker", "runtime": "claude"}, reviewer, {"role": "Maker", "runtime": "claude"}],
+        ):
+            r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": two_step, "roles": roles})
+            assert (r.status_code, r.json()["error"]["code"]) == (422, "roles_invalid"), roles
+        # the product's limits: more than 50 rows · a role name over 200 characters → recipe_too_large
+        for roles in (
+            [{"role": f"Role{i}", "runtime": "claude"} for i in range(51)],
+            [{"role": "M" * 201, "runtime": "claude"}, reviewer],
+        ):
+            r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": two_step, "roles": roles})
+            assert (r.status_code, r.json()["error"]["code"]) == (422, "recipe_too_large"), len(roles)
+        # beyond the abuse caps the schema itself refuses (generous — no product rule lives there)
+        r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": two_step,
+                                          "roles": [{"role": "x", "runtime": "claude"}] * 501})
+        assert r.status_code == 422
     assert await _counts() == before, "nothing was made by a refused confirmation"
 
 
