@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
+import { getViewerTimeZone } from '@/i18n/request';
+import { ViewerTimeZoneProvider } from '@/components/viewer-time-zone';
 import { ThemeProvider } from '@/components/providers/theme-provider';
 import { ContentPaintedSignal } from '@/components/providers/content-painted-signal';
 import { FetchGateInstaller } from '@/components/providers/fetch-gate-installer';
@@ -68,6 +70,7 @@ export default async function RootLayout({
 }>) {
   const locale = await getLocale();
   const messages = await getMessages();
+  const viewerTimeZone = await getViewerTimeZone(); // story #4443 — null on a first visit
 
   return (
     <html
@@ -92,7 +95,7 @@ export default async function RootLayout({
           disableTransitionOnChange
         >
           <NextIntlClientProvider locale={locale} messages={messages}>
-            {children}
+            <ViewerTimeZoneProvider serverTimeZone={viewerTimeZone}>{children}</ViewerTimeZoneProvider>
           </NextIntlClientProvider>
         </ThemeProvider>
       </body>
