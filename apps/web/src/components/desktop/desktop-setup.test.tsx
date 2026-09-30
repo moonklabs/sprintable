@@ -140,7 +140,7 @@ describe('[SID:4427] desktop setup page', () => {
     expect(failureForCode('code_used')).toBe('expired');
     expect(failureForCode('roles_invalid')).toBe('recipes-changed');
     expect(failureForCode('recipe_too_large')).toBe('recipe-too-big');
-    expect(failureForCode('no_agent_role')).toBe('no-agent');
+    expect(failureForCode('no_agent_role')).toBe('recipes-changed');
     expect(failureForCode('PLAN_LIMIT_EXCEEDED', 'agent')).toBe('agent-limit');
     expect(failureForCode('PLAN_LIMIT_EXCEEDED', 'storage')).toBeNull();
     expect(failureForCode(undefined)).toBeNull();
@@ -381,13 +381,13 @@ describe('[SID:4427] either rows can be «나» · no agent row · the recipe ov
     expect(startButton().disabled).toBe(false);
   });
 
-  it('the server still says no_agent_role → the same ① screen', async () => {
+  it('the server still says no_agent_role → «레시피가 달라졌어요» (agents were found, so ① would be false · Yuna · PO 06:52Z)', async () => {
     stub(() => new Response(JSON.stringify({ data: null, error: { code: 'no_agent_role' } }), { status: 422 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     await act(async () => { startButton().click(); });
-    expect(failureForCode('no_agent_role')).toBe('no-agent');
-    expect(text()).toContain('이 컴퓨터에서 에이전트를 찾지 못했어요');
-    expect(text()).not.toContain('잠시 뒤');
+    expect(text()).toContain('레시피가 달라졌어요');
+    expect(text()).not.toContain('이 컴퓨터에서 에이전트를 찾지 못했어요');
+    expect([...container.querySelectorAll('button')].map((x) => x.textContent)).toEqual(['레시피 다시 불러오기']);
   });
 
   it('a recipe over the request limits (422 recipe_too_large) → «이 레시피는 여기서 시작할 수 없어요» [레시피 다시 고르기] back to the choice; no retry, no «잠시 뒤»; another 422 body fault is not this card', async () => {

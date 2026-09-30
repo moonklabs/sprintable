@@ -59,16 +59,16 @@ export function failureForCode(code: string | undefined, resource?: string): Set
     case 'code_expired':
     case 'code_used':
       return 'expired';
-    // no row left for an agent (PO 05:21Z ⒜): the page stops this before «시작»; if it still comes, the same ①
-    case 'no_agent_role':
-      return 'no-agent';
     // the recipe is over the confirm body's limits (more than 50 roles · a role name over 200 characters): trying again gives
     // the same answer, so «다른 레시피», not «잠시 뒤 다시» (Kadir 4834 · PO 05:21Z · Didi 4838's closed code · Yuna v20)
     case 'recipe_too_large':
       return 'recipe-too-big';
     // the rows the page sent no longer match the recipe (the web never sends a row outside the list it was given): the list
-    // changed since the page read it — read it again and choose, never «잠시 뒤 다시» (PO 06:08Z)
+    // changed since the page read it — read it again and choose, never «잠시 뒤 다시» (PO 06:08Z). no_agent_role is the same
+    // case: the page keeps «시작» off with no agent row, so it only comes when the recipe changed meanwhile — ① («에이전트를
+    // 찾지 못했어요») would be false there, agents were found (Yuna · PO 06:52Z)
     case 'roles_invalid':
+    case 'no_agent_role':
       return 'recipes-changed';
     default:
       return null;
