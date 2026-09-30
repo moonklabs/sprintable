@@ -65,7 +65,7 @@ describe('[SID:4427] desktop setup page rules', () => {
     expect(confirmBody(CODE, rows, 'p', 'v', '~/x').roles).toEqual([{ role: 'Creator', runtime: 'claude' }]);
   });
 
-  it('confirm carries {role, runtime} for agent rows only; people rows are bound by the BE to whoever pressed «시작»', () => {
+  it('confirm carries {role, runtime} for agent rows and {role, owner: me} for an either row set to «나»; human-only rows are not sent (the BE binds them to whoever pressed «시작» · PO 05:21Z ⒜)', () => {
     const rows = setupRoleRows(recipe, ['claude', 'codex']);
     const draft = rows.find((r) => r.role === '작성')!;
     draft.owner = { kind: 'agent', runtime: 'codex' };
@@ -76,15 +76,23 @@ describe('[SID:4427] desktop setup page rules', () => {
       workdir_hint: '~/Sprintable/마케팅 루프',
     });
     draft.owner = { kind: 'me' };
-    expect(confirmBody(CODE, rows, 'p', 'r', '~/x').roles).toEqual([{ role: '조사', runtime: 'claude' }]);
+    expect(confirmBody(CODE, rows, 'p', 'r', '~/x').roles).toEqual([{ role: '조사', runtime: 'claude' }, { role: '작성', owner: 'me' }]);
+    expect(confirmBody(CODE, rows, 'p', 'r', '~/x').roles.some((x) => x.role === '연출')).toBe(false); // the human row
     expect(agentRowCount(rows)).toBe(1);
   });
 
-  it('nothing found: an agent-only role cannot start (failure ①); a recipe with only people roles can', () => {
-    expect(needsAnAgent(setupRoleRows(recipe, []), [])).toBe(true);
-    expect(needsAnAgent(setupRoleRows(recipe, ['claude']), ['claude'])).toBe(false);
+  it('no row bound to an agent → cannot start: nothing found, or every either row set to «나» (the BE says no_agent_role)', () => {
+    expect(needsAnAgent(setupRoleRows(recipe, []))).toBe(true);
+    const found = setupRoleRows(recipe, ['claude']);
+    expect(needsAnAgent(found)).toBe(false);
+    const eitherOnly: SetupRecipe = { ...recipe, roles: [{ role: '작성', kind: 'either', stages: ['draft'] }] };
+    const rows = setupRoleRows(eitherOnly, ['claude']);
+    expect(needsAnAgent(rows)).toBe(false);
+    rows[0]!.owner = { kind: 'me' };
+    expect(needsAnAgent(rows)).toBe(true);
+    // a people-only recipe has nothing to start here (it is never listed — listableRecipe)
     const peopleOnly: SetupRecipe = { ...recipe, roles: [{ role: '연출', kind: 'human', stages: ['review'] }] };
-    expect(needsAnAgent(setupRoleRows(peopleOnly, []), [])).toBe(false);
+    expect(needsAnAgent(setupRoleRows(peopleOnly, []))).toBe(true);
   });
 
   it('working folder: the default from the recipe name; empty / «~» blocked before «시작» (the app decides the rest)', () => {

@@ -54,6 +54,8 @@ export interface SetupRecipe {
   key: string;
   name: string;
   description?: string | null;
+  /** null = a platform preset (named in the viewer's language by key — presetName); an organization's own recipe otherwise. */
+  org_id?: string | null;
   roles: SetupRecipeRole[];
 }
 
@@ -85,9 +87,11 @@ export function listableRecipe(recipe: SetupRecipe, displayName: string): boolea
   return !!name && name !== recipe.key && recipe.roles.some((r) => r.kind !== 'human');
 }
 
-/** 찾은 에이전트 없이 에이전트만 맡을 수 있는 줄이 있으면 시작할 수 없다(실패 ①). */
-export function needsAnAgent(rows: readonly SetupRoleRow[], runtimes: readonly DesktopRuntime[]): boolean {
-  return runtimes.length === 0 && rows.some((r) => r.actor === 'agent');
+/** 에이전트에 묶인 줄이 하나도 없으면 시작할 수 없다. */
+export function needsAnAgent(rows: readonly SetupRoleRow[]): boolean {
+  // no row bound to an agent — agent rows with nothing found, or either rows all set to «나» (PO 05:21Z ⒜ · the server
+  // refuses the same with no_agent_role: this setup exists to start agents on this device)
+  return !rows.some((r) => r.owner.kind === 'agent');
 }
 
 /** «에이전트 N개» — 에이전트가 맡는 줄 수(= 새로 만들 에이전트 수). */
@@ -117,18 +121,21 @@ export interface ConfirmBody {
   project_id: string;
   recipe_id: string;
   /** 에이전트 단위 = 역할(PO 08:31Z · 4825 CHANGES): 한 역할이 여러 stage를 맡아도 에이전트 하나. */
-  roles: { role: string; runtime: DesktopRuntime }[];
+  /** `{role, runtime}` = a new agent · `{role, owner: 'me'}` = the person confirming holds an either row (PO 05:21Z ⒜). Human
+   * rows are not sent (the server binds them to the person). */
+  roles: ({ role: string; runtime: DesktopRuntime } | { role: string; owner: 'me' })[];
   workdir_hint: string;
 }
 
-/** 확인 요청(4424 confirm) — 에이전트가 맡는 역할마다 {role, runtime}(역할 하나 = 에이전트 하나). 사람이 맡는 줄은 싣지
- * 않는다(BE가 확인을 누른 사람에게 묶는다 — PO 07:14Z). */
+/** 확인 요청(4424 confirm) — 에이전트가 맡는 역할마다 {role, runtime}(역할 하나 = 에이전트 하나), «나»를 고른 either 줄은
+ * {role, owner: 'me'}. 사람만 맡는 줄은 싣지 않는다(BE가 확인을 누른 사람에게 묶는다 — PO 07:14Z). */
 export function confirmBody(code: string, rows: readonly SetupRoleRow[], projectId: string, recipeId: string, workdirHint: string): ConfirmBody {
   return {
     code,
     project_id: projectId,
     recipe_id: recipeId,
-    roles: rows.flatMap((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime }] : [])),
+    roles: rows.flatMap<ConfirmBody['roles'][number]>((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime }]
+      : r.actor === 'either' ? [{ role: r.role, owner: 'me' as const }] : [])),
     workdir_hint: workdirHint.trim(),
   };
 }

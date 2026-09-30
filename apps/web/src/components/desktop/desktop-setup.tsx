@@ -31,7 +31,7 @@ const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', c
 // code.claude.com/docs/en/setup and github.com/openai/codex)
 const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
-export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline';
+export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big';
 
 /** 실패 화면 문구 키 — `Record<string, string>` 리터럴 표(키 가드가 이 모양의 값을 «읽힘»으로 센다). */
 const FAILURE_KEY: Record<string, string> = {
@@ -43,6 +43,8 @@ const FAILURE_KEY: Record<string, string> = {
   'managed.title': 'failure.managed.title', 'managed.body': 'failure.managed.body', 'managed.action': 'failure.managed.action',
   'no-recipe.title': 'failure.no-recipe.title', 'no-recipe.body': 'failure.no-recipe.body', 'no-recipe.action': 'failure.no-recipe.action',
   'recipes-offline.title': 'failure.recipes-offline.title', 'recipes-offline.body': 'failure.recipes-offline.body', 'recipes-offline.action': 'failure.recipes-offline.action',
+  // the button is ③'s «레시피 다시 고르기» (Yuna v20: the same action, the same words)
+  'recipe-too-big.title': 'failure.recipe-too-big.title', 'recipe-too-big.body': 'failure.recipe-too-big.body', 'recipe-too-big.action': 'failure.agent-limit.action',
 };
 
 /** confirm 오류 코드(4424 닫힌 목록) → 실패 화면. 목록 밖 코드는 null(화면이 지어내지 않는다 — 한 줄 일반 문구). */
@@ -56,9 +58,23 @@ export function failureForCode(code: string | undefined, resource?: string): Set
     case 'code_expired':
     case 'code_used':
       return 'expired';
+    // no row left for an agent (PO 05:21Z ⒜): the page stops this before «시작»; if it still comes, the same ①
+    case 'no_agent_role':
+      return 'no-agent';
     default:
       return null;
   }
+}
+
+/**
+ * The recipe is over the confirm body's limits (more than 50 roles · a role name over 200 characters — the request schema's
+ * own 422, which has no error code, only FastAPI's `detail` list pointing at `roles`). Trying again gives the same answer, so
+ * this is not «잠시 뒤 다시» but «다른 레시피» (Kadir 4834 · PO 05:21Z · Yuna v20).
+ */
+export function isRecipeOverLimits(status: number, body: unknown): boolean {
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  return status === 422 && Array.isArray(detail)
+    && detail.some((d) => Array.isArray((d as { loc?: unknown }).loc) && ((d as { loc: unknown[] }).loc).includes('roles'));
 }
 
 /** ③ 한도의 수는 서버 오류가 준 값만(유나 표) — 이번 설정에 필요한 수와 더 만들 수 있는 수가 둘 다 있을 때만 수 문장. */
@@ -154,6 +170,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       });
       if (res.ok) { setView({ kind: 'started' }); return; }
       const body = await res.json().catch(() => null);
+      if (isRecipeOverLimits(res.status, body)) { setView({ kind: 'failed', failure: 'recipe-too-big' }); return; }
       const failure = failureForCode(body?.error?.code, body?.error?.resource);
       setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null } : { kind: 'error' });
     } catch {
@@ -166,14 +183,17 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   if (view.kind === 'failed') {
     const onRetry = view.retry === 'load' ? reload : view.failure === 'offline' ? () => void start() : undefined;
     return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={onRetry}
-      onChooseRecipe={view.failure === 'agent-limit' ? () => setView({ kind: 'choose' }) : undefined} />;
+      onChooseRecipe={view.failure === 'agent-limit' || view.failure === 'recipe-too-big' ? () => setView({ kind: 'choose' }) : undefined} />;
   }
   // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
-  if (runtimes.length === 0 && needsAnAgent(rows, runtimes)) return <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
+  if (runtimes.length === 0 && needsAnAgent(rows)) return <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
   if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} />;
 
   const setOwner = (role: string, key: string) => setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
-  const canStart = !!recipe && !!projectId && workdirInputOk(workdir) && view.kind === 'choose';
+  // agents found but every either row set to «나»: «시작» off with the reason in the count line's place (Yuna v21 — n = 0 there
+  // would be false); the server refuses the same with no_agent_role
+  const noAgentRow = needsAnAgent(rows);
+  const canStart = !!recipe && !!projectId && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose';
 
   return (
     <Card className="break-keep flex flex-col gap-6 p-6">
@@ -241,7 +261,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{t('start')}
         </Button>
         <p className="text-xs text-muted-foreground">
-          {humanRoles.length > 0 ? t('startNoteWithMe', { n: agents, roles: humanList, josa: pickEunNeunJosa(humanList) }) : t('startNote', { n: agents })}
+          {noAgentRow ? t('noAgentRow')
+            : humanRoles.length > 0 ? t('startNoteWithMe', { n: agents, roles: humanList, josa: pickEunNeunJosa(humanList) }) : t('startNote', { n: agents })}
         </p>
         {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
             commands · other tools still ask each time */}
@@ -278,6 +299,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
           : failure === 'expired' ? appButton(t(key('action')))
           : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
           : failure === 'not-admin' || failure === 'managed' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
+          : failure === 'recipe-too-big' && onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
             <Button variant="outline" asChild><a href={flatHref('/organization/workforce')}>{t('failure.agent-limit.manage')}</a></Button>

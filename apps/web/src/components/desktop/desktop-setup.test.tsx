@@ -348,6 +348,78 @@ const status = (state: string, sig: Partial<Sig> = {}) => ({
   signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null, ...sig },
 });
 
+describe('[SID:4427] either rows can be «나» · no agent row · the recipe over the request limits (Kadir 4834 · PO 05:21Z ⒜ · Yuna v20/v21)', () => {
+  const setOwnerSelect = async (role: string, value: string) => {
+    const sel = container.querySelector(`select[aria-label*="${role}"]`) as HTMLSelectElement;
+    await act(async () => { sel.value = value; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+  };
+  const chooseLabel = '레시피 다시 고르기';
+
+  it('an either row set to «나» goes in the body as {role, owner: me}; the human-only row still is not sent', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await setOwnerSelect('작성', 'me');
+    calls = [];
+    await act(async () => { startButton().click(); });
+    const sent = calls.find((c) => c.url.includes('/api/desktop/setup-codes/'))!.body as { roles: unknown[] };
+    expect(sent.roles).toEqual([{ role: '조사', runtime: 'claude' }, { role: '작성', owner: 'me' }]);
+  });
+
+  it('agents found but every either row set to «나»: «시작» off and the count line becomes the reason (not ①)', async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [{ id: 'rec-e', key: 'org.either', name: '둘 다 되는 한 명', roles: [{ role: '작성', kind: 'either', stages: ['draft'] }] }] }), { status: 200 });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(startButton().disabled).toBe(false);
+    await setOwnerSelect('작성', 'me');
+    expect(startButton().disabled).toBe(true);
+    expect(text()).toContain('에이전트가 맡는 역할이 하나는 있어야 시작할 수 있어요 — 역할 하나를 에이전트로 바꿔 주세요.');
+    expect(text()).not.toContain('에이전트 0개');
+    expect(text()).not.toContain('에이전트를 찾지 못했어요');
+    await setOwnerSelect('작성', 'claude');
+    expect(startButton().disabled).toBe(false);
+  });
+
+  it('the server still says no_agent_role → the same ① screen', async () => {
+    stub(() => new Response(JSON.stringify({ data: null, error: { code: 'no_agent_role' } }), { status: 422 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await act(async () => { startButton().click(); });
+    expect(failureForCode('no_agent_role')).toBe('no-agent');
+    expect(text()).toContain('이 컴퓨터에서 에이전트를 찾지 못했어요');
+    expect(text()).not.toContain('잠시 뒤');
+  });
+
+  it('a recipe over the request limits (422 · detail on roles) → «이 레시피는 여기서 시작할 수 없어요» [레시피 다시 고르기] back to the choice; no retry, no «잠시 뒤»', async () => {
+    for (const loc of [['body', 'roles'], ['body', 'roles', 3, 'role']]) {
+      stub(() => new Response(JSON.stringify({ detail: [{ type: 'too_long', loc, msg: 'x' }] }), { status: 422 }));
+      await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      await act(async () => { startButton().click(); });
+      expect(text()).toContain('이 레시피는 여기서 시작할 수 없어요');
+      expect(text()).toContain('역할이 너무 많거나 역할 이름이 너무 길어요. 다른 레시피를 골라 주세요.');
+      const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+      expect(buttons).toEqual([chooseLabel]);
+      await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === chooseLabel)!.click(); });
+      expect(container.querySelector('input[name=recipe]')).not.toBeNull();
+    }
+    // another 422 without a roles pointer is not taken for this card
+    stub(() => new Response(JSON.stringify({ detail: [{ type: 'string_too_long', loc: ['body', 'workdir_hint'], msg: 'x' }] }), { status: 422 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await act(async () => { startButton().click(); });
+    expect(text()).not.toContain('이 레시피는 여기서 시작할 수 없어요');
+  });
+
+  it('a platform preset (org_id null) is named in the viewer\'s language; an organization\'s recipe keeps its own name', async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [
+      { id: 'p-1', key: 'preset.workflow.two_step', name: 'Two step (raw)', org_id: null, roles: [{ role: '조사', kind: 'agent', stages: ['a'] }] },
+      { id: 'o-1', key: 'preset.workflow.two_step', name: '우리 팀 두 단계', org_id: 'org-1', roles: [{ role: '조사', kind: 'agent', stages: ['a'] }] },
+    ] }), { status: 200 });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(text()).toContain('제출·검토');
+    expect(text()).not.toContain('Two step (raw)');
+    expect(text()).toContain('우리 팀 두 단계');
+  });
+});
+
 describe('[SID:4427] after «시작» — progress from the setup status (PO 12:25Z rules · Yuna v13 copy)', () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'Date'] }); vi.setSystemTime(Date.parse('2026-09-30T00:00:00Z')); });
   afterEach(() => { vi.useRealTimers(); });
