@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  endsWithAgentWord,
   activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
   setupProgress, listableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
@@ -282,6 +283,29 @@ describe('[SID:4433] an agent that stopped before the first result — the progr
     const q = setupProgress(base({ tools_connected: [{ member_id: 'm1', at: 'x' }], agents_ended: [ended('m2', 5_000, 'codex')] }), T0 + 10_000, T0);
     expect(q.stillPreparing).toEqual([]);
     expect(q.readyDrawn).toBe('done');
+  });
+
+  // Yuna v29 · PO 15:59Z: a step spins only while something moves
+  it('one agent and it stopped → ① and ② (and ③) do not spin · two agents, one stopped → the steps the other waits for still spin', () => {
+    const one = { ...base({ first_task_handed_at: null, agents_ended: [ended('m1', 5_000, 'claude')] }), members: base().members.filter((m) => m.member_id !== 'm2') };
+    expect(setupProgress(one, T0 + 10_000, T0)).toMatchObject({ readyPaused: true, handedPaused: true });
+    // two agents, not connected, the second (Publisher) stopped: ① still waits for Creator · ② waits for Creator (first) → both spin
+    const second = base({ first_task_handed_at: null, agents_ended: [ended('m2', 5_000, 'codex')] });
+    expect(setupProgress(second, T0 + 10_000, T0)).toMatchObject({ readyPaused: false, handedPaused: false });
+    // the first (Creator) stopped, Publisher connected: all that ① waits for stopped · ② waits for Creator → both still
+    const first = base({ first_task_handed_at: null, tools_connected: [{ member_id: 'm2', at: 'x' }], agents_ended: [ended('m1', 5_000, 'claude')] });
+    expect(setupProgress(first, T0 + 10_000, T0)).toMatchObject({ readyPaused: true, handedPaused: true });
+    // started again → spinning as before
+    const again = base({ first_task_handed_at: null, agents_ended: [ended('m1', 5_000, 'claude', 7_000)] });
+    expect(setupProgress({ ...again, members: one.members }, T0 + 10_000, T0)).toMatchObject({ readyPaused: false, handedPaused: false });
+    // nothing stopped → nothing still
+    expect(setupProgress(base({ first_task_handed_at: null }), T0, T0)).toMatchObject({ readyPaused: false, handedPaused: false });
+  });
+
+  it('a role name already ending in «에이전트» (ko) · «agent» / «에이전트» (en, any case) gets no second one', () => {
+    for (const [name, locale, yes] of [['에이전트', 'ko', true], ['블로그 에이전트', 'ko', true], ['블로그에이전트', 'ko', true], ['Writer', 'ko', false], ['Research agent', 'ko', false],
+      ['에이전트', 'en', true], ['Research Agent', 'en', true], ['agent', 'en', true], ['Writer', 'en', false], ['Agency', 'en', false], ['에이전트 ', 'ko', true]] as const)
+      expect(endsWithAgentWord(name, locale), `${name} · ${locale}`).toBe(yes);
   });
 
   it('an unreadable time is left out (never a block from a broken row)', () => {
