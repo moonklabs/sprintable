@@ -18,7 +18,7 @@ import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
 import { onboardingRedirect } from '@/lib/auth/onboarding-next';
 import { formatLocaleDate } from '@/lib/i18n';
 import {
-  agentRowCount, confirmBody, newOrgConfirmBody, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -265,7 +265,12 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       const body = await res.json().catch(() => null);
       const error = body?.error as { code?: string; resource?: string } | undefined;
       // (나) an invite arrived between the page's look and «시작» (the server checks again): the invite card, nothing made
-      if (newOrg && error?.code === 'pending_invites') { await readInvites(); return; }
+      if (newOrg && error?.code === 'pending_invites') {
+        await readInvites();
+        // the invite was withdrawn meanwhile and the list came back empty: the choice again, never a «시작 중» that never ends (4429 ④)
+        setView((v) => (v.kind === 'starting' ? { kind: 'choose' } : v));
+        return;
+      }
       // (나) the words the one-screen «조직 만들기» uses for the same refusals (4832 · Yuna: «같은 오류는 같은 말»)
       const limit = typeof (error as { limit?: unknown } | undefined)?.limit === 'number' ? (error as { limit: number }).limit : 1;
       const message = !newOrg ? null
@@ -287,7 +292,16 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
     const onRetry = view.retry === 'load' ? reload : view.failure === 'offline' ? () => void start() : undefined;
-    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={onRetry}
+    // «이미 조직이 있어요» [다시 불러오기]: reload with the setup values put back into the fragment — they are only in memory now
+    // (the page took them off the address), and a bare reload showed «데스크톱 앱에서 열어 주세요» (4429 ②)
+    const onReloadPage = view.failure === 'has-org'
+      // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
+      ? () => {
+        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked }));
+        window.location.reload();
+      }
+      : undefined;
+    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={onRetry} onReloadPage={onReloadPage}
       onChooseRecipe={view.failure === 'agent-limit' || view.failure === 'recipe-too-big' ? () => setView({ kind: 'choose' }) : undefined} />;
   }
   // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
@@ -402,7 +416,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   );
 }
 
-export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; onChooseRecipe?: () => void }) {
+export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onReloadPage }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; onChooseRecipe?: () => void; onReloadPage?: () => void }) {
   const t = useTranslations('desktop.setup');
   const flatHref = useFlatHref();
   const key = (part: 'title' | 'body' | 'action') => FAILURE_KEY[`${failure}.${part}`]!;
@@ -427,7 +441,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
         {failure === 'no-agent' ? appButton(t(key('action')))
           : failure === 'expired' ? appButton(t(key('action')))
           : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline' || failure === 'recipes-changed') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
-          : failure === 'not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
+          : failure === 'not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={onReloadPage ?? (() => window.location.reload())}>{t(key('action'))}</Button>
           : failure === 'recipe-too-big' && onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}

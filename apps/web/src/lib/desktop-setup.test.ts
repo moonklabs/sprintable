@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
-  agentRowCount, confirmBody, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
   setupProgress, listableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
 } from './desktop-setup';
 
@@ -205,5 +205,16 @@ describe('[SID:4427] what the setup page lists and strips (dev 실측 15:31Z · 
     expect(hasSetupFragment('#section-2')).toBe(false);
     expect(hasSetupFragment('#decode=x')).toBe(false);
     expect(hasSetupFragment('')).toBe(false);
+  });
+});
+
+describe('[SID:4429] setupFragment — the fragment a reload puts back', () => {
+  it('reads back as the same values (code · runtimes · setup · blocked) and carries nothing else', () => {
+    const q = { code: `${'A'.repeat(20)}_-${'b'.repeat(21)}`, runtimes: ['claude', 'codex'] as ('claude' | 'codex')[], setupId: 's-1', blocked: ['codex'] as ('claude' | 'codex')[] };
+    const f = setupFragment(q);
+    expect(f.startsWith('#')).toBe(true);
+    expect(parseSetupFragment(f)).toEqual(q);
+    expect(parseSetupFragment(setupFragment({ ...q, setupId: null, blocked: [] }))).toEqual({ ...q, setupId: null, blocked: [] });
+    expect([...new URLSearchParams(f.slice(1)).keys()].sort()).toEqual(['blocked', 'code', 'runtimes', 'setup']);
   });
 });

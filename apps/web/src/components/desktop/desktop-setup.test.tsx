@@ -724,6 +724,39 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     }
   });
 
+  it('4429 ④: 409 pending_invites but the invites read again come back empty → not stuck on «시작 중»: the choice comes back and «시작» works again', async () => {
+    confirmNow = () => new Response(JSON.stringify({ data: null, error: { code: 'pending_invites' } }), { status: 409 });
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await act(async () => { startButton().click(); });
+    await flush();
+    // the invite was withdrawn meanwhile: the new-organization choice again, not a spinner that never ends
+    expect(container.querySelector('[data-testid=setup-invited]')).toBeNull();
+    expect(startButton()).toBeTruthy();
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-new-org]')).not.toBeNull();
+  });
+
+  it('4429 ②: «이미 조직이 있어요» [다시 불러오기] reloads WITH the setup values in the fragment (they are only in memory — a bare reload lost them and showed «앱에서 열기»)', async () => {
+    const order: string[] = [];
+    const reload = vi.fn(() => { order.push('reload'); });
+    vi.stubGlobal('location', { ...window.location, pathname: '/desktop/setup', search: '', hash: '', reload } as unknown as Location);
+    let replaced = '';
+    const replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation((_s, _t, url) => { replaced = String(url); order.push('replace'); });
+    confirmNow = () => new Response(JSON.stringify({ data: null, error: { code: 'has_organization' } }), { status: 409 });
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId="s-1" blocked={['codex']} />);
+    await act(async () => { startButton().click(); });
+    await flush();
+    await act(async () => { button('다시 불러오기')!.click(); });
+    expect(order).toEqual(['replace', 'reload']); // the values go back into the address first, then the reload
+    expect(replaced.startsWith('/desktop/setup#')).toBe(true);
+    expect(replaced).not.toMatch(/\?.*code=/); // only in the fragment, never a query
+    const q = new URLSearchParams(replaced.split('#')[1]);
+    expect([q.get('code'), q.get('setup'), q.get('runtimes'), q.get('blocked')]).toEqual([CODE, 's-1', 'claude,codex', 'codex']);
+    replaceState.mockRestore();
+  });
+
   it('with an organization the page never asks for invites and reads the usual list', async () => {
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
