@@ -234,7 +234,7 @@ async def post_confirm_new_org(
     try:
         setup_id, members, work_item_id, org_id, project_id = await confirm_setup_new_org(
             db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, recipe_id=body.recipe_id,
-            roles=[RoleChoice(role=r.role, runtime=r.runtime) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
             background_tasks=background_tasks,
         )
     except DesktopSetupError as e:

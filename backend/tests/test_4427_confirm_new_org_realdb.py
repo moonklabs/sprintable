@@ -609,3 +609,67 @@ async def test_a_slug_race_retried_inside_the_confirmation_still_makes_everythin
         assert agents == len(body["roles"]) and agents >= 1
     finally:
         await eng.dispose()
+
+
+# ─── an either row as «me» on the new-organization path (Didi 4838 · bind_setup_roles · PO 05:34Z) ─────────────────────
+
+
+async def _either_preset(roles_kinds: dict[str, str]) -> uuid.UUID:
+    """A platform preset (org_id NULL — the only kind a person without an organization can start) whose stages are held by
+    the given roles. Removed by the caller."""
+    import json
+
+    pid = uuid.uuid4()
+    stages = {f"s{i}": {"role": role} for i, role in enumerate(roles_kinds)}
+    schema = {"type": "object", "properties": {"stage": {"type": "string", "enum": list(stages)},
+                                               "work_item_type": {"type": "string"}, "work_item_id": {"type": "string"}}}
+    await _sql(
+        "INSERT INTO event_definitions (id,key,org_id,name,description,payload_schema,routing,block_template,stage_metadata,"
+        "role_actor_kinds,enabled,version) VALUES (:id,:key,NULL,:name,'d4427na',CAST(:ps AS jsonb),CAST(:r AS jsonb),"
+        "CAST('{}' AS jsonb),CAST(:sm AS jsonb),CAST(:rak AS jsonb),true,1)",
+        params={"id": str(pid), "key": f"preset.na_test.e{pid.hex[:8]}", "name": f"NA either {pid.hex[:6]}", "ps": json.dumps(schema),
+                "r": json.dumps({"escalation": {"kind": "server_derived", "target": "none"}, "broadcast": {"kind": "recipe_role_binding"}}),
+                "sm": json.dumps(stages), "rak": json.dumps(roles_kinds)},
+    )
+    return pid
+
+
+async def _drop_preset(pid: uuid.UUID) -> None:
+    await _sql(
+        "DELETE FROM recipe_role_bindings WHERE event_definition_key = (SELECT key FROM event_definitions WHERE id = :p)",
+        "DELETE FROM event_definitions WHERE id = :p",
+        params={"p": str(pid)},
+    )
+
+
+@pytest.mark.anyio
+async def test_an_either_row_chosen_as_me_is_held_by_the_new_organization_owner(world):
+    who = await world.person()
+    pid = await _either_preset({"Writer": "either", "Reviewer": "agent"})
+    try:
+        async with _client() as c:
+            code, _ = await _code(c)
+            body = {"recipe_id": str(pid), "roles": [{"role": "Writer", "owner": "me"}, {"role": "Reviewer", "runtime": "claude"}]}
+            r = await _confirm_new(c, code, who, body)
+            assert r.status_code == 200, r.text
+            kinds = {m["role"]: m["kind"] for m in r.json()["members"]}
+            assert kinds == {"Writer": "human", "Reviewer": "agent"}
+            agents = (await _sql(fetch="SELECT count(*) FROM members WHERE org_id=:o AND type='agent'", params={"o": r.json()["org_id"]}))[0][0]
+            assert agents == 1, "only the agent row makes an agent; «me» is the person"
+    finally:
+        await _drop_preset(pid)
+
+
+@pytest.mark.anyio
+async def test_every_row_the_persons_is_no_agent_role_and_nothing_is_made(world):
+    who = await world.person()
+    pid = await _either_preset({"Writer": "either"})
+    try:
+        async with _client() as c:
+            code, _ = await _code(c)
+            r = await _confirm_new(c, code, who, {"recipe_id": str(pid), "roles": [{"role": "Writer", "owner": "me"}]})
+            assert (r.status_code, r.json()["error"]["code"]) == (422, "no_agent_role")
+        assert await _nothing_made(who, ORG_NAME) == NOTHING
+    finally:
+        await _drop_preset(pid)
+
