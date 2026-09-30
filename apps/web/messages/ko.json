@@ -6541,7 +6541,8 @@
       "blockedClaudeNote": "Claude Code는 회사 설정 때문에 이 컴퓨터에서 Sprintable에 연결할 수 없어 Codex가 맡아요",
       "notConnected": {
         "title": "에이전트에 Sprintable이 아직 연결되지 않았어요",
-        "body": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. 터미널에서 작업 폴더를 믿을지 묻고 있다면 먼저 믿는다고 답해 주세요. 답했는데도 안 붙으면 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
+        "bodyClaude": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. Claude Code 터미널이 작업 폴더를 믿을지 묻고 있다면 ↓ 키로 «Yes, I trust this folder»를 고른 뒤 Enter를 눌러 주세요. 그래도 안 붙으면 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
+        "bodyOther": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
         "action": "다시 확인"
       },
       "failure": {
@@ -6618,7 +6619,7 @@
       "stepResultRunning": "첫 결과를 기다려요",
       "stepResultDone": "첫 결과가 나왔어요",
       "workdirFallback": "고른 폴더를 쓸 수 없어 기본 폴더(~/Sprintable/{recipe})에서 시작했어요 — 작업 폴더는 홈 폴더 안의 한 폴더여야 해요",
-      "trustHint": "처음 켤 때 에이전트가 작업 폴더를 믿을지 물을 수 있어요. 그러면 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널에서 믿는다고 답해 주세요 — 답하면 이어서 진행돼요.",
+      "trustHint": "Claude Code는 처음 켤 때 작업 폴더를 믿을지 물어요. 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널을 열고, ↓ 키로 «Yes, I trust this folder»를 고른 뒤 Enter를 눌러 주세요 — 그냥 Enter면 에이전트가 꺼져요.",
       "seeResult": "결과 보기",
       "seeResultReason": "결과가 나오면 눌러서 일감으로 가요",
       "noAgentRow": "에이전트가 맡는 역할이 하나는 있어야 시작할 수 있어요 — 역할 하나를 에이전트로 바꿔 주세요.",

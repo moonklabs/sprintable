@@ -299,6 +299,15 @@ export function lowercaseWordRefKey(r: Pick<LowercaseWordRef, 'key' | 'word'>): 
 //    stderr에 실제로 찍히는 로그 문자열 리터럴.
 //  - 브랜드명 예시(moonklabs)·시스템 기능명 리터럴(ping).
 export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // story #4427 (유나 v24 · PO 11:19Z) — Claude Code 터미널이 영어로 띄우는 믿기 선택지를 그대로 인용(«Yes, I trust this folder»):
+  // 사용자가 화살표로 **그 글자를 찾아 고르는** 자리라 옮기면 화면과 어긋난다(CLI 출력 리터럴 · 위 «stderr 로그 문자열» 부류).
+  // Claude Code 2.1.x 폴더 믿기 물음 선택지 원문 · CLI 문구가 바뀌면 같이 고침. PO 승인 2026-09-30 11:24Z.
+  'desktop.setup.trustHint::trust',
+  'desktop.setup.trustHint::this',
+  'desktop.setup.trustHint::folder',
+  'desktop.setup.notConnected.bodyClaude::trust',
+  'desktop.setup.notConnected.bodyClaude::this',
+  'desktop.setup.notConnected.bodyClaude::folder',
   // story #4359 — 버튼이 복사하는 셸 `export KEY=…` 줄의 명령어 그대로(유나 문구 판정 · PO 2026-09-27 22:42Z 전달).
   'agents.fakechatEnvCopyExport::export',
   'agents.toolPermissions.coreAlways::ping',

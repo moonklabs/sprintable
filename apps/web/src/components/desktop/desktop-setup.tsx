@@ -544,12 +544,13 @@ export function InvitedCard({ invites }: { invites: MyInvite[] }) {
  * ⑦ 원인 모름 — 에이전트는 켜졌지만 우리 도구 연결이 «아직» 붙지 않음(단정 X · 유나 v13). 뜨는 때와 걷히는 때는
  * setupProgress(사람 입력 + 30초 · 받은 것을 본 때 + 180초 — PO 12:25Z). 연결이 뒤늦게 붙으면 단계로 돌아간다.
  */
-export function ToolsNotConnected({ onRetry }: { onRetry: () => void }) {
+export function ToolsNotConnected({ onRetry, claude }: { onRetry: () => void; claude: boolean }) {
   const t = useTranslations('desktop.setup');
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
       <h2 className="text-base font-semibold">{t('notConnected.title')}</h2>
-      <p className="text-sm text-muted-foreground">{t('notConnected.body')}</p>
+      {/* Yuna v24 · PO 11:19Z: the trust question is Claude Code's — its sentence only when this setup has a Claude Code agent */}
+      <p className="text-sm text-muted-foreground">{t(claude ? 'notConnected.bodyClaude' : 'notConnected.bodyOther')}</p>
       <div><Button onClick={onRetry}>{t('notConnected.action')}</Button></div>
     </Card>
   );
