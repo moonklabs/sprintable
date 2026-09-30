@@ -1667,7 +1667,8 @@
     "create": "Create",
     "creating": "Creating…",
     "returnNote": "You'll go back to the setup page.",
-    "inviteNote": "If you were invited to an organization, use the link in your invite email instead."
+    "inviteNote": "If you were invited to an organization, use the link in your invite email instead.",
+    "orgCreatedRetryNote": "Your organization is created — pressing again only creates the project."
   },
   "settings": {
     "title": "Settings",

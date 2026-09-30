@@ -123,6 +123,10 @@ describe('DesktopCreateOrg', () => {
     await settle();
     expect(container.querySelector('[role="alert"]')?.textContent).toBeTruthy();
     expect(hrefSet).toEqual([]);
+    // Yuna ⑥ (PO 01:38Z): on this panel only, the alert says why the organization field is locked and the button says what a retry does
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('조직은 만들었어요 — 다시 누르면 프로젝트만 만들어요.');
+    expect(createButton().textContent).toBe('프로젝트 만들기');
+    expect((container.querySelector('#desktop-org-name') as HTMLInputElement).disabled).toBe(true);
     await act(async () => { createButton().click(); });
     await settle();
     expect(calls.filter((c) => c.url === '/api/organizations')).toHaveLength(1);

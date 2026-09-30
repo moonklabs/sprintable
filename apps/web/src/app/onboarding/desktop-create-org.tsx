@@ -114,7 +114,7 @@ export function DesktopCreateOrg({ next }: DesktopCreateOrgProps) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <SectionCard className="w-full max-w-md space-y-6 p-6 sm:p-8" aria-labelledby="desktop-create-org-title">
+      <SectionCard className="w-full max-w-md space-y-6 break-keep p-6 sm:p-8" aria-labelledby="desktop-create-org-title">
         <header>
           <p className="text-xs text-muted-foreground">{t('eyebrow')}</p>
           <h1 id="desktop-create-org-title" className="mt-1 text-2xl font-bold text-foreground">{t('title')}</h1>
@@ -123,7 +123,9 @@ export function DesktopCreateOrg({ next }: DesktopCreateOrgProps) {
 
         {error && (
           <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-lg border border-destructive/20 bg-destructive-tint p-3 text-sm text-foreground">
-            {error}
+            <p>{error}</p>
+            {/* the organization exists and its field is locked — say why, and that a retry only makes the project (Yuna ⑥ · PO 01:38Z) */}
+            {orgId && <p className="mt-1">{t('orgCreatedRetryNote')}</p>}
           </div>
         )}
 
@@ -154,7 +156,7 @@ export function DesktopCreateOrg({ next }: DesktopCreateOrgProps) {
 
         <div>
           <Button type="button" className="w-full" disabled={!canCreate} onClick={() => void handleCreate()}>
-            {loading ? t('creating') : t('create')}
+            {loading ? t('creating') : orgId ? to('createProjectAction') : t('create')}
           </Button>
           <p className="mt-2 text-xs text-muted-foreground">{t('returnNote')}</p>
         </div>
