@@ -180,14 +180,23 @@ describe('[SID:4427] desktop setup page', () => {
     expect(text()).not.toContain('에이전트를 찾지 못했어요');
   });
 
-  it('⑥(나) cause unknown: a neutral card that does not claim the cause', async () => {
+  it('⑥(나) cause unknown: a neutral card that does not claim the cause — with a Claude Code agent, how to answer its trust question', async () => {
     const retry = vi.fn();
     stub(() => new Response('{}'));
-    await mount(<ToolsNotConnected onRetry={retry} />);
+    await mount(<ToolsNotConnected onRetry={retry} claude />);
     expect(text()).toContain('에이전트에 Sprintable이 아직 연결되지 않았어요');
-    expect(text()).toContain('터미널에서 작업 폴더를 믿을지 묻고 있다면 먼저 믿는다고 답해 주세요');
+    // Yuna v27 · PO 12:11Z: the CLI's own English choice quoted as it is; which line starts selected differs by Claude Code
+    // version (2.1.285 = No · 2.1.142 = Yes), so the text says where ❯ must be, not which key to press
+    expect(text()).toContain('Claude Code 터미널이 작업 폴더를 믿을지 묻고 있다면 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요. 그래도 안 붙으면 회사 설정이나 네트워크 때문일 수 있어요');
     await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('⑥(나) cause unknown with Codex only: no trust sentence (Codex does not ask it)', async () => {
+    stub(() => new Response('{}'));
+    await mount(<ToolsNotConnected onRetry={vi.fn()} claude={false} />);
+    expect(text()).toContain('에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. 회사 설정이나 네트워크 때문일 수 있어요');
+    expect(text()).not.toMatch(/믿을지|trust/);
   });
 
   it('the setup values come after # and leave the address as soon as they are read (PO 09:45Z)', async () => {
@@ -515,6 +524,17 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
   });
 
+  // Yuna v24 · PO 11:19Z — the trust note is Claude Code's question: with only Codex agents it is not shown at all
+  it('Codex agents only: no trust note between handed over and connected', async () => {
+    const codexOnly = (sig: Partial<Sig>) => ({ ...status('handed_over', sig), members: [{ stage: 'research', role: '조사', member_id: 'm1', kind: 'agent', runtime: 'codex' }] });
+    statusNow = () => codexOnly({ tools_connected: [] });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(text()).toContain('에이전트를 준비하고 있어요');
+    expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
+  });
+
   it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
     statusNow = () => status('waiting_for_app');
     await startSetup();
@@ -527,7 +547,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
     await tick(2_000);
-    expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toContain('처음 켤 때 에이전트가 작업 폴더를 믿을지 물을 수 있어요');
+    expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toBe('Claude Code는 처음 켤 때 작업 폴더를 믿을지 물어요. 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널을 열고, 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요 — «No, exit»에서 Enter면 에이전트가 꺼져요.');
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], workdir_fallback_at: 'x' });
     await tick(2_000);

@@ -63,7 +63,9 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   }
   if (progress.blocked) return <Failure failure="managed" />;
   if (progress.expired) return <Failure failure="expired" />;
-  if (progress.notConnected) return <ToolsNotConnected onRetry={() => void poll()} />;
+  // the folder-trust question is Claude Code's (Codex does not ask it) — Yuna v24 · PO 11:19Z
+  const claude = status.members.some((m) => m.kind === 'agent' && m.runtime === 'claude');
+  if (progress.notConnected) return <ToolsNotConnected onRetry={() => void poll()} claude={claude} />;
 
   const role = (r: string) => stageRoleLabel(r, tOrg);
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
@@ -94,7 +96,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         <Step state={progress.handed} label={progress.handed === 'done' ? t('stepHandedDone') : t('stepHandedRunning')}
           detail={progress.handed === 'running' && task && progress.firstAgentRole
             ? t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: role(progress.firstAgentRole) }) : null} />
-        {progress.trustHint ? (
+        {progress.trustHint && claude ? (
           <li className="ml-7 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
             <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
           </li>
