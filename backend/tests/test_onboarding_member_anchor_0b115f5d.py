@@ -177,6 +177,7 @@ async def test_invite_accept_ensures_human_member():
     session = AsyncMock()
     session.execute = AsyncMock(
         side_effect=[
+            MagicMock(),             # story 4427 (나): accept() first-organization person lock
             _scalar_result(invite),  # accept(): invite 조회
             MagicMock(),             # story #2477: advisory xact lock
             _tier_result("free"),    # story #2477: check_member_accept_limit._get_org_tier

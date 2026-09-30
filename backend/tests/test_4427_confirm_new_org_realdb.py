@@ -673,3 +673,44 @@ async def test_every_row_the_persons_is_no_agent_role_and_nothing_is_made(world)
     finally:
         await _drop_preset(pid)
 
+
+
+# ─── Qadir 4837 1st line — the auto-accept paths take the same lock (it lives in OrgInviteRepository.accept) ─────────────
+
+
+@pytest.mark.anyio
+async def test_an_invite_auto_accepted_at_sign_up_in_another_tab_leaves_one_organization(world):
+    """Sign-up / sign-in with an invite token accepts it through `_auto_accept_invitation` (auth.py), not the accept route.
+    Forced order: that accept holds its transaction open; confirm-new-org waits on the person's lock (pg_locks); once the
+    accept commits, confirm-new-org sees the membership and refuses — the person ends with the invited organization only."""
+    from app.models.user import User
+    from app.routers.auth import _auto_accept_invitation
+
+    who = await world.person()
+    inviter = await world.org_with()
+    email = (await _sql(fetch="SELECT email FROM users WHERE id=:u", params={"u": str(who)}))[0][0]
+    token = secrets.token_urlsafe(24)
+    await _sql(
+        "INSERT INTO org_invites (id,organization_id,email,role,token,status,expires_at,created_at) VALUES "
+        "(gen_random_uuid(),:o,:e,'member',:t,'pending',now() + interval '3 days',now())",
+        params={"o": str(inviter), "e": email, "t": token},
+    )
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with _client() as c:
+            code, _ = await _code(c)
+            body = await _preset_body(c, who)
+            async with async_sessionmaker(eng, expire_on_commit=False)() as holder:
+                user = await holder.get(User, who)
+                accepted = await _auto_accept_invitation(holder, user, token)
+                assert accepted and accepted.get("ok"), accepted
+                call = asyncio.create_task(_confirm_new(c, code, who, body))
+                assert await _someone_waits_on_an_advisory_lock(), "confirm-new-org should wait on the lock the accept holds"
+                assert not call.done()
+                await holder.commit()
+            r = await call
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "has_organization")
+        rows = await _sql(fetch="SELECT org_id FROM org_members WHERE user_id=:u AND deleted_at IS NULL", params={"u": str(who)})
+        assert [row[0] for row in rows] == [inviter]
+    finally:
+        await eng.dispose()
