@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from dataclasses import dataclass, field
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,25 @@ from app.core.config import settings
 from app.models.org_invite import OrgInvite
 from app.models.organization import Organization
 from app.models.project import OrgMember, Project
+
+
+# story #4427 (Qadir 4833 · PO 05:12Z · 05:15Z) — the one way an invite's email is compared with an address (an invite's
+# or a person's), used by every place that does it: making an invite (already a member · a pending one already), «my
+# invites», accept, the login fallback accept (auth.py) and the invitee's locale (org_invites.py). Before, they differed —
+# the list compared `lower().strip()` of the person's address with the stored value as it is, accept compared `lower()` of
+# both — so an older invite or account whose address kept spaces or capitals was shown in one and refused by another.
+# Same characters on both sides: ASCII whitespace trimmed, then lower-cased. New invites are stored in this form too.
+_EMAIL_TRIM = " \t\r\n"
+
+
+def invite_email_key(email: str) -> str:
+    """The comparison form of an email address (Python side)."""
+    return email.strip(_EMAIL_TRIM).lower()
+
+
+def invite_email_key_sql(column):
+    """The same comparison form in SQL, for a stored column (btrim of the same characters, then lower)."""
+    return func.lower(func.btrim(column, _EMAIL_TRIM))
 
 
 @dataclass
@@ -41,7 +60,7 @@ class OrgInviteRepository:
             .join(User, User.id == OrgMember.user_id)
             .where(
                 OrgMember.org_id == org_id,
-                User.email == email.lower().strip(),
+                invite_email_key_sql(User.email) == invite_email_key(email),
                 OrgMember.deleted_at.is_(None),
             )
             .limit(1)
@@ -53,7 +72,7 @@ class OrgInviteRepository:
         result = await self.session.execute(
             select(OrgInvite.id).where(
                 OrgInvite.organization_id == org_id,
-                OrgInvite.email == email.lower().strip(),
+                invite_email_key_sql(OrgInvite.email) == invite_email_key(email),
                 OrgInvite.status == "pending",
             ).limit(1)
         )
@@ -76,7 +95,7 @@ class OrgInviteRepository:
         now = datetime.now(timezone.utc)
         invite = OrgInvite(
             organization_id=org_id,
-            email=email.lower().strip(),
+            email=invite_email_key(email),
             role=role,
             expires_at=now + timedelta(days=_INVITE_EXPIRE_DAYS),
             created_by=created_by,
@@ -196,7 +215,7 @@ class OrgInviteRepository:
             select(OrgInvite, Organization.name)
             .join(Organization, Organization.id == OrgInvite.organization_id)
             .where(
-                OrgInvite.email == email.lower().strip(),
+                invite_email_key_sql(OrgInvite.email) == invite_email_key(email),
                 OrgInvite.status == "pending",
                 OrgInvite.expires_at > now,
                 OrgInvite.organization_id.not_in(already),
@@ -228,7 +247,7 @@ class OrgInviteRepository:
             # Idempotent: the same invitee re-accepting (double-click / re-visit / back button)
             # is already a member → treat as success rather than a 409 error. Only a *different*
             # user hitting an already-consumed invite gets already_accepted.
-            if invite.email.lower() == user_email.lower():
+            if invite_email_key(invite.email) == invite_email_key(user_email):
                 # ensure membership exists (prior accept may predate a backfill) — idempotent
                 await self.session.execute(
                     pg_insert(OrgMember)
@@ -259,7 +278,7 @@ class OrgInviteRepository:
             return {"ok": False, "reason": "invalid_status"}
         if invite.expires_at < datetime.now(timezone.utc):
             return {"ok": False, "reason": "expired"}
-        if invite.email.lower() != user_email.lower():
+        if invite_email_key(invite.email) != invite_email_key(user_email):
             return {"ok": False, "reason": "email_mismatch"}
 
         # story #2477 AC②③ — Free cap 재검증(accept 시점) + 동시 수락 레이스 방어.
