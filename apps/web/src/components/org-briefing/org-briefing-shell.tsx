@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
+import { ViewerDate } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -65,7 +66,6 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
 export function OrgBriefingShell() {
   const t = useTranslations('orgBriefing');
   const tc = useTranslations('common');
-  const locale = useLocale();
   const { projectId: _projectId } = useDashboardContext();
   void _projectId; // today route는 org 스코프뿐 — 이 화면 자체는 project를 더는 안 쓴다.
   const router = useRouter();
@@ -88,8 +88,8 @@ export function OrgBriefingShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 마운트 시 1회만(그 뒤 focus는 이미 지워짐).
   }, []);
 
+  // story #4443 PR2 — «today» is the viewer's today (ViewerDate below: their zone · held while unknown)
   const today = new Date();
-  const dateLabel = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(today);
 
   return (
     // story #4277(민 기기 #1) — 셸 본문 열(flex-col) 안에서 mx-auto(자동 여백)가 stretch를 꺼 이 뿌리가 «내용 폭»으로 줄었다 → 긴 제목(한 줄
@@ -105,7 +105,7 @@ export function OrgBriefingShell() {
       <div className="flex items-baseline justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold tracking-tight text-foreground">{t('title')}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{dateLabel}</p>
+          <p className="mt-1 text-sm text-muted-foreground"><ViewerDate value={today} options={{ month: 'long', day: 'numeric', weekday: 'long' }} /></p>
         </div>
         {data && snapshot.needsMeCount > 0 ? (
           // story #3853(§③ 토큰 표 「사람 손 필요=경고 amber」) — 하드코딩 bg-primary/10

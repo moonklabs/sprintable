@@ -1,0 +1,294 @@
+[
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/docs/[slug]/view/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/docs/docs-index.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;#2",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/retro/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/channel/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/content/[draftId]/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/content/channel-posts/[draftId]/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/content/channel-posts/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/content/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/inbox/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/inbox/page.tsx::no-arg-display-tz::const displayTimezone = useMemo(() => resolveDisplayTimezone().tz, []);",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/channels/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/channels/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;#2",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/channels/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;#3",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/content-rules/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/events/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/generation-connectors/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/insights-board/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/trust/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/trust/trust-utils.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/organization/workforce/[id]/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/rewards/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/privacy/page.tsx::no-arg-display-tz::시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz, null).display}",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/refund-policy/page.tsx::no-arg-display-tz::시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz, null).display}",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/terms/page.tsx::no-arg-display-tz::시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz, null).display}",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/activity/dashboard-activity-timeline.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/agents/agent-api-key-manager.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/agents/agent-management-tab.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/agents/agent-run-detail.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/agents/agent-runs-list.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/attention-queue/attention-queue-view.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/cage/boost-execution-control.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/cage/gate-evidence.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/cage/gate-evidence.tsx::no-arg-display-tz::<span className=\"text-foreground\">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/cage/gate-evidence.tsx::no-arg-display-tz::<span className=\"text-foreground\">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>#2",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/cage/gate-evidence.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;#2",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/cage/production-workbench-evidence.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/cage/stuck-handoff-detail.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/chat-v3/chat-v3-context-panel.tsx::no-arg-display-tz::const { tz } = resolveDisplayTimezone();",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/chat/chat-list-view.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/chat/chat-view.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/connect-rules-v3/connect-rules-v3-channels.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/content/publishing-metrics-band.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/docs/doc-gate-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/docs/doc-status-rail.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/docs/doc-status-rail.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;#2",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/docs/policy-doc-browser.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/flow/flow-map-canvas.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/flow/hypothesis-earth-layer.tsx::no-arg-display-tz::const concludedDate = formatRelativeTime(hypothesis.updated_at, locale, resolveDisplayTimezone().tz);",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/flow/hypothesis-narrative-panel.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/goals/goal-trust-rail.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/inbox/approvals-queue.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/kanban/recipe-start-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/kanban/story-card.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/kanban/story-detail-panel.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/nav/notification-bell.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/settings/my-notification-channel-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/settings/org-members-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/settings/recurring-recipes-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/settings/workflow-execution-history-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/settings/workflow-line-editor-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/shared/entity-backlinks-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/shared/rejected-relations-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/shared/story-origin-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/storage/storage-asset-row.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/storage/storage-detail-panel.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/support-widget/support-widget-panel.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/verify/evidence-section.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "components/work-list/work-list-detail-panel.tsx::no-arg-display-tz::const { tz } = resolveDisplayTimezone();",
+    "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "lib/date.ts::fixed-zone::timeZone: 'Asia/Seoul',",
+    "reason": "story #4443 — frozen at PR2a; one city's zone written in → the org's zone for a team date (PR3)"
+  }
+]

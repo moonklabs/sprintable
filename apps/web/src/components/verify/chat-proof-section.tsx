@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatViewerDate } from '@/lib/viewer-time-zone';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { ChatProofEmbed } from './chat-proof-embed';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -89,10 +91,9 @@ export function parseStoryProofReferences(json: unknown): ParsedStoryProofRefere
   return { items, skippedIds };
 }
 
-function formatCitationDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric' }).format(d);
+// story #4443 PR2 — the viewer's day in their locale (was ko-KR in the runtime's zone); '' while the zone is not known yet
+function formatCitationDate(iso: string, locale: string, timeZone: string | null): string {
+  return formatViewerDate(iso, locale, timeZone, { month: 'numeric', day: 'numeric' }) ?? '';
 }
 
 interface ChatProofSectionProps {
@@ -110,6 +111,8 @@ interface ChatProofSectionProps {
 export function ChatProofSection({ storyId }: ChatProofSectionProps) {
   const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('verify');
+  const locale = useLocale();
+  const viewerTz = useViewerTimeZone(); // story #4443 PR2
   const [refs, setRefs] = useState<StoryProofReference[] | null>(null);
   const [skippedCount, setSkippedCount] = useState(0);
   const [loadedForId, setLoadedForId] = useState<string | null>(null);
@@ -175,13 +178,13 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
       {refs.map((ref) => (
         <ChatProofEmbed
           key={ref.id}
-          sourceLabel={`${t('chatProofSectionTitle')} · ${formatCitationDate(ref.createdAt)}`}
+          sourceLabel={`${t('chatProofSectionTitle')} · ${formatCitationDate(ref.createdAt, locale, viewerTz)}`}
           // story #4231 — 증거 대화는 스토리와 다른 프로젝트일 수 있다 → 대화 자기 프로젝트.
           conversationHref={ref.conversationProjectId
             ? withProjectParam(`/chats/${ref.conversationId}?messageId=${ref.startMessageId}`, ref.conversationProjectId)
             // 대상-프로젝트: 옛 응답(conversation_project_id 없음)일 때만 현재 p로 폴백.
             : flatHref(`/chats/${ref.conversationId}?messageId=${ref.startMessageId}`)}
-          quotedAt={formatCitationDate(ref.createdAt)}
+          quotedAt={formatCitationDate(ref.createdAt, locale, viewerTz)}
           status={ref.stillExists === false ? 'deleted' : 'normal'}
           messages={ref.snapshot.map((m) => ({ id: m.message_id, senderName: '', content: m.content }))}
         />

@@ -933,10 +933,13 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
 
   it('invite dates: month name + day, the year only when it is not this year (Yuna 02:46Z)', () => {
     const now = new Date('2026-09-30T03:00:00Z');
-    expect(inviteUntilDate('2026-10-06T12:00:00Z', 'ko', now)).toBe('10월 6일');
-    expect(inviteUntilDate('2026-10-06T12:00:00Z', 'en', now)).toBe('Oct 6');
-    expect(inviteUntilDate('2027-01-06T12:00:00Z', 'ko', now)).toBe('2027년 1월 6일');
-    expect(inviteUntilDate('2027-01-06T12:00:00Z', 'en', now)).toBe('Jan 6, 2027');
+    expect(inviteUntilDate('2026-10-06T12:00:00Z', 'ko', 'Asia/Seoul', now)).toBe('10월 6일');
+    expect(inviteUntilDate('2026-10-06T12:00:00Z', 'en', 'Asia/Seoul', now)).toBe('Oct 6');
+    expect(inviteUntilDate('2027-01-06T12:00:00Z', 'ko', 'Asia/Seoul', now)).toBe('2027년 1월 6일');
+    expect(inviteUntilDate('2027-01-06T12:00:00Z', 'en', 'Asia/Seoul', now)).toBe('Jan 6, 2027');
+    // story #4443 PR2 — the viewer's day: 23:00Z on 10/6 is 10/7 in Seoul, still 10/6 in UTC
+    expect(inviteUntilDate('2026-10-06T23:00:00Z', 'ko', 'Asia/Seoul', now)).toBe('10월 7일');
+    expect(inviteUntilDate('2026-10-06T23:00:00Z', 'ko', 'UTC', now)).toBe('10월 6일');
   });
 
   it('the invite read fails → sent to the one-screen «조직 만들기» ((가) · /onboarding?next=%2Fdesktop%2Fsetup) — not knowing is not «no invites»', async () => {

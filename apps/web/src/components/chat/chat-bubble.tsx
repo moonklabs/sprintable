@@ -7,6 +7,8 @@ import remarkBreaks from 'remark-breaks';
 import { hasNoVisibleText, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
 import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { ViewerDate } from '@/components/viewer-time-zone';
+import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { commandArgs, commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
@@ -447,7 +449,6 @@ export function ChatBubble({
   const cmdName = isCmd ? commandName(message.content) : null;
   const args = isCmd ? commandArgs(message.content) : '';
   const displayName = isMine ? t('you') : (senderLabel || message.sender_name || t('team'));
-  const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.created_at));
   const replyCount = message.reply_count ?? 0;
   const lastReplyAt = message.last_reply_at;
 
@@ -539,9 +540,6 @@ export function ChatBubble({
     onOpenThread?.(message);
   }, [message, onOpenThread]);
 
-  const lastReplyTime = lastReplyAt
-    ? new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(lastReplyAt))
-    : null;
 
   return (
     <>
@@ -816,7 +814,8 @@ export function ChatBubble({
             </div>
           )}
 
-          <time className="text-[10px] text-muted-foreground">{time}</time>
+          {/* story #4443 PR2 — the viewer's zone and locale (was ko-KR in the runtime's zone: «오전 07:32» in en too) */}
+          <time className="text-[10px] text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
 
           {/* AC5: 답글 수 표시 — reply_count > 0 */}
           {replyCount > 0 && (
@@ -827,8 +826,8 @@ export function ChatBubble({
             >
               <MessageSquare className="h-3 w-3" />
               {t('replyCount', { count: replyCount })}
-              {lastReplyTime && (
-                <span className="font-normal text-muted-foreground">{lastReplyTime}</span>
+              {lastReplyAt && (
+                <span className="font-normal text-muted-foreground"><ViewerDate value={lastReplyAt} options={VIEWER_TIME_OPTIONS} /></span>
               )}
             </button>
           )}
