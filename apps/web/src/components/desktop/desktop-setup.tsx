@@ -589,9 +589,10 @@ export function DesktopSetupEntry() {
     // A newer code replaces an older one (the app restarted the setup).
     const onHash = () => {
       const q = parseSetupFragment(window.location.hash);
-      if (!q) return;
+      const progress = q ? null : progressFromFragment(window.location.hash);
+      if (!q && !progress) return;
       strip();
-      setEntry({ query: q });
+      setEntry({ query: q, progress });
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);

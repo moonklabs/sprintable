@@ -848,6 +848,16 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
       await act(async () => { root.unmount(); });
       root = createRoot(container);
     }
+    // the same when #progress arrives after the page is up (a same-document change — the path the app's reopen takes too)
+    refreshNow = () => new Response('{}', { status: 200 });
+    stubNoOrg();
+    window.location.hash = '';
+    await mountNoOrg(<DesktopSetupEntry />);
+    await setHash('#progress=s-8');
+    await flush();
+    expect(window.location.hash).toBe('');
+    await vi.waitFor(() => expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-8'))).toBe(true));
+    expect(text()).not.toContain('데스크톱 앱에서 열어 주세요');
   });
 
   it('with an organization the page never asks for invites and reads the usual list', async () => {
