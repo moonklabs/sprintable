@@ -309,6 +309,11 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'desktop.setup.notConnected.bodyClaude::trust',
   'desktop.setup.notConnected.bodyClaude::this',
   'desktop.setup.notConnected.bodyClaude::folder',
+  // story #4433 — Claude Code CLI가 화면에 띄우는 선택지 글자 그대로(«Yes, I trust this folder») — 사람이 터미널에서 그 글자를
+  // 찾아 골라야 해서 번역하면 못 찾음(유나 v24 · v26 표기 규칙 «CLI 선택지는 영어 원문 그대로» · 셸 상태판과 같은 글자). PO 승인 요청.
+  'desktop.setup.stoppedTrust::folder',
+  'desktop.setup.stoppedTrust::this',
+  'desktop.setup.stoppedTrust::trust',
   // story #4359 — 버튼이 복사하는 셸 `export KEY=…` 줄의 명령어 그대로(유나 문구 판정 · PO 2026-09-27 22:42Z 전달).
   'agents.fakechatEnvCopyExport::export',
   'agents.toolPermissions.coreAlways::ping',

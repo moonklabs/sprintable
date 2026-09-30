@@ -218,3 +218,53 @@ describe('[SID:4429] setupFragment — the fragment a reload puts back', () => {
     expect([...new URLSearchParams(f.slice(1)).keys()].sort()).toEqual(['blocked', 'code', 'runtimes', 'setup']);
   });
 });
+
+describe('[SID:4433] an agent that stopped before the first result — the progress block', () => {
+  const T0 = Date.parse('2026-09-30T12:00:00Z');
+  const iso = (ms: number) => new Date(T0 + ms).toISOString();
+  const base = (signals: Partial<SetupStatus['signals']> = {}): SetupStatus => ({
+    state: 'handed_over', recipe_name: '블로그 글', work_item_id: 'story-1',
+    members: [
+      { stage: 'planning', role: 'Creator', member_id: 'm1', kind: 'agent', runtime: 'claude' },
+      { stage: 'concept', role: 'Director', member_id: 'h1', kind: 'human', runtime: null },
+      { stage: 'draft', role: 'Creator', member_id: 'm1', kind: 'agent', runtime: 'claude' },
+      { stage: 'publish', role: 'Publisher', member_id: 'm2', kind: 'agent', runtime: 'codex' },
+    ],
+    signals: { tools_connected: [], first_task_handed_at: iso(0), first_result_at: null, workdir_fallback_at: null, blocked: null, ...signals },
+  });
+  const ended = (member_id: string, at: number, runtime: 'claude' | 'codex', restarted_at: number | null = null) =>
+    ({ member_id, at: iso(at), runtime, exit_code: 1, restarted_at: restarted_at === null ? null : iso(restarted_at) });
+
+  it('no agents_ended field (today\'s server): nothing changes', () => {
+    expect(setupProgress(base(), T0 + 1_000, T0).stopped).toBeNull();
+    expect(setupProgress(base({ agents_ended: [] }), T0 + 1_000, T0).stopped).toBeNull();
+  });
+
+  it('ended only → the block, with that agent\'s role once (a role over two stages is one role) · Claude → the trust sentence', () => {
+    const p = setupProgress(base({ agents_ended: [ended('m1', 5_000, 'claude')] }), T0 + 10_000, T0);
+    expect(p.stopped).toEqual({ roles: ['Creator'], claude: true });
+    // the block says what to do itself: no trust note, no ⑦ «not connected» even long after
+    expect(setupProgress(base({ agents_ended: [ended('m1', 5_000, 'claude')] }), T0 + 600_000, T0)).toMatchObject({ trustHint: false, notConnected: false });
+  });
+
+  it('two stopped agents → one line with both roles in the flow\'s order · Codex only → no trust sentence', () => {
+    const p = setupProgress(base({ agents_ended: [ended('m2', 6_000, 'codex'), ended('m1', 5_000, 'claude')] }), T0 + 10_000, T0);
+    expect(p.stopped).toEqual({ roles: ['Creator', 'Publisher'], claude: true });
+    expect(setupProgress(base({ agents_ended: [ended('m2', 6_000, 'codex')] }), T0 + 10_000, T0).stopped).toEqual({ roles: ['Publisher'], claude: false });
+  });
+
+  it('started again after it stopped → no block (the same instant counts as started again) · stopped again later → the block', () => {
+    expect(setupProgress(base({ agents_ended: [ended('m1', 5_000, 'claude', 7_000)] }), T0 + 10_000, T0).stopped).toBeNull();
+    expect(setupProgress(base({ agents_ended: [ended('m1', 5_000, 'claude', 5_000)] }), T0 + 10_000, T0).stopped).toBeNull();
+    expect(setupProgress(base({ agents_ended: [ended('m1', 9_000, 'claude', 7_000)] }), T0 + 10_000, T0).stopped).toEqual({ roles: ['Creator'], claude: true });
+  });
+
+  it('a first result after it stopped → no block · a first result before it stopped → the block', () => {
+    expect(setupProgress(base({ agents_ended: [ended('m1', 5_000, 'claude')], first_result_at: iso(8_000) }), T0 + 10_000, T0).stopped).toBeNull();
+    expect(setupProgress(base({ agents_ended: [ended('m1', 5_000, 'claude')], first_result_at: iso(3_000) }), T0 + 10_000, T0).stopped).toEqual({ roles: ['Creator'], claude: true });
+  });
+
+  it('an unreadable time is left out (never a block from a broken row)', () => {
+    expect(setupProgress(base({ agents_ended: [{ member_id: 'm1', at: 'not a time', runtime: 'claude', exit_code: 1, restarted_at: null }] }), T0, T0).stopped).toBeNull();
+  });
+});

@@ -6622,6 +6622,8 @@
       "trustHint": "Claude Code asks whether to trust the working folder the first time. Select that agent in the «Agents on this computer» bar at the bottom of the window, then in its terminal use the arrow keys to put ❯ on \"Yes, I trust this folder\" and press Enter — Enter on \"No, exit\" quits the agent.",
       "seeResult": "See the result",
       "seeResultReason": "Once the result is in, this takes you to the task",
+      "stopped": "{count, plural, one {The {roles} agent stopped} other {The {roles} agents stopped}} — select it in the «Agents on this computer» bar at the bottom of the window and press Start again.",
+      "stoppedTrust": "It may ask again whether to trust the working folder — if it does, press ↓ to choose \"Yes, I trust this folder\", then Enter.",
       "noAgentRow": "At least one role needs an agent before you can start — switch a role back to an agent.",
       "newOrg": {
         "line": "This also creates a new organization, \"{name}\"",

@@ -535,6 +535,45 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
   });
 
+  // story 4433 (Yuna v26): an agent that stopped before the first result — one block under the steps, the roles on one line,
+  // the trust sentence only when a Claude Code agent is among them; ③ stops spinning; no field (today's server) → nothing
+  it('[SID:4433] a stopped agent: the block under the steps · ③ a still ring · Claude → the trust sentence · started again → gone', async () => {
+    const block = () => container.querySelector('[data-testid=setup-agent-stopped]');
+    const third = () => container.querySelectorAll('ol > li[data-state]')[2] as HTMLElement | undefined;
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(block()).toBeNull(); // no agents_ended field
+    expect(third()?.dataset.paused).toBeUndefined();
+
+    const ended = (member_id: string, runtime: string, restarted_at: string | null = null) => ({ member_id, at: '2026-09-30T12:00:05Z', runtime, exit_code: 1, restarted_at });
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m1', 'claude')] } });
+    await tick(2_000);
+    expect(block()?.textContent).toContain('조사 에이전트가 멈췄어요 — 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 [다시 시작]을 눌러 주세요.');
+    expect(block()?.textContent).toContain('다시 시작하면 작업 폴더를 믿을지 다시 물을 수 있어요 — 물으면 ↓ 키로 «Yes, I trust this folder»를 고른 뒤 Enter를 눌러 주세요.');
+    expect(third()?.dataset.paused).toBe('true');
+    expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
+    // the block comes after the steps and before «결과 보기»
+    expect(!!(container.querySelector('ol')!.compareDocumentPosition(block()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(!!(block()!.compareDocumentPosition(container.querySelector('footer')!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    // two agents, Codex only among the stopped ones would drop the trust sentence; both here → one line, the flow's order
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m2', 'codex'), ended('m1', 'claude')] } });
+    await tick(2_000);
+    expect(block()?.textContent).toContain('조사 · 작성 에이전트가 멈췄어요');
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m2', 'codex')] } });
+    await tick(2_000);
+    expect(block()?.textContent).toContain('작성 에이전트가 멈췄어요');
+    expect(block()?.textContent).not.toContain('믿을지');
+
+    // started again after it stopped → the block goes and ③ spins again
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m2', 'codex', '2026-09-30T12:00:09Z')] } });
+    await tick(2_000);
+    expect(block()).toBeNull();
+    expect(third()?.dataset.paused).toBeUndefined();
+  });
+
   it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
     statusNow = () => status('waiting_for_app');
     await startSetup();
