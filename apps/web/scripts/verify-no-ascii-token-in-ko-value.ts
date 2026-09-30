@@ -310,7 +310,8 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'desktop.setup.notConnected.bodyClaude::this',
   'desktop.setup.notConnected.bodyClaude::folder',
   // story #4433 — Claude Code CLI가 화면에 띄우는 선택지 글자 그대로(«Yes, I trust this folder») — 사람이 터미널에서 그 글자를
-  // 찾아 골라야 해서 번역하면 못 찾음(유나 v24 · v26 표기 규칙 «CLI 선택지는 영어 원문 그대로» · 셸 상태판과 같은 글자). PO 승인 요청.
+  // 찾아 골라야 해서 번역하면 못 찾음(유나 v24 · v26 표기 규칙 «CLI 선택지는 영어 원문 그대로» · 셸 상태판과 같은 글자).
+  // PO 승인 2026-09-30 12:08Z · CLI 문구가 바뀌면 이 셋과 ko 값을 같이 고침.
   'desktop.setup.stoppedTrust::folder',
   'desktop.setup.stoppedTrust::this',
   'desktop.setup.stoppedTrust::trust',
