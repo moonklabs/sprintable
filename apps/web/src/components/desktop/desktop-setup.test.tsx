@@ -12,7 +12,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => c
 // the query the router reports (the dashboard shell adds ?p= with a router replace)
 vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next/navigation')>()), useSearchParams: () => sp.value }));
 
-import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode } from './desktop-setup';
+import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -559,7 +559,7 @@ describe('[SID:4427] en copy (Yuna 08:34Z)', () => {
 });
 
 describe('[SID:4427] (나) no organization yet — «시작» also makes the organization (design doc 9a4cb445 · Yuna f6cfda19 v2)', () => {
-  const INVITE = { invite_id: 'i-1', org_id: 'o-9', org_name: '뭉클랩', role: 'admin', invited_at: '2026-09-29T00:00:00Z', expires_at: '2026-10-06T00:00:00Z' };
+  const INVITE = { invite_id: 'i-1', org_id: 'o-9', org_name: '뭉클랩', role: 'admin', invited_at: '2026-09-29T00:00:00Z', expires_at: `${new Date().getFullYear()}-10-06T12:00:00Z` }; // this year, midday UTC (any runner time zone keeps the day)
   let invitesNow: () => Response;
   let meName: string | null;
   let confirmNow: () => Response;
@@ -675,11 +675,19 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
     const card = container.querySelector('[data-testid=setup-invited]')!;
     expect(card.textContent).toContain('초대받은 조직이 있어요');
-    expect(card.textContent).toMatch(/뭉클랩에서 관리자로 초대했어요 · .*2026.*까지/);
+    expect(card.textContent).toContain('뭉클랩에서 관리자로 초대했어요 · 10월 6일까지'); // this year: no year (Yuna 02:46Z)
     expect(card.textContent).toContain('다른 팀에서 멤버로 초대했어요');
     expect(card.textContent).toContain('초대 메일의 링크로 들어가면 그 조직에서 바로 시작할 수 있어요.');
     expect(container.querySelectorAll('button')).toHaveLength(0);
     expect(urls().some((u) => u.includes('/api/desktop/recipes'))).toBe(false);
+  });
+
+  it('invite dates: month name + day, the year only when it is not this year (Yuna 02:46Z)', () => {
+    const now = new Date('2026-09-30T03:00:00Z');
+    expect(inviteUntilDate('2026-10-06T12:00:00Z', 'ko', now)).toBe('10월 6일');
+    expect(inviteUntilDate('2026-10-06T12:00:00Z', 'en', now)).toBe('Oct 6');
+    expect(inviteUntilDate('2027-01-06T12:00:00Z', 'ko', now)).toBe('2027년 1월 6일');
+    expect(inviteUntilDate('2027-01-06T12:00:00Z', 'en', now)).toBe('Jan 6, 2027');
   });
 
   it('the invite read fails → sent to the one-screen «조직 만들기» ((가) · /onboarding?next=%2Fdesktop%2Fsetup) — not knowing is not «no invites»', async () => {

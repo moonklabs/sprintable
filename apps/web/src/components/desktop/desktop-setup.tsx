@@ -16,7 +16,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
 import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
 import { onboardingRedirect } from '@/lib/auth/onboarding-next';
-import { formatLocaleDateOnly } from '@/lib/i18n';
+import { formatLocaleDate } from '@/lib/i18n';
 import {
   agentRowCount, confirmBody, newOrgConfirmBody, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
@@ -439,6 +439,14 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
   );
 }
 
+/** (나) the invite's last day as the web's notifications say dates (Yuna 02:46Z): month name + day, the year only when it is not
+ * this year — ko «10월 6일» · en "Oct 6" · another year ko «2027년 1월 6일» · en "Jan 6, 2027". */
+export function inviteUntilDate(value: string, locale: string, now: Date = new Date()): string {
+  const date = new Date(value);
+  const ko = locale.startsWith('ko');
+  return formatLocaleDate(date, locale, { month: ko ? 'long' : 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
+}
+
 /**
  * (나) invited somewhere (Yuna f6cfda19 v2): the page makes nothing and has no button — the invite is taken through the mail link
  * (no token here). One line per invite: who invited · as what · until when.
@@ -448,7 +456,7 @@ export function InvitedCard({ invites }: { invites: MyInvite[] }) {
   const locale = useLocale();
   const inviteRow = (i: MyInvite) => {
     const role = i.role === 'admin' ? t('invited.roleAdmin') : t('invited.roleMember');
-    return t('invited.row', { org: i.org_name, role, josa: pickEuroJosa(role), date: formatLocaleDateOnly(i.expires_at, locale) });
+    return t('invited.row', { org: i.org_name, role, josa: pickEuroJosa(role), date: inviteUntilDate(i.expires_at, locale) });
   };
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-invited">
