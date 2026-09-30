@@ -50,8 +50,10 @@ export function threadsAfterMessage(
   const createdAt = payload.created_at as string | undefined;
   const updated = [...prev];
   const item = { ...updated[idx]! };
-  if (content && createdAt) {
-    item.latest_message = { content, created_at: createdAt };
+  const hasAttachments = Array.isArray(payload.attachments) && payload.attachments.length > 0;
+  // story #4442 — an attachment-only message (no text) updates the thread too: «첨부 파일» and its time
+  if (createdAt && (content || hasAttachments)) {
+    item.latest_message = { content: content ?? '', created_at: createdAt, ...(hasAttachments ? { has_attachments: true } : {}) };
     if (conversationId !== selectedId && !isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
   }
   updated.splice(idx, 1);
@@ -287,6 +289,8 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   useChatSse({
     currentTeamMemberId: me?.id,
     onConversationMessage: handleThreadMessage,
+    // story #4442 — this tab's own sends update the rail row (the echo is dropped); my message never leaves an unread dot
+    onSentHere: (payload: Record<string, unknown>) => setThreads((prev) => threadsAfterMessage(prev, payload, { selectedId, meId: me?.id }).next),
     onConversationRead: handleThreadRead,
     onReconnect: handleThreadReconnect,
   });

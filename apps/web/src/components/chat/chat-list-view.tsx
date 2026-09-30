@@ -61,6 +61,8 @@ interface ConversationItem {
   latest_message: {
     content: string;
     created_at: string;
+    // story #4442 — the list row reads «첨부 파일» when the latest message has no text but files (the server already sends it)
+    has_attachments?: boolean;
     event?: {
       event_key: string;
       payload: Record<string, unknown>;
@@ -174,6 +176,7 @@ function ConversationRow({
   // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview)한다.
   const preview = eventPreview
     ?? (conv.latest_message?.content ? toPlainPreview(conv.latest_message.content) : null)
+    ?? (conv.latest_message?.has_attachments ? t('latestAttachmentOnly') : null) // story #4442 (Yuna)
     ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
@@ -348,6 +351,7 @@ export function applyConversationMessageUpdate(
   meId?: string,
 ): ConversationItem[] {
   const { conversation_id, content, created_at } = payload;
+  const hasAttachments = Array.isArray(payload.attachments) && payload.attachments.length > 0;
   if (!conversation_id) return prev;
   const idx = prev.findIndex((c) => c.id === conversation_id);
   if (idx === -1) {
@@ -356,8 +360,9 @@ export function applyConversationMessageUpdate(
   }
   const updated = [...prev];
   const item = { ...updated[idx]! };
-  if (content && created_at) {
-    item.latest_message = { content, created_at };
+  // story #4442 — an attachment-only message (no text) updates the row too: «첨부 파일» and its time
+  if (created_at && (content || hasAttachments)) {
+    item.latest_message = { content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}) };
     item.updated_at = created_at;
     // story #4440 — my own message (sent from another tab or device) moves the row up but is never unread
     if (!isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
@@ -641,6 +646,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const { connected, polling } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
+    onSentHere: handleConversationMessage, // story #4442 — this tab's own sends (my message: up, never unread)
     onConversationRead: handleConversationRead,
     onReconnect: handleReconnect,
     onPoll: handlePoll,
