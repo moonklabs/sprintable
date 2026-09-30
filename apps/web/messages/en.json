@@ -6657,6 +6657,7 @@
       "disconnecting": "Disconnecting…",
       "failed": "Couldn't disconnect — try again",
       "done": "Disconnected {device}",
+      "alreadyDone": "{device} was already disconnected",
       "emptyTitle": "No connected devices yet",
       "emptyBody": "Download the desktop app above and finish its setup — your organization's devices will show up here.",
       "loadFailed": "Couldn't load the list",

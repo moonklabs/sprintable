@@ -12,7 +12,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import {
-  canDisconnect, canManageDevices, deviceAgentCount, deviceDateOptions, markDisconnected, orderDevices, readDevices,
+  canDisconnect, canManageDevices, deviceAgentCount, deviceDateOptions, markDisconnected, orderDevices, readDevices, readRevoked,
   type DesktopDevice,
 } from '@/lib/desktop-devices';
 
@@ -25,20 +25,25 @@ import {
 export function DesktopDevices() {
   const t = useTranslations('desktop.devices');
   const tDesktop = useTranslations('desktop');
-  const { orgId, orgMemberships, userName } = useDashboardContext();
+  const { orgId, orgMemberships } = useDashboardContext();
   const manage = canManageDevices(orgMemberships.find((o) => o.orgId === orgId)?.role);
   const [devices, setDevices] = useState<DesktopDevice[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [asking, setAsking] = useState<DesktopDevice | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
+  const [done, setDone] = useState<{ device: string; already: boolean } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
+  // the list is this org's: read again whenever the org changes (Qadir 4830 ① — a client-side org switch kept /desktop mounted
+  // and showed the previous org's devices), starting from a clean slate so nothing of the other org shows meanwhile
   const load = useCallback(() => {
     setLoadFailed(false);
     setDevices(null);
+    setDone(null);
+    setAsking(null);
+    setFailed(false);
     let alive = true;
     fetchWithAuth('/api/desktop/setups')
       .then(readDevices)
@@ -49,7 +54,8 @@ export function DesktopDevices() {
         else setLoadFailed(true);
       });
     return () => { alive = false; };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the request is scoped by the session's org (the token switch-org reissues); orgId says when it changed
+  }, [orgId]);
 
   useEffect(() => (manage ? load() : undefined), [manage, load]);
 
@@ -59,8 +65,11 @@ export function DesktopDevices() {
     try {
       const res = await fetchWithAuth(`/api/desktop/setups/${device.setup_id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(String(res.status));
-      setDevices((list) => (list ? markDisconnected(list, device.setup_id, new Date().toISOString(), userName ?? null) : list));
-      setDone(device.device_name);
+      // the server says who disconnected it and when — «you» only when this call did it (Qadir 4830 ④)
+      const revoked = await readRevoked(res);
+      if (revoked) setDevices((list) => (list ? markDisconnected(list, device.setup_id, revoked) : list));
+      else load(); // an answer we cannot read: read the list again rather than guess
+      setDone({ device: device.device_name, already: revoked?.already ?? false });
       setAsking(null);
       headingRef.current?.focus(); // the pressed button is gone — focus goes to the list heading
     } catch {
@@ -85,7 +94,7 @@ export function DesktopDevices() {
         <>
           <p className="text-xs text-muted-foreground">{t('description')}</p>
           <p aria-live="polite" className="text-xs text-foreground" data-testid="desktop-devices-done">
-            {done ? t('done', { device: done }) : null}
+            {done ? t(done.already ? 'alreadyDone' : 'done', { device: done.device }) : null}
           </p>
           {loadFailed ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="desktop-devices-load-failed">

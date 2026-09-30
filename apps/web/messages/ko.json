@@ -6657,6 +6657,7 @@
       "disconnecting": "끊는 중…",
       "failed": "연결을 끊지 못했어요 — 다시 시도해 주세요",
       "done": "{device} 연결을 끊었어요",
+      "alreadyDone": "{device} 연결은 이미 끊겨 있었어요",
       "emptyTitle": "아직 연결된 기기가 없어요",
       "emptyBody": "위에서 데스크톱 앱을 받아 설정을 마치면 이 조직의 기기가 여기에 보여요.",
       "loadFailed": "목록을 불러오지 못했어요",

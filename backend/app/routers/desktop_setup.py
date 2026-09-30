@@ -28,6 +28,7 @@ from app.services.desktop_setup import (
     exchange_urls,
     list_setup_recipes,
     list_setups,
+    person_names,
     revoke_setup,
     setup_hands,
     setup_status,
@@ -444,6 +445,11 @@ async def get_setup_hands(
 
 class RevokeResponse(BaseModel):
     revoked_keys: int
+    # Qadir 4830 · PO 05:48Z ④ — true when the device was already disconnected before this call (another admin first); the
+    # screen then says so and shows who and when from here, instead of «you disconnected it»
+    already_disconnected: bool
+    revoked_at: datetime
+    revoked_by_name: str | None
 
 
 @router.delete("/setups/{setup_id}", response_model=RevokeResponse)
@@ -461,9 +467,13 @@ async def delete_setup(
     if not await is_org_owner_or_admin(db, user_id, org_id):
         raise _error(DesktopSetupError("not_org_admin"))
     try:
-        n = await revoke_setup(db, setup_id=setup_id, user_id=user_id, org_id=org_id)
+        done = await revoke_setup(db, setup_id=setup_id, user_id=user_id, org_id=org_id)
+        names = await person_names(db, org_id, {done.revoked_by})
     except DesktopSetupError as e:
         await db.rollback()
         raise _error(e) from None
     await db.commit()
-    return RevokeResponse(revoked_keys=n)
+    return RevokeResponse(
+        revoked_keys=done.keys, already_disconnected=done.already, revoked_at=done.revoked_at,
+        revoked_by_name=names.get(done.revoked_by),
+    )
