@@ -240,6 +240,20 @@ describe('[SID:4427] desktop setup page', () => {
     sp.value = null;
   });
 
+  it('every setup card wraps Korean by words (break-keep — Yuna 00:43Z: «없 / 어요» at 390)', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.firstElementChild!.className).toContain('break-keep');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    recipesNow = () => new Response(JSON.stringify({ recipes: [] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.firstElementChild!.className).toContain('break-keep');
+    recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(<OpenInDesktopApp />);
+    expect(container.firstElementChild!.className).toContain('break-keep');
+  });
+
   it('the list is the server\'s (4831): drawn as it comes; a key shown as a name or a people-only card never shows (display guard)', async () => {
     const extra = [
       { id: 'rec-key', key: 'org.moonklabs.work.gate_cycle', name: 'org.moonklabs.work.gate_cycle', roles: [{ role: '작업', kind: 'agent' as const, stages: ['a'] }] },

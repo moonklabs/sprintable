@@ -174,7 +174,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const canStart = !!recipe && !!projectId && workdirInputOk(workdir) && view.kind === 'choose';
 
   return (
-    <Card className="flex flex-col gap-6 p-6">
+    <Card className="break-keep flex flex-col gap-6 p-6">
       <header>
         <p className="text-xs text-muted-foreground">{t('eyebrow')}</p>
         <h1 className="text-lg font-semibold">{t('title')}</h1>
@@ -256,7 +256,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
   const key = (part: 'title' | 'body' | 'action') => FAILURE_KEY[`${failure}.${part}`]!;
   const appButton = (label: string) => <Button asChild><a href={SETUP_APP_LINK}>{label}</a></Button>;
   return (
-    <Card className="flex flex-col gap-3 p-6">
+    <Card className="break-keep flex flex-col gap-3 p-6">
       <h1 className="text-lg font-semibold">{t(key('title'))}</h1>
       <p className="text-sm text-muted-foreground">
         {failure === 'agent-limit' && counts ? <>{t('failure.agent-limit.bodyWithCounts', { need: counts.need, left: counts.left })} </> : null}{t(key('body'))}
@@ -293,7 +293,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
 export function ToolsNotConnected({ onRetry }: { onRetry: () => void }) {
   const t = useTranslations('desktop.setup');
   return (
-    <Card className="flex flex-col gap-3 p-6">
+    <Card className="break-keep flex flex-col gap-3 p-6">
       <h2 className="text-base font-semibold">{t('notConnected.title')}</h2>
       <p className="text-sm text-muted-foreground">{t('notConnected.body')}</p>
       <div><Button onClick={onRetry}>{t('notConnected.action')}</Button></div>
@@ -342,7 +342,7 @@ export function DesktopSetupEntry() {
 export function OpenInDesktopApp() {
   const t = useTranslations('desktop.setup');
   return (
-    <Card className="flex flex-col gap-3 p-6">
+    <Card className="break-keep flex flex-col gap-3 p-6">
       <h1 className="text-lg font-semibold">{t('direct.title')}</h1>
       <p className="text-sm text-muted-foreground">{t('direct.body')}</p>
       <div><Button asChild><a href={SETUP_APP_LINK}>{t('direct.action')}</a></Button></div>
