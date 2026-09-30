@@ -13,6 +13,9 @@ vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 vi.mock('@/components/desktop/desktop-download-card', () => ({
   DesktopDownloadCard: () => <div data-testid="desktop-download-card-stub" />,
 }));
+vi.mock('@/components/desktop/desktop-devices', () => ({
+  DesktopDevices: () => <div data-testid="desktop-devices-stub" />,
+}));
 
 let originalEnvValue: string | undefined;
 
@@ -28,14 +31,15 @@ afterEach(() => {
 });
 
 describe('DesktopPage — story #4012 서버 게이트', () => {
-  it('DESKTOP_DOWNLOAD_ENABLED=true → redirect 없이 카드를 렌더', async () => {
+  it('DESKTOP_DOWNLOAD_ENABLED=true → redirect 없이 카드를 렌더(+ story #4424 «연결된 기기» 칸)', async () => {
     process.env.DESKTOP_DOWNLOAD_ENABLED = 'true';
     vi.resetModules();
     const { default: DesktopPage } = await import('./page');
     const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
-    const result = DesktopPage() as { props: { children: { type: unknown } } };
+    const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
+    const result = DesktopPage() as { props: { children: Array<{ type: unknown } | null> } };
     expect(redirectMock).not.toHaveBeenCalled();
-    expect(result.props.children.type).toBe(DesktopDownloadCard);
+    expect(result.props.children.filter(Boolean).map((c) => c!.type)).toEqual([DesktopDownloadCard, DesktopDevices]);
   });
 
   it('DESKTOP_DOWNLOAD_ENABLED=false → /org-briefing으로 redirect(카드 렌더 없음)', async () => {

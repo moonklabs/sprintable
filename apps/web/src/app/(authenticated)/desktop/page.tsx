@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { DesktopDevices } from '@/components/desktop/desktop-devices';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
@@ -29,8 +30,10 @@ export default function DesktopPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl p-6">
+    <div className="mx-auto w-full max-w-3xl space-y-4 p-6">
       <DesktopDownloadCard />
+      {/* story #4424 — «연결된 기기» (org owner/admin only; nothing for a member) */}
+      <DesktopDevices />
     </div>
   );
 }

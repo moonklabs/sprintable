@@ -6596,6 +6596,35 @@
       "trustHint": "When an agent starts for the first time, it may ask whether to trust the working folder. If it does, select that agent in the «Agents on this computer» bar at the bottom of the window and answer in its terminal — setup continues once you do.",
       "seeResult": "See the result",
       "seeResultReason": "Once the result is in, this takes you to the task"
+    },
+    "devices": {
+      "title": "Connected devices",
+      "description": "Computers connected to this organization through the desktop app.",
+      "state": {
+        "handed_over": "Connected",
+        "waiting_for_app": "Waiting for the app",
+        "not_handed_over": "Not connected",
+        "disconnected": "Disconnected"
+      },
+      "notHandedOverWhy": "The setup expired before this device picked up its agents",
+      "agents": "{count, plural, one {# agent} other {# agents}}",
+      "connectedOn": "connected {date}",
+      "connectedBy": "by {name}",
+      "disconnectedOn": "disconnected {date}",
+      "disconnectedBy": "by {name}",
+      "disconnect": "Disconnect",
+      "disconnectAria": "Disconnect {device}",
+      "confirmTitle": "Disconnect {device}?",
+      "confirmBody": "Its {agents} will stop receiving Sprintable tasks. The agents stay in your organization; to use this device again, run setup on it again.",
+      "cancel": "Cancel",
+      "disconnecting": "Disconnecting…",
+      "failed": "Couldn't disconnect — try again",
+      "done": "Disconnected {device}",
+      "emptyTitle": "No connected devices yet",
+      "emptyBody": "Download the desktop app above and finish its setup — your organization's devices will show up here.",
+      "loadFailed": "Couldn't load the list",
+      "retry": "Try again",
+      "member": "Your organization's admins manage its desktop connections."
     }
   },
   "recipePreset": {

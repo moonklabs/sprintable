@@ -11,3 +11,11 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
   if (!SETUP_ID.test(id)) return Response.json({ error: { code: 'not_found' } }, { status: 404 });
   return proxyToFastapi(request, `/api/v2/desktop/setups/${id}`);
 }
+
+// story #4424 (PO 15:38Z) — «이 기기 연결 끊기»: DELETE /api/v2/desktop/setups/{id} revokes every key that setup handed out, and
+// only those (org owner/admin; another org's id is «not found»). Answers {revoked_keys}.
+export async function DELETE(request: Request, { params }: RouteParams): Promise<Response> {
+  const { id } = await params;
+  if (!SETUP_ID.test(id)) return Response.json({ error: { code: 'not_found' } }, { status: 404 });
+  return proxyToFastapi(request, `/api/v2/desktop/setups/${id}`);
+}

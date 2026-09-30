@@ -204,8 +204,10 @@ class SetupItem(BaseModel):
     recipe_key: str | None
     confirmed_by: uuid.UUID | None
     confirmed_at: datetime | None
+    confirmed_by_name: str | None = None  # the person's name in this org (none: left, or no name)
     exchanged_at: datetime | None
     revoked_at: datetime | None
+    revoked_by_name: str | None = None
     keys_issued: int
     active_keys: int
     members: list[SetupMember]
