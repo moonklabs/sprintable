@@ -40,11 +40,19 @@ describe('(authenticated) layout — organization-less user', () => {
   it.each([
     [404, null],
     [200, { id: 'x', org_id: null }],
-  ])('/me %s: /desktop/setup → /onboarding?next=%%2Fdesktop%%2Fsetup; any other path → plain /onboarding', async (status, body) => {
+  ])('/me %s: /desktop/setup stays (the page decides the «새 조직» mode); any other path → plain /onboarding', async (status, body) => {
     meStatus = status as number;
     meBody = body;
-    expect(await redirectFor('/desktop/setup')).toBe('redirect:/onboarding?next=%2Fdesktop%2Fsetup');
+    expect(await redirectFor('/desktop/setup')).toBe('no redirect');
+    expect(await redirectFor('/desktop/setup?p=x#c')).toBe('no redirect');
     expect(await redirectFor('/chats')).toBe('redirect:/onboarding');
     expect(await redirectFor('/desktop/setupx')).toBe('redirect:/onboarding');
+    expect(await redirectFor('/desktop/setup/other')).toBe('redirect:/onboarding');
+  });
+
+  it('a person with an organization is unchanged: /desktop/setup renders inside the shell, no redirect', async () => {
+    meStatus = 200;
+    meBody = { id: 'x', org_id: 'o', project_id: 'p' };
+    expect(await redirectFor('/desktop/setup')).toBe('no redirect');
   });
 });
