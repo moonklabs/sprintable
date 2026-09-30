@@ -241,6 +241,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         <p className="text-xs text-muted-foreground">
           {humanRoles.length > 0 ? t('startNoteWithMe', { n: agents, roles: humanList, josa: pickEunNeunJosa(humanList) }) : t('startNote', { n: agents })}
         </p>
+        {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
+            commands · other tools still ask each time */}
+        <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
         {view.kind === 'error' ? <p className="text-xs text-muted-foreground">{t('genericError')}</p> : null}
       </footer>
     </Card>

@@ -6532,6 +6532,7 @@
       "start": "시작",
       "startNote": "에이전트 {n}개를 이 컴퓨터에 만들고 첫 일감을 맡겨요",
       "startNoteWithMe": "에이전트 {n}개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · {roles}{josa} 내가 맡아요",
+      "toolNote": "에이전트는 Sprintable 안의 일은 묻지 않고 하고, 이 컴퓨터의 파일을 바꾸거나 명령을 실행하거나 다른 도구를 쓸 땐 그때마다 물어봐요.",
       "startedTitle": "에이전트를 시작하고 있어요",
       "startedDoneTitle": "에이전트를 시작했어요",
       "startedBody": "창을 닫아도 에이전트는 계속 일해요.",

@@ -78,6 +78,9 @@ describe('[SID:4427] desktop setup page', () => {
     expect(selects.map((s) => s.value)).toEqual(['claude', 'claude']); // 조사 · 작성(either)
     expect(text()).toContain('~/Sprintable/마케팅 루프');
     expect(text()).toContain('에이전트 2개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · 연출은 내가 맡아요');
+    // PO 00:41Z · Yuna v17: right after the «시작» line, same muted size
+    const notes = [...container.querySelectorAll('footer p')].map((p) => p.textContent);
+    expect(notes[1]).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 하고, 이 컴퓨터의 파일을 바꾸거나 명령을 실행하거나 다른 도구를 쓸 땐 그때마다 물어봐요.');
     expect(text()).not.toContain('발행'); // channel stage → later
     expect(startButton().disabled).toBe(false);
   });

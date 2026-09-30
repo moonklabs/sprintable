@@ -6532,6 +6532,7 @@
       "start": "Start",
       "startNote": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task",
       "startNoteWithMe": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task · you take {roles}",
+      "toolNote": "Agents work in Sprintable without asking, and ask each time before changing files, running commands, or using other tools on this computer.",
       "startedTitle": "Starting your agents",
       "startedDoneTitle": "Your agents have started",
       "startedBody": "Your agents keep working even if you close this window.",
