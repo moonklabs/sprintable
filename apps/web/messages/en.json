@@ -6592,6 +6592,11 @@
         "recipe-too-big": {
           "title": "This recipe can't be started here",
           "body": "It has too many roles, or a role name is too long. Choose another recipe."
+        },
+        "recipes-changed": {
+          "title": "The recipe has changed",
+          "body": "The recipe or its roles changed after you opened this page, so it can't start as chosen. Reload the list and choose again.",
+          "action": "Reload recipes"
         }
       },
       "direct": {

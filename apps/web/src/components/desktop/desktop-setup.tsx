@@ -31,7 +31,7 @@ const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', c
 // code.claude.com/docs/en/setup and github.com/openai/codex)
 const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
-export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big';
+export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed';
 
 /** 실패 화면 문구 키 — `Record<string, string>` 리터럴 표(키 가드가 이 모양의 값을 «읽힘»으로 센다). */
 const FAILURE_KEY: Record<string, string> = {
@@ -44,6 +44,7 @@ const FAILURE_KEY: Record<string, string> = {
   'no-recipe.title': 'failure.no-recipe.title', 'no-recipe.body': 'failure.no-recipe.body', 'no-recipe.action': 'failure.no-recipe.action',
   'recipes-offline.title': 'failure.recipes-offline.title', 'recipes-offline.body': 'failure.recipes-offline.body', 'recipes-offline.action': 'failure.recipes-offline.action',
   // the button is ③'s «레시피 다시 고르기» (Yuna v20: the same action, the same words)
+  'recipes-changed.title': 'failure.recipes-changed.title', 'recipes-changed.body': 'failure.recipes-changed.body', 'recipes-changed.action': 'failure.recipes-changed.action',
   'recipe-too-big.title': 'failure.recipe-too-big.title', 'recipe-too-big.body': 'failure.recipe-too-big.body', 'recipe-too-big.action': 'failure.agent-limit.action',
 };
 
@@ -65,6 +66,10 @@ export function failureForCode(code: string | undefined, resource?: string): Set
     // the same answer, so «다른 레시피», not «잠시 뒤 다시» (Kadir 4834 · PO 05:21Z · Didi 4838's closed code · Yuna v20)
     case 'recipe_too_large':
       return 'recipe-too-big';
+    // the rows the page sent no longer match the recipe (the web never sends a row outside the list it was given): the list
+    // changed since the page read it — read it again and choose, never «잠시 뒤 다시» (PO 06:08Z)
+    case 'roles_invalid':
+      return 'recipes-changed';
     default:
       return null;
   }
@@ -164,7 +169,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       if (res.ok) { setView({ kind: 'started' }); return; }
       const body = await res.json().catch(() => null);
       const failure = failureForCode(body?.error?.code, body?.error?.resource);
-      setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null } : { kind: 'error' });
+      setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null, retry: failure === 'recipes-changed' ? 'load' : undefined } : { kind: 'error' });
     } catch {
       setView({ kind: 'failed', failure: 'offline', retry: 'confirm' });
     }
@@ -289,7 +294,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
       <div className="flex gap-2">
         {failure === 'no-agent' ? appButton(t(key('action')))
           : failure === 'expired' ? appButton(t(key('action')))
-          : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
+          : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline' || failure === 'recipes-changed') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
           : failure === 'not-admin' || failure === 'managed' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
           : failure === 'recipe-too-big' && onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>

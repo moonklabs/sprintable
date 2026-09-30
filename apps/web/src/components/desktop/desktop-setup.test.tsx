@@ -138,7 +138,9 @@ describe('[SID:4427] desktop setup page', () => {
     expect(failureForCode('not_org_admin')).toBe('not-admin');
     expect(failureForCode('person_session_required')).toBe('not-admin');
     expect(failureForCode('code_used')).toBe('expired');
-    expect(failureForCode('roles_invalid')).toBeNull();
+    expect(failureForCode('roles_invalid')).toBe('recipes-changed');
+    expect(failureForCode('recipe_too_large')).toBe('recipe-too-big');
+    expect(failureForCode('no_agent_role')).toBe('no-agent');
     expect(failureForCode('PLAN_LIMIT_EXCEEDED', 'agent')).toBe('agent-limit');
     expect(failureForCode('PLAN_LIMIT_EXCEEDED', 'storage')).toBeNull();
     expect(failureForCode(undefined)).toBeNull();
@@ -399,11 +401,28 @@ describe('[SID:4427] either rows can be «나» · no agent row · the recipe ov
     expect(container.querySelector('input[name=recipe]')).not.toBeNull();
     // a body fault (roles_invalid · FastAPI's own 422 with detail) is not taken for this card
     for (const body of [{ data: null, error: { code: 'roles_invalid' } }, { detail: [{ type: 'too_long', loc: ['body', 'roles'], msg: 'x' }] }]) {
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
       stub(() => new Response(JSON.stringify(body), { status: 422 }));
       await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
       await act(async () => { startButton().click(); });
       expect(text()).not.toContain('이 레시피는 여기서 시작할 수 없어요');
     }
+  });
+
+  it('roles_invalid → «레시피가 달라졌어요» [레시피 다시 불러오기]: the list is read again and the choice comes back; the same confirm is not sent again (Yuna v22 · PO 06:08Z)', async () => {
+    stub(() => new Response(JSON.stringify({ data: null, error: { code: 'roles_invalid' } }), { status: 422 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await act(async () => { startButton().click(); });
+    expect(text()).toContain('레시피가 달라졌어요');
+    expect(text()).toContain('이 페이지를 연 뒤 레시피나 역할이 바뀌어 지금 고른 대로는 시작할 수 없어요. 목록을 다시 불러와 골라 주세요.');
+    expect(text()).not.toContain('잠시 뒤');
+    expect([...container.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['레시피 다시 불러오기']);
+    calls = [];
+    await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === '레시피 다시 불러오기')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.map((c) => c.url)).toEqual(['/api/desktop/recipes']);
+    expect(container.querySelector('input[name=recipe]')).not.toBeNull();
   });
 
   it('a platform preset (org_id null) is named in the viewer\'s language; an organization\'s recipe keeps its own name', async () => {
