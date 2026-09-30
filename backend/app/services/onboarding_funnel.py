@@ -49,6 +49,10 @@ DESKTOP_SHELL_EMIT_EVENTS = frozenset({
     # it (meta member_id); the setup status reads them as signals.agents_ended
     "desktop_agent_ended_early", "desktop_agent_restarted",
 })
+# Pedro 13:51Z (4426) — names that are a person's act by definition: the hand count reads them by name (once per setup),
+# whatever the meta says — the shell sends desktop_setup_signed_in with no meta, and apps already in people's hands keep doing
+# so; counting here makes every app build and every row already stored count right.
+HUMAN_HAND_EVENTS = frozenset({"desktop_setup_signed_in"})
 # §1 canonical = FE-emit ∪ BE-emit (one source each; the router accepts exactly this).
 EVENT_CATALOG = FE_EMIT_EVENTS | BE_EMIT_EVENTS | DESKTOP_SHELL_EMIT_EVENTS
 # §4 실패사유 taxonomy(8).

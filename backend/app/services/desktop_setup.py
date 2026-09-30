@@ -726,7 +726,12 @@ async def setup_hands(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UU
         select(OnboardingEvent.event, OnboardingEvent.meta, OnboardingEvent.server_ts)
         .where(OnboardingEvent.session_id == setup_id, _counted_row()).order_by(OnboardingEvent.server_ts)
     )).all()
-    hands = sum(1 for _e, meta, _t in rows if (meta or {}).get("human_hand") is True)
+    from app.services.onboarding_funnel import HUMAN_HAND_EVENTS
+
+    # a row marked human_hand is a hand; a name that is a person's act by definition (a sign-in) is one hand per setup — the
+    # shell keeps «sent» in memory only, so after an app restart the same sign-in can arrive again (Pedro 13:51Z)
+    hands = sum(1 for e, meta, _t in rows if e not in HUMAN_HAND_EVENTS and (meta or {}).get("human_hand") is True)
+    hands += len({e for e, _m, _t in rows if e in HUMAN_HAND_EVENTS})
     started = next((t for e, _m, t in rows if e == EVENT_CODE_ISSUED), None)
     first_result = next((t for e, _m, t in rows if e == EVENT_FIRST_RESULT), None)
     minutes = round((first_result - started).total_seconds() / 60, 1) if started and first_result else None
