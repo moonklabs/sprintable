@@ -567,6 +567,7 @@ def _msg_payload(
     *, references: list[dict[str, str]] | None = None,
     blocked_sender_ids: set[uuid.UUID] | None = None,
     sender_runtime_type: str | None = None,
+    viewer_member_id: uuid.UUID | None = None,
 ) -> dict:
     # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone인데 attachments가 응답에
     # 그대로 남아 첨부(영상 등)가 계속 재생됐다. AC③(오발송 스크럽) 근거가 이걸로 무너진다 —
@@ -622,6 +623,14 @@ def _msg_payload(
     # 모르는 SSE/write-response 경로는 넘기지 않아 키 자체가 없다(기존 references 규율 재사용).
     if blocked_sender_ids is not None:
         payload["is_blocked_sender"] = bool(sender and sender.id in blocked_sender_ids)
+    # story #4430 — how many participants a block kept this message from, shown to its sender only (never to the blocker
+    # or anyone else — a count, never who: PO 16:20Z). Read paths pass the viewer; the send answer carries its own
+    # `delivery` block instead.
+    # read like _activation_payload: loaded values only (__dict__), never a lazy load inside this sync builder
+    _meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    withheld = _meta.get(DELIVERY_WITHHELD_KEY) if isinstance(_meta, dict) else None
+    if withheld and viewer_member_id is not None and msg.sender_id == viewer_member_id:
+        payload["delivery_withheld"] = withheld
     # E-ACTIVATION S1: typed activation 필드 top-level 노출(없으면 None). connector 헤더 주입용.
     payload.update(_activation_payload(msg))
     # story #2604 P2: approval-request 카드 스키마 top-level 노출(없으면 None·additive).
@@ -635,6 +644,10 @@ def _msg_payload(
 
 
 _ACTIVATION_KINDS = frozenset({"request", "handoff", "result", "ack"})
+
+# story #4430 — a message a block kept from some participants: the metadata key on the sent line, and the closed reason.
+DELIVERY_WITHHELD_KEY = "delivery_withheld"
+DELIVERY_WITHHELD_REASON_BLOCKED = "recipient_blocked_sender"
 
 
 def _activation_meta(req: "SendMessageRequest") -> dict | None:
@@ -756,19 +769,23 @@ def _server_command_payload(msg: "ConversationMessage") -> dict:
     return {"server_command": server_command if isinstance(server_command, dict) else None}
 
 
-async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
-    """story #2349 — 읽기 경로 전용. viewer(현재 caller)가 차단한 member_id 집합.
+async def _viewer_blocked_sender_ids(
+    auth: AuthContext, org_id: uuid.UUID, db: AsyncSession,
+) -> tuple[set[uuid.UUID], uuid.UUID | None]:
+    """story #2349 — 읽기 경로 전용. viewer(현재 caller)가 차단한 member_id 집합 + viewer 자신의 member id(story #4430 —
+    보낸 사람에게만 보이는 `delivery_withheld`용 · 못 풀면 None).
 
     grant-only 휴먼(team_member 행 없음)은 차단 기능을 아직 못 쓴다(user_blocks.py의 동일
     경계) — 여기서는 read 경로가 안 깨지게 빈 집합으로 조용히 폴백한다(차단 0건과 동치).
     """
     resolved = await _resolve_member(auth, org_id, db)
+    viewer_id = getattr(resolved, "id", None)
     if not isinstance(resolved, TeamMember):
-        return set()
+        return set(), viewer_id
     rows = (await db.execute(
         select(UserBlock.blocked_member_id).where(UserBlock.blocker_member_id == resolved.id)
     )).scalars().all()
-    return set(rows)
+    return set(rows), viewer_id
 
 
 async def _dispatch_conversation_event(
@@ -2060,13 +2077,14 @@ async def list_messages(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[m.id for m in msgs],
     )
-    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
+    blocked_sender_ids, viewer_member_id = await _viewer_blocked_sender_ids(auth, org_id, db)
 
     data = [
         _msg_payload(
             m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
             blocked_sender_ids=blocked_sender_ids,
             sender_runtime_type=runtime_type_map.get(m.sender_id) if m.sender_id else None,
+            viewer_member_id=viewer_member_id,
         )
         for m in msgs
     ]
@@ -2111,11 +2129,12 @@ async def get_message(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[msg.id],
     )
-    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
+    blocked_sender_ids, viewer_member_id = await _viewer_blocked_sender_ids(auth, org_id, db)
     return _msg_payload(
         msg, sender_map.get(msg.sender_id), references=refs_by_msg.get(msg.id, []),
         blocked_sender_ids=blocked_sender_ids,
         sender_runtime_type=runtime_type_map.get(msg.sender_id) if msg.sender_id else None,
+        viewer_member_id=viewer_member_id,
     )
 
 
@@ -2222,13 +2241,14 @@ async def list_message_replies(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[m.id for m in msgs],
     )
-    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
+    blocked_sender_ids, viewer_member_id = await _viewer_blocked_sender_ids(auth, org_id, db)
 
     data = [
         _msg_payload(
             m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
             blocked_sender_ids=blocked_sender_ids,
             sender_runtime_type=runtime_type_map.get(m.sender_id) if m.sender_id else None,
+            viewer_member_id=viewer_member_id,
         )
         for m in msgs
     ]
@@ -2971,6 +2991,29 @@ async def send_message_core(
     except Exception:
         logger.warning("user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id, exc_info=True)
 
+    # story #4430 — the participants this message will not reach because they blocked the sender: never a quiet success.
+    # A count and a closed reason code, never who (PO 16:20Z — blocking is a people's feature too; «who blocked me» would
+    # break the blocker's quiet). Kept on the sent line (metadata) for the sender's later reads, and in the send answer.
+    withheld_delivery: dict | None = None
+    if user_blocker_ids:
+        _others = set((await db.execute(
+            select(ConversationParticipant.member_id).where(
+                ConversationParticipant.conversation_id == conv.id,
+                ConversationParticipant.member_id != sender.id,
+            )
+        )).scalars().all())
+        _withheld_n = len(_others & user_blocker_ids)
+        if _withheld_n:
+            # the room's kind lets the sender's tools word it right (a 1:1 «the recipient» vs a group count) — the sender
+            # already knows it, so it tells nothing about who blocked (PO 16:49Z). Counted from the participants, not the
+            # room's `type` column: a room typed "dm" can hold three or more people, and «the recipient» would be untrue
+            # there (PO 17:18Z).
+            withheld_delivery = {
+                "withheld_count": _withheld_n, "reason": DELIVERY_WITHHELD_REASON_BLOCKED,
+                "conversation_type": "dm" if len(_others) == 1 else "group",
+            }
+            msg.msg_metadata = {**(msg.msg_metadata or {}), DELIVERY_WITHHELD_KEY: withheld_delivery}
+
     # E-EVENT-1CONFIG + story #2620(P3, DeliveryDecision 단일화): webhook 전달 대상을 요청
     # 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제 webhook delivery 가 **같은 snapshot**을
     # 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고 Finding 1). 산출된 target 을 그대로
@@ -3359,6 +3402,9 @@ async def send_message_core(
     if fork_info:
         response["forked"] = True
         response["forked_conversation_id"] = fork_info["forked_conversation_id"]
+    # story #4430 — the participants a block kept this message from (a count · a closed reason); absent when none.
+    if withheld_delivery:
+        response["delivery"] = withheld_delivery
     # E-CHAT-CMD S4: 미지원 런타임으로 차단된 커맨드의 hint 를 발신자에게 반환(AC3 hint response).
     if command_hints:
         response["command_gate"] = {"blocked": command_hints}
