@@ -388,23 +388,22 @@ describe('[SID:4427] either rows can be «나» · no agent row · the recipe ov
     expect(text()).not.toContain('잠시 뒤');
   });
 
-  it('a recipe over the request limits (422 · detail on roles) → «이 레시피는 여기서 시작할 수 없어요» [레시피 다시 고르기] back to the choice; no retry, no «잠시 뒤»', async () => {
-    for (const loc of [['body', 'roles'], ['body', 'roles', 3, 'role']]) {
-      stub(() => new Response(JSON.stringify({ detail: [{ type: 'too_long', loc, msg: 'x' }] }), { status: 422 }));
-      await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
-      await act(async () => { startButton().click(); });
-      expect(text()).toContain('이 레시피는 여기서 시작할 수 없어요');
-      expect(text()).toContain('역할이 너무 많거나 역할 이름이 너무 길어요. 다른 레시피를 골라 주세요.');
-      const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
-      expect(buttons).toEqual([chooseLabel]);
-      await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === chooseLabel)!.click(); });
-      expect(container.querySelector('input[name=recipe]')).not.toBeNull();
-    }
-    // another 422 without a roles pointer is not taken for this card
-    stub(() => new Response(JSON.stringify({ detail: [{ type: 'string_too_long', loc: ['body', 'workdir_hint'], msg: 'x' }] }), { status: 422 }));
+  it('a recipe over the request limits (422 recipe_too_large) → «이 레시피는 여기서 시작할 수 없어요» [레시피 다시 고르기] back to the choice; no retry, no «잠시 뒤»; another 422 body fault is not this card', async () => {
+    stub(() => new Response(JSON.stringify({ data: null, error: { code: 'recipe_too_large' } }), { status: 422 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     await act(async () => { startButton().click(); });
-    expect(text()).not.toContain('이 레시피는 여기서 시작할 수 없어요');
+    expect(text()).toContain('이 레시피는 여기서 시작할 수 없어요');
+    expect(text()).toContain('역할이 너무 많거나 역할 이름이 너무 길어요. 다른 레시피를 골라 주세요.');
+    expect([...container.querySelectorAll('button')].map((b) => b.textContent)).toEqual([chooseLabel]);
+    await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === chooseLabel)!.click(); });
+    expect(container.querySelector('input[name=recipe]')).not.toBeNull();
+    // a body fault (roles_invalid · FastAPI's own 422 with detail) is not taken for this card
+    for (const body of [{ data: null, error: { code: 'roles_invalid' } }, { detail: [{ type: 'too_long', loc: ['body', 'roles'], msg: 'x' }] }]) {
+      stub(() => new Response(JSON.stringify(body), { status: 422 }));
+      await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      await act(async () => { startButton().click(); });
+      expect(text()).not.toContain('이 레시피는 여기서 시작할 수 없어요');
+    }
   });
 
   it('a platform preset (org_id null) is named in the viewer\'s language; an organization\'s recipe keeps its own name', async () => {

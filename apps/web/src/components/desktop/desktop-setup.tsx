@@ -61,20 +61,13 @@ export function failureForCode(code: string | undefined, resource?: string): Set
     // no row left for an agent (PO 05:21Z ⒜): the page stops this before «시작»; if it still comes, the same ①
     case 'no_agent_role':
       return 'no-agent';
+    // the recipe is over the confirm body's limits (more than 50 roles · a role name over 200 characters): trying again gives
+    // the same answer, so «다른 레시피», not «잠시 뒤 다시» (Kadir 4834 · PO 05:21Z · Didi 4838's closed code · Yuna v20)
+    case 'recipe_too_large':
+      return 'recipe-too-big';
     default:
       return null;
   }
-}
-
-/**
- * The recipe is over the confirm body's limits (more than 50 roles · a role name over 200 characters — the request schema's
- * own 422, which has no error code, only FastAPI's `detail` list pointing at `roles`). Trying again gives the same answer, so
- * this is not «잠시 뒤 다시» but «다른 레시피» (Kadir 4834 · PO 05:21Z · Yuna v20).
- */
-export function isRecipeOverLimits(status: number, body: unknown): boolean {
-  const detail = (body as { detail?: unknown } | null)?.detail;
-  return status === 422 && Array.isArray(detail)
-    && detail.some((d) => Array.isArray((d as { loc?: unknown }).loc) && ((d as { loc: unknown[] }).loc).includes('roles'));
 }
 
 /** ③ 한도의 수는 서버 오류가 준 값만(유나 표) — 이번 설정에 필요한 수와 더 만들 수 있는 수가 둘 다 있을 때만 수 문장. */
@@ -170,7 +163,6 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       });
       if (res.ok) { setView({ kind: 'started' }); return; }
       const body = await res.json().catch(() => null);
-      if (isRecipeOverLimits(res.status, body)) { setView({ kind: 'failed', failure: 'recipe-too-big' }); return; }
       const failure = failureForCode(body?.error?.code, body?.error?.resource);
       setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null } : { kind: 'error' });
     } catch {
