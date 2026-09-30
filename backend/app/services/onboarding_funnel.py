@@ -49,6 +49,86 @@ DESKTOP_SHELL_EMIT_EVENTS = frozenset({
     # it (meta member_id); the setup status reads them as signals.agents_ended
     "desktop_agent_ended_early", "desktop_agent_restarted",
 })
+# story #4438 (PO 18:42Z) — the meta of each name the desktop app sends, one closed shape per name, checked at the entrance
+# (POST /onboarding/events): a known field of the wrong kind or with an unknown value → 422 `invalid_meta`, nothing stored; a
+# field not in the shape is dropped and the rest stored (PO 19:07Z — refusing the whole event would lose a hand, and an app
+# build that adds a field before the server knows it would lose every such event). Twice today a non-string field became a 500 on the read side (4828 reason · 4846 runtime); this closes the class
+# instead of one isinstance per read. The readers keep their own guards for rows stored before this check. The app's copy of
+# the names is desktop-electron/src/shell-events.ts (sprintable-mobile); a name here needs a shape here (test pins it).
+BLOCKED_REASONS = frozenset({"managed_mcp"})
+BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
+BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
+AGENT_RUNTIMES = frozenset({"claude", "codex"})
+EXIT_CODE_RANGE = range(-(2**31), 2**31)
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _fits(spec: dict, v: object) -> bool:
+    """One field's value against its spec (the contract file's words): `const` · `enum` (strings) · `type` bool | uuid | int32.
+    An unknown spec never fits (closed: a typo in the table refuses, it never lets anything through)."""
+    if "const" in spec:
+        return v is spec["const"]
+    if "enum" in spec:
+        return isinstance(v, str) and v in spec["enum"]
+    kind = spec.get("type")
+    if kind == "bool":
+        return isinstance(v, bool)
+    if kind == "uuid":
+        return isinstance(v, str) and bool(_UUID_RE.match(v))
+    if kind == "int32":
+        return isinstance(v, int) and not isinstance(v, bool) and v in EXIT_CODE_RANGE
+    return False
+
+
+def _field(required: bool, **spec: object) -> dict:
+    return {"required": required, **spec}
+
+
+# name → field → {required, value spec}. Plain data, so the test holds it equal to the contract file, values included (Kadir
+# 228 · PO 19:45Z). Optional fields are the ones an app build may leave out (older builds · unknown values).
+DESKTOP_SHELL_META_SHAPES: dict[str, dict[str, dict]] = {
+    "desktop_workdir_fallback": {"hinted": _field(True, type="bool")},
+    "desktop_setup_blocked": {
+        "reason": _field(True, enum=sorted(BLOCKED_REASONS)),
+        "runtime": _field(False, enum=sorted(BLOCKED_RUNTIMES)),
+        "when": _field(False, enum=sorted(BLOCKED_WHEN)),
+    },
+    "desktop_first_screen_human_input": {"human_hand": _field(True, const=True)},
+    "desktop_first_task_handed": {"via": _field(True, enum=["start", "turn"])},
+    "desktop_setup_signed_in": {},
+    "desktop_agent_ended_early": {
+        "member_id": _field(True, type="uuid"),
+        "runtime": _field(False, enum=sorted(AGENT_RUNTIMES)),
+        "exit_code": _field(False, type="int32"),
+    },
+    "desktop_agent_restarted": {"member_id": _field(True, type="uuid")},
+}
+
+
+def desktop_meta_error(event: str, meta: object) -> str | None:
+    """The first known field of `meta` that breaks `event`'s shape (or «meta» itself), None when it fits · None for other
+    names. Fields not in the shape are not judged here — desktop_meta_known drops them."""
+    shape = DESKTOP_SHELL_META_SHAPES.get(event)
+    if shape is None:
+        return None
+    if not isinstance(meta, dict):
+        return "meta"
+    for key, spec in shape.items():
+        if key not in meta:
+            if spec["required"]:
+                return key
+            continue
+        if not _fits(spec, meta[key]):
+            return key
+    return None
+
+
+def desktop_meta_known(event: str, meta: dict) -> dict:
+    """`meta` with only the fields `event`'s shape knows (the same dict for names without a shape)."""
+    shape = DESKTOP_SHELL_META_SHAPES.get(event)
+    return meta if shape is None else {k: v for k, v in meta.items() if k in shape}
+
+
 # Pedro 13:51Z (4426) — names that are a person's act by definition: the hand count reads them by name (once per setup),
 # whatever the meta says — the shell sends desktop_setup_signed_in with no meta, and apps already in people's hands keep doing
 # so; counting here makes every app build and every row already stored count right.

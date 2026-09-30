@@ -1,0 +1,69 @@
+{
+  "desktop_agent_ended_early": {
+    "exit_code": {
+      "required": false,
+      "type": "int32"
+    },
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    },
+    "runtime": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "required": false
+    }
+  },
+  "desktop_agent_restarted": {
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    }
+  },
+  "desktop_first_screen_human_input": {
+    "human_hand": {
+      "const": true,
+      "required": true
+    }
+  },
+  "desktop_first_task_handed": {
+    "via": {
+      "enum": [
+        "start",
+        "turn"
+      ],
+      "required": true
+    }
+  },
+  "desktop_setup_blocked": {
+    "reason": {
+      "enum": [
+        "managed_mcp"
+      ],
+      "required": true
+    },
+    "runtime": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "required": false
+    },
+    "when": {
+      "enum": [
+        "after_start",
+        "found"
+      ],
+      "required": false
+    }
+  },
+  "desktop_setup_signed_in": {},
+  "desktop_workdir_fallback": {
+    "hinted": {
+      "required": true,
+      "type": "bool"
+    }
+  }
+}
