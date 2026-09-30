@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select, text, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_current_user_streaming
@@ -434,9 +435,11 @@ async def _stream_access_revoked(api_key_id: object, agent_id: uuid.UUID) -> str
         return "key_revoked"
     try:
         return await _stream_access_revoked_db(key_uuid, agent_id)
-    except Exception:
-        # PO 14:35Z ① — the recheck must not add a new way to drop streams: a DB error skips this check (one log line) and the
-        # next one runs as usual. While the DB errors, the stream's own reads (_fetch_events) fail the same way anyway.
+    except (SQLAlchemyError, TimeoutError):
+        # PO 14:35Z ① — the recheck must not add a new way to drop streams: a DB error or a DB timeout skips this check (one log
+        # line) and the next one runs as usual. While the DB errors, the stream's own reads (_fetch_events) fail the same way
+        # anyway. Only those (PO 15:06Z): any other error is a bug in the check itself and must not leave every stream
+        # quietly open — it propagates.
         logger.warning("agent stream access recheck failed agent_id=%s — skipped this time", agent_id, exc_info=True)
         return None
 
