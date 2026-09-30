@@ -15,7 +15,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
 import {
-  agentRowCount, confirmBody, hasSetupFragment, isStartableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -31,7 +31,7 @@ const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', c
 // code.claude.com/docs/en/setup and github.com/openai/codex)
 const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
-export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed';
+export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe';
 
 /** 실패 화면 문구 키 — `Record<string, string>` 리터럴 표(키 가드가 이 모양의 값을 «읽힘»으로 센다). */
 const FAILURE_KEY: Record<string, string> = {
@@ -41,6 +41,7 @@ const FAILURE_KEY: Record<string, string> = {
   'expired.title': 'failure.expired.title', 'expired.body': 'failure.expired.body', 'expired.action': 'failure.expired.action',
   'offline.title': 'failure.offline.title', 'offline.body': 'failure.offline.body', 'offline.action': 'failure.offline.action',
   'managed.title': 'failure.managed.title', 'managed.body': 'failure.managed.body', 'managed.action': 'failure.managed.action',
+  'no-recipe.title': 'failure.no-recipe.title', 'no-recipe.body': 'failure.no-recipe.body', 'no-recipe.action': 'failure.no-recipe.action',
 };
 
 /** confirm 오류 코드(4424 닫힌 목록) → 실패 화면. 목록 밖 코드는 null(화면이 지어내지 않는다 — 한 줄 일반 문구). */
@@ -71,7 +72,8 @@ type View =
   | { kind: 'choose' }
   | { kind: 'starting' }
   | { kind: 'started' }
-  | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null }
+  /** `retry`: what «다시 시도 / 다시 확인» does — read the list again, or send the confirm again. */
+  | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null; retry?: 'load' | 'confirm' }
   | { kind: 'error' };
 
 function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
@@ -100,28 +102,32 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     rememberActiveSetup(setupId); // 이 탭에서 문서를 열면 desktop_doc_opened로 셈(DesktopSetupDocWatch)
   }, [setupId]);
 
+  // bumped by «다시 확인 / 다시 시도» after the list could not be read or came back empty — reads the list again
+  const [loadTick, setLoadTick] = useState(0);
+  const reload = () => { setView({ kind: 'loading' }); setLoadTick((n) => n + 1); };
+
   useEffect(() => {
     let off = false;
     void (async () => {
       try {
-        const res = await fetchWithAuth('/api/events/definitions');
+        // the recipes this setup can start, each with its rows — worked out by the server with the function confirm checks
+        // with (4831): the page draws them as they come (list order = the default is the first — no «recommended» tag)
+        const res = await fetchWithAuth('/api/desktop/recipes');
         if (!res.ok) throw new Error(String(res.status));
         const body = await res.json();
-        const list: (SetupRecipe & { enabled?: boolean; payload_schema?: SetupRecipe['payload_schema'] })[] = Array.isArray(body) ? body : body?.data ?? [];
-        // 레시피 = 흐름(stage 목록)이 있고 켜져 있는 정의 · 목록 순서 그대로(첫째가 기본값 — 추천 딱지 없음)
-        // 시작할 수 있는 것만(켜짐 · 흐름 · 에이전트 역할 ≥ 1 · 화면 이름 있음 — PO 15:38Z dev 실측: 키 그대로 · 에이전트 0인 정의가 보였다)
-        const usable = list.filter((d) => isStartableRecipe(d, presetName(d, tPreset)));
+        const list: SetupRecipe[] = body?.recipes ?? body?.data?.recipes ?? [];
+        const usable = list.filter((d) => listableRecipe(d, presetName(d, tPreset)));
         if (off) return;
         setRecipes(usable);
         if (usable[0]) pick(usable[0]);
-        setView({ kind: 'choose' });
+        setView(usable.length ? { kind: 'choose' } : { kind: 'failed', failure: 'no-recipe', retry: 'load' });
       } catch {
-        if (!off) setView({ kind: 'failed', failure: 'offline' });
+        if (!off) setView({ kind: 'failed', failure: 'offline', retry: 'load' });
       }
     })();
     return () => { off = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadTick]);
 
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
@@ -149,14 +155,15 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       const failure = failureForCode(body?.error?.code, body?.error?.resource);
       setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null } : { kind: 'error' });
     } catch {
-      setView({ kind: 'failed', failure: 'offline' });
+      setView({ kind: 'failed', failure: 'offline', retry: 'confirm' });
     }
   }
 
   if (!isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
-    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={view.failure === 'offline' ? () => void start() : undefined}
+    const onRetry = view.retry === 'load' ? reload : view.failure === 'offline' ? () => void start() : undefined;
+    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={onRetry}
       onChooseRecipe={view.failure === 'agent-limit' ? () => setView({ kind: 'choose' }) : undefined} />;
   }
   // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
@@ -194,14 +201,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         <ul className="mt-2 flex flex-col divide-y rounded-md border">
           {rows.map((r) => (
             <li key={r.role} className="flex items-center justify-between gap-3 p-3">
-              <span className="min-w-0">
+              <span className="min-w-0 break-keep">
                 <span className="block text-sm font-medium">{roleName(r.role)}</span>
                 <span className="block text-xs text-muted-foreground">{r.actor === 'human' ? t('whoHuman') : r.actor === 'either' ? t('whoEither') : t('whoAgent')}</span>
               </span>
               {r.choices.length === 1
                 ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: userName ?? '' }) : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
                 : (
-                  <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
+                  <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="max-w-[55%] shrink-0 rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
                     value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
                     {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: userName ?? '' }) : RUNTIME_LABEL[c.runtime]}</option>)}
                     {claudeBlocked && r.actor !== 'human' ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
@@ -264,7 +271,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
       <div className="flex gap-2">
         {failure === 'no-agent' ? appButton(t(key('action')))
           : failure === 'expired' ? appButton(t(key('action')))
-          : failure === 'offline' && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
+          : (failure === 'offline' || failure === 'no-recipe') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
           : failure === 'not-admin' || failure === 'managed' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}

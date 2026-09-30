@@ -2,26 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
-  setupProgress, isStartableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
+  setupProgress, listableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
 } from './desktop-setup';
 
 const CODE = 'A'.repeat(20) + '_-' + 'b'.repeat(21); // 43
 const q = (s: string) => new URLSearchParams(s);
 
-// 조사(agent) · 작성(either) · 연출(human, 게이트) · 발행(채널 연결)
+// the server's rows (4831 · flow order): 조사(agent) · 작성(either) · 연출(human). Channel stages never come as rows.
 const recipe: SetupRecipe = {
   id: 'rec-1',
   key: 'org.marketing_loop',
-  org_id: 'o-1',
   name: '마케팅 루프',
-  payload_schema: { properties: { stage: { enum: ['research', 'draft', 'review', 'publish'] } } },
-  stage_metadata: {
-    research: { role: '조사' },
-    draft: { role: '작성' },
-    review: { role: '연출', gate: { type: 'approval', approver: 'org_owner' } },
-    publish: { role: '발행', capability: { kind: 'publish', target: 'channel_connection' } },
-  },
-  role_actor_kinds: { 조사: 'agent', 작성: 'either', 연출: 'human' },
+  roles: [
+    { role: '조사', kind: 'agent', stages: ['research'] },
+    { role: '작성', kind: 'either', stages: ['draft'] },
+    { role: '연출', kind: 'human', stages: ['review'] },
+  ],
 };
 
 describe('[SID:4427] desktop setup page rules', () => {
@@ -35,7 +31,7 @@ describe('[SID:4427] desktop setup page rules', () => {
     for (const bad of ['', 'code=', `code=${CODE}x`, `code=${CODE.slice(1)}`, `code=${CODE.slice(1)}%2F`]) expect(parseSetupQuery(q(bad)), bad).toBeNull();
   });
 
-  it('one row per role, opened with defaults: human → me · agent/either → first runtime (Claude Code → Codex) · channel stage has no row', () => {
+  it('the server\'s rows as they come, people first (orderedRecipeRoles order · Yuna 12:49Z); defaults: human → me · agent/either → first runtime', () => {
     const rows = setupRoleRows(recipe, ['claude', 'codex']);
     expect(rows.map((r) => [r.role, r.actor, r.stages, r.owner])).toEqual([
       ['연출', 'human', ['review'], { kind: 'me' }],
@@ -49,16 +45,21 @@ describe('[SID:4427] desktop setup page rules', () => {
     expect(setupRoleRows(recipe, ['codex']).find((r) => r.role === '조사')!.owner).toEqual({ kind: 'agent', runtime: 'codex' });
   });
 
-  it('a role with no declaration is an agent role (same as the apply window)', () => {
-    const rows = setupRoleRows({ ...recipe, role_actor_kinds: null }, ['claude']);
-    expect(rows.find((r) => r.role === '조사')!.actor).toBe('agent');
+  it('a role the server sends is a row even when its only stage is an approval (loop_agency — the web used to drop it → roles_invalid)', () => {
+    const loop: SetupRecipe = { id: 'l', key: 'preset.loop_agency', name: 'loop', roles: [
+      { role: 'Planner', kind: 'agent', stages: ['plan'] },
+      { role: 'Reviewer', kind: 'either', stages: ['approve'] },
+    ] };
+    const rows = setupRoleRows(loop, ['claude']);
+    expect(rows.map((r) => r.role)).toEqual(['Planner', 'Reviewer']);
+    expect(confirmBody(CODE, rows, 'p', 'l', '~/x').roles).toEqual([{ role: 'Planner', runtime: 'claude' }, { role: 'Reviewer', runtime: 'claude' }]);
   });
 
   it('one agent per ROLE even when the role spans several stages (PO 08:31Z · 4825 CHANGES)', () => {
-    const video: SetupRecipe = { id: 'v', key: 'preset.marketing.video_production', org_id: null, name: 'video',
-      payload_schema: { properties: { stage: { enum: ['brief', 'draft', 'editing', 'animatic', 'verification'] } } },
-      stage_metadata: { brief: { role: 'Director', gate: { type: 'approval' } }, draft: { role: 'Creator' }, editing: { role: 'Creator' }, animatic: { role: 'Creator' }, verification: { role: 'Creator' } },
-      role_actor_kinds: { Director: 'human', Creator: 'agent' } };
+    const video: SetupRecipe = { id: 'v', key: 'preset.marketing.video_production', name: 'video', roles: [
+      { role: 'Director', kind: 'human', stages: ['brief'] },
+      { role: 'Creator', kind: 'agent', stages: ['draft', 'editing', 'animatic', 'verification'] },
+    ] };
     const rows = setupRoleRows(video, ['claude']);
     expect(rows.map((r) => [r.role, r.stages.length])).toEqual([['Director', 1], ['Creator', 4]]);
     expect(confirmBody(CODE, rows, 'p', 'v', '~/x').roles).toEqual([{ role: 'Creator', runtime: 'claude' }]);
@@ -82,7 +83,7 @@ describe('[SID:4427] desktop setup page rules', () => {
   it('nothing found: an agent-only role cannot start (failure ①); a recipe with only people roles can', () => {
     expect(needsAnAgent(setupRoleRows(recipe, []), [])).toBe(true);
     expect(needsAnAgent(setupRoleRows(recipe, ['claude']), ['claude'])).toBe(false);
-    const peopleOnly: SetupRecipe = { ...recipe, stage_metadata: { review: { role: '연출', gate: { type: 'approval' } } }, role_actor_kinds: { 연출: 'human' } };
+    const peopleOnly: SetupRecipe = { ...recipe, roles: [{ role: '연출', kind: 'human', stages: ['review'] }] };
     expect(needsAnAgent(setupRoleRows(peopleOnly, []), [])).toBe(false);
   });
 
@@ -182,16 +183,13 @@ describe('[SID:4427] 진행 표시 — 상태 조회 한 번을 세 단계로(PO
   });
 });
 
-describe('[SID:4427] what the setup page lists and strips (dev 실측 15:31Z)', () => {
-  const base = { id: 'r', key: 'org.x', org_id: 'o', name: '엑스', payload_schema: { properties: { stage: { enum: ['a', 'b'] } } }, stage_metadata: { a: { role: '작업' }, b: { role: '검토' } } } as SetupRecipe;
-  it('startable = on · a flow · an agent role · a real name', () => {
-    expect(isStartableRecipe({ ...base, role_actor_kinds: { 작업: 'agent', 검토: 'human' } }, '엑스')).toBe(true);
-    expect(isStartableRecipe({ ...base, role_actor_kinds: { 작업: 'either', 검토: 'human' } }, '엑스')).toBe(true);
-    expect(isStartableRecipe({ ...base, role_actor_kinds: { 작업: 'human', 검토: 'human' } }, '엑스')).toBe(false);
-    expect(isStartableRecipe({ ...base, enabled: false }, '엑스')).toBe(false);
-    expect(isStartableRecipe(base, 'org.x')).toBe(false); // the key shown as a name
-    expect(isStartableRecipe(base, '  ')).toBe(false);
-    expect(isStartableRecipe({ ...base, payload_schema: { properties: { stage: { enum: [] } } } }, '엑스')).toBe(false);
+describe('[SID:4427] what the setup page lists and strips (dev 실측 15:31Z · 4831)', () => {
+  it('the server sends only startable recipes; the page still never shows a key as a name nor a people-only card (display guard)', () => {
+    expect(listableRecipe(recipe, '마케팅 루프')).toBe(true);
+    expect(listableRecipe(recipe, 'org.marketing_loop')).toBe(false); // the key shown as a name
+    expect(listableRecipe(recipe, '  ')).toBe(false);
+    expect(listableRecipe({ ...recipe, roles: [{ role: '연출', kind: 'human', stages: ['review'] }] }, '연출만')).toBe(false);
+    expect(listableRecipe({ ...recipe, roles: [{ role: '작성', kind: 'either', stages: ['draft'] }] }, '작성')).toBe(true);
   });
   it('only a # that carries setup values is stripped', () => {
     expect(hasSetupFragment('#code=abc&setup=s')).toBe(true);

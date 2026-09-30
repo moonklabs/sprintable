@@ -6577,6 +6577,11 @@
           "title": "Your company's settings block this connection",
           "body": "Your company manages the agent settings on this computer, so agents here can't receive Sprintable tasks. Ask your IT admin to allow Sprintable, then check again.",
           "action": "Check again"
+        },
+        "no-recipe": {
+          "title": "There's no recipe you can start on this computer",
+          "body": "You need a recipe with at least one role an agent takes. Turn one on in your organization's recipes, then check again.",
+          "action": "Check again"
         }
       },
       "direct": {

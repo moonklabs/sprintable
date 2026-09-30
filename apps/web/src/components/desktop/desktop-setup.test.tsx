@@ -18,23 +18,20 @@ import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const CODE = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
-const RECIPES = [
+// what GET /api/desktop/recipes answers (4831): startable recipes only, each with the server's rows in flow order
+const RECIPES: { id: string; key: string; name: string; description?: string; roles: { role: string; kind: 'human' | 'agent' | 'either'; stages: string[] }[] }[] = [
   {
-    id: 'rec-1', key: 'org.marketing_loop', org_id: 'o-1', name: '마케팅 루프', description: '글감을 모으고 초안을 써요', enabled: true,
-    payload_schema: { properties: { stage: { enum: ['research', 'draft', 'review', 'publish'] } } },
-    stage_metadata: {
-      research: { role: '조사' }, draft: { role: '작성' },
-      review: { role: '연출', gate: { type: 'approval', approver: 'org_owner' } },
-      publish: { role: '발행', capability: { kind: 'publish', target: 'channel_connection' } },
-    },
-    role_actor_kinds: { 조사: 'agent', 작성: 'either', 연출: 'human' },
+    id: 'rec-1', key: 'org.marketing_loop', name: '마케팅 루프', description: '글감을 모으고 초안을 써요',
+    roles: [{ role: '조사', kind: 'agent', stages: ['research'] }, { role: '작성', kind: 'either', stages: ['draft'] }, { role: '연출', kind: 'human', stages: ['review'] }],
   },
-  { id: 'rec-2', key: 'org.research_one', org_id: 'o-1', name: '조사 한 명', enabled: true, payload_schema: { properties: { stage: { enum: ['research'] } } }, stage_metadata: { research: { role: '조사' } }, role_actor_kinds: { 조사: 'agent' } },
+  { id: 'rec-2', key: 'org.research_one', name: '조사 한 명', roles: [{ role: '조사', kind: 'agent', stages: ['research'] }] },
 ];
 
 let container: HTMLDivElement;
 let root: Root;
 let calls: { url: string; body?: unknown }[];
+/** What GET /api/desktop/recipes answers now (tests change it: empty · failing · a list). */
+let recipesNow: () => Response = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
 /** What GET /api/desktop/setups/{id} answers now (the progress tests change it between polls). */
 let statusNow: () => unknown = () => ({});
 
@@ -43,7 +40,7 @@ function stub(confirm: () => Response | Promise<Response>) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (url.endsWith('/api/events/definitions')) return new Response(JSON.stringify({ data: RECIPES }), { status: 200 });
+    if (url.endsWith('/api/desktop/recipes')) return recipesNow();
     if (url.includes('/api/desktop/setup-codes/')) return confirm();
     if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
     return new Response('{}', { status: 404 });
@@ -240,20 +237,52 @@ describe('[SID:4427] desktop setup page', () => {
     sp.value = null;
   });
 
-  it('the recipe list shows only what can start: on · a flow · at least one agent role · a real name (dev 실측: a key shown as a name, a people-only recipe)', async () => {
+  it('the list is the server\'s (4831): drawn as it comes; a key shown as a name or a people-only card never shows (display guard)', async () => {
     const extra = [
-      { id: 'rec-key', key: 'org.moonklabs.work.gate_cycle', org_id: 'o-1', name: '', enabled: true, payload_schema: { properties: { stage: { enum: ['a'] } } }, stage_metadata: { a: { role: '작업' } }, role_actor_kinds: { 작업: 'agent' } },
-      { id: 'rec-people', key: 'org.people_only', org_id: 'o-1', name: '사람만', enabled: true, payload_schema: { properties: { stage: { enum: ['a'] } } }, stage_metadata: { a: { role: '검토' } }, role_actor_kinds: { 검토: 'human' } },
-      { id: 'rec-off', key: 'org.off', org_id: 'o-1', name: '꺼진 것', enabled: false, payload_schema: { properties: { stage: { enum: ['a'] } } }, stage_metadata: { a: { role: '작업' } } },
+      { id: 'rec-key', key: 'org.moonklabs.work.gate_cycle', name: 'org.moonklabs.work.gate_cycle', roles: [{ role: '작업', kind: 'agent' as const, stages: ['a'] }] },
+      { id: 'rec-people', key: 'org.people_only', name: '사람만', roles: [{ role: '검토', kind: 'human' as const, stages: ['a'] }] },
+      // approval-only either role — the server sends it as a row; the web used to drop it (→ roles_invalid at «시작»)
+      { id: 'rec-loop', key: 'preset.loop_agency', name: '루프 대행', roles: [{ role: '기획', kind: 'agent' as const, stages: ['plan'] }, { role: '검수', kind: 'either' as const, stages: ['approve'] }] },
     ];
-    RECIPES.push(...(extra as never[]));
+    RECIPES.push(...extra);
     try {
-      stub(() => new Response('{}'));
+      stub(() => new Response(JSON.stringify({ setup_id: 's', members: [], work_item_id: 'w' }), { status: 200 }));
       await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
       const ids = [...container.querySelectorAll('input[name=recipe]')].map((i) => (i as HTMLInputElement).value);
-      expect(ids).toEqual(['rec-1', 'rec-2']);
+      expect(ids).toEqual(['rec-1', 'rec-2', 'rec-loop']);
       expect(text()).not.toContain('org.moonklabs.work.gate_cycle');
+      await act(async () => { (container.querySelector('input[value=rec-loop]') as HTMLInputElement).click(); });
+      await act(async () => { startButton().click(); });
+      for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+      expect((calls.find((c) => c.url.includes('/confirm'))!.body as { roles: unknown }).roles).toEqual([{ role: '기획', runtime: 'claude' }, { role: '검수', runtime: 'claude' }]);
     } finally { RECIPES.splice(RECIPES.length - extra.length, extra.length); }
+  });
+
+  it('an empty list → «이 컴퓨터에서 시작할 수 있는 레시피가 없어요» · [다시 확인] reads the list again (Yuna 00:25Z); a failed read → ⑤ · [다시 시도] reads the list again (not «시작»)', async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(text()).toContain('이 컴퓨터에서 시작할 수 있는 레시피가 없어요');
+    expect(text()).toContain('조직의 레시피에서 그런 레시피를 켠 뒤 다시 확인해 주세요');
+    expect(container.querySelectorAll('a').length).toBe(0); // no link away (the code is in memory only)
+    recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 확인') as HTMLButtonElement).click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(startButton()).toBeTruthy();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    recipesNow = () => new Response('{}', { status: 503 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(text()).toContain('연결이 끊겼어요');
+    recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
+    const before = calls.filter((c) => c.url.includes('/api/desktop/recipes')).length;
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도') as HTMLButtonElement).click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.filter((c) => c.url.includes('/api/desktop/recipes')).length).toBe(before + 1);
+    expect(calls.some((c) => c.url.includes('/confirm'))).toBe(false);
+    expect(startButton()).toBeTruthy();
+    recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
   });
 
   it('the web keeps no setup value anywhere (no storage) and has no login-page branch for the desktop (PO 09:58Z)', async () => {

@@ -6,10 +6,9 @@
 //   에이전트(either는 «나»로 바꿀 수 있다). 기본 에이전트 = 찾은 것 중 고정 순서 첫째(Claude Code → Codex).
 // - 채널 연결 · 연산 커넥터 stage는 «나중에 연결»(여기서 고르지 않는다 · 4424 할 일 6).
 // - 작업 폴더는 제안일 뿐 — 최종 판단은 데스크톱 로컬 층(홈 안 · `..` 없음 …)이 한다(PO 08:15Z).
-import {
-  orderedRecipeRoles, roleActorKind, stageApprovalSurface, stageMemberKind, stagesInFlowOrder,
-  type RecipeStageMetadata, type RoleActorKind, type RoleActorKinds,
-} from './recipe-role-slots';
+/** A role's kind from the server (4831): human → the person confirming · agent → one of this computer's agents · either → an agent,
+ * or «나». The same union the recipe preset uses. */
+export type RoleActorKind = 'human' | 'agent' | 'either';
 
 /** 데스크톱 앱이 찾는 런타임 — 고정 순서(기본값은 이 순서의 첫째). 셸 runtimes.ts와 같은 id. */
 export const DESKTOP_RUNTIMES = ['claude', 'codex'] as const;
@@ -46,38 +45,44 @@ export interface SetupRoleRow {
   owner: RowOwner;
 }
 
+/** One row the server worked out for the setup (4831 `setup_role_rows` — the same function the confirmation checks with). */
+export interface SetupRecipeRole { role: string; kind: RoleActorKind; stages: string[] }
+
+/** A recipe the desktop setup can start (`GET /api/v2/desktop/recipes` · 4831): only startable ones come, each with its rows. */
 export interface SetupRecipe {
   id: string;
   key: string;
-  org_id?: string | null;
   name: string;
   description?: string | null;
-  stage_metadata?: RecipeStageMetadata | null;
-  role_actor_kinds?: RoleActorKinds | null;
-  payload_schema?: { properties?: { stage?: { enum?: string[] } } } | null;
+  roles: SetupRecipeRole[];
 }
 
-export function flowStages(recipe: SetupRecipe): string[] {
-  return recipe.payload_schema?.properties?.stage?.enum ?? [];
-}
-
-/** 역할마다 한 줄, 기본값이 채워진 채. 멤버 자리 stage가 없는 역할(채널 · 연산만)은 줄이 없다(«나중에 연결»). */
+/**
+ * The page's rows: the server's rows as they come, in their order (PO 16:03Z — one place counts the setup roles; the web
+ * used to work them out itself and dropped approval-only roles that the confirmation needs → `roles_invalid`). The web only
+ * fills in who takes each row from the agents found on this computer.
+ */
 export function setupRoleRows(recipe: SetupRecipe, runtimes: readonly DesktopRuntime[]): SetupRoleRow[] {
-  const meta = recipe.stage_metadata ?? {};
-  const kinds = recipe.role_actor_kinds ?? null;
-  const flow = stagesInFlowOrder(meta, flowStages(recipe));
   const agents: RowOwner[] = runtimes.map((runtime) => ({ kind: 'agent', runtime }));
   const me: RowOwner = { kind: 'me' };
-  return orderedRecipeRoles(meta, flowStages(recipe), kinds).flatMap((role) => {
-    const stages = flow.filter((s) => meta[s]?.role === role
-      && stageMemberKind(s, meta, kinds) !== null && stageApprovalSurface(s, meta, kinds) === null);
-    if (stages.length === 0) return [];
-    const actor: RoleActorKind = roleActorKind(role, kinds) ?? 'agent';
-    const choices = actor === 'human' ? [me] : actor === 'either' ? [...agents, me] : agents;
+  // people's roles first, then the server's order — the order the recipe gallery and the apply dialog use
+  // (orderedRecipeRoles · Yuna 12:49Z: one order per recipe across the product)
+  const ordered = [...recipe.roles.filter((r) => r.kind === 'human'), ...recipe.roles.filter((r) => r.kind !== 'human')];
+  return ordered.map(({ role, kind, stages }) => {
+    const choices = kind === 'human' ? [me] : kind === 'either' ? [...agents, me] : agents;
     // 찾은 에이전트가 없으면(실패 ①) 에이전트 줄의 기본값이 없다 — 페이지가 ① 화면을 보이고 «시작»을 막는다.
-    const owner = actor === 'human' ? me : (agents[0] ?? me);
-    return [{ role, actor, stages, choices, owner }];
+    const owner = kind === 'human' ? me : (agents[0] ?? me);
+    return { role, actor: kind, stages: [...stages], choices, owner };
   });
+}
+
+/**
+ * A recipe the page lists: the server sends only startable ones (on · a flow · an agent row · a name — 4831); the page still
+ * never shows a key as a name nor a people-only card (a display guard, not the rule — PO 00:19Z ①).
+ */
+export function listableRecipe(recipe: SetupRecipe, displayName: string): boolean {
+  const name = displayName.trim();
+  return !!name && name !== recipe.key && recipe.roles.some((r) => r.kind !== 'human');
 }
 
 /** 찾은 에이전트 없이 에이전트만 맡을 수 있는 줄이 있으면 시작할 수 없다(실패 ①). */
@@ -88,18 +93,6 @@ export function needsAnAgent(rows: readonly SetupRoleRow[], runtimes: readonly D
 /** «에이전트 N개» — 에이전트가 맡는 줄 수(= 새로 만들 에이전트 수). */
 export function agentRowCount(rows: readonly SetupRoleRow[]): number {
   return rows.filter((r) => r.owner.kind === 'agent').length;
-}
-
-/**
- * 설정 페이지의 레시피 목록에 올려도 되는가(PO 15:38Z · dev 실측): 켜져 있고 · 흐름이 있고 · 에이전트가 맡을 역할이 하나 이상이고
- * (사람 역할뿐이면 «이 컴퓨터에서 에이전트를 시작»할 게 없다) · 화면 이름이 있는 것(이름이 없어 키 그대로 보이는 정의는 올리지 않는다).
- * `displayName` = presetName(번역 키 → name → key 순)으로 그린 값.
- */
-export function isStartableRecipe(recipe: SetupRecipe & { enabled?: boolean }, displayName: string): boolean {
-  if (recipe.enabled === false || flowStages(recipe).length === 0) return false;
-  const name = displayName.trim();
-  if (!name || name === recipe.key) return false;
-  return setupRoleRows(recipe, []).some((r) => r.actor !== 'human');
 }
 
 /** 주소의 `#`가 설정 값(code=…)을 싣고 있으면 지운다 — 다른 `#`(문서 안 앵커 등)는 건드리지 않는다. */
