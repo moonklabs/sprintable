@@ -655,6 +655,29 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     }
   });
 
+  // PO 16:41Z: a role name is trimmed once where the status is read — every place that shows it (stopped block · still getting
+  // ready · ② detail · the «역할 · 런타임» pairs line) shows the trimmed name, and «에이전트» is judged on it
+  it('[SID:4433] a trailing-space role name is trimmed in all four places (ko)', async () => {
+    ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
+    const members = (a: string, b: string) => [{ stage: 'a', role: a, member_id: 'm1', kind: 'agent', runtime: 'claude' }, { stage: 'b', role: b, member_id: 'm2', kind: 'agent', runtime: 'codex' }];
+    const at = (sig: Record<string, unknown>, a = '에이전트 ', b = 'Writer ') => ({ ...status('handed_over'), members: members(a, b), signals: { ...status('handed_over').signals, ...sig } });
+    const ended = [{ member_id: 'm1', at: '2026-09-30T12:00:05Z', runtime: 'claude', exit_code: 1, restarted_at: null }];
+    stub(() => new Response('{}', { status: 200 }));
+    statusNow = () => at({ agents_ended: ended }) as ReturnType<typeof status>;
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-agent-stopped] p')?.textContent?.startsWith('에이전트가 멈췄어요 — ')).toBe(true);
+    expect(text()).toContain('«마케팅 루프»를 에이전트에게 건네는 중이에요'); // ② detail, first agent «에이전트 »
+    // still getting ready: 조사 connected and handed · the other («에이전트 ») not yet
+    statusNow = () => at({ tools_connected: [{ member_id: 'm2', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' }) as ReturnType<typeof status>;
+    await tick(2_000);
+    expect(container.querySelector('[data-testid=setup-still-preparing]')?.textContent).toBe('에이전트는 아직 준비하고 있어요');
+    // every agent ready: the pairs line with trimmed names (no «에이전트  · …»)
+    statusNow = () => at({ tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] }) as ReturnType<typeof status>;
+    await tick(2_000);
+    expect(text()).toContain('에이전트 · Claude Code, Writer · Codex');
+  });
+
   it('[SID:4433] one agent and it stopped → ① ② ③ all still rings · two agents, one stopped → the other\'s steps spin', async () => {
     const paused = () => [...container.querySelectorAll('ol > li[data-state]')].map((li) => (li as HTMLElement).dataset.paused === 'true');
     const ended = (id: string) => [{ member_id: id, at: '2026-09-30T12:00:05Z', runtime: 'claude', exit_code: 1, restarted_at: null }];

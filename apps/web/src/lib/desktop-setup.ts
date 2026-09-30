@@ -287,7 +287,9 @@ export interface SetupProgress {
 
 /** `handedOverSeenAt` = 이 페이지가 handed_over를 처음 본 때(상태 조회에 받은 시각이 없어 페이지 시계로 잰다). */
 export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: number | null): SetupProgress {
-  const agents = s.members.filter((m) => m.kind === 'agent');
+  // a role name is trimmed once, here where the status is read — every place that shows it (stopped block · still getting
+  // ready · ② detail · the pairs line) and the «에이전트» check see the same name (PO 16:41Z)
+  const agents = s.members.filter((m) => m.kind === 'agent').map((m) => ({ ...m, role: m.role?.trim() || null }));
   const agentIds = [...new Set(agents.map((m) => m.member_id))];
   const connected = new Set(s.signals.tools_connected.map((c) => c.member_id));
   const handedOver = s.state === 'handed_over';
