@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTranslations } from 'next-intl';
 import { ArrowLeft, MessageSquare, X } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
-import { normalizeToMessage, sentMessageFromAnswer } from '@/hooks/use-chat-sse';
+import { newClientNonce, normalizeToMessage, sentMessageFromAnswer } from '@/hooks/use-chat-sse';
 import { toPlainPreview } from './entity-ref';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
@@ -167,7 +167,7 @@ export function ThreadPanel({
   });
 
   const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
-    const body: Record<string, unknown> = { content, thread_id: parentMessage.id };
+    const body: Record<string, unknown> = { content, thread_id: parentMessage.id, client_nonce: newClientNonce() }; // story #4440
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
     const res = await fetchWithAuth(`/api/conversations/${conversationId}/messages`, {
       method: 'POST',

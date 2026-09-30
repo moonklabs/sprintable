@@ -12,7 +12,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
 import { ConnectionLostBanner } from './connection-lost-banner';
-import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
+import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
 import { Avatar } from '@/components/shared/avatar';
@@ -341,10 +341,11 @@ function OutsideProjectRow({
   );
 }
 
-function applyConversationMessageUpdate(
+export function applyConversationMessageUpdate(
   prev: ConversationItem[],
-  payload: { conversation_id?: string; content?: string; created_at?: string },
+  payload: { conversation_id?: string; content?: string; created_at?: string } & Record<string, unknown>,
   onRefetch: () => void,
+  meId?: string,
 ): ConversationItem[] {
   const { conversation_id, content, created_at } = payload;
   if (!conversation_id) return prev;
@@ -358,7 +359,8 @@ function applyConversationMessageUpdate(
   if (content && created_at) {
     item.latest_message = { content, created_at };
     item.updated_at = created_at;
-    item.unread_count = (item.unread_count ?? 0) + 1;
+    // story #4440 — my own message (sent from another tab or device) moves the row up but is never unread
+    if (!isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
   }
   updated.splice(idx, 1);
   return [item, ...updated];
@@ -590,14 +592,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (wasLoaded) { setAgentLoading(true); loadAgentConversationsOnce(); }
   }, [projectId, loadAgentConversationsOnce]);
 
-  const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string }) => {
-    setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false)));
+  const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string } & Record<string, unknown>) => {
+    setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false), currentTeamMemberId));
     // agent 탭을 아직 안 연 상태에선 allConversations 를 reactive 로드하지 않는다(lazy 유지) —
     // 탭 첫 활성화 시 loadAgentConversationsOnce 가 최신본을 받으므로 누락 없음.
     if (agentLoadedRef.current) {
-      setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false)));
+      setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false), currentTeamMemberId));
     }
-  }, [fetchConversations, fetchAllConversations]);
+  }, [fetchConversations, fetchAllConversations, currentTeamMemberId]);
 
   // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
   // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.

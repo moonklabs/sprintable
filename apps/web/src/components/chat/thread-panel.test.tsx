@@ -374,8 +374,10 @@ describe('ThreadPanel — 발신자 동명이인([SID:4311 PR 3])', () => {
 
 describe('ThreadPanel — story #4430 a reply\'s send answer puts «not delivered» under my reply', () => {
   it('the send answer\'s `delivery` lands on my new reply', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+    const posted: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
       if (init?.method === 'POST') {
+        posted.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>);
         return {
           ok: true,
           json: async () => ({
@@ -392,5 +394,9 @@ describe('ThreadPanel — story #4430 a reply\'s send answer puts «not delivere
     await flush();
     expect(container.querySelector('[data-testid="withheld-delivery-line"]')?.textContent)
       .toBe('전달되지 않았어요 — 받는 사람이 내 메시지를 받지 않도록 해 두었어요');
+    // story #4440 — the reply send carries a nonce this tab remembers (so its echo does not bump the count again)
+    const { isEchoOfSentHere } = await import('@/hooks/use-chat-sse');
+    expect(typeof posted[0]?.client_nonce).toBe('string');
+    expect(isEchoOfSentHere({ client_nonce: posted[0]!.client_nonce })).toBe(true);
   });
 });

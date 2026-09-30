@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useChatSse } from './use-chat-sse';
+import { isOwnMessage, useChatSse } from './use-chat-sse';
 import { fetchChatUnreadTotal } from '@/lib/chat-unread-total-client';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
@@ -55,7 +55,8 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
 
   useChatSse({
     currentTeamMemberId,
-    onConversationMessage: () => setTotal((prev) => prev + 1),
+    // story #4440 — my own message (now echoed to my other tabs) is never unread
+    onConversationMessage: (payload) => { if (!isOwnMessage(payload, currentTeamMemberId)) setTotal((prev) => prev + 1); },
     onConversationRead: () => fetchTotalRef.current?.(),
     // story #1978(트랙C) — SSE 드롭 중 놓친 conversation.message_created는 낙관 +1이 못 따라오니
     // 재연결 시 서버 truth로 스냅해 drift를 없앤다. visibility/focus(위)는 이미 있었지만 그건
