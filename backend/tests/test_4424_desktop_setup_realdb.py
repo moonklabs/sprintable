@@ -1125,3 +1125,58 @@ async def test_the_exchange_allows_several_apps_behind_one_address(world, per_ip
             assert (await ask("198.51.100.5")).status_code == 404
         assert (await ask("198.51.100.5")).status_code == 429
         assert (await ask("198.51.100.6")).status_code == 404
+
+
+# ─── PO 16:03Z — one place works out a recipe's setup rows ──────────────────────
+
+
+@pytest.mark.anyio
+async def test_every_recipe_the_list_offers_confirms_with_its_own_rows(world):
+    """GET /desktop/recipes hands the rows the confirmation checks with (one function): confirming every offered recipe with
+    exactly those rows — a runtime for every non-human row, nothing for a human row — is never roles_invalid."""
+    async with _client() as c:
+        r = await c.get("/api/v2/desktop/recipes", headers=_person(OWNER))
+        assert r.status_code == 200, r.text
+        recipes = r.json()["recipes"]
+        keys = {x["key"] for x in recipes}
+        # the platform presets that make an agent are offered; signals and measurements (no flow) are not
+        assert {"preset.workflow.loop_agency", "preset.workflow.two_step", "preset.marketing.blog_article"} <= keys
+        assert not keys & {"preset.work.assigned", "preset.goal.measured", "preset.gate.verdict"}
+        loop = next(x for x in recipes if x["key"] == "preset.workflow.loop_agency")
+        assert {"role": "Human", "kind": "human"} in [{k: row[k] for k in ("role", "kind")} for row in loop["roles"]]
+        assert all(row["kind"] != "human" for row in loop["roles"] if row["role"] != "Human")
+        blog = next(x for x in recipes if x["key"] == "preset.marketing.blog_article")
+        assert "Director" in [row["role"] for row in blog["roles"] if row["kind"] == "human"]
+
+        for recipe in recipes:
+            code, _verifier = await _code(c, f"d4424 recipe {recipe['key']}"[:80])
+            body = {
+                "project_id": str(PROJ), "recipe_id": recipe["id"],
+                "roles": [{"role": row["role"], "runtime": "claude"} for row in recipe["roles"] if row["kind"] != "human"],
+            }
+            res = await _confirm(c, code, body=body)
+            assert res.status_code in (200, 201), (recipe["key"], res.text)
+            confirmed = res.json()
+            # every row became a member, the human rows bound to the person
+            assert {m["role"] for m in confirmed["members"]} == {row["role"] for row in recipe["roles"]}, recipe["key"]
+            assert all(m["kind"] == "human" for m in confirmed["members"] if m["role"] in {row["role"] for row in recipe["roles"] if row["kind"] == "human"})
+
+
+@pytest.mark.anyio
+async def test_the_recipe_list_is_for_people_of_the_org(world):
+    async with _client() as c:
+        assert (await c.get("/api/v2/desktop/recipes", headers=_person(PLAIN))).status_code == 200  # any member may look
+        assert str(RECIPE) in {x["id"] for x in (await c.get("/api/v2/desktop/recipes", headers=_person(OWNER))).json()["recipes"]}
+        # a recipe whose every role is a person makes no agent on this device — not offered (a copy of RECIPE, all human)
+        people_only = uuid.uuid4()
+        await _sql(
+            "INSERT INTO event_definitions (id,key,org_id,name,description,payload_schema,routing,block_template,stage_metadata,"
+            "role_actor_kinds,enabled,version) "
+            f"SELECT '{people_only}', key || '.people_only', org_id, name || ' (people)', description, payload_schema, routing, "
+            "block_template, stage_metadata, (SELECT jsonb_object_agg(v->>'role', 'human') FROM jsonb_each(stage_metadata) AS e(k, v) "
+            f"WHERE v ? 'role'), enabled, version FROM event_definitions WHERE id='{RECIPE}'"
+        )
+        offered = {x["id"] for x in (await c.get("/api/v2/desktop/recipes", headers=_person(OWNER))).json()["recipes"]}
+        assert str(RECIPE) in offered and str(people_only) not in offered
+        other = (await c.get("/api/v2/desktop/recipes", headers=_person(OUTSIDER, ORG2))).json()["recipes"]
+        assert str(RECIPE) not in {x["id"] for x in other}  # another org's own recipe is not offered

@@ -184,6 +184,49 @@ def ordered_agent_stages(definition) -> list[str]:
     return [s for s in stages if stage_target(definition, s) == "agent"]
 
 
+def setup_role_rows(definition) -> list[dict]:
+    """PO 16:03Z — the one place a recipe's setup rows are worked out: one row per role that holds an agent-target stage, in the
+    recipe's order, `{role, kind, stages}`. kind = the role's `role_actor_kinds` value (human · agent · either; none declared →
+    agent). The confirmation checks against these rows and `GET /desktop/recipes` hands them to the web — the web no longer
+    works them out itself. A human row is bound to the person confirming; every other row needs a runtime (either included)."""
+    kinds = definition.role_actor_kinds or {}  # keyed by role (events.py reads it the same way)
+    rows: list[dict] = []
+    by_role: dict[str, dict] = {}
+    for s in ordered_agent_stages(definition):
+        role = stage_role(definition, s)
+        if role not in by_role:
+            kind = kinds.get(role)
+            by_role[role] = {"role": role, "kind": kind if kind in ("human", "agent", "either") else "agent", "stages": []}
+            rows.append(by_role[role])
+        by_role[role]["stages"].append(s)
+    return rows
+
+
+def recipe_startable(definition) -> bool:
+    """A recipe the desktop setup can start: enabled, a flow (the payload's stage enum), a screen name and at least one row that
+    becomes an agent (human-only recipes make no agent on this device)."""
+    stages = ((definition.payload_schema or {}).get("properties") or {}).get("stage", {}).get("enum")
+    return (
+        bool(definition.enabled) and isinstance(stages, list) and bool(stages) and bool((definition.name or "").strip())
+        and any(r["kind"] != "human" for r in setup_role_rows(definition))
+    )
+
+
+async def list_setup_recipes(db: AsyncSession, *, org_id: uuid.UUID) -> list[dict]:
+    """PO 16:03Z — the recipes this org can start from the desktop setup (platform presets ∪ this org's own, the same visibility
+    as the confirmation's lookup), each with its setup rows from `setup_role_rows`."""
+    from app.models.event_definition import EventDefinition
+
+    definitions = (await db.execute(
+        select(EventDefinition).where((EventDefinition.org_id == org_id) | (EventDefinition.org_id.is_(None)))
+        .order_by(EventDefinition.name, EventDefinition.key)
+    )).scalars().all()
+    return [
+        {"id": d.id, "key": d.key, "name": d.name, "description": d.description, "roles": setup_role_rows(d)}
+        for d in definitions if recipe_startable(d)
+    ]
+
+
 async def confirm_setup(
     db: AsyncSession,
     *,
@@ -234,13 +277,10 @@ async def confirm_setup(
     if definition is None:
         raise DesktopSetupError("recipe_not_found")
 
-    agent_stages = ordered_agent_stages(definition)
-    role_order: list[str] = []
-    for s in agent_stages:
-        if stage_role(definition, s) not in role_order:
-            role_order.append(stage_role(definition, s))
-    kinds = definition.role_actor_kinds or {}  # keyed by role (events.py reads it the same way)
-    human_roles = {r for r in role_order if kinds.get(r) == "human"}
+    # the same rows GET /desktop/recipes hands the web (one function — PO 16:03Z)
+    rows = setup_role_rows(definition)
+    role_order = [r["role"] for r in rows]
+    human_roles = {r["role"] for r in rows if r["kind"] == "human"}
     choices: dict[str, str] = {}
     for r in roles:
         if r.role in choices or r.role not in role_order or r.role in human_roles or r.runtime not in RUNTIME_TYPES:
@@ -280,8 +320,9 @@ async def confirm_setup(
         role_member[role] = agent.id
 
     members: list[dict] = []
-    for stage in agent_stages:
-        role = stage_role(definition, stage)
+    stage_to_role = {s: r["role"] for r in rows for s in r["stages"]}
+    for stage in ordered_agent_stages(definition):  # the flow's own order (the first stage is published below)
+        role = stage_to_role[stage]
         human = role in human_roles
         members.append({
             "stage": stage, "role": role, "member_id": str(role_member[role]), "kind": "human" if human else "agent",
