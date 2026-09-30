@@ -187,6 +187,28 @@ class OrgInviteRepository:
             projects=projects,
         )
 
+    async def pending_for_email(self, email: str, user_id: uuid.UUID) -> list[dict]:
+        """story #4427 (PO 01:21Z) — the pending, unexpired invites to this email, newest first, leaving out the orgs the
+        person already belongs to. The caller passes only a verified email (never someone else's)."""
+        now = datetime.now(timezone.utc)
+        already = select(OrgMember.org_id).where(OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+        rows = (await self.session.execute(
+            select(OrgInvite, Organization.name)
+            .join(Organization, Organization.id == OrgInvite.organization_id)
+            .where(
+                OrgInvite.email == email.lower().strip(),
+                OrgInvite.status == "pending",
+                OrgInvite.expires_at > now,
+                OrgInvite.organization_id.not_in(already),
+            )
+            .order_by(OrgInvite.created_at.desc())
+        )).all()
+        return [
+            {"invite_id": str(inv.id), "org_id": str(inv.organization_id), "org_name": name, "role": inv.role,
+             "invited_at": inv.created_at, "expires_at": inv.expires_at}
+            for inv, name in rows
+        ]
+
     async def accept(self, token: str, user_id: uuid.UUID, user_email: str) -> dict:
         """초대 수락. 성공 시 org_id/role 반환. 실패 시 reason 포함."""
         result = await self.session.execute(
