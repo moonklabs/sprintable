@@ -182,7 +182,7 @@ describe('[SID:4427] desktop setup page', () => {
     stub(() => new Response('{}'));
     await mount(<ToolsNotConnected onRetry={retry} />);
     expect(text()).toContain('에이전트에 Sprintable이 아직 연결되지 않았어요');
-    expect(text()).toContain('터미널에서 작업 폴더를 믿을지 묻고 있다면 먼저 답해 주세요');
+    expect(text()).toContain('터미널에서 작업 폴더를 믿을지 묻고 있다면 먼저 믿는다고 답해 주세요');
     await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
     expect(retry).toHaveBeenCalledTimes(1);
   });
@@ -275,7 +275,7 @@ describe('[SID:4427] desktop setup page', () => {
     } finally { RECIPES.splice(RECIPES.length - extra.length, extra.length); }
   });
 
-  it('an empty list → «이 컴퓨터에서 시작할 수 있는 레시피가 없어요» · [다시 확인] reads the list again (Yuna 00:25Z); a failed read → ⑤ · [다시 시도] reads the list again (not «시작»)', async () => {
+  it('an empty list → «이 컴퓨터에서 시작할 수 있는 레시피가 없어요» · [다시 확인] reads the list again (Yuna 00:25Z); a failed read → «레시피 목록을 불러오지 못했어요» (not ⑤) · [다시 시도] reads the list again (not «시작»)', async () => {
     recipesNow = () => new Response(JSON.stringify({ recipes: [] }), { status: 200 });
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
@@ -291,7 +291,10 @@ describe('[SID:4427] desktop setup page', () => {
     recipesNow = () => new Response('{}', { status: 503 });
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
-    expect(text()).toContain('연결이 끊겼어요');
+    // its own card: nothing is chosen yet, so ⑤'s «고른 레시피와 설정은 그대로» would be false (PO 01:00Z · Yuna v18)
+    expect(text()).toContain('레시피 목록을 불러오지 못했어요');
+    expect(text()).toContain('인터넷 연결을 확인하거나 잠시 뒤 다시 시도해 주세요.');
+    expect(text()).not.toContain('고른 레시피와 설정은 그대로');
     recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
     const before = calls.filter((c) => c.url.includes('/api/desktop/recipes')).length;
     await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도') as HTMLButtonElement).click(); });

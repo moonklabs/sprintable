@@ -31,7 +31,7 @@ const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', c
 // code.claude.com/docs/en/setup and github.com/openai/codex)
 const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
-export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe';
+export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline';
 
 /** 실패 화면 문구 키 — `Record<string, string>` 리터럴 표(키 가드가 이 모양의 값을 «읽힘»으로 센다). */
 const FAILURE_KEY: Record<string, string> = {
@@ -42,6 +42,7 @@ const FAILURE_KEY: Record<string, string> = {
   'offline.title': 'failure.offline.title', 'offline.body': 'failure.offline.body', 'offline.action': 'failure.offline.action',
   'managed.title': 'failure.managed.title', 'managed.body': 'failure.managed.body', 'managed.action': 'failure.managed.action',
   'no-recipe.title': 'failure.no-recipe.title', 'no-recipe.body': 'failure.no-recipe.body', 'no-recipe.action': 'failure.no-recipe.action',
+  'recipes-offline.title': 'failure.recipes-offline.title', 'recipes-offline.body': 'failure.recipes-offline.body', 'recipes-offline.action': 'failure.recipes-offline.action',
 };
 
 /** confirm 오류 코드(4424 닫힌 목록) → 실패 화면. 목록 밖 코드는 null(화면이 지어내지 않는다 — 한 줄 일반 문구). */
@@ -122,7 +123,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         if (usable[0]) pick(usable[0]);
         setView(usable.length ? { kind: 'choose' } : { kind: 'failed', failure: 'no-recipe', retry: 'load' });
       } catch {
-        if (!off) setView({ kind: 'failed', failure: 'offline', retry: 'load' });
+        // not ⑤: nothing is chosen yet, so «고른 레시피와 설정은 그대로» would be false (PO 01:00Z · Yuna v18)
+        if (!off) setView({ kind: 'failed', failure: 'recipes-offline', retry: 'load' });
       }
     })();
     return () => { off = true; };
@@ -274,7 +276,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
       <div className="flex gap-2">
         {failure === 'no-agent' ? appButton(t(key('action')))
           : failure === 'expired' ? appButton(t(key('action')))
-          : (failure === 'offline' || failure === 'no-recipe') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
+          : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
           : failure === 'not-admin' || failure === 'managed' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
