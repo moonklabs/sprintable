@@ -611,6 +611,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
       ['en', 'Research Agent', 'Research Agent stopped — ', 'Handing «마케팅 루프» to Research Agent', 'Research Agent is still getting ready'],
       ['en', 'Writer', 'The Writer agent stopped — ', 'Handing «마케팅 루프» to the Writer agent', 'The Writer agent is still getting ready'],
     ];
+    ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
     stub(() => new Response('{}', { status: 200 }));
     for (const [locale, name, stopped, handed, still] of cases) {
       const render = async (st: unknown) => {
@@ -626,6 +627,31 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
       expect(text(), `${locale} ${name} handed`).toContain(handed);
       await render(two(name));
       expect(container.querySelector('[data-testid=setup-still-preparing]')?.textContent, `${locale} ${name} still`).toBe(still);
+    }
+  });
+
+  // PO 16:31Z (Kadir): the LAST role of a group decides, and a name with a trailing space is judged and drawn trimmed
+  it('[SID:4433] a group: the last role decides «에이전트» · a trailing space is trimmed for the check and the words (ko/en)', async () => {
+    const stoppedTwo = (a: string, b: string) => ({ ...status('handed_over'), members: [{ stage: 'a', role: a, member_id: 'm1', kind: 'agent', runtime: 'codex' }, { stage: 'b', role: b, member_id: 'm2', kind: 'agent', runtime: 'codex' }],
+      signals: { ...status('handed_over').signals, agents_ended: ['m1', 'm2'].map((id) => ({ member_id: id, at: '2026-09-30T12:00:05Z', runtime: 'codex', exit_code: 1, restarted_at: null })) } });
+    const cases: [locale: 'ko' | 'en', a: string, b: string, words: string][] = [
+      ['ko', 'Writer', '에이전트', 'Writer · 에이전트가 멈췄어요 — '],
+      ['ko', '에이전트', 'Writer', '에이전트 · Writer 에이전트가 멈췄어요 — '],
+      ['en', 'Writer', '에이전트', 'Writer · 에이전트 stopped — '],
+      ['en', '에이전트', 'Writer', 'The 에이전트 · Writer agents stopped — '],
+      ['ko', 'Writer', '에이전트 ', 'Writer · 에이전트가 멈췄어요 — '],
+      ['en', 'Writer', 'Research agent  ', 'Writer · Research agent stopped — '],
+    ];
+    ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
+    stub(() => new Response('{}', { status: 200 }));
+    for (const [locale, a, b, words] of cases) {
+      statusNow = () => stoppedTwo(a, b) as ReturnType<typeof status>;
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await act(async () => { root.render(<NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><SetupProgressView setupId={SETUP_ID} recipeName="" /></NextIntlClientProvider>); });
+      await tick(0);
+      const got = container.querySelector('[data-testid=setup-agent-stopped] p')?.textContent ?? '';
+      expect(got.startsWith(words), `${locale} [${a}|${b}] → ${got}`).toBe(true);
     }
   });
 
