@@ -107,10 +107,22 @@ def test_the_setup_reads_only_names_the_desktop_app_may_send():
     assert read <= f.DESKTOP_SHELL_EMIT_EVENTS, sorted(read - f.DESKTOP_SHELL_EMIT_EVENTS)
 
 
+
+_DESKTOP_META = {
+    "desktop_workdir_fallback": {"hinted": True},
+    "desktop_setup_blocked": {"reason": "managed_mcp", "runtime": "claude", "when": "found"},
+    "desktop_first_screen_human_input": {"human_hand": True},
+    "desktop_first_task_handed": {"via": "start"},
+    "desktop_setup_signed_in": {},
+    "desktop_agent_ended_early": {"member_id": str(uuid.uuid4()), "runtime": "claude", "exit_code": 1},
+    "desktop_agent_restarted": {"member_id": str(uuid.uuid4())},
+}
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("event", sorted(f.DESKTOP_SHELL_EMIT_EVENTS))
 async def test_every_name_the_desktop_app_sends_is_accepted(event):
-    body = OnboardingEventBody(event=event, session_id=uuid.uuid4(), meta={"flow": "desktop_setup"})
+    # each with the meta the app really sends (the shapes are story 4438's — tests/test_4438_desktop_meta_shapes.py)
+    body = OnboardingEventBody(event=event, session_id=uuid.uuid4(), meta=_DESKTOP_META[event])
     db = _db()
     await post_onboarding_event(body, db=db, credentials=None, x_agent_api_key=None)
     assert db.add.called

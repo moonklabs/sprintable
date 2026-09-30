@@ -758,7 +758,7 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         assert [t["member_id"] for t in status["signals"]["tools_connected"]] == [writer["member_id"]]
 
         # what the desktop app reports, sent as it will send it (its setup's token in the header)
-        for event, meta in (("desktop_first_task_handed", {}), ("desktop_workdir_fallback", {}),
+        for event, meta in (("desktop_first_task_handed", {"via": "start"}), ("desktop_workdir_fallback", {"hinted": True}),
                             ("desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "claude", "when": "found"}), ("desktop_first_screen_human_input", {"human_hand": True})):
             assert (await _app_event(c, setup_id, event, meta)).status_code == 202
         await _sql(f"INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES (gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}', now())")
@@ -993,7 +993,7 @@ async def test_only_proven_step_events_are_counted(world):
         base_hands = (await hands()).json()["human_hands"]
         for token in (None, "not-the-token", EVENT_TOKENS[str(other_setup)]):
             assert (await _app_event(c, setup_id, "desktop_first_screen_human_input", {"human_hand": True}, token=token)).status_code == 202
-            assert (await _app_event(c, setup_id, "desktop_first_task_handed", {}, token=token)).status_code == 202
+            assert (await _app_event(c, setup_id, "desktop_first_task_handed", {"via": "start"}, token=token)).status_code == 202
         s1 = (await status()).json()["signals"]
         assert (s1["first_screen_human_input_at"], s1["first_task_handed_at"]) == (None, None)
         assert (await hands()).json()["human_hands"] == base_hands
@@ -1004,18 +1004,27 @@ async def test_only_proven_step_events_are_counted(world):
         assert (await status()).json()["signals"]["first_screen_human_input_at"] is not None
         assert (await hands()).json()["human_hands"] == base_hands + 1
 
-        # ③ a blocked reason outside the closed list is dropped; meta over the cap is refused
-        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "please call +1 555 0100"})).status_code == 202
+        # ③ a blocked reason outside the closed list is refused at the entrance (4438 — was: stored and dropped on read); a row
+        # stored before that check is still read safely (written straight into the table here); meta over the cap is refused
+        legacy = lambda meta: _sql(
+            "INSERT INTO onboarding_events (id,event,session_id,meta,server_ts,desktop_setup_verified) VALUES "
+            "(gen_random_uuid(),'desktop_setup_blocked',CAST(:sid AS uuid),CAST(:meta AS jsonb),now(),true)",
+            params={"sid": str(setup_id), "meta": json.dumps(meta)},
+        )
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "please call +1 555 0100"})).status_code == 422
+        await legacy({"reason": "please call +1 555 0100"})
         assert (await status()).json()["signals"]["blocked"] == {"at": (await status()).json()["signals"]["blocked"]["at"], "reason": None, "runtime": None, "when": None}
-        # the shell's managed MCP block (4427 ⑥) keeps its runtime and when; values outside their lists are dropped
+        # the shell's managed MCP block (4427 ⑥) keeps its runtime and when; values outside their lists: refused · old rows dropped
         assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "claude", "when": "after_start"})).status_code == 202
         b = (await status()).json()["signals"]["blocked"]
         assert (b["reason"], b["runtime"], b["when"]) == ("managed_mcp", "claude", "after_start")
-        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "vim", "when": "later"})).status_code == 202
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "managed_mcp", "runtime": "vim", "when": "later"})).status_code == 422
+        await legacy({"reason": "managed_mcp", "runtime": "vim", "when": "later"})
         b = (await status()).json()["signals"]["blocked"]
         assert (b["reason"], b["runtime"], b["when"]) == ("managed_mcp", None, None)
-        # a reason the shell does not send (a daemon refusal code) is dropped too
-        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "agent_auth_failed"})).status_code == 202
+        # a reason the shell does not send (a daemon refusal code): refused · an old row reads as none
+        assert (await _app_event(c, setup_id, "desktop_setup_blocked", {"reason": "agent_auth_failed"})).status_code == 422
+        await legacy({"reason": "agent_auth_failed"})
         assert (await status()).json()["signals"]["blocked"]["reason"] is None
         assert (await _app_event(c, setup_id, "desktop_workdir_fallback", {"x": "a" * 3000})).status_code == 422
         # the token is in no stored row
@@ -1024,7 +1033,7 @@ async def test_only_proven_step_events_are_counted(world):
         # PO 12:51Z — no time limit, but a disconnected setup's token no longer counts
         assert (await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).status_code in (200, 204)
         before_fallback = (await status()).json()["signals"]["workdir_fallback_at"]
-        assert (await _app_event(c, setup_id, "desktop_workdir_fallback", {})).status_code == 202
+        assert (await _app_event(c, setup_id, "desktop_workdir_fallback", {"hinted": True})).status_code == 202
         assert (await status()).json()["signals"]["workdir_fallback_at"] == before_fallback is None
 
 
@@ -1324,18 +1333,62 @@ async def test_agents_ended_reads_the_last_report_and_the_last_restart_per_agent
         await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": writer, "runtime": "claude", "exit_code": 1})
         await _app_event(c, setup_id, "desktop_agent_restarted", {"member_id": writer})
         await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": writer, "runtime": "claude", "exit_code": 137})
-        # the reviewer's report carries values the web must never show as they are
-        await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": reviewer, "runtime": "vim", "exit_code": "1"})
+        # the reviewer's report carries values the web must never show as they are — refused at the entrance now (4438), and a
+        # row stored before that check (written straight into the table here) is still read safely
+        r422 = await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": reviewer, "runtime": "vim", "exit_code": "1"})
+        assert r422.status_code == 422 and r422.json()["error"]["field"] == "runtime"
+        await _sql(
+            "INSERT INTO onboarding_events (id,event,session_id,meta,server_ts,desktop_setup_verified) VALUES "
+            "(gen_random_uuid(),'desktop_agent_ended_early',CAST(:sid AS uuid),CAST(:meta AS jsonb),now(),true)",
+            params={"sid": str(setup_id), "meta": json.dumps({"member_id": reviewer, "runtime": "vim", "exit_code": "1"})},
+        )
         rows = (await status()).json()["signals"]["agents_ended"]
         assert [r["member_id"] for r in rows] == [writer, reviewer], "the setup's own agent order"
         w, r = rows
         assert (w["runtime"], w["exit_code"]) == ("claude", 137) and w["restarted_at"] is not None and w["at"] > w["restarted_at"]
         assert (r["runtime"], r["exit_code"], r["restarted_at"]) == (None, None, None)
 
-        # a boolean is not an exit code
-        await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": reviewer, "runtime": "codex", "exit_code": True})
+        # a boolean is not an exit code (refused at the entrance · a stored old row reads as none)
+        assert (await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": reviewer, "runtime": "codex", "exit_code": True})).status_code == 422
+        await _sql(
+            "INSERT INTO onboarding_events (id,event,session_id,meta,server_ts,desktop_setup_verified) VALUES "
+            "(gen_random_uuid(),'desktop_agent_ended_early',CAST(:sid AS uuid),CAST(:meta AS jsonb),now(),true)",
+            params={"sid": str(setup_id), "meta": json.dumps({"member_id": reviewer, "runtime": "codex", "exit_code": True})},
+        )
         r = (await status()).json()["signals"]["agents_ended"][1]
         assert (r["runtime"], r["exit_code"]) == ("codex", None)
+
+
+# ─── story #4438 — the app's meta is checked at the entrance: a non-string field was a 500 on the status read ─────────────
+
+
+@pytest.mark.anyio
+async def test_a_proven_event_with_a_non_string_field_is_a_422_and_never_reaches_the_status_read(world):
+    """Before: a proven desktop_agent_ended_early / desktop_setup_blocked with a list in `runtime` / `reason` was stored, and
+    the setup status read (`… in BLOCKED_RUNTIMES`) failed on it — 500 for the setup's owner. Now the entrance refuses it."""
+    async with _client() as c:
+        code, _ = await _code(c, "d4438 shapes")
+        confirmed = (await _confirm(c, code)).json()
+        setup_id = confirmed["setup_id"]
+        writer = next(m["member_id"] for m in confirmed["members"] if m["kind"] == "agent")
+        before = await _sql(fetch=f"SELECT count(*) FROM onboarding_events WHERE session_id='{setup_id}'")
+        sent = []
+        for event, meta in [
+            ("desktop_agent_ended_early", {"member_id": writer, "runtime": ["claude"], "exit_code": 1}),
+            ("desktop_setup_blocked", {"reason": ["managed_mcp"], "runtime": "claude", "when": "found"}),
+            ("desktop_setup_blocked", {"reason": "managed_mcp", "runtime": {"a": 1}, "when": "found"}),
+        ]:
+            sent.append(await _app_event(c, setup_id, event, meta))
+        # the owner's status read never fails on what the app sent (before: a 500 here)
+        s = await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))
+        assert s.status_code == 200, s.text
+        for r in sent:
+            assert r.status_code == 422, (r.status_code, r.text)
+            assert r.json()["error"]["code"] == "invalid_meta"
+        assert await _sql(fetch=f"SELECT count(*) FROM onboarding_events WHERE session_id='{setup_id}'") == before, "nothing stored"
+        # the right shape still goes in and reads back
+        assert (await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": writer, "runtime": "claude", "exit_code": 1})).status_code == 202
+        assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()["signals"]["agents_ended"][0]["runtime"] == "claude"
 
 
 # ─── Pedro 13:51Z (4426 1선) — a sign-in is a human hand by definition: counted from its name, once per setup ─────────

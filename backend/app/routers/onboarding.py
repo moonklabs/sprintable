@@ -27,6 +27,7 @@ from app.services.onboarding_funnel import (
     FE_EMIT_EVENTS,
     KEY_PREFIX_MAX,
     contains_secret,
+    desktop_meta_error,
     record_onboarding_event,
     safe_key_prefix,
 )
@@ -69,6 +70,10 @@ async def post_onboarding_event(
         raise HTTPException(status_code=422, detail=f"unknown event: {body.event}")
     if len(json.dumps(body.meta, default=str)) > META_MAX_BYTES:
         raise HTTPException(status_code=422, detail=f"meta is over {META_MAX_BYTES} bytes")
+    # story #4438: the desktop app's names carry one closed meta shape each — anything else is refused here, not a 500 later
+    bad = desktop_meta_error(body.event, body.meta)
+    if bad is not None:
+        raise HTTPException(status_code=422, detail={"code": "invalid_meta", "message": "meta does not fit this event's shape", "event": body.event, "field": bad})
     if body.failure_reason and body.failure_reason not in FAILURE_REASONS:
         raise HTTPException(status_code=422, detail=f"unknown failure_reason: {body.failure_reason}")
 

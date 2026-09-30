@@ -1,0 +1,25 @@
+{
+  "desktop_agent_ended_early": {
+    "exit_code": "optional",
+    "member_id": "required",
+    "runtime": "optional"
+  },
+  "desktop_agent_restarted": {
+    "member_id": "required"
+  },
+  "desktop_first_screen_human_input": {
+    "human_hand": "required"
+  },
+  "desktop_first_task_handed": {
+    "via": "required"
+  },
+  "desktop_setup_blocked": {
+    "reason": "required",
+    "runtime": "optional",
+    "when": "optional"
+  },
+  "desktop_setup_signed_in": {},
+  "desktop_workdir_fallback": {
+    "hinted": "required"
+  }
+}

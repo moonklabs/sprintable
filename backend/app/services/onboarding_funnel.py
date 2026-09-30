@@ -49,6 +49,71 @@ DESKTOP_SHELL_EMIT_EVENTS = frozenset({
     # it (meta member_id); the setup status reads them as signals.agents_ended
     "desktop_agent_ended_early", "desktop_agent_restarted",
 })
+# story #4438 (PO 18:42Z) — the meta of each name the desktop app sends, one closed shape per name, checked at the entrance
+# (POST /onboarding/events): a field of the wrong kind, an unknown value or a field not listed → 422 `invalid_meta`, nothing
+# stored. Twice today a non-string field became a 500 on the read side (4828 reason · 4846 runtime); this closes the class
+# instead of one isinstance per read. The readers keep their own guards for rows stored before this check. The app's copy of
+# the names is desktop-electron/src/shell-events.ts (sprintable-mobile); a name here needs a shape here (test pins it).
+BLOCKED_REASONS = frozenset({"managed_mcp"})
+BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
+BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
+AGENT_RUNTIMES = frozenset({"claude", "codex"})
+EXIT_CODE_RANGE = range(-(2**31), 2**31)
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _is_bool(v: object) -> bool:
+    return isinstance(v, bool)
+
+
+def _is_true(v: object) -> bool:
+    return v is True
+
+
+def _one_of(values: frozenset[str]):
+    return lambda v: isinstance(v, str) and v in values
+
+
+def _is_uuid(v: object) -> bool:
+    return isinstance(v, str) and bool(_UUID_RE.match(v))
+
+
+def _is_exit_code(v: object) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v in EXIT_CODE_RANGE
+
+
+# name → field → (required, check). Optional fields are the ones an app build may leave out (older builds · unknown values).
+DESKTOP_SHELL_META_SHAPES: dict[str, dict[str, tuple[bool, object]]] = {
+    "desktop_workdir_fallback": {"hinted": (True, _is_bool)},
+    "desktop_setup_blocked": {"reason": (True, _one_of(BLOCKED_REASONS)), "runtime": (False, _one_of(BLOCKED_RUNTIMES)), "when": (False, _one_of(BLOCKED_WHEN))},
+    "desktop_first_screen_human_input": {"human_hand": (True, _is_true)},
+    "desktop_first_task_handed": {"via": (True, _one_of(frozenset({"start", "turn"})))},
+    "desktop_setup_signed_in": {},
+    "desktop_agent_ended_early": {"member_id": (True, _is_uuid), "runtime": (False, _one_of(AGENT_RUNTIMES)), "exit_code": (False, _is_exit_code)},
+    "desktop_agent_restarted": {"member_id": (True, _is_uuid)},
+}
+
+
+def desktop_meta_error(event: str, meta: object) -> str | None:
+    """The first field of `meta` that breaks `event`'s shape (or «meta» itself), None when it fits · None for other names."""
+    shape = DESKTOP_SHELL_META_SHAPES.get(event)
+    if shape is None:
+        return None
+    if not isinstance(meta, dict):
+        return "meta"
+    for key in meta:
+        if key not in shape:
+            return str(key)
+    for key, (required, check) in shape.items():
+        if key not in meta:
+            if required:
+                return key
+            continue
+        if not check(meta[key]):  # type: ignore[operator]
+            return key
+    return None
+
+
 # Pedro 13:51Z (4426) — names that are a person's act by definition: the hand count reads them by name (once per setup),
 # whatever the meta says — the shell sends desktop_setup_signed_in with no meta, and apps already in people's hands keep doing
 # so; counting here makes every app build and every row already stored count right.

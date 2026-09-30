@@ -51,14 +51,13 @@ EVENT_FIRST_SCREEN_INPUT = "desktop_first_screen_human_input"
 # PO 12:49Z — the reasons the desktop app actually sends for «blocked», taken from the sender: today only the company-managed
 # MCP policy (shell 4427, PR 184 `setup-flow.ts:160` found · `:237` after_start). A new reason is added here together with
 # the shell change that sends it. Anything else is dropped (the web never shows free text as a reason).
-BLOCKED_REASONS = frozenset({"managed_mcp"})
-BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
-BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
+# story #4438 — one source: the entrance checks the same sets (onboarding_funnel.DESKTOP_SHELL_META_SHAPES)
+from app.services.onboarding_funnel import BLOCKED_REASONS, BLOCKED_RUNTIMES, BLOCKED_WHEN  # noqa: E402
 EVENT_DOC_OPENED = "desktop_doc_opened"
 # story #4433 (Min 11:55Z) — sent by the desktop app: an agent's session ended early · the person restarted it
 EVENT_AGENT_ENDED_EARLY = "desktop_agent_ended_early"
 EVENT_AGENT_RESTARTED = "desktop_agent_restarted"
-_EXIT_CODE_RANGE = range(-(2**31), 2**31)
+from app.services.onboarding_funnel import EXIT_CODE_RANGE as _EXIT_CODE_RANGE  # noqa: E402
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
 _CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")  # base64url(sha256) without padding
