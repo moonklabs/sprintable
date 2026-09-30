@@ -37,8 +37,10 @@ export function BlockedUsersSection() {
     try {
       const res = await fetchWithAuth('/api/user-blocks', { cache: 'no-store' });
       if (!res.ok) { setLoadFailed(true); return; }
-      const json = await res.json() as { data?: UserBlockRow[] };
-      const list = json.data ?? [];
+      // story #4444 — the backend answers a bare array (`response_model=list`, passed through by the proxy); reading
+      // `json.data` only left the list always empty, so the section never showed
+      const json = await res.json() as UserBlockRow[] | { data?: UserBlockRow[] };
+      const list = Array.isArray(json) ? json : (json.data ?? []);
       setRows(list);
       // story #4444 — the list carries the name (a person without a project row has no team-member route to read it from);
       // only rows without it (an older server) are looked up one by one

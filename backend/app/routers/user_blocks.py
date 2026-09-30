@@ -29,8 +29,11 @@ async def _caller_member_id(auth: AuthContext, org_id: uuid.UUID, db: AsyncSessi
 
 async def _in_org_members(db: AsyncSession, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> dict[uuid.UUID, str | None]:
     """story #4444 — of these members, the ones still in this org, with the name to show: a team-member row here (agents ·
-    people with a project row) and its name, or else a membership of this org that is not deleted (#4437's two steps) and
-    the person's display name. Someone who left, or of another org, is out. Never an email, never a made-up name (#3755)."""
+    people with a project row) and its name, or else a membership of this org that is not deleted and the person's display
+    name. Someone who left, or of another org, is out. Never an email, never a made-up name (#3755).
+
+    Unlike #4437's `_active_member_ids`, a team-member row counts whatever its `is_active` (PO 23:37Z): a block stands while
+    that member is stopped — it must still be there when they come back — and dropping it from the list would be false."""
     if not member_ids:
         return {}
     found: dict[uuid.UUID, str | None] = {}

@@ -20,6 +20,7 @@ import pytest
 
 from tests.test_1994_backlink_api_realdb import (
     _add_message,
+    _make_agent_member,
     _client_for,
     _make_conversation,
     _make_human_member,
@@ -285,5 +286,41 @@ async def test_the_list_carries_each_blocked_persons_name_from_this_org_only():
         assert names == {str(member_id): member_name, str(named_id): "김하나", str(nameless_id): None}, names
         assert "다른 조직 사람" not in listed.text
         assert "@test.com" not in listed.text  # never an email
+    finally:
+        await engine.dispose()
+
+
+async def test_a_stopped_member_stays_blocked_and_listed_and_can_be_blocked():
+    """PO 23:37Z — unlike #4437's delivery check, blocking does not look at `is_active`: a block on a member stands while they
+    are stopped (it must still be there when they come back), and a stopped member can be blocked."""
+    from sqlalchemy import update
+
+    from app.models.member import Member
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as session:
+            org = await _make_org(session)
+            project = await _make_project(session, org.id)
+            _owner_id, owner_user = await _make_org_owner(session, org.id)
+            was_active = await _make_agent_member(session, org.id, project.id)
+            already_stopped = await _make_agent_member(session, org.id, project.id)
+            await session.execute(update(Member).where(Member.id == already_stopped).values(is_active=False))
+            await session.commit()
+        from app.main import app
+
+        made = await _as(app, Session, owner_user, org.id,
+                         lambda c: c.post("/api/v2/user-blocks", json={"blocked_member_id": str(was_active)}))
+        assert made.status_code == 201, made.text
+        async with Session() as session:
+            await session.execute(update(Member).where(Member.id == was_active).values(is_active=False))
+            await session.commit()
+
+        async def after(c):
+            return await c.post("/api/v2/user-blocks", json={"blocked_member_id": str(already_stopped)}), await c.get("/api/v2/user-blocks")
+
+        stopped_made, listed = await _as(app, Session, owner_user, org.id, after)
+        assert stopped_made.status_code == 201, stopped_made.text
+        assert sorted(r["blocked_member_id"] for r in listed.json()) == sorted([str(was_active), str(already_stopped)])
     finally:
         await engine.dispose()

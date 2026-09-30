@@ -41,6 +41,22 @@ describe('BlockedUsersSection', () => {
     expect(container.textContent).toBe('');
   });
 
+  // story #4444 — the real answer of GET /api/user-blocks is a bare JSON array (the backend's `response_model=list`, passed
+  // through by the proxy — measured on a local stack), not `{ data: [...] }`. The section read `json.data` only, so the list
+  // was always empty and the section never showed for anyone; the mocks here used `{ data }` and stayed green.
+  it('⭐#4444 — 서버의 실제 모양(맨 배열)으로도 목록이 뜬다 — 예전엔 json.data만 읽어 늘 빈 목록', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/user-blocks') {
+        return { ok: true, json: async () => ([{ id: 'b-1', blocker_member_id: 'me', blocked_member_id: 'org-person-1', blocked_member_name: '최민아', created_at: '2026-10-01T00:00:00Z' }]) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('차단한 사용자 목록');
+    expect(container.textContent).toContain('최민아');
+  });
+
   // story #4444 — a failed read used to render nothing, which looks exactly like «no one blocked» (Yuna 23:01Z): the section
   // now says it could not load, with «다시 시도» reading again (the same shape as the devices list's loadFailed).
   it('⭐#4444 — 목록 읽기 실패면 «차단 목록을 불러오지 못했어요» + [다시 시도] — 누르면 다시 읽어 목록이 뜬다', async () => {
