@@ -13,6 +13,8 @@ from app.services.agent_anchor_sync import ensure_human_member
 from app.services.entity_slug import (
     RESERVED_WORKSPACE_SLUGS,
     is_valid_slug_format,
+    resolve_unique_workspace_slug,
+    slugify_ascii_or_fallback,
     is_workspace_slug_taken,
 )
 from app.schemas.organization import (
@@ -76,16 +78,23 @@ async def create_organization(
         from ee.plan_limits import check_org_create_limit  # type: ignore[import]
         await check_org_create_limit(session, auth.user_id)
 
-    # story 139d2405(S-slug-infra): workspace slug=root bare 경로라 앱 라우트 예약어와 충돌
-    # 방지(형식도 함께 방어 — URL path segment).
-    if not is_valid_slug_format(body.slug):
-        raise HTTPException(status_code=400, detail="Invalid slug format")
-    if body.slug in RESERVED_WORKSPACE_SLUGS:
-        raise HTTPException(status_code=400, detail="Slug is reserved")
-
-    org = await repo.create(name=body.name, slug=body.slug, owner_member_id=body.owner_member_id)
-    if org is None:
-        raise HTTPException(status_code=409, detail="Slug already exists")
+    if body.slug is not None:
+        # story 139d2405(S-slug-infra): workspace slug=root bare 경로라 앱 라우트 예약어와 충돌
+        # 방지(형식도 함께 방어 — URL path segment).
+        if not is_valid_slug_format(body.slug):
+            raise HTTPException(status_code=400, detail="Invalid slug format")
+        if body.slug in RESERVED_WORKSPACE_SLUGS:
+            raise HTTPException(status_code=400, detail="Slug is reserved")
+        org = await repo.create(name=body.name, slug=body.slug, owner_member_id=body.owner_member_id)
+        if org is None:
+            raise HTTPException(status_code=409, detail="Slug already exists")
+    else:
+        # story 4427: no slug sent → derive it (ASCII part of the name, or `workspace-<8 hex>` for a name with none)
+        # and make it unique (reserved words and taken slugs get `-2`, `-3`…), the same helpers projects use.
+        slug = await resolve_unique_workspace_slug(session, slugify_ascii_or_fallback(body.name, fallback_prefix="workspace"))
+        org = await repo.create(name=body.name, slug=slug, owner_member_id=body.owner_member_id)
+        if org is None:
+            raise HTTPException(status_code=409, detail="Slug already exists")
 
     # OSS bootstrap: owner_member_id 미전달 시 auth.user_id로 직접 org_member 생성
     if body.owner_member_id is None and auth.user_id:
