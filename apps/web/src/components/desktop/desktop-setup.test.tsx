@@ -757,6 +757,24 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     replaceState.mockRestore();
   });
 
+  it('4429 ③: 429 RATE_LIMITED → «잠깐 사이에 너무 자주 시도했어요. {time} 뒤에 다시 «시작»을 눌러 주세요.» in the error line\'s place, «시작» left on (Yuna f6cfda19 v5)', async () => {
+    const cases: [Record<string, string>, string][] = [
+      [{ 'Retry-After': '30' }, '30초'], [{ 'Retry-After': '61' }, '2분'], [{}, '잠시'],
+    ];
+    for (const [headers, time] of cases) {
+      confirmNow = () => new Response(JSON.stringify({ data: null, error: { code: 'RATE_LIMITED', message: 'Too many requests' } }), { status: 429, headers });
+      stubNoOrg();
+      await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      await act(async () => { startButton().click(); });
+      await flush();
+      expect(container.querySelector('[data-testid=setup-rate-limited]')?.textContent).toBe(`잠깐 사이에 너무 자주 시도했어요. ${time} 뒤에 다시 «시작»을 눌러 주세요.`);
+      expect(startButton().disabled).toBe(false); // trying again is true
+      expect(text()).not.toContain('잠시 뒤 다시 시도해 주세요');
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
   it('with an organization the page never asks for invites and reads the usual list', async () => {
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);

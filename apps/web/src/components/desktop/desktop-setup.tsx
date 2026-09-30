@@ -155,6 +155,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
   const [view, setView] = useState<View>({ kind: 'loading' });
+  const [rateLine, setRateLine] = useState<string | null>(null);
 
   // 로그인이 필요했던 설정이면 한 번(4426 · 사람 손 셈) — 설정 id가 없으면 이 흐름에 묶을 수 없어 보내지 않는다
   useEffect(() => {
@@ -246,6 +247,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   async function start() {
     if (!recipe || (!newOrg && !projectId)) return;
+    setRateLine(null);
     setView({ kind: 'starting' });
     try {
       const res = newOrg
@@ -264,6 +266,16 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       }
       const body = await res.json().catch(() => null);
       const error = body?.error as { code?: string; resource?: string } | undefined;
+      // too many tries in a short time (4429 ③ · Yuna f6cfda19 v5): a line in the error line's place and «시작» left on — trying
+      // again is true, just later; no extra button, no countdown
+      if (res.status === 429 || error?.code === 'RATE_LIMITED') {
+        const secs = Number(res.headers.get('Retry-After'));
+        const time = !Number.isFinite(secs) || secs <= 0 ? t('rateLimitedMoment')
+          : secs < 60 ? t('rateLimitedSeconds', { n: Math.ceil(secs) }) : t('rateLimitedMinutes', { n: Math.ceil(secs / 60) });
+        setRateLine(t('rateLimited', { time }));
+        setView({ kind: 'choose' });
+        return;
+      }
       // (나) an invite arrived between the page's look and «시작» (the server checks again): the invite card, nothing made
       if (newOrg && error?.code === 'pending_invites') {
         await readInvites();
@@ -410,7 +422,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
             commands · other tools still ask each time */}
         <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
-        {view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
+        {rateLine ? <p className="text-xs text-muted-foreground" data-testid="setup-rate-limited">{rateLine}</p>
+          : view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
       </footer>
     </Card>
   );

@@ -6632,7 +6632,11 @@
         "roleAdmin": "관리자",
         "roleMember": "멤버",
         "action": "초대 메일의 링크로 들어가면 그 조직에서 바로 시작할 수 있어요."
-      }
+      },
+      "rateLimited": "잠깐 사이에 너무 자주 시도했어요. {time} 뒤에 다시 «시작»을 눌러 주세요.",
+      "rateLimitedSeconds": "{n}초",
+      "rateLimitedMinutes": "{n}분",
+      "rateLimitedMoment": "잠시"
     },
     "devices": {
       "title": "연결된 기기",

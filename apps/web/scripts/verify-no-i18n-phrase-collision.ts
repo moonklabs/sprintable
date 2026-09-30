@@ -796,6 +796,10 @@ export const EXEMPT_PAIRS = new Set<string>([
   // needs a check and is cleared when the «link existing campaign» confirmation (which shows the label) opens; the start
   // confirmation belongs to another state of the card. Look again if the result line ever stays under an open confirmation.
   'cage.adsBoostBudgetLabel <-> cage.boostAdoptBudgetMismatch',
+  // story #4429 ③ (Yuna f6cfda19 v5): the rate-limit line names the button it asks to press again — «…다시 «시작»을 눌러
+  // 주세요» sits right under that «시작» on purpose (the same word, so the person knows which one). Not two phrases that could
+  // be mistaken for each other.
+  'desktop.setup.rateLimited <-> desktop.setup.start',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
