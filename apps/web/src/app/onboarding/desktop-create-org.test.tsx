@@ -164,3 +164,66 @@ describe('onboarding page picks the one screen only for a valid desktop next', (
     expect((el as { type: unknown }).type).toBe(component);
   });
 });
+
+// story 4427 · Qadir 2nd line on 4832 (PO 04:50Z) — the failure paths: each shows the usual onboarding message, never
+// navigates, and «만들기» can be pressed again. A failure after the organization exists never makes a second one.
+describe('DesktopCreateOrg — failures', () => {
+  type Reply = { status: number; code?: string; limit?: number } | 'network';
+  function stubFailing(fail: { org?: Reply; project?: Reply }) {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      calls.push(url);
+      const ok = (data: unknown) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ data, error: null, meta: null }) } as Response);
+      const reply = (r: Reply) => {
+        if (r === 'network') throw new TypeError('Failed to fetch');
+        return { ok: false, status: r.status, headers: new Headers(), json: async () => ({ data: null, error: { code: r.code ?? 'X', message: 'm', ...(r.limit ? { limit: r.limit } : {}) }, meta: null }) } as Response;
+      };
+      if (url === '/api/auth/me') return ok({ member_id: 'u1', display_name: '김지우' });
+      if (url === '/api/organizations') return fail.org ? reply(fail.org) : ok({ id: 'org-1', name: 'x', slug: 'workspace-abc' });
+      if (url === '/api/projects') return fail.project ? reply(fail.project) : ok({ id: 'proj-1', name: 'y' });
+      if (url === '/api/current-project' || url === '/api/auth/refresh') return ok({});
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    return calls;
+  }
+  const alertText = () => container.querySelector('[role="alert"]')?.textContent ?? '';
+  const ko = koMessages.onboarding;
+  async function pressCreate() {
+    await act(async () => { root.render(wrap()); });
+    await settle();
+    await act(async () => { createButton().click(); });
+    await settle();
+  }
+
+  it.each([
+    ['org 403 EMAIL_VERIFICATION_REQUIRED', { org: { status: 403, code: 'EMAIL_VERIFICATION_REQUIRED' } }, ko.emailVerifyRequiredError],
+    ['org 402 PLAN_LIMIT_EXCEEDED', { org: { status: 402, code: 'PLAN_LIMIT_EXCEEDED', limit: 1 } }, ko.orgLimitExceededError.replace('{limit}', '1')],
+    ['org 409 (another failure)', { org: { status: 409, code: 'CONFLICT' } }, ko.createOrgFailed],
+    ['org 500', { org: { status: 500 } }, ko.createOrgFailed],
+    ['network error on the organization', { org: 'network' as const }, ko.networkError],
+  ])('%s → its message · no navigation · «만들기» enabled again · no project call', async (_n, fail, message) => {
+    const calls = stubFailing(fail as { org?: Reply });
+    await pressCreate();
+    expect(alertText()).toContain(message);
+    expect(hrefSet).toEqual([]);
+    expect(createButton().disabled).toBe(false);
+    expect(createButton().textContent).toBe('만들기');
+    expect(calls.filter((u) => u === '/api/projects')).toHaveLength(0);
+  });
+
+  it.each([
+    ['project 402 PLAN_LIMIT_EXCEEDED', { status: 402, code: 'PLAN_LIMIT_EXCEEDED', limit: 1 } as Reply, ko.projectLimitExceededError.replace('{limit}', '1')],
+    ['network error on the project', 'network' as Reply, ko.networkError],
+  ])('%s → its message; the organization stays made — pressing again never creates a second one', async (_n, projectFail, message) => {
+    const calls = stubFailing({ project: projectFail });
+    await pressCreate();
+    expect(alertText()).toContain(message);
+    expect(hrefSet).toEqual([]);
+    expect(createButton().disabled).toBe(false);
+    await act(async () => { createButton().click(); });
+    await settle();
+    expect(calls.filter((u) => u === '/api/organizations')).toHaveLength(1);
+    expect(calls.filter((u) => u === '/api/projects')).toHaveLength(2);
+  });
+});
