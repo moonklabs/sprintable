@@ -489,3 +489,47 @@ describe('ChatV3Messages — 발신자 동명이인([SID:4311 PR 3])', () => {
     expect(labels).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '송윤재 · e75ca548', koMessages.chatV3.meLabel, '안나']);
   });
 });
+
+
+describe('ChatV3Messages — story #4430 «not delivered» line', () => {
+  it('a send answer with `delivery` puts the line under my new bubble', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await mount(ref);
+    fetchMock.mockImplementationOnce(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: { id: 'm9', sender: { id: 'me-1', name: '나', type: 'human' }, content: '회의록 올렸어요.', attachments: [], created_at: '2026-09-16T06:45:00Z', references: [] },
+        delivery: { withheld_count: 2, reason: 'recipient_blocked_sender', conversation_type: 'group' },
+      }),
+    }));
+    const input = container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
+    const sendBtn = container.querySelector('[data-testid="chat-v3-send-action"]') as HTMLElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '회의록 올렸어요.');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      sendBtn.click();
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    const lines = [...container.querySelectorAll('[data-testid="withheld-delivery-line"]')];
+    expect(lines.map((l) => l.textContent)).toEqual(['2명에게는 전달되지 않았어요 — 내 메시지를 받지 않도록 해 둔 사람이 있어요']);
+  });
+
+  it('a read that carries delivery_withheld on my message shows it; the other messages show nothing', async () => {
+    stub({
+      messages: {
+        data: [
+          { ...INITIAL_MESSAGES.data[0] },
+          { id: 'm5', sender: { id: 'me-1', name: '나', type: 'human' }, content: '내일 오전에 초안 공유할게요.', attachments: [], created_at: '2026-09-16T06:42:00Z', references: [], delivery_withheld: { withheld_count: 1, reason: 'recipient_blocked_sender', conversation_type: 'dm' } },
+        ],
+      },
+    });
+    await mount(createRef<ChatV3MessagesHandle>());
+    const lines = [...container.querySelectorAll('[data-testid="withheld-delivery-line"]')];
+    expect(lines.map((l) => l.textContent)).toEqual(['전달되지 않았어요 — 받는 사람이 내 메시지를 받지 않도록 해 두었어요']);
+  });
+});

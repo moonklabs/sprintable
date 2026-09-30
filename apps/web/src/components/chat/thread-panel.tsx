@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTranslations } from 'next-intl';
 import { ArrowLeft, MessageSquare, X } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
-import { normalizeToMessage } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, sentMessageFromAnswer } from '@/hooks/use-chat-sse';
 import { toPlainPreview } from './entity-ref';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
@@ -176,8 +176,7 @@ export function ThreadPanel({
     });
     if (!res.ok) throw new Error('Failed to send thread reply');
     const raw = await res.json() as Record<string, unknown>;
-    const payload = (raw.data ?? raw) as Record<string, unknown>;
-    const msg = normalizeToMessage(payload);
+    const msg = sentMessageFromAnswer(raw); // story #4430 — the send answer's `delivery` on the sender's own line
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];

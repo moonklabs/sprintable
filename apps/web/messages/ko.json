@@ -5169,6 +5169,8 @@
     "blockedSenderMessagePlaceholder": "차단한 사용자의 메시지예요",
     "blockedSenderMessageReveal": "보기",
     "blockedSenderMessageHide": "숨기기",
+    "withheldDeliveryDm": "전달되지 않았어요 — 받는 사람이 내 메시지를 받지 않도록 해 두었어요",
+    "withheldDeliveryGroup": "{n}명에게는 전달되지 않았어요 — 내 메시지를 받지 않도록 해 둔 사람이 있어요",
     "blockUserConfirmTitle": "이 사용자를 차단할까요?",
     "blockUserConfirmDescription": "{name}의 메시지가 보이지 않게 돼요. 업무 배정과 알림은 그대로예요. 언제든 해제할 수 있어요.",
     "blockUserConfirmCancel": "취소",

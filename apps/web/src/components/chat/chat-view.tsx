@@ -19,7 +19,7 @@ import { useReadingPanelStack } from './use-reading-panel-stack';
 import { ReadingPanelProvider } from './reading-panel-context';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
 import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
 import type { HitlAnswer } from './hitl-approval-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
@@ -721,8 +721,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       router.push(newPath);
       return;
     }
-    const payload = (raw.data ?? raw) as Record<string, unknown>;
-    const sent = normalizeToMessage(payload);
+    const sent = sentMessageFromAnswer(raw); // story #4430 — the send answer's `delivery` on the sender's own line
     addMessage(sent);
     // S5: 미지원 런타임 차단 hint를 트리거 메시지에 keyed로 적재(차단 발생 시에만 키 존재).
     const gate = raw.command_gate as { blocked?: BlockedHint[] } | undefined;

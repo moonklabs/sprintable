@@ -30,6 +30,13 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => {} }),
 }));
 
+// story #4430 — the reply send is driven through ChatInput's onSend (the real input's typing isn't what these tests watch).
+vi.mock('./chat-input', () => ({
+  ChatInput: ({ onSend }: { onSend: (content: string) => Promise<void> | void }) => (
+    <button type="button" data-testid="mock-send" onClick={() => { void onSend('회의록 올렸어요.'); }}>send</button>
+  ),
+}));
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -361,5 +368,29 @@ describe('ThreadPanel — 발신자 동명이인([SID:4311 PR 3])', () => {
     await flush();
     const names = [...container.querySelectorAll('span.text-\\[11px\\].font-medium')].map((el) => el.textContent).filter((n) => n !== koMessages.chats.you);
     expect(names).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '송윤재 · e75ca548', '안나']);
+  });
+});
+
+
+describe('ThreadPanel — story #4430 a reply\'s send answer puts «not delivered» under my reply', () => {
+  it('the send answer\'s `delivery` lands on my new reply', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            data: { id: 'reply-9', thread_id: 'parent-1', sender: { id: 'member-1', name: '나', type: 'human' }, content: '회의록 올렸어요.', created_at: '2026-08-08T00:02:00.000Z' },
+            delivery: { withheld_count: 1, reason: 'recipient_blocked_sender', conversation_type: 'dm' },
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await act(async () => { root.render(wrap(<Harness />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="mock-send"]') as HTMLElement).click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="withheld-delivery-line"]')?.textContent)
+      .toBe('전달되지 않았어요 — 받는 사람이 내 메시지를 받지 않도록 해 두었어요');
   });
 });
