@@ -177,6 +177,44 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
     expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/desktop/setups' && !init?.method)).toHaveLength(2);
+    // Qadir 4839 T1 ① — the result is unknown, so the list says what happened; the line never claims «연결을 끊었어요»
+    expect(q('desktop-devices-done')[0].textContent).toBe('');
+  });
+
+  // Qadir 4839 T1 ② — a list read started before an org switch (the retry button, or the re-read after an unreadable
+  // disconnect answer) answers after the switch: that late answer is the previous org's and is dropped
+  it('a late list answer from before an org switch (the retry path) is dropped — the new org\'s rows stay', async () => {
+    asRole('admin');
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 500 }));
+    await render();
+    let late!: (r: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((r) => { late = r; }));
+    await click([...document.querySelectorAll('button')].find((b) => b.textContent === '다시 시도')!);
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ setups: [device(A.replace('1', '3'), 'second org mac')] }), { status: 200 }));
+    asRole('admin', 'org-2');
+    await render();
+    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+    await act(async () => { late(new Response(JSON.stringify({ setups: [device(A, 'studio mac')] }), { status: 200 })); });
+    await act(async () => { await Promise.resolve(); });
+    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+  });
+
+  it('a late list answer from before an org switch (the re-read after an unreadable disconnect answer) is dropped', async () => {
+    asRole('owner');
+    await render();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ revoked_keys: 2 }), { status: 200 }));
+    let late!: (r: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((r) => { late = r; }));
+    await click(q('desktop-device-disconnect')[0]);
+    await click(q('desktop-devices-confirm')[0]);
+    await act(async () => { await Promise.resolve(); });
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ setups: [device(A.replace('1', '3'), 'second org mac')] }), { status: 200 }));
+    asRole('owner', 'org-2');
+    await render();
+    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+    await act(async () => { late(new Response(JSON.stringify({ setups: [device(A, 'studio mac'), device(B, 'old laptop', 'disconnected')] }), { status: 200 })); });
+    await act(async () => { await Promise.resolve(); });
+    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
   });
 
   // Qadir 4830 ① — a client-side org switch keeps /desktop mounted: the list is read again for the new org, and nothing of
