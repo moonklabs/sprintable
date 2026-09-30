@@ -305,6 +305,7 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'desktop.setup.trustHint::trust',
   'desktop.setup.trustHint::this',
   'desktop.setup.trustHint::folder',
+  'desktop.setup.trustHint::exit', // v27 · PO 12:11Z — «No, exit», the other choice quoted as the CLI shows it
   'desktop.setup.notConnected.bodyClaude::trust',
   'desktop.setup.notConnected.bodyClaude::this',
   'desktop.setup.notConnected.bodyClaude::folder',
