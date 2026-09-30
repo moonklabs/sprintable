@@ -12,9 +12,9 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { OperatorInput } from '@/components/ui/operator-control';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { RewardsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface LedgerEntry { id: string; member_id: string; amount: number; reason: string; created_at: string }
 interface LeaderboardEntry { member_id: string; balance: number }
@@ -27,7 +27,7 @@ export default function RewardsPage() {
   const tc = useTranslations('common');
   const shellT = useTranslations('shell');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { projectId } = useDashboardContext();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
@@ -238,7 +238,7 @@ export default function RewardsPage() {
                         <p className={`text-sm font-bold ${e.amount >= 0 ? 'text-success' : 'text-destructive'}`}>
                           {e.amount >= 0 ? '+' : ''}{e.amount.toLocaleString()} TJSB
                         </p>
-                        <p className="text-xs text-muted-foreground">{formatRelativeTime(e.created_at, locale, displayTimezone)}</p>
+                        <p className="text-xs text-muted-foreground">{formatViewerRelativeTime(e.created_at, locale, displayTimezone)}</p>
                       </div>
                     </div>
                   ))}

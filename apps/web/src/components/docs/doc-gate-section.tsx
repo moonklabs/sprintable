@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { memberLookup } from '@/lib/member-display';
 import { pickIGaJosa } from '@/lib/korean-particle';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   Shield, ShieldCheck, ShieldX, RotateCcw, Pencil, History, User, ChevronDown,
   CheckCircle, XCircle,
@@ -23,6 +22,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useFieldDraft } from '@/hooks/use-field-draft';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * E-DG S28 + 24f5ae18/34360c54 — doc decision gate UI(doc 상세 상단). S24 hypothesis-gate-badge 어휘 미러·신규 토큰 0.
@@ -87,7 +87,7 @@ export function DocGateSection({
   const t = useTranslations('docs');
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { currentTeamMemberId } = useDashboardContext();
   const [gate, setGate] = useState<GateItem | null>(null);
   const [revisions, setRevisions] = useState<DocRevision[]>([]);
@@ -151,7 +151,7 @@ export function DocGateSection({
   const resolveNameInfo = (id: string | null | undefined) => (id ? memberLookup(memberNames, id, tc, { loaded: true }) : null);
   const resolveName = (id: string | null | undefined) => (id ? (resolveNameInfo(id)?.label ?? '') : '—');
   // story #3493 — gate.resolved_at·ev.at은 "기록"(정본 formatRelativeTime).
-  const fmtDate = (s: string | undefined) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
+  const fmtDate = (s: string | undefined) => (s ? formatViewerRelativeTime(s, locale, displayTimezone) : '');
 
   // doc.status transition(draft↔pending↔denied). gate-row transition과 별개.
   // story #3004 — draft→pending(상신)은 approverMemberId가 이제 서버 필수(그 외 전이엔 무관·안 실음).

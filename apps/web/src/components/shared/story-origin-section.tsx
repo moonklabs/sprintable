@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react';
 import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { toPlainPreview } from '@/components/chat/entity-ref';
 import { parseCursorMeta } from '@/lib/pagination';
@@ -13,6 +12,7 @@ import { deriveStoryOrigin } from './derive-story-origin';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #2267(C-9) AC4 — 이 컴포넌트는 EntityBacklinksSection과 같은 엔드포인트
 // (GET /api/stories/{id}/backlinks)를 별도로 부른다. 두 섹션이 응답을 나눠 쓰도록
@@ -129,7 +129,7 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
   const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('board');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [result, setResult] = useState<LoadedResult | 'failed' | null>(null);
 
   useEffect(() => {
@@ -170,7 +170,7 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
                 )}
                 <span className="block text-[10px] text-muted-foreground">
                   {creatorName ? `${creatorName} · ` : ''}
-                  {formatRelativeTime(origin.created_at, locale, displayTimezone)}
+                  {formatViewerRelativeTime(origin.created_at, locale, displayTimezone)}
                 </span>
               </span>
             </span>

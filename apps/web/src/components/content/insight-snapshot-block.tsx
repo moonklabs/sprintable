@@ -38,7 +38,7 @@ export interface InsightSnapshot {
 
 export interface InsightSnapshotBlockProps {
   snapshots: InsightSnapshot[];
-  orgTimezone: string;
+  orgTimezone: string | null;
   locale: string;
   // story #3617(유나 3600 AC2 기준선) — 성과 보드로 가는 유일한 화면 내 길. 발행
   // 前(publication 없음)에는 undefined/null — 링크를 안 그린다(이 블록 자체도

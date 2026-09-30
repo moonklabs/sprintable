@@ -16,8 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { fetchWithAuth } from '@/lib/db/client';
 import { copyTextSafely } from '@/lib/clipboard';
 import { channelConnectionIdentityLabel, useChannelLabel, channelMarkColor, channelMarkInitials } from '@/lib/channel-label';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { formatCount } from '@/components/content/generation-budget-indicator';
 import { ChannelStatusChip } from '@/components/channel-connect/channel-status-chip';
 import { deriveChannelConnectionStatus, worstChannelConnectionStatus } from '@/components/channel-connect/connection-status';
@@ -29,6 +28,7 @@ import { FacebookPageSelectCard, type SelectCandidate } from '@/components/chann
 import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 import { AgentSetupSection } from '@/components/channel-connect/agent-setup-section';
 import { ExternalPublishPauseCard } from '@/components/channel-connect/external-publish-pause-card';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3376(Phase1·마케팅운영) — 소셜 채널 OAuth 연결 화면. org-connectors(/organization/
@@ -138,7 +138,7 @@ function MeasurementConnectionsSection({
 }) {
   const locale = useLocale();
   const tCommon = useTranslations('common');
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [beaconPanel, setBeaconPanel] = useState<{ publicKey: string } | null>(null);
   const [beaconPanelLoading, setBeaconPanelLoading] = useState(false);
   const [beaconPanelError, setBeaconPanelError] = useState(false);
@@ -257,7 +257,7 @@ function MeasurementConnectionsSection({
       : beacon.status === 'no_data_yet'
         ? t('measurementBeaconNoDataYet')
         : t('measurementBeaconHasData', {
-            time: beacon.last_seen_at ? formatRelativeTime(beacon.last_seen_at, locale, displayTimezone) : '',
+            time: beacon.last_seen_at ? formatViewerRelativeTime(beacon.last_seen_at, locale, displayTimezone) : '',
             // 페드루 PO REQUIRED③(2026-09-06, #3896 리뷰) — count_7d(0 포함,
             // null≠0 원칙 — has_data 상태면 항상 실수라 BE가 이미 보장).
             count: beacon.count_7d ?? 0,
@@ -599,7 +599,7 @@ function ConnectionRow({
   // story #3486(유나 10회차, 3436 묶음 8 정본 재사용) — 「연결 시각」은 약속이 아니라
   // 기록이라 상대시각이 맞다(묶음 8 판정 그대로). 새 포맷 함수를 신설하지 않는다.
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [testing, setTesting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -665,7 +665,7 @@ function ConnectionRow({
             ) : null}
           </p>
           <p className="text-xs text-muted-foreground">
-            {t('channelConnectedBy', { time: formatRelativeTime(conn.created_at, locale, displayTimezone) })}
+            {t('channelConnectedBy', { time: formatViewerRelativeTime(conn.created_at, locale, displayTimezone) })}
           </p>
         </div>
         {showStatusChip ? (
@@ -695,7 +695,7 @@ function ConnectionRow({
               줄만 그대로 — 새 값을 지어내지 않는다. */}
           {conn.last_error_code || conn.last_error_at ? (
             <p className="mt-1 font-mono">
-              {[conn.last_error_code, conn.last_error_at ? formatRelativeTime(conn.last_error_at, locale, displayTimezone) : null]
+              {[conn.last_error_code, conn.last_error_at ? formatViewerRelativeTime(conn.last_error_at, locale, displayTimezone) : null]
                 .filter(Boolean)
                 .join(' · ')}
             </p>
@@ -833,7 +833,7 @@ function ChannelSection({
   const locale = useLocale();
   const tc = useTranslations('common');
   const channelLabel = useChannelLabel();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const rowStatuses = connections.map((c) =>
     deriveChannelConnectionStatus({
       serverStatus: c.status, tokenExpiresAt: c.token_expires_at, canAutoRefresh: c.can_auto_refresh,
@@ -930,7 +930,7 @@ function ChannelSection({
       if (singleDerived.isAutoRefreshInfo !== undefined) {
         return expiringSoonSubtitleText({ isAutoRefreshInfo: singleDerived.isAutoRefreshInfo, tokenExpiresAt: single.token_expires_at, t });
       }
-      return `${channelConnectionIdentityLabel(single, channelLabel)} · ${t('channelConnectedBy', { time: formatRelativeTime(single.created_at, locale, displayTimezone) })}`;
+      return `${channelConnectionIdentityLabel(single, channelLabel)} · ${t('channelConnectedBy', { time: formatViewerRelativeTime(single.created_at, locale, displayTimezone) })}`;
     }
     return undefined;
   })();

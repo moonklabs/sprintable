@@ -18,14 +18,14 @@ import { toPlainPreview } from '@/components/chat/entity-ref';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { getEventTypeCopy } from '@/services/notification-display';
 import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
 import { useToast } from '@/components/ui/toast';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -228,7 +228,7 @@ function NotificationPanel({
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
@@ -367,7 +367,7 @@ function NotificationPanel({
                       </p>
                     ) : null}
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {formatRelativeTime(n.created_at, locale, displayTimezone)}
+                      {formatViewerRelativeTime(n.created_at, locale, displayTimezone)}
                     </p>
                   </div>
                   {!n.read_at && (

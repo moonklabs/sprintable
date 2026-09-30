@@ -100,7 +100,7 @@ export function fileExtLabel(contentType: string, name: string): string {
  * 7일 초과는 "최신성"이 아니라 "그 시각이 정확히 언제였나"로 질문이 바뀐다 — §11-2 정본
  * (`formatScheduledAt`, displayTimezone 기준)으로 폴백한다(구현: UTC 슬라이스, tz 무시).
  */
-export function formatRelativeTime(iso: string, locale: string, displayTimezone: string): string {
+export function formatRelativeTime(iso: string, locale: string, displayTimezone: string | null, viewerTz?: string | null): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return '';
   // PO 지적(2026-09-04 20:04Z) — 서버 created_at이 클라이언트 시계보다 몇 초 앞서는 흔한
@@ -108,7 +108,8 @@ export function formatRelativeTime(iso: string, locale: string, displayTimezone:
   // 미래형을 낸다(舊 구현은 mins<1 뭉뚱그림이라 이 증상 자체가 없었다). 0으로 clamp해
   // numeric:'auto'가 "지금"/"now"로 떨어지게 한다.
   const diffMs = Math.max(0, Date.now() - t);
-  if (diffMs >= 7 * 86400000) return formatScheduledAt(iso, displayTimezone).display;
+  // story #4443 PR2b — past a week it is a date: in the viewer's zone, or nothing while that is not known (never UTC)
+  if (diffMs >= 7 * 86400000) return (viewerTz === undefined ? formatScheduledAt(iso, displayTimezone) : formatScheduledAt(iso, displayTimezone, viewerTz)).display;
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const sec = Math.round(diffMs / 1000);
   const min = Math.round(sec / 60);
@@ -118,6 +119,11 @@ export function formatRelativeTime(iso: string, locale: string, displayTimezone:
   if (Math.abs(min) < 60) return rtf.format(-min, 'minute');
   if (Math.abs(hr) < 24) return rtf.format(-hr, 'hour');
   return rtf.format(-day, 'day');
+}
+
+/** story #4443 PR2b — a relative time for the viewer, in their own zone past a week (no offset label: it is theirs). */
+export function formatViewerRelativeTime(iso: string, locale: string, viewerTz: string | null): string {
+  return formatRelativeTime(iso, locale, viewerTz, viewerTz);
 }
 
 /** 합계 크기(요약 칩) — formatFileSize 는 MB 상한이라 GB 까지 커버하는 별도 포맷터. */
@@ -149,9 +155,9 @@ export function formatStorageSize(bytes: number): string {
 
 /** ISO → YYYY-MM-DD (상세 메타 '생성' 행 · 검증일) — tz 기준 날짜. story #4280: 예전엔 `toISOString().slice(0, 10)`(UTC 날짜)라
  * KST 00~09시에 생긴 것이 전날로 찍혔다. 옆 줄의 formatRelativeTime과 같은 tz를 받는다(필수 — 빼먹으면 tsc가 잡는다). */
-export function formatDate(iso: string, tz: string): string {
+export function formatDate(iso: string, tz: string | null): string {
   const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return '';
+  if (Number.isNaN(t) || !tz) return ''; // story #4443 PR2b — the viewer's zone not known yet: no day (never the UTC one)
   return toDateKey(iso, tz);
 }
 

@@ -3,8 +3,8 @@
 import { useLocale, useTranslations } from 'next-intl';
 import { AlertCircle } from 'lucide-react';
 import type { WorkflowLineStepRun } from '@/components/kanban/types';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * E-DG S12 ①ⓒ — stuck handoff 디테일(display-only). detail drawer stuck 섹션 전용.
@@ -18,7 +18,7 @@ interface StuckHandoffDetailProps {
 export function StuckHandoffDetail({ step }: StuckHandoffDetailProps) {
   const t = useTranslations('cage');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const ev = step.last_event;
 
   return (
@@ -36,7 +36,7 @@ export function StuckHandoffDetail({ step }: StuckHandoffDetailProps) {
           <p>{ev.event_type}</p>
           <p className="font-mono">#{ev.id.slice(0, 8)}{ev.recipient_seq != null ? ` · seq ${ev.recipient_seq}` : ''}</p>
           {/* story #3493 — 이벤트 시각은 "기록"(정본 formatRelativeTime). */}
-          {ev.created_at ? <p>{formatRelativeTime(ev.created_at, locale, displayTimezone)}</p> : null}
+          {ev.created_at ? <p>{formatViewerRelativeTime(ev.created_at, locale, displayTimezone)}</p> : null}
         </div>
       ) : null}
 

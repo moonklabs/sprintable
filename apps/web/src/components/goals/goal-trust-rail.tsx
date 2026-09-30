@@ -5,8 +5,9 @@ import { useTranslations, useLocale } from 'next-intl';
 import { FlaskConical } from 'lucide-react';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #2958 §4/§6(doc goals-outcome-ledger-redesign-handoff) — 결과 캡슐(상세) 우측 328px
@@ -53,9 +54,9 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
   // story #3493 — measureAfter(측정 예정)는 "약속"(§11-2 formatScheduledAt),
   // createdAt(생성 기록)은 "기록"(3436 묶음 8 formatRelativeTime) — 한 함수로
   // 뭉뚱그리지 않는다.
-  const displayTimezone = resolveDisplayTimezone().tz;
-  const fmtScheduled = (s: string) => formatScheduledAt(s, displayTimezone).display;
-  const fmtRecord = (s: string) => formatRelativeTime(s, locale, displayTimezone);
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
+  const fmtScheduled = (s: string) => formatViewerScheduledAt(s, displayTimezone).display;
+  const fmtRecord = (s: string) => formatViewerRelativeTime(s, locale, displayTimezone);
   const judged = outcomeStatus && outcomeStatus !== 'n_a' && outcomeStatus !== 'pending';
   // 동적 t() 키 조립(문자열 이어붙이기) 대신 명시 매핑 — 정적 추출·타입 안전 둘 다 지킨다.
   const judgedLabel = outcomeStatus === 'hit' ? tOutcome('statusHit')

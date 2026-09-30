@@ -7,8 +7,7 @@ import { MessageSquare, Users } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
 import { ConnectionLostBanner } from './connection-lost-banner';
@@ -28,6 +27,7 @@ import { composeEventPreviewLine } from './event-block-card';
 import { toPlainPreview } from './entity-ref';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface Participant {
   member_id: string;
@@ -97,8 +97,8 @@ interface OutsideProjectConversation {
 
 // story #3493 — 손으로 짠 상대시각(하드코딩 'ko-KR', locale 무시)이 3436 묶음 8
 // 정본(formatRelativeTime)과 별개로 존재하던 자리. 대화 최근시각은 "기록"이라 정본에 위임.
-function formatTime(iso: string, locale: string, displayTimezone: string): string {
-  return formatRelativeTime(iso, locale, displayTimezone);
+function formatTime(iso: string, locale: string, displayTimezone: string | null): string {
+  return formatViewerRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatParticipantNames(
@@ -155,7 +155,7 @@ function ConversationRow({
   // useLocale()은 순수 Context 읽기(HTTP 요청 0)라 행마다 불러도 되는 것 — CHANGES①이
   // 지적한 것은 useOrgDomainLabels(HTTP fetch를 매 마운트 발사)뿐이다.
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const displayName = conv.title ??
     (conv.participants && conv.participants.length > 0

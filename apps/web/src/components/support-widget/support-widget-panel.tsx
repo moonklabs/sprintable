@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { History, Plus, Send, UserRound, X } from 'lucide-react';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -13,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { SupportWidgetSession } from '@/hooks/use-support-widget-session';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3260 — 헤더가 반전 톤(bg-foreground/text-background, tooltip.tsx·avatar.tsx와 동일
@@ -76,7 +76,7 @@ function ThinkingIndicator() {
 function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
   const t = useTranslations('supportWidget');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [listOpen, setListOpen] = useState(false);
 
   return (
@@ -131,7 +131,7 @@ function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
               >
                 {/* story #3493 — 상담 생성 시각은 "기록"(정본 formatRelativeTime). */}
                 <span className={conv.id === session.conversationId ? 'font-medium text-foreground' : undefined}>
-                  {formatRelativeTime(conv.created_at, locale, displayTimezone)}
+                  {formatViewerRelativeTime(conv.created_at, locale, displayTimezone)}
                 </span>
                 {conv.ended_at === null ? (
                   <span className="text-[11px] text-muted-foreground">{t('conversationActiveBadge')}</span>

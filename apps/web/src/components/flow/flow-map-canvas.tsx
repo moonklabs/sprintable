@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
 import { Check, Circle } from 'lucide-react';
 import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from './derive-flow-map';
 import {
@@ -23,6 +22,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // 카드 실측(FlowMapNodeCard): w-[110px] · 높이 24px(한 줄) — 선은 카드 "왼쪽 가장자리
 // 중앙"→"오른쪽 가장자리 중앙"을 잇는다.
@@ -378,7 +378,7 @@ export function FlowMapCanvas({
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story #2224 후속(수→형, §A1) — 렌더 시각 하나를 고정해 같은 렌더 패스 안 모든 카드가
   // 같은 기준으로 판정되게 한다(Date.now()를 카드마다 따로 부르면 렌더 중 시각이 미세하게
   // 갈릴 수 있다 — 여기서만 부르고 순수함수(isNodeStalled)에 값으로 흘려보낸다).
@@ -1220,7 +1220,7 @@ export function FlowMapCanvas({
               </DialogTitle>
               <DialogDescription>
                 {/* story #3493 — 서명 선언 시각은 "기록"(정본 formatRelativeTime). */}
-                {undoTarget.declaredAt ? t('portUndoSignature', { at: formatRelativeTime(undoTarget.declaredAt, locale, displayTimezone) }) : t('portUndoSignatureUnknown')}
+                {undoTarget.declaredAt ? t('portUndoSignature', { at: formatViewerRelativeTime(undoTarget.declaredAt, locale, displayTimezone) }) : t('portUndoSignatureUnknown')}
               </DialogDescription>
             </DialogHeader>
             {undoDeleteError ? <p role="alert" className="text-[11px] text-destructive">{undoDeleteError}</p> : null}

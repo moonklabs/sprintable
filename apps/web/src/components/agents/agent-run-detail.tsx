@@ -10,10 +10,11 @@ import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { getRunErrorDisplay, getRunFailureDisposition } from '@/services/agent-run-history';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { agentRunStatusBadgeVariant, type AgentRunStatus } from '@/lib/agent-run-status';
 import { AgentRunToolCallsSection } from './agent-run-tool-calls-section';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface RunDetail {
   id: string;
@@ -60,9 +61,9 @@ export function formatDuration(ms: number | null): string {
 }
 
 // story #3493 — started_at/finished_at/entry.created_at은 "기록"(정본 formatRelativeTime).
-export function toLocaleStr(iso: string | null, locale: string, displayTimezone: string): string {
+export function toLocaleStr(iso: string | null, locale: string, displayTimezone: string | null): string {
   if (!iso) return '-';
-  return formatRelativeTime(iso, locale, displayTimezone);
+  return formatViewerRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatBillingModeLabel(t: ReturnType<typeof useTranslations>, billingMode: RunDetail['llm_provider']): string {
@@ -81,7 +82,7 @@ export function AgentRunDetail({
 }) {
   const t = useTranslations('agentRuns');
   const tc = useTranslations('common');
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   // story #1989: fetch 자체에 try/catch가 없어 네트워크 실패(오프라인 등) 시 fetch가 throw →
@@ -234,7 +235,7 @@ export function AgentRunDetail({
                       formatRelativeTime을 쓰면 diffMs가 음수라 0으로 clamp돼 "지금"으로
                       오표시되므로 §11-2 정본(formatScheduledAt)으로 절대 표기. */}
                   {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
-                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {formatScheduledAt(run.next_retry_at, displayTimezone).display}</p>
+                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {formatViewerScheduledAt(run.next_retry_at, displayTimezone).display}</p>
                   )}
                 </AlertDescription>
               </Alert>

@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -27,6 +27,7 @@ import { GoalTrustRail } from '@/components/goals/goal-trust-rail';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -113,9 +114,9 @@ function priorityLabelKey(p: EpicPriority): 'priorityCritical' | 'priorityHigh' 
 // story #3493 — target_date/measure_after는 "약속"(목표 완료일·측정 예정일, 아직
 // 안 온 미래 시점) — §11-2 정본(formatScheduledAt)으로 통일. 고정 포맷이라 en/ko
 // locale 분기(구 #2084 근본원인)가 원천적으로 사라진다.
-function formatDate(d: string | null | undefined, displayTimezone: string) {
+function formatDate(d: string | null | undefined, displayTimezone: string | null) {
   if (!d) return '—';
-  return formatScheduledAt(d, displayTimezone).display;
+  return formatViewerScheduledAt(d, displayTimezone).display;
 }
 
 // ─── UI components ────────────────────────────────────────────────────────────
@@ -249,7 +250,7 @@ export default function EpicDetailPage() {
     const key = storyStatusKeyMap[slug];
     return key ? tBoard(key) : slug;
   };
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { wsSlug, projSlug, projectId } = useGoalsRoute();

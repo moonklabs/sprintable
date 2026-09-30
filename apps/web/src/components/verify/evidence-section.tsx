@@ -8,8 +8,7 @@ import {
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { pickIGaJosa } from '@/lib/korean-particle';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { deriveTrustStage, asVerificationSheet, type EvidenceItem, type EvidenceType, type VerificationSheetItem } from '@/services/verify';
 import {
   adaptArtifactDetail, getArtifactVersionDetail,
@@ -19,6 +18,7 @@ import { ArtifactExpandDialog } from '@/components/canvas/artifact-expand-dialog
 import { type GalleryTimelineVersion } from '@/components/canvas/artifact-gallery-timeline';
 import { fetchWithAuth } from '@/lib/db/client';
 import { memberDisplayLabel, memberLookup } from '@/lib/member-display';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 const VISIBLE_LIMIT = 4;
 
@@ -179,7 +179,7 @@ export function EvidenceSection({
   const tInsights = useTranslations('insightsBoard');
   const naLabel = tInsights('insightsBoardCommentsNotApplicable');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [expanded, setExpanded] = useState(false);
   const [items, setItems] = useState<EvidenceItem[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -296,7 +296,7 @@ export function EvidenceSection({
   const verifiedByName = humanVerifiedBy
     ? memberLookup(memberMap, humanVerifiedBy, tCommon, { loaded: memberNamesLoaded })?.label ?? null
     : null;
-  const verifiedWhen = humanVerifiedAt ? formatRelativeTime(humanVerifiedAt, locale, displayTimezone) : null;
+  const verifiedWhen = humanVerifiedAt ? formatViewerRelativeTime(humanVerifiedAt, locale, displayTimezone) : null;
   const sealLabel = trustStage === 'verified'
     ? (verifiedByName ? `${t('trustSealVerifiedBy', { name: verifiedByName })}${verifiedWhen ? ` · ${verifiedWhen}` : ''}` : t('provenCompletion'))
     : t('trustSealClaimedBy');

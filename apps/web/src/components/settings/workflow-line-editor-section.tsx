@@ -10,8 +10,8 @@ import { WorkflowPolicySimulatorSection } from './workflow-policy-simulator-sect
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * E-DG S34 — workflow line admin editor(workflow-policies 탭 4모드 확장). org admin이 라인 config를
@@ -77,7 +77,7 @@ const DIFF_META: Record<string, { variant: 'success' | 'destructive' | 'warning'
 export function WorkflowLineEditorSection({ projectId }: { projectId?: string | null }) {
   const t = useTranslations('settings');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [mode, setMode] = useState<Mode>('view');
   const [entityType, setEntityType] = useState<string>('story');
   const [versions, setVersions] = useState<VersionItem[]>([]);
@@ -272,7 +272,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
                 <span className="font-mono text-xs text-foreground">v{v.version}</span>
                 <Badge variant={STATUS_VARIANT[v.status] ?? 'chip'}>{v.status}</Badge>
                 <span className="text-[10px] text-muted-foreground">{t('lineEditorLintLabel')}: {v.lint_status}</span>
-                {v.updated_at ? <span className="text-[10px] text-muted-foreground">{formatRelativeTime(v.updated_at, locale, displayTimezone)}</span> : null}
+                {v.updated_at ? <span className="text-[10px] text-muted-foreground">{formatViewerRelativeTime(v.updated_at, locale, displayTimezone)}</span> : null}
                 {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「편집」 접근 이름이라
                     보조기술 버튼 목록에서 어느 버전 행인지 못 가른다. */}
                 {v.status === 'draft' ? (

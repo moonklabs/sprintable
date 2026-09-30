@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatAgentRuntimeLine } from '@/components/agents/agent-management-tab';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
@@ -35,6 +34,7 @@ import { fetchMe } from '@/lib/me-client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import { copyTextSafely } from '@/lib/clipboard';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /** 런타임 상태(6종 중 ①~⑤) → 배지·헬퍼 표현. ⑥(드롭다운 dot)은 AC 범위 외(§11). */
 const RUNTIME_STATUS_UI: Record<
@@ -117,7 +117,7 @@ export default function AgentDetailPage() {
   const tc = useTranslations('common');
   const to = useTranslations('organization');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { addToast } = useToast();

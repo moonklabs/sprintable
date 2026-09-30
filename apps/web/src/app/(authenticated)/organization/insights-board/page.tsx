@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
 import { AdsSpendCell } from '@/components/insights-board/ads-spend-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';
@@ -37,6 +37,7 @@ import {
   ResponsiveDataTable, type ResponsiveDataTableColumn, type ResponsiveDataTableRenderedPair,
 } from '@/components/shared/responsive-data-table';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3503 — 성과 보드 화면. BE #3502 의존(PR 브리프 헤더 참고, 이 파일 작성 시점
@@ -142,7 +143,7 @@ export default function InsightsBoardPage() {
   // story #4278(유나 결정 ③) — 셸 메뉴 «결과»(구역 이름)를 눌러 온 화면이라 머리에 구역을 싣는다(«결과 › 성과 보드»).
   const tNav = useTranslations('nav');
   const channelLabel = useChannelLabel();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const windowParam = (searchParams.get('window') as InsightsBoardWindow | null) ?? DEFAULT_WINDOW;
   const channelParam = searchParams.get('channel') ?? '';
@@ -477,7 +478,7 @@ export default function InsightsBoardPage() {
       cellClassName: 'px-3 py-2.5 text-muted-foreground',
       renderCell: (row) => (
         <span data-testid="insights-board-published-at">
-          {formatScheduledAt(row.published_at, displayTimezone).display}
+          {formatViewerScheduledAt(row.published_at, displayTimezone).display}
         </span>
       ),
     },

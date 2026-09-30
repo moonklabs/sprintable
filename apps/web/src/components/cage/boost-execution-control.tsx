@@ -7,9 +7,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt, formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #3806(Phase3·3-2 PR5, 유나 §절 §2 「중지 스위치」) — 실행 중인 홍보의 중지/재개.
 // 자리 = 상세(이 컴포넌트, gates/[id]/page.tsx에서 마운트)·성과 보드 행(조각⑥, 같은
@@ -121,7 +122,7 @@ export function BoostExecutionControl({
   const t = useTranslations('cage');
   const tContent = useTranslations('content');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [initiatedBy, setInitiatedBy] = useState<InitiatedBy | null>(null);
   const [startCommand, setStartCommand] = useState<StartCommand | null>(null);
@@ -394,9 +395,9 @@ export function BoostExecutionControl({
         <p>
           <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
           <span className="text-foreground">
-            {formatScheduledAt(sealedAdsStartsAt, displayTimezone).display}
+            {formatViewerScheduledAt(sealedAdsStartsAt, displayTimezone).display}
             {' ~ '}
-            {formatScheduledAt(sealedAdsEndsAt, displayTimezone).display}
+            {formatViewerScheduledAt(sealedAdsEndsAt, displayTimezone).display}
           </span>
         </p>
       ) : null}
@@ -615,7 +616,7 @@ export function BoostExecutionControl({
         </Button>
         {beforeStart ? (
           <p className="text-xs text-muted-foreground" data-testid="boost-start-before-schedule">
-            {t('boostExecutionStartBeforeSchedule', { date: formatScheduledAt(sealedAdsStartsAt, displayTimezone).display })}
+            {t('boostExecutionStartBeforeSchedule', { date: formatViewerScheduledAt(sealedAdsStartsAt, displayTimezone).display })}
           </p>
         ) : null}
 
@@ -662,7 +663,7 @@ export function BoostExecutionControl({
       ) : initiatedBy === 'scheduler' ? (
         <p className="text-xs text-muted-foreground" data-testid="boost-execution-initiated-by">
           {t('boostExecutionInitiatedByScheduler', {
-            date: sealedAdsStartsAt ? formatScheduledAt(sealedAdsStartsAt, displayTimezone).display : '',
+            date: sealedAdsStartsAt ? formatViewerScheduledAt(sealedAdsStartsAt, displayTimezone).display : '',
           })}
         </p>
       ) : null}
@@ -736,7 +737,7 @@ export function BoostExecutionControl({
         <p className="text-xs text-muted-foreground" data-testid="boost-spend-refresh-success">
           {t('boostExecutionSpendRefreshedNotice', {
             amount: formatMinorCurrency(lastRefresh.spendMinor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent),
-            time: formatRelativeTime(lastRefresh.capturedAt, locale, displayTimezone),
+            time: formatViewerRelativeTime(lastRefresh.capturedAt, locale, displayTimezone),
           })}
         </p>
       ) : null}

@@ -30,8 +30,8 @@ import {
 } from '@/lib/agent-run-status';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface AgentRun {
   id: string;
@@ -90,8 +90,8 @@ function formatCost(usd: number | null): string {
 }
 
 // story #3493 — run.created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)으로.
-function toLocaleDateStr(iso: string, locale: string, displayTimezone: string): string {
-  return formatRelativeTime(iso, locale, displayTimezone);
+function toLocaleDateStr(iso: string, locale: string, displayTimezone: string | null): string {
+  return formatViewerRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatBillingMode(t: ReturnType<typeof useTranslations>, billingMode: AgentRun['llm_provider']): string {
@@ -121,7 +121,7 @@ export function AgentRunsList() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const fetchRuns = useCallback(async (cursor?: string) => {
     if (!projectId) throw new Error('projectId not ready');

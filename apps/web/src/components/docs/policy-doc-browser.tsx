@@ -9,8 +9,8 @@ import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface Sprint {
   id: string;
@@ -40,7 +40,7 @@ export function shouldClosePolicyPanelAfterSelection(mode: 'inline' | 'drawer') 
 
 export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [loading, setLoading] = useState(true);
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [docs, setDocs] = useState<PolicyDocument[]>([]);
@@ -244,7 +244,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                 <div>
                   <div className="text-sm font-semibold text-foreground">{selectedDoc?.title || selectedDoc?.epic?.title || t('selectPolicyEpic')}</div>
                   {/* story #3493 — updated_at은 "기록"(정본 formatRelativeTime). */}
-                  {selectedDoc ? <div className="mt-1 text-xs text-muted-foreground">{t('lastUpdated')}: {formatRelativeTime(selectedDoc.updated_at, locale, displayTimezone)}</div> : null}
+                  {selectedDoc ? <div className="mt-1 text-xs text-muted-foreground">{t('lastUpdated')}: {formatViewerRelativeTime(selectedDoc.updated_at, locale, displayTimezone)}</div> : null}
                 </div>
               </div>
             </div>
