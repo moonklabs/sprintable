@@ -557,3 +557,55 @@ async def test_an_invite_accepted_in_another_tab_leaves_one_organization(world):
     assert confirmed.status_code == 409 and confirmed.json()["error"]["code"] in ("has_organization", "pending_invites")
     rows = await _sql(fetch="SELECT org_id FROM org_members WHERE user_id=:u AND deleted_at IS NULL", params={"u": str(who)})
     assert [r[0] for r in rows] == [inviter]
+
+
+# ─── the slug race inside the whole confirmation (PO 04:54Z) ──────────────────
+
+
+@pytest.mark.anyio
+async def test_a_slug_race_retried_inside_the_confirmation_still_makes_everything(world):
+    """The SAVEPOINT roll-back happens in the middle of the confirmation's one transaction (code lock · the new
+    organization · then the project, agents and first work item). Whatever the transaction read before the roll-back must
+    still be usable after it (no expired object lazily loaded — MissingGreenlet). Forced order: another person's uncommitted
+    organization holds the same derived slug; this confirmation waits on it, retries to `-2`, and finishes. Read back on a
+    new connection."""
+    from app.services.org_project_create import create_org_with_owner
+
+    holder_user = await world.person()
+    who = await world.person()
+    name = f"Race Setup {uuid.uuid4().hex[:6]}"
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with _client() as c:
+            code, _ = await _code(c)
+            body = await _preset_body(c, who)
+            async with async_sessionmaker(eng, expire_on_commit=False)() as holder:
+                held = await create_org_with_owner(holder, name=name, slug=None, user_id=str(holder_user), owner_member_id=None)
+                call = asyncio.create_task(_confirm_new(c, code, who, body, org_name=name))
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + 10
+                waited = False
+                while loop.time() < deadline:
+                    if (await _sql(fetch="SELECT count(*) FROM pg_locks WHERE locktype='transactionid' AND NOT granted"))[0][0]:
+                        waited = True
+                        break
+                    await asyncio.sleep(0.02)
+                assert waited, "the confirmation should wait on the held organization's uncommitted row"
+                assert not call.done()
+                await holder.commit()
+            r = await call
+        assert r.status_code == 200, r.text
+        got = r.json()
+        rows = await _sql(fetch=(
+            "SELECT o.slug, (SELECT count(*) FROM projects p WHERE p.id=:p AND p.org_id=o.id),"
+            " (SELECT count(*) FROM members m WHERE m.org_id=o.id AND m.type='agent'),"
+            " (SELECT count(*) FROM desktop_setups d WHERE d.id=:s AND d.org_id=o.id AND d.confirmed_at IS NOT NULL),"
+            " (SELECT count(*) FROM stories st WHERE st.id=:w AND st.project_id=:p)"
+            " FROM organizations o WHERE o.id=:o"
+        ), params={"o": got["org_id"], "p": got["project_id"], "s": got["setup_id"], "w": got["work_item_id"]})
+        slug, projects, agents, setups, stories = rows[0]
+        assert slug == f"{held.slug}-2", (held.slug, slug)
+        assert (projects, setups, stories) == (1, 1, 1)
+        assert agents == len(body["roles"]) and agents >= 1
+    finally:
+        await eng.dispose()
