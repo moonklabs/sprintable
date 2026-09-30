@@ -1183,3 +1183,69 @@ async def test_the_recipe_list_is_for_people_of_the_org(world):
         assert str(RECIPE) in offered and str(people_only) not in offered
         other = (await c.get("/api/v2/desktop/recipes", headers=_person(OUTSIDER, ORG2))).json()["recipes"]
         assert str(RECIPE) not in {x["id"] for x in other}  # another org's own recipe is not offered
+
+
+# ─── Qadir 4834 · PO 05:21Z ⒜ — an either row takes «me»; the recipe list says whose recipe it is ────────────────
+
+
+async def _preset(key: str) -> tuple[str, dict]:
+    rows = await _sql(fetch=f"SELECT id, role_actor_kinds FROM event_definitions WHERE key='{key}' AND org_id IS NULL")
+    assert rows, f"the migrated DB carries {key}"
+    return str(rows[0][0]), rows[0][1]
+
+
+@pytest.mark.anyio
+async def test_an_either_row_chosen_as_me_is_the_person_and_the_other_rows_stay_agents(world):
+    recipe_id, kinds = await _preset("preset.workflow.two_step")
+    assert kinds == {"Maker": "either", "Reviewer": "either"}  # the shape this test relies on
+    before = await _counts()
+    async with _client() as c:
+        code, _verifier = await _code(c, "d4424 either me")
+        body = {"project_id": str(PROJ), "recipe_id": recipe_id,
+                "roles": [{"role": "Maker", "owner": "me"}, {"role": "Reviewer", "runtime": "codex"}]}
+        r = await _confirm(c, code, body=body)
+        assert r.status_code == 200, r.text
+        by_role: dict[str, set] = {}
+        for m in r.json()["members"]:
+            by_role.setdefault(m["role"], set()).add((m["kind"], m["member_id"]))
+        assert by_role["Maker"] == {("human", str(OWNER_TM))}, "the person holds the Maker row"
+        assert len(by_role["Reviewer"]) == 1 and next(iter(by_role["Reviewer"]))[0] == "agent"
+    assert (await _counts())["agents"] == before["agents"] + 1  # one agent — for Reviewer only
+
+
+@pytest.mark.anyio
+async def test_the_setup_row_rules_for_me_and_runtime(world):
+    two_step, _ = await _preset("preset.workflow.two_step")
+    loop, kinds = await _preset("preset.workflow.loop_agency")
+    assert kinds["Agent"] == "agent" and kinds["Human"] == "human"
+    before = await _counts()
+    async with _client() as c:
+        code, _verifier = await _code(c, "d4424 row rules")
+        # every row the person's → no agent to start: no_agent_role, nothing made
+        r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": two_step,
+                                          "roles": [{"role": "Maker", "owner": "me"}, {"role": "Reviewer", "owner": "me"}]})
+        assert (r.status_code, r.json()["error"]["code"]) == (422, "no_agent_role"), r.text
+        # «me» on an agent row · a human row sent as «me» → roles_invalid
+        agent_rows = [{"role": role, "runtime": "claude"} for role, k in kinds.items() if k != "human"]
+        for roles in (
+            [{"role": "Agent", "owner": "me"}] + [x for x in agent_rows if x["role"] != "Agent"],
+            agent_rows + [{"role": "Human", "owner": "me"}],
+        ):
+            r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": loop, "roles": roles})
+            assert (r.status_code, r.json()["error"]["code"]) == (422, "roles_invalid"), roles
+        # a row with both a runtime and «me», or neither → the body is refused as a whole
+        for row in ({"role": "Maker", "runtime": "claude", "owner": "me"}, {"role": "Maker"}):
+            r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": two_step,
+                                              "roles": [row, {"role": "Reviewer", "runtime": "codex"}]})
+            assert r.status_code == 422, (row, r.text)
+    assert await _counts() == before, "nothing was made by a refused confirmation"
+
+
+@pytest.mark.anyio
+async def test_the_recipe_list_says_whose_recipe_it_is(world):
+    async with _client() as c:
+        recipes = (await c.get("/api/v2/desktop/recipes", headers=_person(OWNER))).json()["recipes"]
+    by_id = {x["id"]: x for x in recipes}
+    assert by_id[str(RECIPE)]["org_id"] == str(ORG), "the org's own recipe"
+    presets = [x for x in recipes if x["key"].startswith("preset.")]
+    assert presets and all(x["org_id"] is None for x in presets), "a platform preset has no org"

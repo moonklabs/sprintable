@@ -12,7 +12,7 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rate_limit import open_setup_limiter
@@ -48,6 +48,7 @@ _STATUS = {
     "request_invalid": 422,
     "service_unavailable": 503,
     "human_stage_needs_member": 422,
+    "no_agent_role": 422,
 }
 
 
@@ -88,8 +89,18 @@ async def post_setup_code(request: Request, response: Response, body: SetupCodeR
 
 
 class RoleIn(BaseModel):
+    """One setup row: `{role, runtime}` — a new agent on that runtime — or `{role, owner: "me"}` — the person confirming holds
+    it (an either row only · Qadir 4834 · PO 05:21Z ⒜). Exactly one of the two; the rows themselves are checked by
+    bind_setup_roles."""
     role: str = Field(min_length=1, max_length=200)  # a recipe role (stage_metadata[stage].role), not a stage
-    runtime: Literal["claude", "codex"]
+    runtime: Literal["claude", "codex"] | None = None
+    owner: Literal["me"] | None = None
+
+    @model_validator(mode="after")
+    def _runtime_or_owner(self) -> "RoleIn":
+        if (self.runtime is None) == (self.owner is None):
+            raise ValueError("a role takes a runtime or owner 'me', exactly one")
+        return self
 
 
 # Qadir 4825 (PO 09:45Z) — the setup code travels in bodies only, never in a URL: a path is written to the access log and the
@@ -140,7 +151,7 @@ async def post_confirm(
     try:
         setup_id, members, work_item_id = await confirm_setup(
             db, code=body.code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
-            roles=[RoleChoice(role=r.role, runtime=r.runtime) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
             background_tasks=background_tasks,
         )
     except DesktopSetupError as e:
@@ -219,13 +230,14 @@ class SetupListResponse(BaseModel):
 
 class SetupRecipeRole(BaseModel):
     role: str
-    kind: Literal["human", "agent", "either"]  # human → the person confirming · agent/either → a runtime is needed
+    kind: Literal["human", "agent", "either"]  # human → the person confirming · agent → a runtime · either → a runtime or owner «me»
     stages: list[str]
 
 
 class SetupRecipe(BaseModel):
     id: uuid.UUID
     key: str
+    org_id: uuid.UUID | None  # null = a platform preset (the web names it in the viewer's language by key)
     name: str
     description: str | None
     roles: list[SetupRecipeRole]
