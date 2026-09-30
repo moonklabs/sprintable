@@ -28,6 +28,30 @@
     "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
   },
   {
+    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::d.setDate(d.getDate() + offsetDays);",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::d.setDate(d.getDate() + offsetDays);#2",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::const y = d.getFullYear();",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::const m = String(d.getMonth() + 1).padStart(2, '0');",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::const day = String(d.getDate()).padStart(2, '0');",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::runtime-calendar::const d = new Date(year, month - 1, day + days);",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
     "key": "app/(authenticated)/channel/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
     "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
   },
@@ -46,6 +70,18 @@
   {
     "key": "app/(authenticated)/content/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
     "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
+  },
+  {
+    "key": "app/(authenticated)/inbox/page.tsx::runtime-calendar::const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "app/(authenticated)/inbox/page.tsx::runtime-calendar::const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();#2",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "app/(authenticated)/inbox/page.tsx::runtime-calendar::const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();#3",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
   },
   {
     "key": "app/(authenticated)/inbox/page.tsx::no-arg-display-tz::const displayTimezone = resolveDisplayTimezone().tz;",
@@ -288,7 +324,51 @@
     "reason": "story #4443 — frozen at PR2a; the runtime's zone → useViewerTimeZone (PR2b) · a team date → PR3"
   },
   {
+    "key": "ee/components/billing/billing-tab.tsx::runtime-calendar::const nextBillingDay = new Date().getDate();",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "ee/components/billing/pricing-plan-card.tsx::runtime-calendar::return `${d.getMonth() + 1}/${d.getDate()}`;",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "ee/components/billing/pricing-plan-card.tsx::runtime-calendar::return `${d.getMonth() + 1}/${d.getDate()}`;#2",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
     "key": "lib/date.ts::fixed-zone::timeZone: 'Asia/Seoul',",
     "reason": "story #4443 — frozen at PR2a; one city's zone written in → the org's zone for a team date (PR3)"
+  },
+  {
+    "key": "lib/desktop-devices.ts::runtime-calendar::const year = (d: Date) => (timeZone ? new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(d) : String(d.getFullYear()));",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "services/agent-run-history.ts::runtime-calendar::return new Date(year, month - 1, day, 0, 0, 0, 0).toISOString();",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "services/agent-run-history.ts::runtime-calendar::return new Date(year, month - 1, day, 23, 59, 59, 999).toISOString();",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "services/agent-run-history.ts::runtime-calendar::const year = date.getFullYear();",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "services/agent-run-history.ts::runtime-calendar::const month = String(date.getMonth() + 1).padStart(2, '0');",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "services/agent-run-history.ts::runtime-calendar::const day = String(date.getDate()).padStart(2, '0');",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "services/agent-run-history.ts::runtime-calendar::from.setDate(from.getDate() - DEFAULT_RUN_LOOKBACK_DAYS);",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+  },
+  {
+    "key": "services/agent-run-history.ts::runtime-calendar::from.setDate(from.getDate() - DEFAULT_RUN_LOOKBACK_DAYS);#2",
+    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
   }
 ]

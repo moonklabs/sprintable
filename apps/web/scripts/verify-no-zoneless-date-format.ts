@@ -10,6 +10,9 @@
  *   ③ no-arg-display-tz : `resolveDisplayTimezone()` with no argument — the runtime's zone (PR2b moves these to the viewer's)
  *   ④ fixed-zone     : a place's zone written as a literal (`timeZone: 'Asia/Seoul'`) — a team date is the org's zone, not one
  *                      city's (PR3). `'UTC'` is not counted: it is how a calendar-day key or an offset label is drawn on purpose.
+ *   ⑤ runtime-calendar : calendar arithmetic in the runtime's zone without saying so — local getters/setters (`getDate()` ·
+ *                      `getFullYear()` · `setDate(` …) and `new Date(y, m, d…)` (PO 23:45Z: the same hole outside a formatter —
+ *                      on a server it is UTC). `Date.UTC(…)` names its zone and is not counted.
  * Not counted: `Intl.DateTimeFormat().resolvedOptions()` — that asks the runtime which zone it is in (how the viewer's zone is
  * found), it draws nothing. Dates through `toLocale*String` are already held at 0 by verify:no-date-tolocalestring.
  *
@@ -18,7 +21,9 @@
  * ratchet only goes down). Keys are file + kind + the line's text (not its number: an unrelated line above must not break it);
  * the same text twice in a file gets «#2». `--print` writes the current places as a baseline (to measure at a PR's head).
  *
- * Not seen (declared): a formatter built from a variable holding the options (`new Intl.DateTimeFormat(locale, opts)` counts as
+ * Not seen (declared): a naive local string parsed in the runtime's zone (`new Date('2026-09-05T14:30')` — a datetime-local value, as
+ * in components/content/validate-scheduled-at.ts: a `new Date(x)` can't be told from an ISO parse by text; PR3 names that zone);
+ * a formatter built from a variable holding the options (`new Intl.DateTimeFormat(locale, opts)` counts as
  * zoneless — name the zone at the call); date-fns and the like (none in src today). Test files are not read.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -33,7 +38,7 @@ const TEST_RE = /\.test\.(tsx?|jsx?)$/;
 // the definition itself (its fallback is what ③ counts at the call sites)
 const DEFINITION_FILES = new Set(['components/content/schedule-format.ts']);
 
-export type ZonelessKind = 'zoneless-intl' | 'fixed-locale' | 'no-arg-display-tz' | 'fixed-zone';
+export type ZonelessKind = 'zoneless-intl' | 'fixed-locale' | 'no-arg-display-tz' | 'fixed-zone' | 'runtime-calendar';
 
 export interface ZonelessHit { kind: ZonelessKind; file: string; line: number; snippet: string; key: string }
 
@@ -72,6 +77,13 @@ export function findZonelessDates(content: string, file: string): ZonelessHit[] 
     if (args.trim() === '' && after.startsWith('.resolvedOptions()')) continue; // asks the runtime its zone — draws nothing
     if (/^\s*['"]ko(?:-KR)?['"]/.test(args)) raw.push({ kind: 'fixed-locale', file, line, snippet });
     if (!/\btimeZone\b/.test(args)) raw.push({ kind: 'zoneless-intl', file, line, snippet });
+  }
+  const calendar = /\.(?:getDate|getDay|getHours|getMinutes|getMonth|getFullYear)\(\)|\.set(?:Hours|Date|Month|FullYear)\(|new Date\((?!Date\.UTC)[^()]*,[^()]*,/g;
+  for (let m = calendar.exec(content); m; m = calendar.exec(content)) {
+    const line = lineOf(content, m.index);
+    const text = lines[line - 1]!.trim();
+    if (text.startsWith('//') || text.startsWith('*')) continue;
+    raw.push({ kind: 'runtime-calendar', file, line, snippet: text });
   }
   const literalZone = /\btimeZone\s*:\s*['"]([A-Za-z]+\/[A-Za-z_]+)['"]/g;
   for (let m = literalZone.exec(content); m; m = literalZone.exec(content)) {
@@ -127,6 +139,7 @@ export const REASONS: Record<ZonelessKind, string> = {
   'fixed-locale': 'story #4443 — frozen at PR2a; a hard-coded Korean date locale → the viewer\'s locale',
   'no-arg-display-tz': 'story #4443 — frozen at PR2a; the runtime\'s zone → useViewerTimeZone (PR2b) · a team date → PR3',
   'fixed-zone': 'story #4443 — frozen at PR2a; one city\'s zone written in → the org\'s zone for a team date (PR3)',
+  'runtime-calendar': 'story #4443 — frozen at PR2a; calendar arithmetic in the runtime\'s zone → PR3 names the zone (the org\'s for a team date, the viewer\'s for when it happened)',
 };
 
 // positive and negative controls — the guard checks itself first (a miss or a false catch fails)
@@ -145,6 +158,11 @@ export const SELF_TEST: { code: string; kinds: ZonelessKind[] }[] = [
   { code: "{e.balance.toLocaleString()} TJSB", kinds: [] },
   { code: "return new Intl.DateTimeFormat('sv-SE', {\n    timeZone: 'Asia/Seoul',\n    year: 'numeric',\n  }).format(value);", kinds: ['fixed-zone'] },
   { code: "new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC', year: 'numeric' })", kinds: [] },
+  { code: 'const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();', kinds: ['runtime-calendar', 'runtime-calendar', 'runtime-calendar'] }, // the getters mark it (the constructor's own pattern needs plain arguments)
+  { code: 'const d = new Date(year, month - 1, day + days);', kinds: ['runtime-calendar'] },
+  { code: 'd.setDate(d.getDate() + offsetDays);', kinds: ['runtime-calendar', 'runtime-calendar'] },
+  { code: 'const requestedMonth = new Date(Date.UTC(year, monthIndex - 1, 1));', kinds: [] },
+  { code: 'const t = new Date(iso).getTime();', kinds: [] },
 ];
 
 export function runSelfTest(): string[] {
@@ -182,7 +200,7 @@ function main(): void {
     process.exit(1);
   }
   const by = (k: ZonelessKind) => hits.filter((h) => h.kind === k).length;
-  console.log(`OK: no new zoneless date — baseline ${hits.length} (zoneless-intl ${by('zoneless-intl')} · fixed-locale ${by('fixed-locale')} · no-arg-display-tz ${by('no-arg-display-tz')} · fixed-zone ${by('fixed-zone')})`);
+  console.log(`OK: no new zoneless date — baseline ${hits.length} (zoneless-intl ${by('zoneless-intl')} · fixed-locale ${by('fixed-locale')} · no-arg-display-tz ${by('no-arg-display-tz')} · fixed-zone ${by('fixed-zone')} · runtime-calendar ${by('runtime-calendar')})`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();
