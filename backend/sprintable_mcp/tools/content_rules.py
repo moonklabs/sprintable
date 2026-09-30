@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from mcp.types import TextContent
 
-from ..api_client import client
+from ..api_client import as_mapping, client
 from ..response import err, ok
 from ..schemas import SprintableInput
 
@@ -35,7 +35,7 @@ async def get_content_rules(args: GetContentRulesInput) -> list[TextContent]:
     generation_budget_status의 None 신호 그대로, generation-budget GET과 동일 계약)."""
     try:
         org_id = client.org_id
-        rules_resp = await client.get(f"/api/v2/organizations/{org_id}/content-rules")
+        rules_resp = as_mapping(await client.get(f"/api/v2/organizations/{org_id}/content-rules"))
         budget_resp = await client.get(f"/api/v2/organizations/{org_id}/generation-budget")
         return ok({**rules_resp, "generation_budget_status": budget_resp})
     except Exception as exc:

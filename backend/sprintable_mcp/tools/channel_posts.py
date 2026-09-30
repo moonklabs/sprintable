@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from mcp.types import TextContent
 
-from ..api_client import client
+from ..api_client import as_list, as_mapping, client
 from ..response import err, ok
 from ..schemas import SprintableInput
 
@@ -125,9 +125,9 @@ async def get_publication_insights(args: GetPublicationInsightsInput) -> list[Te
         if not publication_id:
             if not args.draft_id:
                 return err("publication_id 또는 draft_id 중 하나는 필요합니다.")
-            draft = await client.get(
+            draft = as_mapping(await client.get(
                 f"/api/v2/organizations/{client.org_id}/channel-posts/drafts/{args.draft_id}",
-            )
+            ))
             publication_id = draft.get("publication_id")
             if not publication_id:
                 return err(
@@ -135,9 +135,9 @@ async def get_publication_insights(args: GetPublicationInsightsInput) -> list[Te
                     "발행 후 다시 조회해 주세요.",
                 )
 
-        snapshots = await client.get(
+        snapshots = as_list(await client.get(
             f"/api/v2/organizations/{client.org_id}/publications/{publication_id}/insights",
-        )
+        ))
         delta, reason, superseded_count = _label_snapshots_and_compute_delta(snapshots)
         return ok({
             "publication_id": publication_id,
