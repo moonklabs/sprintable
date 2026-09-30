@@ -25,6 +25,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.agent_stream_auth import agent_stream_claims, seed_agent_stream_key
+
 _REAL_DB_URL = __import__("os").getenv("PARITY_TEST_DATABASE_URL") or __import__("os").getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = pytest.mark.destructive_schema
@@ -108,12 +110,13 @@ async def test_undetected_orphan_reclaims_sse_lease_via_lifespan_cap_not_ttl(mon
     try:
         async with Session() as s:
             org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)  # the stream rechecks its key each tick (story #4434)
         agent_id_str = str(agent_id)
         scope = f"perkey:{agent_id_str}"
 
         auth_ctx = MagicMock()
         auth_ctx.user_id = agent_id_str
-        auth_ctx.claims = {"app_metadata": {"api_key_id": "test-key"}}
+        auth_ctx.claims = agent_stream_claims(key_id)
 
         @asynccontextmanager
         async def _factory():

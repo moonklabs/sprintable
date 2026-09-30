@@ -1507,3 +1507,41 @@ async def test_an_open_stream_of_a_disconnected_setup_ends_and_another_setup_s_s
                 await agen.aclose()
             ag._agent_connections.clear()
             shutdown_module.reset_shutdown_event()
+
+
+@pytest.mark.anyio
+async def test_the_stream_s_key_check_fails_closed(world, monkeypatch):
+    """PO 14:15Z — no key id is refused at connect (403); a malformed or unknown key id is never «skip the key check»:
+    the next tick ends the stream with access_revoked(key_revoked). The agent itself is real and active."""
+    import json as _json
+
+    import app.routers.agent_gateway as ag
+    from app.core import shutdown as shutdown_module
+    from app.dependencies.auth import AuthContext
+    from fastapi import HTTPException
+
+    _quiet_stream_side_effects(monkeypatch)
+    monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 0.3)
+    async with _client() as c:
+        code, verifier = await _code(c, "d4434 closed key")
+        await _confirm(c, code)
+        agent = (await _exchange(c, code, verifier)).json()["agents"][0]
+
+    with pytest.raises(HTTPException) as refused:
+        await ag.agent_stream(_StreamRequest(), auth=AuthContext(user_id=agent["member_id"], email=None, claims={"app_metadata": {}}))
+    assert refused.value.status_code == 403
+
+    try:
+        for bad in ("not-a-uuid", str(uuid.uuid4())):
+            auth = AuthContext(user_id=agent["member_id"], email=None, claims={"app_metadata": {"api_key_id": bad, "org_id": str(ORG)}})
+            agen = (await ag.agent_stream(_StreamRequest(), auth=auth)).body_iterator
+            try:
+                frames, ended = await _frames_until_end(agen, 3.0)
+            finally:
+                await agen.aclose()
+            closing = [f for f in frames if f.startswith("event: access_revoked")]
+            assert ended and closing, (bad, frames)
+            assert _json.loads(closing[0].split("data: ", 1)[1]) == {"reason": "key_revoked"}, bad
+    finally:
+        ag._agent_connections.clear()
+        shutdown_module.reset_shutdown_event()

@@ -416,19 +416,19 @@ async def _stream_access_revoked(api_key_id: object, agent_id: uuid.UUID) -> str
     """story #4434 (Qadir 4847 ④ · PO) — is this open stream still allowed? The key and the agent are checked when the stream
     connects; a desktop setup disconnected afterwards (keys revoked · its agents stopped) must also end a stream that is already
     open, or the device keeps receiving task content the dialog says it no longer gets. Checked on the heartbeat tick, in a
-    short session of its own (never the stream's). None = still allowed; otherwise the reason. A key id that is not a UUID
-    (test stand-ins) skips the key half; the agent half always runs."""
+    short session of its own (never the stream's). None = still allowed; otherwise the reason. Fails closed (PO 14:15Z): a
+    missing or malformed key id is «key_revoked» — never «skip the key check» (a future auth path that carries no id must
+    not slip through quietly). Real agent keys always carry a UUID (dependencies/auth.py)."""
     from app.models.api_key import ApiKey
 
     async with async_session_factory() as db:
         try:
             key_uuid = uuid.UUID(str(api_key_id))
         except (TypeError, ValueError):
-            key_uuid = None
-        if key_uuid is not None:
-            key = (await db.execute(select(ApiKey.revoked_at, ApiKey.expires_at).where(ApiKey.id == key_uuid))).first()
-            if key is None or key.revoked_at is not None or (key.expires_at is not None and key.expires_at <= datetime.now(timezone.utc)):
-                return "key_revoked"
+            return "key_revoked"
+        key = (await db.execute(select(ApiKey.revoked_at, ApiKey.expires_at).where(ApiKey.id == key_uuid))).first()
+        if key is None or key.revoked_at is not None or (key.expires_at is not None and key.expires_at <= datetime.now(timezone.utc)):
+            return "key_revoked"
         # the same lookup the connect check makes (TeamMember · active agent · any projection row)
         still = (await db.execute(
             select(TeamMember.id).where(TeamMember.id == agent_id, TeamMember.type == "agent", TeamMember.is_active.is_(True)).limit(1)
