@@ -14,6 +14,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+class _NoSavepoint:
+    """story 4427 (나): create_org_with_owner inserts inside `session.begin_nested()` (a SAVEPOINT, for the slug race).
+    A mocked session gets a no-op async context manager there."""
+
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -58,6 +69,7 @@ async def test_create_organization_ensures_human_member():
     user_id = uuid.uuid4()
 
     session = AsyncMock()
+    session.begin_nested = MagicMock(side_effect=lambda: _NoSavepoint())
     # email_verified user → org-create 허용, 이후 om_id SELECT 캡처
     user = MagicMock()
     user.email_verified = True

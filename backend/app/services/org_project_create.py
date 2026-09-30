@@ -11,6 +11,7 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -28,6 +29,9 @@ from app.services.entity_slug import (
     resolve_unique_workspace_slug,
     slugify_ascii_or_fallback,
 )
+
+
+SLUG_RACE_ATTEMPTS = 3
 
 
 async def lock_first_org_path(session: AsyncSession, user_id: str | uuid.UUID) -> None:
@@ -82,7 +86,9 @@ async def create_org_with_owner(
     else the calling person (`user_id`) as an `org_members` owner plus their human member anchor. Never commits.
     `repo` is the route's injected repository (its dependency stays overridable); other callers leave it out."""
     repo = repo or OrganizationRepository(session)
-    if slug is not None:
+    explicit = slug is not None
+    base = None
+    if explicit:
         # story 139d2405(S-slug-infra): workspace slug=root bare 경로라 앱 라우트 예약어와 충돌
         # 방지(형식도 함께 방어 — URL path segment).
         if not is_valid_slug_format(slug):
@@ -92,8 +98,27 @@ async def create_org_with_owner(
     else:
         # story 4427: no slug sent → derive it (ASCII part of the name, or `workspace-<8 hex>` for a name with none)
         # and make it unique (reserved words and taken slugs get `-2`, `-3`…), the same helpers projects use.
-        slug = await resolve_unique_workspace_slug(session, slugify_ascii_or_fallback(name, fallback_prefix="workspace"))
-    org = await repo.create(name=name, slug=slug, owner_member_id=owner_member_id)
+        base = slugify_ascii_or_fallback(name, fallback_prefix="workspace")
+        slug = await resolve_unique_workspace_slug(session, base)
+    # story 4427 (나) · Qadir 2nd line on 4832 — the uniqueness check and the insert are not one step: two people making an
+    # organization with the same ASCII name at the same moment both see the slug free, and the second insert hits
+    # uq_organizations_slug (a 500 before). The insert runs in a SAVEPOINT so a collision rolls back only itself (the caller's
+    # transaction — the whole desktop confirmation — stays usable). A derived slug then takes the next free one (the other
+    # row is committed by now, so it is seen); a slug the person sent is theirs to change: 409, as when it was already taken.
+    org = None
+    for _attempt in range(SLUG_RACE_ATTEMPTS):
+        try:
+            async with session.begin_nested():
+                org = await repo.create(name=name, slug=slug, owner_member_id=owner_member_id)
+        except IntegrityError as exc:
+            if "uq_organizations_slug" not in str(exc.orig):
+                raise
+            org = None
+        if org is not None:
+            break
+        if explicit:
+            raise HTTPException(status_code=409, detail="Slug already exists")
+        slug = await resolve_unique_workspace_slug(session, base)
     if org is None:
         raise HTTPException(status_code=409, detail="Slug already exists")
 

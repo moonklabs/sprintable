@@ -212,3 +212,97 @@ async def test_routes_unchanged_same_response_and_commit_count(monkeypatch):
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ─── Qadir 2nd line on 4832 · PO 04:50Z — the same ASCII name by two people at the same moment ─────────────────────────
+
+
+async def _someone_waits_on_a_row(Session, ms: int = 10000) -> bool:
+    """Condition wait (not a fixed sleep): a backend is blocked on another transaction (the unique index on an uncommitted row)."""
+    import asyncio
+    from sqlalchemy import text
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + ms / 1000
+    while loop.time() < deadline:
+        async with Session() as s:
+            n = (await s.execute(text("SELECT count(*) FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted"))).scalar()
+        if n:
+            return True
+        await asyncio.sleep(0.02)
+    return False
+
+
+async def _drop_orgs(Session, slugs: list[str], users: list[uuid.UUID]) -> None:
+    from sqlalchemy import text
+
+    async with Session() as s:
+        ids = [r[0] for r in (await s.execute(text("SELECT id FROM organizations WHERE slug = ANY(:s)"), {"s": slugs})).all()]
+        for sql in (
+            "DELETE FROM members WHERE org_id = ANY(:o)",
+            "DELETE FROM org_members WHERE org_id = ANY(:o)",
+            "DELETE FROM participation_role WHERE org_id = ANY(:o)",
+            "DELETE FROM organizations WHERE id = ANY(:o)",
+        ):
+            await s.execute(text(sql), {"o": ids})
+        await s.execute(text("DELETE FROM users WHERE id = ANY(:u)"), {"u": [str(u) for u in users]})
+        await s.commit()
+
+
+@pytest.mark.anyio
+async def test_same_ascii_name_at_the_same_moment_both_made_with_different_slugs():
+    import asyncio
+    from app.services.org_project_create import create_org_with_owner
+
+    engine, Session = await _session_factory()
+    u1, u2 = await _new_user(Session), await _new_user(Session)
+    name = f"Race Team {uuid.uuid4().hex[:6]}"
+    made: list[str] = []
+    try:
+        async with Session() as a:
+            org_a = await create_org_with_owner(a, name=name, slug=None, user_id=str(u1), owner_member_id=None)  # flushed, not committed
+            made.append(org_a.slug)
+
+            async def second() -> str:
+                async with Session() as b:
+                    org_b = await create_org_with_owner(b, name=name, slug=None, user_id=str(u2), owner_member_id=None)
+                    await b.commit()
+                    return org_b.slug
+
+            task = asyncio.create_task(second())
+            assert await _someone_waits_on_a_row(Session), "the second insert should wait on the first one's uncommitted row"
+            await a.commit()
+        slug_b = await task
+        made.append(slug_b)
+        assert slug_b == f"{org_a.slug}-2", (org_a.slug, slug_b)
+    finally:
+        await _drop_orgs(Session, made, [u1, u2])
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_same_sent_slug_at_the_same_moment_is_409_not_500():
+    import asyncio
+    from fastapi import HTTPException
+    from app.services.org_project_create import create_org_with_owner
+
+    engine, Session = await _session_factory()
+    u1, u2 = await _new_user(Session), await _new_user(Session)
+    slug = f"race-{uuid.uuid4().hex[:8]}"
+    try:
+        async with Session() as a:
+            await create_org_with_owner(a, name="A", slug=slug, user_id=str(u1), owner_member_id=None)
+
+            async def second():
+                async with Session() as b:
+                    return await create_org_with_owner(b, name="B", slug=slug, user_id=str(u2), owner_member_id=None)
+
+            task = asyncio.create_task(second())
+            assert await _someone_waits_on_a_row(Session)
+            await a.commit()
+        with pytest.raises(HTTPException) as e:
+            await task
+        assert e.value.status_code == 409
+    finally:
+        await _drop_orgs(Session, [slug], [u1, u2])
+        await engine.dispose()
