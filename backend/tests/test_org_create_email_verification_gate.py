@@ -13,6 +13,17 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 
+class _NoSavepoint:
+    """story 4427 (나): create_org_with_owner inserts inside `session.begin_nested()` (a SAVEPOINT, for the slug race).
+    A mocked session gets a no-op async context manager there."""
+
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
@@ -46,6 +57,7 @@ async def _post_org(*, email_verified: bool, require_flag: bool):
     user.email_verified = email_verified
 
     mock_session = AsyncMock()
+    mock_session.begin_nested = MagicMock(side_effect=lambda: _NoSavepoint())
     mock_session.execute = AsyncMock(
         return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=user))
     )

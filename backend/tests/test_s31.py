@@ -5,6 +5,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
+class _NoSavepoint:
+    """story 4427 (나): create_org_with_owner inserts inside `session.begin_nested()` (a SAVEPOINT, for the slug race).
+    A mocked session gets a no-op async context manager there."""
+
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False
+
 ORG_ID = uuid.uuid4()
 PROJECT_ID = uuid.uuid4()
 MEMBER_ID = uuid.uuid4()
@@ -76,6 +87,7 @@ async def _client():
     ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
 
     mock_session = AsyncMock()
+    mock_session.begin_nested = MagicMock(side_effect=lambda: _NoSavepoint())
 
     async def override_db():
         yield mock_session
@@ -248,6 +260,7 @@ async def _client_api_key():
     }
 
     mock_session = AsyncMock()
+    mock_session.begin_nested = MagicMock(side_effect=lambda: _NoSavepoint())
 
     async def override_db():
         yield mock_session

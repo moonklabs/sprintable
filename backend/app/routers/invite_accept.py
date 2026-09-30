@@ -70,6 +70,8 @@ async def accept_invite(
     session: AsyncSession = Depends(get_db),
 ) -> AcceptInviteResponse:
     """초대 수락 — 인증된 사용자만, email 일치 필수."""
+    # story 4427 (나): the per-person first-organization lock is taken in OrgInviteRepository.accept — the one place every
+    # accept path goes through (this route, sign-in auto-accept, sign-up with an invite token)
     user_result = await session.execute(
         select(User).where(User.id == uuid.UUID(auth.user_id), User.is_active.is_(True))
     )

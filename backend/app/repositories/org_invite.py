@@ -211,6 +211,13 @@ class OrgInviteRepository:
 
     async def accept(self, token: str, user_id: uuid.UUID, user_email: str) -> dict:
         """초대 수락. 성공 시 org_id/role 반환. 실패 시 reason 포함."""
+        # story 4427 (나) · Qadir 4837 1st line — every way an invite is accepted comes through here: the accept route, the
+        # auto-accept at sign-in and sign-up with an invite token. The per-person first-organization lock is taken here, once,
+        # so confirm-new-org's «no organization · no pending invite» check cannot interleave with any of them (it would leave
+        # the person with the invited organization AND a new one). Transaction-scoped: held until the caller commits.
+        from app.services.org_project_create import lock_first_org_path
+
+        await lock_first_org_path(self.session, user_id)
         result = await self.session.execute(
             select(OrgInvite).where(OrgInvite.token == token)
         )

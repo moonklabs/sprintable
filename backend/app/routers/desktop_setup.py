@@ -12,16 +12,17 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.rate_limit import open_setup_limiter
+from app.core.rate_limit import hit_person_limits, open_setup_limiter
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.services.desktop_setup import (
     DesktopSetupError,
     RoleChoice,
     confirm_setup,
+    confirm_setup_new_org,
     create_setup_code,
     exchange_setup,
     exchange_urls,
@@ -50,6 +51,9 @@ _STATUS = {
     "human_stage_needs_member": 422,
     "no_agent_role": 422,
     "recipe_too_large": 422,
+    # story 4427 (나): the new-organization path — the person already has one (use the usual confirm) · has an invite (join)
+    "has_organization": 409,
+    "pending_invites": 409,
 }
 
 
@@ -169,6 +173,80 @@ async def post_confirm(
     )
 
 
+# story 4427 (나) · design doc 9a4cb445 §1 · §8 · §10 — a person with no organization: «시작» makes the organization, its first
+# project and the setup in one transaction. No organization or project field at all (extra=forbid): this path can only make a
+# new organization, never point at an existing one.
+CONFIRM_NEW_ORG_LIMITS = ("3/hour", "10/day")  # PO 02:57Z — the way an organization is made (OSS has no EE owner limit)
+RECIPES_NEW_ORG_LIMITS = ("60/minute",)  # PO 02:57Z — a read
+
+
+def _rate_limited(retry_after: int) -> HTTPException:
+    """The same answer as the shared limiters' handler (429 RATE_LIMITED + Retry-After)."""
+    return HTTPException(
+        status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry_after)},
+    )
+
+
+class ConfirmNewOrgRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = SETUP_CODE_FIELD
+    recipe_id: uuid.UUID
+    roles: list[RoleIn] = Field(max_length=50)
+    workdir_hint: str | None = Field(default=None, max_length=200)
+    org_name: str = Field(min_length=1, max_length=100)
+    project_name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("workdir_hint")
+    @classmethod
+    def _hint_no_control_characters(cls, v: str | None) -> str | None:
+        if v is not None and any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise ValueError("workdir_hint must not contain control characters")
+        return v
+
+    @field_validator("org_name", "project_name")
+    @classmethod
+    def _name_trimmed_no_control_characters(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be blank")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise ValueError("must not contain control characters")
+        return v
+
+
+class ConfirmNewOrgResponse(ConfirmResponse):
+    org_id: uuid.UUID
+    project_id: uuid.UUID
+
+
+@router.post("/setup-codes/confirm-new-org", response_model=ConfirmNewOrgResponse)
+async def post_confirm_new_org(
+    body: ConfirmNewOrgRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    user_id = _human_only(auth)
+    retry = hit_person_limits("desktop-confirm-new-org", str(user_id), *CONFIRM_NEW_ORG_LIMITS)
+    if retry is not None:
+        raise _rate_limited(retry)
+    try:
+        setup_id, members, work_item_id, org_id, project_id = await confirm_setup_new_org(
+            db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, recipe_id=body.recipe_id,
+            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            background_tasks=background_tasks,
+        )
+    except DesktopSetupError as e:
+        # get_db rolls the whole session back: no organization, project or agent is left by a failed setup
+        raise _error(e) from None
+    await db.commit()
+    return ConfirmNewOrgResponse(
+        setup_id=setup_id, work_item_id=work_item_id, org_id=org_id, project_id=project_id,
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members],
+    )
+
+
 class ExchangeRequest(BaseModel):
     code: str = SETUP_CODE_FIELD
     verifier: str = Field(min_length=43, max_length=128)
@@ -261,6 +339,25 @@ async def get_setup_recipes(
     confirmation checks with (the web draws them as they come)."""
     _human_only(auth)
     return SetupRecipesResponse(recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=org_id)])
+
+
+@router.get("/recipes/for-new-org", response_model=SetupRecipesResponse)
+async def get_setup_recipes_for_new_org(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    """story 4427 (나) · PO 02:26Z — the recipes a person with **no organization** can start (the «새 조직» setup page): the
+    platform presets only (`org_id IS NULL`), in the same shape and rows as `/recipes`. A person who has an organization gets
+    409 has_organization (they read `/recipes`)."""
+    from app.services.org_project_create import has_active_org
+
+    user_id = _human_only(auth)
+    retry = hit_person_limits("desktop-recipes-new-org", str(user_id), *RECIPES_NEW_ORG_LIMITS)
+    if retry is not None:
+        raise _rate_limited(retry)
+    if await has_active_org(db, user_id):
+        raise _error(DesktopSetupError("has_organization"))
+    return SetupRecipesResponse(recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=None)])
 
 
 @router.get("/setups", response_model=SetupListResponse)

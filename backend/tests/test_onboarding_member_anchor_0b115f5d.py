@@ -14,6 +14,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+class _NoSavepoint:
+    """story 4427 (나): create_org_with_owner inserts inside `session.begin_nested()` (a SAVEPOINT, for the slug race).
+    A mocked session gets a no-op async context manager there."""
+
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -58,11 +69,13 @@ async def test_create_organization_ensures_human_member():
     user_id = uuid.uuid4()
 
     session = AsyncMock()
+    session.begin_nested = MagicMock(side_effect=lambda: _NoSavepoint())
     # email_verified user → org-create 허용, 이후 om_id SELECT 캡처
     user = MagicMock()
     user.email_verified = True
     session.execute = AsyncMock(
         side_effect=[
+            MagicMock(),            # story 4427 (나): the per-person first-organization lock
             _scalar_result(user),   # email_verified 조회
             MagicMock(),            # org_members INSERT
             _scalar_result(om_id),  # om_id 재조회(캡처)
@@ -83,7 +96,9 @@ async def test_create_organization_ensures_human_member():
     body.slug = "acme"
     body.owner_member_id = None
 
-    with patch.object(orgs, "ensure_human_member", new=AsyncMock()) as ehm, \
+    from app.services import org_project_create as svc  # story 4427 (나) piece 1 — the writes moved here
+
+    with patch.object(svc, "ensure_human_member", new=AsyncMock()) as ehm, \
             patch.object(orgs.OrganizationResponse, "model_validate", return_value=MagicMock()):
         await orgs.create_organization(body=body, auth=auth, repo=repo, session=session)
 
@@ -125,9 +140,11 @@ async def test_create_project_ensures_human_member():
     fake_repo = MagicMock()
     fake_repo.create = AsyncMock(return_value=project_obj)
 
-    with patch.object(projs, "ProjectRepository", return_value=fake_repo), \
-            patch.object(projs, "ensure_human_member", new=AsyncMock()) as ehm, \
-            patch.object(projs, "resolve_unique_project_slug", new=AsyncMock(return_value="board")), \
+    from app.services import org_project_create as svc  # story 4427 (나) piece 1 — the writes moved here
+
+    with patch.object(svc, "ProjectRepository", return_value=fake_repo), \
+            patch.object(svc, "ensure_human_member", new=AsyncMock()) as ehm, \
+            patch.object(svc, "resolve_unique_project_slug", new=AsyncMock(return_value="board")), \
             patch.object(projs.ProjectResponse, "model_validate", return_value=MagicMock()):
         await projs.create_project(body=body, session=session, auth=auth, org_id=org_id)
 
@@ -160,6 +177,7 @@ async def test_invite_accept_ensures_human_member():
     session = AsyncMock()
     session.execute = AsyncMock(
         side_effect=[
+            MagicMock(),             # story 4427 (나): accept() first-organization person lock
             _scalar_result(invite),  # accept(): invite 조회
             MagicMock(),             # story #2477: advisory xact lock
             _tier_result("free"),    # story #2477: check_member_accept_limit._get_org_tier
@@ -195,6 +213,11 @@ def test_three_paths_reference_ensure_human_member():
     from app.routers import projects as projs
     from app.repositories.org_invite import OrgInviteRepository
 
-    assert hasattr(orgs, "ensure_human_member")
-    assert hasattr(projs, "ensure_human_member")
+    # story 4427 (나) piece 1 — the org/project routers reach it through services/org_project_create
+    import inspect
+    from app.services import org_project_create as svc
+    assert "create_org_with_owner(" in inspect.getsource(orgs.create_organization)
+    assert "create_project_with_member(" in inspect.getsource(projs.create_project)
+    assert "ensure_human_member(" in inspect.getsource(svc.create_org_with_owner)
+    assert "ensure_human_member(" in inspect.getsource(svc.create_project_with_member)
     assert hasattr(OrgInviteRepository, "_ensure_member_anchor")

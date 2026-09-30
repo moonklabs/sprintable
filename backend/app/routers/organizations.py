@@ -1,20 +1,15 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.models.user import User
 from app.repositories.organization import OrganizationRepository
-from app.services.agent_anchor_sync import ensure_human_member
+from app.services.org_project_create import check_org_create_allowed, create_org_with_owner, lock_first_org_path
 from app.services.entity_slug import (
     RESERVED_WORKSPACE_SLUGS,
     is_valid_slug_format,
-    resolve_unique_workspace_slug,
-    slugify_ascii_or_fallback,
     is_workspace_slug_taken,
 )
 from app.schemas.organization import (
@@ -56,70 +51,14 @@ async def create_organization(
     repo: OrganizationRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> OrganizationResponse:
-    # 이메일 미인증 사용자는 org 생성 차단 — provider 미설정 셀프호스트는 설정으로 완화(SPR-13).
-    if settings.require_verified_email_for_org_create:
-        user_result = await session.execute(select(User).where(User.id == uuid.UUID(auth.user_id)))
-        user = user_result.scalar_one_or_none()
-        if user and not user.email_verified:
-            # story #2441(PO 승인, 담당경계 예외 — 이 한 줄만) — 평문 영문 detail이라 FE가 code로
-            # 분기 못 해 raw 영문을 그대로 노출했다(#2437 실측: 다음 행동 안내 0인 막다른 UX).
-            # 이 파일에 이미 있는 dict-detail 패턴(SLUG_TAKEN 등)을 그대로 따른다 — 게이트 조건·
-            # 403·요구사항 자체는 무변경.
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "EMAIL_VERIFICATION_REQUIRED",
-                    "message": "Email verification required to create organization",
-                },
-            )
-
-    # EE: Free 플랜 org 생성 제한 (OSS에서는 로드되지 않음)
-    if settings.is_ee_enabled:
-        from ee.plan_limits import check_org_create_limit  # type: ignore[import]
-        await check_org_create_limit(session, auth.user_id)
-
-    if body.slug is not None:
-        # story 139d2405(S-slug-infra): workspace slug=root bare 경로라 앱 라우트 예약어와 충돌
-        # 방지(형식도 함께 방어 — URL path segment).
-        if not is_valid_slug_format(body.slug):
-            raise HTTPException(status_code=400, detail="Invalid slug format")
-        if body.slug in RESERVED_WORKSPACE_SLUGS:
-            raise HTTPException(status_code=400, detail="Slug is reserved")
-        org = await repo.create(name=body.name, slug=body.slug, owner_member_id=body.owner_member_id)
-        if org is None:
-            raise HTTPException(status_code=409, detail="Slug already exists")
-    else:
-        # story 4427: no slug sent → derive it (ASCII part of the name, or `workspace-<8 hex>` for a name with none)
-        # and make it unique (reserved words and taken slugs get `-2`, `-3`…), the same helpers projects use.
-        slug = await resolve_unique_workspace_slug(session, slugify_ascii_or_fallback(body.name, fallback_prefix="workspace"))
-        org = await repo.create(name=body.name, slug=slug, owner_member_id=body.owner_member_id)
-        if org is None:
-            raise HTTPException(status_code=409, detail="Slug already exists")
-
-    # OSS bootstrap: owner_member_id 미전달 시 auth.user_id로 직접 org_member 생성
+    # story 4427 (나) piece 1 — the checks and the writes live in services/org_project_create.py (no commit there) so the
+    # desktop setup can make an organization inside its own transaction; this route commits exactly where it did.
+    await lock_first_org_path(session, auth.user_id)  # story 4427 (나): one per-user lock on every first-organization path
+    await check_org_create_allowed(session, auth.user_id)
+    org = await create_org_with_owner(
+        session, name=body.name, slug=body.slug, user_id=auth.user_id, owner_member_id=body.owner_member_id, repo=repo,
+    )
     if body.owner_member_id is None and auth.user_id:
-        await session.execute(
-            text(
-                "INSERT INTO org_members (id, org_id, user_id, role)"
-                " VALUES (gen_random_uuid(), :org_id, :user_id, 'owner')"
-                " ON CONFLICT (org_id, user_id) DO NOTHING"
-            ),
-            {"org_id": str(org.id), "user_id": auth.user_id},
-        )
-        # 휴먼 members 앵커 보장(#1317 휴먼판): org_member.id를 (신규/기존 무관) 재조회 후
-        # ensure_human_member 호출. ON CONFLICT DO NOTHING이라 RETURNING 불가 → SELECT로 캡처.
-        om_id = (
-            await session.execute(
-                text(
-                    "SELECT id FROM org_members"
-                    " WHERE org_id = :org_id AND user_id = :user_id"
-                    " AND deleted_at IS NULL LIMIT 1"
-                ),
-                {"org_id": str(org.id), "user_id": auth.user_id},
-            )
-        ).scalar_one_or_none()
-        if om_id is not None:
-            await ensure_human_member(session, om_id)
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(org)

@@ -70,3 +70,37 @@ open_setup_limiter = Limiter(
     key_func=_rate_key_client_ip_only,
     enabled=not _TESTING,
 )
+
+
+# story 4427 (나) · PO 02:28Z / 02:57Z — limits keyed by the **signed-in person**, for routes only a person's session reaches
+# (`confirm-new-org` · `recipes/for-new-org`). slowapi's key function runs before authentication, so a user id taken from the
+# token there would be unverified (each request could bring a new id and a fresh count — the 4828 trap). These are counted in
+# the handler instead, with the `auth.user_id` that `get_current_user` verified. In-memory like `open_setup_limiter` (fail-open:
+# a counting problem never blocks a person); each instance counts on its own, the known limit the shared limiter has too.
+from limits import parse as _parse_limit  # noqa: E402
+from limits.storage import MemoryStorage as _MemoryStorage  # noqa: E402
+from limits.strategies import MovingWindowRateLimiter as _MovingWindow  # noqa: E402
+
+_person_limit_storage = _MemoryStorage()
+_person_limiter = _MovingWindow(_person_limit_storage)
+
+
+def hit_person_limits(scope: str, user_id: str, *specs: str) -> int | None:
+    """Counts one request of `user_id` in `scope` against every limit in `specs` ("3/hour", "10/day"). None = allowed; otherwise
+    the seconds until a retry can pass (for `Retry-After`). All windows are checked before any is counted, so a request refused
+    by one window uses up none."""
+    import time
+
+    items = [_parse_limit(s) for s in specs]
+    for item in items:
+        if not _person_limiter.test(item, scope, user_id):
+            reset_at, _remaining = _person_limiter.get_window_stats(item, scope, user_id)
+            return max(1, int(reset_at - time.time()) + 1)
+    for item in items:
+        _person_limiter.hit(item, scope, user_id)
+    return None
+
+
+def reset_person_limits() -> None:
+    """Tests only: forget every count."""
+    _person_limit_storage.reset()
