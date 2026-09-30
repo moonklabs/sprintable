@@ -28,8 +28,10 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   }),
 }));
 const routerPushMock = vi.fn();
+const mockPath = { current: '/dashboard' as string | null };
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: routerPushMock }),
+  usePathname: () => mockPath.current,
 }));
 const createFirstInstructionConversationMock = vi.fn();
 vi.mock('@/lib/onboarding/first-instruction', () => ({
@@ -506,5 +508,36 @@ describe('ActivationChecklistBanner — org 범위 판정 하나로 네 곳(stor
     await flush();
     expect(hintCookie()).toBeUndefined();
     expect(window.localStorage.getItem('sprintable_activation_checklist_complete:org-1')).toBeNull();
+  });
+});
+
+
+describe('ActivationChecklistBanner — not on the desktop setup page (story #4432)', () => {
+  afterEach(() => { mockPath.current = '/dashboard'; });
+
+  it('on /desktop/setup the banner is not drawn — the page is itself the «에이전트 연결하기» step', async () => {
+    mockPath.current = '/desktop/setup';
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).not.toContain('가입을 마무리해 볼까요?');
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('not while loading either (no skeleton box on that page)', async () => {
+    mockPath.current = '/desktop/setup';
+    deferredChecklistResponse();
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('elsewhere unchanged — including a path that only starts with the same letters', async () => {
+    for (const path of ['/dashboard', '/desktop/devices', '/desktop/setup-guide']) {
+      mockPath.current = path;
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      await flush();
+      expect(container.textContent, path).toContain('가입을 마무리해 볼까요?');
+    }
   });
 });

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronUp, Circle, CircleCheck, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -48,7 +48,15 @@ import { withProjectParam } from '@/lib/with-project-param';
  * 같은 조회를 공유한다(두 벌 판별자·중복 네트워크 호출 금지, AC①).
  */
 
+// story #4432 — the desktop setup page is itself the checklist's «에이전트 연결하기» step: the banner there would say the same
+// thing twice (and at 360 it pushed the setup card half a screen down). Not shown on that page; everywhere else unchanged.
+function isHiddenOn(pathname: string | null): boolean {
+  // a comparison, not a link (the flat-link ratchet reads it that way too)
+  return !!pathname && (pathname === '/desktop/setup' || pathname.startsWith('/desktop/setup/'));
+}
+
 export function ActivationChecklistBanner() {
+  const pathname = usePathname();
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('activation');
   const router = useRouter();
@@ -98,6 +106,7 @@ export function ActivationChecklistBanner() {
   ];
 
   if (allComplete) return null;
+  if (isHiddenOn(pathname)) return null; // story #4432 — after every hook (hooks order unchanged)
   // story #4032 — "완주해서 필요 없다"(위 allComplete)와 "아직 모른다"(여기, fetch
   // 미완료)를 더 이상 같은 null로 뭉치지 않는다. 실 배너와 같은 Alert 박스에 스켈레톤을
   // 채워 자리를 미리 잡아 두면, fetch가 끝나 실 콘텐츠로 바뀔 때 박스 높이가 그대로라
