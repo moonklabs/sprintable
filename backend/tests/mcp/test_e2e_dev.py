@@ -1,7 +1,10 @@
 """S4-1: Python MCP 서버 subprocess stdio E2E 실호출 검증.
 
-SPRINTABLE_API_URL + AGENT_API_KEY 환경변수 미설정 시 자동 skip.
 dev 백엔드 기준 read-only 도구 20개 이상 실호출 확인.
+
+story #4439 — runs only when asked: `SPRINTABLE_E2E_DEV=1` **and** SPRINTABLE_API_URL + AGENT_API_KEY (never in CI). Having
+the two variables in a shell is not enough any more — before, anyone running the test suite with them set called dev without
+knowing. When it runs it prints one line with the target host (never the key).
 """
 from __future__ import annotations
 
@@ -16,12 +19,24 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 _API_URL = os.environ.get("SPRINTABLE_API_URL", "")
 _API_KEY = os.environ.get("AGENT_API_KEY", "")
 _CI = os.environ.get("CI", "")
+_OPTED_IN = os.environ.get("SPRINTABLE_E2E_DEV", "") == "1"
 _BACKEND_DIR = str(Path(__file__).parents[2])  # backend/
 
 pytestmark = pytest.mark.skipif(
-    not (_API_URL and _API_KEY) or bool(_CI),
-    reason="SPRINTABLE_API_URL + AGENT_API_KEY 미설정 또는 CI 환경 — dev E2E skip",
+    not _OPTED_IN or not (_API_URL and _API_KEY) or bool(_CI),
+    reason="dev E2E skip — needs SPRINTABLE_E2E_DEV=1 plus SPRINTABLE_API_URL + AGENT_API_KEY, and never runs in CI",
 )
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _say_which_host(request):
+    """story #4439 — one line naming the host this module is about to call (the key is never printed)."""
+    from urllib.parse import urlparse
+
+    reporter = request.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(f"[mcp e2e] calling {urlparse(_API_URL).netloc or '(no host in SPRINTABLE_API_URL)'} (SPRINTABLE_E2E_DEV=1)")
+    yield
 
 _SERVER_PARAMS = StdioServerParameters(
     command=sys.executable,
