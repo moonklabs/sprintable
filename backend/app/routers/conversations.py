@@ -3004,7 +3004,12 @@ async def send_message_core(
             )
         )).scalars().all()))
         if _withheld_n:
-            withheld_delivery = {"withheld_count": _withheld_n, "reason": DELIVERY_WITHHELD_REASON_BLOCKED}
+            # the room's kind lets the sender's tools word it right (a 1:1 «the recipient» vs a group count) — the sender
+            # already knows it, so it tells nothing about who blocked (PO 16:49Z)
+            withheld_delivery = {
+                "withheld_count": _withheld_n, "reason": DELIVERY_WITHHELD_REASON_BLOCKED,
+                "conversation_type": "dm" if conv.type == "dm" else "group",
+            }
             msg.msg_metadata = {**(msg.msg_metadata or {}), DELIVERY_WITHHELD_KEY: withheld_delivery}
 
     # E-EVENT-1CONFIG + story #2620(P3, DeliveryDecision 단일화): webhook 전달 대상을 요청

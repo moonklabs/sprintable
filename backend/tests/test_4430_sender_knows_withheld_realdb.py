@@ -69,8 +69,8 @@ async def _one_to_one(Session):
     return org.id, conv_id, (blocker_id, blocker_user), (sender_id, sender_user)
 
 
-def _withheld(n: int) -> dict:
-    return {"withheld_count": n, "reason": "recipient_blocked_sender"}
+def _withheld(n: int, conversation_type: str = "dm") -> dict:
+    return {"withheld_count": n, "reason": "recipient_blocked_sender", "conversation_type": conversation_type}
 
 
 async def test_a_message_the_recipient_blocked_is_withheld_in_the_send_answer():
@@ -188,7 +188,7 @@ async def test_in_a_group_the_sender_gets_a_count_never_who():
         sent = await _as(app, Session, sender_user, org.id,
                          lambda c: c.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": "team update"}))
         assert sent.status_code == 201, sent.text
-        assert sent.json().get("delivery") == _withheld(2), sent.json()
+        assert sent.json().get("delivery") == _withheld(2, "group"), sent.json()
         for blocker in (b1_id, b2_id):
             assert str(blocker) not in str(sent.json().get("delivery")), sent.json()
 
@@ -196,7 +196,7 @@ async def test_in_a_group_the_sender_gets_a_count_never_who():
         s_row = next(m for m in (await _as(app, Session, sender_user, org.id,
                                            lambda c: c.get(f"/api/v2/conversations/{conv_id}/messages"))).json()["data"]
                      if m["id"] == msg_id)
-        assert s_row.get("delivery_withheld") == _withheld(2), s_row
+        assert s_row.get("delivery_withheld") == _withheld(2, "group"), s_row
         o_row = next(m for m in (await _as(app, Session, other_user, org.id,
                                            lambda c: c.get(f"/api/v2/conversations/{conv_id}/messages"))).json()["data"]
                      if m["id"] == msg_id)
