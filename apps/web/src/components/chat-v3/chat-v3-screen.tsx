@@ -258,20 +258,25 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   // 통째 재조회로 폴백. 「지금 열린 스레드는 안읽음 점 안 켬」(AC3 명시 문구) — legacy처럼
   // mark-read SSE 왕복으로 되돌리는 대신 이 화면 규모에 맞게 즉시 스킵(신규 mark-read
   // 배선은 이 스토리 범위 밖).
-  const handleThreadMessage = useCallback((payload: Record<string, unknown>) => {
-    const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
-    const content = payload.content as string | undefined;
-    const createdAt = payload.created_at as string | undefined;
-    if (!conversationId) return;
-    // story #4008 CHANGES 2 — 이 화면(선택된 스레드)에 온 메시지는 대화 열로도
-    // 밀어준다(그 컴포넌트는 더 이상 자기 useChatSse가 없다 — 위 import 주석).
-    if (conversationId === selectedId) messagesRef.current?.receiveMessage(payload);
+  // the rail's row update, one contract for received messages and this tab's own sends (story #4442 · PO 23:25Z):
+  // `unknown` = not in the rail yet (a new group a DM branched into · a conversation opened by link, outside the first page)
+  // → read the rail again
+  const applyThreadMessage = useCallback((payload: Record<string, unknown>) => {
     setThreads((prev) => {
       const { next, unknown } = threadsAfterMessage(prev, payload, { selectedId, meId: me?.id });
       if (unknown && me) loadConversations(me);
       return next;
     });
   }, [selectedId, loadConversations, me]);
+
+  const handleThreadMessage = useCallback((payload: Record<string, unknown>) => {
+    const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
+    if (!conversationId) return;
+    // story #4008 CHANGES 2 — 이 화면(선택된 스레드)에 온 메시지는 대화 열로도
+    // 밀어준다(그 컴포넌트는 더 이상 자기 useChatSse가 없다 — 위 import 주석).
+    if (conversationId === selectedId) messagesRef.current?.receiveMessage(payload);
+    applyThreadMessage(payload);
+  }, [selectedId, applyThreadMessage]);
 
   const handleThreadRead = useCallback((payload: SseConversationReadPayload) => {
     setThreads((prev) =>
@@ -289,8 +294,9 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   useChatSse({
     currentTeamMemberId: me?.id,
     onConversationMessage: handleThreadMessage,
-    // story #4442 — this tab's own sends update the rail row (the echo is dropped); my message never leaves an unread dot
-    onSentHere: (payload: Record<string, unknown>) => setThreads((prev) => threadsAfterMessage(prev, payload, { selectedId, meId: me?.id }).next),
+    // story #4442 — this tab's own sends update the rail row (the echo is dropped; the chat column already has the message);
+    // my message never leaves an unread dot; a conversation the rail doesn't hold yet reads the rail again
+    onSentHere: applyThreadMessage,
     onConversationRead: handleThreadRead,
     onReconnect: handleThreadReconnect,
   });

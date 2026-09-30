@@ -57,7 +57,7 @@ async function mount() {
 const latestOpts = () => [...useChatSseMock.mock.calls].reverse().map((c) => c[0] as Record<string, unknown>)
   .find((o) => 'onSentHere' in o) as { onSentHere?: (p: Record<string, unknown>) => void } | undefined;
 const rowTexts = () => [...container.querySelectorAll('button, a, li')].map((el) => el.textContent ?? '')
-  .filter((t) => /회의방|기획방/.test(t));
+  .filter((t) => /회의방|기획방|새 그룹방/.test(t));
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -101,5 +101,31 @@ describe('ChatListView — the sending tab\'s own row (#4442)', () => {
     });
     expect(rowTexts()[0]).toContain('기획방');
     expect(rowTexts()[0]).toContain('첨부 파일'); // right after sending
+  });
+  // PO 23:25Z (Qadir's two line-2 findings, one root) — a send to a conversation the list doesn't hold yet (a DM that
+  // branched into a new group · a conversation opened by link, outside the first page) must read the list again, as a
+  // received message does (`applyConversationMessageUpdate`'s «unknown → refetch»). The legacy list already goes through
+  // it; this pins it for the send path.
+  it('a send to a conversation not in the list reads the list again — its row comes up top', async () => {
+    let rows: unknown[] = [
+      conv('c-1', '회의방', { content: '먼저 온 말', created_at: '2026-10-01T00:10:00Z' }, '2026-10-01T00:10:00Z'),
+    ];
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/conversations?')) return { ok: true, json: async () => ({ data: rows, total: rows.length }) };
+      return { ok: false, status: 404, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    const listReads = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/conversations?')).length;
+    const before = listReads();
+    rows = [conv('c-new', '새 그룹방', { content: '갈라져 나온 첫 말', created_at: '2026-10-01T00:40:00Z' }, '2026-10-01T00:40:00Z'), ...rows];
+    await act(async () => {
+      latestOpts()?.onSentHere?.({ id: 'm-11', conversation_id: 'c-new', content: '갈라져 나온 첫 말', created_at: '2026-10-01T00:40:00Z', sender: { id: ME } });
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(listReads()).toBeGreaterThan(before);
+    expect(rowTexts()[0]).toContain('새 그룹방');
+    expect(rowTexts()[0]).toContain('갈라져 나온 첫 말');
   });
 });

@@ -430,6 +430,36 @@ describe('ChatV3Screen — 스레드 레일 실시간(story #4008 AC3)', () => {
     expect(rows[0]?.querySelector('[data-testid="chat-v3-unread-dot"]')).toBeNull();
   });
 
+  // PO 23:25Z (Qadir's two line-2 findings, one root) — `threadsAfterMessage`'s contract: `unknown` = not in the rail yet →
+  // the caller reads the rail again (the SSE path does). A send to such a conversation (a DM that branched into a new group ·
+  // a conversation opened by link, outside the rail's first page) must do the same, or the rail never shows it.
+  it('⭐#4442 — a send to a conversation not in the rail reads the rail again; its row comes up top', async () => {
+    let rail = TWO_THREADS;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => rail };
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    await mount();
+    const railReads = () => fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    const before = railReads();
+    rail = { data: [
+      { id: 'conv-new', participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-3', name: '유나', type: 'agent' }],
+        latest_message: { content: '갈라져 나온 첫 말', created_at: '2026-09-17T00:05:00Z' }, unread_count: 0 },
+      ...TWO_THREADS.data,
+    ] };
+    await act(async () => {
+      sentHereOpts()?.onSentHere?.({ id: 'm-11', conversation_id: 'conv-new', content: '갈라져 나온 첫 말', created_at: '2026-09-17T00:05:00Z', sender: { id: 'me-1' } });
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(railReads()).toBeGreaterThan(before);
+    const rows = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rows[0]?.textContent).toContain('유나');
+    expect(rows[0]?.textContent).toContain('갈라져 나온 첫 말');
+  });
+
   it('⭐#4442 — an attachment-only message reads «첨부 파일» (sent from this tab, and on a thread loaded that way)', async () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
