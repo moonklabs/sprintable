@@ -18,7 +18,7 @@ import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
 import { onboardingRedirect } from '@/lib/auth/onboarding-next';
 import { formatLocaleDate } from '@/lib/i18n';
 import {
-  agentRowCount, confirmBody, newOrgConfirmBody, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -94,15 +94,52 @@ export function limitCounts(error: { needed?: unknown; available?: unknown } | u
  * project as the current one, a fresh token again — the order the one-screen «조직 만들기» uses (Mirko 02:26Z). The setup is
  * already committed, so a failed step here does not stop the progress view (it reads by the setup id).
  */
-async function joinNewOrg(body: { project_id?: string; data?: { project_id?: string } } | null): Promise<void> {
+async function joinNewOrg(body: { project_id?: string; data?: { project_id?: string } } | null): Promise<boolean> {
   const projectId = body?.project_id ?? body?.data?.project_id;
-  await fetchWithAuth('/api/auth/refresh', { method: 'POST' }).catch(() => null);
+  if (!(await renewToken())) return false;
   if (projectId) {
     await fetchWithAuth('/api/current-project', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId }),
     }).catch(() => null);
   }
-  await fetchWithAuth('/api/auth/refresh', { method: 'POST' }).catch(() => null);
+  return renewToken();
+}
+
+/**
+ * A new token that carries the new organization (4429 ①): an answer that is not ok (401 · 5xx) is a failure too — not only a
+ * network error — and it is tried once more. Without it the progress cannot be read with the old token.
+ */
+export async function renewToken(): Promise<boolean> {
+  for (let i = 0; i < 2; i++) {
+    const ok = await fetchWithAuth('/api/auth/refresh', { method: 'POST' }).then((r) => r.ok, () => false);
+    if (ok) return true;
+  }
+  return false;
+}
+
+/** The address a reload goes to for this setup's progress (4429 ①): the setup id only — no code (it is used already). */
+export const PROGRESS_FRAGMENT = (setupId: string) => `#progress=${encodeURIComponent(setupId)}`;
+function reloadToProgress(setupId: string): void {
+  // replaceState, not `location.hash =`: no hashchange for the page's own handler (same as 4429 ②)
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(setupId));
+  window.location.reload();
+}
+
+/**
+ * The setup is saved but its progress cannot be read with the old token (4429 ① · Yuna 09:42Z): in the progress's place, not over
+ * it — «앱이 받아 가기를 기다리는 중» would say what the page does not know. No red: only «seeing» is blocked.
+ */
+export function SetupDoneReload({ setupId }: { setupId: string | null }) {
+  const t = useTranslations('desktop.setup');
+  return (
+    <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-done-reload">
+      <h1 className="text-lg font-semibold">{t('doneReload.title')}</h1>
+      <p className="text-sm text-muted-foreground">{t('doneReload.body')}</p>
+      <div className="flex gap-2">
+        <Button onClick={() => (setupId ? reloadToProgress(setupId) : window.location.reload())}>{t('failure.has-org.action')}</Button>
+      </div>
+    </Card>
+  );
 }
 
 type View =
@@ -110,6 +147,8 @@ type View =
   | { kind: 'choose' }
   | { kind: 'starting' }
   | { kind: 'started' }
+  /** saved on the server, but the new token could not be had: the progress cannot be read here (4429 ①) */
+  | { kind: 'done-reload' }
   /** `retry`: what «다시 시도 / 다시 확인» does — read the list again, or send the confirm again. */
   | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null; retry?: 'load' | 'confirm' }
   /** `message`: a line the new-organization start can say instead of the generic one (e-mail not verified · org/project limit). */
@@ -155,6 +194,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
   const [view, setView] = useState<View>({ kind: 'loading' });
+  const [rateLine, setRateLine] = useState<string | null>(null);
 
   // 로그인이 필요했던 설정이면 한 번(4426 · 사람 손 셈) — 설정 id가 없으면 이 흐름에 묶을 수 없어 보내지 않는다
   useEffect(() => {
@@ -246,6 +286,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   async function start() {
     if (!recipe || (!newOrg && !projectId)) return;
+    setRateLine(null);
     setView({ kind: 'starting' });
     try {
       const res = newOrg
@@ -258,14 +299,29 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           body: JSON.stringify(confirmBody(code, rows, projectId!, recipe.id, workdir)),
         });
       if (res.ok) {
-        if (newOrg) await joinNewOrg(await res.json().catch(() => null));
+        if (newOrg && !(await joinNewOrg(await res.json().catch(() => null)))) { setView({ kind: 'done-reload' }); return; }
         setView({ kind: 'started' });
         return;
       }
       const body = await res.json().catch(() => null);
       const error = body?.error as { code?: string; resource?: string } | undefined;
+      // too many tries in a short time (4429 ③ · Yuna f6cfda19 v5): a line in the error line's place and «시작» left on — trying
+      // again is true, just later; no extra button, no countdown
+      if (res.status === 429 || error?.code === 'RATE_LIMITED') {
+        const secs = Number(res.headers.get('Retry-After'));
+        const time = !Number.isFinite(secs) || secs <= 0 ? t('rateLimitedMoment')
+          : secs < 60 ? t('rateLimitedSeconds', { n: Math.ceil(secs) }) : t('rateLimitedMinutes', { n: Math.ceil(secs / 60) });
+        setRateLine(t('rateLimited', { time }));
+        setView({ kind: 'choose' });
+        return;
+      }
       // (나) an invite arrived between the page's look and «시작» (the server checks again): the invite card, nothing made
-      if (newOrg && error?.code === 'pending_invites') { await readInvites(); return; }
+      if (newOrg && error?.code === 'pending_invites') {
+        await readInvites();
+        // the invite was withdrawn meanwhile and the list came back empty: the choice again, never a «시작 중» that never ends (4429 ④)
+        setView((v) => (v.kind === 'starting' ? { kind: 'choose' } : v));
+        return;
+      }
       // (나) the words the one-screen «조직 만들기» uses for the same refusals (4832 · Yuna: «같은 오류는 같은 말»)
       const limit = typeof (error as { limit?: unknown } | undefined)?.limit === 'number' ? (error as { limit: number }).limit : 1;
       const message = !newOrg ? null
@@ -287,11 +343,21 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
     const onRetry = view.retry === 'load' ? reload : view.failure === 'offline' ? () => void start() : undefined;
-    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={onRetry}
+    // «이미 조직이 있어요» [다시 불러오기]: reload with the setup values put back into the fragment — they are only in memory now
+    // (the page took them off the address), and a bare reload showed «데스크톱 앱에서 열어 주세요» (4429 ②)
+    const onReloadPage = view.failure === 'has-org'
+      // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
+      ? () => {
+        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked }));
+        window.location.reload();
+      }
+      : undefined;
+    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={onRetry} onReloadPage={onReloadPage}
       onChooseRecipe={view.failure === 'agent-limit' || view.failure === 'recipe-too-big' ? () => setView({ kind: 'choose' }) : undefined} />;
   }
   // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
   if (runtimes.length === 0 && needsAnAgent(rows)) return <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
+  if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} />;
   if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} />;
 
   const setOwner = (role: string, key: string) => setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
@@ -396,13 +462,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
             commands · other tools still ask each time */}
         <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
-        {view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
+        {rateLine ? <p className="text-xs text-muted-foreground" data-testid="setup-rate-limited">{rateLine}</p>
+          : view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
       </footer>
     </Card>
   );
 }
 
-export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; onChooseRecipe?: () => void }) {
+export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onReloadPage }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; onChooseRecipe?: () => void; onReloadPage?: () => void }) {
   const t = useTranslations('desktop.setup');
   const flatHref = useFlatHref();
   const key = (part: 'title' | 'body' | 'action') => FAILURE_KEY[`${failure}.${part}`]!;
@@ -427,7 +494,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
         {failure === 'no-agent' ? appButton(t(key('action')))
           : failure === 'expired' ? appButton(t(key('action')))
           : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline' || failure === 'recipes-changed') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
-          : failure === 'not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
+          : failure === 'not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={onReloadPage ?? (() => window.location.reload())}>{t(key('action'))}</Button>
           : failure === 'recipe-too-big' && onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
@@ -492,24 +559,42 @@ export function ToolsNotConnected({ onRetry }: { onRetry: () => void }) {
  * 주소의 `#` 뒤에서 설정 값을 읽고 곧바로 주소에서 지운다(코드는 어떤 URL에도 남기지 않는다 — PO 09:45Z). 값은 이 컴포넌트의
  * 메모리에만 있다. 로그인을 거쳐 `#` 없이 돌아오면 데스크톱 앱이 값을 붙여 다시 연다(PO 09:58Z) — 웹은 맡아 두지 않는다.
  */
+/** `#progress=<setup id>` — the reload from «설정을 마쳤어요» (4429 ①): the setup id only, never a code. */
+export function progressFromFragment(hash: string): string | null {
+  const id = new URLSearchParams(hash.replace(/^#/, '')).get('progress') ?? '';
+  return /^[A-Za-z0-9-]{1,64}$/.test(id) ? id : null;
+}
+
+/** After that reload: renew the token first (a new page load may get it now), then the progress — or the same card again. */
+function ResumeProgress({ setupId }: { setupId: string }) {
+  const t = useTranslations('desktop.setup');
+  const [ok, setOk] = useState<boolean | null>(null);
+  useEffect(() => { let off = false; void renewToken().then((r) => { if (!off) setOk(r); }); return () => { off = true; }; }, []);
+  // named like the page's other loading card, so a screen reader is not silent (Yuna 10:02Z)
+  if (ok === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  return ok ? <SetupProgressView setupId={setupId} recipeName="" /> : <SetupDoneReload setupId={setupId} />;
+}
+
 export function DesktopSetupEntry() {
-  const [entry, setEntry] = useState<{ query: SetupQuery | null } | null>(null);
+  const [entry, setEntry] = useState<{ query: SetupQuery | null; progress?: string | null } | null>(null);
   const searchParams = useSearchParams();
   const strip = () => window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   useEffect(() => {
     const hash = window.location.hash;
     const query = parseSetupFragment(hash);
+    const progress = query ? null : progressFromFragment(hash);
     // off the address at once; the state change follows on the next microtask (no cascading render inside the effect)
     if (hash) strip();
-    void Promise.resolve().then(() => setEntry({ query }));
+    void Promise.resolve().then(() => setEntry({ query, progress }));
     // The values can also arrive AFTER this page is up: after an email login the desktop app reopens the same page with its `#`,
     // and that is a same-document fragment change, not a new load (dev 실측 15:24Z — the page showed «데스크톱 앱에서 열어 주세요»).
     // A newer code replaces an older one (the app restarted the setup).
     const onHash = () => {
       const q = parseSetupFragment(window.location.hash);
-      if (!q) return;
+      const progress = q ? null : progressFromFragment(window.location.hash);
+      if (!q && !progress) return;
       strip();
-      setEntry({ query: q });
+      setEntry({ query: q, progress });
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -520,6 +605,7 @@ export function DesktopSetupEntry() {
     if (hasSetupFragment(window.location.hash)) strip();
   }, [searchParams]);
   if (!entry) return null;
+  if (!entry.query && entry.progress) return <ResumeProgress setupId={entry.progress} />;
   return entry.query
     ? <DesktopSetup key={entry.query.code} code={entry.query.code} runtimes={entry.query.runtimes} blocked={entry.query.blocked} setupId={entry.query.setupId} />
     : <OpenInDesktopApp />;

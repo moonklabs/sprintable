@@ -153,6 +153,15 @@ export function newOrgConfirmBody(code: string, rows: readonly SetupRoleRow[], r
 // 안 남는다 — 페이지는 읽자마자 주소에서 지우고 메모리에만 둔다. 로그인을 거치면 `#`이 따라오지 않는데, 그때는 코드를 쥔
 // 데스크톱 앱이 설정 페이지를 다시 연다(PO 09:58Z) — 웹은 코드를 맡아 두지 않는다.
 
+/** The fragment the desktop app opens this page with, from the values the page holds — for a reload that must not lose them
+ * (story 4429 ②). Only in the `#` (never a query: the address's `?` goes to servers and logs — PO 09:45Z). */
+export function setupFragment(q: SetupQuery): string {
+  const p = new URLSearchParams({ code: q.code, runtimes: q.runtimes.join(',') });
+  if (q.setupId) p.set('setup', q.setupId);
+  if (q.blocked.length) p.set('blocked', q.blocked.join(','));
+  return `#${p.toString().replace(/%2C/g, ',')}`;
+}
+
 /** `#code=…&setup=…&runtimes=…` → SetupQuery (모양이 틀리면 null). */
 export function parseSetupFragment(hash: string): SetupQuery | null {
   return parseSetupQuery(new URLSearchParams(hash.replace(/^#/, '')));

@@ -6632,6 +6632,14 @@
         "roleAdmin": "an admin",
         "roleMember": "a member",
         "action": "Open the link in your invite email to start in that organization."
+      },
+      "rateLimited": "You've tried too often in a short time. Press Start again in {time}.",
+      "rateLimitedSeconds": "{n, plural, one {# second} other {# seconds}}",
+      "rateLimitedMinutes": "{n, plural, one {# minute} other {# minutes}}",
+      "rateLimitedMoment": "a moment",
+      "doneReload": {
+        "title": "Setup is done",
+        "body": "Your agents will start on this computer. Reload this page to see their progress."
       }
     },
     "devices": {
