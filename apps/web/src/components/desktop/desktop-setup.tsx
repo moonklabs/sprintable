@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,13 +9,16 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
-import { pickEunNeunJosa } from '@/lib/korean-particle';
+import { pickEunNeunJosa, pickEuroJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
+import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
+import { onboardingRedirect } from '@/lib/auth/onboarding-next';
+import { formatLocaleDateOnly } from '@/lib/i18n';
 import {
-  agentRowCount, confirmBody, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, newOrgConfirmBody, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
 } from '@/lib/desktop-setup';
 
@@ -31,7 +34,7 @@ const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', c
 // code.claude.com/docs/en/setup and github.com/openai/codex)
 const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
-export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed';
+export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed' | 'has-org';
 
 /** 실패 화면 문구 키 — `Record<string, string>` 리터럴 표(키 가드가 이 모양의 값을 «읽힘»으로 센다). */
 const FAILURE_KEY: Record<string, string> = {
@@ -46,6 +49,7 @@ const FAILURE_KEY: Record<string, string> = {
   // the button is ③'s «레시피 다시 고르기» (Yuna v20: the same action, the same words)
   'recipes-changed.title': 'failure.recipes-changed.title', 'recipes-changed.body': 'failure.recipes-changed.body', 'recipes-changed.action': 'failure.recipes-changed.action',
   'recipe-too-big.title': 'failure.recipe-too-big.title', 'recipe-too-big.body': 'failure.recipe-too-big.body', 'recipe-too-big.action': 'failure.agent-limit.action',
+  'has-org.title': 'failure.has-org.title', 'has-org.body': 'failure.has-org.body', 'has-org.action': 'failure.has-org.action',
 };
 
 /** confirm 오류 코드(4424 닫힌 목록) → 실패 화면. 목록 밖 코드는 null(화면이 지어내지 않는다 — 한 줄 일반 문구). */
@@ -70,6 +74,9 @@ export function failureForCode(code: string | undefined, resource?: string): Set
     case 'roles_invalid':
     case 'no_agent_role':
       return 'recipes-changed';
+    // (나) confirm-new-org: an organization appeared since the page looked (another tab · another device) — reload into it
+    case 'has_organization':
+      return 'has-org';
     default:
       return null;
   }
@@ -82,6 +89,22 @@ export function limitCounts(error: { needed?: unknown; available?: unknown } | u
   return typeof need === 'number' && typeof left === 'number' && need > left && left >= 0 ? { need, left } : null;
 }
 
+/**
+ * (나) after the server made the organization and its project with the setup: a fresh token that carries the organization, the
+ * project as the current one, a fresh token again — the order the one-screen «조직 만들기» uses (Mirko 02:26Z). The setup is
+ * already committed, so a failed step here does not stop the progress view (it reads by the setup id).
+ */
+async function joinNewOrg(body: { project_id?: string; data?: { project_id?: string } } | null): Promise<void> {
+  const projectId = body?.project_id ?? body?.data?.project_id;
+  await fetchWithAuth('/api/auth/refresh', { method: 'POST' }).catch(() => null);
+  if (projectId) {
+    await fetchWithAuth('/api/current-project', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId }),
+    }).catch(() => null);
+  }
+  await fetchWithAuth('/api/auth/refresh', { method: 'POST' }).catch(() => null);
+}
+
 type View =
   | { kind: 'loading' }
   | { kind: 'choose' }
@@ -89,7 +112,19 @@ type View =
   | { kind: 'started' }
   /** `retry`: what «다시 시도 / 다시 확인» does — read the list again, or send the confirm again. */
   | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null; retry?: 'load' | 'confirm' }
-  | { kind: 'error' };
+  /** `message`: a line the new-organization start can say instead of the generic one (e-mail not verified · org/project limit). */
+  | { kind: 'error'; message?: string };
+
+/** A pending invite to this person's own verified e-mail (GET /api/invites/mine · 4833) — no token: accepting stays the mail link. */
+export interface MyInvite { invite_id: string; org_id: string; org_name: string; role: string; expires_at: string }
+
+/**
+ * story #4427 (나) — where a person with no organization stands (design doc 9a4cb445 · PO 02:23Z). `has-org` = the usual page.
+ * `checking` = asking for their invites; `new` = «시작» also makes a new organization and its first project; `invited` = they were
+ * invited somewhere, so the page makes nothing and says where to go. An invite read that fails sends them to 4832's one-screen
+ * «조직 만들기» instead — not knowing is not taken as «no invites».
+ */
+type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] };
 
 function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
 
@@ -100,7 +135,17 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const t = useTranslations('desktop.setup');
   const tPreset = useTranslations('recipePreset');
   const tOrg = useTranslations('organization');
+  const tNewOrg = useTranslations('desktopOnboarding');
+  const tOnboarding = useTranslations('onboarding');
   const { projectId, userName, orgId, orgMemberships } = useDashboardContext();
+  const [orgMode, setOrgMode] = useState<OrgMode>(() => (orgId ? { kind: 'has-org' } : { kind: 'checking' }));
+  const newOrg = orgMode.kind === 'new';
+  const [orgName, setOrgName] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [editingNames, setEditingNames] = useState(false);
+  const orgNameTouched = useRef(false);
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  const myName = userName ?? displayName ?? '';
   // 에이전트를 만드는 건 조직 owner/admin(4424 not_org_admin) — 조직 역할은 orgMemberships(content-rules와 같은 판정)
   const orgRole = orgMemberships?.find((o) => o.orgId === orgId)?.role ?? 'member';
   const isAdmin = orgRole === 'owner' || orgRole === 'admin';
@@ -117,17 +162,58 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     rememberActiveSetup(setupId); // 이 탭에서 문서를 열면 desktop_doc_opened로 셈(DesktopSetupDocWatch)
   }, [setupId]);
 
+  // (나) no organization: their invites decide the mode (0 → a new organization · some → where to go · unreadable → (가))
+  async function readInvites() {
+    try {
+      const res = await fetchWithAuth('/api/invites/mine');
+      if (!res.ok) throw new Error(String(res.status));
+      const body = await res.json();
+      const list: unknown = body?.invites ?? body?.data?.invites;
+      if (!Array.isArray(list)) throw new Error('no list');
+      setOrgMode(list.length ? { kind: 'invited', invites: list as MyInvite[] } : { kind: 'new' });
+    } catch {
+      window.location.assign(onboardingRedirect(window.location.pathname)); // this page → /onboarding?next=… (4832)
+    }
+  }
+  useEffect(() => {
+    if (!orgId) void readInvites();
+  }, [orgId]);
+
+  // (나) the new organization's names: the same defaults as the one-screen «조직 만들기» (4832) — «{표시 이름}의 조직» (40 at most)
+  // or «내 조직», never the e-mail; «첫 프로젝트». The display name comes from /api/auth/me; a name already typed is kept.
+  useEffect(() => {
+    if (!newOrg) return;
+    let off = false;
+    const fallback = tNewOrg('defaultOrgName');
+    setOrgName((n) => n || fallback);
+    setProjectName((n) => n || tNewOrg('defaultProjectName'));
+    fetchWithAuth('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { data?: { display_name?: string | null } } | null) => {
+        if (off) return;
+        const name = json?.data?.display_name ?? null;
+        setDisplayName(name);
+        if (!orgNameTouched.current) setOrgName(defaultOrgName(name, (n) => tNewOrg('defaultOrgNameWithName', { name: n }), fallback));
+      })
+      .catch(() => { /* keep «내 조직» */ });
+    return () => { off = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newOrg]);
+
   // bumped by «다시 확인 / 다시 시도» after the list could not be read or came back empty — reads the list again
   const [loadTick, setLoadTick] = useState(0);
   const reload = () => { setView({ kind: 'loading' }); setLoadTick((n) => n + 1); };
 
   useEffect(() => {
+    if (orgMode.kind !== 'has-org' && orgMode.kind !== 'new') return; // no list until the mode is known (and none when invited)
     let off = false;
     void (async () => {
       try {
         // the recipes this setup can start, each with its rows — worked out by the server with the function confirm checks
         // with (4831): the page draws them as they come (list order = the default is the first — no «recommended» tag)
-        const res = await fetchWithAuth('/api/desktop/recipes');
+        // a person with no organization reads the platform presets through their own path (the usual one needs an
+        // organization — §9 of design doc 9a4cb445); same shape, same drawing
+        const res = await fetchWithAuth(newOrg ? '/api/desktop/recipes/for-new-org' : '/api/desktop/recipes');
         if (!res.ok) throw new Error(String(res.status));
         const body = await res.json();
         const list: SetupRecipe[] = body?.recipes ?? body?.data?.recipes ?? [];
@@ -143,7 +229,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     })();
     return () => { off = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadTick]);
+  }, [loadTick, orgMode.kind]);
 
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
@@ -159,23 +245,45 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const agents = agentRowCount(rows);
 
   async function start() {
-    if (!recipe || !projectId) return;
+    if (!recipe || (!newOrg && !projectId)) return;
     setView({ kind: 'starting' });
     try {
-      const res = await fetchWithAuth('/api/desktop/setup-codes/confirm', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(confirmBody(code, rows, projectId, recipe.id, workdir)),
-      });
-      if (res.ok) { setView({ kind: 'started' }); return; }
+      const res = newOrg
+        ? await fetchWithAuth('/api/desktop/setup-codes/confirm-new-org', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newOrgConfirmBody(code, rows, recipe.id, workdir, orgName, projectName)),
+        })
+        : await fetchWithAuth('/api/desktop/setup-codes/confirm', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(confirmBody(code, rows, projectId!, recipe.id, workdir)),
+        });
+      if (res.ok) {
+        if (newOrg) await joinNewOrg(await res.json().catch(() => null));
+        setView({ kind: 'started' });
+        return;
+      }
       const body = await res.json().catch(() => null);
-      const failure = failureForCode(body?.error?.code, body?.error?.resource);
+      const error = body?.error as { code?: string; resource?: string } | undefined;
+      // (나) an invite arrived between the page's look and «시작» (the server checks again): the invite card, nothing made
+      if (newOrg && error?.code === 'pending_invites') { await readInvites(); return; }
+      // (나) the words the one-screen «조직 만들기» uses for the same refusals (4832 · Yuna: «같은 오류는 같은 말»)
+      const limit = typeof (error as { limit?: unknown } | undefined)?.limit === 'number' ? (error as { limit: number }).limit : 1;
+      const message = !newOrg ? null
+        : error?.code === 'EMAIL_VERIFICATION_REQUIRED' ? tOnboarding('emailVerifyRequiredError')
+        : error?.code === 'PLAN_LIMIT_EXCEEDED' && error.resource === 'org' ? tOnboarding('orgLimitExceededError', { limit })
+        : error?.code === 'PLAN_LIMIT_EXCEEDED' && error.resource === 'project' ? tOnboarding('projectLimitExceededError', { limit })
+        : null;
+      if (message) { setView({ kind: 'error', message }); return; }
+      const failure = failureForCode(error?.code, error?.resource);
       setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null, retry: failure === 'recipes-changed' ? 'load' : undefined } : { kind: 'error' });
     } catch {
       setView({ kind: 'failed', failure: 'offline', retry: 'confirm' });
     }
   }
 
-  if (!isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
+  if (orgMode.kind === 'invited') return <InvitedCard invites={orgMode.invites} />;
+  // a person making a new organization is its owner-to-be: the server checks «no organization» itself (org_members 0 rows)
+  if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
     const onRetry = view.retry === 'load' ? reload : view.failure === 'offline' ? () => void start() : undefined;
@@ -190,7 +298,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // agents found but every either row set to «나»: «시작» off with the reason in the count line's place (Yuna v21 — n = 0 there
   // would be false); the server refuses the same with no_agent_role
   const noAgentRow = needsAnAgent(rows);
-  const canStart = !!recipe && !!projectId && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose';
+  const namesOk = !newOrg || (!!orgName.trim() && !!projectName.trim());
+  const canStart = !!recipe && (newOrg || !!projectId) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose';
 
   return (
     <Card className="break-keep flex flex-col gap-6 p-6">
@@ -199,6 +308,29 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         <h1 className="text-lg font-semibold">{t('title')}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t('lead')}</p>
       </header>
+
+      {newOrg ? (
+        <section aria-label={tNewOrg('orgLabel')} data-testid="setup-new-org">
+          {editingNames ? (
+            <div className="flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-sm font-medium">{tNewOrg('orgLabel')}
+                <Input value={orgName} maxLength={100} onChange={(e) => { orgNameTouched.current = true; setOrgName(e.target.value); }} />
+                {!orgName.trim() ? <span className="text-xs font-normal text-muted-foreground">{tNewOrg('orgRequired')}</span> : null}
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-medium">{tNewOrg('projectLabel')}
+                <Input value={projectName} maxLength={100} onChange={(e) => setProjectName(e.target.value)} />
+                {!projectName.trim() ? <span className="text-xs font-normal text-muted-foreground">{tNewOrg('projectRequired')}</span> : null}
+              </label>
+              <p className="text-xs text-muted-foreground">{t('newOrg.later')}</p>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3 rounded-md bg-muted p-3">
+              <p className="min-w-0 text-sm">{t('newOrg.line', { name: orgName })}</p>
+              <Button variant="ghost" size="sm" onClick={() => setEditingNames(true)}>{t('change')}</Button>
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <section aria-labelledby="setup-recipe">
         <h2 id="setup-recipe" className="text-sm font-medium">{t('recipe')}</h2>
@@ -225,11 +357,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 <span className="block text-xs text-muted-foreground">{r.actor === 'human' ? t('whoHuman') : r.actor === 'either' ? t('whoEither') : t('whoAgent')}</span>
               </span>
               {r.choices.length === 1
-                ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: userName ?? '' }) : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
+                ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: myName }) : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
                 : (
                   <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="max-w-[55%] shrink-0 rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
                     value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
-                    {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: userName ?? '' }) : RUNTIME_LABEL[c.runtime]}</option>)}
+                    {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: myName }) : RUNTIME_LABEL[c.runtime]}</option>)}
                     {claudeBlocked && r.actor !== 'human' ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
                   </select>
                 )}
@@ -264,7 +396,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
             commands · other tools still ask each time */}
         <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
-        {view.kind === 'error' ? <p className="text-xs text-muted-foreground">{t('genericError')}</p> : null}
+        {view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
       </footer>
     </Card>
   );
@@ -295,7 +427,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
         {failure === 'no-agent' ? appButton(t(key('action')))
           : failure === 'expired' ? appButton(t(key('action')))
           : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline' || failure === 'recipes-changed') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
-          : failure === 'not-admin' || failure === 'managed' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
+          : failure === 'not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={() => window.location.reload()}>{t(key('action'))}</Button>
           : failure === 'recipe-too-big' && onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
@@ -303,6 +435,32 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe }: { f
           </>
           : null}
       </div>
+    </Card>
+  );
+}
+
+/**
+ * (나) invited somewhere (Yuna f6cfda19 v2): the page makes nothing and has no button — the invite is taken through the mail link
+ * (no token here). One line per invite: who invited · as what · until when.
+ */
+export function InvitedCard({ invites }: { invites: MyInvite[] }) {
+  const t = useTranslations('desktop.setup');
+  const locale = useLocale();
+  const inviteRow = (i: MyInvite) => {
+    const role = i.role === 'admin' ? t('invited.roleAdmin') : t('invited.roleMember');
+    return t('invited.row', { org: i.org_name, role, josa: pickEuroJosa(role), date: formatLocaleDateOnly(i.expires_at, locale) });
+  };
+  return (
+    <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-invited">
+      <h1 className="text-lg font-semibold">{t('invited.title')}</h1>
+      <ul className="flex flex-col gap-1">
+        {invites.map((i) => (
+          <li key={i.invite_id} className="text-sm">
+            {inviteRow(i)}
+          </li>
+        ))}
+      </ul>
+      <p className="text-sm text-muted-foreground">{t('invited.action')}</p>
     </Card>
   );
 }

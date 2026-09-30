@@ -557,3 +557,170 @@ describe('[SID:4427] en copy (Yuna 08:34Z)', () => {
     expect(t('startNoteWithMe', { n: 1, roles: 'Director', josa: '' })).toBe('Creates 1 agent on this computer and hands over the first task · you take Director');
   });
 });
+
+describe('[SID:4427] (나) no organization yet — «시작» also makes the organization (design doc 9a4cb445 · Yuna f6cfda19 v2)', () => {
+  const INVITE = { invite_id: 'i-1', org_id: 'o-9', org_name: '뭉클랩', role: 'admin', invited_at: '2026-09-29T00:00:00Z', expires_at: '2026-10-06T00:00:00Z' };
+  let invitesNow: () => Response;
+  let meName: string | null;
+  let confirmNow: () => Response;
+  function stubNoOrg() {
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith('/api/invites/mine')) return invitesNow();
+      if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: meName } }), { status: 200 });
+      if (url.endsWith('/api/desktop/recipes/for-new-org')) return recipesNow();
+      if (url.endsWith('/api/desktop/recipes')) return new Response('{"data":null,"error":{"code":"org_id_required"}}', { status: 400 });
+      if (url.endsWith('/api/desktop/setup-codes/confirm-new-org')) return confirmNow();
+      if (url.endsWith('/api/auth/refresh') || url.endsWith('/api/current-project')) return new Response('{}', { status: 200 });
+      if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }));
+  }
+  async function mountNoOrg(node: React.ReactNode) {
+    ctx.mockReturnValue({ projectId: null, currentProjectSlug: null, userName: undefined, orgId: null, orgMemberships: [] });
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>); });
+    for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); });
+  }
+  const urls = () => calls.map((c) => c.url);
+  const button = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
+  const flush = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
+
+  beforeEach(() => {
+    invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
+    meName = '김지우';
+    confirmNow = () => new Response(JSON.stringify({ setup_id: 's-1', members: [], work_item_id: 'w-1', org_id: 'o-new', project_id: 'p-new' }), { status: 200 });
+  });
+
+  it('no invites → one line «새 조직 «김지우의 조직»도 함께 만들어요» above the recipes; the list comes from the new-organization path; no «admin 아님»', async () => {
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const line = container.querySelector('[data-testid=setup-new-org]')!;
+    expect(line.textContent).toContain('새 조직 «김지우의 조직»도 함께 만들어요');
+    expect(line.textContent).not.toContain('이름은 나중에'); // only once the fields are open
+    expect(urls()).toContain('/api/desktop/recipes/for-new-org');
+    expect(urls()).not.toContain('/api/desktop/recipes');
+    expect(text()).not.toContain('조직 관리자만');
+    // the line sits above the recipe choice
+    const recipeSection = container.querySelector('[aria-labelledby=setup-recipe]')!;
+    expect(line.compareDocumentPosition(recipeSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(startButton().disabled).toBe(false);
+  });
+
+  it('«시작» = one confirm-new-org with the names and no organization or project id; then refresh → current project → refresh → progress', async () => {
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flush();
+    const sent = calls.filter((c) => c.url.includes('/api/desktop/setup-codes/'));
+    expect(sent.map((c) => c.url)).toEqual(['/api/desktop/setup-codes/confirm-new-org']);
+    expect(sent[0]!.body).toEqual({
+      code: CODE, recipe_id: 'rec-1', roles: [{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'claude' }],
+      workdir_hint: '~/Sprintable/마케팅 루프', org_name: '김지우의 조직', project_name: '첫 프로젝트',
+    });
+    expect(calls.filter((c) => !c.url.includes('/api/desktop/setups/')).map((c) => c.url)).toEqual([
+      '/api/desktop/setup-codes/confirm-new-org', '/api/auth/refresh', '/api/current-project', '/api/auth/refresh',
+    ]);
+    expect(calls.find((c) => c.url === '/api/current-project')!.body).toEqual({ project_id: 'p-new' });
+    expect(container.textContent).not.toContain('새 조직 «'); // the progress view
+  });
+
+  it('[바꾸기] opens both names (organization · first project) with «이름은 나중에 설정에서 바꿀 수 있어요.»; an empty name blocks «시작» with its reason; typed names are sent', async () => {
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await act(async () => { button('바꾸기')!.click(); });
+    const section = container.querySelector('[data-testid=setup-new-org]')!;
+    const [org, project] = [...section.querySelectorAll('input')] as HTMLInputElement[];
+    expect([org!.value, project!.value]).toEqual(['김지우의 조직', '첫 프로젝트']);
+    expect(section.textContent).toContain('이름은 나중에 설정에서 바꿀 수 있어요.');
+    const type = async (el: HTMLInputElement, v: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, v);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    await type(org!, '  ');
+    expect(startButton().disabled).toBe(true);
+    expect(section.textContent).toContain('조직 이름을 적어 주세요');
+    await type(org!, '우리 팀');
+    await type(project!, '');
+    expect(startButton().disabled).toBe(true);
+    expect(section.textContent).toContain('프로젝트 이름을 적어 주세요');
+    await type(project!, '출시');
+    expect(startButton().disabled).toBe(false);
+    await act(async () => { startButton().click(); });
+    await flush();
+    const body = calls.find((c) => c.url.endsWith('/confirm-new-org'))!.body as { org_name: string; project_name: string };
+    expect([body.org_name, body.project_name]).toEqual(['우리 팀', '출시']);
+  });
+
+  it('default name: over 40 characters or no display name → «내 조직» (never the e-mail)', async () => {
+    meName = '가'.repeat(41);
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=setup-new-org]')!.textContent).toContain('새 조직 «내 조직»도 함께 만들어요');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    meName = null;
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=setup-new-org]')!.textContent).toContain('새 조직 «내 조직»도 함께 만들어요');
+  });
+
+  it('invited → the invite card instead of the form: who · as what · until when; no recipe read, no «시작», no button', async () => {
+    invitesNow = () => new Response(JSON.stringify({ invites: [INVITE, { ...INVITE, invite_id: 'i-2', org_name: '다른 팀', role: 'member' }] }), { status: 200 });
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const card = container.querySelector('[data-testid=setup-invited]')!;
+    expect(card.textContent).toContain('초대받은 조직이 있어요');
+    expect(card.textContent).toMatch(/뭉클랩에서 관리자로 초대했어요 · .*2026.*까지/);
+    expect(card.textContent).toContain('다른 팀에서 멤버로 초대했어요');
+    expect(card.textContent).toContain('초대 메일의 링크로 들어가면 그 조직에서 바로 시작할 수 있어요.');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(urls().some((u) => u.includes('/api/desktop/recipes'))).toBe(false);
+  });
+
+  it('the invite read fails → sent to the one-screen «조직 만들기» ((가) · /onboarding?next=%2Fdesktop%2Fsetup) — not knowing is not «no invites»', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign } as unknown as Location);
+    invitesNow = () => new Response('{}', { status: 503 });
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(assign).toHaveBeenCalledWith('/onboarding?next=%2Fdesktop%2Fsetup');
+    expect(urls().some((u) => u.includes('/api/desktop/recipes'))).toBe(false);
+    expect(container.querySelector('[data-testid=setup-new-org]')).toBeNull();
+  });
+
+  it('refusals: an invite arrived meanwhile (409 pending_invites) → the invite card · an organization appeared (409 has_organization) → «이미 조직이 있어요» [다시 불러오기] · e-mail not verified · organization limit → the one-screen words', async () => {
+    // [confirm's answer, what the invite read says afterwards, what the page then says]
+    const cases: [Response, unknown[], (t: string) => void][] = [
+      [new Response(JSON.stringify({ data: null, error: { code: 'pending_invites' } }), { status: 409 }), [INVITE], (t) => expect(t).toContain('초대받은 조직이 있어요')],
+      [new Response(JSON.stringify({ data: null, error: { code: 'has_organization' } }), { status: 409 }), [], (t) => { expect(t).toContain('이미 조직이 있어요'); expect(button('다시 불러오기')).toBeTruthy(); }],
+      [new Response(JSON.stringify({ data: null, error: { code: 'EMAIL_VERIFICATION_REQUIRED' } }), { status: 403 }), [], (t) => expect(t).toContain('이메일 인증이 필요해요')],
+      [new Response(JSON.stringify({ data: null, error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'org', limit: 1 } }), { status: 402 }), [], (t) => expect(t).toContain('조직을 1개까지')],
+      [new Response(JSON.stringify({ data: null, error: { code: 'code_expired' } }), { status: 410 }), [], (t) => expect(t).toContain('설정 시간이 지났어요')],
+    ];
+    for (const [answer, invitesAfter, check] of cases) {
+      invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
+      confirmNow = () => answer;
+      stubNoOrg();
+      await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      invitesNow = () => new Response(JSON.stringify({ invites: invitesAfter }), { status: 200 });
+      await act(async () => { startButton().click(); });
+      await flush();
+      check(text());
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
+  it('with an organization the page never asks for invites and reads the usual list', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(calls.map((c) => c.url)).not.toContain('/api/invites/mine');
+    expect(calls.map((c) => c.url)).toContain('/api/desktop/recipes');
+    expect(container.querySelector('[data-testid=setup-new-org]')).toBeNull();
+  });
+});
