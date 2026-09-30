@@ -8,13 +8,39 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.user import User
 from app.repositories.org_invite import OrgInviteRepository
-from app.schemas.invite_accept import AcceptInviteRequest, AcceptInviteResponse, InvitePreviewResponse
+from app.schemas.invite_accept import (
+    AcceptInviteRequest,
+    AcceptInviteResponse,
+    InvitePreviewResponse,
+    MyInvite,
+    MyInvitesResponse,
+)
 
 router = APIRouter(prefix="/api/v2/invites", tags=["invites", "Organization"])
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> OrgInviteRepository:
     return OrgInviteRepository(session)
+
+
+@router.get("/mine", response_model=MyInvitesResponse)
+async def get_my_invites(
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    repo: OrgInviteRepository = Depends(_get_repo),
+) -> MyInvitesResponse:
+    """story #4427 (PO 01:21Z) — the pending invites to the signed-in person's own email, so a new sign-up joins by invite
+    instead of making a new org. Only a **verified** email is looked up (an unverified one could be anyone's address): no
+    user · unverified · an agent key → an empty list. No tokens in the answer — accepting stays the mail link.
+    Declared before `/{token}` so «mine» is never read as a token."""
+    try:
+        user_id = uuid.UUID(str(auth.user_id))
+    except (TypeError, ValueError):
+        return MyInvitesResponse(invites=[])
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None or not user.email_verified or not user.email:
+        return MyInvitesResponse(invites=[])
+    return MyInvitesResponse(invites=[MyInvite(**i) for i in await repo.pending_for_email(user.email, user.id)])
 
 
 @router.get("/{token}", response_model=InvitePreviewResponse)
