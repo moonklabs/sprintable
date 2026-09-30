@@ -1,13 +1,19 @@
 import { OnboardingForm } from './onboarding-form';
+import { DesktopCreateOrg } from './desktop-create-org';
+import { desktopOnboardingNext } from '@/lib/auth/onboarding-next';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveChatsHref, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
 interface OnboardingPageProps {
-  searchParams: Promise<{ step?: string; orgId?: string }>;
+  searchParams: Promise<{ step?: string; orgId?: string; next?: string }>;
 }
 
 export default async function OnboardingPage({ searchParams }: OnboardingPageProps) {
   const params = await searchParams;
+  // story 4427 — a sign-up that started in the desktop app (the layout carried `next=/desktop/setup`) gets the one screen
+  // «조직 만들기» and goes back to the setup page. Any other `next` is ignored; every other sign-up is unchanged.
+  const desktopNext = desktopOnboardingNext(params.next);
+  if (desktopNext && !params.step) return <DesktopCreateOrg next={desktopNext} />;
   const initialStep = params.step === 'project' ? 'project' : undefined;
   const initialOrgId = params.orgId ?? undefined;
   // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z) — 이 page.tsx는 서버

@@ -3,6 +3,7 @@ import { cookies, headers } from 'next/headers';
 import { ACTIVATION_COLLAPSED_COOKIE, ACTIVATION_HINT_COOKIE, isActivationCollapsed, parseActivationHint } from '@/lib/activation-hint';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { onboardingRedirect } from '@/lib/auth/onboarding-next';
 import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
@@ -78,7 +79,7 @@ async function AuthenticatedLayoutBody({
   // 🔴 org 없는 유저(신규 OAuth 가입자 등 — team_member 미생성 시 /me 404) → 온보딩으로.
   // auth/callback이 is_new_user 무관 /inbox 리다이렉트하는 결함을 layout에서 OAuth+email/pw 공통 커버
   // (org-less가 깨진 페이지 도달 자체 차단). /onboarding은 (authenticated) 밖이라 루프 없음.
-  if (meRes.status === 404) redirect('/onboarding');
+  if (meRes.status === 404) redirect(onboardingRedirect(currentPath));
 
   // 0746aab9: /me가 403(org 전환 후 project 접근/인가 실패) 등 비-2xx면, 조용히 null 컨텍스트로
   // 렌더하지 않고 에러 경계(error.tsx)로 넘긴다. 기존 `me = meRes.ok ? ... : null`이 403/500을
@@ -88,7 +89,7 @@ async function AuthenticatedLayoutBody({
   }
 
   const me = (await meRes.json()) as MemberContext | null;
-  if (!me?.org_id) redirect('/onboarding');
+  if (!me?.org_id) redirect(onboardingRedirect(currentPath));
   const memberships: { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[] =
     membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[]) : [];
   // story #2885 — sentinel(0-프로젝트 org) 오염 가드, 근거는 resolve-project-memberships.ts 참고.

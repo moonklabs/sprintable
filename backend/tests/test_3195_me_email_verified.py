@@ -24,10 +24,11 @@ def anyio_backend():
     return "asyncio"
 
 
-def _mock_db(email_verified: bool | None) -> AsyncMock:
+def _mock_db(email_verified: bool | None, display_name: str | None = None) -> AsyncMock:
+    # story 4427 — get_auth_me reads email_verified and display_name in one query (a row of both, or None).
     session = AsyncMock()
     result = MagicMock()
-    result.scalar_one_or_none.return_value = email_verified
+    result.one_or_none.return_value = (email_verified, display_name)
     session.execute = AsyncMock(return_value=result)
     return session
 
@@ -83,3 +84,23 @@ async def test_email_verified_lookup_failure_degrades_to_none_not_crash():
     session.execute = AsyncMock(side_effect=RuntimeError("db down"))
     resp = await get_auth_me(auth=auth, db=session)
     assert resp.email_verified is None
+
+
+@pytest.mark.anyio
+async def test_4427_human_session_returns_display_name_for_the_desktop_default_org_name():
+    """story 4427 — the desktop sign-up screen defaults the organization name to «{display_name}의 조직»."""
+    auth = AuthContext(user_id=str(uuid.uuid4()), email="jiwoo@example.com", claims={"app_metadata": {}})
+    resp = await get_auth_me(auth=auth, db=_mock_db(True, "김지우"))
+    assert resp.display_name == "김지우"
+    assert resp.email_verified is True
+
+
+@pytest.mark.anyio
+async def test_4427_display_name_none_when_unset_and_no_user_row():
+    auth = AuthContext(user_id=str(uuid.uuid4()), email="x@example.com", claims={"app_metadata": {}})
+    assert (await get_auth_me(auth=auth, db=_mock_db(False, None))).display_name is None
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=MagicMock(one_or_none=MagicMock(return_value=None)))
+    resp = await get_auth_me(auth=auth, db=session)
+    assert resp.display_name is None and resp.email_verified is None
+

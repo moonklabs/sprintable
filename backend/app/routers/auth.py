@@ -2316,6 +2316,9 @@ class AuthMeResponse(BaseModel):
     # 이 신호가 필요했다. api_key 컨텍스트(에이전트)는 User 행이 없어 None(무의미 — 온보딩 게이트
     # 자체가 인간 전용이라 agent 소비처는 이 필드를 참조하지 않는다).
     email_verified: bool | None = None
+    # story 4427 — the desktop sign-up screen defaults the organization name to «{display_name}의 조직» (never the
+    # e-mail's local part). Human sessions only; None when unset or for an API-key context.
+    display_name: str | None = None
     # story #4178(산티아고 prod 에스컬레이션 1d522e6d) — 사람(JWT) 세션의 `member_id`는
     # `auth.user_id`(=users.id) 그대로라 `/api/v2/events/stream`의 `resolve_member_identity`
     # (TeamMember.id/OrgMember.id만 허용)로 검증하면 404가 난다. `member_id` 자체의 의미는
@@ -2376,6 +2379,7 @@ async def get_auth_me(
     ambiguous = False
     accessible_ids: list[str] = []
     email_verified: bool | None = None
+    display_name: str | None = None
     org_member_id: str | None = None
     org_id_raw = auth.org_id or meta.get("org_id")
     if meta.get("api_key_id"):
@@ -2394,9 +2398,11 @@ async def get_auth_me(
         # story #3195 — human JWT 세션(auth.user_id == User.id)에 한해서만 조회. api_key
         # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
         try:
-            email_verified = (
-                await db.execute(select(User.email_verified).where(User.id == uuid.UUID(auth.user_id)))
-            ).scalar_one_or_none()
+            user_row = (
+                await db.execute(select(User.email_verified, User.display_name).where(User.id == uuid.UUID(auth.user_id)))
+            ).one_or_none()
+            if user_row is not None:
+                email_verified, display_name = user_row
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
         # story #4178 — org 미해소(org 없음·OrgMember 행 없음)는 예외가 아니라 None.
@@ -2420,6 +2426,7 @@ async def get_auth_me(
         is_project_ambiguous=ambiguous,
         accessible_project_ids=accessible_ids,
         email_verified=email_verified,
+        display_name=display_name,
         org_member_id=org_member_id,
     )
 

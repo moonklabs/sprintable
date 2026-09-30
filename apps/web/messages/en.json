@@ -1653,6 +1653,23 @@
     "verifyExampleLabel": "Try telling your agent:",
     "verifyExamplePrompt": "Show me my story list"
   },
+  "desktopOnboarding": {
+    "eyebrow": "Start on this computer",
+    "title": "Create your organization",
+    "lead": "Before starting your agents, create an organization and its first project. You can rename them later in settings.",
+    "orgLabel": "Organization name",
+    "projectLabel": "First project name",
+    "defaultOrgNameWithName": "{name}'s organization",
+    "defaultOrgName": "My organization",
+    "defaultProjectName": "First project",
+    "orgRequired": "Enter an organization name",
+    "projectRequired": "Enter a project name",
+    "create": "Create",
+    "creating": "Creating…",
+    "returnNote": "You'll go back to the setup page.",
+    "inviteNote": "If you were invited to an organization, use the link in your invite email instead.",
+    "orgCreatedRetryNote": "Your organization is created — pressing again only creates the project."
+  },
   "settings": {
     "title": "Settings",
     "save": "Save",

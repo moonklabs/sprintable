@@ -1653,6 +1653,23 @@
     "verifyExampleLabel": "에이전트에게 이렇게 말해 보세요:",
     "verifyExamplePrompt": "내 스토리 목록 보여줘"
   },
+  "desktopOnboarding": {
+    "eyebrow": "이 컴퓨터에서 시작하기",
+    "title": "조직 만들기",
+    "lead": "에이전트를 시작하기 전에 일할 조직과 첫 프로젝트를 만들어요. 이름은 나중에 설정에서 바꿀 수 있어요.",
+    "orgLabel": "조직 이름",
+    "projectLabel": "첫 프로젝트 이름",
+    "defaultOrgNameWithName": "{name}의 조직",
+    "defaultOrgName": "내 조직",
+    "defaultProjectName": "첫 프로젝트",
+    "orgRequired": "조직 이름을 적어 주세요",
+    "projectRequired": "프로젝트 이름을 적어 주세요",
+    "create": "만들기",
+    "creating": "만드는 중…",
+    "returnNote": "만들면 설정 페이지로 돌아가요.",
+    "inviteNote": "초대받은 조직이 있다면 여기서 만들지 말고 초대 메일의 링크로 들어가 주세요.",
+    "orgCreatedRetryNote": "조직은 만들었어요 — 다시 누르면 프로젝트만 만들어요."
+  },
   "settings": {
     "title": "설정",
     "save": "저장",
