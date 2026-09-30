@@ -1363,3 +1363,50 @@ async def test_a_sign_in_counts_as_one_hand_from_its_name_even_without_the_mark(
         await _app_event(c, setup_id, "desktop_setup_signed_in", {})
         await _app_event(c, setup_id, "desktop_setup_signed_in", {"human_hand": True})
         assert (await hands()).json()["human_hands"] == base + 1
+
+
+# ─── story #4434 (PO decision) — disconnecting a setup stops its agents: they no longer count toward the agent limit ─────
+
+
+@pytest.mark.anyio
+async def test_a_disconnected_setup_s_agents_stop_so_the_same_setup_fits_the_limit_again(world, monkeypatch):
+    """Min 11:24Z: after a setup was disconnected (keys revoked), the next setup with as many agents hit the limit — its agents
+    stayed active. PO: disconnecting deactivates that setup's agents (their record stays · not deleted)."""
+    from sqlalchemy import text as sql_text
+
+    from app.core.config import settings
+    from ee import plan_limits
+
+    limit = 3  # the one agent already running (EXISTING) + this setup's two (Writer · Reviewer)
+
+    async def limited(db, org_id):
+        current = (await db.execute(sql_text(
+            "SELECT COUNT(*) FROM members WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"
+        ), {"oid": str(org_id)})).scalar()
+        if current >= limit:
+            raise plan_limits._plan_limit_error("agent", limit, current=current, tier="free")
+
+    monkeypatch.setattr(type(settings), "is_ee_enabled", property(lambda _self: True))
+    monkeypatch.setattr("ee.plan_limits.check_agent_add_limit", limited)
+    async with _client() as c:
+        code, _ = await _code(c, "d4434 first device")
+        first = await _confirm(c, code)
+        assert first.status_code == 200, first.text
+        setup_id = first.json()["setup_id"]
+        agents = sorted({m["member_id"] for m in first.json()["members"] if m["kind"] == "agent"})
+        assert len(agents) == 2
+
+        assert (await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).status_code == 200
+
+        # the setup's agents stopped — kept, not deleted; the agent that was already running is untouched
+        rows = await _sql(fetch=(
+            "SELECT id::text, is_active, deleted_at IS NULL FROM members WHERE id IN ("
+            + ",".join(f"'{a}'" for a in agents) + ") ORDER BY id"
+        ))
+        assert rows == [(a, False, True) for a in agents]
+        assert (await _sql(fetch=f"SELECT is_active FROM members WHERE id='{EXISTING}'")) == [(True,)]
+
+        # and the same setup again fits the limit
+        code2, _ = await _code(c, "d4434 second device")
+        second = await _confirm(c, code2)
+        assert second.status_code == 200, second.text

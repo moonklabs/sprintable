@@ -633,7 +633,12 @@ async def person_names(db: AsyncSession, org_id: uuid.UUID, user_ids: set) -> di
 
 
 async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> Revoked:
-    """«Disconnect this device»: every key this setup handed out, and only those."""
+    """«Disconnect this device»: every key this setup handed out, and only those — and the agents this setup made stop
+    (story #4434 · PO: «disconnect = that device's agents stop»): they become inactive, so they no longer count toward the
+    org's agent limit; their record and work stay (not deleted). Only this setup's own agents, in this org."""
+    from sqlalchemy import func
+
+    from app.models.member import Member
     from app.services.project_auth import is_org_owner_or_admin
 
     setup = (await db.execute(
@@ -648,6 +653,14 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
         .values(revoked_at=now).returning(ApiKey.id)
     )).scalars().all()
+    agent_ids = {
+        uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent" and m.get("member_id")
+    }
+    if agent_ids:
+        await db.execute(
+            update(Member).where(Member.id.in_(agent_ids), Member.org_id == org_id, Member.type == "agent")
+            .values(is_active=False, updated_at=func.now())
+        )
     already = setup.revoked_at is not None
     if not already:
         setup.revoked_at = now
