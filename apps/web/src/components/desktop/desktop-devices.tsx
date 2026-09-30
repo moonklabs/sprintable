@@ -132,7 +132,8 @@ export function DesktopDevices() {
         <DialogContent showCloseButton={false} initialFocus={cancelRef}>
           <DialogHeader>
             <DialogTitle className="truncate" title={asking?.device_name}>{t('confirmTitle', { device: asking?.device_name ?? '' })}</DialogTitle>
-            <DialogDescription>{confirmBody}</DialogDescription>
+            {/* the v3 body is long (story #4434) — keep Korean words whole at 360, as the list rows do (Yuna) */}
+            <DialogDescription className="break-keep">{confirmBody}</DialogDescription>
           </DialogHeader>
           {failed ? <p role="alert" className="text-sm text-destructive" data-testid="desktop-devices-failed">{t('failed')}</p> : null}
           <DialogFooter>

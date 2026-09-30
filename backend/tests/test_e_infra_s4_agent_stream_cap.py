@@ -7,6 +7,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from tests.agent_stream_auth import agent_stream_claims
 from fastapi import HTTPException
 
 from app.routers import agent_gateway as ag
@@ -45,7 +47,7 @@ def _patch_db_and_auth(monkeypatch, agent_id):
     monkeypatch.setattr(ag, "async_session_factory", lambda: _Ctx())
     req = MagicMock(); req.headers = {}
     auth = AuthContext(user_id=str(agent_id), email=None,
-                       claims={"app_metadata": {"api_key_id": "k"}}, org_id=None)
+                       claims=agent_stream_claims(uuid.uuid4()), org_id=None)
     return req, auth, str(agent_id)
 
 

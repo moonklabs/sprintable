@@ -6664,7 +6664,7 @@
       "disconnect": "연결 끊기",
       "disconnectAria": "{device} 연결 끊기",
       "confirmTitle": "{device} 연결을 끊을까요?",
-      "confirmBody": "끊으면 이 기기의 {agents}{josa} 더는 Sprintable 일감을 받지 못해요. 에이전트는 조직에 그대로 남고, 이 기기를 다시 쓰려면 그 기기에서 설정을 새로 해야 해요.",
+      "confirmBody": "끊으면 이 기기의 {agents}{josa} 멈춰요 — 더는 Sprintable 일감을 받지 않고, 조직의 에이전트 수에서도 빠져요. 에이전트의 기록과 한 일은 조직에 그대로 남아요. 이 기기를 다시 쓰려면 그 기기에서 설정을 새로 해 주세요.",
       "cancel": "취소",
       "disconnecting": "끊는 중…",
       "failed": "연결을 끊지 못했어요 — 다시 시도해 주세요",

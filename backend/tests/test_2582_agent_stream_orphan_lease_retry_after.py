@@ -17,6 +17,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.agent_stream_auth import agent_stream_claims
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -60,7 +62,7 @@ def _patch_route(monkeypatch, agent_id, org_plan="free"):
     monkeypatch.setattr(ag, "_agent_sse_connection_count", 0)  # global cap 여유
     req = MagicMock(); req.headers = {}
     auth = AuthContext(user_id=str(agent_id), email=None,
-                       claims={"app_metadata": {"api_key_id": "k"}}, org_id=None)
+                       claims=agent_stream_claims(uuid.uuid4()), org_id=None)
     return req, auth, str(agent_id)
 
 

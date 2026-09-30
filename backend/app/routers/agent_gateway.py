@@ -412,6 +412,51 @@ def _push_to_agent_v2(member_id: str, payload: dict, _from_listener: bool = Fals
 
 # âââ GET /api/v2/agent/stream âââââââââââââââââââââââââââââââââââââââââââââââââ
 
+# PO 14:35Z ② — before a batch goes out, recheck when the last check is at least this old: after a disconnect the tail is about
+# this long and nothing queued in the meantime pours out (at most one DB read per stream per this many seconds)
+_ACCESS_RECHECK_BEFORE_BATCH_SEC: float = 5.0
+
+
+def _access_revoked_frame(reason: str) -> str:
+    return f"event: access_revoked\ndata: {json.dumps({'reason': reason})}\n\n"
+
+
+async def _stream_access_revoked(api_key_id: object, agent_id: uuid.UUID) -> str | None:
+    """story #4434 (Qadir 4847 ④ · PO) — is this open stream still allowed? The key and the agent are checked when the stream
+    connects; a desktop setup disconnected afterwards (keys revoked · its agents stopped) must also end a stream that is already
+    open, or the device keeps receiving task content the dialog says it no longer gets. Checked on the heartbeat tick, in a
+    short session of its own (never the stream's). None = still allowed; otherwise the reason. Fails closed (PO 14:15Z): a
+    missing or malformed key id is «key_revoked» — never «skip the key check» (a future auth path that carries no id must
+    not slip through quietly). Real agent keys always carry a UUID (dependencies/auth.py)."""
+    try:
+        key_uuid = uuid.UUID(str(api_key_id))
+    except (TypeError, ValueError):
+        return "key_revoked"
+    try:
+        return await _stream_access_revoked_db(key_uuid, agent_id)
+    except Exception:
+        # PO 14:35Z ① — the recheck must not add a new way to drop streams: a DB error skips this check (one log line) and the
+        # next one runs as usual. While the DB errors, the stream's own reads (_fetch_events) fail the same way anyway.
+        logger.warning("agent stream access recheck failed agent_id=%s — skipped this time", agent_id, exc_info=True)
+        return None
+
+
+async def _stream_access_revoked_db(key_uuid: uuid.UUID, agent_id: uuid.UUID) -> str | None:
+    from app.models.api_key import ApiKey
+
+    async with async_session_factory() as db:
+        key = (await db.execute(select(ApiKey.revoked_at, ApiKey.expires_at).where(ApiKey.id == key_uuid))).first()
+        if key is None or key.revoked_at is not None or (key.expires_at is not None and key.expires_at <= datetime.now(timezone.utc)):
+            return "key_revoked"
+        # the same lookup the connect check makes (TeamMember · active agent · any projection row)
+        still = (await db.execute(
+            select(TeamMember.id).where(TeamMember.id == agent_id, TeamMember.type == "agent", TeamMember.is_active.is_(True)).limit(1)
+        )).scalar_one_or_none()
+        if still is None:
+            return "agent_inactive"
+    return None
+
+
 @router.get("/stream")
 async def agent_stream(
     request: Request,
@@ -609,12 +654,30 @@ async def agent_stream(
             from app.services.presence_events import emit_presence
             await emit_presence(org_id_str)
 
+            # story #4434 — the connect check above is the first access check; the stream rechecks from here on
+            _last_access_check = time.monotonic()
+            _stream_key_id = auth.claims.get("app_metadata", {}).get("api_key_id")
+
+            async def _recheck_if_older_than(age: float) -> str | None:
+                """The access recheck when the last one is at least `age` old (None = still allowed or not due)."""
+                nonlocal _last_access_check
+                if time.monotonic() - _last_access_check < age:
+                    return None
+                _last_access_check = time.monotonic()
+                return await _stream_access_revoked(_stream_key_id, agent_id)
+
             yield "event: heartbeat\ndata: {}\n\n"
 
             # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
             async with async_session_factory() as db:
                 rows = await _fetch_events(db, agent_id, start_seq, _BACKFILL_LIMIT)
 
+            # PO 14:35Z ② — the backfill is a batch too (it runs once the first heartbeat is read, which can be later)
+            if rows:
+                _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
+                if _revoked:
+                    yield _access_revoked_frame(_revoked)
+                    return
             backfill_floor = start_seq  # ì´ë² ë°±í ë´ ì¤ë³µ ë°©ì§
             for row in rows:
                 data = _row_to_payload(row)
@@ -629,8 +692,16 @@ async def agent_stream(
             # heartbeat가 안 떠도(매번 wait_for가 일찍 반환) last_seen이 stale → 거짓 offline 되므로,
             # 매 iteration 경과를 체크해 _PRESENCE_TICK_INTERVAL마다 throttle write(busy/idle 무관 갱신 보장).
             last_presence_tick = datetime.now(timezone.utc)
+
             # story c4c72eb1(E-ARCH GCE 이전) PR-A: events.py와 동형 shutdown-aware 종료.
             while not await request.is_disconnected():
+                # story #4434 (Qadir 4847 ④) — once per heartbeat period (time-based, so a busy stream is checked too, but not
+                # per event): the key revoked or the agent stopped since connecting → one closing line, then the stream ends
+                # (the finally below does the usual cleanup). A reconnect is refused at connect time as before.
+                _revoked = await _recheck_if_older_than(_SSE_HEARTBEAT)
+                if _revoked:
+                    yield _access_revoked_frame(_revoked)
+                    return
                 # story #2128 ①본체: 좀비가 스스로 늘릴 수 없는 유일한 축 — disconnect 감지
                 # 여부와 완전히 무관하게 발동. "완료로 위장" 안 함 — 특별취급 없이 기존
                 # finally: 하나로 그대로 흘러간다(정상종료·이상종료·수명초과 전부 같은 정리
@@ -707,6 +778,12 @@ async def agent_stream(
                             scan_from = max(start_seq, cur.acked_seq if cur else 0)
                             new_rows = await _fetch_events(db, agent_id, scan_from, _BACKFILL_LIMIT)
 
+                        # PO 14:35Z ② — a batch goes out only if access still holds (rechecked if the last check is 5 s old)
+                        if new_rows:
+                            _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
+                            if _revoked:
+                                yield _access_revoked_frame(_revoked)
+                                return
                         wake_floor = scan_from  # ì´ë² wake ë´ ì¤ë³µ ë°©ì§
                         for row in new_rows:
                             gseq = row.recipient_seq or 0
@@ -727,6 +804,10 @@ async def agent_stream(
                         # instead would be worse (a false cursor position) — per SSE spec, omit
                         # `id:` entirely for non-durable events so the client's Last-Event-ID is
                         # simply left unchanged.
+                        _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
+                        if _revoked:
+                            yield _access_revoked_frame(_revoked)
+                            return
                         event_type = signal.get("event_type", "message")
                         _sse = json.dumps({**signal, "is_backfill": False})
                         yield f"event: {event_type}\ndata: {_sse}\n\n"

@@ -6664,7 +6664,7 @@
       "disconnect": "Disconnect",
       "disconnectAria": "Disconnect {device}",
       "confirmTitle": "Disconnect {device}?",
-      "confirmBody": "Its {agents} will stop receiving Sprintable tasks. The agents stay in your organization; to use this device again, run setup on it again.",
+      "confirmBody": "Its {agents} will stop: they no longer receive Sprintable tasks or count toward your organization's agent limit. Their records and work stay in your organization. To use this device again, run setup on it again.",
       "cancel": "Cancel",
       "disconnecting": "Disconnecting…",
       "failed": "Couldn't disconnect — try again",

@@ -20,6 +20,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.agent_stream_auth import agent_stream_claims, seed_agent_stream_key
+
 _REAL_DB_URL = __import__("os").getenv("PARITY_TEST_DATABASE_URL") or __import__("os").getenv("ALEMBIC_DATABASE_URL")
 
 # story 8236bbc3 컨벤션: 이 파일의 agent 경로 realdb 테스트가 create_all/drop_all을 쓴다 —
@@ -229,10 +231,11 @@ async def test_agent_lifespan_cap_reclaims_slot_and_presence():
     try:
         async with Session() as s:
             org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)  # the stream rechecks its key each tick (story #4434)
 
         auth_ctx = MagicMock()
         auth_ctx.user_id = str(agent_id)
-        auth_ctx.claims = {"app_metadata": {"api_key_id": "test-key"}}
+        auth_ctx.claims = agent_stream_claims(key_id)
 
         @asynccontextmanager
         async def _factory():
