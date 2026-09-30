@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.repositories.organization import OrganizationRepository
-from app.services.org_project_create import check_org_create_allowed, create_org_with_owner
+from app.services.org_project_create import check_org_create_allowed, create_org_with_owner, lock_first_org_path
 from app.services.entity_slug import (
     RESERVED_WORKSPACE_SLUGS,
     is_valid_slug_format,
@@ -53,6 +53,7 @@ async def create_organization(
 ) -> OrganizationResponse:
     # story 4427 (나) piece 1 — the checks and the writes live in services/org_project_create.py (no commit there) so the
     # desktop setup can make an organization inside its own transaction; this route commits exactly where it did.
+    await lock_first_org_path(session, auth.user_id)  # story 4427 (나): one per-user lock on every first-organization path
     await check_org_create_allowed(session, auth.user_id)
     org = await create_org_with_owner(
         session, name=body.name, slug=body.slug, user_id=auth.user_id, owner_member_id=body.owner_member_id, repo=repo,

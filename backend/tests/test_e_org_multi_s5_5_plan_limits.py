@@ -29,7 +29,9 @@ def test_plan_limits_only_in_ee_router():
     from app.routers import organizations
     from app.services import org_project_create
     assert "check_org_create_allowed(" in inspect.getsource(organizations.create_organization)
-    source = inspect.getsource(org_project_create.check_org_create_allowed)
+    # story 4427 (나) piece 2 — the limit is its own function (the new-org path runs it after the e-mail gate and the lock)
+    assert "check_owned_org_limit(" in inspect.getsource(org_project_create.check_org_create_allowed)
+    source = inspect.getsource(org_project_create.check_owned_org_limit)
     assert "is_ee_enabled" in source
     assert "plan_limits" in source or "check_org_create_limit" in source
 

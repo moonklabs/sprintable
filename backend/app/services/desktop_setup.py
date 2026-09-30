@@ -62,7 +62,7 @@ _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 class DesktopSetupError(Exception):
     """A closed code: request_invalid · service_unavailable · code_not_found · code_expired · code_used · code_not_confirmed_yet · verifier_mismatch ·
     already_confirmed · not_org_admin · recipe_not_found · roles_invalid · recipe_too_large · no_agent_role · human_stage_needs_member ·
-    setup_not_found."""
+    setup_not_found · has_organization · pending_invites (story 4427 (나): the new-organization path)."""
 
     def __init__(self, code: str, detail: str | None = None):
         super().__init__(detail or code)
@@ -268,20 +268,92 @@ def recipe_startable(definition) -> bool:
     )
 
 
-async def list_setup_recipes(db: AsyncSession, *, org_id: uuid.UUID) -> list[dict]:
+async def list_setup_recipes(db: AsyncSession, *, org_id: uuid.UUID | None) -> list[dict]:
     """PO 16:03Z — the recipes this org can start from the desktop setup (platform presets ∪ this org's own, the same visibility
-    as the confirmation's lookup), each with its setup rows from `setup_role_rows`."""
+    as the confirmation's lookup), each with its setup rows from `setup_role_rows`.
+    `org_id=None` (story 4427 (나) · PO 02:26Z — a person with no organization yet): the platform presets only, never any
+    organization's own recipe — the condition is `org_id IS NULL` and nothing else."""
     from app.models.event_definition import EventDefinition
 
+    visible = (
+        EventDefinition.org_id.is_(None) if org_id is None
+        else (EventDefinition.org_id == org_id) | (EventDefinition.org_id.is_(None))
+    )
     definitions = (await db.execute(
-        select(EventDefinition).where((EventDefinition.org_id == org_id) | (EventDefinition.org_id.is_(None)))
-        .order_by(EventDefinition.name, EventDefinition.key)
+        select(EventDefinition).where(visible).order_by(EventDefinition.name, EventDefinition.key)
     )).scalars().all()
     return [
         # org_id: null for a platform preset (the web names presets in the viewer's language by key — Qadir 4834)
         {"id": d.id, "key": d.key, "org_id": d.org_id, "name": d.name, "description": d.description, "roles": setup_role_rows(d)}
         for d in definitions if recipe_startable(d)
     ]
+
+
+async def confirm_setup_new_org(
+    db: AsyncSession,
+    *,
+    code: str,
+    user_id: uuid.UUID,
+    org_name: str,
+    project_name: str,
+    recipe_id: uuid.UUID,
+    roles: list[RoleChoice],
+    auth,
+    workdir_hint: str | None = None,
+    background_tasks=None,
+) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID, uuid.UUID]:
+    """story 4427 (나) · design doc 9a4cb445 — «시작» on the setup page for a person with no organization: the organization, its
+    first project and the setup (agents · bindings · first work item) in **one transaction**. Returns (setup_id, members,
+    work_item_id, org_id, project_id). Never commits itself: the confirmation's one commit is the first stage's publish, as in
+    `confirm_setup`, and any error before it rolls everything back — no organization is left behind by a failed setup.
+
+    Order (PO 02:57Z): e-mail gate → per-user lock → the code (row lock) → a replay by the same person returns what the code
+    made → the code's state → no organization yet → no pending invite → owned-org limit → create → `confirm_setup` itself."""
+    from app.repositories.org_invite import OrgInviteRepository
+    from app.models.user import User
+    from app.services.org_project_create import (
+        check_owned_org_limit,
+        check_project_create_allowed,
+        create_org_with_owner,
+        create_project_with_member,
+        has_active_org,
+        lock_first_org_path,
+        require_verified_email_for_org,
+    )
+
+    await require_verified_email_for_org(db, str(user_id))
+    await lock_first_org_path(db, user_id)
+    setup = await _setup_by_code(db, code)
+    # the same person pressing again after a confirmation whose answer was lost: what this code made, as it is (nothing made or
+    # re-applied). The confirmation row holds the organization and project it was confirmed into.
+    if setup.confirmed_at is not None and setup.confirmed_by == user_id and setup.revoked_at is None:
+        return setup.id, list(setup.members or []), setup.work_item_id, setup.org_id, setup.project_id
+    if setup.revoked_at is not None or setup.exchanged_at is not None:
+        raise DesktopSetupError("code_used")
+    if _now() >= setup.expires_at:
+        raise DesktopSetupError("code_expired")
+    if setup.confirmed_at is not None:
+        raise DesktopSetupError("already_confirmed")
+
+    if await has_active_org(db, user_id):
+        raise DesktopSetupError("has_organization")
+    # only a verified e-mail is looked up (as `GET /invites/mine`): an unverified address could be anyone's
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is not None and user.email_verified and user.email:
+        if await OrgInviteRepository(db).pending_for_email(user.email, user.id):
+            raise DesktopSetupError("pending_invites")
+    await check_owned_org_limit(db, str(user_id))
+
+    org = await create_org_with_owner(db, name=org_name, slug=None, user_id=str(user_id), owner_member_id=None)
+    await check_project_create_allowed(db, org.id)
+    project = await create_project_with_member(
+        db, org_id=org.id, name=project_name, description=None, slug=None, user_id=str(user_id),
+    )
+    setup_id, members, work_item_id = await confirm_setup(
+        db, code=code, user_id=user_id, org_id=org.id, project_id=project.id, recipe_id=recipe_id, roles=roles, auth=auth,
+        workdir_hint=workdir_hint, background_tasks=background_tasks,
+    )
+    return setup_id, members, work_item_id, org.id, project.id
 
 
 async def confirm_setup(

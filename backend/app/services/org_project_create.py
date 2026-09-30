@@ -30,8 +30,22 @@ from app.services.entity_slug import (
 )
 
 
+async def lock_first_org_path(session: AsyncSession, user_id: str | uuid.UUID) -> None:
+    """story 4427 (나) · Qadir lens + PO 02:57Z — the three ways a person's organization comes to be (`confirm-new-org`, accepting
+    an invite, `POST /organizations`) take this per-user lock first, so two tabs doing two of them at once cannot leave the
+    person with two organizations: the second waits, then sees the first's membership. Transaction-scoped (released at commit
+    or rollback) · 64-bit key (`hashtextextended`)."""
+    await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:u, 0))"), {"u": str(user_id)})
+
+
 async def check_org_create_allowed(session: AsyncSession, user_id: str) -> None:
     """E-mail verification, then the plan's owned-organization limit (EE) — what `POST /organizations` checks first."""
+    await require_verified_email_for_org(session, user_id)
+    await check_owned_org_limit(session, user_id)
+
+
+async def require_verified_email_for_org(session: AsyncSession, user_id: str) -> None:
+    """403 EMAIL_VERIFICATION_REQUIRED for an unverified person when the setting asks for it."""
     # 이메일 미인증 사용자는 org 생성 차단 — provider 미설정 셀프호스트는 설정으로 완화(SPR-13).
     if settings.require_verified_email_for_org_create:
         user = (await session.execute(select(User).where(User.id == uuid.UUID(user_id)))).scalar_one_or_none()
@@ -44,6 +58,10 @@ async def check_org_create_allowed(session: AsyncSession, user_id: str) -> None:
                     "message": "Email verification required to create organization",
                 },
             )
+
+
+async def check_owned_org_limit(session: AsyncSession, user_id: str) -> None:
+    """The plan's owned-organization limit (EE only)."""
     # EE: Free 플랜 org 생성 제한 (OSS에서는 로드되지 않음)
     if settings.is_ee_enabled:
         from ee.plan_limits import check_org_create_limit  # type: ignore[import]
@@ -158,3 +176,10 @@ async def _org_member_id(session: AsyncSession, org_id: uuid.UUID, user_id: str)
             {"org_id": str(org_id), "user_id": user_id},
         )
     ).scalar_one_or_none()
+
+
+async def has_active_org(session: AsyncSession, user_id: str | uuid.UUID) -> bool:
+    """Whether the person belongs to any organization (a membership they left — `deleted_at` set — does not count: PO 02:57Z)."""
+    return (await session.execute(
+        text("SELECT EXISTS (SELECT 1 FROM org_members WHERE user_id = :u AND deleted_at IS NULL)"), {"u": str(user_id)},
+    )).scalar_one()

@@ -63,6 +63,7 @@ async def test_create_organization_ensures_human_member():
     user.email_verified = True
     session.execute = AsyncMock(
         side_effect=[
+            MagicMock(),            # story 4427 (나): the per-person first-organization lock
             _scalar_result(user),   # email_verified 조회
             MagicMock(),            # org_members INSERT
             _scalar_result(om_id),  # om_id 재조회(캡처)
