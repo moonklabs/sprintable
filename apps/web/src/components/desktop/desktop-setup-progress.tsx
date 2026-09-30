@@ -87,27 +87,28 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
       </header>
       <ol className="flex flex-col gap-3" aria-live="polite">
         {/* a later step done → the earlier one is drawn done (Yuna 12:22Z): ② proves the receiving agent was ready; the pairs line
-            stays for when every agent is really ready, and the others still getting ready get one muted line below */}
+            stays for when every agent is really ready, and the others still getting ready are ①'s own detail (not a list item) */}
         <Step state={progress.readyDrawn} label={progress.readyDrawn === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
-          detail={progress.ready === 'done' ? progress.pairs.map((p) => `${role(p.role)} · ${RUNTIME[p.runtime]}`).join(', ') : null} />
-        {progress.stillPreparing.length > 0 ? (
-          <li className="ml-7 text-xs text-muted-foreground" data-testid="setup-still-preparing">
-            {t('stillPreparing', { roles: progress.stillPreparing.map(role).join(' · '), count: progress.stillPreparing.length })}
-          </li>
-        ) : null}
-        {progress.workdirFallback ? (
-          <li className="ml-7 flex gap-2 text-xs text-muted-foreground" data-testid="setup-workdir-fallback">
-            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('workdirFallback', { recipe: task })}
-          </li>
-        ) : null}
+          detail={progress.ready === 'done' ? progress.pairs.map((p) => `${role(p.role)} · ${RUNTIME[p.runtime]}`).join(', ')
+            : progress.stillPreparing.length > 0 ? t('stillPreparing', { roles: progress.stillPreparing.map(role).join(' · '), count: progress.stillPreparing.length }) : null}
+          detailTestId={progress.ready !== 'done' && progress.stillPreparing.length > 0 ? 'setup-still-preparing' : undefined}>
+          {/* the notes belong to their step's list item (same place on screen: the step's text column is 28px in) — never a list
+              item of their own, so a screen reader counts three steps */}
+          {progress.workdirFallback ? (
+            <span className="mt-1 flex gap-2 text-xs text-muted-foreground" data-testid="setup-workdir-fallback">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('workdirFallback', { recipe: task })}
+            </span>
+          ) : null}
+        </Step>
         <Step state={progress.handed} label={progress.handed === 'done' ? t('stepHandedDone') : t('stepHandedRunning')}
           detail={progress.handed === 'running' && task && progress.firstAgentRole
-            ? t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: role(progress.firstAgentRole) }) : null} />
-        {progress.trustHint && claude ? (
-          <li className="ml-7 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
-            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
-          </li>
-        ) : null}
+            ? t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: role(progress.firstAgentRole) }) : null}>
+          {progress.trustHint && claude ? (
+            <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
+            </span>
+          ) : null}
+        </Step>
         {/* while an agent is stopped, ③ does not spin — nothing is moving (Yuna v26) */}
         <Step state={progress.result} paused={!!progress.stopped} label={progress.result === 'done' ? t('stepResultDone') : t('stepResultRunning')} detail={null} />
       </ol>
@@ -129,7 +130,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   );
 }
 
-function Step({ state, label, detail, paused = false }: { state: StepState; label: string; detail: string | null; paused?: boolean }) {
+function Step({ state, label, detail, paused = false, detailTestId, children }: { state: StepState; label: string; detail: string | null; paused?: boolean; detailTestId?: string; children?: React.ReactNode }) {
   return (
     <li className="flex gap-3" data-state={state} data-paused={paused && state !== 'done' ? 'true' : undefined}>
       {state === 'done'
@@ -139,7 +140,8 @@ function Step({ state, label, detail, paused = false }: { state: StepState; labe
           : <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />}
       <span className="min-w-0">
         <span className="block text-sm font-medium">{label}</span>
-        {detail ? <span className="block text-xs text-muted-foreground">{detail}</span> : null}
+        {detail ? <span className="block text-xs text-muted-foreground" data-testid={detailTestId}>{detail}</span> : null}
+        {children}
       </span>
     </li>
   );

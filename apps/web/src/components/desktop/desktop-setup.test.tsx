@@ -582,10 +582,13 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
     await tick(0);
     expect(first()?.dataset.state).toBe('done');
-    expect(first()?.textContent).toBe('에이전트를 준비했어요'); // the «역할 · 런타임» pairs only once every agent is ready
     const line = container.querySelector('[data-testid=setup-still-preparing]');
     expect(line?.textContent).toBe('작성 에이전트는 아직 준비하고 있어요');
     expect(line?.className).toContain('text-muted-foreground');
+    // ①'s own detail (the «역할 · 런타임» pairs only once every agent is ready) — still three steps for a screen reader
+    expect(first()?.textContent).toBe('에이전트를 준비했어요작성 에이전트는 아직 준비하고 있어요');
+    expect(first()!.contains(line)).toBe(true);
+    expect(container.querySelectorAll('ol > li').length).toBe(3);
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
     await tick(2_000);
     expect(container.querySelector('[data-testid=setup-still-preparing]')).toBeNull();
@@ -605,12 +608,14 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
     await tick(2_000);
     expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toBe('Claude Code는 처음 켤 때 작업 폴더를 믿을지 물어요. 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널을 열고, 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요 — «No, exit»에서 Enter면 에이전트가 꺼져요.');
+    expect(container.querySelectorAll('ol > li').length).toBe(3); // the note is inside ②'s item: still three steps for a screen reader
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], workdir_fallback_at: 'x' });
     await tick(2_000);
     expect(text()).toContain('에이전트를 준비했어요');
     expect(text()).toContain('조사 · Claude Code, 작성 · Codex');
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
+    expect(container.querySelectorAll('ol > li').length).toBe(3); // the folder note is inside ①'s item
     expect(container.querySelector('[data-testid=setup-workdir-fallback]')?.textContent).toBe('고른 폴더를 쓸 수 없어 기본 폴더(~/Sprintable/마케팅 루프)에서 시작했어요 — 작업 폴더는 홈 폴더 안의 한 폴더여야 해요');
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
