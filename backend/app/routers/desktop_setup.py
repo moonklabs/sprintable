@@ -396,11 +396,18 @@ class SetupSignals(BaseModel):
     blocked: SetupBlocked | None
 
 
+class SetupStatusRecipe(BaseModel):
+    key: str
+    name: str | None
+    org_id: uuid.UUID | None  # null = a platform preset (the web names it by its translation, as the recipe list does)
+
+
 class SetupStatusResponse(BaseModel):
     setup_id: uuid.UUID
     device_name: str
     state: Literal["waiting_for_app", "handed_over", "not_handed_over", "disconnected"]
     recipe_name: str | None
+    recipe: SetupStatusRecipe | None = None
     work_item_id: str | None
     members: list[SetupMember]
     signals: SetupSignals

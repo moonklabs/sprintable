@@ -88,6 +88,17 @@ export function listableRecipe(recipe: SetupRecipe, displayName: string): boolea
 }
 
 /** 에이전트에 묶인 줄이 하나도 없으면 시작할 수 없다. */
+/** PO 10:40Z ② (Yuna 0747aadd v23): the default recipe — its first stage is an agent's, so the first task goes out right after
+ * «시작» and a result shows. The platform preset only (an org's own recipe with this key is not it). */
+export const DEFAULT_SETUP_RECIPE_KEY = 'preset.marketing.blog_article';
+
+/** The list with the default recipe first when it is there (the rest keep the server's order); its first entry is the one chosen.
+ * Not there (the organization turned it off) → the list as it came. No «recommended» mark — being first and chosen is all. */
+export function withDefaultRecipeFirst<T extends Pick<SetupRecipe, 'key' | 'org_id'>>(recipes: readonly T[]): T[] {
+  const i = recipes.findIndex((r) => r.key === DEFAULT_SETUP_RECIPE_KEY && r.org_id === null);
+  return i < 0 ? [...recipes] : [recipes[i], ...recipes.slice(0, i), ...recipes.slice(i + 1)];
+}
+
 export function needsAnAgent(rows: readonly SetupRoleRow[]): boolean {
   // no row bound to an agent — agent rows with nothing found, or either rows all set to «나» (PO 05:21Z ⒜ · the server
   // refuses the same with no_agent_role: this setup exists to start agents on this device)
@@ -216,6 +227,8 @@ export function isGuideLink(href: string, appOrigin: string): boolean {
 export interface SetupStatus {
   state: 'waiting_for_app' | 'handed_over' | 'not_handed_over' | 'disconnected';
   recipe_name: string | null;
+  /** The setup's recipe (org_id null = a platform preset) — named by its translation, as the recipe list names it (PO 10:39Z ①). */
+  recipe?: { key: string; name: string | null; org_id: string | null } | null;
   work_item_id: string | null;
   members: { stage: string; role: string | null; member_id: string; kind: 'agent' | 'human'; runtime: DesktopRuntime | null }[];
   signals: {

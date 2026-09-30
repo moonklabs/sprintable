@@ -14,6 +14,7 @@ vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next
 
 import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
+import { SetupProgressView } from './desktop-setup-progress';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -350,6 +351,49 @@ const status = (state: string, sig: Partial<Sig> = {}) => ({
   signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null, ...sig },
 });
 
+// PO 10:40Z ② (Yuna 0747aadd v23) — the default recipe is «블로그 글» (preset.marketing.blog_article): when the list has it, it
+// comes first and is chosen (seen on the first screen at 360 too) · no «recommended» mark; when it is not there, the server's first
+describe('[SID:4427] the default recipe', () => {
+  const recipe = (id: string, key: string, name: string, org_id: string | null) => ({
+    id, key, name, org_id, roles: [{ role: '작성', kind: 'agent' as const, stages: ['draft'] }],
+  });
+  const radios = () => [...container.querySelectorAll('input[type=radio][name=recipe]')] as HTMLInputElement[];
+
+  it('«블로그 글» in the list: first, and chosen — not the server\'s first', async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [
+      recipe('r-kanban', 'preset.workflow.kanban_simple', '칸반 심플', null),
+      recipe('r-video', 'preset.marketing.video_production', '영상 제작', null),
+      recipe('r-blog', 'preset.marketing.blog_article', '블로그 글', null),
+    ] }), { status: 200 });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(radios().map((r) => r.value)).toEqual(['r-blog', 'r-kanban', 'r-video']);
+    expect(radios().find((r) => r.checked)?.value).toBe('r-blog');
+    expect(container.textContent).not.toMatch(/추천/);
+  });
+
+  it('no «블로그 글» (the org turned it off): the server\'s first stays first and chosen', async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [
+      recipe('r-kanban', 'preset.workflow.kanban_simple', '칸반 심플', null),
+      recipe('r-video', 'preset.marketing.video_production', '영상 제작', null),
+    ] }), { status: 200 });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(radios().map((r) => r.value)).toEqual(['r-kanban', 'r-video']);
+    expect(radios().find((r) => r.checked)?.value).toBe('r-kanban');
+  });
+
+  it("an org's own recipe with the same key is not the default (only the platform preset is)", async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [
+      recipe('r-kanban', 'preset.workflow.kanban_simple', '칸반 심플', null),
+      recipe('r-own', 'preset.marketing.blog_article', '우리 블로그', 'org-1'),
+    ] }), { status: 200 });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(radios().find((r) => r.checked)?.value).toBe('r-kanban');
+  });
+});
+
 describe('[SID:4427] either rows can be «나» · no agent row · the recipe over the request limits (Kadir 4834 · PO 05:21Z ⒜ · Yuna v20/v21)', () => {
   const setOwnerSelect = async (role: string, value: string) => {
     const sel = container.querySelector(`select[aria-label*="${role}"]`) as HTMLSelectElement;
@@ -450,6 +494,26 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
   };
   const polls = () => calls.filter((c) => c.url.includes('/api/desktop/setups/')).length;
   const resultButton = () => [...container.querySelectorAll('a, button')].find((b) => b.textContent === '결과 보기') as HTMLElement;
+
+  // PO 10:39Z ① (Mirko's probe) — a platform preset is named on the progress screen as the list names it (its translation by
+  // key), not by the stored name: «3단계 칸반», not «칸반 심플» — also when the page is opened again (no name from the list)
+  it('a platform preset is named by its translation on the progress screen, even when reopened without the list', async () => {
+    statusNow = () => ({ ...status('waiting_for_app'), recipe_name: '칸반 심플', recipe: { key: 'preset.workflow.kanban_simple', name: '칸반 심플', org_id: null } });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(text()).toContain('«3단계 칸반»을 조사 에이전트에게 건네는 중이에요');
+    expect(container.querySelector('header p')?.textContent).toContain('3단계 칸반');
+    expect(text()).not.toContain('칸반 심플');
+  });
+
+  it("an org's own recipe keeps its own name (no translation for it)", async () => {
+    statusNow = () => ({ ...status('waiting_for_app'), recipe: { key: 'org.marketing_loop', name: '마케팅 루프', org_id: 'org-1' } });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
+  });
 
   it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
     statusNow = () => status('waiting_for_app');

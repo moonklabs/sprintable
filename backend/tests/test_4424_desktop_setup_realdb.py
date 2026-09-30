@@ -737,6 +737,8 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         setup_id = confirmed["setup_id"]
         status = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()
         assert (status["state"], status["recipe_name"], status["work_item_id"]) == ("handed_over", RECIPE_NAME, confirmed["work_item_id"])
+        # PO 10:39Z ① — the status also says which recipe (key · org) so the web names a preset by its translation, as the list does
+        assert status["recipe"] == {"key": RECIPE_KEY, "name": RECIPE_NAME, "org_id": str(ORG)}
         assert status["signals"] == {
             "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "first_screen_human_input_at": None,
             "workdir_fallback_at": None, "blocked": None,
@@ -1279,3 +1281,18 @@ async def test_the_recipe_list_says_whose_recipe_it_is(world):
     assert by_id[str(RECIPE)]["org_id"] == str(ORG), "the org's own recipe"
     presets = [x for x in recipes if x["key"].startswith("preset.")]
     assert presets and all(x["org_id"] is None for x in presets), "a platform preset has no org"
+
+
+@pytest.mark.anyio
+async def test_the_status_names_a_platform_preset_with_a_null_org(world):
+    """PO 10:39Z ① — a setup on a platform preset: the status carries its key and org_id null (the web translates the name)."""
+    recipe_id, _kinds = await _preset("preset.workflow.two_step")
+    async with _client() as c:
+        code, verifier = await _code(c, "d4424 preset status")
+        r = await _confirm(c, code, body={"project_id": str(PROJ), "recipe_id": recipe_id,
+                                          "roles": [{"role": "Maker", "runtime": "claude"}, {"role": "Reviewer", "runtime": "codex"}]})
+        assert r.status_code == 200, r.text
+        status = (await c.get(f"/api/v2/desktop/setups/{r.json()['setup_id']}", headers=_person(OWNER))).json()
+    assert status["recipe"]["key"] == "preset.workflow.two_step"
+    assert status["recipe"]["org_id"] is None
+    assert status["recipe_name"] == status["recipe"]["name"]
