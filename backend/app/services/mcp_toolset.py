@@ -281,6 +281,8 @@ _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/api/v2/audit-logs", "audit"),
     ("/api/v2/webhooks", "webhooks"),
     ("/api/v2/conversations", "chat"),
+    # story #4430 (Qadir 4853) — the block list the chat-group tools wrap: the REST path is gated like the tools
+    ("/api/v2/user-blocks", "chat"),
     ("/api/v2/meetings", "meetings"),
     ("/api/v2/retros", "retro"),
     ("/api/v2/stories", "stories"),

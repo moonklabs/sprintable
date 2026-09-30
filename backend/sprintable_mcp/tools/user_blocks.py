@@ -7,6 +7,8 @@ knowing and not being able to lift one.
 """
 from __future__ import annotations
 
+import uuid
+
 from mcp.types import TextContent
 
 from ..api_client import client
@@ -19,7 +21,7 @@ class ListUserBlocksInput(SprintableInput):
 
 
 class RemoveUserBlockInput(SprintableInput):
-    member_id: str
+    member_id: uuid.UUID  # a member id, never a free string in the path (Qadir 4853 ②)
 
 
 async def list_user_blocks(args: ListUserBlocksInput) -> list[TextContent]:
@@ -36,6 +38,6 @@ async def remove_user_block(args: RemoveUserBlockInput) -> list[TextContent]:
     is fine (no change)."""
     try:
         await client.delete(f"/api/v2/user-blocks/{args.member_id}")
-        return ok({"member_id": args.member_id, "blocked": False})
+        return ok({"member_id": str(args.member_id), "blocked": False})
     except Exception as exc:
         return err(exc)
