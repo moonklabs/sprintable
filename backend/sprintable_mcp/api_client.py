@@ -490,3 +490,18 @@ class SprintableClient:
 
 
 client = SprintableClient()
+
+
+# story #4441 (Qadir 4853 2nd line) — a success with no body is `None` (story #4430). A tool that reads a field or spreads
+# the result right away turned that into «Error: UNKNOWN: 'NoneType' …» — a success reported as a failure. These two are
+# the one place that says what «no body» means for a result read as a mapping or as a list; any other result comes back
+# as the very same object, so a response with a body is unchanged byte for byte.
+# (tests/test_4441_mcp_tools_empty_body_guard.py runs every tool on an empty body.)
+def as_mapping(result: Any) -> Any:
+    """`{}` for a success with no body; otherwise `result` itself."""
+    return {} if result is None else result
+
+
+def as_list(result: Any) -> Any:
+    """`[]` for a success with no body; otherwise `result` itself."""
+    return [] if result is None else result
