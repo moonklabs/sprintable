@@ -575,6 +575,23 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(third()?.dataset.paused).toBeUndefined();
   });
 
+  it('[SID:4433] ② done while another agent is not connected → ① drawn done · «… 에이전트는 아직 준비하고 있어요» muted under it, no pairs line', async () => {
+    const first = () => container.querySelectorAll('ol > li[data-state]')[0] as HTMLElement | undefined;
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(first()?.dataset.state).toBe('done');
+    expect(first()?.textContent).toBe('에이전트를 준비했어요'); // the «역할 · 런타임» pairs only once every agent is ready
+    const line = container.querySelector('[data-testid=setup-still-preparing]');
+    expect(line?.textContent).toBe('작성 에이전트는 아직 준비하고 있어요');
+    expect(line?.className).toContain('text-muted-foreground');
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
+    await tick(2_000);
+    expect(container.querySelector('[data-testid=setup-still-preparing]')).toBeNull();
+    expect(first()?.textContent).toContain('조사 · Claude Code, 작성 · Codex');
+  });
+
   it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
     statusNow = () => status('waiting_for_app');
     await startSetup();

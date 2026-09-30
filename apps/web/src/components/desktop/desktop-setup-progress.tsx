@@ -86,8 +86,15 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         <p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p>
       </header>
       <ol className="flex flex-col gap-3" aria-live="polite">
-        <Step state={progress.ready} label={progress.ready === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
+        {/* a later step done → the earlier one is drawn done (Yuna 12:22Z): ② proves the receiving agent was ready; the pairs line
+            stays for when every agent is really ready, and the others still getting ready get one muted line below */}
+        <Step state={progress.readyDrawn} label={progress.readyDrawn === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
           detail={progress.ready === 'done' ? progress.pairs.map((p) => `${role(p.role)} · ${RUNTIME[p.runtime]}`).join(', ') : null} />
+        {progress.stillPreparing.length > 0 ? (
+          <li className="ml-7 text-xs text-muted-foreground" data-testid="setup-still-preparing">
+            {t('stillPreparing', { roles: progress.stillPreparing.map(role).join(' · '), count: progress.stillPreparing.length })}
+          </li>
+        ) : null}
         {progress.workdirFallback ? (
           <li className="ml-7 flex gap-2 text-xs text-muted-foreground" data-testid="setup-workdir-fallback">
             <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('workdirFallback', { recipe: task })}

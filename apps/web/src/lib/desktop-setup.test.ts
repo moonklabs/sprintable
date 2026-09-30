@@ -264,6 +264,26 @@ describe('[SID:4433] an agent that stopped before the first result — the progr
     expect(setupProgress(base({ agents_ended: [ended('m1', 5_000, 'claude')], first_result_at: iso(3_000) }), T0 + 10_000, T0).stopped).toEqual({ roles: ['Creator'], claude: true });
   });
 
+  // Yuna 12:22Z · PO 12:23Z: a later step done → the earlier one is drawn done; the others still getting ready get a muted line
+  it('② done while an agent is not connected yet → ① drawn done (the definition stays: ready is still running) · that agent\'s role in the muted line', () => {
+    const p = setupProgress(base({ tools_connected: [{ member_id: 'm1', at: iso(1_000) }] }), T0 + 10_000, T0);
+    expect(p).toMatchObject({ ready: 'running', readyDrawn: 'done', handed: 'done', stillPreparing: ['Publisher'] });
+    // every agent connected → drawn done by the definition itself, no muted line
+    expect(setupProgress(base({ tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] }), T0 + 10_000, T0))
+      .toMatchObject({ ready: 'done', readyDrawn: 'done', stillPreparing: [] });
+    // ② not done → ① as it is, no muted line
+    expect(setupProgress(base({ first_task_handed_at: null }), T0 + 10_000, T0)).toMatchObject({ readyDrawn: 'running', stillPreparing: [] });
+  });
+
+  it('a stopped agent is only in the stopped block, never also «still getting ready» (one agent, one place)', () => {
+    const p = setupProgress(base({ agents_ended: [ended('m2', 5_000, 'codex')] }), T0 + 10_000, T0);
+    expect(p.stopped).toEqual({ roles: ['Publisher'], claude: false });
+    expect(p.stillPreparing).toEqual(['Creator']); // m1 not connected either, and not stopped
+    const q = setupProgress(base({ tools_connected: [{ member_id: 'm1', at: 'x' }], agents_ended: [ended('m2', 5_000, 'codex')] }), T0 + 10_000, T0);
+    expect(q.stillPreparing).toEqual([]);
+    expect(q.readyDrawn).toBe('done');
+  });
+
   it('an unreadable time is left out (never a block from a broken row)', () => {
     expect(setupProgress(base({ agents_ended: [{ member_id: 'm1', at: 'not a time', runtime: 'claude', exit_code: 1, restarted_at: null }] }), T0, T0).stopped).toBeNull();
   });

@@ -269,6 +269,13 @@ export interface SetupProgress {
    * 그 뒤 첫 결과가 없는 에이전트만 · 없으면 null. `claude` = Claude Code가 섞임(다시 켜면 믿기를 다시 물을 수 있다는 둘째 문장).
    */
   stopped: { roles: string[]; claude: boolean } | null;
+  /**
+   * story 4433 (Yuna 12:22Z · PO 12:23Z) — how ① is drawn: a later step that is done means the earlier one is drawn done
+   * (② proves the agent that received the task was ready). The definition of `ready` (every agent connected) does not change.
+   */
+  readyDrawn: StepState;
+  /** The other agents still getting ready while ① is drawn done — roles in the flow's order (a stopped agent is only in `stopped`). */
+  stillPreparing: string[];
 }
 
 /** `handedOverSeenAt` = 이 페이지가 handed_over를 처음 본 때(상태 조회에 받은 시각이 없어 페이지 시계로 잰다). */
@@ -301,7 +308,20 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     blocked: !!s.signals.blocked,
     expired: s.state === 'not_handed_over',
     stopped,
+    readyDrawn: ready === 'done' || handed === 'done' ? 'done' : 'running',
+    stillPreparing: ready === 'done' || handed !== 'done' ? [] : stillPreparingRoles(agents, connected, stopped),
   };
+}
+
+/** The agents not connected yet, by role (each once, the flow's order), leaving out the stopped ones (one agent, one place). */
+function stillPreparingRoles(agents: SetupStatus['members'], connected: ReadonlySet<string>, stopped: SetupProgress['stopped']): string[] {
+  const out: string[] = [];
+  for (const m of agents) {
+    if (connected.has(m.member_id) || !m.role || out.includes(m.role)) continue;
+    if (stopped?.roles.includes(m.role)) continue;
+    out.push(m.role);
+  }
+  return out;
 }
 
 /** 멈춘 에이전트(story 4433): 그 에이전트의 마지막 끝남이 마지막 다시 시작보다 늦고(또는 다시 시작 없음), 그 뒤 첫 결과가 없을 때. */
