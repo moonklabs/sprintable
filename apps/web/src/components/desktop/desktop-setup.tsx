@@ -19,8 +19,7 @@ import { onboardingRedirect } from '@/lib/auth/onboarding-next';
 import { formatLocaleDate } from '@/lib/i18n';
 import {
   agentRowCount, confirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
-  type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow,
-} from '@/lib/desktop-setup';
+  type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow, withDefaultRecipeFirst } from '@/lib/desktop-setup';
 
 /**
  * story #4427(E-DESKTOP P2) — 웹 설정 페이지. 데스크톱 앱이 이 페이지를 설정 코드 + 찾은 에이전트 목록과 함께 연다.
@@ -257,7 +256,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         if (!res.ok) throw new Error(String(res.status));
         const body = await res.json();
         const list: SetupRecipe[] = body?.recipes ?? body?.data?.recipes ?? [];
-        const usable = list.filter((d) => listableRecipe(d, presetName(d, tPreset)));
+        // the default recipe first and chosen when it is there (PO 10:40Z ② · Yuna v23) — not whatever the server sorted first
+        const usable = withDefaultRecipeFirst(list.filter((d) => listableRecipe(d, presetName(d, tPreset))));
         if (off) return;
         setRecipes(usable);
         if (usable[0]) pick(usable[0]);

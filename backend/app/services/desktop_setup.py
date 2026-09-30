@@ -578,19 +578,27 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
     )
 
 
-async def _recipe_name(db: AsyncSession, setup: DesktopSetup) -> str | None:
-    """The recipe's display name (PO 08:22Z — the app's default folder ~/Sprintable/{recipe}). The org's own definition wins
-    over a preset with the same key, as in the publish path."""
+async def _recipe_ref(db: AsyncSession, setup: DesktopSetup) -> dict | None:
+    """The setup's recipe as {key, name, org_id} — org_id null for a platform preset. The org's own definition wins over a
+    preset with the same key, as in the publish path. The web names a preset by its translation from key + org_id, the same
+    way the recipe list does (PO 10:39Z ①: one name in one flow — not the stored name on the progress screen)."""
     from app.models.event_definition import EventDefinition
 
     if not setup.event_definition_key:
         return None
-    return (await db.execute(
-        select(EventDefinition.name).where(
+    row = (await db.execute(
+        select(EventDefinition.key, EventDefinition.name, EventDefinition.org_id).where(
             EventDefinition.key == setup.event_definition_key,
             (EventDefinition.org_id == setup.org_id) | (EventDefinition.org_id.is_(None)),
         ).order_by(EventDefinition.org_id.is_(None)).limit(1)
-    )).scalar_one_or_none()
+    )).first()
+    return {"key": row.key, "name": row.name, "org_id": row.org_id} if row else None
+
+
+async def _recipe_name(db: AsyncSession, setup: DesktopSetup) -> str | None:
+    """The recipe's stored display name (PO 08:22Z — the app's default folder ~/Sprintable/{recipe})."""
+    ref = await _recipe_ref(db, setup)
+    return ref["name"] if ref else None
 
 
 @dataclass
@@ -758,9 +766,11 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     result = first(EVENT_FIRST_RESULT)
     reason = (blocked[0].get("reason") if blocked else None)
     screen_input = first(EVENT_FIRST_SCREEN_INPUT)
+    recipe = await _recipe_ref(db, setup)
     return {
         "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
-        "recipe_name": await _recipe_name(db, setup),
+        "recipe_name": recipe["name"] if recipe else None,
+        "recipe": recipe,
         "work_item_id": str(setup.work_item_id) if setup.work_item_id else None,
         "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime")} for m in (setup.members or [])],
         "signals": {

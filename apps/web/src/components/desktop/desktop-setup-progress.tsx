@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { pickEulReulJosa } from '@/lib/korean-particle';
+import { presetName } from '@/lib/platform-preset-copy';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -21,6 +22,7 @@ import { Failure, ToolsNotConnected } from './desktop-setup';
 export function SetupProgressView({ setupId, recipeName }: { setupId: string | null; recipeName: string }) {
   const t = useTranslations('desktop.setup');
   const tOrg = useTranslations('organization');
+  const tPreset = useTranslations('recipePreset');
   const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
   const flatHref = useFlatHref();
   // one reading: the status, when it was read, and when this page first saw «handed_over» (the status carries no such time)
@@ -65,7 +67,9 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
 
   const role = (r: string) => stageRoleLabel(r, tOrg);
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
-  const task = status.recipe_name ?? recipeName;
+  // one name in one flow (PO 10:39Z ①): the recipe as the list names it — a platform preset by its translation, not the stored
+  // name — from the server's recipe (also when the page is opened again without the list's name)
+  const task = status.recipe ? presetName(status.recipe, tPreset) : (recipeName || status.recipe_name || '');
   const orgSlug = orgMemberships?.find((o) => o.orgId === orgId)?.orgSlug;
   const resultHref = status.work_item_id && orgSlug && currentProjectSlug
     ? storyBoardUrl(orgSlug, currentProjectSlug, status.work_item_id)
