@@ -28,6 +28,7 @@ class _Resp:
     status_code = 200
     is_success = True
     text = "{}"
+    content = b"{}"  # story #4430 — the client reads the body length (a 204/empty body is None), as httpx.Response has it
 
     def json(self):
         return {"ok": 1}

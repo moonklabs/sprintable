@@ -29,7 +29,8 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # (원본 app/services/mcp_toolset.py와 동기화 — 이 vendored 사본이 갈리면 story #2311
     # 회귀가드가 잡는다).
     ("docs", ("doc", "search_docs", "submit_for_approval")),
-    ("chat", ("chat", "message", "conversation")),
+    # story #4430: "user_block" — mirror of app/services/mcp_toolset.py (an agent's own block list belongs with chat).
+    ("chat", ("chat", "message", "conversation", "user_block")),
     ("sprints", ("sprint",)),
     ("hypotheses", ("hypothes",)),
     # 계층 리네이밍 B1(story 1925): "goal" 추가 — 백엔드 SSOT(app/services/mcp_toolset.py)와

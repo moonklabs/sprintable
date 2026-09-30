@@ -115,6 +115,7 @@ async def test_request_uses_override_key_then_env_fallback():
             status_code = 200
             is_success = True
             headers = {"content-type": "application/json"}
+            content = b"{}"  # story #4430 — as httpx.Response has it
             def json(self): return {}
             @property
             def text(self): return "{}"

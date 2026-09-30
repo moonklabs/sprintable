@@ -61,6 +61,8 @@ EXPECTED_TOOLS = {
     "sprintable_list_conversations",
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
     "sprintable_get_chat_message",
+    # story #4430: an agent's own block list (list · remove)
+    "sprintable_list_user_blocks", "sprintable_remove_user_block",
     # meetings (6)
     "sprintable_list_meetings", "sprintable_get_meeting", "sprintable_create_meeting",
     "sprintable_update_meeting", "sprintable_delete_meeting", "sprintable_trigger_ai_summary",
@@ -153,8 +155,9 @@ def test_total_tool_count():
     # story #3614: sprintable_withdraw_channel_post_draft 1종 신설(채널 글 초안 폐기 — 이 도메인
     # 첫 MCP 도구) — 125→126. story #3651: sprintable_get_publication_insights 1종 신설(발행물
     # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127. story #3769:
-    # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128.
-    assert len(_TOOLS) == 128  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128. story #4430:
+    # sprintable_list_user_blocks · sprintable_remove_user_block 2종 신설(에이전트 자기 차단 목록) — 128→130.
+    assert len(_TOOLS) == 130  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():
