@@ -61,7 +61,8 @@ _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 
 class DesktopSetupError(Exception):
     """A closed code: request_invalid · service_unavailable · code_not_found · code_expired · code_used · code_not_confirmed_yet · verifier_mismatch ·
-    already_confirmed · not_org_admin · recipe_not_found · roles_invalid · human_stage_needs_member · setup_not_found."""
+    already_confirmed · not_org_admin · recipe_not_found · roles_invalid · recipe_too_large · no_agent_role · human_stage_needs_member ·
+    setup_not_found."""
 
     def __init__(self, code: str, detail: str | None = None):
         super().__init__(detail or code)
@@ -165,8 +166,62 @@ async def _setup_by_code(db: AsyncSession, code: str) -> DesktopSetup:
 
 @dataclass
 class RoleChoice:
+    """One row of the confirmation body: a runtime (an agent is made for the role) or owner «me» (the person confirming holds
+    it — only for an either row, Qadir 4834 · PO 05:21Z decision ⒜)."""
     role: str
-    runtime: str
+    runtime: str | None = None
+    owner: str | None = None
+
+
+@dataclass
+class RoleBinding:
+    """Who holds each setup row: the person confirming (human rows and either rows chosen as «me») or a new agent on a
+    runtime. `order` is the recipe's own role order."""
+    order: list[str]
+    person_roles: set[str]
+    agent_runtimes: dict[str, str]
+
+
+# the product's limits for one setup (PO 06:04Z: judged here with recipe_too_large, not by the request schema)
+SETUP_MAX_ROLES = 50
+SETUP_ROLE_NAME_MAX = 200
+
+
+def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
+    """The one place a confirmation body is checked against a recipe's setup rows (`setup_role_rows`) — every confirmation
+    route uses it. A human row is never sent (it is the person); an agent row needs a runtime; an either row takes a runtime or
+    owner «me». Anything else (an unknown or repeated role, a human row sent, «me» on an agent row, both or neither of runtime
+    and owner, a row left out) → roles_invalid. When no row is left for an agent → no_agent_role: the setup exists to start
+    agents on this device (a person-only flow makes none). More rows than SETUP_MAX_ROLES or a role name longer than
+    SETUP_ROLE_NAME_MAX (in the body or the recipe) → recipe_too_large."""
+    if len(roles) > SETUP_MAX_ROLES or len(rows) > SETUP_MAX_ROLES or any(
+        len(r.role) > SETUP_ROLE_NAME_MAX for r in roles
+    ) or any(len(r["role"]) > SETUP_ROLE_NAME_MAX for r in rows):
+        raise DesktopSetupError("recipe_too_large", f"up to {SETUP_MAX_ROLES} roles of up to {SETUP_ROLE_NAME_MAX} characters")
+    order = [r["role"] for r in rows]
+    kind = {r["role"]: r["kind"] for r in rows}
+    person = {r["role"] for r in rows if r["kind"] == "human"}
+    runtimes: dict[str, str] = {}
+    seen: set[str] = set()
+    for r in roles:
+        k = kind.get(r.role)
+        if r.role in seen or k is None or k == "human":
+            raise DesktopSetupError("roles_invalid", f"role {r.role!r}")
+        seen.add(r.role)
+        if r.owner is not None and r.runtime is not None:
+            raise DesktopSetupError("roles_invalid", f"role {r.role!r}: a runtime or owner, not both")
+        if r.owner == "me" and k == "either":
+            person.add(r.role)
+        elif r.owner is None and r.runtime in RUNTIME_TYPES:
+            runtimes[r.role] = r.runtime
+        else:
+            raise DesktopSetupError("roles_invalid", f"role {r.role!r} / runtime {r.runtime!r} / owner {r.owner!r}")
+    missing = [role for role in order if role not in person and role not in runtimes]
+    if missing:
+        raise DesktopSetupError("roles_invalid", f"a runtime is needed for: {missing}")
+    if not runtimes:
+        raise DesktopSetupError("no_agent_role", "every row is the person's — the setup starts at least one agent")
+    return RoleBinding(order=order, person_roles=person, agent_runtimes=runtimes)
 
 
 def stage_role(definition, stage: str) -> str:
@@ -188,7 +243,8 @@ def setup_role_rows(definition) -> list[dict]:
     """PO 16:03Z — the one place a recipe's setup rows are worked out: one row per role that holds an agent-target stage, in the
     recipe's order, `{role, kind, stages}`. kind = the role's `role_actor_kinds` value (human · agent · either; none declared →
     agent). The confirmation checks against these rows and `GET /desktop/recipes` hands them to the web — the web no longer
-    works them out itself. A human row is bound to the person confirming; every other row needs a runtime (either included)."""
+    works them out itself. A human row is bound to the person confirming; an agent row needs a runtime; an either row takes a
+    runtime or owner «me» (bind_setup_roles)."""
     kinds = definition.role_actor_kinds or {}  # keyed by role (events.py reads it the same way)
     rows: list[dict] = []
     by_role: dict[str, dict] = {}
@@ -222,7 +278,8 @@ async def list_setup_recipes(db: AsyncSession, *, org_id: uuid.UUID) -> list[dic
         .order_by(EventDefinition.name, EventDefinition.key)
     )).scalars().all()
     return [
-        {"id": d.id, "key": d.key, "name": d.name, "description": d.description, "roles": setup_role_rows(d)}
+        # org_id: null for a platform preset (the web names presets in the viewer's language by key — Qadir 4834)
+        {"id": d.id, "key": d.key, "org_id": d.org_id, "name": d.name, "description": d.description, "roles": setup_role_rows(d)}
         for d in definitions if recipe_startable(d)
     ]
 
@@ -279,16 +336,10 @@ async def confirm_setup(
 
     # the same rows GET /desktop/recipes hands the web (one function — PO 16:03Z)
     rows = setup_role_rows(definition)
-    role_order = [r["role"] for r in rows]
-    human_roles = {r["role"] for r in rows if r["kind"] == "human"}
-    choices: dict[str, str] = {}
-    for r in roles:
-        if r.role in choices or r.role not in role_order or r.role in human_roles or r.runtime not in RUNTIME_TYPES:
-            raise DesktopSetupError("roles_invalid", f"role {r.role!r} / runtime {r.runtime!r}")
-        choices[r.role] = r.runtime
-    missing = [r for r in role_order if r not in human_roles and r not in choices]
-    if missing:
-        raise DesktopSetupError("roles_invalid", f"a runtime is needed for: {missing}")
+    binding = bind_setup_roles(rows, roles)
+    role_order = binding.order
+    human_roles = binding.person_roles  # human rows and either rows chosen as «me»
+    choices = binding.agent_runtimes
 
     person_member_id: uuid.UUID | None = None
     if human_roles:
