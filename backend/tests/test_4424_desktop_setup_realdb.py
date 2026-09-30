@@ -1638,10 +1638,19 @@ async def test_task_rows_put_after_a_disconnect_never_go_out_on_the_open_stream(
     assert not any("task after disconnect" in f for f in frames), (path, frames)
 
 
+def _db_down_error(kind: str) -> BaseException:
+    from sqlalchemy.exc import OperationalError
+
+    if kind == "db_error":
+        return OperationalError("SELECT revoked_at FROM agent_api_keys", {}, ConnectionError("db down"))
+    return TimeoutError("db timeout")
+
+
 @pytest.mark.anyio
-async def test_a_failing_access_recheck_keeps_the_stream_and_the_next_one_runs(world, monkeypatch):
-    """PO 14:35Z ① — the recheck must not add a way to drop streams: its DB failing skips that check; the stream stays and
-    the next check runs as usual."""
+@pytest.mark.parametrize("kind", ["db_error", "db_timeout"])
+async def test_a_failing_access_recheck_keeps_the_stream_and_the_next_one_runs(world, monkeypatch, kind):
+    """PO 14:35Z ① — the recheck must not add a way to drop streams: its DB failing (an SQLAlchemy error or a DB timeout) skips
+    that check; the stream stays and the next check runs as usual."""
     import app.routers.agent_gateway as ag
     from app.core import shutdown as shutdown_module
 
@@ -1654,7 +1663,7 @@ async def test_a_failing_access_recheck_keeps_the_stream_and_the_next_one_runs(w
         # the first three rechecks find the DB down; after that it answers again
         if calls["failed"] < 3:
             calls["failed"] += 1
-            raise RuntimeError("db down")
+            raise _db_down_error(kind)
         calls["real"] += 1
         return await real_db_check(*a, **k)
 
@@ -1671,3 +1680,30 @@ async def test_a_failing_access_recheck_keeps_the_stream_and_the_next_one_runs(w
             shutdown_module.reset_shutdown_event()
     assert not ended and not any("access_revoked" in f for f in frames), (frames, calls)
     assert calls["failed"] == 3 and calls["real"] >= 1, calls  # skipped while down · the next checks ran as usual
+
+
+@pytest.mark.anyio
+async def test_an_error_in_the_access_recheck_that_is_not_the_db_is_not_swallowed(world, monkeypatch):
+    """PO 15:06Z — only DB errors and DB timeouts are skipped. Anything else is a bug in the check itself: swallowing it would
+    leave every stream quietly open, so it comes out of the stream instead."""
+    import app.routers.agent_gateway as ag
+    from app.core import shutdown as shutdown_module
+
+    _quiet_stream_side_effects(monkeypatch)
+    monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 0.2)
+
+    async def broken(*_a, **_k):
+        raise KeyError("a bug in the check")
+
+    async with _client() as c:
+        _setup_id, _agent_id, agen = await _open_setup_stream(c, "d4434 recheck bug")
+        try:
+            assert "event: heartbeat" in await agen.__anext__()
+            monkeypatch.setattr(ag, "_stream_access_revoked_db", broken)
+            with pytest.raises(KeyError, match="a bug in the check"):
+                for _ in range(20):
+                    await agen.__anext__()
+        finally:
+            await agen.aclose()
+            ag._agent_connections.clear()
+            shutdown_module.reset_shutdown_event()
