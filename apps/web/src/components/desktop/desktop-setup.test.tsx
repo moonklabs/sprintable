@@ -563,6 +563,8 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
   let invitesNow: () => Response;
   let meName: string | null;
   let confirmNow: () => Response;
+  /** What POST /api/auth/refresh answers now (4429 ①: the new token that carries the new organization). */
+  let refreshNow: () => Response | Promise<Response>;
   function stubNoOrg() {
     calls = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -573,7 +575,8 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
       if (url.endsWith('/api/desktop/recipes/for-new-org')) return recipesNow();
       if (url.endsWith('/api/desktop/recipes')) return new Response('{"data":null,"error":{"code":"org_id_required"}}', { status: 400 });
       if (url.endsWith('/api/desktop/setup-codes/confirm-new-org')) return confirmNow();
-      if (url.endsWith('/api/auth/refresh') || url.endsWith('/api/current-project')) return new Response('{}', { status: 200 });
+      if (url.endsWith('/api/auth/refresh')) return refreshNow();
+      if (url.endsWith('/api/current-project')) return new Response('{}', { status: 200 });
       if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
       return new Response('{}', { status: 404 });
     }));
@@ -591,6 +594,7 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
     meName = '김지우';
     confirmNow = () => new Response(JSON.stringify({ setup_id: 's-1', members: [], work_item_id: 'w-1', org_id: 'o-new', project_id: 'p-new' }), { status: 200 });
+    refreshNow = () => new Response('{}', { status: 200 });
   });
 
   it('no invites → one line «새 조직 «김지우의 조직»도 함께 만들어요» above the recipes; the list comes from the new-organization path; no «admin 아님»', async () => {
@@ -770,6 +774,77 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
       expect(container.querySelector('[data-testid=setup-rate-limited]')?.textContent).toBe(`잠깐 사이에 너무 자주 시도했어요. ${time} 뒤에 다시 «시작»을 눌러 주세요.`);
       expect(startButton().disabled).toBe(false); // trying again is true
       expect(text()).not.toContain('잠시 뒤 다시 시도해 주세요');
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
+  // a 401 here goes through fetchWithAuth's own session-expired flow (one refresh, then the global «다시 로그인» dialog) — the
+  // app-wide answer for a dead session; this card is for the answers that flow does not take: 5xx and offline
+  it('4429 ①: the new token could not be had (5xx · offline, each after one retry) → «설정을 마쳤어요» with [다시 불러오기] instead of a progress view it cannot read', async () => {
+    const answers: [string, () => Response | Promise<Response>][] = [
+      ['500', () => new Response('{"data":null,"error":{"code":"internal"}}', { status: 500 })],
+      ['503', () => new Response('{"data":null,"error":{"code":"UPSTREAM_UNREACHABLE"}}', { status: 503 })],
+      ['offline', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ];
+    for (const [name, answer] of answers) {
+      refreshNow = answer;
+      stubNoOrg();
+      await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+      await act(async () => { startButton().click(); });
+      await flush();
+      expect(text(), name).toContain('설정을 마쳤어요');
+      expect(text(), name).toContain('에이전트는 이 컴퓨터에서 시작돼요. 진행 상황을 보려면 이 페이지를 다시 불러와 주세요.');
+      expect(text(), name).not.toContain('앱이 받아 가기를 기다리는 중'); // not a progress it cannot read
+      expect(calls.filter((c) => c.url.endsWith('/api/auth/refresh')).length, name).toBeGreaterThanOrEqual(2); // one retry
+      expect([...container.querySelectorAll('button')].map((b) => b.textContent), name).toEqual(['다시 불러오기']);
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
+  it('4429 ①: a first refresh that fails and a retry that works → the progress view as usual', async () => {
+    let n = 0;
+    refreshNow = () => (++n === 1 ? new Response('{}', { status: 503 }) : new Response('{}', { status: 200 }));
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    await act(async () => { startButton().click(); });
+    await flush(); await flush();
+    expect(text()).not.toContain('설정을 마쳤어요');
+    expect(calls.filter((c) => c.url.endsWith('/api/auth/refresh')).length).toBe(3); // 503 · retry ok · the second renewal ok
+    // the progress's first read is on the next task (setTimeout 0): wait for it as a condition
+    await vi.waitFor(() => expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-1'))).toBe(true));
+  });
+
+  it('4429 ①: [다시 불러오기] reloads to the progress of THIS setup (#progress=<setup id> — no code), and that page renews the token first', async () => {
+    refreshNow = () => new Response('{}', { status: 503 });
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    await act(async () => { startButton().click(); });
+    await flush();
+    const order: string[] = []; let replaced = '';
+    vi.stubGlobal('location', { ...window.location, pathname: '/desktop/setup', search: '', hash: '', reload: vi.fn(() => { order.push('reload'); }) } as unknown as Location);
+    const replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation((_s, _t, url) => { replaced = String(url); order.push('replace'); });
+    await act(async () => { button('다시 불러오기')!.click(); });
+    expect(order).toEqual(['replace', 'reload']);
+    expect(replaced).toBe('/desktop/setup#progress=s-1');
+    expect(replaced).not.toContain(CODE);
+    replaceState.mockRestore();
+  });
+
+  it('4429 ①: the page opened at #progress=<setup id> renews the token, then shows that setup\'s progress — or the same card again if it still cannot', async () => {
+    for (const [ok, expectCard] of [[true, false], [false, true]] as const) {
+      refreshNow = () => (ok ? new Response('{}', { status: 200 }) : new Response('{}', { status: 503 }));
+      stubNoOrg();
+      window.location.hash = '#progress=s-9';
+      await mountNoOrg(<DesktopSetupEntry />);
+      await flush();
+      expect(window.location.hash, 'taken off the address').toBe('');
+      expect(calls.some((c) => c.url.endsWith('/api/auth/refresh'))).toBe(true);
+      expect(text().includes('설정을 마쳤어요'), `ok=${ok}`).toBe(expectCard);
+      expect(text()).not.toContain('데스크톱 앱에서 열어 주세요'); // never the «open in the app» card for this address
+      if (ok) await vi.waitFor(() => expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-9'))).toBe(true));
+      else expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-9'))).toBe(false);
       await act(async () => { root.unmount(); });
       root = createRoot(container);
     }

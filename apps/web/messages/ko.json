@@ -6636,7 +6636,11 @@
       "rateLimited": "잠깐 사이에 너무 자주 시도했어요. {time} 뒤에 다시 «시작»을 눌러 주세요.",
       "rateLimitedSeconds": "{n}초",
       "rateLimitedMinutes": "{n}분",
-      "rateLimitedMoment": "잠시"
+      "rateLimitedMoment": "잠시",
+      "doneReload": {
+        "title": "설정을 마쳤어요",
+        "body": "에이전트는 이 컴퓨터에서 시작돼요. 진행 상황을 보려면 이 페이지를 다시 불러와 주세요."
+      }
     },
     "devices": {
       "title": "연결된 기기",
