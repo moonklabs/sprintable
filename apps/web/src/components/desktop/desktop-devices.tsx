@@ -93,7 +93,7 @@ export function DesktopDevices() {
       ) : (
         <>
           <p className="text-xs text-muted-foreground">{t('description')}</p>
-          <p aria-live="polite" className="text-xs text-foreground" data-testid="desktop-devices-done">
+          <p aria-live="polite" className="break-keep text-xs text-foreground" data-testid="desktop-devices-done">
             {done ? t(done.already ? 'alreadyDone' : 'done', { device: done.device }) : null}
           </p>
           {loadFailed ? (
