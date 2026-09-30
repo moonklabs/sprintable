@@ -86,12 +86,10 @@ BAD = [
     ("desktop_agent_ended_early", {"member_id": "not-a-uuid"}, "member_id"),
     ("desktop_agent_ended_early", {"runtime": "claude"}, "member_id"),
     ("desktop_agent_restarted", {}, "member_id"),
-    ("desktop_agent_restarted", {"member_id": M, "path": "/Users/x"}, "path"),  # no field outside the shape
     ("desktop_first_screen_human_input", {"human_hand": "true"}, "human_hand"),
     ("desktop_first_screen_human_input", {"human_hand": False}, "human_hand"),
     ("desktop_first_task_handed", {"via": "mail"}, "via"),
     ("desktop_workdir_fallback", {"hinted": "yes"}, "hinted"),
-    ("desktop_setup_signed_in", {"human_hand": True}, "human_hand"),
 ]
 
 
@@ -104,6 +102,25 @@ async def test_a_meta_off_its_shape_is_a_closed_422_and_nothing_is_stored(event,
     assert e.value.status_code == 422
     assert e.value.detail == {"code": "invalid_meta", "message": "meta does not fit this event's shape", "event": event, "field": field}
     assert not db.add.called and not db.commit.called
+
+
+# PO 19:07Z: a field outside the shape is dropped, not refused — refusing the whole event would lose it (a hand not counted,
+# a lie in the numbers), and an app build that adds a field before the server knows it would lose every such event
+EXTRA = [
+    ("desktop_agent_restarted", {"member_id": M, "path": "/Users/x"}, {"member_id": M}),
+    ("desktop_setup_signed_in", {"human_hand": True}, {}),
+    ("desktop_first_screen_human_input", {"human_hand": True, "new_field": [1, 2]}, {"human_hand": True}),
+]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("event,meta,stored", EXTRA)
+async def test_a_field_outside_the_shape_is_dropped_and_the_rest_stored(event, meta, stored):
+    db = _db()
+    await post_onboarding_event(OnboardingEventBody(event=event, session_id=uuid.uuid4(), meta=meta), db=db, credentials=None, x_agent_api_key=None)
+    assert db.add.called
+    row = db.add.call_args[0][0]
+    assert row.meta == stored
 
 
 @pytest.mark.anyio
