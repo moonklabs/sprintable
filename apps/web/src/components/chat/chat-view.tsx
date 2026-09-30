@@ -147,15 +147,9 @@ export function agentNotConnectedBannerText(
   return tChats('agentNotConnectedBanner', { name: p.name, josa: pickIGaJosa(p.name) });
 }
 
-/**
- * story #4444 (Yuna 23:01Z) — the failed-block toast body says the cause. «다시 시도해 주세요» only where retrying can work (a
- * server error, a timeout, too many requests; a network failure is handled by the caller); 404 = the person is no longer in
- * this org; any other refusal = they can't be blocked.
- */
-export function blockFailureBodyKey(status: number): 'blockUserErrorBody' | 'blockUserErrorBodyGone' | 'blockUserErrorBodyCannot' {
-  if (status === 404) return 'blockUserErrorBodyGone';
-  if (status >= 500 || status === 408 || status === 429) return 'blockUserErrorBody';
-  return 'blockUserErrorBodyCannot';
+/** story #4444 — a failed block answer that retrying can fix: a server error, a timeout, too many requests. */
+function blockFailureIsRetryable(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429;
 }
 
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
@@ -640,7 +634,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         body: JSON.stringify({ blocked_member_id: blockConfirmTarget.memberId }),
       });
       if (!res.ok) {
-        addToast({ type: 'error', title: t('blockUserErrorTitle'), body: t(blockFailureBodyKey(res.status)) });
+        // story #4444 (Yuna 23:01Z) — the body says the cause; «다시 시도해 주세요» only where retrying can work (a network
+        // failure: the catch below). 404 = the person is no longer in this org; any other refusal = they can't be blocked.
+        const body = res.status === 404 ? t('blockUserErrorBodyGone')
+          : blockFailureIsRetryable(res.status) ? t('blockUserErrorBody')
+          : t('blockUserErrorBodyCannot');
+        addToast({ type: 'error', title: t('blockUserErrorTitle'), body });
         return;
       }
       setBlockedMemberIds((prev) => new Set(prev).add(blockConfirmTarget.memberId));
