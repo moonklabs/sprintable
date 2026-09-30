@@ -31,7 +31,8 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # 돼, role-scope 키(예 scope=["docs"])로 recruit된 에이전트가 이 도구를 호출 못 하는(403)
     # 채로 조용히 회귀한다 — 이 스토리가 고치려던 "발견 못 함"과 결이 같은 새 차단이라 미리 막는다.
     ("docs", ("doc", "search_docs", "submit_for_approval")),
-    ("chat", ("chat", "message", "conversation")),
+    # story #4430: "user_block" — an agent's own block list (list · remove) belongs with chat: blocks only act on messages.
+    ("chat", ("chat", "message", "conversation", "user_block")),
     ("sprints", ("sprint",)),
     ("hypotheses", ("hypothes",)),
     # 계층 리네이밍 B1(story 1925): "goal" 추가 — sprintable_add_goal 등 신 이름도 이 그룹으로
@@ -492,6 +493,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_give_reward", "sprintable_list_audit_logs", "sprintable_list_backlog",
     "sprintable_get_chat_message",
     "sprintable_list_chat_messages", "sprintable_list_conversations", "sprintable_list_docs", "sprintable_list_epics",
+    # story #4430 — an agent's own block list
+    "sprintable_list_user_blocks", "sprintable_remove_user_block",
     "sprintable_list_goals",
     "sprintable_list_meetings", "sprintable_list_my_tasks", "sprintable_list_retro_sessions",
     "sprintable_list_sprints", "sprintable_list_standup_entries", "sprintable_list_stories",

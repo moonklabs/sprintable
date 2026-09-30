@@ -155,6 +155,7 @@ from .tools.tasks import (
     add_task, get_task, list_my_tasks, list_tasks,
     update_task, update_task_status,
 )
+from .tools.user_blocks import ListUserBlocksInput, RemoveUserBlockInput, list_user_blocks, remove_user_block
 from .tools.webhooks import (
     DeleteWebhookConfigInput, ListWebhookConfigsInput, UpsertWebhookConfigInput,
     delete_webhook_config, list_webhook_configs, upsert_webhook_config,
@@ -958,6 +959,14 @@ _TOOL_DEFS: list[tuple] = [
      " thread_id는 대화 ID가 아니라 그 메시지의 회신 스레드 ID다(story #2427) — 응답을 보고 그대로"
      " 다시 부를 때는 응답의 conversation_id를 쓸 것.",
      GetChatMessageInput, get_chat_message),
+    ("sprintable_list_user_blocks",
+     "[조직] 내 차단 목록 — 내가 차단한 멤버(member id)와 차단한 때(story #4430). 차단한 멤버의 메시지는 내 알림 ·"
+     " 이벤트에서 빠진다 — 누군가의 메시지가 계속 안 온다면 여기서 먼저 확인. 풀기는 `sprintable_remove_user_block`.",
+     ListUserBlocksInput, list_user_blocks),
+    ("sprintable_remove_user_block",
+     "[조직] 내 차단 하나 풀기(member_id = 차단을 풀 멤버 id) — 그 멤버의 메시지가 다시 온다(story #4430). 없는 차단을"
+     " 풀어도 오류 없음(변화 없음). 차단 목록은 `sprintable_list_user_blocks`.",
+     RemoveUserBlockInput, remove_user_block),
     # Meetings (6)
     ("sprintable_list_meetings",
      "[일감] 프로젝트 미팅 목록 조회."
