@@ -102,7 +102,9 @@ _CLEAN = [
     f"DELETE FROM conversation_participants WHERE conversation_id IN (SELECT id FROM conversations WHERE org_id IN ('{ORG}','{ORG2}'))",
     f"DELETE FROM conversations WHERE org_id IN ('{ORG}','{ORG2}')",
     f"DELETE FROM stories WHERE project_id='{PROJ}'",
-    f"DELETE FROM event_definitions WHERE id IN ('{RECIPE}','{RECIPE2}')",
+    # story #4439 — every definition a test makes in these orgs, not only the fixture's two (the recipe-list test adds a
+    # «people only» copy with a fresh id; left behind, the next run on the same DB hit uq_event_definitions_org_key)
+    f"DELETE FROM event_definitions WHERE org_id IN ('{ORG}','{ORG2}') OR id IN ('{RECIPE}','{RECIPE2}')",
     f"DELETE FROM notification_preferences WHERE member_id IN (SELECT id FROM members WHERE org_id IN ('{ORG}','{ORG2}'))",
     f"DELETE FROM agent_message_allowlist WHERE agent_member_id IN (SELECT id FROM members WHERE org_id IN ('{ORG}','{ORG2}'))",
     f"DELETE FROM agent_project_profiles WHERE project_id='{PROJ}'",
