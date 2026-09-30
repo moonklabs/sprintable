@@ -11,7 +11,9 @@ Contract (PO 07:15Z · 07:21Z · PO decision on when keys are made — the plain
 - exchange (no login, PKCE S256 verifier): before the confirmation `pending`; after it, once — one transaction issues one key
   per new agent (scope = the non-admin tool groups · no expiry · tied to this setup) and marks the setup handed over. Never
   again after that. Existing agents are never given a new key (issue = replace would cut their running sessions).
-- revoke («disconnect this device», a person): every key this setup handed out is revoked; nothing else changes.
+- revoke («disconnect this device», a person): every key this setup handed out is revoked, and the agents this setup made stop
+  (inactive — out of the org's agent count; their record and work stay · story #4434). Nothing else changes: agents that run
+  elsewhere and the people's own rows are untouched.
 
 Failures are closed codes (`DesktopSetupError.code`); the router maps them to statuses."""
 from __future__ import annotations
