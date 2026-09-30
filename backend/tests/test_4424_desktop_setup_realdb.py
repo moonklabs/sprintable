@@ -1410,3 +1410,100 @@ async def test_a_disconnected_setup_s_agents_stop_so_the_same_setup_fits_the_lim
         code2, _ = await _code(c, "d4434 second device")
         second = await _confirm(c, code2)
         assert second.status_code == 200, second.text
+
+
+# ─── story #4434 (Qadir 4847 ④ · PO) — a stream already open when its setup is disconnected ends ─────────────────
+
+
+class _StreamRequest:
+    headers: dict = {}
+
+    async def is_disconnected(self) -> bool:
+        return False
+
+
+def _quiet_stream_side_effects(monkeypatch):
+    """The stream's side effects that are not what this test watches (the test_2381 set)."""
+    from unittest.mock import AsyncMock
+
+    for target in (
+        "app.services.agent_anchor_sync.sync_agent_profile_presence", "app.services.onboarding_funnel.emit_onboarding_event",
+        "app.services.agent_verify.start_verification", "app.services.agent_verify.push_verification_signal",
+        "app.services.presence_online.mark_online", "app.services.presence_events.emit_presence",
+        "app.services.sse_lease.refresh", "app.services.sse_lease.release",
+    ):
+        monkeypatch.setattr(target, AsyncMock())
+    monkeypatch.setattr("app.services.sse_lease.acquire", AsyncMock(return_value=None))
+    monkeypatch.setattr("app.services.agent_verify.get_verification_state",
+                        AsyncMock(return_value={"verify_seq": None, "acked_seq": None, "verified": True, "rail": []}))
+
+
+async def _frames_until_end(agen, seconds: float) -> tuple[list[str], bool]:
+    """Read frames for up to `seconds`; (frames, ended) — ended = the stream finished by itself."""
+    import asyncio
+
+    frames: list[str] = []
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    while loop.time() < deadline:
+        task = asyncio.ensure_future(agen.__anext__())
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, deadline - loop.time()))
+        if not done:
+            # cancel the pending read and wait for it — otherwise aclose() finds the generator still running (the stream
+            # treats the cancel as its end, which is fine: this stream has been watched long enough)
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+            return frames, False
+        try:
+            frames.append(task.result())
+        except StopAsyncIteration:
+            return frames, True
+    return frames, False
+
+
+@pytest.mark.anyio
+async def test_an_open_stream_of_a_disconnected_setup_ends_and_another_setup_s_stream_goes_on(world, monkeypatch):
+    import app.routers.agent_gateway as ag
+    from app.core import shutdown as shutdown_module
+    from app.dependencies.auth import AuthContext
+
+    _quiet_stream_side_effects(monkeypatch)
+    monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 0.3)  # a short tick, so the recheck comes within the test
+
+    async with _client() as c:
+        opened = {}
+        for device in ("d4434 stream A", "d4434 stream B"):
+            code, verifier = await _code(c, device)
+            setup_id = (await _confirm(c, code)).json()["setup_id"]
+            agent = (await _exchange(c, code, verifier)).json()["agents"][0]
+            key_id = (await _sql(fetch=(
+                f"SELECT id FROM agent_api_keys WHERE desktop_setup_id='{setup_id}' AND team_member_id='{agent['member_id']}'"
+            )))[0][0]
+            auth = AuthContext(user_id=agent["member_id"], email=None,
+                               claims={"app_metadata": {"api_key_id": str(key_id), "org_id": str(ORG)}})
+            resp = await ag.agent_stream(_StreamRequest(), auth=auth)
+            assert resp.status_code == 200
+            opened[device] = (setup_id, resp.body_iterator)
+        try:
+            for _setup, agen in opened.values():
+                assert "event: heartbeat" in await agen.__anext__()
+
+            # disconnect A while both streams are open
+            setup_a, agen_a = opened["d4434 stream A"]
+            assert (await c.delete(f"/api/v2/desktop/setups/{setup_a}", headers=_person(OWNER))).status_code == 200
+
+            frames_a, ended_a = await _frames_until_end(agen_a, 3.0)
+            assert ended_a, f"A's stream must end within a tick or two: {frames_a}"
+            assert any(f.startswith("event: access_revoked") for f in frames_a), frames_a
+
+            _setup_b, agen_b = opened["d4434 stream B"]
+            frames_b, ended_b = await _frames_until_end(agen_b, 1.0)
+            assert not ended_b and not any("access_revoked" in f for f in frames_b), frames_b
+        finally:
+            for _setup, agen in opened.values():
+                await agen.aclose()
+            ag._agent_connections.clear()
+            shutdown_module.reset_shutdown_event()
