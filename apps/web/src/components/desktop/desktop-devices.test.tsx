@@ -22,16 +22,20 @@ const device = (setup_id: string, device_name: string, state = 'handed_over') =>
   setup_id, device_name, state, confirmed_at: '2026-09-29T10:00:00Z', confirmed_by_name: '김지우',
   revoked_at: state === 'disconnected' ? '2026-09-29T12:00:00Z' : null, revoked_by_name: state === 'disconnected' ? '박서연' : null,
   active_keys: 2,
-  members: [{ kind: 'agent' }, { kind: 'agent' }, { kind: 'human' }],
+  // one entry per stage: agent-1 holds two stages — still two agents (Qadir 4830 ②)
+  members: [{ kind: 'agent', member_id: 'agent-1' }, { kind: 'agent', member_id: 'agent-1' }, { kind: 'agent', member_id: 'agent-2' }, { kind: 'human', member_id: 'person' }],
 });
+const revoked = (already: boolean, by: string | null) => ({ revoked_keys: already ? 0 : 2, already_disconnected: already, revoked_at: '2026-09-30T05:00:00Z', revoked_by_name: by });
 
 let container: HTMLDivElement;
 let root: Root;
 let fetchMock: ReturnType<typeof vi.fn>;
 
-function asRole(role: 'owner' | 'admin' | 'member') {
+function asRole(role: 'owner' | 'admin' | 'member', orgId = ORG_ID) {
   useDashboardContextMock.mockReturnValue({
-    orgId: ORG_ID, orgMemberships: [{ orgId: ORG_ID, orgName: '뭉클랩', orgSlug: 'moonklabs', role }], projectMemberships: [], userName: '김지우',
+    orgId,
+    orgMemberships: [{ orgId: ORG_ID, orgName: '뭉클랩', orgSlug: 'moonklabs', role }, { orgId: 'org-2', orgName: '둘째 조직', orgSlug: 'second', role }],
+    projectMemberships: [], userName: '김지우',
   });
 }
 
@@ -50,7 +54,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    if (init?.method === 'DELETE') return new Response(JSON.stringify({ revoked_keys: 2 }), { status: 200 });
+    if (init?.method === 'DELETE') return new Response(JSON.stringify(revoked(false, '김지우')), { status: 200 });
     return new Response(JSON.stringify({ setups: [device(B, 'old laptop', 'disconnected'), device(A, 'studio mac')] }), { status: 200 });
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -133,7 +137,7 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     const confirm = q('desktop-devices-confirm')[0] as HTMLButtonElement;
     const cancel = [...document.querySelectorAll('button')].find((b) => b.textContent === '취소') as HTMLButtonElement;
     expect([confirm.textContent, confirm.disabled, cancel.disabled]).toEqual(['끊는 중…', true, true]);
-    await act(async () => { answer(new Response(JSON.stringify({ revoked_keys: 2 }), { status: 200 })); });
+    await act(async () => { answer(new Response(JSON.stringify(revoked(false, '김지우')), { status: 200 })); });
     await act(async () => { await Promise.resolve(); });
     expect(q('desktop-devices-confirm')).toHaveLength(0);
   });
@@ -148,5 +152,47 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     expect(q('desktop-devices-failed')[0].textContent).toBe('연결을 끊지 못했어요 — 다시 시도해 주세요');
     expect(q('desktop-devices-confirm')).toHaveLength(1);
     expect(q('desktop-device-state')[0].textContent).toBe('연결됨');
+  });
+
+  // Qadir 4830 ④ — another admin disconnected it first: the line says so and the row shows that admin, not the person pressing
+  it('a device another admin already disconnected: «이미 끊겨 있었어요» and that admin\'s name, not «you»', async () => {
+    asRole('owner');
+    await render();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(revoked(true, '박서연')), { status: 200 }));
+    await click(q('desktop-device-disconnect')[0]);
+    await click(q('desktop-devices-confirm')[0]);
+    await act(async () => { await Promise.resolve(); });
+    expect(q('desktop-devices-done')[0].textContent).toBe('studio mac 연결은 이미 끊겨 있었어요');
+    const metas = [...q('desktop-device-meta')].map((n) => n.textContent);
+    expect(metas.filter((m) => m?.endsWith('끊은 사람 박서연'))).toHaveLength(2); // studio mac now, old laptop before
+    expect(metas.some((m) => m?.endsWith('끊은 사람 김지우'))).toBe(false);
+  });
+
+  it('an answer that cannot be read: the list is read again instead of guessing who disconnected it', async () => {
+    asRole('owner');
+    await render();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ revoked_keys: 2 }), { status: 200 }));
+    await click(q('desktop-device-disconnect')[0]);
+    await click(q('desktop-devices-confirm')[0]);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/desktop/setups' && !init?.method)).toHaveLength(2);
+  });
+
+  // Qadir 4830 ① — a client-side org switch keeps /desktop mounted: the list is read again for the new org, and nothing of
+  // the previous org (its rows, its «연결을 끊었어요» line) stays on screen
+  it('switching org reads the new org\'s list and drops the previous org\'s rows and line', async () => {
+    asRole('admin');
+    await render();
+    await click(q('desktop-device-disconnect')[0]);
+    await click(q('desktop-devices-confirm')[0]);
+    await act(async () => { await Promise.resolve(); });
+    expect(q('desktop-devices-done')[0].textContent).toBe('studio mac 연결을 끊었어요');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ setups: [device(A.replace('1', '3'), 'second org mac')] }), { status: 200 }));
+    asRole('admin', 'org-2');
+    await render();
+    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+    expect(q('desktop-devices-done')[0].textContent).toBe('');
+    expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/desktop/setups' && !init?.method)).toHaveLength(2);
   });
 });

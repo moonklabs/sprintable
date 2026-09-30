@@ -427,7 +427,8 @@ async def test_ac3_to_ac6_least_privilege_other_keys_disconnect_and_the_record(w
         assert (await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(PLAIN))).status_code == 403
         assert (await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OUTSIDER, ORG2))).status_code == 404
         r = await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))
-        assert r.json() == {"revoked_keys": 2}
+        first = r.json()
+        assert (first["revoked_keys"], first["already_disconnected"], first["revoked_by_name"]) == (2, False, "Owner")
         assert (await c.get("/api/v2/me", headers=bearer)).status_code == 401
         assert (await c.get("/api/v2/me", headers={"Authorization": f"Bearer {other_agents[0]['api_key']}"})).status_code == 200
         assert await _sql(fetch=f"SELECT id, revoked_at FROM agent_api_keys WHERE team_member_id='{EXISTING}'") == existing_before
@@ -442,6 +443,17 @@ async def test_ac3_to_ac6_least_privilege_other_keys_disconnect_and_the_record(w
         assert (listed["d4424 other device"]["confirmed_by_name"], listed["d4424 other device"]["revoked_by_name"]) == ("Owner", None)
         assert (await c.get("/api/v2/desktop/setups", headers=_person(PLAIN))).status_code == 403
         assert (await c.get("/api/v2/desktop/setups", headers=_person(OUTSIDER, ORG2))).json()["setups"] == []
+
+        # Qadir 4830 ④ — a second admin disconnecting the same device afterwards: the answer says it was already disconnected, by
+        # the first admin and when (not «you»), and nothing is revoked twice
+        await _sql(f"UPDATE org_members SET role='admin' WHERE org_id='{ORG}' AND user_id='{PLAIN}'")
+        again = (await c.delete(f"/api/v2/desktop/setups/{setup_id}", headers=_person(PLAIN))).json()
+        assert (again["revoked_keys"], again["already_disconnected"], again["revoked_by_name"]) == (0, True, "Owner")
+        assert again["revoked_at"] == first["revoked_at"]
+        # Qadir 4830 ③ — a removed member (is_active false) is no longer named as who connected or disconnected
+        await _sql(f"UPDATE members SET is_active=false WHERE id='{OWNER_TM}'")
+        listed = {x["device_name"]: x for x in (await c.get("/api/v2/desktop/setups", headers=_person(PLAIN))).json()["setups"]}
+        assert (listed["d4424 laptop"]["confirmed_by_name"], listed["d4424 laptop"]["revoked_by_name"]) == (None, None)
 
     # AC6: who · which device · how many · when handed · when cut
     row = (await _sql(fetch=(

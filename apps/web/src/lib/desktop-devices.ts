@@ -12,7 +12,7 @@ export interface DesktopDevice {
   revoked_at: string | null;
   revoked_by_name?: string | null;
   active_keys: number;
-  members: { kind: 'agent' | 'human' }[];
+  members: { kind: 'agent' | 'human'; member_id?: string }[];
 }
 
 /** Only an org owner/admin reads the list and disconnects (the backend's gate); a member's page does not ask at all. */
@@ -20,9 +20,13 @@ export function canManageDevices(role: string | null | undefined): boolean {
   return role === 'owner' || role === 'admin';
 }
 
-/** The agents this setup made (the person's own human role is not counted). */
+/**
+ * The agents this setup made (the person's own human role is not counted). `members` has one entry per stage, so an agent
+ * holding four stages appears four times — count distinct members (Qadir 4830 ②).
+ */
 export function deviceAgentCount(device: DesktopDevice): number {
-  return device.members.filter((m) => m.kind === 'agent').length;
+  const agents = device.members.filter((m) => m.kind === 'agent');
+  return new Set(agents.map((m, i) => m.member_id ?? `stage-${i}`)).size;
 }
 
 /** A disconnected device has nothing left to disconnect. */
@@ -35,10 +39,34 @@ export function orderDevices(devices: readonly DesktopDevice[]): DesktopDevice[]
   return [...devices.filter((d) => d.state !== 'disconnected'), ...devices.filter((d) => d.state === 'disconnected')];
 }
 
-/** After «연결 끊기» answers: that device shows disconnected at once, by the person who pressed it (no refetch needed to be right). */
-export function markDisconnected(devices: readonly DesktopDevice[], setupId: string, at: string, byName: string | null): DesktopDevice[] {
+/** What «연결 끊기» answered: whether the device was already disconnected (another admin first), and the setup's own when · who. */
+export interface Revoked {
+  already: boolean;
+  revokedAt: string;
+  revokedByName: string | null;
+}
+
+/** The DELETE answer → Revoked; anything unreadable → null (the caller then reads the list again instead of guessing). */
+export async function readRevoked(res: Response): Promise<Revoked | null> {
+  try {
+    const body = (await res.json()) as { already_disconnected?: unknown; revoked_at?: unknown; revoked_by_name?: unknown };
+    if (typeof body.already_disconnected !== 'boolean' || typeof body.revoked_at !== 'string') return null;
+    return {
+      already: body.already_disconnected, revokedAt: body.revoked_at,
+      revokedByName: typeof body.revoked_by_name === 'string' ? body.revoked_by_name : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * After «연결 끊기» answers: that device shows disconnected at once, with the server's own when · who — the person who pressed
+ * only when this call was the one that disconnected it (Qadir 4830 ④: another admin first → that admin, not «you»).
+ */
+export function markDisconnected(devices: readonly DesktopDevice[], setupId: string, revoked: Revoked): DesktopDevice[] {
   return devices.map((d) => (d.setup_id === setupId
-    ? { ...d, state: 'disconnected', revoked_at: d.revoked_at ?? at, revoked_by_name: d.revoked_by_name ?? byName, active_keys: 0 }
+    ? { ...d, state: 'disconnected', revoked_at: revoked.revokedAt, revoked_by_name: revoked.revokedByName, active_keys: 0 }
     : d));
 }
 

@@ -593,8 +593,35 @@ async def _recipe_name(db: AsyncSession, setup: DesktopSetup) -> str | None:
     )).scalar_one_or_none()
 
 
-async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> int:
-    """«Disconnect this device»: every key this setup handed out, and only those. Returns how many were active."""
+@dataclass
+class Revoked:
+    """What «disconnect» did: the keys it revoked now, and whether the device was already disconnected before this call (another
+    admin first — Qadir 4830 · PO 05:48Z ④: the screen must not say «you disconnected it»). revoked_at / revoked_by are the
+    setup's own, whoever it was."""
+    keys: int
+    already: bool
+    revoked_at: datetime
+    revoked_by: uuid.UUID | None
+
+
+async def person_names(db: AsyncSession, org_id: uuid.UUID, user_ids: set) -> dict:
+    """user id → the person's name in this org, for «connected by» / «disconnected by». A removed member (is_active false —
+    Qadir 4830 ③) or a deleted row gives no name, so nobody who left is named as if still here."""
+    from app.models.member import Member
+
+    ids = {u for u in user_ids if u is not None}
+    if not ids:
+        return {}
+    return dict((await db.execute(
+        select(Member.user_id, Member.name).where(
+            Member.org_id == org_id, Member.type == "human", Member.user_id.in_(ids), Member.deleted_at.is_(None),
+            Member.is_active.is_(True),
+        )
+    )).all())
+
+
+async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> Revoked:
+    """«Disconnect this device»: every key this setup handed out, and only those."""
     from app.services.project_auth import is_org_owner_or_admin
 
     setup = (await db.execute(
@@ -609,11 +636,12 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
         .values(revoked_at=now).returning(ApiKey.id)
     )).scalars().all()
-    if setup.revoked_at is None:
+    already = setup.revoked_at is not None
+    if not already:
         setup.revoked_at = now
         setup.revoked_by = user_id
     await db.flush()
-    return len(revoked)
+    return Revoked(keys=len(revoked), already=already, revoked_at=setup.revoked_at, revoked_by=setup.revoked_by)
 
 
 def setup_state(setup: DesktopSetup, now: datetime | None = None) -> str:
@@ -644,15 +672,7 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         ).group_by(ApiKey.desktop_setup_id)
     )).all()) if rows else {}
     # story #4424 (Yuna's /desktop list) — «connected by {name}» · «disconnected by {name}»: the person's name in this org
-    from app.models.member import Member
-
-    people = {r.confirmed_by for r in rows} | {r.revoked_by for r in rows}
-    people.discard(None)
-    names = dict((await db.execute(
-        select(Member.user_id, Member.name).where(
-            Member.org_id == org_id, Member.type == "human", Member.user_id.in_(people), Member.deleted_at.is_(None),
-        )
-    )).all()) if people else {}
+    names = await person_names(db, org_id, {r.confirmed_by for r in rows} | {r.revoked_by for r in rows})
     now = _now()
     return [{
         "setup_id": r.id, "device_name": r.device_name, "state": setup_state(r, now), "project_id": r.project_id,
