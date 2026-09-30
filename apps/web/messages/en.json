@@ -5169,6 +5169,8 @@
     "blockedSenderMessagePlaceholder": "Message from a blocked user",
     "blockedSenderMessageReveal": "View",
     "blockedSenderMessageHide": "Hide",
+    "withheldDeliveryDm": "Not delivered — the recipient has chosen not to receive your messages",
+    "withheldDeliveryGroup": "Not delivered to {n, plural, one {# person} other {# people}} — they've chosen not to receive your messages",
     "blockUserConfirmTitle": "Block this user?",
     "blockUserConfirmDescription": "{name}'s messages will be hidden. Task assignments and notifications are unaffected. You can unblock anytime.",
     "blockUserConfirmCancel": "Cancel",

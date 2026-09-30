@@ -60,6 +60,8 @@ export interface ChatMessage {
    * "판단 재료 없음"(이 필드를 안 주는 경로)이라 마스킹을 보류한다 — false로 기본값을 주면
    * "차단 여부 모름"이 "차단 안 함"으로 뭉개진다. */
   is_blocked_sender?: boolean;
+  // story #4430 — participants a block kept this message from (a count, never who) · sent by the server to the sender only
+  delivery_withheld?: DeliveryWithheld;
   /** story #2604 P2 — BE(#3007)가 msg_metadata['approval_target']를 payload top-level에
    * additive로 노출(`_approval_payload`, `_activation_payload`와 동형). 있으면 결재 카드를
    * 렌더한다 — 없으면(구 메시지·approval_target 없는 일반 메시지) 항상 `null`(옛 서버는 키
@@ -122,6 +124,33 @@ export interface ChatMessage {
   } | null;
 }
 
+/** story #4430 — how many participants a block kept a message from, and the room's kind (from who is in it). */
+export interface DeliveryWithheld {
+  withheld_count: number;
+  conversation_type?: 'dm' | 'group';
+}
+
+/** A positive integer count or nothing — anything else from the wire is treated as «nothing withheld». */
+export function parseDeliveryWithheld(v: unknown): DeliveryWithheld | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const o = v as { withheld_count?: unknown; conversation_type?: unknown };
+  const n = o.withheld_count;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return undefined;
+  const kind = o.conversation_type === 'dm' || o.conversation_type === 'group' ? o.conversation_type : undefined;
+  return kind ? { withheld_count: n, conversation_type: kind } : { withheld_count: n };
+}
+
+/**
+ * story #4430 — the message from a send answer: `{data, delivery?}` (`delivery` is a sibling of `data`, like `command_gate`).
+ * The sender's own line gets the same `delivery_withheld` a later read would give it — without this the mark would only
+ * appear after a reload (a quiet success right when it matters).
+ */
+export function sentMessageFromAnswer(raw: Record<string, unknown>): ChatMessage {
+  const payload = (raw.data ?? raw) as Record<string, unknown>;
+  const delivery = parseDeliveryWithheld(raw.delivery);
+  return normalizeToMessage(delivery ? { ...payload, delivery_withheld: delivery } : payload);
+}
+
 // Normalize backend _to_chat_message format → ChatMessage
 export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
   const sender = raw.sender as { id?: string; name?: string; type?: string; avatar_url?: string | null; runtime_type?: string | null } | undefined;
@@ -148,6 +177,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     references: Array.isArray(raw.references) ? raw.references as ChatMessage['references'] : undefined,
     // story #2349 — references와 동일 규율: 키 부재(undefined)와 false를 구분한다.
     is_blocked_sender: typeof raw.is_blocked_sender === 'boolean' ? raw.is_blocked_sender : undefined,
+    // story #4430 — kept, not dropped with the other unknown fields (a dropped field would be a quiet success again)
+    delivery_withheld: parseDeliveryWithheld(raw.delivery_withheld),
     // story #2604 P2 — BE가 top-level에 항상 키를 싣진 않는 경로(구 메시지 등)도 있어 `?? null`.
     approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
     // story #2637 AC0-a — approval_target과 동일 규율.

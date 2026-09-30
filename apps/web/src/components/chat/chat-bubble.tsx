@@ -29,6 +29,7 @@ import { Avatar } from '@/components/shared/avatar';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { IntentSuggestionCard } from './intent-suggestion-card';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
+import { WithheldDeliveryLine } from './withheld-delivery-line';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard, type CardState } from './approval-request-card';
 import { EventBlockCard } from './event-block-card';
@@ -724,6 +725,9 @@ export function ChatBubble({
               )}
             </div>
           )}
+
+          {/* story #4430 — right under the sender's own bubble, above the suggestion/reference rows */}
+          {!isDeleted && <WithheldDeliveryLine withheld={message.delivery_withheld} isMine={isMine} />}
 
           {/* story #2349(유나 design:changes) — "보기"로 펼친 뒤 되돌릴 문턱이 없으면
               "이걸 누르면 계속 보이나?"가 걸려 아예 안 누르게 된다(가리기+확認 가능을 둘 다

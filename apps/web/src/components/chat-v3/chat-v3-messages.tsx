@@ -10,9 +10,10 @@ import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { actorRowLabels } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
+import { WithheldDeliveryLine } from '@/components/chat/withheld-delivery-line';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import { seedFromCompose } from './chat-v3-compose';
-import { normalizeToMessage, type ChatMessage } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, sentMessageFromAnswer, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 // story #4008 CHANGES 2(PO 지적, 2026-09-17) — 이 컴포넌트가 chat-v3-screen.tsx와 각자
@@ -214,8 +215,10 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
     setSending(false);
     if (res.ok) {
       setDraft('');
-      const json = (await res.json().catch(() => null)) as { data?: ChatMessage } | null;
-      if (json?.data) addMessage(json.data);
+      // story #4430 — through the same normalizer as every other path (the raw `data` skipped it), with the send answer's
+      // `delivery` on the sender's own line
+      const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (json?.data) addMessage(sentMessageFromAnswer(json));
     }
   };
 
@@ -260,6 +263,8 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
                   >
                     {m.content}
                   </Card>
+                  {/* story #4430 — right under the sender's own bubble, above the reference and approval cards */}
+                  <WithheldDeliveryLine withheld={m.delivery_withheld} isMine={isMine} />
                   {(m.references ?? []).map((ref) => (
                     <div key={`${ref.target_type}-${ref.target_id}`} className="mt-1.5">
                       <EmbedCard entity_type={ref.target_type} entity_id={ref.target_id} title={null} status={null} />
