@@ -2996,19 +2996,21 @@ async def send_message_core(
     # break the blocker's quiet). Kept on the sent line (metadata) for the sender's later reads, and in the send answer.
     withheld_delivery: dict | None = None
     if user_blocker_ids:
-        _withheld_n = len(set((await db.execute(
+        _others = set((await db.execute(
             select(ConversationParticipant.member_id).where(
                 ConversationParticipant.conversation_id == conv.id,
-                ConversationParticipant.member_id.in_(user_blocker_ids),
                 ConversationParticipant.member_id != sender.id,
             )
-        )).scalars().all()))
+        )).scalars().all())
+        _withheld_n = len(_others & user_blocker_ids)
         if _withheld_n:
             # the room's kind lets the sender's tools word it right (a 1:1 «the recipient» vs a group count) — the sender
-            # already knows it, so it tells nothing about who blocked (PO 16:49Z)
+            # already knows it, so it tells nothing about who blocked (PO 16:49Z). Counted from the participants, not the
+            # room's `type` column: a room typed "dm" can hold three or more people, and «the recipient» would be untrue
+            # there (PO 17:18Z).
             withheld_delivery = {
                 "withheld_count": _withheld_n, "reason": DELIVERY_WITHHELD_REASON_BLOCKED,
-                "conversation_type": "dm" if conv.type == "dm" else "group",
+                "conversation_type": "dm" if len(_others) == 1 else "group",
             }
             msg.msg_metadata = {**(msg.msg_metadata or {}), DELIVERY_WITHHELD_KEY: withheld_delivery}
 

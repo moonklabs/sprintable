@@ -207,28 +207,56 @@ async def test_in_a_group_the_sender_gets_a_count_never_who():
 
 
 async def test_someone_outside_the_conversation_who_blocked_the_sender_is_not_counted():
-    """The count is about this conversation: a member elsewhere in the org who also blocked the sender was never going to
-    receive this message, so it does not add to «did not arrive»."""
+    """The count is about this conversation. A member who blocked the sender but sits only in *another* conversation with
+    them was never going to receive this message — it adds nothing (PO 17:18Z: the first version of this test put the
+    outsider in no conversation at all, so dropping the «this conversation» condition still passed)."""
     engine, Session = await _session_factory()
     try:
-        org_id, conv_id, (_blocker_id, blocker_user), (sender_id, sender_user) = await _one_to_one(Session)
         async with Session() as session:
-            from app.models.conversation import Conversation
-
-            project_id = (await session.get(Conversation, conv_id)).project_id
-            _outsider_id, outsider_user = await _make_human_member(session, org_id, project_id)
+            org = await _make_org(session)
+            project = await _make_project(session, org.id)
+            member_id, _member_user = await _make_human_member(session, org.id, project.id)
+            outsider_id, outsider_user = await _make_human_member(session, org.id, project.id)
+            sender_id, sender_user = await _make_human_member(session, org.id, project.id)
+            conv_id = await _make_conversation(session, org.id, project.id, [member_id, sender_id], sender_id)
+            # the outsider shares another conversation with the sender — a participant row that is not this one
+            await _make_conversation(session, org.id, project.id, [outsider_id, sender_id], sender_id)
         from app.main import app
 
-        for user in (blocker_user, outsider_user):
-            r = await _as(app, Session, user, org_id,
-                          lambda c: c.post("/api/v2/user-blocks", json={"blocked_member_id": str(sender_id)}))
-            assert r.status_code == 201, r.text
-        sent = await _as(app, Session, sender_user, org_id,
+        r = await _as(app, Session, outsider_user, org.id,
+                      lambda c: c.post("/api/v2/user-blocks", json={"blocked_member_id": str(sender_id)}))
+        assert r.status_code == 201, r.text
+        sent = await _as(app, Session, sender_user, org.id,
                          lambda c: c.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": "hi again"}))
-        assert sent.json().get("delivery") == _withheld(1), sent.json()
+        assert sent.status_code == 201, sent.text
+        assert "delivery" not in sent.json(), sent.json()  # withheld_count 0 → no field
     finally:
         await engine.dispose()
 
+
+async def test_a_room_typed_dm_with_three_people_is_worded_as_a_group():
+    """`conversation_type` comes from who is in the room, not the `type` column: a room typed "dm" can hold three or more
+    people, and «the recipient» would be untrue there (PO 17:18Z)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as session:
+            org = await _make_org(session)
+            project = await _make_project(session, org.id)
+            blocker_id, blocker_user = await _make_human_member(session, org.id, project.id)
+            other_id, _ = await _make_human_member(session, org.id, project.id)
+            sender_id, sender_user = await _make_human_member(session, org.id, project.id)
+            conv_id = await _make_conversation(
+                session, org.id, project.id, [blocker_id, other_id, sender_id], sender_id, conv_type="dm",
+            )
+        from app.main import app
+
+        await _as(app, Session, blocker_user, org.id,
+                  lambda c: c.post("/api/v2/user-blocks", json={"blocked_member_id": str(sender_id)}))
+        sent = await _as(app, Session, sender_user, org.id,
+                         lambda c: c.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": "three of us"}))
+        assert sent.json().get("delivery") == _withheld(1, "group"), sent.json()
+    finally:
+        await engine.dispose()
 
 async def test_a_reply_in_a_thread_carries_the_mark_on_the_replies_read_too():
     """The third read path (replies) — the sent line's mark is loaded and shown to the sender there as well; a read path
