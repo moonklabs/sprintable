@@ -3,8 +3,10 @@
 // story #4443 — one screen, one time zone: the viewer's. Kadir's second line: «연결된 기기» said «9월 30일» (next-intl had no
 // zone, so the server's UTC) while the chat beside it said «오전 07:32» (the browser's). Live RED on dev c1eae9842, 2026-09-30
 // 22:39Z, a browser in Asia/Seoul: five device rows disconnected between 22:09Z and 22:32Z read «9월 30일» (KST: 10월 1일).
-// Every case here pins its zones (the runtime's own is mocked) — this Mac runs in KST and CI in UTC.
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// Every case here pins its zones (the runtime's own is mocked) — this Mac runs in KST and CI in UTC. The process zone is pinned
+// to UTC for this file too (PO 22:55Z): a server render reads the process zone, and on a KST machine the old code's «today»
+// looked right by accident — pinned, it is RED on develop wherever it runs.
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
@@ -41,6 +43,15 @@ function page(node: React.ReactNode, serverTimeZone: string | null) {
   );
 }
 
+let processTz: string | undefined;
+beforeAll(() => {
+  processTz = process.env.TZ;
+  process.env.TZ = 'UTC'; // Node re-reads it: Date and Intl's default zone follow (checked by the first test below)
+});
+afterAll(() => {
+  if (processTz === undefined) delete process.env.TZ; else process.env.TZ = processTz;
+});
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -59,6 +70,11 @@ afterEach(async () => {
 });
 
 describe('[SID:4443] the viewer\'s zone — the rule', () => {
+  it('this file runs in a UTC process whatever the machine (a server render\'s zone)', () => {
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe('UTC');
+    expect(new Date('2026-09-30T22:39:00Z').getDate()).toBe(30);
+  });
+
   it('only a real IANA zone passes (canonical name) · anything else is null', () => {
     expect(validTimeZone('Asia/Seoul')).toBe('Asia/Seoul');
     expect(validTimeZone('America/Argentina/Buenos_Aires')).not.toBeNull(); // three parts pass the shape (ICU may give its canonical alias)
