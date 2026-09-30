@@ -13,6 +13,8 @@ import { disambiguateFallbackLabels, memberNameById } from '@/lib/member-display
 interface UserBlockRow {
   blocked_member_id: string;
   created_at: string;
+  // story #4444 — the list's own name for the person (this org only · null when none); absent from an older server
+  blocked_member_name?: string | null;
 }
 
 // story #2349 — 「차단한 사용자 목록」. 0명이면 절 자체를 안 그린다(PO 규격, standup-history-
@@ -26,16 +28,25 @@ export function BlockedUsersSection() {
   // id를 이름 자리에 넣어 원시 UUID가 보였다.
   const [memberMap, setMemberMap] = useState<Record<string, { name: string | null }>>({});
   const [loading, setLoading] = useState(true);
+  // story #4444 — a failed read is said as such (it used to render nothing, which looks like «no one blocked»)
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const fetchBlocks = useCallback(async () => {
+    setLoadFailed(false);
     try {
       const res = await fetchWithAuth('/api/user-blocks', { cache: 'no-store' });
-      if (!res.ok) return;
+      if (!res.ok) { setLoadFailed(true); return; }
       const json = await res.json() as { data?: UserBlockRow[] };
       const list = json.data ?? [];
       setRows(list);
-      const missing = list.map((r) => r.blocked_member_id).filter((id) => !(id in memberMap));
+      // story #4444 — the list carries the name (a person without a project row has no team-member route to read it from);
+      // only rows without it (an older server) are looked up one by one
+      const named = list.filter((r) => r.blocked_member_name !== undefined);
+      if (named.length > 0) {
+        setMemberMap((prev) => ({ ...prev, ...Object.fromEntries(named.map((r) => [r.blocked_member_id, { name: r.blocked_member_name ?? null }])) }));
+      }
+      const missing = list.filter((r) => r.blocked_member_name === undefined).map((r) => r.blocked_member_id).filter((id) => !(id in memberMap));
       if (missing.length > 0) {
         const entries = await Promise.all(missing.map(async (id) => {
           try {
@@ -49,6 +60,8 @@ export function BlockedUsersSection() {
         }));
         setMemberMap((prev) => ({ ...prev, ...Object.fromEntries(entries.filter((e) => e !== null)) }));
       }
+    } catch {
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -71,7 +84,26 @@ export function BlockedUsersSection() {
     }
   }, [addToast, t]);
 
-  if (loading || rows.length === 0) return null;
+  if (loading) return null;
+  if (loadFailed) {
+    return (
+      <SectionCard>
+        <SectionCardHeader>
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-foreground">{t('blockedUsersTitle')}</h2>
+            <p className="text-sm text-muted-foreground">{t('blockedUsersSubtitle')}</p>
+          </div>
+        </SectionCardHeader>
+        <SectionCardBody>
+          <p className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="blocked-users-load-failed">
+            {t('blockedUsersLoadFailed')}
+            <Button variant="outline" size="sm" onClick={() => void fetchBlocks()}>{tc('retry')}</Button>
+          </p>
+        </SectionCardBody>
+      </SectionCard>
+    );
+  }
+  if (rows.length === 0) return null;
 
   // 목록 행이라 같은 폴백 글자가 서로 다른 사람 둘 이상이면 그 행에만 «· ID 앞 8자»(꼬리 규칙 한 곳 · tailSharedFallbacks).
   const rowLabels = disambiguateFallbackLabels(rows.map((row) => ({

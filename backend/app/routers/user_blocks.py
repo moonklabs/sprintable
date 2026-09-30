@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.project import OrgMember
 from app.models.team import TeamMember
+from app.models.user import User
 from app.models.user_block import UserBlock
 from app.routers.conversations import _resolve_member
 from app.schemas.user_block import CreateUserBlock, UserBlockResponse
@@ -18,14 +20,33 @@ from app.schemas.user_block import CreateUserBlock, UserBlockResponse
 router = APIRouter(prefix="/api/v2/user-blocks", tags=["user-blocks", "Conversations"])
 
 
-async def _caller_team_member_id(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> uuid.UUID:
-    """차단 기능은 team_members.id 축이라 grant-only 휴먼(team_member 행 없음)은 아직 못 쓴다 —
-    이미 대화에 참가 중인 caller는 참가 자체가 team_members.id 키잉이라 실제로는 항상 있다
-    (block은 이미 메시지를 받은 상대에 대해서만 의미가 있는 동작이라 이 경계가 자연스럽다)."""
-    resolved = await _resolve_member(auth, org_id, db)
-    if not isinstance(resolved, TeamMember):
-        raise HTTPException(status_code=400, detail="team member required to use blocking")
-    return resolved.id
+async def _caller_member_id(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> uuid.UUID:
+    """story #4444 (PO 23:00Z) — anyone who can be in a conversation can block: a team-member row, or else a membership of
+    this org (a grant-only person, e.g. an org owner without a project row). The key is the same value either way —
+    a person's team-member id is their org-membership id (0075) — so no row changes."""
+    return (await _resolve_member(auth, org_id, db)).id
+
+
+async def _in_org_members(db: AsyncSession, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+    """story #4444 — of these members, the ones still in this org, with the name to show: a team-member row here (agents ·
+    people with a project row) and its name, or else a membership of this org that is not deleted (#4437's two steps) and
+    the person's display name. Someone who left, or of another org, is out. Never an email, never a made-up name (#3755)."""
+    if not member_ids:
+        return {}
+    found: dict[uuid.UUID, str | None] = {}
+    for mid, name in (await db.execute(
+        select(TeamMember.id, TeamMember.name).where(TeamMember.id.in_(member_ids), TeamMember.org_id == org_id)
+        .order_by(TeamMember.project_id)  # a person with several project rows: one, the same way every time
+    )).all():
+        found.setdefault(mid, name)
+    rest = member_ids - found.keys()
+    if rest:
+        for mid, name in (await db.execute(
+            select(OrgMember.id, User.display_name).outerjoin(User, User.id == OrgMember.user_id)
+            .where(OrgMember.id.in_(rest), OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None))
+        )).all():
+            found[mid] = name
+    return found
 
 
 @router.post("", response_model=UserBlockResponse, status_code=201)
@@ -35,18 +56,12 @@ async def create_user_block(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> UserBlockResponse:
-    blocker_id = await _caller_team_member_id(auth, org_id, db)
+    blocker_id = await _caller_member_id(auth, org_id, db)
     if body.blocked_member_id == blocker_id:
         raise HTTPException(status_code=400, detail="cannot block yourself")
-    # 대상이 같은 org 소속인지 확認(cross-org 참조 차단 — IDOR). team_members는 VIEW라 멀티
-    # 프로젝트 멤버는 project별 여러 행으로 투영된다 — limit(1)(존재 여부만 필요, scalar_one_or_none
-    # 쓰면 MultipleResultsFound로 500난다).
-    target = (await db.execute(
-        select(TeamMember.id)
-        .where(TeamMember.id == body.blocked_member_id, TeamMember.org_id == org_id)
-        .limit(1)
-    )).scalar_one_or_none()
-    if target is None:
+    # 대상이 같은 org 소속인지 확認(cross-org 참조 차단 — IDOR). story #4444 — a person without a project row counts too
+    # (the same two steps); someone who left the org does not.
+    if not await _in_org_members(db, org_id, {body.blocked_member_id}):
         raise HTTPException(status_code=404, detail="member not found")
     existing = (await db.execute(
         select(UserBlock).where(
@@ -70,7 +85,7 @@ async def delete_user_block(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> None:
-    blocker_id = await _caller_team_member_id(auth, org_id, db)
+    blocker_id = await _caller_member_id(auth, org_id, db)
     await db.execute(
         delete(UserBlock).where(
             UserBlock.blocker_member_id == blocker_id,
@@ -91,11 +106,12 @@ async def list_user_blocks(
     # 거른다 — «지금 org에 실존하는» member만 내준다(①, PO 선택). 고아 행 자체는 남는다(명시).
     # team_members는 VIEW라 멀티프로젝트 멤버가 여러 행(project별)으로 투영된다 — join 후
     # distinct 없으면 UserBlock이 그 project 수만큼 중복 반환된다.
-    blocker_id = await _caller_team_member_id(auth, org_id, db)
-    rows = (await db.execute(
-        select(UserBlock)
-        .join(TeamMember, TeamMember.id == UserBlock.blocked_member_id)
-        .where(UserBlock.blocker_member_id == blocker_id, TeamMember.org_id == org_id)
-        .distinct()
-    )).scalars().all()
-    return [UserBlockResponse.model_validate(r) for r in rows]
+    # story #4444 — «지금 org에 실존» is the two steps now: a person who lost project access but is still in the org stays
+    # listed (they can still talk); someone who left the org is hidden (their row stays).
+    blocker_id = await _caller_member_id(auth, org_id, db)
+    rows = (await db.execute(select(UserBlock).where(UserBlock.blocker_member_id == blocker_id))).scalars().all()
+    present = await _in_org_members(db, org_id, {r.blocked_member_id for r in rows})
+    return [
+        UserBlockResponse.model_validate(r).model_copy(update={"blocked_member_name": present[r.blocked_member_id]})
+        for r in rows if r.blocked_member_id in present
+    ]

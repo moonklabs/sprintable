@@ -41,11 +41,58 @@ describe('BlockedUsersSection', () => {
     expect(container.textContent).toBe('');
   });
 
-  it('목록 fetch 실패면 아무것도 안 그린다(loading이 안 풀려도 조용히 실패)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+  // story #4444 — a failed read used to render nothing, which looks exactly like «no one blocked» (Yuna 23:01Z): the section
+  // now says it could not load, with «다시 시도» reading again (the same shape as the devices list's loadFailed).
+  it('⭐#4444 — 목록 읽기 실패면 «차단 목록을 불러오지 못했어요» + [다시 시도] — 누르면 다시 읽어 목록이 뜬다', async () => {
+    let fail = true;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/user-blocks') {
+        if (fail) return { ok: false, status: 500, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: [{ blocked_member_id: 'member-9', blocked_member_name: '까심', created_at: '2026-08-02T00:00:00Z' }] }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
     await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
-    await act(async () => { await Promise.resolve(); });
-    expect(container.textContent).toBe('');
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('차단한 사용자 목록');
+    expect(container.querySelector('[data-testid="blocked-users-load-failed"]')?.textContent).toContain('차단 목록을 불러오지 못했어요');
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도');
+    expect(retry).toBeDefined();
+    fail = false;
+    await act(async () => { retry!.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="blocked-users-load-failed"]')).toBeNull();
+    expect(container.textContent).toContain('까심');
+  });
+
+  it('⭐#4444 — 네트워크 실패(던짐)도 같은 줄 — 조용한 빈 목록 아님', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="blocked-users-load-failed"]')?.textContent).toContain('차단 목록을 불러오지 못했어요');
+  });
+
+  // story #4444 (PO 23:05Z) — the list carries the name now (a person without a project row has no team-member route to
+  // read it from): the row uses it and asks nothing else; a null name is a known person without one — «이름 없는 구성원»
+  // (the #4286 rule), never the id.
+  it('⭐#4444 — 목록의 blocked_member_name을 쓴다(따로 이름 조회 0) · null이면 «이름 없는 구성원»', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/user-blocks') {
+        return { ok: true, json: async () => ({ data: [
+          { blocked_member_id: 'org-person-1', blocked_member_name: '김하나', created_at: '2026-10-01T00:00:00Z' },
+          { blocked_member_id: 'org-person-2', blocked_member_name: null, created_at: '2026-10-01T00:00:00Z' },
+        ] }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('김하나');
+    expect(container.textContent).toContain(koMessages.common.memberUnnamed);
+    expect(container.textContent).not.toContain('org-person-2');
+    expect(fetchMock.mock.calls.map((c) => c[0]).filter((u) => String(u).startsWith('/api/team-members/'))).toEqual([]);
   });
 
   it('1건 이상이면 절이 뜨고 이름을 resolve해 보여준다', async () => {

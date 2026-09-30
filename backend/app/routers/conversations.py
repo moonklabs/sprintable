@@ -775,15 +775,15 @@ async def _viewer_blocked_sender_ids(
     """story #2349 — 읽기 경로 전용. viewer(현재 caller)가 차단한 member_id 집합 + viewer 자신의 member id(story #4430 —
     보낸 사람에게만 보이는 `delivery_withheld`용 · 못 풀면 None).
 
-    grant-only 휴먼(team_member 행 없음)은 차단 기능을 아직 못 쓴다(user_blocks.py의 동일
-    경계) — 여기서는 read 경로가 안 깨지게 빈 집합으로 조용히 폴백한다(차단 0건과 동치).
+    story #4444 — a grant-only person (no team-member row) can block now too, so their blocks mask as well: the key is
+    their member id either way.
     """
     resolved = await _resolve_member(auth, org_id, db)
     viewer_id = getattr(resolved, "id", None)
-    if not isinstance(resolved, TeamMember):
-        return set(), viewer_id
+    if viewer_id is None:
+        return set(), None
     rows = (await db.execute(
-        select(UserBlock.blocked_member_id).where(UserBlock.blocker_member_id == resolved.id)
+        select(UserBlock.blocked_member_id).where(UserBlock.blocker_member_id == viewer_id)
     )).scalars().all()
     return set(rows), viewer_id
 

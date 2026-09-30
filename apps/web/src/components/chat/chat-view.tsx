@@ -147,6 +147,17 @@ export function agentNotConnectedBannerText(
   return tChats('agentNotConnectedBanner', { name: p.name, josa: pickIGaJosa(p.name) });
 }
 
+/**
+ * story #4444 (Yuna 23:01Z) — the failed-block toast body says the cause. «다시 시도해 주세요» only where retrying can work (a
+ * server error, a timeout, too many requests; a network failure is handled by the caller); 404 = the person is no longer in
+ * this org; any other refusal = they can't be blocked.
+ */
+export function blockFailureBodyKey(status: number): 'blockUserErrorBody' | 'blockUserErrorBodyGone' | 'blockUserErrorBodyCannot' {
+  if (status === 404) return 'blockUserErrorBodyGone';
+  if (status >= 500 || status === 408 || status === 429) return 'blockUserErrorBody';
+  return 'blockUserErrorBodyCannot';
+}
+
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
@@ -629,7 +640,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         body: JSON.stringify({ blocked_member_id: blockConfirmTarget.memberId }),
       });
       if (!res.ok) {
-        addToast({ type: 'error', title: t('blockUserErrorTitle'), body: t('blockUserErrorBody') });
+        addToast({ type: 'error', title: t('blockUserErrorTitle'), body: t(blockFailureBodyKey(res.status)) });
         return;
       }
       setBlockedMemberIds((prev) => new Set(prev).add(blockConfirmTarget.memberId));

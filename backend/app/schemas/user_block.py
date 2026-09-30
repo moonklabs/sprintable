@@ -17,3 +17,6 @@ class UserBlockResponse(BaseModel):
     blocker_member_id: uuid.UUID
     blocked_member_id: uuid.UUID
     created_at: datetime
+    # story #4444 — the list's name for the blocked person (this org only · null when none · never an email). Create answers
+    # leave it out.
+    blocked_member_name: str | None = None
