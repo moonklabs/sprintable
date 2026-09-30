@@ -1,18 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Check, Circle, Info, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
-import { pickEulReulJosa } from '@/lib/korean-particle';
+import { pickEulReulJosa, pickEunNeunJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { presetName } from '@/lib/platform-preset-copy';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { forgetActiveSetup, rememberActiveSetup, setupProgress, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepState } from '@/lib/desktop-setup';
+import { endsWithAgentWord, forgetActiveSetup, rememberActiveSetup, setupProgress, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepState } from '@/lib/desktop-setup';
 import { Failure, ToolsNotConnected } from './desktop-setup';
 
 /**
@@ -21,6 +21,7 @@ import { Failure, ToolsNotConnected } from './desktop-setup';
  */
 export function SetupProgressView({ setupId, recipeName }: { setupId: string | null; recipeName: string }) {
   const t = useTranslations('desktop.setup');
+  const locale = useLocale();
   const tOrg = useTranslations('organization');
   const tPreset = useTranslations('recipePreset');
   const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
@@ -68,6 +69,14 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   if (progress.notConnected) return <ToolsNotConnected onRetry={() => void poll()} claude={claude} />;
 
   const role = (r: string) => stageRoleLabel(r, tOrg);
+  // roles shown as one group, and whether «에이전트» / «agent» is added after them: a name that already ends in it gets none
+  // (the last one decides — Yuna v29), and the Korean particle follows the name then
+  const roleGroup = (roles: string[]) => {
+    // judged and drawn by the same trimmed name (a trailing space would read «에이전트 가» — Kadir · PO 16:31Z)
+    const names = roles.map((r) => role(r).trim());
+    const last = names.at(-1) ?? '';
+    return { text: names.join(' · '), last, bare: endsWithAgentWord(last, locale), count: names.length };
+  };
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
   // one name in one flow (PO 10:39Z ①): the recipe as the list names it — a platform preset by its translation, not the stored
   // name — from the server's recipe (also when the page is opened again without the list's name)
@@ -88,9 +97,12 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
       <ol className="flex flex-col gap-3" aria-live="polite">
         {/* a later step done → the earlier one is drawn done (Yuna 12:22Z): ② proves the receiving agent was ready; the pairs line
             stays for when every agent is really ready, and the others still getting ready are ①'s own detail (not a list item) */}
-        <Step state={progress.readyDrawn} label={progress.readyDrawn === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
+        <Step state={progress.readyDrawn} paused={progress.readyPaused} label={progress.readyDrawn === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
           detail={progress.ready === 'done' ? progress.pairs.map((p) => `${role(p.role)} · ${RUNTIME[p.runtime]}`).join(', ')
-            : progress.stillPreparing.length > 0 ? t('stillPreparing', { roles: progress.stillPreparing.map(role).join(' · '), count: progress.stillPreparing.length }) : null}
+            : progress.stillPreparing.length > 0 ? (() => {
+              const g = roleGroup(progress.stillPreparing);
+              return g.bare ? t('stillPreparingBare', { roles: g.text, josa: pickEunNeunJosa(g.last), count: g.count }) : t('stillPreparing', { roles: g.text, count: g.count });
+            })() : null}
           detailTestId={progress.ready !== 'done' && progress.stillPreparing.length > 0 ? 'setup-still-preparing' : undefined}>
           {/* the notes belong to their step's list item (same place on screen: the step's text column is 28px in) — never a list
               item of their own, so a screen reader counts three steps */}
@@ -100,23 +112,29 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
             </span>
           ) : null}
         </Step>
-        <Step state={progress.handed} label={progress.handed === 'done' ? t('stepHandedDone') : t('stepHandedRunning')}
+        <Step state={progress.handed} paused={progress.handedPaused} label={progress.handed === 'done' ? t('stepHandedDone') : t('stepHandedRunning')}
           detail={progress.handed === 'running' && task && progress.firstAgentRole
-            ? t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: role(progress.firstAgentRole) }) : null}>
+            ? (() => {
+              const r = role(progress.firstAgentRole).trim();
+              return endsWithAgentWord(r, locale) ? t('stepHandedDetailBare', { task, josa: pickEulReulJosa(task), role: r }) : t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: r });
+            })() : null}>
           {progress.trustHint && claude ? (
             <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
               <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
             </span>
           ) : null}
         </Step>
-        {/* while an agent is stopped, ③ does not spin — nothing is moving (Yuna v26) */}
+        {/* while an agent is stopped, ③ does not spin — nothing is moving (Yuna v26); ① · ② likewise when all they wait for stopped (v29) */}
         <Step state={progress.result} paused={!!progress.stopped} label={progress.result === 'done' ? t('stepResultDone') : t('stepResultRunning')} detail={null} />
       </ol>
       {progress.stopped ? (
         // story 4433 (Yuna v26): one block under the steps, above «결과 보기» · the roles on one line · body colour (there is
         // something to do), never red (the cause can be a person's own choice) · no cause guessed: «멈췄어요» covers both
         <div className="flex flex-col gap-1 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-stopped">
-          <p>{t('stopped', { roles: progress.stopped.roles.map(role).join(' · '), count: progress.stopped.roles.length })}</p>
+          <p>{(() => {
+            const g = roleGroup(progress.stopped.roles);
+            return g.bare ? t('stoppedBare', { roles: g.text, josa: pickIGaJosa(g.last), count: g.count }) : t('stopped', { roles: g.text, count: g.count });
+          })()}</p>
           {progress.stopped.claude ? <p>{t('stoppedTrust')}</p> : null}
         </div>
       ) : null}

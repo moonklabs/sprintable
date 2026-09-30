@@ -6,6 +6,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 const { ctx, sp } = vi.hoisted(() => ({ ctx: vi.fn(), sp: { value: null as URLSearchParams | null } }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
@@ -593,6 +594,81 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     await tick(2_000);
     expect(container.querySelector('[data-testid=setup-still-preparing]')).toBeNull();
     expect(first()?.textContent).toContain('조사 · Claude Code, 작성 · Codex');
+  });
+
+  // Yuna v29 · PO 15:59Z: a role name already ending in «에이전트» (ko) · «agent» / «에이전트» (en) gets no second one — the stopped
+  // block · ②'s detail · the «still getting ready» line alike; the particle follows the name then
+  it('[SID:4433] «에이전트» is not added twice: stopped block · ② detail · still-getting-ready line × role names × ko/en', async () => {
+    const one = (name: string, sig: Record<string, unknown>) => ({ ...status('handed_over'), members: [{ stage: 'a', role: name, member_id: 'm1', kind: 'agent', runtime: 'claude' }], signals: { ...status('handed_over').signals, ...sig } });
+    const two = (name: string) => ({ ...status('handed_over'), members: [{ stage: 'a', role: '조사', member_id: 'm0', kind: 'agent', runtime: 'claude' }, { stage: 'b', role: name, member_id: 'm1', kind: 'agent', runtime: 'codex' }],
+      signals: { ...status('handed_over').signals, tools_connected: [{ member_id: 'm0', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' } });
+    const ended = [{ member_id: 'm1', at: '2026-09-30T12:00:05Z', runtime: 'claude', exit_code: 1, restarted_at: null }];
+    const cases: [locale: 'ko' | 'en', name: string, stopped: string, handed: string, still: string][] = [
+      ['ko', '에이전트', '에이전트가 멈췄어요 — ', '«마케팅 루프»를 에이전트에게 건네는 중이에요', '에이전트는 아직 준비하고 있어요'],
+      ['ko', '블로그 에이전트', '블로그 에이전트가 멈췄어요 — ', '«마케팅 루프»를 블로그 에이전트에게 건네는 중이에요', '블로그 에이전트는 아직 준비하고 있어요'],
+      ['ko', 'Writer', 'Writer 에이전트가 멈췄어요 — ', '«마케팅 루프»를 Writer 에이전트에게 건네는 중이에요', 'Writer 에이전트는 아직 준비하고 있어요'],
+      ['en', '에이전트', '에이전트 stopped — ', 'Handing «마케팅 루프» to 에이전트', '에이전트 is still getting ready'],
+      ['en', 'Research Agent', 'Research Agent stopped — ', 'Handing «마케팅 루프» to Research Agent', 'Research Agent is still getting ready'],
+      ['en', 'Writer', 'The Writer agent stopped — ', 'Handing «마케팅 루프» to the Writer agent', 'The Writer agent is still getting ready'],
+    ];
+    ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
+    stub(() => new Response('{}', { status: 200 }));
+    for (const [locale, name, stopped, handed, still] of cases) {
+      const render = async (st: unknown) => {
+        statusNow = () => st as ReturnType<typeof status>;
+        await act(async () => { root.unmount(); });
+        root = createRoot(container);
+        await act(async () => { root.render(<NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><SetupProgressView setupId={SETUP_ID} recipeName="" /></NextIntlClientProvider>); });
+        await tick(0);
+      };
+      await render(one(name, { agents_ended: ended }));
+      expect(container.querySelector('[data-testid=setup-agent-stopped] p')?.textContent?.startsWith(stopped), `${locale} ${name} stopped: ${container.querySelector('[data-testid=setup-agent-stopped] p')?.textContent}`).toBe(true);
+      await render(one(name, {}));
+      expect(text(), `${locale} ${name} handed`).toContain(handed);
+      await render(two(name));
+      expect(container.querySelector('[data-testid=setup-still-preparing]')?.textContent, `${locale} ${name} still`).toBe(still);
+    }
+  });
+
+  // PO 16:31Z (Kadir): the LAST role of a group decides, and a name with a trailing space is judged and drawn trimmed
+  it('[SID:4433] a group: the last role decides «에이전트» · a trailing space is trimmed for the check and the words (ko/en)', async () => {
+    const stoppedTwo = (a: string, b: string) => ({ ...status('handed_over'), members: [{ stage: 'a', role: a, member_id: 'm1', kind: 'agent', runtime: 'codex' }, { stage: 'b', role: b, member_id: 'm2', kind: 'agent', runtime: 'codex' }],
+      signals: { ...status('handed_over').signals, agents_ended: ['m1', 'm2'].map((id) => ({ member_id: id, at: '2026-09-30T12:00:05Z', runtime: 'codex', exit_code: 1, restarted_at: null })) } });
+    const cases: [locale: 'ko' | 'en', a: string, b: string, words: string][] = [
+      ['ko', 'Writer', '에이전트', 'Writer · 에이전트가 멈췄어요 — '],
+      ['ko', '에이전트', 'Writer', '에이전트 · Writer 에이전트가 멈췄어요 — '],
+      ['en', 'Writer', '에이전트', 'Writer · 에이전트 stopped — '],
+      ['en', '에이전트', 'Writer', 'The 에이전트 · Writer agents stopped — '],
+      ['ko', 'Writer', '에이전트 ', 'Writer · 에이전트가 멈췄어요 — '],
+      ['en', 'Writer', 'Research agent  ', 'Writer · Research agent stopped — '],
+    ];
+    ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
+    stub(() => new Response('{}', { status: 200 }));
+    for (const [locale, a, b, words] of cases) {
+      statusNow = () => stoppedTwo(a, b) as ReturnType<typeof status>;
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await act(async () => { root.render(<NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><SetupProgressView setupId={SETUP_ID} recipeName="" /></NextIntlClientProvider>); });
+      await tick(0);
+      const got = container.querySelector('[data-testid=setup-agent-stopped] p')?.textContent ?? '';
+      expect(got.startsWith(words), `${locale} [${a}|${b}] → ${got}`).toBe(true);
+    }
+  });
+
+  it('[SID:4433] one agent and it stopped → ① ② ③ all still rings · two agents, one stopped → the other\'s steps spin', async () => {
+    const paused = () => [...container.querySelectorAll('ol > li[data-state]')].map((li) => (li as HTMLElement).dataset.paused === 'true');
+    const ended = (id: string) => [{ member_id: id, at: '2026-09-30T12:00:05Z', runtime: 'claude', exit_code: 1, restarted_at: null }];
+    statusNow = () => ({ ...status('handed_over'), members: [{ stage: 'a', role: '조사', member_id: 'm1', kind: 'agent', runtime: 'claude' }], signals: { ...status('handed_over').signals, agents_ended: ended('m1') } });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(paused()).toEqual([true, true, true]);
+    expect(container.querySelectorAll('ol .animate-spin').length).toBe(0);
+    // two agents, the second one (작성) stopped: ① and ② still wait for 조사, which is not stopped → they spin; ③ still (any stopped)
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: ended('m2') } });
+    await tick(2_000);
+    expect(paused()).toEqual([false, false, true]);
+    expect(container.querySelectorAll('ol .animate-spin').length).toBe(2);
   });
 
   it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {

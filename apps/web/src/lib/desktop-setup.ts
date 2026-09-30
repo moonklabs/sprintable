@@ -270,6 +270,13 @@ export interface SetupProgress {
    */
   stopped: { roles: string[]; claude: boolean } | null;
   /**
+   * story 4433 (Yuna v29 · PO 15:59Z): a step spins only while something moves. ① gets the still ring when every agent not
+   * connected yet is stopped; ② when the agent to receive the first task is stopped (③ as before: any stopped agent). A step
+   * whose agents are only partly stopped keeps spinning; started again → back as it was. The words of the step stay.
+   */
+  readyPaused: boolean;
+  handedPaused: boolean;
+  /**
    * story 4433 (Yuna 12:22Z · PO 12:23Z) — how ① is drawn: a later step that is done means the earlier one is drawn done
    * (② proves the agent that received the task was ready). The definition of `ready` (every agent connected) does not change.
    */
@@ -293,7 +300,8 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     if (m.role && m.runtime && !pairs.some((p) => p.role === m.role)) pairs.push({ role: m.role, runtime: m.runtime });
   }
   const input = s.signals.first_screen_human_input_at ? Date.parse(s.signals.first_screen_human_input_at) : NaN;
-  const stopped = stoppedAgents(s, agents);
+  const stoppedMembers = stoppedMemberIds(s);
+  const stopped = stoppedAgents(stoppedMembers, s, agents);
   // a stopped agent says what to do itself (its block) — the trust note and ⑦ «not connected» would tell a different story
   const waitingForTools = handedOver && !allConnected && result === 'running' && !stopped;
   const notConnected = waitingForTools && (
@@ -308,6 +316,9 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     blocked: !!s.signals.blocked,
     expired: s.state === 'not_handed_over',
     stopped,
+    readyPaused: !(ready === 'done' || handed === 'done') && agentIds.some((id) => !connected.has(id))
+      && agentIds.filter((id) => !connected.has(id)).every((id) => stoppedMembers.has(id)),
+    handedPaused: handed === 'running' && !!agents[0] && stoppedMembers.has(agents[0].member_id),
     readyDrawn: ready === 'done' || handed === 'done' ? 'done' : 'running',
     stillPreparing: ready === 'done' || handed !== 'done' ? [] : stillPreparingRoles(agents, connected, stopped),
   };
@@ -325,27 +336,37 @@ function stillPreparingRoles(agents: SetupStatus['members'], connected: Readonly
 }
 
 /** 멈춘 에이전트(story 4433): 그 에이전트의 마지막 끝남이 마지막 다시 시작보다 늦고(또는 다시 시작 없음), 그 뒤 첫 결과가 없을 때. */
-function stoppedAgents(s: SetupStatus, agents: SetupStatus['members']): SetupProgress['stopped'] {
-  const ended = s.signals.agents_ended ?? [];
-  if (ended.length === 0) return null;
-  const result = s.signals.first_result_at ? Date.parse(s.signals.first_result_at) : NaN;
+function stoppedMemberIds(s: SetupStatus): Set<string> {
   const out = new Set<string>();
-  const roles: string[] = [];
-  let claude = false;
-  for (const e of ended) {
+  const result = s.signals.first_result_at ? Date.parse(s.signals.first_result_at) : NaN;
+  for (const e of s.signals.agents_ended ?? []) {
     const at = Date.parse(e.at);
     if (!Number.isFinite(at)) continue;
     const restarted = e.restarted_at ? Date.parse(e.restarted_at) : NaN;
     if (Number.isFinite(restarted) && restarted >= at) continue; // started again after it stopped
     if (Number.isFinite(result) && result >= at) continue; // a first result came after it
     out.add(e.member_id);
-    if (e.runtime === 'claude') claude = true;
   }
+  return out;
+}
+
+function stoppedAgents(out: ReadonlySet<string>, s: SetupStatus, agents: SetupStatus['members']): SetupProgress['stopped'] {
   if (out.size === 0) return null;
+  const roles: string[] = [];
+  let claude = (s.signals.agents_ended ?? []).some((e) => out.has(e.member_id) && e.runtime === 'claude');
   // the roles in the flow's order, each once (a role over several stages is one role)
   for (const m of agents) if (out.has(m.member_id) && m.role && !roles.includes(m.role)) roles.push(m.role);
   if (agents.some((m) => out.has(m.member_id) && m.runtime === 'claude')) claude = true;
   return { roles, claude };
+}
+
+/**
+ * story 4433 (Yuna v29): a role name that already ends in «에이전트» (ko) — or «agent» / «에이전트» (en, any case) — gets no
+ * «에이전트» / «agent» added after it (never «에이전트 에이전트»). For a group of roles, the last one decides.
+ */
+export function endsWithAgentWord(name: string, locale: string): boolean {
+  const n = name.trim();
+  return locale === 'ko' ? /에이전트$/.test(n) : /(agent|에이전트)$/i.test(n);
 }
 
 /** 폴링 간격(PO 12:25Z). 결과가 나오거나 화면이 실패로 바뀌면 멈춘다. */
