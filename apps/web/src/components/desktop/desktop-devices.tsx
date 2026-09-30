@@ -34,6 +34,9 @@ export function DesktopDevices() {
   const [failed, setFailed] = useState(false);
   const [done, setDone] = useState<{ device: string; already: boolean } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  // every list read gets a number; only the latest may write — a read started before an org switch (the retry button, the
+  // re-read after an unreadable disconnect answer) that answers after it is the previous org's and is dropped (Qadir 4839 T1 ②)
+  const readSeq = useRef(0);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   // the list is this org's: read again whenever the org changes (Qadir 4830 ① — a client-side org switch kept /desktop mounted
@@ -44,16 +47,16 @@ export function DesktopDevices() {
     setDone(null);
     setAsking(null);
     setFailed(false);
-    let alive = true;
+    const mine = ++readSeq.current;
     fetchWithAuth('/api/desktop/setups')
       .then(readDevices)
       .catch(() => null)
       .then((list) => {
-        if (!alive) return;
+        if (readSeq.current !== mine) return;
         if (list) setDevices(list);
         else setLoadFailed(true);
       });
-    return () => { alive = false; };
+    return () => { if (readSeq.current === mine) readSeq.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the request is scoped by the session's org (the token switch-org reissues); orgId says when it changed
   }, [orgId]);
 
@@ -67,9 +70,14 @@ export function DesktopDevices() {
       if (!res.ok) throw new Error(String(res.status));
       // the server says who disconnected it and when — «you» only when this call did it (Qadir 4830 ④)
       const revoked = await readRevoked(res);
-      if (revoked) setDevices((list) => (list ? markDisconnected(list, device.setup_id, revoked) : list));
-      else load(); // an answer we cannot read: read the list again rather than guess
-      setDone({ device: device.device_name, already: revoked?.already ?? false });
+      if (revoked) {
+        setDevices((list) => (list ? markDisconnected(list, device.setup_id, revoked) : list));
+        setDone({ device: device.device_name, already: revoked.already });
+      } else {
+        // an answer we cannot read: the result is unknown — the re-read list says what happened, the line claims nothing
+        // (Qadir 4839 T1 ①)
+        load();
+      }
       setAsking(null);
       headingRef.current?.focus(); // the pressed button is gone — focus goes to the list heading
     } catch {
