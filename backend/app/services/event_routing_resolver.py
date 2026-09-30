@@ -214,15 +214,46 @@ async def resolve_broad_crew_member_ids(
     )).scalars().all())
 
 
+async def _active_member_ids(db: AsyncSession, *, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """story #4437 — of these members, the ones that can still receive. Same two-step identity as
+    `member_resolver.resolve_member_identity`: a team-member row (agents · legacy humans) decides by its `is_active` — a stopped
+    agent (its desktop setup disconnected · PR 4847) is out; with no such row, an org membership that is not deleted (a
+    grant-only human, e.g. an org owner without a project row) is in. A member of neither is out."""
+    from app.models.project import OrgMember
+    from app.models.team import TeamMember
+
+    if not member_ids:
+        return set()
+    rows = (await db.execute(
+        select(TeamMember.id, TeamMember.is_active).where(TeamMember.id.in_(member_ids), TeamMember.org_id == org_id)
+    )).all()
+    with_row = {mid for mid, _active in rows}
+    active = {mid for mid, is_active in rows if is_active}
+    rest = member_ids - with_row
+    if rest:
+        active |= set((await db.execute(
+            select(OrgMember.id).where(OrgMember.id.in_(rest), OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None))
+        )).scalars().all())
+    return active
+
+
 async def _bound_member_for_stage(
     db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition_key: str, stage: str,
 ) -> uuid.UUID | None:
     """그 stage에 바인딩된 멤버(`agent_member_id` 열 — 에이전트·사람 종류 무관) — project 스코프 바인딩 우선, 없으면 org
-    전역(story #3288 규칙 그대로)."""
+    전역(story #3288 규칙 그대로).
+
+    story #4437 — the bound member must still be able to receive (active · of this org). A stopped or missing member is «no
+    one»: every caller (delivery · the stage assignee on the event card · recipe start candidates · stage complete/start
+    assignee checks · the channel-stage next member · the last server stage · publish-failure notices) then takes its existing
+    «no one» path — the zero-reach warning for delivery — instead of queuing work nobody will pick up. The project binding
+    still decides for its project: a stopped agent there does not fall back to the org-wide binding (project work would land
+    with someone nobody chose for it). The binding row itself is kept (a new setup upserts it)."""
     from app.models.recipe_role_binding import RecipeRoleBinding
 
+    member_id: uuid.UUID | None = None
     if project_id is not None:
-        agent_id = (await db.execute(
+        member_id = (await db.execute(
             select(RecipeRoleBinding.agent_member_id).where(
                 RecipeRoleBinding.org_id == org_id,
                 RecipeRoleBinding.project_id == project_id,
@@ -230,16 +261,18 @@ async def _bound_member_for_stage(
                 RecipeRoleBinding.stage == stage,
             )
         )).scalar_one_or_none()
-        if agent_id is not None:
-            return agent_id
-    return (await db.execute(
-        select(RecipeRoleBinding.agent_member_id).where(
-            RecipeRoleBinding.org_id == org_id,
-            RecipeRoleBinding.project_id.is_(None),
-            RecipeRoleBinding.event_definition_key == definition_key,
-            RecipeRoleBinding.stage == stage,
-        )
-    )).scalar_one_or_none()
+    if member_id is None:
+        member_id = (await db.execute(
+            select(RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id.is_(None),
+                RecipeRoleBinding.event_definition_key == definition_key,
+                RecipeRoleBinding.stage == stage,
+            )
+        )).scalar_one_or_none()
+    if member_id is None:
+        return None
+    return member_id if await _active_member_ids(db, org_id=org_id, member_ids={member_id}) else None
 
 
 async def recipe_crew_member_ids(
@@ -265,7 +298,9 @@ async def recipe_crew_member_ids(
             project_filter,
         )
     )).scalars().all()
-    return set(crew_ids)
+    # story #4437 — the crew is who can still take the work: stopped or missing members are left out (the connector-stage
+    # fallback would otherwise queue events for them, and the publish checks would let them count)
+    return await _active_member_ids(db, org_id=org_id, member_ids=set(crew_ids))
 
 
 async def _stage_approval_is_elsewhere(
