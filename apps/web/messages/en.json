@@ -6597,6 +6597,11 @@
           "title": "The recipe has changed",
           "body": "The recipe or its roles changed after you opened this page, so it can't start as chosen. Reload the list and choose again.",
           "action": "Reload recipes"
+        },
+        "has-org": {
+          "title": "You already have an organization",
+          "body": "An organization was created elsewhere. Reload to continue with it.",
+          "action": "Reload"
         }
       },
       "direct": {
@@ -6616,7 +6621,18 @@
       "trustHint": "When an agent starts for the first time, it may ask whether to trust the working folder. If it does, select that agent in the «Agents on this computer» bar at the bottom of the window and choose to trust it in its terminal — setup continues once you do.",
       "seeResult": "See the result",
       "seeResultReason": "Once the result is in, this takes you to the task",
-      "noAgentRow": "At least one role needs an agent before you can start — switch a role back to an agent."
+      "noAgentRow": "At least one role needs an agent before you can start — switch a role back to an agent.",
+      "newOrg": {
+        "line": "This also creates a new organization, \"{name}\"",
+        "later": "You can rename them later in settings."
+      },
+      "invited": {
+        "title": "You have an invitation",
+        "row": "{org} invited you as {role} · until {date}",
+        "roleAdmin": "an admin",
+        "roleMember": "a member",
+        "action": "Open the link in your invite email to start in that organization."
+      }
     },
     "devices": {
       "title": "Connected devices",

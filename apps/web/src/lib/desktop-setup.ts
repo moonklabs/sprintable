@@ -140,6 +140,14 @@ export function confirmBody(code: string, rows: readonly SetupRoleRow[], project
   };
 }
 
+/** (나) confirm-new-org's body (design doc 9a4cb445): the usual fields without a project, plus the new organization's and first
+ * project's names. No organization or project id — the server only uses the ones it makes (extra=forbid). */
+export interface NewOrgConfirmBody extends Omit<ConfirmBody, 'project_id'> { org_name: string; project_name: string }
+export function newOrgConfirmBody(code: string, rows: readonly SetupRoleRow[], recipeId: string, workdirHint: string, orgName: string, projectName: string): NewOrgConfirmBody {
+  const { project_id: _none, ...rest } = confirmBody(code, rows, '', recipeId, workdirHint);
+  return { ...rest, org_name: orgName.trim(), project_name: projectName.trim() };
+}
+
 // ── story #4427 — 설정 값은 `#` 뒤로만 ──
 // 설정 코드는 어떤 URL에도 싣지 않는다(까디르 4825 · PO 09:45Z): 앱이 `#` 뒤(fragment)로 넘기고 — 서버 요청 · 로그 · Referer에
 // 안 남는다 — 페이지는 읽자마자 주소에서 지우고 메모리에만 둔다. 로그인을 거치면 `#`이 따라오지 않는데, 그때는 코드를 쥔

@@ -1,6 +1,6 @@
 // story 4427 — `next` for a desktop sign-up: exactly `/desktop/setup`, nothing else (no open redirect).
 import { describe, expect, it } from 'vitest';
-import { desktopOnboardingNext, onboardingRedirect } from './onboarding-next';
+import { desktopOnboardingNext, onboardingRedirect, staysForNewOrgSetup } from './onboarding-next';
 
 describe('desktopOnboardingNext — only /desktop/setup itself', () => {
   it('accepts the setup path', () => {
@@ -26,4 +26,17 @@ describe('onboardingRedirect — the layout keeps the desktop destination, nothi
       expect(onboardingRedirect(path as string | null | undefined)).toBe('/onboarding');
     },
   );
+});
+
+describe('staysForNewOrgSetup — only the setup page itself (its query or fragment aside)', () => {
+  it.each(['/desktop/setup', '/desktop/setup?p=abc', '/desktop/setup#code=abc'])('stays on %j', (path) => {
+    expect(staysForNewOrgSetup(path)).toBe(true);
+  });
+  it.each([
+    undefined, null, '', '/', '/chats', '/desktop', '/desktop/setupx', '/desktop/setup/', '/desktop/setup/other',
+    '/desktop/setup/../chats', '//evil.com', '//evil.com/desktop/setup', 'https://evil.com/desktop/setup', '/\\evil.com',
+    '\\\\evil.com', 'javascript:alert(1)', ' /desktop/setup', '/DESKTOP/SETUP', '%2Fdesktop%2Fsetup', '/x/desktop/setup',
+  ])('not for %j', (value) => {
+    expect(staysForNewOrgSetup(value as string | null | undefined)).toBe(false);
+  });
 });

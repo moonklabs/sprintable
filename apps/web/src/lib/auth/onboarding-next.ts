@@ -18,3 +18,9 @@ export function onboardingRedirect(currentPath: string | null | undefined): stri
   const pathOnly = (currentPath ?? '').split(/[?#]/, 1)[0];
   return pathOnly === '/desktop/setup' ? '/onboarding?next=%2Fdesktop%2Fsetup' : '/onboarding';
 }
+
+/** story 4427 (나): an organization-less person on the desktop setup page stays there — the page shows the «새 조직» mode
+ * (or sends them to the one screen when an invite exists or the check fails). Only this exact path. */
+export function staysForNewOrgSetup(currentPath: string | null | undefined): boolean {
+  return (currentPath ?? '').split(/[?#]/, 1)[0] === '/desktop/setup';
+}
