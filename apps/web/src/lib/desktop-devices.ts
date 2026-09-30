@@ -82,7 +82,9 @@ export async function readDevices(res: Response): Promise<DesktopDevice[] | null
 }
 
 /** Yuna 0ebe65ef — dates like the web's notifications: «9월 29일», with the year when it is not this year. */
-export function deviceDateOptions(iso: string, now: Date = new Date()): { year?: 'numeric'; month: 'long'; day: 'numeric' } {
-  const sameYear = new Date(iso).getFullYear() === now.getFullYear();
+export function deviceDateOptions(iso: string, now: Date = new Date(), timeZone?: string): { year?: 'numeric'; month: 'long'; day: 'numeric' } {
+  // story #4443 — «this year» is the viewer's year (New Year's Eve in UTC is already next year in Seoul)
+  const year = (d: Date) => (timeZone ? new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(d) : String(d.getFullYear()));
+  const sameYear = year(new Date(iso)) === year(now);
   return sameYear ? { month: 'long', day: 'numeric' } : { year: 'numeric', month: 'long', day: 'numeric' };
 }

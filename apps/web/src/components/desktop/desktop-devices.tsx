@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
+import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -155,7 +156,10 @@ function DeviceRow({ device, onDisconnect }: { device: DesktopDevice; onDisconne
   const count = deviceAgentCount(device);
   const at = off ? device.revoked_at : device.confirmed_at;
   const who = off ? device.revoked_by_name : device.confirmed_by_name;
-  const date = at ? format.dateTime(new Date(at), deviceDateOptions(at)) : null;
+  // story #4443 — in the viewer's zone (was next-intl's, which nothing set: the server's UTC); unknown yet → held, not drawn
+  const tz = useViewerTimeZone();
+  const date = at ? format.dateTime(new Date(at), { ...deviceDateOptions(at, new Date(), tz ?? 'UTC'), timeZone: tz ?? 'UTC' }) : null;
+  const dateText = date ? t(off ? 'disconnectedOn' : 'connectedOn', { date }) : null;
   const stateLabel = device.state === 'handed_over' ? t('state.handed_over')
     : device.state === 'waiting_for_app' ? t('state.waiting_for_app')
     : device.state === 'not_handed_over' ? t('state.not_handed_over')
@@ -173,7 +177,7 @@ function DeviceRow({ device, onDisconnect }: { device: DesktopDevice; onDisconne
         {device.state === 'not_handed_over' ? <p className="mt-0.5 break-keep text-xs text-muted-foreground">{t('notHandedOverWhy')}</p> : null}
         <p className="mt-0.5 break-keep text-xs text-muted-foreground" data-testid="desktop-device-meta">
           {t('agents', { count })}
-          {date ? <>{' · '}{t(off ? 'disconnectedOn' : 'connectedOn', { date })}</> : null}
+          {dateText ? <>{' · '}{tz ? dateText : <InvisibleSample>{dateText}</InvisibleSample>}</> : null}
           {who ? <>{' · '}{t(off ? 'disconnectedBy' : 'connectedBy', { name: who })}</> : null}
         </p>
       </div>

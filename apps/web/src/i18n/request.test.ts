@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getLocale } from './request';
+import { getLocale, getViewerTimeZone } from './request';
 
 // story #3778 CHANGES(유나 design:changes 2026-09-10) — getLocale()을 export해 회고
 // 내보내기 BFF가 재사용하게 만든 계기가 된 바로 그 버그의 재현·고정. 최초본은 export
@@ -61,5 +61,23 @@ describe('getLocale() — story #3778 CHANGES 재현·고정', () => {
     cookieGet.mockReturnValue({ value: 'ja' });
     headerGet.mockReturnValue(null);
     expect(await getLocale()).toBe('en');
+  });
+});
+
+// story #4443 — the viewer's zone from the `tz` cookie the browser writes: only a real zone passes (it becomes next-intl's
+// timeZone and the root layout's viewer zone); anything else is «not known yet».
+describe('getViewerTimeZone() — story #4443', () => {
+  it('a real zone, raw or URL-encoded → its name', async () => {
+    cookieGet.mockReturnValue({ value: 'Asia/Seoul' });
+    expect(await getViewerTimeZone()).toBe('Asia/Seoul');
+    cookieGet.mockReturnValue({ value: 'America%2FLos_Angeles' });
+    expect(await getViewerTimeZone()).toBe('America/Los_Angeles');
+  });
+
+  it('no cookie · not a zone · a broken encoding · an injection → null', async () => {
+    for (const v of [undefined, { value: '' }, { value: 'Asia/Nowhere' }, { value: '%E0%A4%A' }, { value: 'Asia/Seoul;domain=evil' }]) {
+      cookieGet.mockReturnValue(v);
+      expect(await getViewerTimeZone()).toBeNull();
+    }
   });
 });
