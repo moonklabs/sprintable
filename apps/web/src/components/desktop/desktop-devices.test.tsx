@@ -113,7 +113,9 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     await click(q('desktop-device-disconnect')[0]);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0); // nothing before the confirmation
     expect(document.body.textContent).toContain('studio mac 연결을 끊을까요?');
-    expect(document.body.textContent).toContain('에이전트 2개가 더는 Sprintable 일감을 받지 못해요');
+    // story #4434 · Yuna 0ebe65ef v3: disconnecting stops the device's agents — the dialog says what happens, what it means
+    // (no tasks · out of the agent count), what stays (their records and work), and how to use the device again
+    expect(document.body.textContent).toContain('끊으면 이 기기의 에이전트 2개가 멈춰요 — 더는 Sprintable 일감을 받지 않고, 조직의 에이전트 수에서도 빠져요. 에이전트의 기록과 한 일은 조직에 그대로 남아요.');
     await click(q('desktop-devices-confirm')[0]);
     await act(async () => { await Promise.resolve(); });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE').map(([url]) => url)).toEqual([`/api/desktop/setups/${A}`]);
