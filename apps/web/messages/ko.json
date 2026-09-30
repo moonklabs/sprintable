@@ -6622,6 +6622,9 @@
       "trustHint": "Claude Code는 처음 켤 때 작업 폴더를 믿을지 물어요. 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널을 열고, 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요 — «No, exit»에서 Enter면 에이전트가 꺼져요.",
       "seeResult": "결과 보기",
       "seeResultReason": "결과가 나오면 눌러서 일감으로 가요",
+      "stopped": "{roles} 에이전트가 멈췄어요 — 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 [다시 시작]을 눌러 주세요.",
+      "stoppedTrust": "다시 시작하면 작업 폴더를 믿을지 다시 물을 수 있어요 — 물으면 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요.",
+      "stillPreparing": "{roles} 에이전트는 아직 준비하고 있어요",
       "noAgentRow": "에이전트가 맡는 역할이 하나는 있어야 시작할 수 있어요 — 역할 하나를 에이전트로 바꿔 주세요.",
       "newOrg": {
         "line": "새 조직 «{name}»도 함께 만들어요",

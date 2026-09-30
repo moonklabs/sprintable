@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Check, Info, Loader2 } from 'lucide-react';
+import { Check, Circle, Info, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -86,23 +86,40 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         <p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p>
       </header>
       <ol className="flex flex-col gap-3" aria-live="polite">
-        <Step state={progress.ready} label={progress.ready === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
-          detail={progress.ready === 'done' ? progress.pairs.map((p) => `${role(p.role)} · ${RUNTIME[p.runtime]}`).join(', ') : null} />
-        {progress.workdirFallback ? (
-          <li className="ml-7 flex gap-2 text-xs text-muted-foreground" data-testid="setup-workdir-fallback">
-            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('workdirFallback', { recipe: task })}
-          </li>
-        ) : null}
+        {/* a later step done → the earlier one is drawn done (Yuna 12:22Z): ② proves the receiving agent was ready; the pairs line
+            stays for when every agent is really ready, and the others still getting ready are ①'s own detail (not a list item) */}
+        <Step state={progress.readyDrawn} label={progress.readyDrawn === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
+          detail={progress.ready === 'done' ? progress.pairs.map((p) => `${role(p.role)} · ${RUNTIME[p.runtime]}`).join(', ')
+            : progress.stillPreparing.length > 0 ? t('stillPreparing', { roles: progress.stillPreparing.map(role).join(' · '), count: progress.stillPreparing.length }) : null}
+          detailTestId={progress.ready !== 'done' && progress.stillPreparing.length > 0 ? 'setup-still-preparing' : undefined}>
+          {/* the notes belong to their step's list item (same place on screen: the step's text column is 28px in) — never a list
+              item of their own, so a screen reader counts three steps */}
+          {progress.workdirFallback ? (
+            <span className="mt-1 flex gap-2 text-xs text-muted-foreground" data-testid="setup-workdir-fallback">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('workdirFallback', { recipe: task })}
+            </span>
+          ) : null}
+        </Step>
         <Step state={progress.handed} label={progress.handed === 'done' ? t('stepHandedDone') : t('stepHandedRunning')}
           detail={progress.handed === 'running' && task && progress.firstAgentRole
-            ? t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: role(progress.firstAgentRole) }) : null} />
-        {progress.trustHint && claude ? (
-          <li className="ml-7 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
-            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
-          </li>
-        ) : null}
-        <Step state={progress.result} label={progress.result === 'done' ? t('stepResultDone') : t('stepResultRunning')} detail={null} />
+            ? t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: role(progress.firstAgentRole) }) : null}>
+          {progress.trustHint && claude ? (
+            <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
+            </span>
+          ) : null}
+        </Step>
+        {/* while an agent is stopped, ③ does not spin — nothing is moving (Yuna v26) */}
+        <Step state={progress.result} paused={!!progress.stopped} label={progress.result === 'done' ? t('stepResultDone') : t('stepResultRunning')} detail={null} />
       </ol>
+      {progress.stopped ? (
+        // story 4433 (Yuna v26): one block under the steps, above «결과 보기» · the roles on one line · body colour (there is
+        // something to do), never red (the cause can be a person's own choice) · no cause guessed: «멈췄어요» covers both
+        <div className="flex flex-col gap-1 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-stopped">
+          <p>{t('stopped', { roles: progress.stopped.roles.map(role).join(' · '), count: progress.stopped.roles.length })}</p>
+          {progress.stopped.claude ? <p>{t('stoppedTrust')}</p> : null}
+        </div>
+      ) : null}
       <footer className="flex flex-col gap-1">
         {resultReady
           ? <div><Button asChild><a href={resultHref!}>{t('seeResult')}</a></Button></div>
@@ -113,15 +130,18 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   );
 }
 
-function Step({ state, label, detail }: { state: StepState; label: string; detail: string | null }) {
+function Step({ state, label, detail, paused = false, detailTestId, children }: { state: StepState; label: string; detail: string | null; paused?: boolean; detailTestId?: string; children?: React.ReactNode }) {
   return (
-    <li className="flex gap-3" data-state={state}>
+    <li className="flex gap-3" data-state={state} data-paused={paused && state !== 'done' ? 'true' : undefined}>
       {state === 'done'
         ? <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-        : <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />}
+        : paused
+          ? <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+          : <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />}
       <span className="min-w-0">
         <span className="block text-sm font-medium">{label}</span>
-        {detail ? <span className="block text-xs text-muted-foreground">{detail}</span> : null}
+        {detail ? <span className="block text-xs text-muted-foreground" data-testid={detailTestId}>{detail}</span> : null}
+        {children}
       </span>
     </li>
   );

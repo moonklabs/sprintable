@@ -239,6 +239,9 @@ export interface SetupStatus {
     blocked: { at: string; reason: string | null } | null;
     /** 디디군 이벤트 신뢰 PR에서 더해질 값 — 없으면 180초 쪽만 쓴다. */
     first_screen_human_input_at?: string | null;
+    /** story 4433 — 에이전트마다 마지막 «첫 턴 전 끝남»(셸 desktop_agent_ended_early)과 마지막 «다시 시작»(desktop_agent_restarted).
+     *  BE가 아직 안 싣는 칸 — 없으면 아무것도 안 바뀐다(디디 4844 뒤). */
+    agents_ended?: { member_id: string; at: string; runtime: DesktopRuntime | null; exit_code: number | null; restarted_at?: string | null }[];
   };
 }
 
@@ -261,6 +264,18 @@ export interface SetupProgress {
   blocked: boolean;
   /** 코드가 먼저 끝나 앱이 받지 못함 → ④ 화면(앱에서 다시 시작). */
   expired: boolean;
+  /**
+   * story 4433 — 첫 결과 전에 멈춘 에이전트들(유나 정본: 세 단계 아래 한 덩어리 · 역할을 한 줄에 묶음). 끝남이 다시 시작보다 늦고
+   * 그 뒤 첫 결과가 없는 에이전트만 · 없으면 null. `claude` = Claude Code가 섞임(다시 켜면 믿기를 다시 물을 수 있다는 둘째 문장).
+   */
+  stopped: { roles: string[]; claude: boolean } | null;
+  /**
+   * story 4433 (Yuna 12:22Z · PO 12:23Z) — how ① is drawn: a later step that is done means the earlier one is drawn done
+   * (② proves the agent that received the task was ready). The definition of `ready` (every agent connected) does not change.
+   */
+  readyDrawn: StepState;
+  /** The other agents still getting ready while ① is drawn done — roles in the flow's order (a stopped agent is only in `stopped`). */
+  stillPreparing: string[];
 }
 
 /** `handedOverSeenAt` = 이 페이지가 handed_over를 처음 본 때(상태 조회에 받은 시각이 없어 페이지 시계로 잰다). */
@@ -278,7 +293,9 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     if (m.role && m.runtime && !pairs.some((p) => p.role === m.role)) pairs.push({ role: m.role, runtime: m.runtime });
   }
   const input = s.signals.first_screen_human_input_at ? Date.parse(s.signals.first_screen_human_input_at) : NaN;
-  const waitingForTools = handedOver && !allConnected && result === 'running';
+  const stopped = stoppedAgents(s, agents);
+  // a stopped agent says what to do itself (its block) — the trust note and ⑦ «not connected» would tell a different story
+  const waitingForTools = handedOver && !allConnected && result === 'running' && !stopped;
   const notConnected = waitingForTools && (
     (Number.isFinite(input) && now - input >= NOT_CONNECTED_AFTER_INPUT_MS)
     || (handedOverSeenAt !== null && now - handedOverSeenAt >= NOT_CONNECTED_AFTER_HANDOVER_MS));
@@ -290,7 +307,45 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     notConnected,
     blocked: !!s.signals.blocked,
     expired: s.state === 'not_handed_over',
+    stopped,
+    readyDrawn: ready === 'done' || handed === 'done' ? 'done' : 'running',
+    stillPreparing: ready === 'done' || handed !== 'done' ? [] : stillPreparingRoles(agents, connected, stopped),
   };
+}
+
+/** The agents not connected yet, by role (each once, the flow's order), leaving out the stopped ones (one agent, one place). */
+function stillPreparingRoles(agents: SetupStatus['members'], connected: ReadonlySet<string>, stopped: SetupProgress['stopped']): string[] {
+  const out: string[] = [];
+  for (const m of agents) {
+    if (connected.has(m.member_id) || !m.role || out.includes(m.role)) continue;
+    if (stopped?.roles.includes(m.role)) continue;
+    out.push(m.role);
+  }
+  return out;
+}
+
+/** 멈춘 에이전트(story 4433): 그 에이전트의 마지막 끝남이 마지막 다시 시작보다 늦고(또는 다시 시작 없음), 그 뒤 첫 결과가 없을 때. */
+function stoppedAgents(s: SetupStatus, agents: SetupStatus['members']): SetupProgress['stopped'] {
+  const ended = s.signals.agents_ended ?? [];
+  if (ended.length === 0) return null;
+  const result = s.signals.first_result_at ? Date.parse(s.signals.first_result_at) : NaN;
+  const out = new Set<string>();
+  const roles: string[] = [];
+  let claude = false;
+  for (const e of ended) {
+    const at = Date.parse(e.at);
+    if (!Number.isFinite(at)) continue;
+    const restarted = e.restarted_at ? Date.parse(e.restarted_at) : NaN;
+    if (Number.isFinite(restarted) && restarted >= at) continue; // started again after it stopped
+    if (Number.isFinite(result) && result >= at) continue; // a first result came after it
+    out.add(e.member_id);
+    if (e.runtime === 'claude') claude = true;
+  }
+  if (out.size === 0) return null;
+  // the roles in the flow's order, each once (a role over several stages is one role)
+  for (const m of agents) if (out.has(m.member_id) && m.role && !roles.includes(m.role)) roles.push(m.role);
+  if (agents.some((m) => out.has(m.member_id) && m.runtime === 'claude')) claude = true;
+  return { roles, claude };
 }
 
 /** 폴링 간격(PO 12:25Z). 결과가 나오거나 화면이 실패로 바뀌면 멈춘다. */

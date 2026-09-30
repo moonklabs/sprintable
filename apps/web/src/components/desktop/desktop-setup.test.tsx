@@ -535,6 +535,66 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
   });
 
+  // story 4433 (Yuna v26): an agent that stopped before the first result — one block under the steps, the roles on one line,
+  // the trust sentence only when a Claude Code agent is among them; ③ stops spinning; no field (today's server) → nothing
+  it('[SID:4433] a stopped agent: the block under the steps · ③ a still ring · Claude → the trust sentence · started again → gone', async () => {
+    const block = () => container.querySelector('[data-testid=setup-agent-stopped]');
+    const third = () => container.querySelectorAll('ol > li[data-state]')[2] as HTMLElement | undefined;
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(block()).toBeNull(); // no agents_ended field
+    expect(third()?.dataset.paused).toBeUndefined();
+
+    const ended = (member_id: string, runtime: string, restarted_at: string | null = null) => ({ member_id, at: '2026-09-30T12:00:05Z', runtime, exit_code: 1, restarted_at });
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m1', 'claude')] } });
+    await tick(2_000);
+    expect(block()?.textContent).toContain('조사 에이전트가 멈췄어요 — 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 [다시 시작]을 눌러 주세요.');
+    expect(block()?.textContent).toContain('다시 시작하면 작업 폴더를 믿을지 다시 물을 수 있어요 — 물으면 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요.');
+    expect(third()?.dataset.paused).toBe('true');
+    expect(block()?.textContent).not.toMatch(/↓/); // true on either Claude version: no fixed key direction (PO 12:11Z · Yuna v27)
+    expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
+    // the block comes after the steps and before «결과 보기»
+    expect(!!(container.querySelector('ol')!.compareDocumentPosition(block()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(!!(block()!.compareDocumentPosition(container.querySelector('footer')!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    // two agents, Codex only among the stopped ones would drop the trust sentence; both here → one line, the flow's order
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m2', 'codex'), ended('m1', 'claude')] } });
+    await tick(2_000);
+    expect(block()?.textContent).toContain('조사 · 작성 에이전트가 멈췄어요');
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m2', 'codex')] } });
+    await tick(2_000);
+    expect(block()?.textContent).toContain('작성 에이전트가 멈췄어요');
+    expect(block()?.textContent).not.toContain('믿을지');
+
+    // started again after it stopped → the block goes and ③ spins again
+    statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: [ended('m2', 'codex', '2026-09-30T12:00:09Z')] } });
+    await tick(2_000);
+    expect(block()).toBeNull();
+    expect(third()?.dataset.paused).toBeUndefined();
+  });
+
+  it('[SID:4433] ② done while another agent is not connected → ① drawn done · «… 에이전트는 아직 준비하고 있어요» muted under it, no pairs line', async () => {
+    const first = () => container.querySelectorAll('ol > li[data-state]')[0] as HTMLElement | undefined;
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(first()?.dataset.state).toBe('done');
+    const line = container.querySelector('[data-testid=setup-still-preparing]');
+    expect(line?.textContent).toBe('작성 에이전트는 아직 준비하고 있어요');
+    expect(line?.className).toContain('text-muted-foreground');
+    // ①'s own detail (the «역할 · 런타임» pairs only once every agent is ready) — still three steps for a screen reader
+    expect(first()?.textContent).toBe('에이전트를 준비했어요작성 에이전트는 아직 준비하고 있어요');
+    expect(first()!.contains(line)).toBe(true);
+    expect(container.querySelectorAll('ol > li').length).toBe(3);
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
+    await tick(2_000);
+    expect(container.querySelector('[data-testid=setup-still-preparing]')).toBeNull();
+    expect(first()?.textContent).toContain('조사 · Claude Code, 작성 · Codex');
+  });
+
   it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
     statusNow = () => status('waiting_for_app');
     await startSetup();
@@ -548,12 +608,14 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
     await tick(2_000);
     expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toBe('Claude Code는 처음 켤 때 작업 폴더를 믿을지 물어요. 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널을 열고, 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요 — «No, exit»에서 Enter면 에이전트가 꺼져요.');
+    expect(container.querySelectorAll('ol > li').length).toBe(3); // the note is inside ②'s item: still three steps for a screen reader
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], workdir_fallback_at: 'x' });
     await tick(2_000);
     expect(text()).toContain('에이전트를 준비했어요');
     expect(text()).toContain('조사 · Claude Code, 작성 · Codex');
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
+    expect(container.querySelectorAll('ol > li').length).toBe(3); // the folder note is inside ①'s item
     expect(container.querySelector('[data-testid=setup-workdir-fallback]')?.textContent).toBe('고른 폴더를 쓸 수 없어 기본 폴더(~/Sprintable/마케팅 루프)에서 시작했어요 — 작업 폴더는 홈 폴더 안의 한 폴더여야 해요');
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
