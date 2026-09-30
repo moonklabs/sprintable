@@ -327,7 +327,9 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
         raw = await client.post_full(f"/api/v2/conversations/{args.conversation_id}/messages", json=payload)
         result: dict = dict(raw.get("data") or {}) if isinstance(raw, dict) else raw
         if isinstance(raw, dict):
-            for sibling_key in ("references", "command_gate", "forked", "forked_conversation_id"):
+            # story #4430 — `delivery` (participants a block kept the message from: a count and a closed reason) must reach
+            # the agent that sent it too; the silent two-month loss had an agent on the sending side.
+            for sibling_key in ("references", "command_gate", "forked", "forked_conversation_id", "delivery"):
                 if sibling_key in raw:
                     result[sibling_key] = raw[sibling_key]
         return ok(result)

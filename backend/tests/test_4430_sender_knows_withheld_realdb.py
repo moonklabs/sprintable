@@ -228,3 +228,75 @@ async def test_someone_outside_the_conversation_who_blocked_the_sender_is_not_co
         assert sent.json().get("delivery") == _withheld(1), sent.json()
     finally:
         await engine.dispose()
+
+
+async def test_a_reply_in_a_thread_carries_the_mark_on_the_replies_read_too():
+    """The third read path (replies) — the sent line's mark is loaded and shown to the sender there as well; a read path
+    that did not load metadata would drop it silently (a quiet success again)."""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (_blocker_id, blocker_user), (sender_id, sender_user) = await _one_to_one(Session)
+        from app.main import app
+
+        root = await _as(app, Session, sender_user, org_id,
+                         lambda c: c.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": "root"}))
+        root_id = root.json()["data"]["id"]
+        await _as(app, Session, blocker_user, org_id,
+                  lambda c: c.post("/api/v2/user-blocks", json={"blocked_member_id": str(sender_id)}))
+        reply = await _as(app, Session, sender_user, org_id,
+                          lambda c: c.post(f"/api/v2/conversations/{conv_id}/messages",
+                                           json={"content": "a reply", "thread_id": root_id}))
+        assert reply.status_code == 201, reply.text
+        assert reply.json().get("delivery") == _withheld(1), reply.json()
+        reply_id = reply.json()["data"]["id"]
+
+        async def replies(c):
+            return await c.get(f"/api/v2/conversations/{conv_id}/messages/{root_id}/replies")
+
+        s_rows = (await _as(app, Session, sender_user, org_id, replies)).json()["data"]
+        b_rows = (await _as(app, Session, blocker_user, org_id, replies)).json()["data"]
+        assert next(m for m in s_rows if m["id"] == reply_id).get("delivery_withheld") == _withheld(1), s_rows
+        assert "delivery_withheld" not in next(m for m in b_rows if m["id"] == reply_id), b_rows
+    finally:
+        await engine.dispose()
+
+
+async def _mcp_send_result(raw_backend_reply: dict, conv_id) -> tuple[dict, str]:
+    """The MCP send tool fed the backend's real reply (transport patched, nothing else): its parsed result and raw text."""
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    import sprintable_mcp.tools.chat as chat_mod
+
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value=raw_backend_reply)):
+        out = await chat_mod.send_chat_message(chat_mod.SendChatInput(conversation_id=str(conv_id), content="x"))
+    return json.loads(out[0].text), out[0].text
+
+
+async def test_the_mcp_send_tool_hands_delivery_to_the_sending_agent():
+    """PO 16:39Z — the MCP send tool passed only a few sibling keys through, so `delivery` never reached an agent sender
+    (the two-month loss had an agent on the sending side). Fed the backend's real reply, the tool result now carries it; with
+    no block the tool result is byte-for-byte what it was before (the message fields only)."""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (_blocker_id, blocker_user), (sender_id, sender_user) = await _one_to_one(Session)
+        from app.main import app
+
+        plain = await _as(app, Session, sender_user, org_id,
+                          lambda c: c.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": "before"}))
+        await _as(app, Session, blocker_user, org_id,
+                  lambda c: c.post("/api/v2/user-blocks", json={"blocked_member_id": str(sender_id)}))
+        withheld = await _as(app, Session, sender_user, org_id,
+                             lambda c: c.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": "after"}))
+
+        result, _ = await _mcp_send_result(withheld.json(), conv_id)
+        assert result.get("delivery") == _withheld(1), result
+        assert result["id"] == withheld.json()["data"]["id"]
+
+        from sprintable_mcp.response import ok
+
+        result, text = await _mcp_send_result(plain.json(), conv_id)
+        assert "delivery" not in result, result
+        assert text == ok(dict(plain.json()["data"]))[0].text  # the same bytes as the tool gave before
+    finally:
+        await engine.dispose()
