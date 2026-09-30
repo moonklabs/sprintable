@@ -1334,3 +1334,32 @@ async def test_agents_ended_reads_the_last_report_and_the_last_restart_per_agent
         await _app_event(c, setup_id, "desktop_agent_ended_early", {"member_id": reviewer, "runtime": "codex", "exit_code": True})
         r = (await status()).json()["signals"]["agents_ended"][1]
         assert (r["runtime"], r["exit_code"]) == ("codex", None)
+
+
+# ─── Pedro 13:51Z (4426 1선) — a sign-in is a human hand by definition: counted from its name, once per setup ─────────
+
+
+@pytest.mark.anyio
+async def test_a_sign_in_counts_as_one_hand_from_its_name_even_without_the_mark(world):
+    """The shell sends desktop_setup_signed_in with no meta (setup-flow.ts emitStep) — the hand count missed it (Mirko r2:
+    2 where the person acted 3 times). A sign-in is a person's act by definition: the read counts it by name, once per
+    setup (the shell remembers «sent» in memory only — after an app restart the same sign-in can come again), whether or not
+    it carries human_hand, and only when proven."""
+    async with _client() as c:
+        code, _ = await _code(c, "d4426 sign-in hand")
+        setup_id = (await _confirm(c, code)).json()["setup_id"]
+        hands = lambda: c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OWNER))
+        base = (await hands()).json()["human_hands"]  # the confirmation's own hand
+
+        # not proven (no token) → not counted
+        await _app_event(c, setup_id, "desktop_setup_signed_in", {}, token=None)
+        assert (await hands()).json()["human_hands"] == base
+
+        # proven, no human_hand in meta (as the shell sends it) → one hand
+        await _app_event(c, setup_id, "desktop_setup_signed_in", {})
+        assert (await hands()).json()["human_hands"] == base + 1
+
+        # the same sign-in again (app restarted) and one that does carry the mark → still one
+        await _app_event(c, setup_id, "desktop_setup_signed_in", {})
+        await _app_event(c, setup_id, "desktop_setup_signed_in", {"human_hand": True})
+        assert (await hands()).json()["human_hands"] == base + 1
