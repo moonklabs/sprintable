@@ -717,6 +717,7 @@ export default function GateDetailPage() {
                     sealedAdsStartsAt={gate.sealed_ads_starts_at ?? null}
                     sealedAdsEndsAt={gate.sealed_ads_ends_at ?? null}
                     sealedAdsObjective={gate.sealed_ads_objective ?? null}
+                    gateStatus={gate.status}
                     onSpendRefreshed={() => setActivityRefreshKey((k) => k + 1)}
                   />
                 ) : null}

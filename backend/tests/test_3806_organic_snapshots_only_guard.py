@@ -28,6 +28,10 @@ _APP_DIR = _BACKEND_ROOT / "app"
 # 한 줄로 적을 것.
 _EXEMPT_FILES: dict[str, str] = {
     "app/models/insight_snapshot.py": "모델 정의 자체 — 조회부가 아니다.",
+    "app/services/ads_boost_gate_exit.py": (
+        "story #4466 — paid 캡처 행 하나를 쓰기만 한다(ads_boost 게이트가 approved를 벗어날 때 지금 시각 지출 캡처 예약 — "
+        "process_due_ads_spend_snapshots가 집도록). organic 조회가 아니라 paid 쓰기라 이 술어가 필요 없다."
+    ),
     "app/services/ads_spend_snapshots.py": (
         "organic_snapshots_only() 정의처. 이 파일의 paid 캡처 루프(process_due_ads_spend_"
         "snapshots)는 의도적으로 paid 채널만 보는 유일한 정당한 소비처 — 이 술어를 "

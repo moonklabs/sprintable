@@ -440,9 +440,13 @@ async def void_pending_commands_for_gate(db: AsyncSession, *, gate_id: uuid.UUID
     있게). completed·dead_letter·voided 등 이미 종결된 command는 절대 건드리지 않는다
     (그 자체 이력 보존 — "이 게이트의 아무 행이나"가 아니라 "이 게이트의 대기 중인
     행"만, 카디르 QA③ 지적 그대로)."""
+    from app.services.ads_boost_execution import MONEY_STOPPING_OPS
+
     rows = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.gate_id == gate_id, PublicationCommand.status == "pending",
+            # story #4466 (PO 11:51Z · (나)) — a queued pause stops money: a gate going back to review never cancels it
+            PublicationCommand.operation.not_in(MONEY_STOPPING_OPS),
         ).with_for_update()
     )).scalars().all()
     for row in rows:

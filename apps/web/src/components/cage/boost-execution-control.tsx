@@ -46,6 +46,8 @@ export interface BoostExecutionControlProps {
   sealedAdsStartsAt: string | null;
   sealedAdsEndsAt: string | null;
   sealedAdsObjective: string | null;
+  // story #4466 — the gate's status: a boost whose gate is back in review is paused by the server and cannot be resumed there
+  gateStatus?: string | null;
   // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — 「눌렀는데
   // 아무 일도 없었다」 결함 처방. 「광고비 다시 수집」 성공은 이 컴포넌트 밖(형제
   // GateActivityHistory)에 새 이력 행을 남기는데 그쪽이 스스로 재조회할 방법이
@@ -142,7 +144,7 @@ export function adsManagerCampaignUrl(adAccountId: string | null | undefined, ca
 }
 
 export function BoostExecutionControl({
-  orgId, gateId, sealedAdsBudgetMinor, sealedAdsCurrency, sealedAdsStartsAt, sealedAdsEndsAt, sealedAdsObjective,
+  orgId, gateId, sealedAdsBudgetMinor, sealedAdsCurrency, sealedAdsStartsAt, sealedAdsEndsAt, sealedAdsObjective, gateStatus,
   onSpendRefreshed,
 }: BoostExecutionControlProps) {
   const t = useTranslations('cage');
@@ -501,6 +503,7 @@ export function BoostExecutionControl({
     );
   }
   const runActive = runStatus === 'running' || runStatus === 'paused' || runStatus === 'pause_pending';
+  const offApproved = gateStatus != null && gateStatus !== 'approved'; // story #4466
 
   const needsCheck = command?.status === 'dead_letter' && command.failure_kind === 'needs_check';
   if (needsCheck && !runActive) {
@@ -786,7 +789,8 @@ export function BoostExecutionControl({
             </a>
           ) : null}
           <p className="text-muted-foreground">
-            {t.rich('boostPauseConnectionLostReconnect', { link: (chunks) => <Link href={connectRulesHref} className="underline" data-testid="boost-pause-reconnect">{chunks}</Link> })}
+            {/* Yuna 13:12Z — a link standing on its own line: the same shape as the Ads Manager link above */}
+            {t.rich('boostPauseConnectionLostReconnect', { link: (chunks) => <Link href={connectRulesHref} className="text-primary hover:underline" data-testid="boost-pause-reconnect">{chunks}</Link> })}
           </p>
         </div>
       ) : null}
@@ -823,6 +827,11 @@ export function BoostExecutionControl({
           ) : null}
         </div>
       ) : null}
+      {/* story #4466 (PO 11:51Z) — the gate went back to review: the server paused the boost (no money on values nobody approves).
+          Facts only — no «resume once approved»: a lower-budget re-approval leaves the campaign on another budget (4458) */}
+      {offApproved && runStatus === 'paused' ? (
+        <p className="text-xs text-muted-foreground" data-testid="boost-paused-approval-gone">{t('boostPausedApprovalGone')}</p>
+      ) : null}
       {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
       {waitingLine}
       {capNoticeBlock}
@@ -833,7 +842,8 @@ export function BoostExecutionControl({
         >
           {t('boostExecutionPause')}
         </Button>
-      ) : spendBlockedCode ? null /* story #4417 — resuming would spend with no cap (the server refuses it too) */ : (
+      ) : spendBlockedCode || offApproved ? null /* story #4417 — resuming would spend with no cap · story #4466 — or on a gate
+          back in review (the server refuses both) */ : (
         <Button
           variant="outline" size="sm" disabled={submitting || waiting === 'resume'}
           onClick={() => void doAction('resume', () => {})} data-testid="boost-resume-trigger"
