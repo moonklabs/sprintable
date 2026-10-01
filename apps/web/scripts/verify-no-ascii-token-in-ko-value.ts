@@ -319,6 +319,7 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'agents.fakechatEnvCopyExport::export',
   'agents.toolPermissions.coreAlways::ping',
   'board.backlinksEmptyScoped::source',
+  'cage.boostStartFailedConnection::link', // story #4447 — the <link> markup tag (the same «연결 확인» link shape as content.commentsReplyFailureConnectionBlocked)
   'cage.githubCheckRependingReason::pending',
   'cage.githubCheckRependingReasonWithPrior::pending',
   'chats.commandArgHintPriority::critical',
