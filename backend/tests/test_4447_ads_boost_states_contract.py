@@ -4,12 +4,16 @@ until the TypeScript file is regenerated: (cd backend && PYTHONPATH=. uv run pyt
 from __future__ import annotations
 
 
+# the web file this contract reaches (a plain path string, so check_backend_relevant_diff runs this test when that file changes)
+_WEB_FILE = "apps/web/src/lib/ads-boost-states.generated.ts"
+
+
 def test_the_web_file_is_generated_from_the_backend_sets():
     from scripts.gen_ads_boost_states_ts import TS_FILE, render
 
+    assert str(TS_FILE).endswith(_WEB_FILE)
     assert TS_FILE.read_text(encoding="utf-8") == render(), (
-        "apps/web/src/lib/ads-boost-states.generated.ts is stale — "
-        "(cd backend && PYTHONPATH=. uv run python scripts/gen_ads_boost_states_ts.py)"
+        f"{_WEB_FILE} is stale — (cd backend && PYTHONPATH=. uv run python scripts/gen_ads_boost_states_ts.py)"
     )
 
 
