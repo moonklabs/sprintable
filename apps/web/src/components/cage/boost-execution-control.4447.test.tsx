@@ -222,4 +222,14 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     await mount();
     expect(text()).toContain(cage.boostExecutionStarting);
   });
+
+  // story #4458 (PO 08:13Z ②) — a campaign made on another budget (a re-seal during its create) is not switched on: the card says
+  // why and offers no retry (it would stop the same way every time)
+  it('needs_check · ADS_BOOST_CREATED_BUDGET_DIFFERS: its line · no retry · no start', async () => {
+    spendNow = { run_status: 'pending', start_command: cmd('dead_letter', 'needs_check', false, 'ADS_BOOST_CREATED_BUDGET_DIFFERS') };
+    await mount();
+    expect($('boost-needs-check-reason')?.textContent).toBe(cage.boostNeedsCheckCreatedBudgetDiffers);
+    expect($('boost-needs-check-retry-trigger')).toBeNull();
+    expect($('boost-start-trigger')).toBeNull();
+  });
 });
