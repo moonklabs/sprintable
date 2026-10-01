@@ -873,6 +873,17 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(startButton().disabled).toBe(false);
   });
 
+  it('the three [바꾸기] each say what they change to a screen reader; the shown word stays «바꾸기» (Qadir 4866 2nd line)', async () => {
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const changes = [...container.querySelectorAll('button')].filter((b) => b.textContent === '바꾸기');
+    expect(changes).toHaveLength(3);
+    const names = changes.map((b) => b.getAttribute('aria-label') ?? '');
+    expect(names).toEqual(['새 조직 이름 바꾸기', '레시피 바꾸기', '작업 폴더 바꾸기']);
+    expect(new Set(names).size).toBe(3);
+    for (const n of names) expect(n).toContain('바꾸기'); // the spoken name holds the shown word (label in name)
+  });
+
   it('«시작» = one confirm-new-org with the names and no organization or project id; then refresh → current project → refresh → progress', async () => {
     stubNoOrg();
     await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
@@ -1161,6 +1172,19 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     await openRecipes();
     expect(recipeInputs().map((i) => i.value)).toEqual(['rec-2', 'rec-1']);
     expect(recipeInputs()[0].checked).toBe(true);
+  });
+
+  it('keyboard focus follows the fold (Yuna 00:54Z): opening → the chosen radio · picking → back on [바꾸기] · aria-expanded', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const change = chosen()!.querySelector('button') as HTMLButtonElement;
+    expect(change.getAttribute('aria-expanded')).toBe('false');
+    expect(change.getAttribute('aria-controls')).toBe('setup-recipe-list');
+    await openRecipes();
+    expect(document.activeElement).toBe(recipeInputs().find((i) => i.checked));
+    expect(container.querySelector('#setup-recipe-list')).not.toBeNull();
+    await act(async () => { recipeInputs()[1].click(); });
+    expect(document.activeElement).toBe(chosen()!.querySelector('button'));
   });
 
   it('one recipe only: its card, no [바꾸기]', async () => {
