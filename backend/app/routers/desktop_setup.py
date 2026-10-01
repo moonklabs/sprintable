@@ -277,6 +277,8 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
         content={
             "setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url,
             "workdir_hint": done.workdir_hint, "recipe_name": done.recipe_name, "org_name": done.org_name,
+            # story 4470: the org's id (an added field — an older app ignores it)
+            "org_id": str(done.org_id) if done.org_id else None,
         },
         headers=headers,
     )
