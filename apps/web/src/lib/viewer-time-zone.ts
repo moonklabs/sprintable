@@ -3,6 +3,15 @@
 // browser sets (components/viewer-time-zone.tsx). Before this, nothing set a zone: next-intl fell back to the server's own
 // (Cloud Run = UTC) and handed it to the browser too, so «연결된 기기» said «9월 30일» on a Korean morning of 10월 1일.
 // Server-safe (no DOM): the root layout and i18n/request.ts read the cookie through validTimeZone.
+//
+// Rule (story #4449 · PO 03:38Z): a clock time with a day period — ko «오전/오후», en «AM/PM», i.e. anything drawn with
+// VIEWER_TIME_OPTIONS or `hour: 'numeric'` — is drawn after mount only, never into the server's HTML. Its words come from the
+// runtime's ICU, and runtimes disagree: ICU 78.2 (Node 20.20.2 · 22.23.2) says ko «AM 7:18», 78.3 (Node 22.23.3) and
+// Chrome say «오전 7:18», and Safari carries its own ICU. Pinning the server's Node to CI's (apps/web/Dockerfile ·
+// verify:node-version-matches-ci) makes the server agree with our tests, not with every browser — so a server-drawn day period
+// would be a hydration text mismatch for some viewers. Dates without a day period («10월 1일 목요일») and 24-hour times are
+// the same across these ICUs. Today no server HTML carries one (dev, 2026-10-01: org-briefing · inbox · chats · workforce ·
+// events · activity · desktop/setup — 0).
 
 export const VIEWER_TZ_COOKIE = 'tz';
 

@@ -28,6 +28,7 @@
     "verify:no-hand-rolled-marketing-table": "tsx scripts/verify-no-hand-rolled-marketing-table.ts",
     "verify:frontend-docker-import-context": "tsx scripts/verify-frontend-docker-import-context.ts",
     "verify:next-public-build-arg-wiring": "tsx scripts/verify-next-public-build-arg-wiring.ts",
+    "verify:node-version-matches-ci": "tsx scripts/verify-node-version-matches-ci.ts",
     "verify:no-direct-backend-v2-call": "tsx scripts/verify-no-direct-backend-v2-call.ts",
     "verify:no-date-tolocalestring": "tsx scripts/verify-no-date-tolocalestring.ts",
     "verify:no-zoneless-date-format": "tsx scripts/verify-no-zoneless-date-format.ts",

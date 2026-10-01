@@ -6,7 +6,12 @@
 # `gcr.io/cloud-builders/docker` 스텝은 daemon.json을 못 건드림) — 실측(2026-08-14, 디디):
 # 흔치 않은 태그(node:20.11.1-alpine3.19)도 온디맨드 fetch-through 성공, 존재하지 않는
 # 태그는 정상 404("not found") — 캐시 미스가 조용히 깨지는 새 실패 모드가 아님을 확認.
-FROM mirror.gcr.io/library/node:20-alpine AS base
+# Node 판은 CI(ci.yml `node-version`)와 같은 정확한 판 + digest로 고정한다(2026-10-01 · PO 결정). 떠 있는 태그
+# `node:20-alpine`은 빌드 때마다 그때의 판을 집었고(dev 00cf66694 = 20.20.2 · ICU 78.2), 판마다 ICU가 달라 서버가
+# 그리는 한국어 시각이 갈린다: ICU 78.2는 ko «AM 7:18», 78.3(22.23.3)은 «오전 7:18». 시험한 런타임과 내보내는
+# 런타임을 같게 — 두 FROM과 ci.yml이 다르면 verify:node-version-matches-ci가 빨강. 판을 올릴 땐 셋을 함께.
+# digest = 멀티 아키텍처 인덱스(mirror.gcr.io에서 읽음 · 이미지 설정 NODE_VERSION=22.23.3 확인).
+FROM mirror.gcr.io/library/node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS base
 RUN corepack enable pnpm
 
 # ─── 의존성 설치 ──────────────────────────────────────────────────────────────
@@ -101,7 +106,8 @@ RUN pnpm build
 # ─── 런타임 ──────────────────────────────────────────────────────────────────
 # story #2640: 위 base 스테이지와 동일 이유(mirror.gcr.io) — runner는 base에서 파생되지
 # 않는 별도 스테이지라 여기도 따로 전환 필요.
-FROM mirror.gcr.io/library/node:20-alpine AS runner
+# 위 base와 같은 판 · 같은 digest(따로 바꾸지 않는다).
+FROM mirror.gcr.io/library/node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1
