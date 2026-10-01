@@ -772,7 +772,8 @@ export function BoostExecutionControl({
               href={adsManagerCampaignUrl(runAd.ad_account_id, runAd.campaign_id)} target="_blank" rel="noopener noreferrer"
               className="block text-primary hover:underline" data-testid="boost-ads-manager-link"
             >
-              {t('boostOpenAdsManager')}<span aria-hidden="true"> ↗</span>
+              {/* Yuna 10:29Z — the same words as the cap notice's link for the same act */}
+              {t('boostExecutionStopInAdsManager')}<span aria-hidden="true"> ↗</span>
             </a>
           ) : null}
           <p className="text-muted-foreground">

@@ -252,7 +252,8 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     const block = $('boost-pause-connection-lost')!;
     expect(block.textContent).toContain(cage.boostPauseConnectionLost);
     expect(block.querySelector('[data-testid="boost-pause-reconnect"]')?.getAttribute('href')).toBe('/ws/proj/organization/channels');
-    expect(block.querySelector('[data-testid="boost-ads-manager-link"]')).not.toBeNull();
+    expect(block.querySelector('[data-testid="boost-ads-manager-link"]')?.textContent).toContain(cage.boostExecutionStopInAdsManager);
+    expect(block.querySelector('[data-testid="boost-pause-reconnect"]')?.textContent).toBe('연결 확인'); // Yuna — the card's own connection words
     expect(text()).not.toContain(cage.boostExecutionPausing); // never «중지 중…» for a pause that did not reach the campaign
   });
 
