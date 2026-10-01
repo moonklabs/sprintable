@@ -70,6 +70,8 @@ interface StartCommand {
 const OUTCOME_UNKNOWN = 'ADS_BOOST_CREATE_OUTCOME_UNKNOWN';
 // story #4417 — the ad account's currency is not the approved one: nothing was created (the next step is a new request)
 const ACCOUNT_CURRENCY_MISMATCH = 'ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH';
+// story #4458 — a campaign made on another budget (a re-seal during its create): not switched on, a person decides
+const CREATED_BUDGET_DIFFERS = 'ADS_BOOST_CREATED_BUDGET_DIFFERS';
 // story #4417 (Yuna 5883612567) — only these codes mean «the spend came in another currency»; every other reason the server
 // stopped the boost (e.g. repeated read failures, or a code added later) gets the line without a reason — never a wrong one.
 const SPEND_CURRENCY_CODES: ReadonlySet<string> = new Set(['META_ADS_SPEND_CURRENCY_MISMATCH', 'META_ADS_SPEND_UNKNOWN_CURRENCY']);
@@ -93,6 +95,8 @@ interface SpendData {
   // the start
   spend_blocked_code?: string | null;
   account_currency?: string | null;
+  // story #4458 — a campaign held because it was created on another budget: the budget it was created with
+  created_budget_minor?: number | null;
 }
 
 // story #4416 — start · retry · pause · resume are queued commands the worker runs later (every minute, transient failures
@@ -143,6 +147,7 @@ export function BoostExecutionControl({
   // ad account's currency read before the start (the Ads Manager link uses 4416's run ids)
   const [spendBlockedCode, setSpendBlockedCode] = useState<string | null>(null);
   const [accountCurrency, setAccountCurrency] = useState<string | null>(null);
+  const [createdBudget, setCreatedBudget] = useState<number | null>(null);
   const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
   const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
   // story #4412 — «it is already in my ad account»: the lookup's answer when it did not adopt
@@ -242,6 +247,7 @@ export function BoostExecutionControl({
       setInitiatedBy(d.initiated_by ?? null);
       setSpendBlockedCode(d.spend_blocked_code ?? null);
       setAccountCurrency(d.account_currency ?? null);
+      setCreatedBudget(d.created_budget_minor ?? null);
       setRunAd({
         campaign_id: d.campaign_id ?? null, ad_account_id: d.ad_account_id ?? null,
         campaign_name: d.campaign_name ?? null, ad_channel: d.ad_channel ?? null,
@@ -485,13 +491,20 @@ export function BoostExecutionControl({
   if (needsCheck && !runActive) {
     const outcomeUnknown = command.error_code === OUTCOME_UNKNOWN;
     const currencyMismatch = command.error_code === ACCOUNT_CURRENCY_MISMATCH;
+    const budgetDiffers = command.error_code === CREATED_BUDGET_DIFFERS;
     return (
       <div className="space-y-2 break-keep" data-testid="boost-execution-control">
         <p className="text-xs">
           <span className="font-medium text-foreground" data-testid="boost-needs-check">{t('boostNeedsCheckTitle')}</span>
         </p>
         <p className="text-xs text-muted-foreground" data-testid="boost-needs-check-reason">
-          {currencyMismatch
+          {budgetDiffers ? (() => {
+            // PO 10:56Z — the facts only: re-seals only lower the budget, so «request again at that budget» never works (no link)
+            const money = (minor: number | null) => (minor !== null && sealedAdsCurrency
+              ? formatMinorCurrency(minor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent) : '');
+            // Yuna 11:00Z — the approved budget is the «총예산» line right above: not repeated here
+            return t('boostNeedsCheckCreatedBudgetDiffers', { amount: money(createdBudget) });
+          })() : currencyMismatch
             ? (accountCurrency && sealedAdsCurrency
               ? t('boostAccountCurrencyMismatch', { accountCurrency, approvedCurrency: sealedAdsCurrency })
               : t('boostAccountCurrencyMismatchNoCodes'))
@@ -500,7 +513,8 @@ export function BoostExecutionControl({
         {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
         {/* story #4417 — a different account currency: retry and link are hidden (the sealed values give the same answer
             every time; the next step is a new request with a matching account — Yuna) */}
-        {currencyMismatch ? null : (
+        {/* story #4458 — a campaign made on another budget: no retry either (it stops the same way every time) */}
+        {currencyMismatch || budgetDiffers ? null : (
         <div className="flex flex-wrap gap-2">
           {outcomeUnknown ? (
             // story #4412 — link the campaign this start may have made (Yuna 00:49Z: link first, then retry, both outline)

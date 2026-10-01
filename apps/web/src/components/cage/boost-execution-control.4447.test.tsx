@@ -16,7 +16,11 @@ import { fetchWithAuth } from '@/lib/db/client';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn() }));
-vi.mock('@/app/dashboard/dashboard-shell', () => ({ useConnectRulesHref: (p: string) => `/ws/proj${p}` }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useConnectRulesHref: (p: string) => `/ws/proj${p}`,
+  // story #4458 — useFlatHref (the post link) reads the shell's project
+  useDashboardContext: () => ({ projectId: 'proj-1', inShell: true }),
+}));
 const mockedFetch = vi.mocked(fetchWithAuth);
 const cage = koMessages.cage;
 
@@ -221,5 +225,19 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     spendNow = { run_status: 'pending', start_command: cmd('pending', null, false) };
     await mount();
     expect(text()).toContain(cage.boostExecutionStarting);
+  });
+
+  // story #4458 (PO 08:13Z ②) — a campaign made on another budget (a re-seal during its create) is not switched on: the card says
+  // why and offers no retry (it would stop the same way every time)
+  it('needs_check · ADS_BOOST_CREATED_BUDGET_DIFFERS: the facts only — created budget · approved budget · no link · no retry · no start', async () => {
+    // PO 10:56Z — re-seals only lower the budget, so «request again at that budget» is never a way on: no link at all
+    spendNow = { run_status: 'pending', start_command: cmd('dead_letter', 'needs_check', false, 'ADS_BOOST_CREATED_BUDGET_DIFFERS'), created_budget_minor: 100_000 };
+    await mount();
+    const line = $('boost-needs-check-reason')!;
+    expect(line.textContent).toContain('100,000원');
+    expect(line.textContent).toContain('광고비는 나가지 않아요'); // Yuna 11:00Z — what the person needs now: no money goes out
+    expect(line.querySelector('a')).toBeNull();
+    expect($('boost-needs-check-retry-trigger')).toBeNull();
+    expect($('boost-start-trigger')).toBeNull();
   });
 });

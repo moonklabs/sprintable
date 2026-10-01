@@ -818,6 +818,7 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         }
     return {
         **run_ad,
+        "created_budget_minor": run.created_budget_minor if run is not None else None,
         "gate_id": gate.id,
         "initiated_by": boost_start_command.initiated_by if boost_start_command is not None else None,
         "sealed_ads_budget_minor": gate.sealed_ads_budget_minor,

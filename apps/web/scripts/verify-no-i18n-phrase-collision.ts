@@ -380,6 +380,13 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story #4458 (PO 10:56Z · Yuna 11:00Z) — the held campaign's needs_check sentence («…으로 만들어져 시작하지 않았어요 — …» · {amount}
+  // = a money amount) contains «시작», the start dialog's confirm button label. Not the shape
+  // this guard is for (#2352/#2365: two counted phrases read as one another): the sentence and the button are never on the card
+  // at the same time — the sentence shows only in the needs_check state, where the start button and its confirm dialog are not
+  // drawn (no retry, no start). «시작» is the card's own verb on purpose (Yuna). Look again if the needs_check branch ever draws
+  // the start dialog.
+  'cage.boostExecutionStartConfirm <-> cage.boostNeedsCheckCreatedBudgetDiffers',
   // story #3592(§22-18 정본, 2026-09-07) — 행 액션 접근 이름 재발 가드가 새로 심은
   // aria-label 템플릿 11쌍. 전부 이 가드가 잡으려는 "화면에 «보이는» 두 문구가
   // 헷갈린다"(#2352·#2365) 모양이 아니다 — aria-label은 스크린리더 전용이라 애초에

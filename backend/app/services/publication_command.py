@@ -171,7 +171,11 @@ _CONNECTION_BLOCKED_CODES = frozenset({
 # story 620beefc(PO 決定, 2026-09-04) — IMAGE 컨테이너가 Threads 쪽에서 ERROR/EXPIRED로
 # 끝났다. 폴링을 몇 번 더 반복해도 같은 결과이므로(결정적) transient 백오프가 아니라
 # needs_check(사람 재시도, AC5)로 바로 보낸다.
-_NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
+_NEEDS_CHECK_CODES = frozenset({
+    "CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED",
+    # story #4458 — a boost campaign made on another budget (a re-seal during its create): not switched on, a person decides
+    "ADS_BOOST_CREATED_BUDGET_DIFFERS",
+})
 # story #4272(까디르 codex P1) — 코드 없는 예외가 공급자 쓰기 호출 **전**에 났다(`provider_call_mark` 표시 없음) — 아무것도 안
 # 나갔으니 자동 재시도가 안전하다(이중 발행 0). 호출 뒤의 코드 없는 예외는 예전처럼 needs_check(모름).
 PRE_CALL_ERROR_CODE = "PUBLICATION_COMMAND_PRE_CALL_ERROR"
