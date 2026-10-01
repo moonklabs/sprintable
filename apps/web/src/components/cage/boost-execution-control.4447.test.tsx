@@ -130,20 +130,23 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     expect($('boost-start-trigger')).toBeNull();
   });
 
-  it('③ connection (blocked): the line with the «연결 확인» link · no start', async () => {
-    spendNow = { run_status: 'pending', start_command: cmd('blocked', 'connection', true) };
+  it('③ connection (blocked), not retryable: the line with the «연결 확인» link · no tail · no button · no start', async () => {
+    spendNow = { run_status: 'pending', start_command: cmd('blocked', 'connection', false) };
     await mount();
     const line = $('boost-start-failed');
     expect(line?.textContent).toContain('광고 계정 연결이 끊겨 시작하지 못했어요');
     expect(line?.querySelector('a')?.getAttribute('href')).toBe('/ws/proj/organization/channels');
+    expect(line?.textContent).toBe(cage.boostStartFailedConnection.replace(/<\/?link>/g, ''));
+    expect($('boost-start-failed-retry')).toBeNull();
     expect($('boost-start-trigger')).toBeNull();
   });
 
   // Qadir 4870 ② — the server's `retryable` alone decides the button: a connection-blocked start the server lets a person retry
   // (after reconnecting · the server does not re-queue it by itself) had no button because the card re-filtered by kind.
-  it('③ connection (blocked) and the server says retryable: the link line and «다시 시도» → the retry endpoint', async () => {
+  it('③ connection (blocked) and the server says retryable: the line with the «연결 확인» link and the retry tail · «다시 시도» → the retry endpoint', async () => {
     spendNow = { run_status: 'pending', start_command: cmd('blocked', 'connection', true) };
     await mount();
+    expect($('boost-start-failed')?.textContent).toBe(cage.boostStartFailedConnectionRetry.replace(/<\/?link>/g, ''));
     expect($('boost-start-failed')?.querySelector('a')).not.toBeNull();
     expect($('boost-start-failed-retry')).not.toBeNull();
     await act(async () => { $('boost-start-failed-retry')!.click(); });
@@ -183,9 +186,10 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
   // never «unknown» and never a retry (approving again makes a new command).
   it.each([
     ['ADS_BOOST_GATE_NOT_APPROVED', 'boostStartBlockedApprovalGone'],
-    ['ADS_BOOST_ORIGINAL_PUBLICATION_MISSING', 'boostStartBlockedSourceMissing'],
-    ['ADS_BOOST_ORIGIN_CONNECTION_MISSING', 'boostStartBlockedSourceMissing'],
+    ['ADS_BOOST_ORIGINAL_PUBLICATION_MISSING', 'boostStartBlockedPostMissing'],
     ['ADS_BOOST_GATE_MISSING', 'boostStartBlocked'],
+    ['ADS_BOOST_NOT_STARTED_AT_PROVIDER', 'boostStartBlocked'], // a pause/resume code — never expected here, so the fallback
+    [null, 'boostStartBlocked'],
   ] as const)('④ blocked_unapproved · %s: its line · no retry · no start', async (code, key) => {
     spendNow = { run_status: 'pending', start_command: cmd('blocked_unapproved', null, false, code) };
     await mount();
@@ -195,9 +199,13 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     expect($('boost-start-trigger')).toBeNull();
   });
 
-  it('④ blocked_unapproved · ADS_BOOST_CONNECTION_UNAVAILABLE: the connection line with its «연결 확인» link · no retry', async () => {
-    spendNow = { run_status: 'pending', start_command: cmd('blocked_unapproved', null, false, 'ADS_BOOST_CONNECTION_UNAVAILABLE') };
+  it.each([
+    ['ADS_BOOST_CONNECTION_UNAVAILABLE', 'boostStartFailedConnection'], // Yuna — the same line as the connection failure (same fact)
+    ['ADS_BOOST_ORIGIN_CONNECTION_MISSING', 'boostStartBlockedOriginConnection'],
+  ] as const)('④ blocked_unapproved · %s: its line with the channel-connections link · no retry', async (code, key) => {
+    spendNow = { run_status: 'pending', start_command: cmd('blocked_unapproved', null, false, code) };
     await mount();
+    expect($('boost-start-failed')?.textContent).toBe(cage[key].replace(/<\/?link>/g, ''));
     expect($('boost-start-failed')?.querySelector('a')?.getAttribute('href')).toBe('/ws/proj/organization/channels');
     expect($('boost-start-failed-retry')).toBeNull();
   });

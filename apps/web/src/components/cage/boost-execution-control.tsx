@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -637,12 +637,15 @@ export function BoostExecutionControl({
     // Qadir 4870 ② — the server's `retryable` alone (human_retryable · people only): a connection-blocked start it lets a person
     // retry after reconnecting now has its button; the card no longer re-filters by kind
     const retryable = command.retryable === true;
-    const connectionLine = () => t.rich('boostStartFailedConnection', { link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link> });
+    const link = (chunks: ReactNode) => <Link href={connectRulesHref} className="underline">{chunks}</Link>;
     // Yuna 03:03Z — «— 다시 시도해 주세요» only where the retry button is shown; without it the line stops at the fact
+    const connectionLine = () => (retryable ? t.rich('boostStartFailedConnectionRetry', { link }) : t.rich('boostStartFailedConnection', { link }));
+    // Yuna 06:12Z — blocked_unapproved lines by the reason code the worker writes (ads_boost_execution._resolve_execution_context)
     const line = command.status === 'blocked_unapproved'
       ? (code === 'ADS_BOOST_GATE_NOT_APPROVED' ? t('boostStartBlockedApprovalGone')
         : code === 'ADS_BOOST_CONNECTION_UNAVAILABLE' ? connectionLine()
-        : code === 'ADS_BOOST_ORIGINAL_PUBLICATION_MISSING' || code === 'ADS_BOOST_ORIGIN_CONNECTION_MISSING' ? t('boostStartBlockedSourceMissing')
+        : code === 'ADS_BOOST_ORIGINAL_PUBLICATION_MISSING' ? t('boostStartBlockedPostMissing')
+        : code === 'ADS_BOOST_ORIGIN_CONNECTION_MISSING' ? t.rich('boostStartBlockedOriginConnection', { link })
         : t('boostStartBlocked'))
       : kind === 'not_sent' ? (retryable ? t('boostStartFailedNotSent') : t('boostStartFailedNotSentNoRetry'))
       : kind === 'transient' ? (retryable ? t('boostStartFailedTransient') : t('boostStartFailedTransientNoRetry'))

@@ -320,6 +320,8 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'agents.toolPermissions.coreAlways::ping',
   'board.backlinksEmptyScoped::source',
   'cage.boostStartFailedConnection::link', // story #4447 — the <link> markup tag (the same «연결 확인» link shape as content.commentsReplyFailureConnectionBlocked)
+  'cage.boostStartFailedConnectionRetry::link', // story #4447 (Yuna) — the same «연결 확인» link, with the retry tail
+  'cage.boostStartBlockedOriginConnection::link', // story #4447 (Yuna 06:12Z) — the «채널 연결» link
   'cage.githubCheckRependingReason::pending',
   'cage.githubCheckRependingReasonWithPrior::pending',
   'chats.commandArgHintPriority::critical',
