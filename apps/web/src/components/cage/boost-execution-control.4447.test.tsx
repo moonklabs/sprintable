@@ -18,8 +18,9 @@ import { fetchWithAuth } from '@/lib/db/client';
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useConnectRulesHref: (p: string) => `/ws/proj${p}`,
-  // story #4458 — useFlatHref (the post link) reads the shell's project
-  useDashboardContext: () => ({ projectId: 'proj-1', inShell: true }),
+  // story #4458 — useFlatHref (the post link) reads the shell's project · story #4443 PR3b — the card reads the org's zone for ad
+  // windows (useTeamTimeZone); none set here → the viewer's
+  useDashboardContext: () => ({ projectId: 'proj-1', inShell: true, orgTimezone: null }),
 }));
 const mockedFetch = vi.mocked(fetchWithAuth);
 const cage = koMessages.cage;
