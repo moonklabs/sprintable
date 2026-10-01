@@ -199,6 +199,20 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const recipeListRef = useRef<HTMLDivElement | null>(null);
   const recipeChangeRef = useRef<HTMLButtonElement | null>(null);
   const focusAfterFold = useRef<'list' | 'change' | null>(null);
+  // the list's order is fixed when it opens (the chosen one first) — arrow keys change the choice while it is open, and a
+  // list that re-sorted on every choice would move under the person's keyboard (Yuna 02:56Z)
+  const [recipeOrder, setRecipeOrder] = useState<string[]>([]);
+  const openRecipes = () => {
+    setRecipeOrder([...recipes].sort((a, b) => Number(b.id === recipeId) - Number(a.id === recipeId)).map((r) => r.id));
+    focusAfterFold.current = 'list';
+    setPickingRecipe(true);
+  };
+  // folding (Yuna 02:56Z): never on an arrow key (that only chooses), but on a real click, Enter or Space, or focus leaving
+  // the list. Focus goes back to [바꾸기] — except when it left for another control (a Tab · a click elsewhere): that stays.
+  const foldRecipes = (refocus: boolean) => {
+    focusAfterFold.current = refocus ? 'change' : null;
+    setPickingRecipe(false);
+  };
   useEffect(() => {
     const where = focusAfterFold.current;
     focusAfterFold.current = null;
@@ -418,10 +432,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       <section aria-labelledby="setup-recipe">
         <h2 id="setup-recipe" className="text-sm font-medium">{t('recipe')}</h2>
         {pickingRecipe ? (
-          <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}>
-            {[...recipes].sort((a, b) => Number(b.id === recipeId) - Number(a.id === recipeId)).map((r) => (
-              <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
-                <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => { pick(r); focusAfterFold.current = 'change'; setPickingRecipe(false); }} className="mt-1" />
+          <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); foldRecipes(true); } }}
+            onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) foldRecipes(e.relatedTarget === null); }}>
+            {recipeOrder.map((id) => recipes.find((x) => x.id === id)).filter((r): r is NonNullable<typeof r> => !!r).map((r) => (
+              // a real click (detail ≥ 1) chooses and folds; the click an arrow key or a label sends to the radio has detail 0
+              <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary"
+                onClick={(e) => { if (e.detail > 0) foldRecipes(true); }}>
+                <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1" />
                 <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
                   {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
                   <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
@@ -435,7 +453,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               <RecipeRolesLine recipe={recipe} runtimes={runtimes} /></span>
             {recipes.length > 1 ? (
               <Button ref={recipeChangeRef} variant="ghost" size="sm" aria-label={t('changeRecipeAria')} aria-expanded={false} aria-controls="setup-recipe-list"
-                onClick={() => { focusAfterFold.current = 'list'; setPickingRecipe(true); }}>{t('change')}</Button>
+                onClick={openRecipes}>{t('change')}</Button>
             ) : null}
           </div>
         ) : null}

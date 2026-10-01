@@ -6536,7 +6536,7 @@
       "change": "Change",
       "changeRecipeAria": "Change recipe",
       "changeFolderAria": "Change work folder",
-      "changeNewOrgAria": "Change new organization name",
+      "changeNewOrgAria": "Change new organization and project names",
       "folderHint": "Enter a folder inside your home folder",
       "start": "Start",
       "startNote": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task",

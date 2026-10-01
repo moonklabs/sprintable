@@ -78,6 +78,31 @@ test.describe('[SID:4446] desktop setup — «시작» in sight without scrollin
     await context.close();
   });
 
+  test('the recipe list by keyboard (Yuna 02:56Z): ↓ only chooses, Enter folds with focus back on [바꾸기]; a mouse click folds', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: 'playwright/.auth/owner.json', locale: 'ko-KR', viewport: { width: 1440, height: 900 - BAR } });
+    const page = await context.newPage();
+    await openSetup(page);
+    const change = page.getByTestId('setup-recipe-chosen').getByRole('button');
+    await change.click();
+    const list = page.getByTestId('setup-recipe-list');
+    await expect(list).toBeVisible();
+    await expect(page.locator('input[name=recipe]:checked')).toBeFocused();
+    const order = await list.locator('input[name=recipe]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await expect(list, 'arrows only choose — the list stays open').toBeVisible();
+    expect(await list.locator('input[name=recipe]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value)), 'not re-sorted under the keyboard').toEqual(order);
+    await expect(list.locator('input[name=recipe]').nth(2)).toBeChecked();
+    await page.keyboard.press('Enter');
+    await expect(list).toHaveCount(0);
+    await expect(page.getByTestId('setup-recipe-chosen').getByRole('button')).toBeFocused();
+    // a person's mouse click on a card chooses and folds
+    await page.getByTestId('setup-recipe-chosen').getByRole('button').click();
+    await list.locator('label').nth(1).click();
+    await expect(list).toHaveCount(0);
+    await context.close();
+  });
+
   test('(나) a new organization — a person with none yet (the window scrolls)', async ({ browser, baseURL }) => {
     const page = await newPersonPage(browser, baseURL!);
     await check(page, 'new-org');

@@ -879,7 +879,7 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     const changes = [...container.querySelectorAll('button')].filter((b) => b.textContent === '바꾸기');
     expect(changes).toHaveLength(3);
     const names = changes.map((b) => b.getAttribute('aria-label') ?? '');
-    expect(names).toEqual(['새 조직 이름 바꾸기', '레시피 바꾸기', '작업 폴더 바꾸기']);
+    expect(names).toEqual(['새 조직 · 프로젝트 이름 바꾸기', '레시피 바꾸기', '작업 폴더 바꾸기']);
     expect(new Set(names).size).toBe(3);
     for (const n of names) expect(n).toContain('바꾸기'); // the spoken name holds the shown word (label in name)
   });
@@ -1148,6 +1148,9 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
 
 describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the last row (Yuna b2d15f85 · PO 00:31Z)', () => {
   const recipeInputs = () => [...container.querySelectorAll('input[name=recipe]')] as HTMLInputElement[];
+  // a person's mouse click (detail 1) — `.click()` and the click an arrow key sends both have detail 0 (choose only, no fold)
+  const realClick = async (el: HTMLElement) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })); }); };
+  const keyChoose = async (el: HTMLInputElement) => { await act(async () => { el.focus(); el.click(); }); }; // as ↑/↓ does
   const chosen = () => container.querySelector('[data-testid=setup-recipe-chosen]') as HTMLElement | null;
 
   it('folded at first: only the chosen recipe, no list, a [바꾸기] on it', async () => {
@@ -1165,7 +1168,7 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     await openRecipes();
     expect(recipeInputs().map((i) => i.value)).toEqual(['rec-1', 'rec-2']);
     expect(chosen()).toBeNull();
-    await act(async () => { recipeInputs()[1].click(); });
+    await realClick(recipeInputs()[1]);
     expect(recipeInputs()).toHaveLength(0);
     expect(chosen()?.textContent).toContain('조사 한 명');
     // opened again: the newly chosen one is now first
@@ -1183,7 +1186,37 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     await openRecipes();
     expect(document.activeElement).toBe(recipeInputs().find((i) => i.checked));
     expect(container.querySelector('#setup-recipe-list')).not.toBeNull();
-    await act(async () => { recipeInputs()[1].click(); });
+    await realClick(recipeInputs()[1]);
+    expect(document.activeElement).toBe(chosen()!.querySelector('button'));
+  });
+
+  it('keys (Yuna 02:56Z): arrows only choose — the list stays open, in the order it opened with; Enter folds, focus on [바꾸기]', async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [...RECIPES, { id: 'rec-3', key: 'org.third', name: '셋째 일', roles: [{ role: '조사', kind: 'agent', stages: ['r'] }] }] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await openRecipes();
+    const order = recipeInputs().map((i) => i.value);
+    await keyChoose(recipeInputs()[1]);
+    await keyChoose(recipeInputs()[2]);
+    expect(recipeInputs().map((i) => i.value)).toEqual(order); // open still, and not re-sorted under the keyboard
+    expect(recipeInputs().find((i) => i.checked)?.value).toBe('rec-3');
+    await act(async () => { container.querySelector('[data-testid=setup-recipe-list]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(recipeInputs()).toHaveLength(0);
+    expect(chosen()?.textContent).toContain('셋째 일');
+    expect(document.activeElement).toBe(chosen()!.querySelector('button'));
+  });
+
+  it('focus leaving the list folds it: to another control, focus stays there; to nowhere, back on [바꾸기]', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await openRecipes();
+    const other = container.querySelector('select') as HTMLSelectElement;
+    await act(async () => { other.focus(); });
+    expect(recipeInputs()).toHaveLength(0);
+    expect(document.activeElement).toBe(other);
+    await openRecipes();
+    await act(async () => { (document.activeElement as HTMLElement).blur(); });
+    expect(recipeInputs()).toHaveLength(0);
     expect(document.activeElement).toBe(chosen()!.querySelector('button'));
   });
 
