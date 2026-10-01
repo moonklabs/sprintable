@@ -324,11 +324,9 @@ class SpendSummaryResponse(BaseModel):
     ad_account_id: str | None = None
     campaign_name: str | None = None
     ad_channel: str | None = None
-    # story #4458 (PO 08:53Z) — a campaign made on another budget (a re-seal during its create) is held: the card says what it was
-    # created with and links the post to request again from (requesting at that budget switches it on). Null without a run · a
-    # campaign made before the record existed · a publication with no draft.
+    # story #4458 (PO 10:56Z) — a campaign made on another budget (a re-seal during its create) is held: the card states what it
+    # was created with next to the approved budget. Null without a run · a campaign made before the record existed.
     created_budget_minor: int | None = None
-    request_draft_id: uuid.UUID | None = None
     snapshots: list[SpendSnapshotView]
 
 
@@ -395,7 +393,7 @@ async def _get_ads_boost_spend_endpoint(
         spend_blocked_at=summary["spend_blocked_at"].isoformat() if summary["spend_blocked_at"] else None,
         spend_blocked_code=summary["spend_blocked_code"], account_currency=summary["account_currency"],
         # story #4458 — the held campaign's created budget and the post to request again from
-        created_budget_minor=summary["created_budget_minor"], request_draft_id=summary["request_draft_id"],
+        created_budget_minor=summary["created_budget_minor"],
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,

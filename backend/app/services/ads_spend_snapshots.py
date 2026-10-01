@@ -816,26 +816,9 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
             "campaign_name": await expected_campaign_name(db, gate),
             "ad_channel": ad_conn.channel if ad_conn is not None else None,
         }
-    # story #4458 — the held campaign's created budget and the post to request again from (publication → version → draft, org-scoped)
-    request_draft_id = None
-    if gate.scope_key:
-        from app.models.channel_post_version import ChannelPostVersion
-        from app.models.channel_publication import ChannelPublication
-
-        try:
-            publication_id = uuid.UUID(gate.scope_key)
-        except ValueError:
-            publication_id = None
-        if publication_id is not None:
-            request_draft_id = (await db.execute(
-                select(ChannelPostVersion.draft_id)
-                .join(ChannelPublication, ChannelPublication.version_id == ChannelPostVersion.id)
-                .where(ChannelPublication.id == publication_id, ChannelPublication.org_id == org_id)
-            )).scalar_one_or_none()
     return {
         **run_ad,
         "created_budget_minor": run.created_budget_minor if run is not None else None,
-        "request_draft_id": request_draft_id,
         "gate_id": gate.id,
         "initiated_by": boost_start_command.initiated_by if boost_start_command is not None else None,
         "sealed_ads_budget_minor": gate.sealed_ads_budget_minor,

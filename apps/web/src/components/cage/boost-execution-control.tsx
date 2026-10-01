@@ -13,7 +13,6 @@ import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
-import { useFlatHref } from '@/hooks/use-flat-href';
 import {
   BOOST_RUN_STATUSES, COMMAND_FAILURE_KINDS, COMMAND_STATUSES,
 } from '@/lib/ads-boost-states.generated';
@@ -96,9 +95,8 @@ interface SpendData {
   // the start
   spend_blocked_code?: string | null;
   account_currency?: string | null;
-  // story #4458 — a campaign held because it was created on another budget: that budget and the post to request again from
+  // story #4458 — a campaign held because it was created on another budget: the budget it was created with
   created_budget_minor?: number | null;
-  request_draft_id?: string | null;
 }
 
 // story #4416 — start · retry · pause · resume are queued commands the worker runs later (every minute, transient failures
@@ -143,14 +141,13 @@ export function BoostExecutionControl({
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [runStatus, setRunStatus] = useState<string | null>(null);
   const connectRulesHref = useConnectRulesHref('/organization/channels');
-  const flatHref = useFlatHref(); // story #4458 — the post's page carries the project (`?p=`), like every flat link
   const [initiatedBy, setInitiatedBy] = useState<InitiatedBy | null>(null);
   const [startCommand, setStartCommand] = useState<StartCommand | null>(null);
   // story #4417 — the spend could not be checked against the budget (the server paused the boost and refuses resume) · the
   // ad account's currency read before the start (the Ads Manager link uses 4416's run ids)
   const [spendBlockedCode, setSpendBlockedCode] = useState<string | null>(null);
   const [accountCurrency, setAccountCurrency] = useState<string | null>(null);
-  const [createdBudget, setCreatedBudget] = useState<{ minor: number | null; draftId: string | null }>({ minor: null, draftId: null });
+  const [createdBudget, setCreatedBudget] = useState<number | null>(null);
   const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
   const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
   // story #4412 — «it is already in my ad account»: the lookup's answer when it did not adopt
@@ -250,7 +247,7 @@ export function BoostExecutionControl({
       setInitiatedBy(d.initiated_by ?? null);
       setSpendBlockedCode(d.spend_blocked_code ?? null);
       setAccountCurrency(d.account_currency ?? null);
-      setCreatedBudget({ minor: d.created_budget_minor ?? null, draftId: d.request_draft_id ?? null });
+      setCreatedBudget(d.created_budget_minor ?? null);
       setRunAd({
         campaign_id: d.campaign_id ?? null, ad_account_id: d.ad_account_id ?? null,
         campaign_name: d.campaign_name ?? null, ad_channel: d.ad_channel ?? null,
@@ -502,12 +499,10 @@ export function BoostExecutionControl({
         </p>
         <p className="text-xs text-muted-foreground" data-testid="boost-needs-check-reason">
           {budgetDiffers ? (() => {
-            // PO 08:53Z — only the way that works: requesting again at the budget it was created with switches it on
-            const amount = createdBudget.minor !== null && sealedAdsCurrency
-              ? formatMinorCurrency(createdBudget.minor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent) : '';
-            return createdBudget.draftId
-              ? t.rich('boostNeedsCheckCreatedBudgetDiffers', { amount, link: (chunks) => <Link href={flatHref(`/content/channel-posts/${createdBudget.draftId}`)} className="underline">{chunks}</Link> })
-              : t('boostNeedsCheckCreatedBudgetDiffersNoLink', { amount });
+            // PO 10:56Z — the facts only: re-seals only lower the budget, so «request again at that budget» never works (no link)
+            const money = (minor: number | null) => (minor !== null && sealedAdsCurrency
+              ? formatMinorCurrency(minor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent) : '');
+            return t('boostNeedsCheckCreatedBudgetDiffers', { amount: money(createdBudget), approved: money(sealedAdsBudgetMinor) });
           })() : currencyMismatch
             ? (accountCurrency && sealedAdsCurrency
               ? t('boostAccountCurrencyMismatch', { accountCurrency, approvedCurrency: sealedAdsCurrency })
