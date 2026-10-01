@@ -155,7 +155,7 @@ export function AgentRunsList() {
       items: (json.data ?? []) as AgentRun[],
       nextCursor: parseCursorMeta(json.meta, 'agent-runs-list').nextCursor,
     };
-  }, [projectId, statusFilter, fromDate, toDate]);
+  }, [projectId, statusFilter, fromDate, toDate, viewerTz]); // story #4443 PR3a — the day bounds are the viewer's zone
 
   // story #2000: 원 raw fetch가 네트워크 단에서 throw하면(오프라인 등) try 없이 setLoading(false)가
   // 영영 안 불려 스켈레톤이 무한행 — try/catch/finally + loadError/retryKey로 봉합(D #1989 패턴).
