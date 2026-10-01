@@ -297,3 +297,91 @@ async def test_an_old_seals_command_is_refused_where_every_execution_passes(monk
         assert creates == [1]  # nothing reached the provider for the old seal
     finally:
         await engine.dispose()
+
+
+def _status_calls(monkeypatch) -> list[str]:
+    import app.services.ads_sandbox_campaign as sandbox
+
+    real = sandbox.set_campaign_status
+    calls: list[str] = []
+
+    async def spy(client, **kwargs):
+        calls.append(kwargs["status"])
+        return await real(client, **kwargs)
+
+    monkeypatch.setattr(sandbox, "set_campaign_status", spy)
+    return calls
+
+
+async def _retry_by_hand(Session, org_id, owner_id, command_id):
+    from app.main import app
+
+    _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+    try:
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/publication-commands/{command_id}/retry")
+        assert r.status_code in (200, 201), r.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_a_pause_of_an_older_seal_still_runs_after_a_reseal(monkeypatch):
+    """PO 08:13Z ① — a pause stops money: the seal check is for the commands that spend (start · resume) only. A pause pressed
+    before a re-seal that got stuck (dead_letter) and is retried after it must still switch the campaign off — refusing it would
+    leave the campaign spending (a regression the seal check alone would have brought)."""
+    from tests.test_4404_publish_worker_no_open_tx_realdb import _command, _run, _tick
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+    from app.services.ads_boost_execution import request_ads_boost_pause
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    statuses = _status_calls(monkeypatch)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        assert (await _run(Session, gate_id)).status == "running"
+        async with Session() as s:
+            pause = await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+            await s.commit()
+            pause_id = pause.id
+        await _set_command(Session, pause_id, status="dead_letter", failure_kind="transient")  # stuck before the re-seal
+        await _reseal_and_approve(Session, org_id, owner_id, gate_id)
+        before = list(statuses)
+        await _retry_by_hand(Session, org_id, owner_id, pause_id)
+        await _tick(Session)
+        assert (await _command(Session, pause_id)).status == "completed"
+        assert statuses[len(before):] == ["PAUSED"]
+    finally:
+        await engine.dispose()
+
+
+async def test_a_resume_of_an_older_seal_is_refused_after_a_reseal(monkeypatch):
+    """The other side of the same rule: a resume spends again — an older seal's resume retried after a re-seal is refused before
+    any call (ADS_BOOST_SEAL_REPLACED), like an older start."""
+    from tests.test_4404_publish_worker_no_open_tx_realdb import _command, _run, _tick
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+    from app.services.ads_boost_execution import request_ads_boost_pause, request_ads_boost_resume
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    statuses = _status_calls(monkeypatch)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        async with Session() as s:
+            await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+            await s.commit()
+        await _tick(Session)
+        assert (await _run(Session, gate_id)).status == "paused"
+        async with Session() as s:
+            resume = await request_ads_boost_resume(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+            await s.commit()
+            resume_id = resume.id
+        await _set_command(Session, resume_id, status="dead_letter", failure_kind="transient")
+        await _reseal_and_approve(Session, org_id, owner_id, gate_id)
+        before = list(statuses)
+        await _retry_by_hand(Session, org_id, owner_id, resume_id)
+        await _tick(Session)
+        stopped = await _command(Session, resume_id)
+        assert (stopped.status, stopped.reason_code) == ("blocked_unapproved", "ADS_BOOST_SEAL_REPLACED"), (stopped.status, stopped.reason_code, stopped.last_error)
+        assert statuses[len(before):] == []  # nothing switched back on
+    finally:
+        await engine.dispose()

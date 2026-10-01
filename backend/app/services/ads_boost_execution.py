@@ -429,10 +429,12 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
         raise AdsBoostAdapterUnavailableError(
             "ADS_BOOST_GATE_NOT_APPROVED", f"gate no longer approved (status={gate.status}): {gate.id}",
         )
-    # story #4447 (Qadir 4870 07:19Z) — the command must belong to the gate's current seal. A re-seal voids only *pending*
-    # commands; an older seal's stopped start (dead_letter · blocked) could still be retried by hand or adopted, and ran with that
-    # older approval (its budget · its content). Every execution path (worker · retry · adopt) passes here: refuse before any call.
-    if command.approved_version != gate.sealed_ads_boost_version_id:
+    # story #4447 (Qadir 4870 07:19Z) — a command that spends must belong to the gate's current seal. A re-seal voids only
+    # *pending* commands; an older seal's stopped start (dead_letter · blocked) could still be retried by hand or adopted, and ran
+    # with that older approval (its budget · its content). Every execution path (worker · retry · adopt) passes here: refuse before
+    # any call. PO 08:13Z — a pause stops money, so it is never refused for its seal: a pause pressed before a re-seal and retried
+    # after it must still switch the campaign off (start · resume only).
+    if command.operation in (OP_BOOST_START, OP_RESUME) and command.approved_version != gate.sealed_ads_boost_version_id:
         raise AdsBoostAdapterUnavailableError(
             SEAL_REPLACED_CODE, f"command belongs to a replaced seal ({command.approved_version}); current: {gate.sealed_ads_boost_version_id}",
         )
