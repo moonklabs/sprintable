@@ -113,9 +113,11 @@ class _SealReplacedBeforeCall(Exception):
 
     code = "ADS_BOOST_SEAL_REPLACED"
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, *, code: str | None = None):
         super().__init__(message)
         self.message = message
+        if code:
+            self.code = code  # story #4460 — the gate left «approved» right before the call (a cancel · a reopen)
 
 
 async def _refuse_if_seal_replaced(db: AsyncSession, command, gate_id: uuid.UUID) -> None:
@@ -125,7 +127,13 @@ async def _refuse_if_seal_replaced(db: AsyncSession, command, gate_id: uuid.UUID
     (MONEY_STOPPING_OPS)."""
     if command.operation in MONEY_STOPPING_OPS:
         return
-    current = (await db.execute(select(Gate.sealed_ads_boost_version_id).where(Gate.id == gate_id))).scalar_one_or_none()
+    current, status = (await db.execute(
+        select(Gate.sealed_ads_boost_version_id, Gate.status).where(Gate.id == gate_id)
+    )).one_or_none() or (None, None)
+    if status != "approved":
+        # story #4460 (PO 16:32Z) — a cancel (or a reopen) landed while this command was already out: what it may have created is
+        # never switched on; the cancel finishes once this command ended
+        raise _SealReplacedBeforeCall(f"the gate is no longer approved before the provider call (status {status})", code="ADS_BOOST_GATE_NOT_APPROVED")
     if current != command.approved_version:
         raise _SealReplacedBeforeCall(
             f"the gate was re-sealed before the provider call (command {command.approved_version} · current {current})",
@@ -775,6 +783,17 @@ CREATED_BUDGET_DIFFERS_CODE = "ADS_BOOST_CREATED_BUDGET_DIFFERS"  # story #4458 
 
 
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
+    gate_id = command.gate_id
+    await _process_one_ads_boost_command(db, command, now=now)
+    # story #4460 — a cancel waits for the gate's commands: once this one ended (a pause landed · a start refused before ACTIVE),
+    # the cancel may finish (the one place: ads_boost_cancel.finish_cancel_if_stopped)
+    from app.services.ads_boost_cancel import finish_cancel_if_stopped
+
+    if await finish_cancel_if_stopped(db, gate_id=gate_id, now=now):
+        await db.commit()
+
+
+async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
     """`app/services/publication_command.py::_process_one_command`의 content_kind==
     "ads_boost" 분기가 이 함수로 넘긴다(site_post/comment_reply와 동형 위임 패턴).
     실패 시 `apply_command_failure`(publication_command.py)를 그대로 재사용 —

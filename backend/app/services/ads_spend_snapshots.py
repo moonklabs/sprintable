@@ -176,7 +176,9 @@ async def _resolve_spend_context(db: AsyncSession, snapshot: InsightSnapshot) ->
     }
 
 
-async def _captured_spend_minor_for_gate(db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID) -> int:
+async def _captured_spend_minor_for_gate(
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, since: datetime | None = None,
+) -> int:
     """story #3806(Phase3·3-2 PR 11) — `get_ads_boost_spend_summary`가 이미 하던
     "그 gate의 캡처된 paid spend 합" 계산을 추출(드리프트 금지 — 상한 판정
     (`_enforce_spend_cap`)과 조회 API가 같은 계산을 각자 다시 적으면 나중에
@@ -185,6 +187,9 @@ async def _captured_spend_minor_for_gate(db: AsyncSession, *, org_id: uuid.UUID,
         select(InsightSnapshot).where(
             InsightSnapshot.org_id == org_id, InsightSnapshot.publication_id == publication_id,
             InsightSnapshot.source == _PAID_SOURCE, InsightSnapshot.status == "captured",
+            # story #4460 — one post can run several cycles (a cancel, then a new request): the card and the cap count the
+            # current cycle's captures only (the org ledger keeps them all)
+            *([InsightSnapshot.due_at >= since] if since is not None else []),
         )
     )).scalars().all()
     return sum((s.normalized or {}).get("spend") or 0 for s in snapshots)
@@ -204,7 +209,7 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
         return False
 
     captured = await _captured_spend_minor_for_gate(
-        db, org_id=gate.org_id, publication_id=uuid.UUID(gate.scope_key),
+        db, org_id=gate.org_id, publication_id=uuid.UUID(gate.scope_key), since=run.cycle_started_at,
     )
     if captured < gate.sealed_ads_budget_minor:
         return False
@@ -832,8 +837,19 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
     # 가져온 `snapshots`로 직접 합해도 값은 같지만, 두 소비처가 각자 다시 적으면
     # 나중에 한쪽만 고쳐질 위험을 없애기 위해 공유 함수를 그대로 부른다.
     captured_spend_minor = await _captured_spend_minor_for_gate(
-        db, org_id=org_id, publication_id=uuid.UUID(gate.scope_key),
+        db, org_id=org_id, publication_id=uuid.UUID(gate.scope_key), since=run.cycle_started_at if run is not None else None,
     )
+    # story #4460 — the cycles that ended before this one (a cancel): their campaign and what they spent stay on the card
+    from app.models.ads_boost_run import AdsBoostRunCycle
+
+    previous_cycles = [
+        {"campaign_id": c.campaign_id, "spend_minor": c.spend_minor, "currency": c.currency, "ended_at": c.ended_at.isoformat(),
+         "end_reason": c.end_reason}
+        for c in (await db.execute(
+            select(AdsBoostRunCycle).where(AdsBoostRunCycle.gate_id == gate.id, AdsBoostRunCycle.org_id == org_id)
+            .order_by(AdsBoostRunCycle.ended_at)
+        )).scalars().all()
+    ]
     # story #4416 — what the card needs to point at the running campaign when a pause has not landed yet (money may still be
     # going out): the campaign, its ad account (numeric, no `act_`) and name, and the ad channel (`conn.channel` as is — the
     # screen decides which notice fits; an unknown value falls back to the money line only). All null without a run;
@@ -871,6 +887,8 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
             if latest_pause is not None else None
         ),
         "created_budget_minor": run.created_budget_minor if run is not None else None,
+        "cancel_requested": run is not None and run.cancel_requested_at is not None,  # story #4460 — «취소 중»
+        "previous_cycles": previous_cycles,
         "gate_id": gate.id,
         "initiated_by": boost_start_command.initiated_by if boost_start_command is not None else None,
         "sealed_ads_budget_minor": gate.sealed_ads_budget_minor,

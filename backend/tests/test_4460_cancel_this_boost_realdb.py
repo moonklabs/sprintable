@@ -1,0 +1,352 @@
+"""story #4460 — a person cancels a boost; the next request for the same post starts a new cycle with a new campaign.
+
+PO 10:56Z · 16:30Z · 16:32Z: a post has one ads_boost gate and a gate one run, so a cancel resets them in place. The gate is voided
+the moment the cancel is asked for (an explicit ads_boost cancel transition, with who and why on the gate) — 4466's rules then
+stop the money (start/resume refused · a live campaign paused). The run is cleared only once the provider confirmed the campaign
+is off (paused, or never switched on, and no command still out): until then it is «취소 중» and keeps every campaign id (an
+emptied run could neither stop nor read a live campaign). The ended cycle is kept as a row (campaign · created values · spend).
+A re-request then reopens the gate as a fresh cycle; the next start makes a new campaign. Requester or owner/admin only.
+"""
+from __future__ import annotations
+
+import os
+import uuid
+from datetime import datetime, timezone
+
+import pytest
+
+from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
+from tests.test_3806_ads_boost_execution import _setup_approved_gate
+from tests.test_3806_ads_boost_gate import _approve_gate, _boost_body
+from tests.test_4404_publish_worker_no_open_tx_realdb import _command, _run, _start_command, _tick
+from tests.test_4142_recipe_async_video_publish_command_realdb import _configure_secrets  # noqa: F401 — autouse
+
+_REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+
+pytestmark = [
+    pytest.mark.destructive_schema,
+    pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요"),
+    pytest.mark.anyio,
+]
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    yield
+    from app.core.database import engine as _global_engine
+
+    await _global_engine.dispose()
+
+
+
+def _provider(monkeypatch) -> list[tuple[str, str]]:
+    """Every status call the sandbox gets, as (status, campaign id)."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    real = sandbox.set_campaign_status
+    calls: list[tuple[str, str]] = []
+
+    async def spy(client, **kwargs):
+        calls.append((kwargs["status"], kwargs["campaign_id"]))
+        return await real(client, **kwargs)
+
+    monkeypatch.setattr(sandbox, "set_campaign_status", spy)
+    return calls
+
+
+async def _setup(monkeypatch, *, objective="POST_ENGAGEMENT"):
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory(), objective=objective)
+    return engine, Session, org_id, owner_id, gate_id, _provider(monkeypatch)
+
+
+async def _cancel(Session, org_id, gate_id, actor_id, *, is_admin=True, reason="다른 예산으로 다시"):
+    from app.services.ads_boost_cancel import cancel_ads_boost
+
+    async with Session() as s:
+        result = await cancel_ads_boost(s, org_id=org_id, gate_id=gate_id, actor_member_id=actor_id, actor_is_admin=is_admin, reason=reason)
+        await s.commit()
+        return result
+
+
+async def _gate(Session, gate_id):
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+
+    async with Session() as s:
+        return (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+
+
+async def _cycles(Session, gate_id):
+    from sqlalchemy import select
+
+    from app.models.ads_boost_run import AdsBoostRunCycle
+
+    async with Session() as s:
+        return (await s.execute(select(AdsBoostRunCycle).where(AdsBoostRunCycle.gate_id == gate_id))).scalars().all()
+
+
+async def _request_again(Session, org_id, owner_id, gate_id, *, budget_minor):
+    from app.main import app
+
+    gate = await _gate(Session, gate_id)
+    _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+    try:
+        async with _client_for(app) as client:
+            return await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{gate.scope_key}/boosts",
+                json=_boost_body(ad_connection_id=gate.sealed_ads_connection_id, budget_minor=budget_minor),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def _new_seal_start(Session, org_id, gate_id, owner_id):
+    from tests.test_4458_seal_race_realdb import _new_seal_start as start
+
+    return await start(Session, org_id, gate_id, owner_id)
+
+
+async def test_cancel_a_running_boost_then_a_new_request_makes_a_new_campaign(monkeypatch):
+    """AC1 · AC3: running → cancel → the gate is voided at once (who · why) and the campaign is paused → only then the cycle is
+    recorded and the run cleared → a request with another (higher) budget opens a fresh cycle → its start creates a new campaign;
+    the old campaign is never switched on again."""
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        old = await _run(Session, gate_id)
+        assert old.status == "running" and old.campaign_id
+        old_campaign = old.campaign_id
+
+        await _cancel(Session, org_id, gate_id, owner_id)
+        gate = await _gate(Session, gate_id)
+        assert gate.status == "voided" and gate.resolution_note and "다른 예산으로 다시" in gate.resolution_note
+        cancelling = await _run(Session, gate_id)
+        assert cancelling.cancel_requested_at is not None and cancelling.campaign_id == old_campaign  # «취소 중» · ids kept
+
+        await _tick(Session)  # the pause goes out and lands
+        assert calls[-1] == ("PAUSED", old_campaign)
+        cleared = await _run(Session, gate_id)
+        assert (cleared.campaign_id, cleared.adset_id, cleared.ad_id, cleared.cancel_requested_at) == (None, None, None, None)
+        [cycle] = await _cycles(Session, gate_id)
+        assert (cycle.campaign_id, cycle.end_reason, cycle.ended_by_member_id) == (old_campaign, "cancelled", owner_id)
+
+        r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=250_000)  # higher than before: a fresh cycle
+        assert r.status_code in (200, 201), r.text
+        gate = await _gate(Session, gate_id)
+        assert (gate.status, gate.sealed_ads_budget_minor) == ("pending", 250_000) and gate.requested_by_member_id is not None
+        async with Session() as s:
+            await _approve_gate(s, gate_id, owner_id)
+        await _new_seal_start(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        new = await _run(Session, gate_id)
+        assert new.status == "running" and new.campaign_id and new.campaign_id != old_campaign
+        assert ("ACTIVE", old_campaign) not in calls[calls.index(("PAUSED", old_campaign)):]
+        assert new.cycle_started_at is not None
+    finally:
+        await engine.dispose()
+
+
+async def test_a_pause_not_confirmed_keeps_the_ids_and_a_new_request_waits(monkeypatch):
+    """Condition 1: the pause is in flight (the sandbox's delayed pause) → «취소 중», nothing cleared, no cycle row yet, and a new
+    request for the post is refused (409) until it is."""
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch, objective="POST_ENGAGEMENT [sandbox:pause-delayed]")
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        campaign = (await _run(Session, gate_id)).campaign_id
+        await _cancel(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        run = await _run(Session, gate_id)
+        assert (run.status, run.campaign_id) == ("pause_pending", campaign) and run.cancel_requested_at is not None
+        assert await _cycles(Session, gate_id) == []
+        r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=250_000)
+        assert r.status_code == 409, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_CANCEL_IN_PROGRESS"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_cancel_while_the_start_is_out_at_the_provider_waits_for_it_and_never_switches_it_on(monkeypatch):
+    """PO 16:32Z: the cancel lands while the start's create call is out (in_progress · outcome unknown). The campaign that call
+    makes is never switched on (the gate is no longer approved right before ACTIVE); only after that command ended is the cycle
+    recorded (with that campaign) and the run cleared."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    real_create = sandbox.create_boost_campaign
+    seen: dict = {}
+
+    async def create_while_cancelled(client, **kwargs):
+        result = await real_create(client, **kwargs)
+        seen["campaign"] = result["campaign_id"]
+        seen["cancel"] = await _cancel(Session, org_id, gate_id, owner_id)  # the person cancels while the call is out
+        run = await _run(Session, gate_id)
+        seen["kept"] = run.cancel_requested_at is not None and not await _cycles(Session, gate_id)
+        return result
+
+    monkeypatch.setattr(sandbox, "create_boost_campaign", create_while_cancelled)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        assert seen["kept"]  # in flight: «취소 중», nothing recorded yet
+        assert [c for c in calls if c[0] == "ACTIVE"] == []  # never switched on
+        cleared = await _run(Session, gate_id)
+        assert cleared.campaign_id is None and cleared.cancel_requested_at is None
+        [cycle] = await _cycles(Session, gate_id)
+        assert cycle.campaign_id == seen["campaign"]
+    finally:
+        await engine.dispose()
+
+
+async def test_a_held_needs_check_boost_is_cancelled_at_once_and_a_new_budget_makes_a_new_campaign(monkeypatch):
+    """AC3 (the 4458 dead end): the campaign was created on another budget and held (needs_check, never switched on) → cancel
+    ends it at once (nothing to pause) → a request with another budget → a new campaign."""
+    from tests.test_4458_seal_race_realdb import _reseal_during_create
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    creates, statuses = await _reseal_during_create(monkeypatch, Session, gate_id, new_budget=40_000)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        new = await _new_seal_start(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        held = await _command(Session, new.id)
+        assert held.reason_code == "ADS_BOOST_CREATED_BUDGET_DIFFERS"
+        old_campaign = (await _run(Session, gate_id)).campaign_id
+        await _cancel(Session, org_id, gate_id, owner_id)
+        cleared = await _run(Session, gate_id)
+        assert cleared.campaign_id is None and [c.campaign_id for c in await _cycles(Session, gate_id)] == [old_campaign]
+        assert "ACTIVE" not in statuses
+        r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=70_000)
+        assert r.status_code in (200, 201), r.text
+        async with Session() as s:
+            await _approve_gate(s, gate_id, owner_id)
+        await _new_seal_start(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        run = await _run(Session, gate_id)
+        assert run.status == "running" and run.campaign_id != old_campaign and creates[-1] == 70_000
+    finally:
+        await engine.dispose()
+
+
+async def test_only_the_requester_or_an_owner_admin_may_cancel(monkeypatch):
+    """AC2: another plain member → 403 (nothing changes); the requester (a plain member) and an owner may."""
+    from app.main import app
+    from tests.test_3475_publishing_metrics import _seed_human
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    try:
+        async with Session() as s:
+            other = await _seed_human(s, org_id, role="member")
+        _setup_org_scoped_app(app, Session, org_id, user_id=other)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/cancel", json={"reason": "x"})
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 403, r.text
+        assert (await _gate(Session, gate_id)).status == "approved"
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/cancel", json={"reason": "다시"})
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 200, r.text
+        assert (await _gate(Session, gate_id)).status == "voided"
+    finally:
+        await engine.dispose()
+
+
+async def test_the_old_cycles_spend_stays_and_the_new_cycle_counts_from_zero(monkeypatch):
+    """Condition 3: the ended cycle keeps what it spent (its row · the org ledger), and the new cycle's card · cap count only
+    the new campaign's captures."""
+    import app.services.ads_sandbox_campaign as sandbox
+    from app.services.ads_spend_snapshots import get_ads_boost_spend_summary, process_due_ads_spend_snapshots
+    from app.services.org_cost_summary import get_org_ads_cost_summary
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+
+    async def spend(client, **kwargs):
+        return 12_000
+
+    monkeypatch.setattr(sandbox, "get_campaign_spend_minor", spend)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        from app.main import app
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend/refresh")
+            assert r.status_code == 201, r.text
+        finally:
+            app.dependency_overrides.clear()
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s, now=datetime.now(timezone.utc))
+        await _cancel(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        [cycle] = await _cycles(Session, gate_id)
+        assert cycle.spend_minor == 12_000
+        r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=250_000)
+        assert r.status_code in (200, 201), r.text
+        async with Session() as s:
+            summary = await get_ads_boost_spend_summary(s, org_id=org_id, gate_id=gate_id)
+            assert summary["captured_spend_minor"] == 0  # the new cycle has spent nothing yet
+            assert [c["spend_minor"] for c in summary["previous_cycles"]] == [12_000]
+            ledger = await get_org_ads_cost_summary(s, org_id=org_id)
+        assert ledger["captured_spend_minor"] >= 12_000  # the org ledger keeps the old cycle's spend
+    finally:
+        await engine.dispose()
+
+
+async def test_the_requester_who_is_a_plain_member_may_cancel(monkeypatch):
+    """AC2: the person who requested the boost — not an owner/admin — may cancel it (the gate records who asked)."""
+    from app.main import app
+    from tests.test_3475_publishing_metrics import _seed_human
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    try:
+        async with Session() as s:
+            member = await _seed_human(s, org_id, role="member")
+        r = await _request_again(Session, org_id, member, gate_id, budget_minor=60_000)  # the member asks for it (a re-seal)
+        assert r.status_code in (200, 201), r.text
+        _setup_org_scoped_app(app, Session, org_id, user_id=member)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/cancel", json={"reason": "내가 요청한 것"})
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 200, r.text
+        assert (await _gate(Session, gate_id)).status == "voided"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_queued_start_is_voided_so_a_held_boost_ends_at_once(monkeypatch):
+    """A start queued when the cancel lands would never run (the gate is no longer approved) — it is voided with the cancel, so a
+    boost that is not live ends at once instead of waiting for the worker to refuse that start."""
+    from tests.test_4458_seal_race_realdb import _reseal_during_create
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    await _reseal_during_create(monkeypatch, Session, gate_id, new_budget=40_000)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)  # created on the old budget, the new seal's start not sent yet
+        queued = await _new_seal_start(Session, org_id, gate_id, owner_id)  # queued, not run
+        result = await _cancel(Session, org_id, gate_id, owner_id)
+        assert result == {"state": "cancelled"}
+        assert (await _command(Session, queued.id)).status == "voided"
+        assert (await _run(Session, gate_id)).campaign_id is None
+    finally:
+        await engine.dispose()

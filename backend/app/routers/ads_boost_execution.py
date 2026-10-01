@@ -299,6 +299,16 @@ class PauseCommandView(BaseModel):
     error_code: str | None
 
 
+class PreviousCycleView(BaseModel):
+    """story #4460 — a cycle that ended before the current one (a cancel): its campaign and what it spent."""
+
+    campaign_id: str | None = None
+    spend_minor: int | None = None
+    currency: str | None = None
+    ended_at: str
+    end_reason: str
+
+
 class SpendSummaryResponse(BaseModel):
     gate_id: uuid.UUID
     sealed_ads_budget_minor: int
@@ -337,7 +347,59 @@ class SpendSummaryResponse(BaseModel):
     # story #4461 (PO 09:00Z) — the latest pause's state: a pause that could not reach the campaign's account (its connection gone
     # · token dead) must not look like a pause — the card says so and points at Ads Manager. Null when no pause was requested.
     pause_command: PauseCommandView | None = None
+    # story #4460 — a cancel asked for and not finished («취소 중») · the cycles that ended before this one (campaign · spend)
+    cancel_requested: bool = False
+    previous_cycles: list[PreviousCycleView] = []
     snapshots: list[SpendSnapshotView]
+
+
+class CancelBoostRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class CancelBoostResponse(BaseModel):
+    state: str  # "cancelling" (the campaign not known to be off yet) · "cancelled"
+
+
+@router.post("/{org_id}/ads-boosts/{gate_id}/cancel", response_model=CancelBoostResponse)
+async def cancel_ads_boost_endpoint(
+    org_id: uuid.UUID, gate_id: uuid.UUID, body: CancelBoostRequest | None = None,
+    db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
+) -> CancelBoostResponse:
+    """story #4460 — «이 홍보 취소»: the gate is voided now, the campaign paused, and the run cleared once it is known to be off."""
+    from app.dependencies.ownership import _is_org_admin
+    from app.services.ads_boost_cancel import (
+        AdsBoostAlreadyCancelledError,
+        AdsBoostCancelForbiddenError,
+        AdsBoostCancelNotFoundError,
+        cancel_ads_boost,
+    )
+
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    try:
+        result = await cancel_ads_boost(
+            db, org_id=org_id, gate_id=gate_id, actor_member_id=resolved.id,
+            actor_is_admin=await _is_org_admin(db, org_id, uuid.UUID(str(auth.user_id))), reason=(body.reason if body else None),
+        )
+    except AdsBoostCancelNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail={"code": "ADS_BOOST_GATE_NOT_FOUND", "message": t("ads_boost.gate_not_found", resolved_locale)},
+        ) from exc
+    except AdsBoostCancelForbiddenError as exc:
+        raise HTTPException(
+            status_code=403, detail={"code": "ADS_BOOST_CANCEL_FORBIDDEN", "message": t("ads_boost.cancel_forbidden", resolved_locale)},
+        ) from exc
+    except AdsBoostAlreadyCancelledError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "ADS_BOOST_ALREADY_CANCELLED", "message": t("ads_boost.already_cancelled", resolved_locale)},
+        ) from exc
+    return CancelBoostResponse(**result)
 
 
 @router.get("/{org_id}/ads-boosts/{gate_id}/spend", response_model=SpendSummaryResponse)
@@ -406,6 +468,8 @@ async def _get_ads_boost_spend_endpoint(
         created_budget_minor=summary["created_budget_minor"],
         # story #4461 — the latest pause (a pause stopped on the connection is told honestly)
         pause_command=PauseCommandView(**summary["pause_command"]) if summary.get("pause_command") else None,
+        cancel_requested=summary.get("cancel_requested", False),
+        previous_cycles=[PreviousCycleView(**c) for c in summary.get("previous_cycles", [])],
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,
