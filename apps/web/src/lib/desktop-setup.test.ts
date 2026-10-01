@@ -180,13 +180,24 @@ describe('[SID:4427] 진행 표시 — 상태 조회 한 번을 세 단계로(PO
 
   it('결과가 나온 뒤엔 그 결과를 낸 첫 에이전트는 연결 신호가 비어도 ⑦ 아님(결과가 연결의 증거) — 끝내 안 붙은 다른 에이전트만 ⑦(story 4464)', () => {
     const s = { ...base(), state: 'handed_over' as const };
-    s.signals = { ...s.signals, first_result_at: 'y' };
+    s.signals = { ...s.signals, first_result_at: 'y', first_result_member_id: 'm1' }; // story 4468: the server names it
     const p = setupProgress(s, T0 + 600_000, T0);
     expect(p.notConnected).toBe(true);
     expect(p.notConnectedAgents.roles).toEqual(['작성']); // never 조사 (the result is its)
     // the first agent alone: the result proves it — no ⑦ at all, settled
     const one = { ...s, members: s.members.filter((m) => m.member_id !== 'm2') };
     expect(setupProgress(one, T0 + 600_000, T0)).toMatchObject({ notConnected: false, settled: true });
+  });
+
+  it('[SID:4468] the agent the server names is the one proven — a result by the second agent leaves the first one in ⑦; not known → no one proven', () => {
+    const s = { ...base(), state: 'handed_over' as const };
+    s.signals = { ...s.signals, first_result_at: 'y', first_result_member_id: 'm2' }; // 작성 showed it, 조사 never connected
+    expect(setupProgress(s, T0 + 600_000, T0).notConnectedAgents.roles).toEqual(['조사']); // was: 조사 «proven» by the guess
+    s.signals = { ...s.signals, first_result_member_id: null };
+    expect(setupProgress(s, T0 + 600_000, T0).notConnectedAgents.roles).toEqual(['조사', '작성']); // nobody guessed
+    // an older server that does not send the field at all: the old reading (the flow's first agent) — AC1 compatibility
+    const { first_result_member_id: _absent, ...older } = s.signals;
+    expect(setupProgress({ ...s, signals: older }, T0 + 600_000, T0).notConnectedAgents.roles).toEqual(['작성']);
   });
 
   it('폴더 대체 · 막힘(⑥) · 코드 먼저 끝남(④)', () => {

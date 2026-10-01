@@ -30,15 +30,21 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   // one reading: the status, when it was read, and when this page first saw «handed_over» (the status carries no such time)
   const [snap, setSnap] = useState<{ status: SetupStatus; at: number; handedOverSeenAt: number | null } | null>(null);
   const stopped = useRef(false);
+  // story 4468 (Qadir 4880 second line): [다시 확인] and the 2 s reading can overlap — readings are numbered when they go out, and
+  // an answer older than the one already shown is dropped (it used to put the page back to an earlier state)
+  const reads = useRef({ sent: 0, shown: 0 });
 
   const poll = useCallback(async () => {
     if (!setupId) return;
+    const n = ++reads.current.sent;
     try {
       const res = await fetchWithAuth(`/api/desktop/setups/${setupId}`);
       if (!res.ok) return; // 한 번 못 읽으면 다음 판에 다시(화면은 그대로)
       const body = (await res.json()) as SetupStatus | { data?: SetupStatus };
       const s = 'signals' in body ? body : body.data ?? null;
       if (!s) return;
+      if (n < reads.current.shown) return; // a newer answer is already on the page
+      reads.current.shown = n;
       // «설정 진행 중» 표시(문서 열림 셈 · AC2): 흐름이 끝나면 지우고, 아니면 읽을 때마다 새로 적는다(PO 13:00Z)
       if (s.signals.first_result_at || s.signals.blocked || s.state === 'not_handed_over') forgetActiveSetup();
       else rememberActiveSetup(setupId);
