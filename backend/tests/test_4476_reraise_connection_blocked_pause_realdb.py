@@ -10,6 +10,7 @@ org-wide pause stays as it is (lifting the pause re-queues it).
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 
@@ -214,5 +215,63 @@ async def test_a_resume_stopped_on_the_connection_is_re_raised_the_same_way(monk
         await _tick(Session)
         assert (await _command(Session, resume_id)).status == "completed"
         assert (await _run(Session, gate_id)).status == "running"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("change", ["gate_not_approved", "seal_replaced", "created_budget_differs"])
+async def test_a_re_raised_resume_still_turns_nothing_on_when_it_may_not(monkeypatch, change):
+    """PO 15:28Z — a resume turns money on: re-raising it must not skip what a resume needs. Re-raised, then before the worker runs
+    the gate leaves approved · the seal is replaced · the created budget no longer matches (4458) → no provider call, no ACTIVE."""
+    import app.services.ads_sandbox_campaign as sandbox
+    from sqlalchemy import update
+
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.models.gate import Gate
+    from app.services.ads_boost_execution import request_ads_boost_resume
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
+
+    engine, Session, org_id, owner_id, gate_id, provider = await _running(monkeypatch)
+    try:
+        await _press_pause(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        real = sandbox.set_campaign_status
+        state = {"down": True, "active_calls": 0}
+
+        async def status(client, **kwargs):
+            if kwargs["status"] == "ACTIVE":
+                state["active_calls"] += 1
+                if state["down"]:
+                    raise MetaAdsCampaignError("CHANNEL_TOKEN_EXPIRED", "sandbox: token expired", outcome_known=True)
+            return await real(client, **kwargs)
+
+        monkeypatch.setattr(sandbox, "set_campaign_status", status)
+
+        async def press_resume():
+            async with Session() as s:
+                command = await request_ads_boost_resume(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+                await s.commit()
+                return command.id
+
+        resume_id = await press_resume()
+        await _tick(Session)
+        assert (await _command(Session, resume_id)).status == "blocked"
+        state["down"] = False
+        await _reconnect(Session, gate_id, provider)
+        assert await press_resume() == resume_id  # re-raised
+        async with Session() as s:  # then, before the worker runs, what a resume needs goes away
+            if change == "gate_not_approved":
+                await s.execute(update(Gate).where(Gate.id == gate_id).values(status="pending"))
+            elif change == "seal_replaced":
+                await s.execute(update(Gate).where(Gate.id == gate_id).values(sealed_ads_boost_version_id=uuid.uuid4()))
+            else:
+                await s.execute(update(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id).values(created_budget_minor=1))
+            await s.commit()
+        calls_before = state["active_calls"]
+        await _tick(Session)
+        stopped = await _command(Session, resume_id)
+        assert stopped.status != "completed", (stopped.status, stopped.reason_code)
+        assert state["active_calls"] == calls_before, f"ACTIVE was called after the re-raise ({change})"
+        assert (await _run(Session, gate_id)).status == "paused"
     finally:
         await engine.dispose()
