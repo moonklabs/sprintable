@@ -996,6 +996,23 @@ jobs:
   # 순간부터 _is_publication_active의 「마지막 댓글 7일」 창이 영구 False가 돼 자가
   # 회수 재생성 전체가 죽은 실사고(develop 2026-09-12 00:00Z 전수 RED). PG 불요
   # 정적 AST 스캔이라 독립 job으로 배선.
+  # story #4445 — the web must read the answer shape the backend (through the BFF) really sends: a bare array read as
+  # { data } hid the settings block list for months, a bare DocResponse read as { data } made a saved rename say «실패».
+  # Joins the backend's shapes (scripts/web_api_route_shapes.json, kept fresh by backend/tests/test_4445_web_route_shapes_
+  # snapshot.py) × each BFF handler (pass-through / wrapped) × each web call site's read. Lenient two-shape reads are frozen
+  # per file (scripts/web_api_lenient_reads_baseline.json). What it can't see is declared at the top of the script.
+  web-api-response-shape-lint:
+    name: 웹 응답 모양 × 백엔드 계약 가드 (guard, story #4445)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test (seeded mismatches are caught, lenient growth and shrink are caught)
+        run: python3 scripts/verify_web_api_response_shapes.py --self-test
+      - name: Web call sites read the shape the backend sends
+        run: python3 scripts/verify_web_api_response_shapes.py
+
   no-hardcoded-iso-timestamp-lint:
     name: backend/app ISO 절대 일시 하드코딩 lint (guard, story #3528)
     runs-on: ubuntu-latest

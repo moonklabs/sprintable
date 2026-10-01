@@ -30,6 +30,7 @@ _SCRIPTS_ROOT = Path(__file__).resolve().parent.parent / "scripts"
 _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "ci_alembic_sibling_pr_collision_check.py",   # story #2401 — CI 전용, git+gh api만 사용(운영 DB 무접속)
     "ci_alembic_single_step_promotion_check.py",  # story #2330 — CI 전용 fresh-DB 재현
+    "dump_web_route_shapes.py",                    # story #4445 — 앱 라우트 모양 스냅숏 생성(로컬 · 테스트 전용, DB 무접속)
     "lint_business_info_email_footer_drift.py",   # story #3216 — CI lint 게이트(정적 텍스트 대조, 운영 DB 무접속)
     "lint_channel_insight_metrics_drift.py",      # story #3697 — CI lint 게이트(channel_adapters.py↔
                                                    # channel-declared-metrics.ts 정적 텍스트 대조,

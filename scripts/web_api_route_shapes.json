@@ -1,0 +1,3642 @@
+[
+{
+"method": "GET",
+"path": "/api/v2/a2a/members",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/a2a/members/{}/agent-card.json",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/a2a/members/{}/rpc",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/a2a/tasks/{}/link-gate",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/account/delete",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/accounts/resolve",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/activation/checklist",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/activation/unsubscribe",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/activity-logs",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/activity-stream",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/admin/grandfather-policies",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/admin/grandfather-policies",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/admin/offering-versions",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/admin/offering-versions",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/admin/orgs/{}/billing/credit-grant",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/admin/orgs/{}/billing/reset-billing-key",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/admin/orgs/{}/billing/retry",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/admin/unhandled-errors/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-deployments",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-deployments",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-deployments/preflight",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/agent-deployments/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-deployments/{}",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/agent-deployments/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-deployments/{}/verification",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-inbox/{}/webhook",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-personas",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-personas",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/agent-personas/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-personas/{}",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/agent-personas/{}",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/agent-routing-rules",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-routing-rules",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/agent-routing-rules",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-routing-rules",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/agent-routing-rules",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-runs",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-runs",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-runs/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/agent-runs/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-runs/{}/cancel",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-runs/{}/tool-calls",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-sessions",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/agent-sessions/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent/events/ack",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent/stream",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agents",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/access-matrix",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/api-keys",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/agents/{}/api-keys",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/agents/{}/api-keys/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/connection-artifact",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/message-policy",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/agents/{}/message-policy",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/agents/{}/message-policy/allowlist",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/agents/{}/message-policy/allowlist/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/message-policy/candidates",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/agents/{}/recruit",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/verification-status",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agents/{}/verify-connection",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/activity",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/agent-stats",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/agent-stats/batch",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/epic-flow-nodes",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/epic-progress",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/epics-progress-lane",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/goal-edges",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/goal-edges/pending-count",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/health",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/overview",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/velocity-history",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/analytics/workload",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/api-keys",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/api-keys",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/api-keys/rotate",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/api-keys/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/api-keys/{}/logs",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/assets",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/assets/storage-usage",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/assets/upload-confirm",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/assets/upload-url",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/assets/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/assets/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/assets/{}/text",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/attachments/authorize",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/attachments/{}/convert",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/audit-logs",
+"kind": "array"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/auth/change-password",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/device-installations/register",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/device-installations/registration-challenges",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/forgot-password",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/logout",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/auth/me",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/auth/me/default-project",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/native-bootstrap",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/native-bootstrap/challenges",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/oauth/callback",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/auth/oauth/{}/authorize",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/auth/oauth/{}/link/authorize",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/oauth/{}/link/callback",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/oauth/{}/unlink",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/refresh",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/register",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/resend-verification",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/reset-password",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/auth/set-password/confirm",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/set-password/request",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/switch-account",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/switch-org",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/switch-project",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/token",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/totp/disable",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/totp/setup",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/totp/verify",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/auth/verify-email",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/bridge/slack/events",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/bridge/slack/interactions",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/bridge/teams/events",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/channel/deliver",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/channel/files/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/channel/upload",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/command-center/my-actions",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/command-center/overview",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/context-pack/search",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations",
+"kind": "envelope"
+},
+{
+"method": "POST",
+"path": "/api/v2/conversations",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations/by-work-item",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations/recent-outside-project",
+"kind": "envelope"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations/unread-count",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/conversations/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/conversations/{}/attachments",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/conversations/{}/circuit-breaker/release",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations/{}/messages",
+"kind": "envelope"
+},
+{
+"method": "POST",
+"path": "/api/v2/conversations/{}/messages",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/conversations/{}/messages/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations/{}/messages/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations/{}/messages/{}/replies",
+"kind": "envelope"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/conversations/{}/mute",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/conversations/{}/participants",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/conversations/{}/read",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/conversations/{}/status",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/conversations/{}/working",
+"kind": "envelope"
+},
+{
+"method": "GET",
+"path": "/api/v2/current-project",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/current-project",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/dashboard",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/deeplink-manifest",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/dependencies",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/dependencies",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/dependencies/graph",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/dependencies/{}",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/dependencies/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/recipes",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/recipes/for-new-org",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/setup-codes",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/setup-codes/confirm",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/setup-codes/confirm-new-org",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/setup-codes/exchange",
+"kind": "envelope"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/setups",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/desktop/setups/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/setups/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/setups/{}/hands",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/dispatch",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/docs",
+"kind": "envelope"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/docs/preview",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs/reorder",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/docs/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/docs/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/docs/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs/{}/assets",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs/{}/attachments",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/docs/{}/backlinks",
+"kind": "envelope"
+},
+{
+"method": "GET",
+"path": "/api/v2/docs/{}/comments",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs/{}/comments",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs/{}/concept-approval",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/docs/{}/revisions",
+"kind": "array"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/docs/{}/share",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/docs/{}/share",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs/{}/share",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs/{}/share/regenerate",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/docs/{}/transition",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/entities/search",
+"kind": "envelope"
+},
+{
+"method": "GET",
+"path": "/api/v2/epics",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/epics",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/epics/bulk",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/epics/steer-dispatch",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/epics/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/epics/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/epics/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/epics/{}/progress",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/epics/{}/reference-candidates",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/epics/{}/transition",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/event-notifications",
+"kind": "array"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/event-notifications/read-all",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/event-notifications/unread-count",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/event-notifications/{}/read",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/events",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/definitions",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/events/definitions",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/definitions/publish-history",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/definitions/start-candidates",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/events/definitions/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/events/definitions/{}/apply",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/definitions/{}/bindings",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/events/definitions/{}/complete-stage",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/events/expire-stale",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/onboarding-guide",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/pending",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/events/publish",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/stream",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/work-items/{}/{}/channel-connection",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/events/work-items/{}/{}/generation-connector",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/events/{}/delivered",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/evidence",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/evidence",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/evidence/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/evidence/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/exclusion/dry-run",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/file-locks",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/folders",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/folders",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gate-config/overrides/member",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/gate-config/overrides/member/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/gate-config/overrides/org",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/gate-config/overrides/org",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/gate-config/overrides/org/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/gate-config/policy",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/gate-config/policy",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gate-config/recommendations/apply",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/gate-config/recommendations/suggest",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/gate-config/resolve",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/gate/metrics",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/gates",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/decisions",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/gates/designated-pending-count",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/gates/inbox",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/gates/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/gates/{}/activity",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/gates/{}/approvers",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/approvers/{}/decision",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/gates/{}/backlinks",
+"kind": "envelope"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/delegate",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/discuss",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/gates/{}/github-check-events",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/hold",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/override",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/reassign",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/reevaluate",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/toss",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/transition",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/undo",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/unhold",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/void",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/gates/{}/withdraw",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/glance/attention",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/glance/attention/org-stalled",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/glance/hero",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/goals",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/goals",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/goals/bulk",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/goals/steer-dispatch",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/goals/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/goals/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/goals/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/goals/{}/progress",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/goals/{}/reference-candidates",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/goals/{}/transition",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/health",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/hitl/policy",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/hitl/policy",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/hitl/requests",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/hitl/requests/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/hypotheses",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/hypotheses",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/hypotheses/draft",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/hypotheses/guided",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/hypotheses/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/hypotheses/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/hypotheses/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/hypotheses/{}/lifecycle",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/hypotheses/{}/links",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/hypotheses/{}/links",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/hypotheses/{}/outcome-draft",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/hypotheses/{}/transition",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/integrations/github/install/callback",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/integrations/github/install/start",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/integrations/github/links",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/integrations/github/links",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/integrations/github/links/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/integrations/github/links/{}/backlinks",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/integrations/github/status",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/integrations/slack/connect",
+"kind": "envelope"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/auth/firebase-session",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/auth/native-bootstrap/consume",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/auth/oauth-handoff/consume",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/auth/oauth-handoff/issue",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/a2a-task-deadline-sweep",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/agent-run-timeout-sweep",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/agent-session-recovery",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/assets-grace-hard-delete",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/au-usage-warn",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/billing-payment-attempts",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/db-connection-stats",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/detect-unclosed-loops",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/embed-backfill",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/embed-backlog",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/entity-references-orphan-check",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/expire-stale-events",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/hitl-timeouts",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/onboarding-abandoned-sweep",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/onboarding-reminder-sweep",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/publication-commands",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/recipe-repeat-tick",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/refresh-channel-tokens",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/score-ga4-outcomes",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/score-hypotheses",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/seed-default-story-line",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/storage-usage-warn",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/toss-billing-maintenance",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/toss-daily-reconciliation",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/unattached-snapshot",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/workflow-grandfather-backfill",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/workflow-handoff-watchdog",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/workflow-sla",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/internal/cron/zero-referenced-entities-check",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/verdict/capture-pr",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/verdict/capture-review",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/verdict/github-webhook",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/invites/accept",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/invites/mine",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/invites/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/item-labels",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/item-labels",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/item-labels/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/judgments",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/judgments",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/labels",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/labels",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/labels/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/labels/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/labels/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/legal/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/loop-measure-due/queue",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/loops",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/loops",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/loops/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/loops/{}/artifacts",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/loops/{}/artifacts",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/loops/{}/context-pack",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/loops/{}/decision",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/loops/{}/transition",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/material-lineage",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/material-lineage/hook-performance",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/material-lineage/material-performance",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/mcp/manifest",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/mcp/manifest/check",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/mcp/toolset-catalog",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/me",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/me",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/me/api-keys",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/me/api-keys",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/me/api-keys/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/me/memberships",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/measurement-connections/ga4/callback",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/meetings",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/meetings",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/meetings/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/meetings/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/meetings/{}",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/meetings/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/meetings/{}/recording",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/meetings/{}/summarize",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/meetings/{}/summary",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/meetings/{}/transcribe",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/members",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/merge-gate/metrics",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/notification-preferences",
+"kind": "array"
+},
+{
+"method": "PUT",
+"path": "/api/v2/notification-preferences",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/notification-settings",
+"kind": "array"
+},
+{
+"method": "PUT",
+"path": "/api/v2/notification-settings",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/notifications",
+"kind": "envelope"
+},
+{
+"method": "GET",
+"path": "/api/v2/notifications/count",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/notifications/mark-all-read",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/notifications/{}/read",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/onboarding/events",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/org-billing-keys",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/org-billing-keys",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/org-billing-keys",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/org-billing-keys/customer-key",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/org-members",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/org-members",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/org-members/eligible-approvers",
+"kind": "array"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/org-members/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/org-members/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/org-members/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/org-members/{}/affected-projects",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/org-subscriptions/attempts/{}",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/org-subscriptions/cancel",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/org-subscriptions/cancel",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/org-subscriptions/change-tier",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/org-subscriptions/checkout",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/org-subscriptions/downgrade",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/org-subscriptions/downgrade",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/org-subscriptions/packs",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/resolve",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/organizations/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/organizations/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/ads-boosts/{}/adopt-existing",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/ads-boosts/{}/pause",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/ads-boosts/{}/resume",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/ads-boosts/{}/spend",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/ads-boosts/{}/spend/refresh",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/ads-boosts/{}/start",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/api-usage-budget",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/background-jobs/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/campaigns",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/campaigns",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/campaigns/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-connections",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-connections/agent-visible",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-connections/available-channels",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/facebook/select",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/instagram-sandbox",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/meta-ads/select",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/sandbox",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-connections/{}/app-credentials",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/organizations/{}/channel-connections/{}/app-credentials",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/{}/authorize",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/{}/callback",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/organizations/{}/channel-connections/{}/credentials",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/{}/disconnect",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-connections/{}/publishing-limit",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/{}/sandbox",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-connections/{}/test",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-connections/{}/youtube-usage",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-posts/drafts",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/archive",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/assets/confirm",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/assets/import-image",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/assets/reorder",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/assets/upload-url",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/assets/video/confirm",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/assets/video/upload-url",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/assets/{}",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/cancel-publish",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/cancel-scheduled",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/publish",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/restore",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/submit",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/unpublish",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/versions",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/versions/{}/asset",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/versions/{}/assets",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/drafts/{}/withdraw",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/channel-posts/publication-commands/{}/retry",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/comments/{}/follow-ups",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/comments/{}/replies",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/comments/{}/replies/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/comments/{}/replies/{}/submit",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/connectors",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/connectors/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/connectors/{}",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/organizations/{}/connectors/{}/config",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/content-rules",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/organizations/{}/content-rules",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/organizations/{}/domain-labels",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/domain-labels",
+"kind": "array"
+},
+{
+"method": "PUT",
+"path": "/api/v2/organizations/{}/domain-labels",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/engagement/collection-status",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/engagement/items",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/organizations/{}/engagement/items/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/external-publish-pause",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/organizations/{}/external-publish-pause",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/gate-config",
+"kind": "array"
+},
+{
+"method": "PUT",
+"path": "/api/v2/organizations/{}/gate-config",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/generation-budget",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/generation-connectors",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/generation-connectors",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/organizations/{}/generation-connectors/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/generation-connectors/{}/revoke",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/impact",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/insights-board",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/insights-board/cost-summary",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/insights/measured-metrics",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/invites",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/invites",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/organizations/{}/invites/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/invites/{}/resend",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/measurement-connections",
+"kind": "array"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/organizations/{}/measurement-connections/ga4",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/measurement-connections/ga4/authorize",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/measurement-connections/ga4/properties",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/measurement-connections/ga4/select",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/metering-key",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/metering-key/rotate",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/pageviews",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/publication-commands/{}/retry",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/publications/{}/boosts",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/publications/{}/comments",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/publications/{}/comments/refresh",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/publications/{}/follow-ups",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/publications/{}/insights",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/publications/{}/newsletter-sends",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/publications/{}/reconcile",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/publishing-metrics",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/site-posts",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/site-posts/drafts",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/site-posts/drafts",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/archive",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/campaign",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/publication",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/publish",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/restore",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/submit",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/unpublish",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/variants",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/site-posts/drafts/{}/versions",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/oss/seed",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/oss/webhook-status",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/participation",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/participation",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/participation/roles",
+"kind": "array"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/participation/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/ping",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/plan-features",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/platform-settings",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/policy-documents",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/project-settings",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/project-settings",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/projects",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/projects",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/projects/resolve",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/projects/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/projects/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/projects/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/projects/{}/access",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/projects/{}/access",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/projects/{}/access-candidates",
+"kind": "array"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/projects/{}/access/{}",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/projects/{}/access/{}/role",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/projects/{}/gate-config",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/projects/{}/gate-config",
+"kind": "array"
+},
+{
+"method": "PUT",
+"path": "/api/v2/projects/{}/gate-config",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/projects/{}/repeat-schedules",
+"kind": "array"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/projects/{}/repeat-schedules/{}/pause",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/projects/{}/repeat-schedules/{}/resume",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/projects/{}/repeat-schedules/{}/run-now",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/public/docs/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/public/pageview",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/public/site-posts",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/public/site-posts/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/ready",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/reference-candidates/next-up",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/references",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/references/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/release-notes",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/resolve",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/retros",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/by-sprint",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/retros/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/retros/{}/actions",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/actions",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/retros/{}/actions/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/retros/{}/export",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/items",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/retros/{}/items/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/items/{}/group",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/items/{}/ungroup",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/items/{}/vote",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/next-hypotheses/adopt",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/retros/{}/phase",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/recommend-next",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/synthesis",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/retros/{}/synthesize",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/rewards",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/rewards",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/rewards/balance",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/rewards/leaderboard",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/role-templates",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/role-templates/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/runtime-capabilities",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/session-context",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/sprints",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/sprints",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/sprints/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/sprints/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/sprints/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/sprints/{}/activate",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/sprints/{}/burndown",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/sprints/{}/checkin",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/sprints/{}/close",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/sprints/{}/hypotheses",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/sprints/{}/hypotheses",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/sprints/{}/kickoff",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/sprints/{}/summary",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/sprints/{}/transition",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/sprints/{}/velocity",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/standups",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/standups",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/standups",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/standups/feedback",
+"kind": "array"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/standups/feedback/{}",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/standups/feedback/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/standups/history",
+"kind": "envelope"
+},
+{
+"method": "GET",
+"path": "/api/v2/standups/missing",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/standups/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/standups/{}/feedback",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/stories/bulk",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/workflow-line/metrics",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/workflow-line/status",
+"kind": "array"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/stories/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/stories/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}/activities",
+"kind": "envelope"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}/attachment-suggestions",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/attachments",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}/backlinks",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}/comments",
+"kind": "envelope"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/comments",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}/reference-candidates",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/reference-candidates",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/stories/{}/reference-candidates/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/reference-candidates/{}/declare",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/reference-candidates/{}/reject",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/reference-candidates/{}/relation-kind",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}/references",
+"kind": "envelope"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/references",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}/rejected-relations",
+"kind": "array"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/stories/{}/rejected-relations/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/request-verification",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/stories/{}/status",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/workflow-line/fallback-notify",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/stories/{}/workflow-line/status",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/stories/{}/workflow-line/withdraw",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/subscription/status",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/support/escalation-events",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/support/session-token",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/tasks",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/tasks",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/tasks/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/tasks/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/tasks/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/team-members",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/team-members",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/team-members/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/team-members/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/team-members/{}",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/team-members/{}/avatar",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/team-members/{}/avatar/confirm",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/team-members/{}/avatar/upload-url",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/team-members/{}/claim",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/team-members/{}/file-lock",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/team-members/{}/file-unlock",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/team-members/{}/heartbeat",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/team-members/{}/unclaim",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/team-presence",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/today",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/trust-scores",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/trust-scores/history",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/trust-scores/org-summary",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/usage",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/user-blocks",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/user-blocks",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/user-blocks/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/verdicts",
+"kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/import-image",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts/preview",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/visual-artifacts/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts/{}/backlinks",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts/{}/comments",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/{}/comments",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/{}/comments/{}/resolve",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/{}/edit",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts/{}/exports",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts/{}/pins",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/{}/pins",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/visual-artifacts/{}/pins/{}",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/visual-artifacts/{}/pins/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts/{}/versions",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/visual-artifacts/{}/versions/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/{}/versions/{}/canonicalize",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/{}/versions/{}/export/html",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/{}/versions/{}/export/png/complete",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/visual-artifacts/{}/versions/{}/export/png/upload-url",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/webhooks/config",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/webhooks/config",
+"kind": "array"
+},
+{
+"method": "PUT",
+"path": "/api/v2/webhooks/config",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/webhooks/config/{}/test-send",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/webhooks/deliveries",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/webhooks/toss",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/workflow-executions",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/workflow-executions/story-summary",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/workflow-executions/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/workflow-line-config/active",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-line-config/resolve-preview",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/workflow-line-config/versions",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-line-config/versions",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/workflow-line-config/versions/{}",
+"kind": "object"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/workflow-line-config/versions/{}",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-line-config/versions/{}/approve",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-line-config/versions/{}/lint",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-line-config/versions/{}/reject",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-line-config/versions/{}/request-publish",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-line-config/versions/{}/retire",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/workflow-trigger-types",
+"kind": "array"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-trigger-types",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/workflow-trigger-types/{}",
+"kind": "unknown"
+},
+{
+"method": "PATCH",
+"path": "/api/v2/workflow-trigger-types/{}",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/workflow-versions",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-versions",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow-versions/{}/rollback",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow/report-done",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/workflow/trigger",
+"kind": "object"
+}
+]
