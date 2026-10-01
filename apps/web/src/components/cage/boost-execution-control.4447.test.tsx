@@ -316,6 +316,70 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     expect($('boost-paused-approval-gone')).toBeNull();
   });
 
+  // story #4460 (Yuna 16:46Z) — «홍보 취소»: only for whom the server says may (can_cancel); a destructive confirmation whose close
+  // button is «닫기» (two «취소» side by side would blur which one cancels the promotion), the Meta-only Ads Manager line; then
+  // «취소 중» until the cancel finished, then «취소됨» with the past cycle.
+  const running = { run_status: 'running', start_command: cmd('completed', null, false), gate_status: 'approved' };
+
+  it('the cancel button shows only when the server says this viewer may cancel', async () => {
+    spendNow = { ...running, can_cancel: false };
+    await mount();
+    expect($('boost-cancel-trigger')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    spendNow = { ...running, can_cancel: true };
+    await mount();
+    expect($('boost-cancel-trigger')?.textContent).toBe(cage.boostCancel);
+  });
+
+  it.each([['meta_ads', true], ['ads_sandbox', false]] as const)('the confirmation (%s): body · Meta line %s · «닫기» · then «취소 중» → «취소됨» with the past cycle', async (channel, metaLine) => {
+    spendNow = { ...running, can_cancel: true, ad_channel: channel, ad_account_id: '123', campaign_id: 'c-1' };
+    await mount();
+    await act(async () => { $('boost-cancel-trigger')!.click(); });
+    const dialog = $('boost-cancel-confirm-dialog')!;
+    expect(dialog.textContent).toContain(cage.boostCancelConfirmTitle);
+    expect(dialog.textContent).toContain(cage.boostCancelConfirmBody);
+    expect(Boolean($('boost-cancel-confirm-meta'))).toBe(metaLine);
+    expect([...dialog.querySelectorAll('button')].map((b) => b.textContent)).toContain(cage.boostCancelClose);
+    spendNow = { run_status: 'pause_pending', start_command: cmd('completed', null, false), gate_status: 'voided', cancel_requested: true, can_cancel: false };
+    await act(async () => { $('boost-cancel-confirm')!.click(); });
+    await settle(0);
+    expect(posts('/cancel')).toHaveLength(1);
+    expect($('boost-cancelling')?.textContent).toBe(cage.boostCancelInProgress);
+    expect($('boost-pause-trigger')).toBeNull();
+    expect($('boost-cancel-trigger')).toBeNull();
+    spendNow = {
+      run_status: 'pending', start_command: null, gate_status: 'voided', cancel_requested: false, can_cancel: false,
+      previous_cycles: [{ campaign_id: 'c-1', spend_minor: 12_000, currency: 'KRW', started_at: '2026-09-01T00:00:00Z', ended_at: '2026-10-01T03:00:00Z', end_reason: 'cancelled' }],
+    };
+    await settle(10_000);
+    expect($('boost-cancelled')?.textContent).toBe(cage.boostCancelled);
+    expect($('boost-previous-cycle')?.textContent).toContain('12,000원');
+    expect($('boost-previous-cycle')?.textContent).toContain('지난 홍보');
+  });
+
+  it('a reload while the cancel waits (its pause still queued): «취소 중», and after the pause cap the pause notice (the same rule as «중지 중…»)', async () => {
+    spendNow = { run_status: 'running', start_command: cmd('completed', null, false), gate_status: 'voided', cancel_requested: true, ad_channel: 'ads_sandbox', campaign_id: 'c-1' };
+    await mount();
+    expect($('boost-cancelling')).not.toBeNull();
+    await settle(3 * 60_000 + 10_000);
+    expect($('boost-execution-cap-notice')?.textContent).toBe(cage.boostExecutionPauseCapSandbox);
+    expect($('boost-cancelling')).not.toBeNull();
+  });
+
+  it('a refused cancel shows the server\'s words', async () => {
+    spendNow = { ...running, can_cancel: true };
+    mockedFetch.mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/spend') && !init) return jsonResponse({ data: spendNow });
+      if (String(url).endsWith('/cancel')) return jsonResponse({ error: { code: 'ADS_BOOST_CANCEL_FORBIDDEN', message: '이 홍보는 요청한 사람이나 관리자만 취소할 수 있어요.' } }, 403);
+      return jsonResponse({ data: {} });
+    });
+    await mount();
+    await act(async () => { $('boost-cancel-trigger')!.click(); });
+    await act(async () => { $('boost-cancel-confirm')!.click(); });
+    await settle(0);
+    expect($('boost-execution-error')?.textContent).toBe('이 홍보는 요청한 사람이나 관리자만 취소할 수 있어요.');
+  });
+
   it('running · a pause still queued: no connection-lost line', async () => {
     spendNow = { run_status: 'running', start_command: cmd('completed', null, false), pause_command: { status: 'pending', failure_kind: null, error_code: null } };
     await mount();
