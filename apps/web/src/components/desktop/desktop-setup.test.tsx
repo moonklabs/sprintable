@@ -880,6 +880,23 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(startButton().disabled).toBe(false);
   });
 
+  it('an invited person, unverified: the gate (invites are listed only for a verified address); once verified → their invite card, not a new organization', async () => {
+    meVerify = { email_verified: false, email_verification_required: true, email: 'jiwoo@example.com' };
+    invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 }); // what the server says while unverified
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=email-verify-gate]')).not.toBeNull();
+    const invitesReadsBefore = urls().filter((u) => u.endsWith('/api/invites/mine')).length;
+    meVerify = { email_verified: true, email_verification_required: true, email: 'jiwoo@example.com' };
+    invitesNow = () => new Response(JSON.stringify({ invites: [INVITE] }), { status: 200 });
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(urls().filter((u) => u.endsWith('/api/invites/mine')).length).toBe(invitesReadsBefore + 1);
+    expect(container.querySelector('[data-testid=setup-invited]')).not.toBeNull();
+    expect(container.querySelector('[data-testid=setup-new-org]')).toBeNull();
+    expect(urls()).not.toContain('/api/desktop/setup-codes/confirm-new-org');
+  });
+
   it('a verified sign-up, or a server that does not ask for it: no gate at all', async () => {
     for (const v of [{ email_verified: true, email_verification_required: true }, { email_verified: false, email_verification_required: false }]) {
       meVerify = v;

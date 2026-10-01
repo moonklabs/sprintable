@@ -8,7 +8,7 @@
 // every 3 s while this tab is visible, and again on focus or when the tab becomes visible.
 // No gate when the server does not ask for verification (`email_verification_required` false · a self-hosted server) or the
 // person is verified already (a social sign-in). The server's 403 stays as it is — this only puts the step first.
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -47,15 +47,22 @@ export function registerAgainHref(location: Pick<Location, 'pathname' | 'search'
 
 export type VerifyGate = Gate & { resend: Resend; sendAgain: () => void; registerAgain: () => void };
 
-/** The gate's state for a screen that may need it (`active` false → always open: e.g. desktop setup outside new-org mode). */
-export function useEmailVerifyGate(active = true): VerifyGate {
+/** The gate's state for a screen that may need it (`active` false → always open: e.g. desktop setup outside new-org mode).
+ *  `onOpened` runs once when a closed gate opens — the e-mail was just verified, so what the screen read while it was not
+ *  (e.g. invites, which the server lists only for a verified address) may be different now (PO 05:07Z). */
+export function useEmailVerifyGate(active = true, onOpened?: () => void): VerifyGate {
   const [gate, setGate] = useState<Gate>({ kind: 'reading' });
   const [resend, setResend] = useState<Resend>('idle');
+  const wasClosed = useRef(false);
+  const opened = useRef(onOpened);
+  useEffect(() => { opened.current = onOpened; }, [onOpened]);
 
   // an unreadable answer never holds a person back: the server's own 403 is still there behind the gate
   const apply = useCallback((me: Me | null) => {
     if (!me) { setGate((g) => (g.kind === 'reading' ? { kind: 'open' } : g)); return; }
-    setGate((g) => (g.kind === 'open' ? g : gateClosed(me) ? { kind: 'closed', email: me.email } : { kind: 'open' }));
+    if (gateClosed(me)) { wasClosed.current = true; setGate((g) => (g.kind === 'open' ? g : { kind: 'closed', email: me.email })); return; }
+    if (wasClosed.current) { wasClosed.current = false; opened.current?.(); }
+    setGate({ kind: 'open' });
   }, []);
   const check = useCallback(() => { void readMe().then(apply); }, [apply]);
 

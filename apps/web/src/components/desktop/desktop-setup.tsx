@@ -180,8 +180,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const { projectId, userName, orgId, orgMemberships } = useDashboardContext();
   const [orgMode, setOrgMode] = useState<OrgMode>(() => (orgId ? { kind: 'has-org' } : { kind: 'checking' }));
   const newOrg = orgMode.kind === 'new';
-  // story #4453 — a new organization needs a verified e-mail: that step comes first, not after «시작» (a 403 at the end)
-  const verifyGate = useEmailVerifyGate(newOrg);
+  // story #4453 — a new organization needs a verified e-mail: that step comes first, not after «시작» (a 403 at the end).
+  // Once it opens, read the invites again: the server lists them only for a verified address, so an invited person was
+  // «new» while unverified — without this they would meet their invite only after «시작» (pending_invites · PO 05:07Z)
+  const verifyGate = useEmailVerifyGate(newOrg, () => { setOrgMode({ kind: 'checking' }); void readInvites(); });
   const [orgName, setOrgName] = useState('');
   const [projectName, setProjectName] = useState('');
   const [editingNames, setEditingNames] = useState(false);
