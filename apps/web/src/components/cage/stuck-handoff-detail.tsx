@@ -3,7 +3,7 @@
 import { useLocale, useTranslations } from 'next-intl';
 import { AlertCircle } from 'lucide-react';
 import type { WorkflowLineStepRun } from '@/components/kanban/types';
-import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { History, Plus, Send, UserRound, X } from 'lucide-react';
-import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,

@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
-import { formatScheduledAt, formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';

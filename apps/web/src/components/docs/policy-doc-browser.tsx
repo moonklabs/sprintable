@@ -9,7 +9,7 @@ import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface Sprint {

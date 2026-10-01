@@ -5,7 +5,7 @@ import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, Loader2, type 
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';

@@ -11,7 +11,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { getRunErrorDisplay, getRunFailureDisposition } from '@/services/agent-run-history';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt, formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { agentRunStatusBadgeVariant, type AgentRunStatus } from '@/lib/agent-run-status';
 import { AgentRunToolCallsSection } from './agent-run-tool-calls-section';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';

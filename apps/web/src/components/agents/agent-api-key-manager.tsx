@@ -20,8 +20,8 @@ import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker
 import { copyTextSafely } from '@/lib/clipboard';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt, formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface ApiKey {
