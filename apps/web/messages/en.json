@@ -5917,6 +5917,7 @@
     "boostStartBlockedApprovalGone": "The approval was withdrawn, so it didn't start — it can start once it's approved again.",
     "boostNeedsCheckOutcomeUnknown": "A campaign may already exist in your ad account, so we didn't retry — check your ad account first.",
     "boostNeedsCheckStopped": "The boost couldn't start. Check your ad account, then try again.",
+    "boostPausedApprovalGone": "The approval was withdrawn, so the promotion is paused — nothing is being spent.",
     "boostPauseConnectionLost": "The ad account connection is down, so the promotion couldn't be paused — ad spend may continue, so pause it yourself in Ads Manager.",
     "boostPauseConnectionLostReconnect": "<link>Check connection</link>",
     "boostNeedsCheckCreatedBudgetDiffers": "The ad was created with a budget ({amount}) other than the approved one, so it didn't start — the ad is off, so nothing is being spent.",

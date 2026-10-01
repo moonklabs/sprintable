@@ -58,13 +58,14 @@ afterEach(async () => {
 
 const settle = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 
-async function mount() {
+async function mount(gateStatus: string = 'approved') {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
         <BoostExecutionControl
           orgId="org-1" gateId="gate-1" sealedAdsBudgetMinor={30_000} sealedAdsCurrency="KRW"
           sealedAdsStartsAt="2026-09-01T00:00:00Z" sealedAdsEndsAt="2026-10-19T00:00:00Z" sealedAdsObjective="POST_ENGAGEMENT"
+          gateStatus={gateStatus}
         />
       </NextIntlClientProvider>,
     );
@@ -252,6 +253,7 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     const block = $('boost-pause-connection-lost')!;
     expect(block.textContent).toContain(cage.boostPauseConnectionLost);
     expect(block.querySelector('[data-testid="boost-pause-reconnect"]')?.getAttribute('href')).toBe('/ws/proj/organization/channels');
+    expect(block.querySelector('[data-testid="boost-pause-reconnect"]')?.className).toContain('text-primary'); // Yuna 13:12Z — a link on its own line
     expect(block.querySelector('[data-testid="boost-ads-manager-link"]')?.textContent).toContain(cage.boostExecutionStopInAdsManager);
     expect(block.querySelector('[data-testid="boost-pause-reconnect"]')?.textContent).toBe('연결 확인'); // Yuna — the card's own connection words
     expect(text()).not.toContain(cage.boostExecutionPausing); // never «중지 중…» for a pause that did not reach the campaign
@@ -278,6 +280,30 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     await mount();
     expect(text()).not.toContain(cage.boostExecutionPausing);
     expect($('boost-pause-connection-lost')).not.toBeNull();
+  });
+
+  // story #4466 (PO 11:51Z) — the gate left «approved» (re-request · undo · hold · reject · void): the server paused the boost.
+  // A fact line (Yuna 13:23Z — true for every such status), no resume (the server refuses it there), no «resume once approved».
+  it.each(['pending', 'held', 'rejected', 'voided'])('paused · gate %s: the approval-gone line, no resume', async (gateStatus) => {
+    spendNow = { run_status: 'paused', start_command: cmd('completed', null, false) };
+    await mount(gateStatus);
+    expect($('boost-paused-approval-gone')?.textContent).toBe(cage.boostPausedApprovalGone);
+    expect($('boost-resume-trigger')).toBeNull();
+    expect($('boost-pause-trigger')).toBeNull();
+  });
+
+  it('paused · gate approved: no approval-gone line, resume is there', async () => {
+    spendNow = { run_status: 'paused', start_command: cmd('completed', null, false) };
+    await mount('approved');
+    expect($('boost-paused-approval-gone')).toBeNull();
+    expect($('boost-resume-trigger')).not.toBeNull();
+  });
+
+  it('running · gate back in review (the pause not landed yet): still pausable, no approval-gone line', async () => {
+    spendNow = { run_status: 'running', start_command: cmd('completed', null, false) };
+    await mount('pending');
+    expect($('boost-pause-trigger')).not.toBeNull();
+    expect($('boost-paused-approval-gone')).toBeNull();
   });
 
   it('running · a pause still queued: no connection-lost line', async () => {

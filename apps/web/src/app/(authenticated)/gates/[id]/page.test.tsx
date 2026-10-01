@@ -1148,6 +1148,17 @@ describe('GateDetailPage — ads_boost 실행 블록은 needsAction/gate.status�
     expect(document.body.querySelector('[data-testid="boost-pause-trigger"]')).not.toBeNull();
   });
 
+  // story #4466 — the page hands the gate's status to the card: a boost paused because its gate is back in review says so and
+  // offers no resume (the server refuses it there)
+  it('status=pending · run_status=paused: the approval-gone line, no resume', async () => {
+    await mountWithSpend(
+      adsBoostGate({ status: 'pending', requires_human: true, reapproval_required: true }),
+      { run_status: 'paused' },
+    );
+    expect(document.body.querySelector('[data-testid="boost-paused-approval-gone"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="boost-resume-trigger"]')).toBeNull();
+  });
+
   it('run_status=null(진짜 미승인·최초 요청)이면 지어내지 않고 실행 블록 자체가 안 뜬다', async () => {
     await mountWithSpend(
       adsBoostGate({ status: 'pending', requires_human: true, sealed_ads_starts_at: null }),
