@@ -672,7 +672,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       )}
       {droppedFiles > 0 ? (
         // story #4474 — the files over the cap are named by count and reason (a status, so a screen reader hears it too)
-        <p role="status" data-testid="chat-attachments-dropped" className="mb-1 text-xs text-muted-foreground">
+        <p role="status" data-testid="chat-attachments-dropped" className="mb-1 break-keep text-xs text-muted-foreground">
           {t('attachmentsDropped', { dropped: droppedFiles, max: MAX_ATTACHMENTS })}
         </p>
       ) : atMaxAttachments && (
