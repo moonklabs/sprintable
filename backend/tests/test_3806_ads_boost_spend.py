@@ -502,7 +502,11 @@ async def _break(Session, gate_id, how, monkeypatch):
         elif how == "not_started":
             run.campaign_id = None
         elif how == "connection_missing":
-            gate.sealed_ads_connection_id = uuid.uuid4()
+            # story #4461 — spend is read through the connection the campaign was created under (run.created_connection_id,
+            # recorded at create) — that is the one gone here; the seal's too, for runs made before the record
+            gone = uuid.uuid4()
+            gate.sealed_ads_connection_id = gone
+            run.created_connection_id = gone
         await s.commit()
     if how == "provider_error":
         await _failing_read(monkeypatch, MetaAdsCampaignError("META_ADS_SPEND_FETCH_FAILED", "503"))
