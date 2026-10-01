@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 //
-// [SID:4462] ⓐ (Kadir 09:14Z · from 4878) The sheet stays mounted while it plays its closing transition. Crossing the width back
-// during it: the aside gave the panel's host node back and the sheet's slot — already mounted — never adopted it again, so the
-// sheet opened empty. jsdom plays no transitions; the sheet here keeps its content mounted while closed, as during one.
+// [SID:4477] 4462 AC3, with the real sheet (no mock): the sheet stays mounted while its closing animation plays, and crossing the
+// width back inside that window must not leave it empty. The window is made deterministic: the sheet's popup reports one
+// animation whose end the test holds (base-ui waits on `getAnimations()` · `finished` before it unmounts a closing popup) and
+// releases after the crossing. RED on 4878's head (4ebefcc1c — the slot adopted the panel only on mount), GREEN since 4882.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,12 +30,6 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: replaceMock }),
   useParams: () => ({ ws: 'moonklabs', proj: 'sprintable' }),
 }));
-vi.mock('@/components/ui/sheet', () => ({
-  // closed = its content stays mounted (as while the closing transition plays)
-  Sheet: ({ open, children }: { open: boolean; children: React.ReactNode }) => <div data-sheet-open={String(open)}>{children}</div>,
-  SheetContent: ({ children }: { children: React.ReactNode }) => <div data-slot="sheet-content">{children}</div>,
-  SheetTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-}));
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => mobileRef.current }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ currentMemberType: 'human', orgId: 'org-1' }), useConnectRulesHref: (p: string) => p }));
 vi.mock('@/components/verify/evidence-section', () => ({ EvidenceSection: () => null }));
@@ -51,6 +46,14 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn(async (url: string) => 
 }) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+
+// the sheet's closing animation, held by the test: `hold` → the popup reports it; `release()` → it ends
+const anim = (() => {
+  let resolve: () => void = () => {};
+  const a = { hold: false, finished: Promise.resolve(), release: () => resolve() };
+  return Object.assign(a, { start() { a.hold = true; a.finished = new Promise<void>((r) => { resolve = r; }); } });
+})();
 
 let container: HTMLDivElement;
 let root: Root;
@@ -99,29 +102,62 @@ beforeEach(() => {
   mobileRef.current = false;
   searchRef.current = 'row=t1';
   gateReads.held = false; gateReads.count = 0;
+  anim.hold = false;
+  // jsdom has no Web Animations: only the sheet's popup reports an animation, and only while the test holds one
+  (HTMLElement.prototype as unknown as { getAnimations: () => Array<{ finished: Promise<void> }> }).getAnimations = function (this: HTMLElement) {
+    return anim.hold && this.matches('[data-slot="sheet-content"]') ? [{ finished: anim.finished }] : [];
+  };
 });
 afterEach(async () => {
+  anim.release();
   await act(async () => { root.unmount(); });
+  delete (HTMLElement.prototype as unknown as { getAnimations?: unknown }).getAnimations;
   container.remove();
 });
 
-describe('[SID:4462] ⓐ crossing the width back while the sheet is still closing', () => {
-  it('sheet → aside (the sheet still mounted, closing) → sheet again: the panel is in the sheet, not nowhere', async () => {
+describe('[SID:4477] crossing the width back inside the sheet\'s closing animation (the real sheet)', () => {
+  it('sheet → aside while the sheet is still closing → sheet again: the panel is in the sheet; after the animation ends too', async () => {
     mobileRef.current = true; await render();
     const panelNode = q('[data-testid="panel-assignee"]');
     expect(q('[data-slot="sheet-content"] [data-testid="panel-assignee"]')).toBe(panelNode);
-    mobileRef.current = false; await render(); // to the aside — the sheet keeps its content mounted (closing)
+
+    anim.start();
+    mobileRef.current = false; await render(); // to the aside: the sheet starts closing and plays its (held) animation
+    // the window is real: the closing popup is still mounted, and the panel has moved to the aside
+    expect(q('[data-slot="sheet-content"]')).not.toBeNull();
+    expect(q('[data-slot="sheet-content"]')!.hasAttribute('data-closed')).toBe(true);
+    expect(q('[data-slot="sheet-content"]')!.hasAttribute('data-ending-style')).toBe(true);
     expect(q('aside[data-work-list-detail] [data-testid="panel-assignee"]')).toBe(panelNode);
-    mobileRef.current = true; await render(); // back before the sheet finished closing
+
+    mobileRef.current = true; await render(); // back before the closing animation ended
     expect(q('[data-slot="sheet-content"] [data-testid="panel-assignee"]')).toBe(panelNode); // not an empty sheet
+
+    anim.release(); anim.hold = false;
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    expect(q('[data-slot="sheet-content"] [data-testid="panel-assignee"]')).toBe(panelNode);
     expect(panelNode!.isConnected).toBe(true);
   });
+});
 
-  it('and the other way: aside → sheet → aside keeps the panel in the aside', async () => {
+// the other way (moved here from the mocked-sheet 4462 file · PO 15:00Z): a guard for the opposite direction — it has never been
+// broken; the mutation that turns it red is in PR 4894's body
+describe('[SID:4477] the opposite direction, with the real sheet (a guard — never broken)', () => {
+  it('aside → sheet → aside while the sheet is still closing: the panel stays in the aside; after the animation ends too', async () => {
     await render();
     const panelNode = q('[data-testid="panel-assignee"]');
-    mobileRef.current = true; await render();
-    mobileRef.current = false; await render();
     expect(q('aside[data-work-list-detail] [data-testid="panel-assignee"]')).toBe(panelNode);
+    mobileRef.current = true; await render();
+    expect(q('[data-slot="sheet-content"] [data-testid="panel-assignee"]')).toBe(panelNode);
+
+    anim.start();
+    mobileRef.current = false; await render(); // back to the aside: the sheet closes and plays its (held) animation
+    expect(q('[data-slot="sheet-content"]')!.hasAttribute('data-ending-style')).toBe(true);
+    expect(q('aside[data-work-list-detail] [data-testid="panel-assignee"]')).toBe(panelNode); // not left in the closing sheet
+
+    anim.release(); anim.hold = false;
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    expect(q('[data-slot="sheet-content"]')).toBeNull();
+    expect(q('aside[data-work-list-detail] [data-testid="panel-assignee"]')).toBe(panelNode);
+    expect(panelNode!.isConnected).toBe(true);
   });
 });
