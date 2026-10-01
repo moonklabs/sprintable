@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.gate import Gate
 from app.models.publication_command import PublicationCommand
 from app.services.provider_call_mark import provider_client
-from app.services.publication_command import create_or_get_publication_command
+from app.services.publication_command import create_or_get_publication_command, retry_dead_letter_command
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
 _ADS_BOOST_CONTENT_KIND = "ads_boost"
@@ -345,6 +345,16 @@ async def _request_toggle(
             raise AdsBoostNotPausedError(gate.id)
         toggle_seq = 1
     elif latest.operation == operation:
+        if latest.status == "blocked":
+            # story #4476 (PO 14:27Z) — a toggle stopped on the connection is waiting for a person, not in flight: the double-click
+            # rule below returned that same blocked row and nothing went to the provider again — after reconnecting there was no
+            # way left to stop (or resume) the boost. Pressing again re-raises it by the retry rule (`retry_dead_letter_command`:
+            # same row · same idempotency key · sent through the campaign's connection now · still disconnected → it stops again).
+            # That rule decides what a press may re-raise: a row held by an org-wide pause is not (lifting the pause re-queues it)
+            # and comes back unchanged. A resume still passes the worker's approval and created-budget checks before ACTIVE.
+            reraised = await retry_dead_letter_command(db, org_id=org_id, command_id=latest.id)
+            await db.commit()
+            return reraised or latest
         if latest.status in _NON_TERMINAL_STATUSES:
             toggle_seq = latest.toggle_seq  # 더블클릭 — 같은 행 재사용
         elif latest.status == "completed":
