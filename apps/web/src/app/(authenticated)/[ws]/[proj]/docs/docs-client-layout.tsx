@@ -305,8 +305,14 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         addToast({ title: t('renameFailed'), type: 'error' });
         await fetchTree();
       } else {
-        const { data } = await res.json() as { data: { updated_at: string } };
-        setPendingDocUpdate({ id: docId, title: newName, updated_at: data.updated_at });
+        // story #4445 — PATCH /api/docs/{id} passes the backend's DocResponse through as is (a bare object, not `{ data }`).
+        // Reading `{ data }` threw on a saved rename («renameFailed» + a tree re-read). Only the contract's shape is read; an
+        // answer without `updated_at` cannot set the remote-change baseline, so the tree is read again instead (no failure
+        // toast — the rename was saved).
+        const saved: unknown = await res.json();
+        const updatedAt = saved && typeof saved === 'object' ? (saved as { updated_at?: unknown }).updated_at : undefined;
+        if (typeof updatedAt === 'string') setPendingDocUpdate({ id: docId, title: newName, updated_at: updatedAt });
+        else await fetchTree();
       }
     } catch { addToast({ title: t('renameFailed'), type: 'error' }); await fetchTree(); }
   }, [fetchTree, addToast, t]);
