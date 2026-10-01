@@ -192,6 +192,35 @@ describe('[SID:4427] 진행 표시 — 상태 조회 한 번을 세 단계로(PO
   });
 });
 
+describe('[SID:4464] settled — the one end condition for reading the status', () => {
+  const base = (signals: Partial<SetupStatus['signals']> = {}, state: SetupStatus['state'] = 'handed_over'): SetupStatus => ({
+    state, recipe_name: '3단계 칸반', work_item_id: 'story-1',
+    members: [
+      { stage: 'a', role: '누구나', member_id: 'm1', kind: 'agent', runtime: 'claude' },
+      { stage: 'b', role: '개발자', member_id: 'm2', kind: 'agent', runtime: 'codex' },
+    ],
+    signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null, ...signals },
+  });
+  const T0 = Date.parse('2026-09-30T00:00:00Z');
+  const c = (...ids: string[]) => ids.map((member_id) => ({ member_id, at: 'x' }));
+
+  it('first result in but one agent still getting ready → not settled (keep reading); it connects → settled', () => {
+    expect(setupProgress(base({ tools_connected: c('m1'), first_result_at: 'r' }), T0, T0).settled).toBe(false);
+    expect(setupProgress(base({ tools_connected: c('m1', 'm2'), first_result_at: 'r' }), T0, T0).settled).toBe(true);
+  });
+
+  it('an agent that could not start, or that stopped, is settled too', () => {
+    const failed = [{ member_id: 'm2', runtime: 'codex', reason: 'runtime_missing', at: 'x' }] as never;
+    expect(setupProgress(base({ tools_connected: c('m1'), first_result_at: 'r', agents_start_failed: failed }), T0, T0).settled).toBe(true);
+  });
+
+  it('never before the first result (the page waits for it) — unless blocked or expired', () => {
+    expect(setupProgress(base({ tools_connected: c('m1', 'm2') }), T0, T0).settled).toBe(false);
+    expect(setupProgress(base({ blocked: { at: 'x' } as never }), T0, T0).settled).toBe(true);
+    expect(setupProgress(base({}, 'not_handed_over'), T0, null).settled).toBe(true);
+  });
+});
+
 describe('[SID:4427] what the setup page lists and strips (dev 실측 15:31Z · 4831)', () => {
   it('the server sends only startable recipes; the page still never shows a key as a name nor a people-only card (display guard)', () => {
     expect(listableRecipe(recipe, '마케팅 루프')).toBe(true);

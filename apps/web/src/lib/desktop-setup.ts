@@ -276,6 +276,10 @@ export const NOT_CONNECTED_AFTER_INPUT_MS = 30_000;
 export const NOT_CONNECTED_AFTER_HANDOVER_MS = 180_000;
 
 export interface SetupProgress {
+  /** story 4464 — the one end condition for reading the status: blocked or expired, or the first result is in AND every agent is
+   *  settled (connected · could not start · stopped). Before, the page stopped at the first result, so an agent that connected
+   *  after it stayed «아직 준비하고 있어요» on screen (PO r8 0dbcd38e: Dev connected 45 s after the first result). */
+  settled: boolean;
   ready: StepState;
   handed: StepState;
   result: StepState;
@@ -343,6 +347,7 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
   const failedIds = new Set(failedRows.map((f) => f.member_id));
   const startFailed = startFailedAgents(failedRows, agents);
   const pendingStarted = agentIds.filter((id) => !connected.has(id) && !failedIds.has(id));
+  const unsettled = pendingStarted.filter((id) => !stoppedMembers.has(id));
   // a stopped agent says what to do itself (its block) — the trust note and ⑦ «not connected» would tell a different story
   const waitingForTools = handedOver && pendingStarted.length > 0 && result === 'running' && !stopped;
   const notConnected = waitingForTools && (
@@ -350,6 +355,7 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     || (handedOverSeenAt !== null && now - handedOverSeenAt >= NOT_CONNECTED_AFTER_HANDOVER_MS));
   return {
     ready, handed, result, pairs,
+    settled: !!s.signals.blocked || s.state === 'not_handed_over' || (result === 'done' && unsettled.length === 0),
     firstAgentRole: agents.find((m) => m.role)?.role ?? null,
     workdirFallback: !!s.signals.workdir_fallback_at,
     trustHint: waitingForTools && !notConnected,

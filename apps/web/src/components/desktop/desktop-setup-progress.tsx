@@ -48,7 +48,8 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
 
   const status = snap?.status ?? null;
   const progress = snap ? setupProgress(snap.status, snap.at, snap.handedOverSeenAt) : null;
-  const done = !!progress && (progress.result === 'done' || progress.blocked || progress.expired);
+  // story 4464 — keep reading while an agent is still getting ready after the first result; stop once all are settled
+  const done = !!progress && progress.settled;
   useEffect(() => { stopped.current = done; }, [done]);
 
   useEffect(() => {
