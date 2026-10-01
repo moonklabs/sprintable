@@ -184,6 +184,18 @@ async function fetchDraftsForWorkItem(
 /** story #3845 — findPendingInbox(derive-work-list.ts)와 동일 fallback(task 레벨 먼저,
  * 없으면 그 부모 story 레벨) — 다만 이 함수는 실 GateResponse 전체 필드(risk_grade·
  * gate_type·id)가 필요해 inbox 요약이 아니라 `/api/gates`를 직접 부른다. */
+/** story #4462 — the panel's gate flow, tagged with the work item (row id · work item type and id · story id) it belongs to. */
+type GateFlow = {
+  for: string;
+  gate: WorkListGate | null | undefined; // undefined=로딩 중
+  approved: boolean;
+  error: 'forbidden' | 'draft_changed' | 'other' | null;
+  transitioning: boolean;
+};
+function freshGateFlow(forIdentity: string): GateFlow {
+  return { for: forIdentity, gate: undefined, approved: false, error: null, transitioning: false };
+}
+
 async function fetchPendingGate(row: WorkListRow, storyId: string): Promise<WorkListGate | null> {
   const tryFetch = async (workItemId: string, workItemType: string) => {
     // story #4448 — GET /api/gates passes the backend's bare list through: read as { data } (fetchJsonData) it was always null, so
@@ -273,12 +285,26 @@ export function WorkListDetailPanel({
   const [artifactCount, setArtifactCount] = useState<number | null>(null); // null=로딩 중
   const [tasks, setTasks] = useState<TaskChecklistItem[] | null>(null); // story #3976 — null=로딩 중
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[] | null>(null); // story #3976 — null=로딩 중
-  const [gate, setGate] = useState<WorkListGate | null | undefined>(undefined); // undefined=로딩 중
-  const [transitioning, setTransitioning] = useState(false);
+  // story #4462 (Kadir 09:14Z) — the gate flow (the gate read · «approved» · the transition error · «transitioning») belongs to the work
+  // item it was read for. The panel is not mounted again per work item, so before this an approve / 409 flow started on A that
+  // ended after the person moved to B put A's gate into B's panel (and its «approved»), and B's first render still drew A's gate.
+  // Now each piece carries `for` (the work item's identity); the panel reads it only for the work item on screen (the first render
+  // on another work item draws no gate), and a result for another work item is dropped.
+  const identity = `${row.id}|${row.workItemType}|${row.workItemId}|${storyId}`;
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
+  const [gateFlow, setGateFlow] = useState<GateFlow>(() => freshGateFlow(identity));
+  const ownFlow = gateFlow.for === identity;
+  const gate = ownFlow ? gateFlow.gate : undefined; // undefined=로딩 중
+  const transitioning = ownFlow && gateFlow.transitioning;
   // story #4190 — 'draft_changed' = 409 gate_draft_changed(서명 흐름에서 본 초안이 그 사이 새 버전이 됨 — 게이트 상세와 같은
   // 문장 · loadGate()로 재조회해 카드가 최신 버전을 그린다).
-  const [transitionError, setTransitionError] = useState<'forbidden' | 'draft_changed' | 'other' | null>(null);
-  const [approved, setApproved] = useState(false);
+  const transitionError = ownFlow ? gateFlow.error : null;
+  const approved = ownFlow && gateFlow.approved;
+  // a change for the work item `forIdentity` only — dropped when the panel now shows another one
+  const patchGateFlow = useCallback((forIdentity: string, patch: Partial<Omit<GateFlow, 'for'>>) => {
+    setGateFlow((prev) => (prev.for === forIdentity ? { ...prev, ...patch } : prev));
+  }, []);
   // story #3988 — 「발행물」 탭은 다른 5탭과 달리 패널이 열릴 때 같이 안 부른다(첫 화면
   // 콜 수 무증가, AC2 "탭 열 때만 조회"). idle=아직 그 탭을 연 적 없음.
   const [activeTab, setActiveTab] = useState('evidence');
@@ -305,9 +331,10 @@ export function WorkListDetailPanel({
     });
   }, []);
 
-  const loadGate = useCallback(async () => {
-    setGate(await fetchPendingGate(row, storyId));
-  }, [row, storyId]);
+  const loadGate = useCallback(async (forIdentity: string) => {
+    const v = await fetchPendingGate(row, storyId);
+    patchGateFlow(forIdentity, { gate: v });
+  }, [row, storyId, patchGateFlow]);
 
   // story #4456 — the reads below are keyed on what the row *is* (its id and work item), not on the row object: the list answering
   // again hands the panel a new object for the same task, and keying on the object re-ran every read — first setting the gate back
@@ -327,9 +354,8 @@ export function WorkListDetailPanel({
     setArtifactCount(null);
     setTasks(null);
     setActivityLogs(null);
-    setGate(undefined);
-    setTransitionError(null);
-    setApproved(false);
+    const forIdentity = identityRef.current;
+    setGateFlow(freshGateFlow(forIdentity));
     // story #3988 — 다른 행으로 옮기면 「발행물」 탭도 다시 idle(새 storyId 기준으로
     // 다시 조회해야 한다 — 옛 행 결과를 새 행에 그대로 보여주면 안 된다). activeTab
     // 자체는 안 되돌린다(다른 탭 보다가 행을 바꿔도 같은 탭에 머무는 게 자연스럽다) —
@@ -361,10 +387,12 @@ export function WorkListDetailPanel({
     // story #3976 — 「이력」(기존 activity-logs 재사용, 3971 정정 대상과 같은 API).
     void fetchJsonData<ActivityLogResponse>(`/api/activity-logs?entity_type=story&entity_id=${storyId}`)
       .then((v) => { if (!cancelled) setActivityLogs(v?.items ?? []); });
-    fetchPendingGate(rowRef.current, storyId).then((v) => { if (!cancelled) setGate(v); }).catch(() => { if (!cancelled) setGate(null); });
+    fetchPendingGate(rowRef.current, storyId)
+      .then((v) => { if (!cancelled) patchGateFlow(forIdentity, { gate: v }); })
+      .catch(() => { if (!cancelled) patchGateFlow(forIdentity, { gate: null }); });
 
     return () => { cancelled = true; };
-  }, [rowId, rowWorkItemType, rowWorkItemId, storyId, runPublicationsFetch]);
+  }, [rowId, rowWorkItemType, rowWorkItemId, storyId, runPublicationsFetch, patchGateFlow]);
 
   // 카디르 계약값 ⑥(페드루 판정 2026-09-14 10:55Z) — 「같은 화면 두 소스」결함 처방. row.state는
   // 목록 로드 시점의 inbox 스냅샷이고 주 액션 버튼은 이 패널이 연 시점의 fresh gate(gate state,
@@ -401,9 +429,11 @@ export function WorkListDetailPanel({
 
   const submitTransition = useCallback(async (status: 'approved' | 'rejected', evidenceViewed: boolean, note?: string): Promise<boolean | void> => {
     if (!gate) return;
+    // the gate on screen is this work item's — a press after the panel moved on (a handler from the previous render) does nothing
+    const forIdentity = gateFlow.for;
+    if (!ownFlow || identityRef.current !== forIdentity) return;
     const reviewedDraft = reviewedDraftOf(gate);
-    setTransitioning(true);
-    setTransitionError(null);
+    patchGateFlow(forIdentity, { transitioning: true, error: null });
     try {
       const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
         method: 'POST',
@@ -422,26 +452,27 @@ export function WorkListDetailPanel({
           ...(reviewedDraft ? { reviewed_draft_id: reviewedDraft.id, reviewed_draft_version: reviewedDraft.version } : {}),
         }),
       });
-      if (res.status === 403) { setTransitionError('forbidden'); return; }
+      if (res.status === 403) { patchGateFlow(forIdentity, { error: 'forbidden' }); return; }
       if (!res.ok) {
         const errBody = await res.json().catch(() => null) as { error?: { code?: string } } | null;
         if (errBody?.error?.code === 'gate_draft_changed') {
-          setTransitionError('draft_changed');
-          await loadGate();
+          patchGateFlow(forIdentity, { error: 'draft_changed' });
+          await loadGate(forIdentity);
           return;
         }
-        setTransitionError('other');
+        patchGateFlow(forIdentity, { error: 'other' });
         return;
       }
-      if (status === 'approved') setApproved(true);
-      await loadGate();
-      return true;  // story #4370 — 서명 사유 초안을 지우는 신호
+      if (status === 'approved') patchGateFlow(forIdentity, { approved: true });
+      await loadGate(forIdentity);
+      // story #4370 — 서명 사유 초안을 지우는 신호(the panel moved on: nothing of A's flow is shown, so nothing to clear either)
+      return identityRef.current === forIdentity ? true : undefined;
     } catch {
-      setTransitionError('other');
+      patchGateFlow(forIdentity, { error: 'other' });
     } finally {
-      setTransitioning(false);
+      patchGateFlow(forIdentity, { transitioning: false });
     }
-  }, [gate, loadGate]);
+  }, [gate, gateFlow.for, ownFlow, loadGate, patchGateFlow]);
 
   // 저위험(평문) 경로 — evidence_viewed 없이(=false) 호출.
   const handlePlainApprove = useCallback(() => { void submitTransition('approved', false); }, [submitTransition]);
