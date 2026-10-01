@@ -16,8 +16,9 @@ import { endsWithAgentWord, forgetActiveSetup, rememberActiveSetup, setupProgres
 import { Failure, ToolsNotConnected } from './desktop-setup';
 
 /**
- * «시작» 뒤 진행 표시(유나 시안 v13 · PO 12:25Z): 설정 상태 조회(4826)를 2초마다 읽어 세 단계로. 결과가 나오거나 화면이
- * 실패(⑥ · ④)로 바뀌면 조회를 멈춘다. 설정 id가 없으면(옛 앱) 임시 한 장만.
+ * «시작» 뒤 진행 표시(유나 시안 v13 · PO 12:25Z): 설정 상태 조회(4826)를 2초마다 읽어 세 단계로. 조회는 setupProgress()의
+ * settled가 참이 되면 멈춘다(story 4464): 막힘 · 만료, 또는 첫 결과 뒤 모든 에이전트가 정해짐(붙음 · 시작 실패 · 멈춤 · 문턱 넘긴
+ * 안 붙음 = ⑦ 블록). 설정 id가 없으면(옛 앱) 임시 한 장만.
  */
 export function SetupProgressView({ setupId, recipeName }: { setupId: string | null; recipeName: string }) {
   const t = useTranslations('desktop.setup');
@@ -48,7 +49,8 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
 
   const status = snap?.status ?? null;
   const progress = snap ? setupProgress(snap.status, snap.at, snap.handedOverSeenAt) : null;
-  const done = !!progress && (progress.result === 'done' || progress.blocked || progress.expired);
+  // story 4464 — keep reading while an agent is still getting ready after the first result; stop once all are settled
+  const done = !!progress && progress.settled;
   useEffect(() => { stopped.current = done; }, [done]);
 
   useEffect(() => {
@@ -68,7 +70,8 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   const claude = status.members.some((m) => m.kind === 'agent' && m.runtime === 'claude');
   // story 4452 (Yuna v32 · PO 06:06Z): with an agent that could not start on the page, ⑦ does not cover it — it is a block
   // below the others; with none, ⑦ stays the card (the only fork: is there a start failure)
-  if (progress.notConnected && progress.startFailed.length === 0) return <ToolsNotConnected onRetry={() => void poll()} claude={claude} />;
+  // once the first result is in, the three steps are done: ⑦ is the block below them, never a card over them (story 4464)
+  if (progress.notConnected && progress.startFailed.length === 0 && progress.result !== 'done') return <ToolsNotConnected onRetry={() => void poll()} claude={claude} />;
 
   const role = (r: string) => stageRoleLabel(r, tOrg);
   // roles shown as one group, and whether «에이전트» / «agent» is added after them: a name that already ends in it gets none

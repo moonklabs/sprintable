@@ -591,6 +591,68 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(third()?.dataset.paused).toBeUndefined();
   });
 
+  // story 4464 (PO r8 0dbcd38e): the first result came 45 s before Dev connected, and the page had stopped reading at the first
+  // result — «개발자 에이전트는 아직 준비하고 있어요» stayed under three checks. Keep reading until every agent is settled.
+  it('[SID:4464] after the first result, an agent still getting ready keeps the page reading; when it connects the line goes, then reading stops', async () => {
+    const withResult = (connected: string[]) => status('handed_over', {
+      tools_connected: connected.map((member_id) => ({ member_id, at: 'x' })),
+      first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z',
+    });
+    statusNow = () => withResult(['m1']);
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(text()).toContain('첫 결과가 나왔어요');
+    expect(container.querySelector('[data-testid=setup-still-preparing]')?.textContent).toBe('작성 에이전트는 아직 준비하고 있어요');
+    const before = polls();
+    await tick(2_000);
+    expect(polls()).toBe(before + 1); // still reading after the first result
+    statusNow = () => withResult(['m1', 'm2']);
+    await tick(2_000);
+    expect(container.querySelector('[data-testid=setup-still-preparing]')).toBeNull();
+    const settled = polls();
+    await tick(10_000);
+    expect(polls()).toBe(settled); // every agent settled → no more reading
+  });
+
+  it('[SID:4464 · Qadir 4880] after the first result an agent that never connects: ⑦ as a block under the three steps after 180 s, then no more reading; [다시 확인] reads once and, connected by then, the block goes', async () => {
+    const withResult = (connected: string[]) => status('handed_over', {
+      tools_connected: connected.map((member_id) => ({ member_id, at: 'x' })),
+      first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z',
+    });
+    statusNow = () => withResult(['m1']);
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-still-preparing]')).not.toBeNull();
+    await tick(180_000);
+    const block = container.querySelector('[data-testid=setup-agent-not-connected]');
+    expect(block?.textContent).toContain('작성 에이전트에 Sprintable이 아직 연결되지 않았어요'); // only the role that did not connect
+    expect(container.querySelectorAll('ol > li[data-state=done]').length).toBe(3); // the steps stay: a block, not a card over them
+    expect(container.querySelector('[data-testid=setup-still-preparing]')).toBeNull(); // said once, by the block
+    const stoppedAt = polls();
+    await tick(10_000);
+    expect(polls()).toBe(stoppedAt); // settled: no endless 2-second reading
+    statusNow = () => withResult(['m1', 'm2']);
+    await act(async () => { [...block!.querySelectorAll('button')].find((b) => b.textContent === '다시 확인')!.click(); });
+    await tick(0);
+    expect(polls()).toBe(stoppedAt + 1); // one reading
+    expect(container.querySelector('[data-testid=setup-agent-not-connected]')).toBeNull();
+  });
+
+  it('[SID:4464] an agent that could not start counts as settled: reading stops after the first result', async () => {
+    const base = status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z' });
+    statusNow = () => ({ ...base, signals: { ...base.signals, agents_start_failed: [
+      { member_id: 'm2', runtime: 'codex', reason: 'runtime_missing', code: null, at: '2026-09-30T12:00:05Z', limit: null, first_member_id: null },
+    ] } });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    const first = polls();
+    await tick(10_000);
+    expect(polls()).toBe(first);
+  });
+
   it('[SID:4433] ② done while another agent is not connected → ① drawn done · «… 에이전트는 아직 준비하고 있어요» muted under it, no pairs line', async () => {
     const first = () => container.querySelectorAll('ol > li[data-state]')[0] as HTMLElement | undefined;
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
