@@ -194,8 +194,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
   const [pickingRecipe, setPickingRecipe] = useState(false); // 4446: the recipe list is folded to the chosen one until [바꾸기]
-  // keyboard focus follows the fold (Yuna 00:54Z): opening puts it on the chosen recipe, picking puts it back on [바꾸기] —
-  // the button that had focus goes away when the list opens, so without this the focus would be lost
+  // keyboard focus follows the fold (Yuna 00:54Z): opening puts it on the chosen recipe, folding puts it back on [바꾸기].
+  // [바꾸기] stays in its place while the list is open (Qadir 4869: a disclosure whose button exists only while folded says
+  // «collapsed» forever and controls a list that never exists) — it shows the state and folds the list again.
   const recipeListRef = useRef<HTMLDivElement | null>(null);
   const recipeChangeRef = useRef<HTMLButtonElement | null>(null);
   const focusAfterFold = useRef<'list' | 'change' | null>(null);
@@ -207,8 +208,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     focusAfterFold.current = 'list';
     setPickingRecipe(true);
   };
-  // folding (Yuna 02:56Z): never on an arrow key (that only chooses), but on a real click, Enter or Space, or focus leaving
-  // the list. Focus goes back to [바꾸기] — except when it left for another control (a Tab · a click elsewhere): that stays.
+  // folding (Yuna 02:56Z): never on an arrow key (that only chooses), but on a real click, Enter or Space, [바꾸기] again, or
+  // focus leaving the list. Focus goes back to [바꾸기] — except when it left for another control (a Tab · a click elsewhere)
+  // or the window itself lost focus (PO 03:41Z: never pull focus inside a window the person left).
   const foldRecipes = (refocus: boolean) => {
     focusAfterFold.current = refocus ? 'change' : null;
     setPickingRecipe(false);
@@ -427,14 +429,36 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       ) : null}
 
       {/* the chosen recipe as one card + [바꾸기] — the list of every recipe pushed «시작» more than a screen below, and a
-          person who did not scroll saw no agent start (4446 · Yuna b2d15f85 ① · PO 00:31Z). [바꾸기] opens the list in place
-          (the chosen one first); picking one folds it again. One recipe only: no [바꾸기]. */}
+          person who did not scroll saw no agent start (4446 · Yuna b2d15f85 ① · PO 00:31Z). [바꾸기] opens the list below the
+          card (the chosen one first) and stays there while it is open; picking one folds it again. One recipe only: no [바꾸기]. */}
       <section aria-labelledby="setup-recipe">
         <h2 id="setup-recipe" className="text-sm font-medium">{t('recipe')}</h2>
+        {recipe ? (
+          <div className="mt-2 flex items-start justify-between gap-3 rounded-md border p-3" data-testid="setup-recipe-chosen">
+            <span className="min-w-0"><span className="block text-sm font-medium">{presetName(recipe, tPreset)}</span>
+              {presetDescription(recipe, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(recipe, tPreset)}</span> : null}
+              <RecipeRolesLine recipe={recipe} runtimes={runtimes} /></span>
+            {recipes.length > 1 ? (
+              <Button ref={recipeChangeRef} variant="ghost" size="sm" aria-label={t('changeRecipeAria')} aria-expanded={pickingRecipe} aria-controls="setup-recipe-list"
+                onClick={() => (pickingRecipe ? foldRecipes(true) : openRecipes())}>{t('change')}</Button>
+            ) : null}
+          </div>
+        ) : null}
         {pickingRecipe ? (
           <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); foldRecipes(true); } }}
-            onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) foldRecipes(e.relatedTarget === null); }}>
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              // a screen reader can put focus on a radio without choosing it: Enter/Space there chooses that one (PO 03:41Z)
+              const el = e.target as HTMLInputElement;
+              if (el.name === 'recipe' && !el.checked) { const r = recipes.find((x) => x.id === el.value); if (r) pick(r); }
+              foldRecipes(true);
+            }}
+            onBlur={(e) => {
+              const to = e.relatedTarget as Node | null;
+              if (e.currentTarget.contains(to) || to === recipeChangeRef.current) return; // [바꾸기]'s own click folds it
+              foldRecipes(to === null && document.hasFocus());
+            }}>
             {recipeOrder.map((id) => recipes.find((x) => x.id === id)).filter((r): r is NonNullable<typeof r> => !!r).map((r) => (
               // a real click (detail ≥ 1) chooses and folds; the click an arrow key or a label sends to the radio has detail 0
               <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary"
@@ -445,16 +469,6 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                   <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
               </label>
             ))}
-          </div>
-        ) : recipe ? (
-          <div className="mt-2 flex items-start justify-between gap-3 rounded-md border p-3" data-testid="setup-recipe-chosen">
-            <span className="min-w-0"><span className="block text-sm font-medium">{presetName(recipe, tPreset)}</span>
-              {presetDescription(recipe, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(recipe, tPreset)}</span> : null}
-              <RecipeRolesLine recipe={recipe} runtimes={runtimes} /></span>
-            {recipes.length > 1 ? (
-              <Button ref={recipeChangeRef} variant="ghost" size="sm" aria-label={t('changeRecipeAria')} aria-expanded={false} aria-controls="setup-recipe-list"
-                onClick={openRecipes}>{t('change')}</Button>
-            ) : null}
           </div>
         ) : null}
       </section>

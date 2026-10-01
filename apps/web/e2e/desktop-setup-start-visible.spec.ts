@@ -87,6 +87,9 @@ test.describe('[SID:4446] desktop setup — «시작» in sight without scrollin
     const list = page.getByTestId('setup-recipe-list');
     await expect(list).toBeVisible();
     await expect(page.locator('input[name=recipe]:checked')).toBeFocused();
+    // [바꾸기] stays while open and says so; what it controls is there (Qadir 4869)
+    await expect(change).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator(`#${await change.getAttribute('aria-controls')}`)).toBeVisible();
     const order = await list.locator('input[name=recipe]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
@@ -100,6 +103,12 @@ test.describe('[SID:4446] desktop setup — «시작» in sight without scrollin
     await page.getByTestId('setup-recipe-chosen').getByRole('button').click();
     await list.locator('label').nth(1).click();
     await expect(list).toHaveCount(0);
+    // [바꾸기] again folds it (a disclosure button toggles)
+    await change.click();
+    await expect(list).toBeVisible();
+    await change.click();
+    await expect(list).toHaveCount(0);
+    await expect(change).toHaveAttribute('aria-expanded', 'false');
     await context.close();
   });
 
