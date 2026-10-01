@@ -938,14 +938,71 @@ describe('OrganizationEventsPage — 카탈로그 적용 진입점 + stage_metad
 // story #4370(유나 판정 (가)) — 정의 만들기/고치기 창은 여러 줄 칸(고급 JSON)이 든 폼이라 폼 전체가 초안(만들기 = 조직 · 고치기 = 정의).
 // 창이 Esc로 닫혀도 다시 열면 그대로 · 보이는 «취소»와 성공에서만 지운다. 시험 발행 payload는 초안 제외(PO 처분).
 describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
+  // story #4471 — these tests run on a late-frame clock, so the race that went red now and then under a loaded full run is
+  // made on purpose, every run. Animation frames (what Base UI's enqueueFocus asks for) are held and delivered in request
+  // order — never by elapsed time — only at the moments a real late frame could land:
+  //   · right after the next key the test sends (the worst moment: between the two Escapes of closeByEsc);
+  //   · before the test's own 30 ms timer (a real frame, ~16 ms, always runs before it);
+  //   · when the test itself waits for a frame (frames run in request order: every frame asked for earlier lands first).
+  // cancelAnimationFrame is honoured (enqueueFocus cancels its previous frame). Without the wait in open() below, a draft test
+  // goes red here every run with the dialog still open (data-open).
+  const held = new Map<number, FrameRequestCallback>();
+  const testWaits = new WeakSet<FrameRequestCallback>();
+  let nextFrame = 1;
+  let realRaf: typeof requestAnimationFrame;
+  let realCaf: typeof cancelAnimationFrame;
+  const deliverFrames = () => {
+    const due = [...held.values()];
+    held.clear();
+    due.forEach((cb) => cb(performance.now()));
+  };
+  const afterKey = () => { queueMicrotask(deliverFrames); };
+  beforeEach(() => {
+    realRaf = globalThis.requestAnimationFrame;
+    realCaf = globalThis.cancelAnimationFrame;
+    const lateRaf = ((cb: FrameRequestCallback) => {
+      const id = nextFrame++;
+      held.set(id, cb);
+      if (testWaits.has(cb)) queueMicrotask(deliverFrames);
+      return id;
+    }) as typeof requestAnimationFrame;
+    const lateCaf = ((id: number) => { held.delete(id); }) as typeof cancelAnimationFrame;
+    globalThis.requestAnimationFrame = lateRaf; window.requestAnimationFrame = lateRaf;
+    globalThis.cancelAnimationFrame = lateCaf; window.cancelAnimationFrame = lateCaf;
+    window.addEventListener('keydown', afterKey, true);
+  });
+  afterEach(() => {
+    window.removeEventListener('keydown', afterKey, true);
+    deliverFrames();
+    globalThis.requestAnimationFrame = realRaf; window.requestAnimationFrame = realRaf;
+    globalThis.cancelAnimationFrame = realCaf; window.cancelAnimationFrame = realCaf;
+  });
   const dialog = () => document.body.querySelector('[data-slot="dialog-content"]') as HTMLElement | null;
   const btn = (scope: ParentNode, label: string) => [...scope.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement;
-  const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); };
+  const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(() => { deliverFrames(); r(null); }, 30)); }); };
   function setValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
     const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }
+  // story #4471 — Base UI does a dialog's opening work one animation frame later (it moves focus to the first tabbable element ·
+  // enqueueFocus). A test that acts before that frame races it: under a loaded full run the frame could land between the two
+  // Escapes of closeByEsc, sending focus back into the field that holds text, so the second Escape was spent leaving the field
+  // again and the dialog stayed open. Frames run in request order — waiting for one requested now lets every frame the dialog
+  // asked for before it land first. A condition, not a fixed sleep.
+  const pendingFrames = async () => {
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        const frame = () => resolve();
+        testWaits.add(frame);
+        requestAnimationFrame(frame);
+      });
+    });
+  };
+  const open = async (label: string) => {
+    await act(async () => { btn(container, label).click(); });
+    await pendingFrames();
+  };
   async function closeByEsc(field: HTMLElement) {
     const esc = (t: EventTarget) => t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await act(async () => { field.focus(); });
@@ -957,7 +1014,7 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
   it('만들기: 고급 탭 JSON · 이름을 쓰고 Esc로 닫았다 열면 그대로(탭 포함) · «취소»는 지운다', async () => {
     mockFetches([]);
     await mount();
-    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    await open(koMessages.organization.eventCreateCta);
     await act(async () => { switchToAdvancedTab(); });
     await act(async () => {
       fillName('릴리즈 흐름');
@@ -965,12 +1022,12 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
     });
     await closeByEsc(document.body.querySelector('#event-block-template') as HTMLTextAreaElement);
     expect(dialog()).toBeNull();
-    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    await open(koMessages.organization.eventCreateCta);
     expect((document.body.querySelector('#event-name') as HTMLInputElement).value).toBe('릴리즈 흐름');
     expect((document.body.querySelector('#event-block-template') as HTMLTextAreaElement).value).toBe('{\n  "title": "릴리즈"\n}');
     await act(async () => { btn(dialog()!, koMessages.common.cancel).click(); });
     await settle();
-    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    await open(koMessages.organization.eventCreateCta);
     expect((document.body.querySelector('#event-name') as HTMLInputElement).value).toBe('');
     expect(document.body.querySelector('#event-block-template')).toBeNull();  // 기본 탭으로 새로 시작
   });
@@ -979,13 +1036,13 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
     mockFetches([customWithId({ id: 'def-7', key: 'org.moonklabs.my_event' })]);
     await mount();
     const payload = () => document.body.querySelector('#event-test-publish-payload') as HTMLTextAreaElement;
-    await act(async () => { btn(container, koMessages.organization.eventTestPublishCta).click(); });
+    await open(koMessages.organization.eventTestPublishCta);
     await act(async () => { setValue(payload(), '{\n  "token": "secret-like"\n}'); });
     await closeByEsc(payload());
     expect(dialog()).toBeNull();
     expect(Object.keys(window.sessionStorage).filter((k) => k.includes('event-test-publish'))).toEqual([]);
     expect(JSON.stringify(Object.values(window.sessionStorage))).not.toContain('secret-like');
-    await act(async () => { btn(container, koMessages.organization.eventTestPublishCta).click(); });
+    await open(koMessages.organization.eventTestPublishCta);
     expect(payload().value).toBe('{}');
   });
 });
