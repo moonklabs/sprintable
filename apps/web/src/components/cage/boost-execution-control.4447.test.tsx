@@ -299,6 +299,15 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     expect($('boost-resume-trigger')).not.toBeNull();
   });
 
+  // PO 13:26Z — «멈춰 두었어요» is true only once the provider confirmed the pause (run paused): while the pause is in flight the
+  // campaign still runs — the card keeps its «중지 중…» line, never the approval-gone line
+  it('pause_pending · gate back in review: «중지 중…», no approval-gone line', async () => {
+    spendNow = { run_status: 'pause_pending', start_command: cmd('completed', null, false) };
+    await mount('pending');
+    expect($('boost-paused-approval-gone')).toBeNull();
+    expect(text()).toContain(cage.boostExecutionPausing);
+  });
+
   it('running · gate back in review (the pause not landed yet): still pausable, no approval-gone line', async () => {
     spendNow = { run_status: 'running', start_command: cmd('completed', null, false) };
     await mount('pending');
