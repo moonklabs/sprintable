@@ -207,3 +207,64 @@ async def test_scheduler_cap_pause_execution_records_activity_log_with_cap_reach
         assert log.context == {"initiated_by": "scheduler", "reason": "cap_reached"}
     finally:
         await engine.dispose()
+
+
+async def test_a_scheduler_pause_because_the_approval_was_withdrawn_records_that_reason():
+    """story #4466 (PO 17:07Z, the live run): a scheduler pause is no longer only the cap's — a boost whose gate left «approved»
+    is paused by the scheduler too, and its history line said «자동 중지(광고비 상한 도달)». The activity carries the reason that
+    actually fired: the approval withdrawn (the same post requested again)."""
+    from datetime import datetime, timezone
+
+    from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
+    from app.services.publication_command import process_due_publication_commands
+    from tests.test_4466_money_stops_off_approved_realdb import _reopen
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        await _reopen(Session, org_id, owner_id, gate_id)  # the gate leaves «approved»: the hook schedules a capture now
+        async with Session() as s:
+            await process_due_ads_spend_snapshots(s, now=datetime.now(timezone.utc))
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+        async with Session() as s:
+            log = await _activity_log(s, gate_id=gate_id, action="ads_boost_paused")
+        assert log is not None and log.context == {"initiated_by": "scheduler", "reason": "approval_gone"}, log and log.context
+    finally:
+        await engine.dispose()
+
+
+async def test_a_scheduler_pause_because_the_spend_could_not_be_checked_records_that_reason():
+    """story #4417's pause (the spend could not be checked against the budget) is a scheduler pause too — its own reason."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update
+
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.models.gate import Gate
+    from app.services.ads_spend_snapshots import _pause_by_scheduler
+    from app.services.publication_command import process_due_publication_commands
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            await s.execute(update(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id).values(
+                spend_blocked_at=datetime.now(timezone.utc), spend_blocked_code="ADS_SPEND_CURRENCY_MISMATCH",
+            ))
+            await s.commit()
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            run = (await s.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
+            assert await _pause_by_scheduler(s, gate=gate, run=run) is True
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1, counts
+        async with Session() as s:
+            log = await _activity_log(s, gate_id=gate_id, action="ads_boost_paused")
+        assert log is not None and log.context == {"initiated_by": "scheduler", "reason": "spend_unreadable"}, log and log.context
+    finally:
+        await engine.dispose()

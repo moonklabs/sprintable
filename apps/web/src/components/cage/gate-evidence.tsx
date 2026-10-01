@@ -562,8 +562,8 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   ads_spend_refresh_requested: 'gateActivityActionAdsSpendRefreshRequested',
   // story #3806(Phase3·3-2 PR 14, 페드루 PO 確定 2026-09-11 19:52Z) —
   // process_one_ads_boost_command 실행 성공 지점 신설 액션(ads_boost_execution.py
-  // ::_ACTIVITY_ACTION_BY_OP). ads_boost_paused는 scheduler+cap_reached 조합일
-  // 때만 아래 adsBoostActivityLabel()이 별도 문구로 덮어쓴다(이 맵은 그 기본값).
+  // ::_ACTIVITY_ACTION_BY_OP). ads_boost_paused는 scheduler가 멈춘 것이면 아래
+  // adsBoostActivityLabel()이 그 사유대로 덮어쓴다(이 맵은 사람이 누른 기본값).
   ads_boost_started: 'gateActivityActionAdsBoostStarted',
   ads_boost_paused: 'gateActivityActionAdsBoostPaused',
   ads_boost_resumed: 'gateActivityActionAdsBoostResumed',
@@ -577,12 +577,21 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
 // — 사용자가 "왜 멈췄는지" 화면에서 바로 읽어야 한다는 게 이 PR의 존재 이유 그
 // 자체). context는 BE가 이미 실어 보낸다(ads_boost_execution.py::activity_context
 // — {initiated_by, reason?}), 여기서 새로 지어내지 않는다.
+// story #4466 (PO 17:07Z, the live run) — the scheduler pauses for three reasons now (the cap · the spend could not be checked ·
+// the approval withdrawn), and the history said «광고비 상한 도달» for all of them. The line follows the reason the server recorded
+// (ads_boost_execution._scheduler_pause_reason); a scheduler pause without one says «자동 중지» only (Yuna 17:09Z — automatic is
+// true, the cause unknown), never the cap.
+const SCHEDULER_PAUSE_LABEL: Record<string, string> = {
+  cap_reached: 'gateActivityActionAdsBoostAutoPausedCapReached',
+  approval_gone: 'gateActivityActionAdsBoostAutoPausedApprovalGone',
+  spend_unreadable: 'gateActivityActionAdsBoostAutoPausedSpendUnreadable',
+  none: 'gateActivityActionAdsBoostAutoPaused', // no reason recorded: «자동 중지» only
+};
+
 function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof useTranslations>): string | null {
-  if (item.action !== 'ads_boost_paused') return null;
-  if (item.context['initiated_by'] === 'scheduler' && item.context['reason'] === 'cap_reached') {
-    return t('gateActivityActionAdsBoostAutoPausedCapReached');
-  }
-  return null;
+  if (item.action !== 'ads_boost_paused' || item.context['initiated_by'] !== 'scheduler') return null;
+  const reason = item.context['reason'];
+  return t((typeof reason === 'string' && SCHEDULER_PAUSE_LABEL[reason]) || SCHEDULER_PAUSE_LABEL.none);
 }
 
 /**
