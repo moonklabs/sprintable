@@ -30,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.publication_attempt import PublicationAttempt
-from app.models.publication_command import PublicationCommand
+from app.models.publication_command import STATUS_BLOCKED_UNAPPROVED, PublicationCommand  # noqa: F401 — re-exported (importers use this module)
 from app.services.provider_call_mark import (
     provider_call_marked,
     provider_client,
@@ -284,7 +284,6 @@ def provider_error_code(provider_code: str | None) -> str:
 # command를 즉시 닫는다(백오프 재시도 대상 아님 — "재시도해도 안 되는" 종류가
 # 아니라 "재시도라는 개념 자체가 안 맞는" 종류: 사람이 다시 승인해야 새 커맨드가
 # 생긴다). 기존 'voided'(재승인으로 무효화)와 같은 결의 신규 terminal 상태.
-STATUS_BLOCKED_UNAPPROVED = "blocked_unapproved"
 
 
 def mark_blocked_unapproved(command: PublicationCommand, *, reason_code: str, last_error: str) -> None:

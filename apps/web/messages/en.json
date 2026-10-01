@@ -5910,6 +5910,8 @@
     "boostStartFailedConnection": "The ad account connection is down, so it didn't start — <link>Check connection</link>",
     "boostStartFailedPaused": "External publishing is paused, so it didn't start — you can try again once the owner resumes it.",
     "boostStartBlocked": "This promotion can't start right now.",
+    "boostStartBlockedApprovalGone": "The approval was withdrawn, so this didn’t start — approve it again to start a new boost.",
+    "boostStartBlockedSourceMissing": "The original post or its channel connection could not be found, so this didn’t start.",
     "boostNeedsCheckOutcomeUnknown": "A campaign may already exist in your ad account, so we didn't retry — check your ad account first.",
     "boostNeedsCheckStopped": "The boost couldn't start. Check your ad account, then try again.",
     "boostNeedsCheckRetry": "Retry",

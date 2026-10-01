@@ -628,13 +628,25 @@ export function BoostExecutionControl({
 
   // story #4447 — a start that stopped (not for a person to check): the true line and its way on, never «홍보 시작» (which only
   // returned the same stopped command). The retry button only where the server says this person may retry (`retryable`).
-  if (command && !runActive && (command.status === 'dead_letter' || command.status === 'blocked' || command.status === 'failed')) {
+  // Qadir 4870 ① — `blocked_unapproved`: the worker stopped the start before any call (approval gone · connection or source
+  // missing); its reason code says why and what next. No retry (approving again makes a new command).
+  if (command && !runActive && (command.status === 'dead_letter' || command.status === 'blocked' || command.status === 'failed'
+    || command.status === 'blocked_unapproved')) {
     const kind = command.failure_kind;
-    const retryable = command.retryable === true && (kind === 'not_sent' || kind === 'transient');
+    const code = command.error_code;
+    // Qadir 4870 ② — the server's `retryable` alone (human_retryable · people only): a connection-blocked start it lets a person
+    // retry after reconnecting now has its button; the card no longer re-filters by kind
+    const retryable = command.retryable === true;
+    const connectionLine = () => t.rich('boostStartFailedConnection', { link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link> });
     // Yuna 03:03Z — «— 다시 시도해 주세요» only where the retry button is shown; without it the line stops at the fact
-    const line = kind === 'not_sent' ? (retryable ? t('boostStartFailedNotSent') : t('boostStartFailedNotSentNoRetry'))
+    const line = command.status === 'blocked_unapproved'
+      ? (code === 'ADS_BOOST_GATE_NOT_APPROVED' ? t('boostStartBlockedApprovalGone')
+        : code === 'ADS_BOOST_CONNECTION_UNAVAILABLE' ? connectionLine()
+        : code === 'ADS_BOOST_ORIGINAL_PUBLICATION_MISSING' || code === 'ADS_BOOST_ORIGIN_CONNECTION_MISSING' ? t('boostStartBlockedSourceMissing')
+        : t('boostStartBlocked'))
+      : kind === 'not_sent' ? (retryable ? t('boostStartFailedNotSent') : t('boostStartFailedNotSentNoRetry'))
       : kind === 'transient' ? (retryable ? t('boostStartFailedTransient') : t('boostStartFailedTransientNoRetry'))
-      : kind === 'connection' ? t.rich('boostStartFailedConnection', { link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link> })
+      : kind === 'connection' ? connectionLine()
       : kind === 'paused' ? t('boostStartFailedPaused')
       : t('boostStartBlocked');
     return (

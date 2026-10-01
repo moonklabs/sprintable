@@ -648,8 +648,8 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     from app.services.provider_call_mark import provider_call_marked
     from app.services.publication_command import (
         PRE_CALL_ERROR_CODE,
-        STATUS_BLOCKED_UNAPPROVED,
         apply_command_failure,
+        mark_blocked_unapproved,
         record_publication_attempt,
     )
 
@@ -661,8 +661,9 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
             db, command=command, approval_check="missing" if exc.code == "ADS_BOOST_GATE_NOT_APPROVED" else "ok",
             adapter_called=False, started_at=attempt_started_at, finished_at=now, result_code=None,
         )
-        command.status = STATUS_BLOCKED_UNAPPROVED
-        command.last_error = str(exc)[:2000]
+        # story #4447 (Qadir 4870 ①) — the shared shape (`mark_blocked_unapproved`), with the reason code: this path wrote the
+        # status and the error text only, so the card (error_code = reason_code) could not say why the start stopped or what next
+        mark_blocked_unapproved(command, reason_code=exc.code, last_error=str(exc))
         return
 
     gate, module = ctx["gate"], ctx["module"]

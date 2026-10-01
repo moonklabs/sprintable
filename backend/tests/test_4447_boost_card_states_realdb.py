@@ -115,3 +115,37 @@ async def test_an_agent_viewer_never_gets_retryable():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def test_a_start_stopped_before_the_call_carries_its_reason_to_the_card():
+    """Qadir 4870 ①: the worker stops a start before any provider call when the approval is gone (or the connection / the source
+    post is missing) — `blocked_unapproved`. It wrote the status and the error text only, so /spend had no error_code and the card
+    could neither say why nor what next. Now the shared `mark_blocked_unapproved` shape: the reason code reaches the card, and no
+    retry (approving again makes a new command)."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import text
+
+    from app.main import app
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import process_one_ads_boost_command
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        command_id = (await _start_command(Session, org_id, gate_id, owner_id)).id
+        async with Session() as s:  # the approval is gone by the time the worker picks the command up
+            await s.execute(text("UPDATE gate SET status='pending' WHERE id=:g"), {"g": gate_id})
+            await s.commit()
+        async with Session() as s:
+            command = await s.get(PublicationCommand, command_id)
+            await process_one_ads_boost_command(s, command, now=datetime.now(UTC))
+            await s.commit()
+        async with Session() as s:
+            row = await s.get(PublicationCommand, command_id)
+            assert (row.status, row.reason_code, row.failure_kind) == ("blocked_unapproved", "ADS_BOOST_GATE_NOT_APPROVED", None)
+        start = (await _spend(app, Session, org_id, owner_id, gate_id))["start_command"]
+        assert (start["status"], start["error_code"], start["retryable"]) == ("blocked_unapproved", "ADS_BOOST_GATE_NOT_APPROVED", False)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

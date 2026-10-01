@@ -28,8 +28,8 @@ const jsonResponse = (body: unknown, status = 200) =>
   ({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body), headers: { get: () => null } }) as unknown as Response;
 const $ = (id: string) => document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
 const posts = (suffix: string) => mockedFetch.mock.calls.filter(([url, init]) => String(url).endsWith(suffix) && init);
-const cmd = (status: string, failureKind: string | null, retryable: boolean) =>
-  ({ id: 'cmd-1', status, failure_kind: failureKind, error_code: null, campaign_name: null, retryable });
+const cmd = (status: string, failureKind: string | null, retryable: boolean, errorCode: string | null = null) =>
+  ({ id: 'cmd-1', status, failure_kind: failureKind, error_code: errorCode, campaign_name: null, retryable });
 const text = () => container.textContent ?? '';
 
 beforeEach(() => {
@@ -139,6 +139,18 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     expect($('boost-start-trigger')).toBeNull();
   });
 
+  // Qadir 4870 ② — the server's `retryable` alone decides the button: a connection-blocked start the server lets a person retry
+  // (after reconnecting · the server does not re-queue it by itself) had no button because the card re-filtered by kind.
+  it('③ connection (blocked) and the server says retryable: the link line and «다시 시도» → the retry endpoint', async () => {
+    spendNow = { run_status: 'pending', start_command: cmd('blocked', 'connection', true) };
+    await mount();
+    expect($('boost-start-failed')?.querySelector('a')).not.toBeNull();
+    expect($('boost-start-failed-retry')).not.toBeNull();
+    await act(async () => { $('boost-start-failed-retry')!.click(); });
+    await settle();
+    expect(posts('/cmd-1/retry')).toHaveLength(1);
+  });
+
   it('③ paused (the org paused external publishing): the reason only · no button (the server re-queues it)', async () => {
     spendNow = { run_status: 'pending', start_command: cmd('blocked', 'paused', false) };
     await mount();
@@ -165,6 +177,29 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     await mount();
     expect(text()).toContain(cage.boostStartBlocked);
     expect($('boost-start-trigger')).toBeNull();
+  });
+
+  // Qadir 4870 ① — a start the worker stopped before any call (`blocked_unapproved`) says why and what next, by its reason code;
+  // never «unknown» and never a retry (approving again makes a new command).
+  it.each([
+    ['ADS_BOOST_GATE_NOT_APPROVED', 'boostStartBlockedApprovalGone'],
+    ['ADS_BOOST_ORIGINAL_PUBLICATION_MISSING', 'boostStartBlockedSourceMissing'],
+    ['ADS_BOOST_ORIGIN_CONNECTION_MISSING', 'boostStartBlockedSourceMissing'],
+    ['ADS_BOOST_GATE_MISSING', 'boostStartBlocked'],
+  ] as const)('④ blocked_unapproved · %s: its line · no retry · no start', async (code, key) => {
+    spendNow = { run_status: 'pending', start_command: cmd('blocked_unapproved', null, false, code) };
+    await mount();
+    expect($('boost-start-failed')?.textContent).toBe(cage[key]);
+    expect(text()).not.toContain(cage.boostStateUnknown);
+    expect($('boost-start-failed-retry')).toBeNull();
+    expect($('boost-start-trigger')).toBeNull();
+  });
+
+  it('④ blocked_unapproved · ADS_BOOST_CONNECTION_UNAVAILABLE: the connection line with its «연결 확인» link · no retry', async () => {
+    spendNow = { run_status: 'pending', start_command: cmd('blocked_unapproved', null, false, 'ADS_BOOST_CONNECTION_UNAVAILABLE') };
+    await mount();
+    expect($('boost-start-failed')?.querySelector('a')?.getAttribute('href')).toBe('/ws/proj/organization/channels');
+    expect($('boost-start-failed-retry')).toBeNull();
   });
 
   it('④ a voided start (its approval was replaced) is no start at all: «홍보 시작» from the valid approval', async () => {
