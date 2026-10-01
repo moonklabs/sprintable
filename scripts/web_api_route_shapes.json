@@ -2066,6 +2066,11 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/organizations/{}/ads-boosts/{}/cancel",
+"kind": "object"
+},
+{
+"method": "POST",
 "path": "/api/v2/organizations/{}/ads-boosts/{}/pause",
 "kind": "object"
 },

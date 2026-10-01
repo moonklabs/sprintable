@@ -854,11 +854,11 @@ _CATALOG: dict[str, dict[str, str]] = {
     },
     "ads_boost.already_cancelled": {
         "ko": "이미 취소된 홍보예요.",
-        "en": "This promotion has already been cancelled.",
+        "en": "This promotion is already cancelled.",
     },
     "ads_boost.cancel_in_progress": {
         "ko": "이 글의 홍보를 취소하는 중이에요 — 광고가 멈춘 게 확인되면 다시 요청할 수 있어요.",
-        "en": "This post's promotion is being cancelled — you can request again once the ad is confirmed stopped.",
+        "en": "This post's promotion is being cancelled — you can request again once the ad is confirmed paused.",
     },
     "ads_boost.gate_not_approved": {
         "ko": "아직 승인되지 않은 광고 홍보(boost) 건이에요.",

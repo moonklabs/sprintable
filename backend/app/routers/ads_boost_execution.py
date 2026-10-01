@@ -305,6 +305,7 @@ class PreviousCycleView(BaseModel):
     campaign_id: str | None = None
     spend_minor: int | None = None
     currency: str | None = None
+    started_at: str | None = None
     ended_at: str
     end_reason: str
 
@@ -350,6 +351,10 @@ class SpendSummaryResponse(BaseModel):
     # story #4460 — a cancel asked for and not finished («취소 중») · the cycles that ended before this one (campaign · spend)
     cancel_requested: bool = False
     previous_cycles: list[PreviousCycleView] = []
+    # story #4460 (Yuna 16:46Z) — the gate's status (voided = cancelled) and whether this viewer may cancel it (the requester or an
+    # owner/admin, on a gate a cancel still applies to): the card shows «홍보 취소» only then; the 403 line is a fallback
+    gate_status: str | None = None
+    can_cancel: bool = False
     snapshots: list[SpendSnapshotView]
 
 
@@ -419,6 +424,29 @@ async def get_ads_boost_spend_endpoint(
     )
 
 
+async def _viewer_can_cancel(db: AsyncSession, auth: AuthContext | None, org_id: uuid.UUID, summary: dict) -> bool:
+    """story #4460 — the same rule as the cancel itself (ads_boost_cancel.cancel_ads_boost): a person who is the requester or an
+    owner/admin, on a gate a cancel still applies to (not voided · something to cancel)."""
+    from app.services.gate_service import _ADS_BOOST_CANCELLABLE_STATUSES
+
+    if auth is None or summary.get("gate_status") not in _ADS_BOOST_CANCELLABLE_STATUSES:
+        return False
+    if summary.get("run_status") is None and not summary.get("start_command"):
+        return False  # nothing was started: a request still in review is withdrawn on the gate, not cancelled here
+    try:
+        member = await resolve_member(auth, org_id, db)
+    except Exception:  # noqa: BLE001 — unknown viewer: no button (the server still decides on the cancel itself)
+        return False
+    if member.type != "human":
+        return False
+    from app.dependencies.ownership import _is_org_admin
+
+    if await _is_org_admin(db, org_id, uuid.UUID(str(auth.user_id))):
+        return True
+    requester = summary.get("requested_by_member_id")
+    return requester is not None and requester == member.id
+
+
 async def _caller_is_human(db: AsyncSession, auth: AuthContext | None, org_id: uuid.UUID) -> bool:
     """story #4416 — fail-closed: an unresolvable caller counts as not human."""
     if auth is None:
@@ -470,6 +498,8 @@ async def _get_ads_boost_spend_endpoint(
         pause_command=PauseCommandView(**summary["pause_command"]) if summary.get("pause_command") else None,
         cancel_requested=summary.get("cancel_requested", False),
         previous_cycles=[PreviousCycleView(**c) for c in summary.get("previous_cycles", [])],
+        gate_status=summary.get("gate_status"),
+        can_cancel=await _viewer_can_cancel(db, auth, org_id, summary),
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,

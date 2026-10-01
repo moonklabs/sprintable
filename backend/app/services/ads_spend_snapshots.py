@@ -843,7 +843,8 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
     from app.models.ads_boost_run import AdsBoostRunCycle
 
     previous_cycles = [
-        {"campaign_id": c.campaign_id, "spend_minor": c.spend_minor, "currency": c.currency, "ended_at": c.ended_at.isoformat(),
+        {"campaign_id": c.campaign_id, "spend_minor": c.spend_minor, "currency": c.currency,
+         "started_at": c.started_at.isoformat() if c.started_at else None, "ended_at": c.ended_at.isoformat(),
          "end_reason": c.end_reason}
         for c in (await db.execute(
             select(AdsBoostRunCycle).where(AdsBoostRunCycle.gate_id == gate.id, AdsBoostRunCycle.org_id == org_id)
@@ -888,6 +889,8 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         ),
         "created_budget_minor": run.created_budget_minor if run is not None else None,
         "cancel_requested": run is not None and run.cancel_requested_at is not None,  # story #4460 — «취소 중»
+        "gate_status": gate.status,  # story #4460 — the card says «취소됨» without the page reloading the gate
+        "requested_by_member_id": gate.requested_by_member_id,
         "previous_cycles": previous_cycles,
         "gate_id": gate.id,
         "initiated_by": boost_start_command.initiated_by if boost_start_command is not None else None,

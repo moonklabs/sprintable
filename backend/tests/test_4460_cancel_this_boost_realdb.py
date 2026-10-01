@@ -350,3 +350,38 @@ async def test_a_queued_start_is_voided_so_a_held_boost_ends_at_once(monkeypatch
         assert (await _run(Session, gate_id)).campaign_id is None
     finally:
         await engine.dispose()
+
+
+async def test_the_card_learns_who_may_cancel_and_the_gate_status_from_spend(monkeypatch):
+    """Yuna 16:46Z: the button shows only for the requester or an owner/admin (the server's same rule) — /spend says so
+    (can_cancel), and says the gate's status so the card knows «취소됨» without reloading the gate."""
+    from app.main import app
+    from tests.test_3475_publishing_metrics import _seed_human
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+
+    async def spend_as(user_id):
+        _setup_org_scoped_app(app, Session, org_id, user_id=user_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend")
+            assert r.status_code == 200, r.text
+            return r.json()
+        finally:
+            app.dependency_overrides.clear()
+
+    try:
+        async with Session() as s:
+            other = await _seed_human(s, org_id, role="member")
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        mine = await spend_as(owner_id)
+        assert (mine["can_cancel"], mine["gate_status"]) == (True, "approved")
+        assert (await spend_as(other))["can_cancel"] is False
+        await _cancel(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        after = await spend_as(owner_id)
+        assert (after["can_cancel"], after["gate_status"], after["cancel_requested"]) == (False, "voided", False)
+        assert len(after["previous_cycles"]) == 1 and after["previous_cycles"][0]["started_at"]
+    finally:
+        await engine.dispose()
