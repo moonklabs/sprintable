@@ -68,6 +68,43 @@ async def Session():
     await engine.dispose()
 
 
+_PARKED_AT = datetime(9999, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def own_sweep_world():
+    """story #4473 — the sweep (`sweep_processing_attempts`) is rightly global: it takes every due attempt in the database. The
+    tests that call it assert what *their* attempt did against their own fake Toss, but the real-DB tests share one database: an
+    earlier test's leftovers (processing rows · always due · a pending refund that comes due a few seconds later) were driven by
+    this test's sweep too — another refund key on this test's fake Toss, and «Event loop is closed» from the leftover's teardown.
+    It went red only when enough time had passed since the earlier test (a long, loaded run). Here the sweep sees only the rows
+    this test makes: every attempt the sweep would consider is parked (next check far ahead) for the test and put back after."""
+    from sqlalchemy import create_engine
+
+    # a short-lived sync engine: the async test engine's pooled connections belong to the test's event loop, not the fixture's
+    engine = create_engine(_RAW.replace("postgresql+asyncpg://", "postgresql+psycopg2://"))
+    try:
+        with engine.begin() as conn:
+            parked = conn.execute(text(
+                """UPDATE billing_payment_attempts AS a SET next_check_at = :parked
+                   FROM (SELECT id, next_check_at AS old FROM billing_payment_attempts
+                         WHERE status = 'processing' OR refund_status = 'pending'
+                            OR (status IN ('failed', 'declined') AND next_check_at IS NOT NULL)
+                         FOR UPDATE) AS o
+                   WHERE a.id = o.id
+                   RETURNING a.id, o.old"""
+            ), {"parked": _PARKED_AT}).all()
+        yield
+        with engine.begin() as conn:
+            for row in parked:
+                conn.execute(
+                    text("UPDATE billing_payment_attempts SET next_check_at = :old WHERE id = :id AND next_check_at = :parked"),
+                    {"old": row.old, "id": row.id, "parked": _PARKED_AT},
+                )
+    finally:
+        engine.dispose()
+
+
 class FakeToss:
     """가짜 Toss — orderId 멱등 · 승인 수 집계 · 조회. `charge_mode`: ok | decline | network | hang."""
 
@@ -713,7 +750,7 @@ async def test_card_auth_declined_fails_before_charge_and_asks_for_reauth(Sessio
 
 
 @pytest.mark.anyio
-async def test_sweep_reconciles_attempts_nobody_polled(Session, toss):
+async def test_sweep_reconciles_attempts_nobody_polled(Session, toss, own_sweep_world):
     from app.services import billing_payment_attempt as svc
 
     async with Session() as s:
@@ -924,7 +961,7 @@ async def test_late_worker_after_reconcile_succeeded_changes_nothing(Session, to
 
 
 @pytest.mark.anyio
-async def test_change_tier_refund_intent_survives_a_crash_and_the_sweep_sends_it_once(Session, toss, monkeypatch):
+async def test_change_tier_refund_intent_survives_a_crash_and_the_sweep_sends_it_once(Session, toss, monkeypatch, own_sweep_world):
     """⑤ — 확정 커밋 전에 환불 의도(pending · 금액)를 적는다. 확정 뒤 환불 전에 죽으면 쓸기가 이어서 보내고, 다시 돌아도 취소는 1.
     뮤테이션: 의도를 커밋 뒤에 적으면(또는 안 적으면) 쓸기가 보낼 게 없어 RED."""
     from app.services import billing_payment_attempt as svc
@@ -1179,7 +1216,7 @@ async def _ended_not_found_checkout(Session, toss):
 
 
 @pytest.mark.anyio
-async def test_failed_not_found_then_done_within_24h_grants_rights(Session, toss, alerts):
+async def test_failed_not_found_then_done_within_24h_grants_rights(Session, toss, alerts, own_sweep_world):
     """까디르 ① — 10분 창 뒤 failed가 된 시도가 Toss에서 DONE → 쓸기 재조회가 늦은 성공 길로: 권리 적용(succeeded · active) · 청구 1.
     뮤테이션: 쓸기에서 종결 재조회(`recheck_ended_attempt`)를 빼면 failed 그대로 · 구독 pending → RED."""
     from app.services import billing_payment_attempt as svc
@@ -1198,7 +1235,7 @@ async def test_failed_not_found_then_done_within_24h_grants_rights(Session, toss
 
 
 @pytest.mark.anyio
-async def test_failed_not_found_then_done_after_a_later_success_voids_and_refunds(Session, toss, alerts):
+async def test_failed_not_found_then_done_after_a_later_success_voids_and_refunds(Session, toss, alerts, own_sweep_world):
     """P1 — 그 사이 같은 org의 다른 결제가 성공했다 → 늦은 DONE은 지금 상태를 덮어쓰지 않는다: voided + 제 청구 전액 환불 + 알림.
     뮤테이션: 의도 확인(`_stale_intent`)을 빼면 늦은 시도가 구독을 옛 시도 등급으로 덮어써 RED(tier · status 단언)."""
     from app.services import billing_payment_attempt as svc
@@ -1226,7 +1263,7 @@ async def test_failed_not_found_then_done_after_a_later_success_voids_and_refund
 
 
 @pytest.mark.anyio
-async def test_late_done_while_the_org_slot_is_busy_voids_and_refunds_instead_of_reason_only(Session, toss, alerts):
+async def test_late_done_while_the_org_slot_is_busy_voids_and_refunds_instead_of_reason_only(Session, toss, alerts, own_sweep_world):
     """P1 — 슬롯이 다른 작업에 쥐여 있으면 «이유만 남기고 권리 0 · 재시도 0»이 아니라 voided + 전액 환불.
     뮤테이션: 슬롯 바쁨 갈래를 예전처럼 사유만 적고 return하면 status failed · 환불 0으로 RED."""
     from app.services import billing_payment_attempt as svc
@@ -1268,7 +1305,7 @@ async def test_cas_lost_at_finalize_does_not_write_succeeded(Session, toss, aler
 
 
 @pytest.mark.anyio
-async def test_change_tier_late_done_after_the_plan_changed_voids_without_the_old_partial_refund(Session, toss, alerts):
+async def test_change_tier_late_done_after_the_plan_changed_voids_without_the_old_partial_refund(Session, toss, alerts, own_sweep_world):
     """P1 · change-tier — 시작 뒤 구독 요금제 판이 바뀌었다(다른 변경 · 등급은 그대로) → 늦은 DONE은 voided. 옛 결제 부분 환불은 버리고(권리가 안
     바뀌었으니) 제 청구만 전액 환불. 뮤테이션: 요금제 판 비교를 빼면 옛 시도 등급으로 덮어써 RED."""
     from app.services import billing_payment_attempt as svc
@@ -1330,7 +1367,7 @@ async def test_recheck_stops_after_24h_and_alerts_only_without_a_definite_answer
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("mode", ["5xx", "5xx_done", "network"])
-async def test_refund_5xx_stays_pending_and_the_sweep_retries_same_key(Session, toss, alerts, mode):
+async def test_refund_5xx_stays_pending_and_the_sweep_retries_same_key(Session, toss, alerts, mode, own_sweep_world):
     """까디르 ② — 환불 5xx · 네트워크(Toss는 환불했는데 응답만 잃은 경우 포함)는 failed가 아니라 pending · 다음 쓸기가 같은 멱등키로
     다시 → confirmed · Toss 환불은 1. 뮤테이션: 모든 예외를 failed로 접으면(옛 동기 경로의 부분취소 방식 — story #4344에서 걷힘) RED."""
     from app.services import billing_payment_attempt as svc
@@ -1410,7 +1447,7 @@ async def test_two_concurrent_refund_drivers_send_one_refund(Session, toss, aler
 
 
 @pytest.mark.anyio
-async def test_sweep_skips_rows_not_yet_due_and_defers_when_the_tick_budget_runs_out(Session, toss):
+async def test_sweep_skips_rows_not_yet_due_and_defers_when_the_tick_budget_runs_out(Session, toss, own_sweep_world):
     """5분 틱이 전부를 매번 부르지 않는다: `next_check_at`이 안 된 행은 건드리지 않고, 남은 예산이 한 건 최악보다 작으면 새 건을 집지
     않는다(다음 틱이 이어받음)."""
     from app.services import billing_payment_attempt as svc
