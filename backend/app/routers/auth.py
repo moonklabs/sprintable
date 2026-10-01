@@ -2318,6 +2318,14 @@ class AuthMeResponse(BaseModel):
     # 이 신호가 필요했다. api_key 컨텍스트(에이전트)는 User 행이 없어 None(무의미 — 온보딩 게이트
     # 자체가 인간 전용이라 agent 소비처는 이 필드를 참조하지 않는다).
     email_verified: bool | None = None
+    # story 4453 — whether this server makes a person verify their e-mail before creating an organization
+    # (`require_verified_email_for_org_create`): the web's two org-creating screens open with a «verify your e-mail» gate
+    # only when this is true and email_verified is false (a self-hosted server with the setting off shows no gate).
+    # Human sessions only; None for an API-key context.
+    email_verification_required: bool | None = None
+    # story 4453 — the address the verification mail went to, shown on that gate (the session's own e-mail). Human sessions
+    # only; None for an API-key context.
+    email: str | None = None
     # story 4427 — the desktop sign-up screen defaults the organization name to «{display_name}의 조직» (never the
     # e-mail's local part). Human sessions only; None when unset or for an API-key context.
     display_name: str | None = None
@@ -2381,6 +2389,8 @@ async def get_auth_me(
     ambiguous = False
     accessible_ids: list[str] = []
     email_verified: bool | None = None
+    email_verification_required: bool | None = None
+    email: str | None = None
     display_name: str | None = None
     org_member_id: str | None = None
     org_id_raw = auth.org_id or meta.get("org_id")
@@ -2397,6 +2407,8 @@ async def get_auth_me(
         # 응답 org_id도 이 org로 — 한 응답 안에서 org가 섞이지 않게. 에이전트 분기는 무변(AC3).
         resolved_org = await resolve_request_org_id(auth, x_org_id, request)
         org_id_raw = str(resolved_org) if resolved_org is not None else None
+        email_verification_required = bool(settings.require_verified_email_for_org_create)
+        email = auth.email or None
         # story #3195 — human JWT 세션(auth.user_id == User.id)에 한해서만 조회. api_key
         # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
         try:
@@ -2428,6 +2440,8 @@ async def get_auth_me(
         is_project_ambiguous=ambiguous,
         accessible_project_ids=accessible_ids,
         email_verified=email_verified,
+        email_verification_required=email_verification_required,
+        email=email,
         display_name=display_name,
         org_member_id=org_member_id,
     )

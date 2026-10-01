@@ -3,6 +3,7 @@ import { DesktopCreateOrg } from './desktop-create-org';
 import { desktopOnboardingNext } from '@/lib/auth/onboarding-next';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveChatsHref, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
+import { EmailVerifyGate } from '@/components/auth/email-verify-gate';
 
 interface OnboardingPageProps {
   searchParams: Promise<{ step?: string; orgId?: string; next?: string }>;
@@ -13,7 +14,9 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   // story 4427 — a sign-up that started in the desktop app (the layout carried `next=/desktop/setup`) gets the one screen
   // «조직 만들기» and goes back to the setup page. Any other `next` is ignored; every other sign-up is unchanged.
   const desktopNext = desktopOnboardingNext(params.next);
-  if (desktopNext && !params.step) return <DesktopCreateOrg next={desktopNext} />;
+  // story #4453 — creating an organization needs a verified e-mail: the «verify your e-mail» gate comes first (it opens in
+  // place once verified). `step=project` comes after an organization exists — no gate there.
+  if (desktopNext && !params.step) return <EmailVerifyGate><DesktopCreateOrg next={desktopNext} /></EmailVerifyGate>;
   const initialStep = params.step === 'project' ? 'project' : undefined;
   const initialOrgId = params.orgId ?? undefined;
   // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z) — 이 page.tsx는 서버
@@ -24,7 +27,7 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   const chatsHref = resolveChatsHref(flags);
   const todayHref = resolveNavV3Destinations(flags).today.path;
 
-  return (
+  const form = (
     <OnboardingForm
       initialStep={initialStep}
       initialOrgId={initialOrgId}
@@ -33,4 +36,5 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
       chatsHref={chatsHref}
     />
   );
+  return initialStep === 'project' ? form : <EmailVerifyGate>{form}</EmailVerifyGate>;
 }

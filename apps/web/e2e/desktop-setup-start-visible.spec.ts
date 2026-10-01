@@ -9,6 +9,7 @@
  * seed); a short list would hide the scroll this guards, so the test refuses to run on fewer than 8. With the list opened
  * ([바꾸기]) «시작» must still be in sight — that is the sticky row, not the fold, holding it.
  */
+import { createHmac } from 'node:crypto';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 const CODE = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
@@ -117,10 +118,34 @@ test.describe('[SID:4446] desktop setup — «시작» in sight without scrollin
     await check(page, 'new-org');
     await page.context().close();
   });
+
+  // story #4453 — the same new person before verifying: the verify gate only (in sight), no recipe, no «시작»
+  test('(나) not verified yet — the verify gate in front, nothing of the setup behind it', async ({ browser, baseURL }) => {
+    const page = await newPersonPage(browser, baseURL!, { verified: false });
+    await page.setViewportSize({ width: 1440, height: 900 - BAR });
+    await page.goto(SETUP);
+    const gate = page.getByTestId('email-verify-gate');
+    await expect(gate).toBeVisible({ timeout: 60_000 });
+    await expect(gate.getByRole('button', { name: '인증 메일 다시 보내기' })).toBeInViewport();
+    await expect(page.locator('[aria-labelledby=setup-recipe]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '시작', exact: true })).toHaveCount(0);
+    await page.context().close();
+  });
 });
 
-/** A person who has just signed up and has no organization: registered through the API, signed in through the web. */
-async function newPersonPage(browser: Browser, baseURL: string): Promise<Page> {
+/** The e-mail verification link's token, made the way the server makes it (backend app/core/security.py
+ *  create_email_verification_token: HS256 · sub · type «email_verification» · 24 h) with the job's JWT_SECRET — so a test person
+ *  verifies through the product's own /verify-email path, with no mailbox and no database write (story #4453). */
+function verificationToken(userId: string, secret: string): string {
+  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const body = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: userId, type: 'email_verification', iat: now, exp: now + 86_400 })}`;
+  return `${body}.${createHmac('sha256', secret).update(body).digest('base64url')}`;
+}
+
+/** A person who has just signed up and has no organization: registered through the API, signed in through the web — and,
+ *  unless `verified: false`, with the e-mail verified (story #4453: making an organization waits behind the verify gate). */
+async function newPersonPage(browser: Browser, baseURL: string, { verified = true }: { verified?: boolean } = {}): Promise<Page> {
   const api = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const email = `e2e-4446-${Date.now()}-${Math.floor(Math.random() * 1e6)}@sprintable.test`;
   const password = `Pw-${Math.random().toString(36).slice(2)}-4446A!`;
@@ -129,5 +154,16 @@ async function newPersonPage(browser: Browser, baseURL: string): Promise<Page> {
   expect(reg.status(), await reg.text()).toBeLessThan(300);
   const login = await context.request.post('/api/auth/login', { data: { email, password }, headers: { 'Content-Type': 'application/json', Origin: baseURL } });
   expect(login.ok(), await login.text()).toBe(true);
+  if (verified) {
+    const secret = process.env['JWT_SECRET'];
+    expect(secret, 'JWT_SECRET (the job sets it for FastAPI and Next alike)').toBeTruthy();
+    const me = await context.request.get('/api/auth/me');
+    const userId = ((await me.json()) as { data?: { member_id?: string } }).data?.member_id;
+    expect(userId, 'the signed-in person\'s id').toBeTruthy();
+    const res = await context.request.post('/api/auth/verify-email', { data: { token: verificationToken(userId!, secret!) }, headers: { 'Content-Type': 'application/json', Origin: baseURL } });
+    expect(res.ok(), await res.text()).toBe(true);
+    const after = await context.request.get('/api/auth/me');
+    expect(((await after.json()) as { data?: { email_verified?: boolean } }).data?.email_verified).toBe(true);
+  }
   return context.newPage();
 }

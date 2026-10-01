@@ -1590,7 +1590,7 @@
     "orgLimitExceededError": "무료 플랜은 조직을 {limit}개까지 만들 수 있어요. 계속하려면 요금제를 업그레이드해 주세요.",
     "emailVerifyRequiredError": "이메일 인증이 필요해요 — 조직을 만들려면 먼저 이메일 인증을 완료해 주세요.",
     "emailVerifyGuidance": "가입하신 이메일 받은편지함(스팸함 포함)을 확인하고, 인증 링크를 클릭해 주세요. 메일이 안 보이면 아래에서 다시 보낼 수 있어요.",
-    "resendVerificationCta": "인증 메일 재전송",
+    "resendVerificationCta": "인증 메일 다시 보내기",
     "resending": "보내는 중…",
     "resendSent": "인증 메일을 다시 보냈어요.",
     "resendRateLimited": "너무 자주 요청했어요 — 잠시 후 다시 시도해 주세요.",
@@ -6797,5 +6797,19 @@
     "errorFailed": "인증에 실패했어요. 다시 시도해 주세요.",
     "verify": "확인",
     "verifying": "확인하는 중…"
+  },
+  "emailVerifyGate": {
+    "eyebrow": "이메일 인증",
+    "title": "메일함에서 인증해 주세요",
+    "body": "{email}{euro} 인증 메일을 보냈어요. 메일의 링크를 누르면 여기서 바로 이어져요.",
+    "bodyNoEmail": "가입한 주소로 인증 메일을 보냈어요. 메일의 링크를 누르면 여기서 바로 이어져요.",
+    "anywhere": "링크는 다른 브라우저나 휴대폰에서 눌러도 돼요. 메일이 안 보이면 스팸함도 확인해 주세요.",
+    "waiting": "인증을 기다리는 중이에요",
+    "resend": "인증 메일 다시 보내기",
+    "wrongAddress": "주소가 틀렸다면",
+    "resendSent": "인증 메일을 다시 보냈어요.",
+    "resendFailed": "메일을 보내지 못했어요 — 잠시 뒤 다시 보내 주세요.",
+    "resendLimited": "한 시간에 세 번까지 보낼 수 있어요 — 조금 뒤에 다시 보내 주세요.",
+    "otherAddress": "다른 주소로 가입하기"
   }
 }
