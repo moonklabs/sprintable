@@ -86,6 +86,25 @@ def _tool_ids() -> list[str]:
     return [d[0] for d in server._TOOL_DEFS]
 
 
+def _optional_fields(cls: type[BaseModel]) -> list[str]:
+    """The fields a caller may leave out (None allowed) — a tool often reads its result on a different branch when one is
+    missing (Qadir 4860: get_publication_insights looks the draft up only without a publication_id)."""
+    hints = typing.get_type_hints(cls, include_extras=True)
+    out = []
+    for name, field in cls.model_fields.items():
+        if name == "project_id":
+            continue
+        ann = hints.get(name, field.annotation)
+        if typing.get_origin(ann) in (typing.Union, types.UnionType) and type(None) in typing.get_args(ann):
+            out.append(name)
+    return out
+
+
+def _variant_ids() -> list[tuple[str, str]]:
+    """Every tool once more per optional field, with only that field left out — the branches the base run never takes."""
+    return [(d[0], f) for d in server._TOOL_DEFS for f in _optional_fields(d[2])]
+
+
 @pytest.fixture
 def empty_body_client(monkeypatch):
     """Every client call succeeds with no body: None, or (None, headers) where the caller asked for headers."""
@@ -165,3 +184,39 @@ async def test_a_response_with_a_body_is_answered_byte_for_byte_as_before(empty_
     }
     assert got == _GOLDEN["outputs"]
     assert api_client.client._project_id == _GOLDEN["cache_project_after_set_default"]   # the cache still follows the answer
+
+
+@pytest.mark.parametrize(("tool", "missing"), _variant_ids())
+async def test_a_success_with_no_body_is_never_a_none_error_on_any_branch(tool, missing, empty_body_client, monkeypatch):
+    """The same guard on the branches taken when one optional field is left out (a tool may refuse that input — that is
+    its own answer, not a NoneType error)."""
+    _, _, cls, fn = next(d for d in server._TOOL_DEFS if d[0] == tool)
+    module = sys.modules[fn.__module__]
+    caught: list[BaseException] = []
+    real_err = module.err
+    monkeypatch.setattr(module, "err", lambda exc: (caught.append(exc) if isinstance(exc, BaseException) else None, real_err(exc))[1])
+    args = _build(cls)
+    for field, value in _OVERRIDES.get(tool, {}).items():
+        setattr(args, field, value)
+    setattr(args, missing, None)
+    try:
+        await fn(args)
+    except Exception as exc:  # noqa: BLE001
+        pytest.fail(f"{tool} without {missing}: {type(exc).__name__} escaped on an empty body: {exc}")
+    none_errors = [e for e in caught if "NoneType" in str(e)]
+    assert not none_errors, f"{tool} without {missing}: a success with no body came back as an error — {type(none_errors[0]).__name__}: {none_errors[0]}"
+
+
+async def test_an_empty_draft_answer_says_the_publication_is_unknown_never_not_published(empty_body_client, monkeypatch):
+    """Qadir 4860 2nd line — an empty draft answer proves nothing: «unknown», not «not published yet». A draft that has a
+    body without publication_id still says «not published yet» (unchanged)."""
+    Ins = channel_posts.GetPublicationInsightsInput
+    empty = (await channel_posts.get_publication_insights(Ins(draft_id="d-1")))[0].text
+    assert "발행 여부를 알 수 없습니다" in empty and "발행된 적이 없습니다" not in empty
+
+    async def draft_without_publication(method, path, *, json=None, params=None, unwrap=True, return_headers=False):
+        return {"id": "d-1", "status": "draft"}
+
+    monkeypatch.setattr(api_client.client, "request", draft_without_publication)
+    unpublished = (await channel_posts.get_publication_insights(Ins(draft_id="d-1")))[0].text
+    assert "아직 발행된 적이 없습니다" in unpublished

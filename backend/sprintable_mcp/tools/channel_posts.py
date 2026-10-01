@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from mcp.types import TextContent
 
-from ..api_client import as_list, as_mapping, client
+from ..api_client import as_list, client
 from ..response import err, ok
 from ..schemas import SprintableInput
 
@@ -125,9 +125,12 @@ async def get_publication_insights(args: GetPublicationInsightsInput) -> list[Te
         if not publication_id:
             if not args.draft_id:
                 return err("publication_id 또는 draft_id 중 하나는 필요합니다.")
-            draft = as_mapping(await client.get(
+            draft = await client.get(
                 f"/api/v2/organizations/{client.org_id}/channel-posts/drafts/{args.draft_id}",
-            ))
+            )
+            # story #4441 (Qadir 4860 2nd line) — an empty answer proves nothing about the draft: never «not published yet»
+            if draft is None:
+                return err("초안 응답이 비어 있어 발행 여부를 알 수 없습니다 — 잠시 뒤 다시 조회해 주세요.")
             publication_id = draft.get("publication_id")
             if not publication_id:
                 return err(
