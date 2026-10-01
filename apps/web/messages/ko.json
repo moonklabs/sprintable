@@ -5916,6 +5916,8 @@
     "boostStartBlockedApprovalGone": "승인이 풀려 시작하지 않았어요 — 다시 승인되면 시작할 수 있어요.",
     "boostNeedsCheckOutcomeUnknown": "광고 계정에 캠페인이 이미 만들어졌을 수 있어서 다시 시도하지 않았어요 — 광고 계정에서 먼저 확인해 주세요.",
     "boostNeedsCheckStopped": "홍보를 시작하지 못했어요. 광고 계정을 확인한 뒤 다시 시도해 주세요.",
+    "boostPauseConnectionLost": "원래 광고 연결이 끊겨 멈추지 못했어요 — 광고 관리자에서 직접 멈춰 주세요.",
+    "boostPauseConnectionLostReconnect": "<link>광고 연결 다시 잇기</link>",
     "boostNeedsCheckCreatedBudgetDiffers": "광고가 승인과 다른 예산({amount})으로 만들어져 시작하지 않았어요 — 광고는 꺼져 있어 광고비는 나가지 않아요.",
     "boostNeedsCheckRetry": "다시 시도",
     "boostNeedsCheckConfirmTitle": "홍보 다시 시도",

@@ -97,6 +97,8 @@ interface SpendData {
   account_currency?: string | null;
   // story #4458 — a campaign held because it was created on another budget: the budget it was created with
   created_budget_minor?: number | null;
+  // story #4461 — the latest pause (a stopped one on the connection is told honestly)
+  pause_command?: { status: string; failure_kind: string | null; error_code: string | null } | null;
 }
 
 // story #4416 — start · retry · pause · resume are queued commands the worker runs later (every minute, transient failures
@@ -148,6 +150,7 @@ export function BoostExecutionControl({
   const [spendBlockedCode, setSpendBlockedCode] = useState<string | null>(null);
   const [accountCurrency, setAccountCurrency] = useState<string | null>(null);
   const [createdBudget, setCreatedBudget] = useState<number | null>(null);
+  const [pauseCommand, setPauseCommand] = useState<SpendData['pause_command']>(null);
   const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
   const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
   // story #4412 — «it is already in my ad account»: the lookup's answer when it did not adopt
@@ -248,6 +251,7 @@ export function BoostExecutionControl({
       setSpendBlockedCode(d.spend_blocked_code ?? null);
       setAccountCurrency(d.account_currency ?? null);
       setCreatedBudget(d.created_budget_minor ?? null);
+      setPauseCommand(d.pause_command ?? null);
       setRunAd({
         campaign_id: d.campaign_id ?? null, ad_account_id: d.ad_account_id ?? null,
         campaign_name: d.campaign_name ?? null, ad_channel: d.ad_channel ?? null,
@@ -753,6 +757,29 @@ export function BoostExecutionControl({
       ) : null}
       {/* story #4417 — paused by the server because the spend can't be checked against the budget: said once the pause is
           in effect (before that the card is still «pausing»), with the way to check what was spent (meta only) — Yuna */}
+      {/* story #4461 (PO 09:00Z) — a pause that could not reach the campaign's account (its connection gone · token dead): we did
+          not stop it, so it is never drawn as a pause — the person stops it in Ads Manager, or reconnects and presses pause again */}
+      {(runStatus === 'running' || runStatus === 'pause_pending') && pauseCommand
+        && ((pauseCommand.status === 'blocked_unapproved' && pauseCommand.error_code === 'ADS_BOOST_CONNECTION_UNAVAILABLE')
+          || (pauseCommand.status === 'blocked' && pauseCommand.failure_kind === 'connection')) ? (
+        <div className="space-y-1 text-xs break-keep" data-testid="boost-pause-connection-lost">
+          <p className="text-foreground">{t('boostPauseConnectionLost')}</p>
+          {runAd.campaign_name ? (
+            <p className="text-muted-foreground">{t('boostNeedsCheckCampaignToFind', { campaignName: runAd.campaign_name })}</p>
+          ) : null}
+          {runAd.ad_channel === 'meta_ads' ? (
+            <a
+              href={adsManagerCampaignUrl(runAd.ad_account_id, runAd.campaign_id)} target="_blank" rel="noopener noreferrer"
+              className="block text-primary hover:underline" data-testid="boost-ads-manager-link"
+            >
+              {t('boostOpenAdsManager')}<span aria-hidden="true"> ↗</span>
+            </a>
+          ) : null}
+          <p className="text-muted-foreground">
+            {t.rich('boostPauseConnectionLostReconnect', { link: (chunks) => <Link href={connectRulesHref} className="underline" data-testid="boost-pause-reconnect">{chunks}</Link> })}
+          </p>
+        </div>
+      ) : null}
       {spendBlockedCode === SPEND_CONTEXT_LOST ? (
         // shown whatever the run status says: we could not pause it ourselves
         <div className="space-y-1 text-xs" data-testid="boost-spend-blocked">

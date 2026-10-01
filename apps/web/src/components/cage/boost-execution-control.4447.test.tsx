@@ -240,4 +240,26 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     expect($('boost-needs-check-retry-trigger')).toBeNull();
     expect($('boost-start-trigger')).toBeNull();
   });
+
+  // story #4461 (PO 09:00Z) — a pause that could not reach the campaign's account (its connection gone · token dead) is told
+  // honestly while the boost is still running: never drawn as a pause; Ads Manager and a reconnect link are the way on
+  it.each([
+    [{ status: 'blocked_unapproved', failure_kind: null, error_code: 'ADS_BOOST_CONNECTION_UNAVAILABLE' }],
+    [{ status: 'blocked', failure_kind: 'connection', error_code: 'META_TOKEN_EXPIRED' }],
+  ])('running · a pause stopped on the connection (%o): the honest line + reconnect + Ads Manager', async (pauseCommand) => {
+    spendNow = { run_status: 'running', start_command: cmd('completed', null, false), pause_command: pauseCommand, ad_channel: 'meta_ads', ad_account_id: '123', campaign_id: 'c-1', campaign_name: '홍보 · 가격표' };
+    await mount();
+    const block = $('boost-pause-connection-lost')!;
+    expect(block.textContent).toContain(cage.boostPauseConnectionLost);
+    expect(block.querySelector('[data-testid="boost-pause-reconnect"]')?.getAttribute('href')).toBe('/ws/proj/organization/channels');
+    expect(block.querySelector('[data-testid="boost-ads-manager-link"]')).not.toBeNull();
+    expect(text()).not.toContain(cage.boostExecutionPausing); // never «중지 중…» for a pause that did not reach the campaign
+  });
+
+  it('running · a pause still queued: no connection-lost line', async () => {
+    spendNow = { run_status: 'running', start_command: cmd('completed', null, false), pause_command: { status: 'pending', failure_kind: null, error_code: null } };
+    await mount();
+    expect($('boost-pause-connection-lost')).toBeNull();
+  });
 });
+

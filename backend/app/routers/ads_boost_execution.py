@@ -292,6 +292,13 @@ class StartCommandView(BaseModel):
     campaign_name: str | None = None
 
 
+class PauseCommandView(BaseModel):
+    """story #4461 — the latest pause command (status · failure kind · reason code)."""
+    status: _CommandStatus
+    failure_kind: _FailureKind | None
+    error_code: str | None
+
+
 class SpendSummaryResponse(BaseModel):
     gate_id: uuid.UUID
     sealed_ads_budget_minor: int
@@ -327,6 +334,9 @@ class SpendSummaryResponse(BaseModel):
     # story #4458 (PO 10:56Z) — a campaign made on another budget (a re-seal during its create) is held: the card states what it
     # was created with next to the approved budget. Null without a run · a campaign made before the record existed.
     created_budget_minor: int | None = None
+    # story #4461 (PO 09:00Z) — the latest pause's state: a pause that could not reach the campaign's account (its connection gone
+    # · token dead) must not look like a pause — the card says so and points at Ads Manager. Null when no pause was requested.
+    pause_command: PauseCommandView | None = None
     snapshots: list[SpendSnapshotView]
 
 
@@ -394,6 +404,7 @@ async def _get_ads_boost_spend_endpoint(
         spend_blocked_code=summary["spend_blocked_code"], account_currency=summary["account_currency"],
         # story #4458 — the held campaign's created budget and the post to request again from
         created_budget_minor=summary["created_budget_minor"],
+        pause_command=PauseCommandView(**summary["pause_command"]) if summary.get("pause_command") else None,
         snapshots=[
             SpendSnapshotView(
                 due_at=s["due_at"].isoformat(), captured_at=s["captured_at"].isoformat() if s["captured_at"] else None,
