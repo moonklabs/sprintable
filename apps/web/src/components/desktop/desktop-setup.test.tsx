@@ -1410,6 +1410,35 @@ describe('[SID:4452] an agent the shell could not start', () => {
     expect(row).toContain('에이전트가 아직 준비되지 않아 띄우지 않았어요 — 에이전트가 작업 폴더를 믿도록 답한 뒤 다시 시도해 주세요');
   });
 
+  it('one refused at start + one started and not connected + one connected, 30 s after input: both blocks on one page · no covering card (Yuna v32 · PO 06:06Z)', async () => {
+    const s = setup576([{ member_id: DEV, at: '2026-10-01T04:17:10Z', reason: 'start_refused', code: 'adapter_prepare_failed', runtime: 'codex', limit: null, first_member_id: null }]);
+    s.signals.tools_connected = s.signals.tools_connected.filter((c) => c.member_id !== LEAD); // Lead (Claude Code) waits on folder trust
+    statusNow = () => s;
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('ol')).not.toBeNull(); // the steps stay (no card took the page)
+    expect(block()?.textContent).toContain('개발자 에이전트를 시작하지 못했어요');
+    const nc = container.querySelector('[data-testid=setup-agent-not-connected]');
+    expect(nc?.textContent).toContain('리드 에이전트에 Sprintable이 아직 연결되지 않았어요'); // only the agent it is about (Lead → 리드)
+    expect(nc?.textContent).toContain('Yes, I trust this folder'); // Lead is Claude Code: the trust sentence
+    expect(nc?.querySelector('button')?.textContent).toBe('다시 확인');
+    // order on the page: the steps → start failed → ⑦
+    expect(block()!.compareDocumentPosition(nc!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('no start failure: ⑦ stays the card, as before', async () => {
+    const s = setup576(undefined);
+    s.signals.tools_connected = s.signals.tools_connected.filter((c) => c.member_id !== LEAD);
+    statusNow = () => s;
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('ol')).toBeNull();
+    expect(container.querySelector('[data-testid=setup-agent-not-connected]')).toBeNull();
+    expect(text()).toContain('에이전트에 Sprintable이 아직 연결되지 않았어요');
+  });
+
   it('it connected after all (the report is cleared by the server · or a connection is seen): no block · the usual progress', async () => {
     statusNow = () => { const s = setup576([{ member_id: DEV, at: '2026-10-01T04:17:10Z', reason: 'start_refused', code: 'spawn_failed', runtime: 'codex', limit: null, first_member_id: null }]); s.signals.tools_connected.push({ member_id: DEV, at: '2026-10-01T04:19:30Z' }); return s; };
     stub(() => new Response('{}', { status: 200 }));

@@ -286,6 +286,9 @@ export interface SetupProgress {
   workdirFallback: boolean;
   trustHint: boolean;
   notConnected: boolean;
+  /** story 4452 (Yuna v32) — the agents ⑦ is about: started, not connected, not failed (roles in flow order) · `claude` = one of
+   *  them is Claude Code (the trust sentence). With a start failure on the page ⑦ is a block among the others, not the card. */
+  notConnectedAgents: { roles: string[]; runtimes: DesktopRuntime[]; claude: boolean };
   /** 받은 뒤 회사 설정으로 막힘(⑥ · 셸의 after_start 신호) → ⑥ 화면. */
   blocked: boolean;
   /** 코드가 먼저 끝나 앱이 받지 못함 → ④ 화면(앱에서 다시 시작). */
@@ -351,6 +354,11 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     workdirFallback: !!s.signals.workdir_fallback_at,
     trustHint: waitingForTools && !notConnected,
     notConnected,
+    notConnectedAgents: {
+      roles: [...new Set(agents.filter((m) => pendingStarted.includes(m.member_id) && m.role).map((m) => m.role as string))],
+      runtimes: [...new Set(agents.filter((m) => pendingStarted.includes(m.member_id) && m.runtime).map((m) => m.runtime as DesktopRuntime))],
+      claude: agents.some((m) => pendingStarted.includes(m.member_id) && m.runtime === 'claude'),
+    },
     blocked: !!s.signals.blocked,
     expired: s.state === 'not_handed_over',
     stopped,

@@ -6552,7 +6552,9 @@
         "title": "Sprintable hasn't connected to your agent yet",
         "bodyClaude": "Your agent started, but its connection to Sprintable tasks hasn't come up yet. If the Claude Code terminal is asking whether to trust the working folder, use the arrow keys to put ❯ on \"Yes, I trust this folder\" and press Enter. If it still doesn't connect, it can be your company's settings or your network — check with your IT admin that Sprintable is allowed and that your network isn't blocking it, then check again.",
         "bodyOther": "Your agent started, but its connection to Sprintable tasks hasn't come up yet. It can be your company's settings or your network — check with your IT admin that Sprintable is allowed and that your network isn't blocking it, then check again.",
-        "action": "Check again"
+        "action": "Check again",
+        "blockTitle": "{count, plural, one {Sprintable hasn't connected to the {roles} agent yet} other {Sprintable hasn't connected to the {roles} agents yet}}",
+        "blockTitleBare": "Sprintable hasn't connected to the {roles} yet"
       },
       "failure": {
         "copy": "Copy",

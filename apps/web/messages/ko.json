@@ -6552,7 +6552,9 @@
         "title": "에이전트에 Sprintable이 아직 연결되지 않았어요",
         "bodyClaude": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. Claude Code 터미널이 작업 폴더를 믿을지 묻고 있다면 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요. 그래도 안 붙으면 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
         "bodyOther": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
-        "action": "다시 확인"
+        "action": "다시 확인",
+        "blockTitle": "{roles} 에이전트에 Sprintable이 아직 연결되지 않았어요",
+        "blockTitleBare": "{roles}에 Sprintable이 아직 연결되지 않았어요"
       },
       "failure": {
         "copy": "복사",

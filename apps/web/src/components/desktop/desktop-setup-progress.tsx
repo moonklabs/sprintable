@@ -66,7 +66,9 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   if (progress.expired) return <Failure failure="expired" />;
   // the folder-trust question is Claude Code's (Codex does not ask it) — Yuna v24 · PO 11:19Z
   const claude = status.members.some((m) => m.kind === 'agent' && m.runtime === 'claude');
-  if (progress.notConnected) return <ToolsNotConnected onRetry={() => void poll()} claude={claude} />;
+  // story 4452 (Yuna v32 · PO 06:06Z): with an agent that could not start on the page, ⑦ does not cover it — it is a block
+  // below the others; with none, ⑦ stays the card (the only fork: is there a start failure)
+  if (progress.notConnected && progress.startFailed.length === 0) return <ToolsNotConnected onRetry={() => void poll()} claude={claude} />;
 
   const role = (r: string) => stageRoleLabel(r, tOrg);
   // roles shown as one group, and whether «에이전트» / «agent» is added after them: a name that already ends in it gets none
@@ -169,6 +171,20 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
             return g.bare ? t('stoppedBare', { roles: g.text, josa: pickIGaJosa(g.last), count: g.count }) : t('stopped', { roles: g.text, count: g.count });
           })()}</p>
           {progress.stopped.claude ? <p>{t('stoppedTrust')}</p> : null}
+        </div>
+      ) : null}
+      {progress.notConnected ? (
+        // the same weight as the blocks above (thin border · never red) · the body is ⑦'s (v24) for these agents · its button
+        // stays here: checking again is the page's
+        <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-not-connected">
+          <p>{(() => {
+            const g = roleGroup(progress.notConnectedAgents.roles);
+            // no role names (not expected from a recipe): the tools by name, never a sentence without who
+            if (g.count === 0) return t('notConnected.blockTitleBare', { roles: progress.notConnectedAgents.runtimes.map((r) => RUNTIME[r]).join(' · ') });
+            return g.bare ? t('notConnected.blockTitleBare', { roles: g.text }) : t('notConnected.blockTitle', { roles: g.text, count: g.count });
+          })()}</p>
+          <p className="text-muted-foreground">{t(progress.notConnectedAgents.claude ? 'notConnected.bodyClaude' : 'notConnected.bodyOther')}</p>
+          <div><Button variant="outline" size="sm" onClick={() => void poll()}>{t('notConnected.action')}</Button></div>
         </div>
       ) : null}
       <footer className="flex flex-col gap-1">
