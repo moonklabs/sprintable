@@ -30,6 +30,14 @@ import {
 //
 // run_status 원천은 /spend(조각⑤ 착수 前 자체발견 fix로 신설) — 새 GET 신설 안 함.
 
+// story #4461 — a pause stopped on the connection the campaign lives in (gone · token dead): it did not and will not reach the
+// campaign. One rule for the honest block and for ending the «중지 중…» wait.
+function pauseStoppedOnConnection(pc: { status: string; failure_kind: string | null; error_code: string | null } | null | undefined): boolean {
+  if (!pc) return false;
+  return (pc.status === 'blocked_unapproved' && pc.error_code === 'ADS_BOOST_CONNECTION_UNAVAILABLE')
+    || (pc.status === 'blocked' && pc.failure_kind === 'connection');
+}
+
 export interface BoostExecutionControlProps {
   orgId: string;
   gateId: string;
@@ -226,12 +234,15 @@ export function BoostExecutionControl({
   // campaign» · after a retry), the wait ends when its state lands, and the cap leaves a notice instead of polling on.
   const afterSpend = (d: SpendData, mayBeginStartWait: boolean) => {
     if (unmountedRef.current) return;
+    const pauseStopped = pauseStoppedOnConnection(d.pause_command);
     if (!waitRef.current && mayBeginStartWait && !waitSettled('start', d)) beginWait('start');
     // story #4447 — a pause already requested (a reload while it has not landed): wait for it with the 4416 cap like after a click
     if (!waitRef.current && mayBeginStartWait && d.run_status === 'pause_pending') beginWait('pause');
     const wait = waitRef.current;
     if (!wait) return;
-    if (waitSettled(wait.op, d)) { endWait(null); return; }
+    // story #4461 (PO 14:05Z) — a pause that could not reach the campaign's account will not land: «중지 중…» would be false comfort
+    // next to the honest block — the wait ends there, with no cap notice (the block says what to do)
+    if (waitSettled(wait.op, d) || (wait.op === 'pause' && pauseStopped)) { endWait(null); return; }
     scheduleNext();
   };
 
@@ -759,9 +770,7 @@ export function BoostExecutionControl({
           in effect (before that the card is still «pausing»), with the way to check what was spent (meta only) — Yuna */}
       {/* story #4461 (PO 09:00Z) — a pause that could not reach the campaign's account (its connection gone · token dead): we did
           not stop it, so it is never drawn as a pause — the person stops it in Ads Manager, or reconnects and presses pause again */}
-      {(runStatus === 'running' || runStatus === 'pause_pending') && pauseCommand
-        && ((pauseCommand.status === 'blocked_unapproved' && pauseCommand.error_code === 'ADS_BOOST_CONNECTION_UNAVAILABLE')
-          || (pauseCommand.status === 'blocked' && pauseCommand.failure_kind === 'connection')) ? (
+      {(runStatus === 'running' || runStatus === 'pause_pending') && pauseStoppedOnConnection(pauseCommand) ? (
         <div className="space-y-1 text-xs break-keep" data-testid="boost-pause-connection-lost">
           <p className="text-foreground">{t('boostPauseConnectionLost')}</p>
           {runAd.campaign_name ? (

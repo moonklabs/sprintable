@@ -257,6 +257,29 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     expect(text()).not.toContain(cage.boostExecutionPausing); // never «중지 중…» for a pause that did not reach the campaign
   });
 
+  // PO 14:05Z — a pause that cannot reach the campaign's account will not land: the card must not also say «중지 중…» (false
+  // comfort next to «pause it yourself»). The wait ends when /spend reports it; no cap notice follows.
+  it('pause in flight, then it stops on the connection: «중지 중…» ends, only the honest block', async () => {
+    const meta = { ad_channel: 'meta_ads', ad_account_id: '123', campaign_id: 'c-1', campaign_name: '홍보 · 가격표' };
+    spendNow = { run_status: 'pause_pending', start_command: cmd('completed', null, false), pause_command: { status: 'pending', failure_kind: null, error_code: null }, ...meta };
+    await mount();
+    expect(text()).toContain(cage.boostExecutionPausing);
+    spendNow = { run_status: 'pause_pending', start_command: cmd('completed', null, false), pause_command: { status: 'blocked', failure_kind: 'connection', error_code: 'META_TOKEN_EXPIRED' }, ...meta };
+    await settle(10_000);
+    expect(text()).not.toContain(cage.boostExecutionPausing);
+    expect($('boost-execution-waiting')).toBeNull();
+    expect($('boost-pause-connection-lost')).not.toBeNull();
+    await settle(3 * 60_000 + 10_000);
+    expect($('boost-execution-cap-notice')).toBeNull(); // the block already says what to do
+  });
+
+  it('reload with a pause already stopped on the connection: no «중지 중…» at all', async () => {
+    spendNow = { run_status: 'pause_pending', start_command: cmd('completed', null, false), pause_command: { status: 'blocked_unapproved', failure_kind: null, error_code: 'ADS_BOOST_CONNECTION_UNAVAILABLE' }, ad_channel: 'meta_ads', ad_account_id: '123', campaign_id: 'c-1' };
+    await mount();
+    expect(text()).not.toContain(cage.boostExecutionPausing);
+    expect($('boost-pause-connection-lost')).not.toBeNull();
+  });
+
   it('running · a pause still queued: no connection-lost line', async () => {
     spendNow = { run_status: 'running', start_command: cmd('completed', null, false), pause_command: { status: 'pending', failure_kind: null, error_code: null } };
     await mount();
