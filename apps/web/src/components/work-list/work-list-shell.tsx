@@ -120,15 +120,18 @@ function useWorkListFilters(): [WorkListFilters, (next: Partial<WorkListFilters>
  * rendered into, so crossing the 1024 px breakpoint moves the panel's DOM without mounting it again: what the person was doing
  * (the «근거 확인» check · the chosen tab · the gate already read) stays. Adopted in a layout effect — before the sheet's focus
  * trap looks for the first field — and given back on unmount (the other slot adopts it in the same commit).
+ * story #4462 ⓐ (Kadir 09:14Z): adopted whenever the slot becomes the one in use (`active`), not only when it mounts — the sheet
+ * stays mounted while its closing transition plays, so crossing the width back during it found the sheet's slot already mounted:
+ * it never adopted the host again after the aside gave it back, and the sheet opened empty.
  */
-function DetailPanelSlot({ host }: { host: HTMLElement | null }) {
+function DetailPanelSlot({ host, active = true }: { host: HTMLElement | null; active?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const slot = ref.current;
-    if (!slot || !host) return;
+    if (!slot || !host || !active) return;
     slot.appendChild(host);
     return () => { if (host.parentNode === slot) slot.removeChild(host); };
-  }, [host]);
+  }, [host, active]);
   return <div ref={ref} className="contents" />;
 }
 
@@ -388,7 +391,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
         <SheetContent side="right" className="w-full p-0 sm:max-w-sm" showCloseButton={false}>
           {/* story #4386 — 선택이 비는 순간에도 창 이름이 남게 늘 그린다(제목이 비면 페이지 이름 — 위 주석 그대로). */}
           <SheetTitle className="sr-only">{selectedContext?.row.title || t('title')}</SheetTitle>
-          {detailPanel ? <DetailPanelSlot host={panelHost} /> : null}
+          {detailPanel ? <DetailPanelSlot host={panelHost} active={isMobile} /> : null}
         </SheetContent>
       </Sheet>
       {/* story #4456 — the panel itself, rendered once at this fixed place into the host node a slot above has adopted */}
