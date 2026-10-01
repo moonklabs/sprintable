@@ -692,6 +692,32 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(polls()).toBe(end);
   });
 
+  // PO 12:18Z: an agent that had connected and then stopped after the result still waits for the person — the last other agent
+  // connecting must not end the reading while its [다시 시작] block is on screen
+  it('[SID:4464 · PO 12:18Z] A connected, then stopped after the first result; B connects last → still reading; A restarted → its block goes, then reading stops', async () => {
+    const sig = (connected: string[], ended: boolean) => {
+      const st = status('handed_over', { tools_connected: connected.map((member_id) => ({ member_id, at: 'x' })), first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z' });
+      return { ...st, signals: { ...st.signals, first_result_member_id: 'm1',
+        agents_ended: ended ? [{ member_id: 'm1', runtime: 'claude', at: '2026-09-30T12:01:00Z', exit_code: 1 }] : [] } };
+    };
+    statusNow = () => sig(['m1'], true); // A (m1) connected, showed the result, then stopped · B (m2) still connecting
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-agent-stopped]')).not.toBeNull();
+    statusNow = () => sig(['m1', 'm2'], true); // B connects — the last one to
+    await tick(10_000);
+    const afterB = polls();
+    await tick(10_000);
+    expect(polls()).toBeGreaterThan(afterB); // A's block still waits: reading goes on
+    statusNow = () => sig(['m1', 'm2'], false); // A restarted (the server drops its end)
+    await tick(10_000);
+    expect(container.querySelector('[data-testid=setup-agent-stopped]')).toBeNull();
+    const end = polls();
+    await tick(30_000);
+    expect(polls()).toBe(end);
+  });
+
   it('[SID:4464 · PO 12:04Z] an agent that stopped after the first result keeps the page reading; restarted and connected, the block goes, then reading stops', async () => {
     const base = status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z' });
     statusNow = () => ({ ...base, signals: { ...base.signals, agents_ended: [{ member_id: 'm2', runtime: 'codex', at: '2026-09-30T12:01:00Z', exit_code: 1 }] } });

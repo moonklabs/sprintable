@@ -369,8 +369,10 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
   const unsettled = pendingStarted.filter((id) => !stoppedMembers.has(id) && id !== proven);
   const lateNotConnected = handedOver && result === 'done' && unsettled.length > 0 && pastThreshold;
   const notConnected = (waitingForTools && pastThreshold) || lateNotConnected;
-  // every agent connected, or proven by the first result — the one thing that ends the reading after the result (PO 12:04Z)
-  const everyAgentIn = agentIds.every((id) => connected.has(id) || id === proven);
+  // every agent connected, or proven by the first result — the one thing that ends the reading after the result (PO 12:04Z) —
+  // and not stopped: an agent that connected and then stopped shows a [다시 시작] block that only further reading can take away
+  // (PO 12:18Z: A stopped after the result · B connecting → B in → settled → A's block stayed after the person restarted A)
+  const everyAgentIn = agentIds.every((id) => (connected.has(id) || id === proven) && !stoppedMembers.has(id));
   // who ⑦ names: before the result every agent not yet connected; after it, only the ones still unsettled
   const named = (id: string) => (lateNotConnected ? unsettled.includes(id) : pendingStarted.includes(id));
   return {
