@@ -402,8 +402,9 @@ async def _get_ads_boost_spend_endpoint(
         campaign_name=summary["campaign_name"], ad_channel=summary["ad_channel"],
         spend_blocked_at=summary["spend_blocked_at"].isoformat() if summary["spend_blocked_at"] else None,
         spend_blocked_code=summary["spend_blocked_code"], account_currency=summary["account_currency"],
-        # story #4458 — the held campaign's created budget and the post to request again from
+        # story #4458 — the held campaign's created budget (the card's fact-only line)
         created_budget_minor=summary["created_budget_minor"],
+        # story #4461 — the latest pause (a pause stopped on the connection is told honestly)
         pause_command=PauseCommandView(**summary["pause_command"]) if summary.get("pause_command") else None,
         snapshots=[
             SpendSnapshotView(
