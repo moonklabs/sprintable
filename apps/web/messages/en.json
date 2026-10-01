@@ -6794,5 +6794,19 @@
     "errorFailed": "Verification failed. Please try again.",
     "verify": "Verify",
     "verifying": "Verifying..."
+  },
+  "emailVerifyGate": {
+    "eyebrow": "Verify your email",
+    "title": "Check your inbox to verify",
+    "body": "We sent a verification email to {email}. Open the link in it and this page continues on its own.",
+    "bodyNoEmail": "We sent a verification email to the address you signed up with. Open the link in it and this page continues on its own.",
+    "anywhere": "You can open the link in another browser or on your phone. If you can't find the email, check your spam folder.",
+    "waiting": "Waiting for verification",
+    "resend": "Resend verification email",
+    "wrongAddress": "Wrong address?",
+    "resendSent": "Verification email sent again.",
+    "resendFailed": "We couldn't send the email — please try again in a moment.",
+    "resendLimited": "You can send this up to three times an hour — please try again a little later.",
+    "otherAddress": "Sign up with a different email"
   }
 }

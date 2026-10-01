@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // story 4427 — desktop sign-up: one screen «조직 만들기» (Yuna f6cfda19), defaults filled, one «만들기», back to the setup page.
+import { EmailVerifyGate } from '@/components/auth/email-verify-gate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -160,8 +161,14 @@ describe('onboarding page picks the one screen only for a valid desktop next', (
     [{ next: '//evil.com' }, OnboardingForm],
     [{ next: '/desktop/setup', step: 'project' }, OnboardingForm],
   ])('%j', async (params, component) => {
-    const el = await OnboardingPage({ searchParams: Promise.resolve(params) });
-    expect((el as { type: unknown }).type).toBe(component);
+    const el = await OnboardingPage({ searchParams: Promise.resolve(params) }) as { type: unknown; props: { children?: { type: unknown } } };
+    // story #4453 — making an organization is behind the «verify your e-mail» gate; `step=project` (an organization
+    // exists) is not
+    if ((params as { step?: string }).step === 'project') expect(el.type).toBe(component);
+    else {
+      expect(el.type).toBe(EmailVerifyGate);
+      expect(el.props.children?.type).toBe(component);
+    }
   });
 });
 

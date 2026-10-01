@@ -824,6 +824,8 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
   let invitesNow: () => Response;
   let meName: string | null;
   let confirmNow: () => Response;
+  /** story #4453 — the verification part of /api/auth/me (default: nothing said → no gate, as before). */
+  let meVerify: { email_verified?: boolean; email_verification_required?: boolean; email?: string } = {};
   /** What POST /api/auth/refresh answers now (4429 ①: the new token that carries the new organization). */
   let refreshNow: () => Response | Promise<Response>;
   function stubNoOrg() {
@@ -832,7 +834,7 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
       const url = String(input);
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       if (url.endsWith('/api/invites/mine')) return invitesNow();
-      if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: meName } }), { status: 200 });
+      if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: meName, ...meVerify } }), { status: 200 });
       if (url.endsWith('/api/desktop/recipes/for-new-org')) return recipesNow();
       if (url.endsWith('/api/desktop/recipes')) return new Response('{"data":null,"error":{"code":"org_id_required"}}', { status: 400 });
       if (url.endsWith('/api/desktop/setup-codes/confirm-new-org')) return confirmNow();
@@ -856,6 +858,36 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     meName = '김지우';
     confirmNow = () => new Response(JSON.stringify({ setup_id: 's-1', members: [], work_item_id: 'w-1', org_id: 'o-new', project_id: 'p-new' }), { status: 200 });
     refreshNow = () => new Response('{}', { status: 200 });
+    meVerify = {};
+  });
+
+  // story #4453 — the teacher chose a recipe, typed names, pressed «시작» and only then got 403 «verify your e-mail». The
+  // gate now comes first, and opens in place (the setup values in the address stay) once the e-mail is verified.
+  it('an unverified e-mail: the verify gate first — no recipe, no names, no «시작»; verified elsewhere → the setup in place', async () => {
+    meVerify = { email_verified: false, email_verification_required: true, email: 'jiwoo@example.com' };
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=email-verify-gate]')?.querySelector('strong')?.textContent).toBe('jiwoo@example.com');
+    expect(container.querySelector('[aria-labelledby=setup-recipe]')).toBeNull();
+    expect(container.querySelector('[data-testid=setup-new-org]')).toBeNull();
+    expect(button('시작')).toBeUndefined();
+    expect(urls()).not.toContain('/api/desktop/setup-codes/confirm-new-org');
+    meVerify = { email_verified: true, email_verification_required: true, email: 'jiwoo@example.com' };
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(container.querySelector('[data-testid=email-verify-gate]')).toBeNull();
+    expect(container.querySelector('[data-testid=setup-new-org]')).not.toBeNull();
+    expect(startButton().disabled).toBe(false);
+  });
+
+  it('a verified sign-up, or a server that does not ask for it: no gate at all', async () => {
+    for (const v of [{ email_verified: true, email_verification_required: true }, { email_verified: false, email_verification_required: false }]) {
+      meVerify = v;
+      stubNoOrg();
+      await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      expect(container.querySelector('[data-testid=email-verify-gate]')).toBeNull();
+      expect(container.querySelector('[data-testid=setup-new-org]')).not.toBeNull();
+    }
   });
 
   it('no invites → one line «새 조직 «김지우의 조직»도 함께 만들어요» above the recipes; the list comes from the new-organization path; no «admin 아님»', async () => {

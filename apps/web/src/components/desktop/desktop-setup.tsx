@@ -18,6 +18,7 @@ import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
 import { onboardingRedirect } from '@/lib/auth/onboarding-next';
 import { formatLocaleDate } from '@/lib/i18n';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
+import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
   agentRowCount, confirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow, withDefaultRecipeFirst } from '@/lib/desktop-setup';
@@ -179,6 +180,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const { projectId, userName, orgId, orgMemberships } = useDashboardContext();
   const [orgMode, setOrgMode] = useState<OrgMode>(() => (orgId ? { kind: 'has-org' } : { kind: 'checking' }));
   const newOrg = orgMode.kind === 'new';
+  // story #4453 — a new organization needs a verified e-mail: that step comes first, not after «시작» (a 403 at the end)
+  const verifyGate = useEmailVerifyGate(newOrg);
   const [orgName, setOrgName] = useState('');
   const [projectName, setProjectName] = useState('');
   const [editingNames, setEditingNames] = useState(false);
@@ -340,6 +343,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   }
 
   if (orgMode.kind === 'invited') return <InvitedCard invites={orgMode.invites} />;
+  if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
+  if (newOrg && verifyGate.kind === 'reading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   // a person making a new organization is its owner-to-be: the server checks «no organization» itself (org_members 0 rows)
   if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;

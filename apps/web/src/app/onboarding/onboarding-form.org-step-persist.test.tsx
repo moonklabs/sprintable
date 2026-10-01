@@ -220,7 +220,7 @@ describe('OnboardingForm — 미인증 선제 고지(story #3195 AC2)', () => {
     await act(async () => { root.render(wrap()); });
     await flush();
 
-    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '인증 메일 재전송');
+    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '인증 메일 다시 보내기');
     expect(resendBtn).toBeTruthy();
     // 아직 제출(조직 만들기)을 누르지 않았다 — 배너가 마운트 시점부터 선제로 떴다는 증거.
     const submitBtn = [...container.querySelectorAll('button')].find((b) => /조직 만들기/.test(b.textContent ?? ''));
@@ -232,7 +232,7 @@ describe('OnboardingForm — 미인증 선제 고지(story #3195 AC2)', () => {
     await act(async () => { root.render(wrap()); });
     await flush();
 
-    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '인증 메일 재전송');
+    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '인증 메일 다시 보내기');
     expect(resendBtn).toBeUndefined();
   });
 
@@ -243,7 +243,7 @@ describe('OnboardingForm — 미인증 선제 고지(story #3195 AC2)', () => {
     await act(async () => { root.render(wrap()); });
     await flush();
 
-    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '인증 메일 재전송');
+    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '인증 메일 다시 보내기');
     expect(resendBtn).toBeUndefined();
   });
 
@@ -254,7 +254,7 @@ describe('OnboardingForm — 미인증 선제 고지(story #3195 AC2)', () => {
     await act(async () => { root.render(wrap()); });
     await flush();
 
-    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '인증 메일 재전송');
+    const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '인증 메일 다시 보내기');
     expect(resendBtn).toBeUndefined();
     // 폼 자체는 정상 — 크래시 없음(조직명 입력창이 여전히 존재).
     expect(container.querySelector('input')).toBeTruthy();
