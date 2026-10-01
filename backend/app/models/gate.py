@@ -244,3 +244,7 @@ def set_gate_evidence_status(gate: "Gate", new_evidence_status: str | None, *, n
         return
     gate.evidence_status = new_evidence_status
     gate.evidence_status_entered_at = now
+
+
+# story #4466 — the hook that notices an ads_boost gate leaving «approved» (registered wherever a gate's status can be written)
+import app.services.ads_boost_gate_exit  # noqa: E402,F401

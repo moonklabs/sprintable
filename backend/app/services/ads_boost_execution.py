@@ -258,11 +258,14 @@ class AdsBoostAlreadyInStateError(Exception):
         super().__init__(f"ads_boost already in requested state (operation={operation}): {gate_id}")
 
 
-async def _resolve_gate(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID) -> Gate:
+async def _resolve_gate(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, operation: str | None = None) -> Gate:
     gate = (await db.execute(select(Gate).where(Gate.id == gate_id))).scalar_one_or_none()
     if gate is None or gate.org_id != org_id or gate.gate_type != _ADS_BOOST_GATE_TYPE:
         raise AdsBoostGateNotFoundError(gate_id)
-    if gate.status != "approved":
+    # story #4466 (PO 11:51Z · (가)) — stopping money never waits for an approval: a live campaign whose gate went back to review
+    # (re-request · undo · then void / hold / reject) must still be pausable — by the person and by the cap. Only the
+    # money-stopping operations are exempt; resume and start still need an approved gate.
+    if gate.status != "approved" and operation not in MONEY_STOPPING_OPS:
         raise AdsBoostGateNotApprovedError(gate_id, gate.status)
     return gate
 
@@ -308,7 +311,7 @@ async def _request_toggle(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, requester_member_id: uuid.UUID,
     operation: str, initiated_by: str | None = None,
 ) -> PublicationCommand:
-    gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id)
+    gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id, operation=operation)
     destination = gate.sealed_ads_connection_id
     approved_version = gate.sealed_ads_boost_version_id
 
@@ -494,7 +497,7 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
     gate = (await db.execute(select(Gate).where(Gate.id == command.gate_id))).scalar_one_or_none()
     if gate is None or gate.gate_type != _ADS_BOOST_GATE_TYPE:
         raise AdsBoostAdapterUnavailableError("ADS_BOOST_GATE_MISSING", f"gate not found: {command.gate_id}")
-    if gate.status != "approved":
+    if gate.status != "approved" and command.operation not in MONEY_STOPPING_OPS:  # story #4466 (가) — a pause runs on any status
         raise AdsBoostAdapterUnavailableError(
             "ADS_BOOST_GATE_NOT_APPROVED", f"gate no longer approved (status={gate.status}): {gate.id}",
         )

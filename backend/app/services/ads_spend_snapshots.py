@@ -231,10 +231,36 @@ async def _follow_through_cap(db: AsyncSession, *, gate: Gate, run, now: datetim
     await _schedule_capture(db, gate=gate, due_at=now + _BLOCK_FOLLOW_UP)
 
 
+# story #4466 (PO 11:51Z · (다)) — the run state in which the campaign is spending (pause_pending = a pause already in flight)
+_LIVE_RUN_STATUSES = frozenset({"running"})
+
+
+async def _pause_if_off_approved(db: AsyncSession, *, gate: Gate, run) -> None:
+    """story #4466 (다) — no money on values nobody approved: a live boost whose gate is no longer approved (re-request · undo ·
+    then void / hold / reject) is paused by the scheduler («다시 결재 중»). Every capture checks it; leaving «approved» schedules a
+    capture right away (`ads_boost_gate_exit`). Already paused or a pause in flight → nothing (no second pause)."""
+    if gate.status == "approved" or run.status not in _LIVE_RUN_STATUSES or not run.campaign_id:
+        return
+    if await _pause_by_scheduler(db, gate=gate, run=run):
+        logger.info("ads_boost_paused_off_approved gate_id=%s gate_status=%s", gate.id, gate.status)
+
+
 async def _pause_by_scheduler(db: AsyncSession, *, gate: Gate, run) -> bool:
     """The scheduler's pause request for a boost (the cap · story #4417 an unreadable spend). Extracted from `_enforce_spend_cap`.
     story #4417 (Qadir 01a0eb71 B) — returns whether a pause is requested or already in place; False = try again later."""
-    if gate.resolver_id is None:
+    requester_id = gate.resolver_id
+    if requester_id is None:
+        # story #4466 (PO 11:51Z) — a gate back in review (re-request · undo) has no resolver, yet its live campaign must still be
+        # paused: the pause is attributed to whoever asked for the boost's start (initiated_by=scheduler still marks it automatic).
+        from app.models.publication_command import PublicationCommand
+        from app.services.ads_boost_execution import OP_BOOST_START
+
+        requester_id = (await db.execute(
+            select(PublicationCommand.requested_by_member_id).where(
+                PublicationCommand.gate_id == gate.id, PublicationCommand.operation == OP_BOOST_START,
+            ).order_by(PublicationCommand.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+    if requester_id is None:
         logger.error("ads_spend_pause_no_resolver gate_id=%s", gate.id)
         return False  # PR6과 동형 방어 — 귀속 불가 상태는 이론상 불가하나 침묵 안 함.
 
@@ -249,7 +275,7 @@ async def _pause_by_scheduler(db: AsyncSession, *, gate: Gate, run) -> bool:
     gate_id = gate.id  # plain value: the rollback below expires the loaded gate
     try:
         await request_ads_boost_pause(
-            db, org_id=gate.org_id, gate_id=gate.id, requester_member_id=gate.resolver_id,
+            db, org_id=gate.org_id, gate_id=gate.id, requester_member_id=requester_id,
             initiated_by="scheduler",
         )
         return True
@@ -626,6 +652,7 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
                 continue
             ctx = await _resolve_spend_context(db, snapshot)
             ids = {"gate_id": ctx["gate"].id, "run_id": ctx["run"].id, "publication_id": snapshot.publication_id}
+            await _pause_if_off_approved(db, gate=ctx["gate"], run=ctx["run"])
             if ctx["run"].spend_blocked_at is not None:
                 # story #4417 (Qadir 01a0eb71 B) — a follow-up capture of a blocked boost: no spend read (it can't be checked
                 # against the budget), only what the block still owes — the pause and the notice.
