@@ -135,6 +135,24 @@ describe('[SID:4462] the detail panel\'s gate belongs to the work item it was re
     expect(posts.at(-1)).toBe('/api/gates/gB/transition');
   });
 
+  // Kadir 4882 (PO 11:44Z): the AC «a press acts only on the current work item's gate» had no test that reached it — every test
+  // pressed B's fresh button. Here A's own click handler (held from A's render, as an event already in flight would) is called
+  // after the panel moved to B: no request, no change on B.
+  it('A\'s approve handler, held from A\'s render and called after the move to B, does nothing — no request · no state on B', async () => {
+    await show(rowA, 'story-A');
+    const btn = approveButton()!;
+    const propsKey = Object.keys(btn).find((k) => k.startsWith('__reactProps'))!;
+    const heldClick = (btn as unknown as Record<string, { onClick: (e: unknown) => void }>)[propsKey].onClick; // A's handler
+    holdB = true; // B's gate still being read: nothing of A may act meanwhile
+    await show(rowB, 'story-B');
+    const postsBefore = posts.length;
+    await act(async () => { heldClick({ preventDefault() {}, stopPropagation() {} }); });
+    await settle();
+    expect(posts.length).toBe(postsBefore); // no transition sent for A's gate from B's screen
+    expect(container.querySelector('[data-testid="panel-approved-notice"]')).toBeNull();
+    expect(container.querySelector('[data-testid="panel-transition-error"]')).toBeNull();
+  });
+
   it('the first render on another work item draws nothing of the previous one\'s gate (B\'s still being read)', async () => {
     gatesFor = { 'task-A': { ...gateA, risk_grade: 'high' }, 'task-B': { ...gateB, risk_grade: 'high' } };
     await show(rowA, 'story-A');
