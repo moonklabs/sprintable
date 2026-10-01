@@ -242,7 +242,33 @@ export interface SetupStatus {
     /** story 4433 — 에이전트마다 마지막 «첫 턴 전 끝남»(셸 desktop_agent_ended_early)과 마지막 «다시 시작»(desktop_agent_restarted).
      *  BE가 아직 안 싣는 칸 — 없으면 아무것도 안 바뀐다(디디 4844 뒤). */
     agents_ended?: { member_id: string; at: string; runtime: DesktopRuntime | null; exit_code: number | null; restarted_at?: string | null }[];
+    /** story 4452 — 셸이 시작하지 못한 에이전트마다 마지막 보고(이유 · 데몬 code · 상한 · 기다린 첫 에이전트). 그 뒤 연결되거나
+     *  다시 시작되면 BE가 뺀다. 없으면 아무것도 안 바뀐다. */
+    agents_start_failed?: AgentStartFailure[];
   };
+}
+
+export type StartFailedReason = 'runtime_missing' | 'credentials_refused' | 'start_refused' | 'key_unreadable' | 'first_not_ready';
+export interface AgentStartFailure {
+  member_id: string; at: string; reason: StartFailedReason | null; code: string | null; runtime: DesktopRuntime | null;
+  limit: number | null; first_member_id: string | null;
+}
+
+/** story 4452 (Yuna 04:41Z · 04:43Z) — which line of the reason table a failure gets: by the next thing to do, not by code. */
+export type StartFailedLine = 'runtimeMissing' | 'runtimeDidNotStart' | 'credentials' | 'keyUnreadable' | 'firstNotReady'
+  | 'sessionLimit' | 'notConnected' | 'unknown';
+export function startFailedLine(reason: StartFailedReason | null, code: string | null): StartFailedLine {
+  if (reason === 'runtime_missing') return 'runtimeMissing';
+  if (reason === 'key_unreadable') return 'keyUnreadable';
+  if (reason === 'first_not_ready') return 'firstNotReady';
+  if (reason === 'credentials_refused') return 'credentials';
+  if (reason === 'start_refused') {
+    if (code === 'session_limit') return 'sessionLimit';
+    if (code === 'credentials_missing') return 'credentials';
+    if (code === 'not_connected') return 'notConnected';
+    if (code === 'profile_invalid' || code === 'unknown_profile' || code === 'adapter_prepare_failed' || code === 'spawn_failed') return 'runtimeDidNotStart';
+  }
+  return 'unknown';
 }
 
 export type StepState = 'running' | 'done';
@@ -260,6 +286,9 @@ export interface SetupProgress {
   workdirFallback: boolean;
   trustHint: boolean;
   notConnected: boolean;
+  /** story 4452 (Yuna v32) — the agents ⑦ is about: started, not connected, not failed (roles in flow order) · `claude` = one of
+   *  them is Claude Code (the trust sentence). With a start failure on the page ⑦ is a block among the others, not the card. */
+  notConnectedAgents: { roles: string[]; runtimes: DesktopRuntime[]; claude: boolean };
   /** 받은 뒤 회사 설정으로 막힘(⑥ · 셸의 after_start 신호) → ⑥ 화면. */
   blocked: boolean;
   /** 코드가 먼저 끝나 앱이 받지 못함 → ④ 화면(앱에서 다시 시작). */
@@ -283,6 +312,9 @@ export interface SetupProgress {
   readyDrawn: StepState;
   /** The other agents still getting ready while ① is drawn done — roles in the flow's order (a stopped agent is only in `stopped`). */
   stillPreparing: string[];
+  /** story 4452 — the agents the shell could not start (flow order · one per agent): role, runtime, the reason line and its
+   *  values. Such an agent is in no other list (not «not connected», not «still getting ready»). */
+  startFailed: { memberId: string; role: string | null; runtime: DesktopRuntime | null; line: StartFailedLine; limit: number | null; firstRole: string | null }[];
 }
 
 /** `handedOverSeenAt` = 이 페이지가 handed_over를 처음 본 때(상태 조회에 받은 시각이 없어 페이지 시계로 잰다). */
@@ -304,8 +336,15 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
   const input = s.signals.first_screen_human_input_at ? Date.parse(s.signals.first_screen_human_input_at) : NaN;
   const stoppedMembers = stoppedMemberIds(s);
   const stopped = stoppedAgents(stoppedMembers, s, agents);
+  // story 4452 — an agent the shell could not start is not «not connected»: it never started. It gets its own block with its
+  // reason; ⑦ and the trust note are only for an agent that started and has not connected (선생님 576b352b: one of three
+  // refused at start took the whole progress over 30 s after a person's input)
+  const failedRows = (s.signals.agents_start_failed ?? []).filter((f) => !connected.has(f.member_id));
+  const failedIds = new Set(failedRows.map((f) => f.member_id));
+  const startFailed = startFailedAgents(failedRows, agents);
+  const pendingStarted = agentIds.filter((id) => !connected.has(id) && !failedIds.has(id));
   // a stopped agent says what to do itself (its block) — the trust note and ⑦ «not connected» would tell a different story
-  const waitingForTools = handedOver && !allConnected && result === 'running' && !stopped;
+  const waitingForTools = handedOver && pendingStarted.length > 0 && result === 'running' && !stopped;
   const notConnected = waitingForTools && (
     (Number.isFinite(input) && now - input >= NOT_CONNECTED_AFTER_INPUT_MS)
     || (handedOverSeenAt !== null && now - handedOverSeenAt >= NOT_CONNECTED_AFTER_HANDOVER_MS));
@@ -315,15 +354,36 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     workdirFallback: !!s.signals.workdir_fallback_at,
     trustHint: waitingForTools && !notConnected,
     notConnected,
+    notConnectedAgents: {
+      roles: [...new Set(agents.filter((m) => pendingStarted.includes(m.member_id) && m.role).map((m) => m.role as string))],
+      runtimes: [...new Set(agents.filter((m) => pendingStarted.includes(m.member_id) && m.runtime).map((m) => m.runtime as DesktopRuntime))],
+      claude: agents.some((m) => pendingStarted.includes(m.member_id) && m.runtime === 'claude'),
+    },
     blocked: !!s.signals.blocked,
     expired: s.state === 'not_handed_over',
     stopped,
     readyPaused: !(ready === 'done' || handed === 'done') && agentIds.some((id) => !connected.has(id))
-      && agentIds.filter((id) => !connected.has(id)).every((id) => stoppedMembers.has(id)),
-    handedPaused: handed === 'running' && !!agents[0] && stoppedMembers.has(agents[0].member_id),
+      && agentIds.filter((id) => !connected.has(id)).every((id) => stoppedMembers.has(id) || failedIds.has(id)),
+    handedPaused: handed === 'running' && !!agents[0] && (stoppedMembers.has(agents[0].member_id) || failedIds.has(agents[0].member_id)),
     readyDrawn: ready === 'done' || handed === 'done' ? 'done' : 'running',
-    stillPreparing: ready === 'done' || handed !== 'done' ? [] : stillPreparingRoles(agents, connected, stopped),
+    stillPreparing: ready === 'done' || handed !== 'done' ? [] : stillPreparingRoles(agents, connected, stopped).filter((r) => !startFailed.some((f) => f.role === r)),
+    startFailed,
   };
+}
+
+/** story 4452 — the failures in the flow's order (one per agent), with the role names the copy needs (the agent it waited on). */
+function startFailedAgents(rows: AgentStartFailure[], agents: SetupStatus['members']): SetupProgress['startFailed'] {
+  const out: SetupProgress['startFailed'] = [];
+  const roleOf = (id: string | null) => (id ? agents.find((m) => m.member_id === id)?.role ?? null : null);
+  for (const m of agents) {
+    const f = rows.find((r) => r.member_id === m.member_id);
+    if (!f || out.some((o) => o.memberId === m.member_id)) continue;
+    out.push({
+      memberId: m.member_id, role: m.role, runtime: f.runtime ?? m.runtime, line: startFailedLine(f.reason, f.code),
+      limit: typeof f.limit === 'number' && f.limit > 0 ? f.limit : null, firstRole: roleOf(f.first_member_id),
+    });
+  }
+  return out;
 }
 
 /** The agents not connected yet, by role (each once, the flow's order), leaving out the stopped ones (one agent, one place). */

@@ -6552,7 +6552,9 @@
         "title": "에이전트에 Sprintable이 아직 연결되지 않았어요",
         "bodyClaude": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. Claude Code 터미널이 작업 폴더를 믿을지 묻고 있다면 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요. 그래도 안 붙으면 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
         "bodyOther": "에이전트는 켜졌지만 Sprintable 일감을 받을 연결이 아직 붙지 않았어요. 회사 설정이나 네트워크 때문일 수 있어요 — 회사 IT 관리자에게 Sprintable 연결이 허용돼 있는지, 네트워크가 막혀 있지 않은지 확인한 뒤 다시 확인해 주세요.",
-        "action": "다시 확인"
+        "action": "다시 확인",
+        "blockTitle": "{roles} 에이전트에 Sprintable이 아직 연결되지 않았어요",
+        "blockTitleBare": "{roles}에 Sprintable이 아직 연결되지 않았어요"
       },
       "failure": {
         "copy": "복사",
@@ -6633,6 +6635,22 @@
       "seeResultReason": "결과가 나오면 눌러서 일감으로 가요",
       "stopped": "{roles} 에이전트가 멈췄어요 — 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 [다시 시작]을 눌러 주세요.",
       "stoppedTrust": "다시 시작하면 작업 폴더를 믿을지 다시 물을 수 있어요 — 물으면 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요.",
+      "startFailed": {
+        "title": "{role} 에이전트를 시작하지 못했어요",
+        "titleBare": "{role}{josa} 시작하지 못했어요",
+        "where": "창 아래 «이 컴퓨터의 에이전트»의 알림에서 [다시 시도]를 눌러 주세요",
+        "runtimeMissing": "이 컴퓨터에서 {runtime}{eulReul} 찾지 못했어요 — 설치한 뒤 다시 시도해 주세요",
+        "runtimeDidNotStart": "{runtime}{iGa} 시작되지 않았어요 — 터미널에서 {runtime}{eulReul} 한 번 실행해 첫 화면을 확인한 뒤 다시 시도해 주세요",
+        "credentials": "연결 정보를 넘기지 못해 시작하지 못했어요 — 다시 시도해 주세요",
+        "keyUnreadable": "키체인에 저장된 연결 정보를 읽지 못했어요 — 다시 시도하고, 키체인 접근을 묻는 창이 뜨면 허용해 주세요",
+        "firstNotReady": "{firstRole} 에이전트가 아직 준비되지 않아 띄우지 않았어요 — {firstRole} 에이전트가 작업 폴더를 믿도록 답한 뒤 다시 시도해 주세요",
+        "firstNotReadyBare": "{firstRole}{josa} 아직 준비되지 않아 띄우지 않았어요 — {firstRole}{josa} 작업 폴더를 믿도록 답한 뒤 다시 시도해 주세요",
+        "firstNotReadyNoRole": "먼저 시작한 에이전트가 아직 준비되지 않아 띄우지 않았어요 — 그 에이전트가 작업 폴더를 믿도록 답한 뒤 다시 시도해 주세요",
+        "sessionLimit": "동시에 열 수 있는 세션은 {n}개예요 — 창 아래에서 끝난 세션을 닫은 뒤 다시 시도해 주세요",
+        "sessionLimitNoN": "동시에 열 수 있는 세션 수가 다 찼어요 — 창 아래에서 끝난 세션을 닫은 뒤 다시 시도해 주세요",
+        "notConnected": "이 컴퓨터의 에이전트 실행기와 연결이 끊겼어요 — 창 아래가 «에이전트 실행 준비됨»으로 바뀐 뒤 다시 시도해 주세요",
+        "unknown": "시작하지 못했어요 — 다시 시도해 주세요"
+      },
       "stillPreparing": "{roles} 에이전트는 아직 준비하고 있어요",
       "stoppedBare": "{roles}{josa} 멈췄어요 — 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 [다시 시작]을 눌러 주세요.",
       "stillPreparingBare": "{roles}{josa} 아직 준비하고 있어요",

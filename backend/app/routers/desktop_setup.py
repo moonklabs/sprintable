@@ -396,6 +396,21 @@ class AgentEnded(BaseModel):
     restarted_at: datetime | None = None
 
 
+class AgentStartFailed(BaseModel):
+    """story #4452 — an agent the shell could not start: its last report (cleared once it connects or is restarted after it).
+    `reason`/`code` are closed sets (onboarding_funnel START_FAILED_*) — the web words them; None = not one it knows."""
+    member_id: str
+    at: datetime
+    reason: Literal["runtime_missing", "credentials_refused", "start_refused", "key_unreadable", "first_not_ready"] | None = None
+    code: Literal[
+        "session_limit", "credentials_missing", "profile_invalid", "unknown_profile", "adapter_prepare_failed", "spawn_failed",
+        "not_connected", "bad_reply", "ended", "timeout",
+    ] | None = None
+    runtime: Literal["claude", "codex"] | None = None
+    limit: int | None = None
+    first_member_id: str | None = None
+
+
 class SetupSignals(BaseModel):
     tools_connected: list[ToolsConnected]  # per agent: its first MCP connection (the manifest fetch)
     first_task_handed_at: datetime | None
@@ -404,6 +419,7 @@ class SetupSignals(BaseModel):
     workdir_fallback_at: datetime | None
     blocked: SetupBlocked | None
     agents_ended: list[AgentEnded] = []  # story #4433 — one row per agent whose session ended early
+    agents_start_failed: list[AgentStartFailed] = []  # story #4452 — one row per agent the shell could not start
 
 
 class SetupStatusRecipe(BaseModel):

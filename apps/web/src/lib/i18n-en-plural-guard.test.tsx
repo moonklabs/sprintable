@@ -26,6 +26,7 @@ const ALLOWED_BARE_COUNT: Record<string, string> = {
   'agents.toolPermissions.expandTools': '{group}은 도구 묶음 이름(수가 아님) — «Git tools»',
   'desktop.setup.stillPreparing': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4433)',
   'desktop.setup.stopped': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4433)',
+  'desktop.setup.notConnected.blockTitle': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4452)',
   'content.channelPostsImageAnimatedUnsupported': '{frameCount}는 애니메이션 프레임 수(늘 2 이상) · 모르면 빈 문자열이라 plural 불가',
 };
 

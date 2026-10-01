@@ -66,7 +66,9 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   if (progress.expired) return <Failure failure="expired" />;
   // the folder-trust question is Claude Code's (Codex does not ask it) — Yuna v24 · PO 11:19Z
   const claude = status.members.some((m) => m.kind === 'agent' && m.runtime === 'claude');
-  if (progress.notConnected) return <ToolsNotConnected onRetry={() => void poll()} claude={claude} />;
+  // story 4452 (Yuna v32 · PO 06:06Z): with an agent that could not start on the page, ⑦ does not cover it — it is a block
+  // below the others; with none, ⑦ stays the card (the only fork: is there a start failure)
+  if (progress.notConnected && progress.startFailed.length === 0) return <ToolsNotConnected onRetry={() => void poll()} claude={claude} />;
 
   const role = (r: string) => stageRoleLabel(r, tOrg);
   // roles shown as one group, and whether «에이전트» / «agent» is added after them: a name that already ends in it gets none
@@ -78,6 +80,12 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
     return { text: names.join(' · '), last, bare: endsWithAgentWord(last, locale), count: names.length };
   };
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
+  // the first agent's name follows the same rule as the title (Yuna v29 — never «에이전트 에이전트»), its particle the name it ends in
+  const firstNotReadyLine = (firstRole: string | null) => {
+    if (!firstRole) return t('startFailed.firstNotReadyNoRole');
+    const first = role(firstRole);
+    return endsWithAgentWord(first, locale) ? t('startFailed.firstNotReadyBare', { firstRole: first, josa: pickIGaJosa(first) }) : t('startFailed.firstNotReady', { firstRole: first });
+  };
   // one name in one flow (PO 10:39Z ①): the recipe as the list names it — a platform preset by its translation, not the stored
   // name — from the server's recipe (also when the page is opened again without the list's name)
   const task = status.recipe ? presetName(status.recipe, tPreset) : (recipeName || status.recipe_name || '');
@@ -127,6 +135,33 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         {/* while an agent is stopped, ③ does not spin — nothing is moving (Yuna v26); ① · ② likewise when all they wait for stopped (v29) */}
         <Step state={progress.result} paused={!!progress.stopped} label={progress.result === 'done' ? t('stepResultDone') : t('stepResultRunning')} detail={null} />
       </ol>
+      {progress.startFailed.length > 0 ? (
+        // story 4452 (Yuna 04:41Z · 04:43Z · v31): an agent the shell could not start — its own block, before a stopped one, with
+        // the real reason (the next thing to do), never red, no button here (starting is the app's: the notice's [다시 시도])
+        <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-start-failed">
+          {progress.startFailed.map((f) => {
+            const name = f.role ? role(f.role) : '';
+            const runtime = f.runtime ? RUNTIME[f.runtime] : null;
+            // each line by its own key (the dead-key check reads them) · particles picked for the name (never a fixed 를/가)
+            const rt = runtime ? { runtime, eulReul: pickEulReulJosa(runtime), iGa: pickIGaJosa(runtime) } : null;
+            const line = f.line === 'sessionLimit' ? (f.limit ? t('startFailed.sessionLimit', { n: f.limit }) : t('startFailed.sessionLimitNoN'))
+              : f.line === 'runtimeMissing' ? (rt ? t('startFailed.runtimeMissing', rt) : t('startFailed.unknown'))
+              : f.line === 'runtimeDidNotStart' ? (rt ? t('startFailed.runtimeDidNotStart', rt) : t('startFailed.unknown'))
+              : f.line === 'credentials' ? t('startFailed.credentials')
+              : f.line === 'keyUnreadable' ? t('startFailed.keyUnreadable')
+              : f.line === 'firstNotReady' ? firstNotReadyLine(f.firstRole)
+              : f.line === 'notConnected' ? t('startFailed.notConnected')
+              : t('startFailed.unknown');
+            return (
+              <div key={f.memberId} data-testid="setup-agent-start-failed-row" data-line={f.line}>
+                <p>{endsWithAgentWord(name, locale) ? t('startFailed.titleBare', { role: name, josa: pickEulReulJosa(name) }) : t('startFailed.title', { role: name })}</p>
+                <p className="text-muted-foreground">{line}</p>
+              </div>
+            );
+          })}
+          <p className="text-muted-foreground">{t('startFailed.where')}</p>
+        </div>
+      ) : null}
       {progress.stopped ? (
         // story 4433 (Yuna v26): one block under the steps, above «결과 보기» · the roles on one line · body colour (there is
         // something to do), never red (the cause can be a person's own choice) · no cause guessed: «멈췄어요» covers both
@@ -136,6 +171,20 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
             return g.bare ? t('stoppedBare', { roles: g.text, josa: pickIGaJosa(g.last), count: g.count }) : t('stopped', { roles: g.text, count: g.count });
           })()}</p>
           {progress.stopped.claude ? <p>{t('stoppedTrust')}</p> : null}
+        </div>
+      ) : null}
+      {progress.notConnected ? (
+        // the same weight as the blocks above (thin border · never red) · the body is ⑦'s (v24) for these agents · its button
+        // stays here: checking again is the page's
+        <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-not-connected">
+          <p>{(() => {
+            const g = roleGroup(progress.notConnectedAgents.roles);
+            // no role names (not expected from a recipe): the tools by name, never a sentence without who
+            if (g.count === 0) return t('notConnected.blockTitleBare', { roles: progress.notConnectedAgents.runtimes.map((r) => RUNTIME[r]).join(' · ') });
+            return g.bare ? t('notConnected.blockTitleBare', { roles: g.text }) : t('notConnected.blockTitle', { roles: g.text, count: g.count });
+          })()}</p>
+          <p className="text-muted-foreground">{t(progress.notConnectedAgents.claude ? 'notConnected.bodyClaude' : 'notConnected.bodyOther')}</p>
+          <div><Button variant="outline" size="sm" onClick={() => void poll()}>{t('notConnected.action')}</Button></div>
         </div>
       ) : null}
       <footer className="flex flex-col gap-1">

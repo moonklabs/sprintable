@@ -743,7 +743,7 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         assert status["recipe"] == {"key": RECIPE_KEY, "name": RECIPE_NAME, "org_id": str(ORG)}
         assert status["signals"] == {
             "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "first_screen_human_input_at": None,
-            "workdir_fallback_at": None, "blocked": None, "agents_ended": [],
+            "workdir_fallback_at": None, "blocked": None, "agents_ended": [], "agents_start_failed": [],
         }
 
         # the MCP server fetches the manifest at tools/list with the agent's key: marked once for that member (a second
@@ -1357,6 +1357,57 @@ async def test_agents_ended_reads_the_last_report_and_the_last_restart_per_agent
         )
         r = (await status()).json()["signals"]["agents_ended"][1]
         assert (r["runtime"], r["exit_code"]) == ("codex", None)
+
+
+# ─── story #4452 (선생님 check A · PO 04:35Z) — an agent the shell could not start, with its real reason ──────────────
+
+
+@pytest.mark.anyio
+async def test_agents_start_failed_names_the_agent_that_did_not_start_until_it_connects_after_all(world):
+    """선생님's setup 576b352b: three agents, two connected their tools, one (Dev · codex) was refused at start — the web lumped
+    it into «not connected» and covered the whole progress. The status now names that agent with its reason; the ones that
+    connected are not in it, and it leaves the list once it connects (or is restarted) after the report."""
+    async with _client() as c:
+        code, _verifier = await _code(c, "d4452 start failed")
+        confirmed = (await _confirm(c, code)).json()
+        setup_id = confirmed["setup_id"]
+        agent = {m["role"]: m["member_id"] for m in confirmed["members"] if m["kind"] == "agent"}
+        writer, reviewer = agent["Writer"], agent["Reviewer"]
+        status = lambda: c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))
+        tools = lambda mid: _sql(
+            "INSERT INTO onboarding_events (id,event,session_id,meta,server_ts,desktop_setup_verified) VALUES "
+            "(gen_random_uuid(),'desktop_tools_connected',CAST(:sid AS uuid),CAST(:meta AS jsonb),now(),true)",
+            params={"sid": str(setup_id), "meta": json.dumps({"member_id": mid})},
+        )
+
+        assert (await status()).json()["signals"]["agents_start_failed"] == []
+        await tools(writer)  # the writer started and connected
+
+        # not proven (no token) · not one of this setup's agents → not counted
+        assert (await _app_event(c, setup_id, "desktop_agent_start_failed", {"member_id": reviewer, "reason": "start_refused"}, token=None)).status_code == 202
+        assert (await _app_event(c, setup_id, "desktop_agent_start_failed", {"member_id": str(uuid.uuid4()), "reason": "start_refused"})).status_code == 202
+        assert (await status()).json()["signals"]["agents_start_failed"] == []
+
+        # the reviewer (codex) is refused: its adapter would not prepare — the reason the web words
+        r = await _app_event(c, setup_id, "desktop_agent_start_failed", {"member_id": reviewer, "reason": "start_refused", "code": "adapter_prepare_failed", "runtime": "codex", "first_member_id": writer})
+        assert r.status_code == 202, r.text
+        rows = (await status()).json()["signals"]["agents_start_failed"]
+        assert [x["member_id"] for x in rows] == [reviewer], "only the agent that did not start · the connected one is not in it"
+        x = rows[0]
+        assert (x["reason"], x["code"], x["runtime"], x["limit"], x["first_member_id"]) == ("start_refused", "adapter_prepare_failed", "codex", None, writer)
+
+        # it connects after all (the person pressed [다시 시작]) → gone from the list
+        await tools(reviewer)
+        assert (await status()).json()["signals"]["agents_start_failed"] == []
+
+        # a later failure after that connection counts again; a stored row with values off the closed sets reads as none
+        await _sql(
+            "INSERT INTO onboarding_events (id,event,session_id,meta,server_ts,desktop_setup_verified) VALUES "
+            "(gen_random_uuid(),'desktop_agent_start_failed',CAST(:sid AS uuid),CAST(:meta AS jsonb),now() + interval '1 second',true)",
+            params={"sid": str(setup_id), "meta": json.dumps({"member_id": reviewer, "reason": "start_refused", "code": "session_limit", "limit": -3, "first_member_id": reviewer})},
+        )
+        x = (await status()).json()["signals"]["agents_start_failed"][0]
+        assert (x["code"], x["limit"], x["first_member_id"]) == ("session_limit", None, None), "a negative cap · itself as «waited on» read as none"
 
 
 # ─── story #4438 — the app's meta is checked at the entrance: a non-string field was a 500 on the status read ─────────────
