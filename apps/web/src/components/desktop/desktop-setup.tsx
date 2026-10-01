@@ -528,6 +528,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onRel
  * this year — ko «10월 6일» · en "Oct 6" · another year ko «2027년 1월 6일» · en "Jan 6, 2027". */
 export function inviteUntilDate(value: string, locale: string, timeZone: string, now: Date = new Date()): string {
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return ''; // an unreadable value: nothing, as before (Kadir 4865 ⓑ — the year below would throw)
   const ko = locale.startsWith('ko');
   // story #4443 PR2 — the viewer's day and year (an invite ending 23:00Z ends the next day in Seoul)
   const year = (d: Date) => new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(d);

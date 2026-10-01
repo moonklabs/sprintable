@@ -49,15 +49,15 @@
   },
   {
     "key": "ee/components/billing/billing-tab.tsx::runtime-calendar::const nextBillingDay = new Date().getDate();",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+    "reason": "story #4443 — billing: not touched (PO 00:07Z · the billing axis is 선생님's call); frozen so a change here is seen"
   },
   {
     "key": "ee/components/billing/pricing-plan-card.tsx::runtime-calendar::return `${d.getMonth() + 1}/${d.getDate()}`;",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+    "reason": "story #4443 — billing: not touched (PO 00:07Z · the billing axis is 선생님's call); frozen so a change here is seen"
   },
   {
     "key": "ee/components/billing/pricing-plan-card.tsx::runtime-calendar::return `${d.getMonth() + 1}/${d.getDate()}`;#2",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+    "reason": "story #4443 — billing: not touched (PO 00:07Z · the billing axis is 선생님's call); frozen so a change here is seen"
   },
   {
     "key": "lib/date.ts::fixed-zone::timeZone: 'Asia/Seoul',",

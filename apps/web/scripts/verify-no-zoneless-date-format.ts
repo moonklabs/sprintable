@@ -21,7 +21,9 @@
  * ratchet only goes down). Keys are file + kind + the line's text (not its number: an unrelated line above must not break it);
  * the same text twice in a file gets «#2». `--print` writes the current places as a baseline (to measure at a PR's head).
  *
- * Not seen (declared): a naive local string parsed in the runtime's zone (`new Date('2026-09-05T14:30')` — a datetime-local value, as
+ * Not seen (declared) — the guard reads text, not code (Kadir 4865 ⓐ): a formatter under another name (`const DTF =
+ * Intl.DateTimeFormat; new DTF(…)`), a `timeZone` that appears only in a comment inside the call's arguments (it counts as named);
+ * a naive local string parsed in the runtime's zone (`new Date('2026-09-05T14:30')` — a datetime-local value, as
  * in components/content/validate-scheduled-at.ts: a `new Date(x)` can't be told from an ISO parse by text; PR3 names that zone);
  * a formatter built from a variable holding the options (`new Intl.DateTimeFormat(locale, opts)` counts as
  * zoneless — name the zone at the call); date-fns and the like (none in src today). Test files are not read.

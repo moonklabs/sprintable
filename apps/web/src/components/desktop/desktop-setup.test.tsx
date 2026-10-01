@@ -956,6 +956,8 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     // story #4443 PR2 — the viewer's day: 23:00Z on 10/6 is 10/7 in Seoul, still 10/6 in UTC
     expect(inviteUntilDate('2026-10-06T23:00:00Z', 'ko', 'Asia/Seoul', now)).toBe('10월 7일');
     expect(inviteUntilDate('2026-10-06T23:00:00Z', 'ko', 'UTC', now)).toBe('10월 6일');
+    // Kadir 4865 ⓑ — an unreadable expires_at is empty text, not a throw during render (the year was read before the check)
+    expect(inviteUntilDate('not-a-date', 'ko', 'Asia/Seoul', now)).toBe('');
   });
 
   it('the invite read fails → sent to the one-screen «조직 만들기» ((가) · /onboarding?next=%2Fdesktop%2Fsetup) — not knowing is not «no invites»', async () => {
