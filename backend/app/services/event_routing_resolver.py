@@ -572,4 +572,16 @@ async def resolve_routing_leg(
         return valid
 
     resolver = _SERVER_DERIVED_RESOLVERS[leg["target"]]
-    return await resolver(db, org_id=org_id, payload=payload)
+    ids = await resolver(db, org_id=org_id, payload=payload)
+    if leg["target"] == "work_item_stakeholders" and definition_key and payload.get("stage"):
+        # story #4451 (critical, 선생님 확인 A) — a recipe stage also reaches the member bound to that stage. The workflow presets
+        # route by `work_item_stakeholders` (assignee · human owner · assignees), which never read the setup's stage bindings: the
+        # first stage on a work item the desktop setup made a moment ago reached only its sender, and the hand-off to the next
+        # role (kanban_simple in_progress → Dev · done_check → Lead) missed the same way. The holder comes from the binding
+        # resolver itself (project before org-wide · a stopped member is no one · an approval held elsewhere has no holder), so
+        # this answers like the `recipe_role_binding` presets. No binding → the stakeholders as before; bindings are keyed by the
+        # definition, so a definition with no stages or no bindings (gate verdict · steer · work assigned/status) is unchanged.
+        ids |= await _resolve_recipe_role_binding(
+            db, org_id=org_id, payload=payload, definition_key=definition_key, context=context,
+        )
+    return ids
