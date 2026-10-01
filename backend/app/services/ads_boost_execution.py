@@ -810,6 +810,7 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                     # story #4458 — what it was created with (a re-seal during the call leaves it on the older seal's values)
                     run.created_budget_minor = gate.sealed_ads_budget_minor
                     run.created_for_version_id = command.approved_version
+                    run.created_connection_id = gate.sealed_ads_connection_id  # PO 09:00Z — the account the campaign lives in
                     run.create_claimed_at = None  # story #4404 — ids recorded: the claim is done
                     run.create_call_started_at = None
                     # story #4268 AC2 — 만든 id를 ACTIVE 전환 **전에** 커밋한다. 뒤(ACTIVE · 지출 스냅샷 예약 · 활동 기록)에서 DB

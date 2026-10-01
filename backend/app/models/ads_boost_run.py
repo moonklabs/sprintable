@@ -64,6 +64,8 @@ class AdsBoostRun(Base):
     # created before this column — no check).
     created_budget_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_for_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # PO 09:00Z — and the ad connection it was created under (4461 binds pause · resume · spend reads to it)
+    created_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # story #4404 (0419) — campaign creation at most once: the claim (conditional UPDATE) and the marker committed right before the
     # create call. Expired claim + marker + no ids = outcome unknown → needs_check, never re-created automatically.
     create_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

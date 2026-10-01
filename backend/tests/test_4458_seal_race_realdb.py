@@ -156,6 +156,7 @@ async def test_a_campaign_created_on_a_replaced_seal_is_not_switched_on_with_ano
         assert (stopped.status, stopped.reason_code) == ("blocked_unapproved", "ADS_BOOST_SEAL_REPLACED"), (stopped.status, stopped.reason_code)
         run = await _run(Session, gate_id)
         assert run.campaign_id and run.created_budget_minor == 100_000 and run.created_for_version_id == old.approved_version
+        assert run.created_connection_id == old.destination  # the ad connection it was created under (PO 09:00Z · used by 4461)
 
         new = await _new_seal_start(Session, org_id, gate_id, owner_id)
         await _tick(Session)
