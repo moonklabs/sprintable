@@ -631,8 +631,9 @@ export function BoostExecutionControl({
   if (command && !runActive && (command.status === 'dead_letter' || command.status === 'blocked' || command.status === 'failed')) {
     const kind = command.failure_kind;
     const retryable = command.retryable === true && (kind === 'not_sent' || kind === 'transient');
-    const line = kind === 'not_sent' ? t('boostStartFailedNotSent')
-      : kind === 'transient' ? t('boostStartFailedTransient')
+    // Yuna 03:03Z — «— 다시 시도해 주세요» only where the retry button is shown; without it the line stops at the fact
+    const line = kind === 'not_sent' ? (retryable ? t('boostStartFailedNotSent') : t('boostStartFailedNotSentNoRetry'))
+      : kind === 'transient' ? (retryable ? t('boostStartFailedTransient') : t('boostStartFailedTransientNoRetry'))
       : kind === 'connection' ? t.rich('boostStartFailedConnection', { link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link> })
       : kind === 'paused' ? t('boostStartFailedPaused')
       : t('boostStartBlocked');

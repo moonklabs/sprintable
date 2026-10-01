@@ -147,10 +147,15 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     expect($('boost-start-trigger')).toBeNull();
   });
 
-  it('③ the server says this person cannot retry (e.g. an agent viewer): the line without the button', async () => {
-    spendNow = { run_status: 'pending', start_command: cmd('dead_letter', 'not_sent', false) };
+  // Yuna 03:03Z — «— 다시 시도해 주세요» only where the button is: without it the line stops at the fact.
+  it.each([
+    ['not_sent', 'boostStartFailedNotSentNoRetry', 'boostStartFailedNotSent'],
+    ['transient', 'boostStartFailedTransientNoRetry', 'boostStartFailedTransient'],
+  ] as const)('③ %s and the server says this person cannot retry: the line without the retry tail, no button', async (kind, noRetryKey, retryKey) => {
+    spendNow = { run_status: 'pending', start_command: cmd('dead_letter', kind, false) };
     await mount();
-    expect(text()).toContain(cage.boostStartFailedNotSent);
+    expect($('boost-start-failed')?.textContent).toBe(cage[noRetryKey]);
+    expect(text()).not.toContain(cage[retryKey]);
     expect($('boost-start-failed-retry')).toBeNull();
     expect($('boost-start-trigger')).toBeNull();
   });
