@@ -781,3 +781,29 @@ describe('WorkListDetailPanel — 레시피 발행 게이트 본 초안 버전 (
     expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v2');
   });
 });
+
+// story #4448 (Yuna 04:13Z) — the panel's gate cell was first drawn with real data here: the low-risk badge was the same warning
+// yellow as high risk (the row uses a neutral chip for the same fact) and sat alone in a bordered box (low risk has no sentence).
+describe('WorkListDetailPanel — the risk badge per grade (#4448)', () => {
+  const gate = (risk: 'low' | 'high') => ({ id: 'g1', gate_type: 'doc_approval', risk_grade: risk, status: 'pending', work_item_id: 'task-1', work_item_type: 'task' });
+  it('low risk: a neutral chip on the «지금 상태» line — no risk box', async () => {
+    mockFetchRoutes({ gates: [gate('low')] });
+    await mountPanel();
+    expect(container.querySelector('[data-testid="panel-risk"]')).toBeNull();
+    const chip = container.querySelector('[data-testid="panel-state"] [data-testid="panel-risk-chip"]');
+    expect(chip?.textContent).toBe(koMessages.workList.chipLowRisk);
+    expect(chip?.className).toContain('bg-muted/70'); // the chip variant (the row's look)
+    expect(chip?.className).not.toContain('bg-warning-tint');
+  });
+  it('high risk: the warning badge and its sentence in the risk box', async () => {
+    mockFetchRoutes({ gates: [gate('high')] });
+    await mountPanel();
+    const box = container.querySelector('[data-testid="panel-risk"]');
+    expect(box).not.toBeNull();
+    const badge = [...(box?.querySelectorAll('span') ?? [])].find((el) => el.textContent === koMessages.workList.riskBadgeHigh);
+    expect(badge?.className).toContain('bg-warning-tint');
+    expect(box?.querySelector('p')?.textContent?.length ?? 0).toBeGreaterThan(0);
+    expect(container.querySelector('[data-testid="panel-risk-chip"]')).toBeNull();
+  });
+});
+
