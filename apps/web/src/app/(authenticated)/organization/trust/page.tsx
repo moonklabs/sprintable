@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ListRow } from '@/components/ui/list-row';
 import { PageHeader } from '@/components/ui/page-header';
-import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import {
   coldStartReason,
   disambiguatedNames,
@@ -33,6 +33,7 @@ import {
 } from './trust-utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { orgRoleLabel } from '@/lib/org-role-label';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #3749(재설계 ⑤, 시안 ④⑤ v3b 74290976) — 역할별 SectionCard 쪼개기를 걷고
 // 역할 칩으로 좁히는 한 목록으로. admin 뷰만 칩을 갖는다(self 뷰는 이미 "내 역할"
@@ -70,7 +71,7 @@ export default function OrganizationTrustPage() {
   const isAdmin = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('organization');
   const tCommon = useTranslations('common');
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const [loading, setLoading] = useState(true);
   const [rosterRows, setRosterRows] = useState<OrgSummaryRow[]>([]);
@@ -254,7 +255,7 @@ export default function OrganizationTrustPage() {
 // 컴포넌트 자체다(훅은 컴포넌트 안에서만 부를 수 있다, .map() 콜백 안 직접 호출 불가).
 function AdminRow({
   row, index, name, hasRealName, t, displayTimezone,
-}: { row: OrgSummaryRow; index: number; name: string; hasRealName: boolean; t: ReturnType<typeof useTranslations>; displayTimezone: string }) {
+}: { row: OrgSummaryRow; index: number; name: string; hasRealName: boolean; t: ReturnType<typeof useTranslations>; displayTimezone: string | null }) {
   const roleLabel = resolveRoleLabel(row.role_key, row.role_label, t);
   const coldStart = isColdStart(row.hit_rate, row.resolved);
   const drilldown = useHistoryDrilldown({ memberId: row.member_id, roleKey: row.role_key });
@@ -266,7 +267,7 @@ function AdminRow({
       subtitle={coldStart ? (
         <ColdStartSubtitle roleLabel={roleLabel} pending={row.pending} t={t} />
       ) : (
-        t('trustRoleComputedAt', { role: roleLabel, time: formatScheduledAt(row.computed_at, displayTimezone).display })
+        t('trustRoleComputedAt', { role: roleLabel, time: formatViewerScheduledAt(row.computed_at, displayTimezone).display })
       )}
       status={coldStart ? (
         <TrustBadge hitRate={row.hit_rate} resolved={row.resolved} t={t} />

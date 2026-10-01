@@ -25,7 +25,7 @@ export interface FailureActionBadgeProps {
   /** B2(페드루 PO 지적, 2026-09-04) — auto_retry의 next_retry_at을 scheduled_at과 같은
    * tz·형식(formatScheduledAt)으로 보인다. schedule-format.ts::resolveDisplayTimezone이
    * 유일한 tz 출처(ChannelPostCard·CalendarGrid와 동형 원칙). */
-  displayTimezone: string;
+  displayTimezone: string | null;
   /** N3(페드루 PO, 2026-09-04 13:26Z) — ChannelPostCard는 `<Link>`라 그 안에 이 배지의
    * `<Button>`을 그대로 넣으면 인터랙티브 요소가 중첩된다(a>button, 무효 HTML). 카드
    * 소비처는 compact=true로 라벨만 받는다 — 재시도는 상세로 들어가서 한다. */

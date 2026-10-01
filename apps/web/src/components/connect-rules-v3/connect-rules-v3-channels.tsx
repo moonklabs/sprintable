@@ -6,8 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge, badgeVariants } from '@/components/ui/badge';
 import type { VariantProps } from 'class-variance-authority';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import {
   deriveChannelConnectionStatus,
   channelConnectionStatusLabelKey,
@@ -21,6 +20,7 @@ import {
 } from './connect-rules-v3-section-state';
 import { OAuthResultBanner } from '@/components/channel-connect/oauth-result-banner';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3982 §(d) 연결된 채널(+성과 수집) — `channel-connect/connection-status.ts`의
@@ -131,7 +131,7 @@ function MeasurementSection({
   locale: string;
 }) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const beacon = items.find((it) => it.key === 'beacon');
   const utm = items.find((it) => it.key === 'utm');
   const ga4 = items.find((it) => it.key === 'ga4');
@@ -142,7 +142,7 @@ function MeasurementSection({
       : beacon.status === 'no_data_yet'
         ? tc('measurementBeaconNoDataYet')
         : tc('measurementBeaconHasData', {
-            time: beacon.last_seen_at ? formatRelativeTime(beacon.last_seen_at, locale, displayTimezone) : '',
+            time: beacon.last_seen_at ? formatViewerRelativeTime(beacon.last_seen_at, locale, displayTimezone) : '',
             count: beacon.count_7d ?? 0,
           })
   );

@@ -10,10 +10,10 @@ import { UnattachedBucket } from '@/components/flow/unattached-bucket';
 import { GuidedHypothesisEntry } from '@/components/flow/guided-hypothesis-entry';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { cn } from '@/lib/utils';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #2531(E-FLOW-V4 S1) — 축척 지도의 최상위 «지구 층». 조직 단위를 작업이 아니라
@@ -105,8 +105,9 @@ function ConcludedRow({
   locale: string;
 }) {
   const t = useTranslations('flow');
+  const viewerTz = useViewerTimeZone(); // story #4443 PR2b
   // story #3493 — 가설 종결 시각은 "기록"(정본 formatRelativeTime).
-  const concludedDate = formatRelativeTime(hypothesis.updated_at, locale, resolveDisplayTimezone().tz);
+  const concludedDate = formatViewerRelativeTime(hypothesis.updated_at, locale, viewerTz);
   // falsified인데 이미 대체 가설(정반합)이 있으면 접힌 채로도 "낳음"이 예고돼야 한다
   // (유나 지적 — 정반합 서사가 펼쳐야만 보이면 여전히 발견성이 낮다).
   const showSupersededHint = hypothesis.status === 'falsified' && Boolean(hypothesis.superseded_by_hypothesis_id);

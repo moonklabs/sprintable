@@ -17,7 +17,7 @@ import { gateTypeLabel } from '@/lib/gate-type-label';
 import { gateApproveLabelKey, sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -29,6 +29,7 @@ import { INBOX_GATES_HELD_URL, INBOX_GATES_PENDING_URL, takePrefetchedOrFetch, t
 import { fetchGateById } from '@/lib/fetch-gate';
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
@@ -161,7 +162,7 @@ export function ApprovalsQueue() {
   // SSOT(organization 네임스페이스)로 stage/role 낱말을 통일.
   const tOrg = useTranslations('organization');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
   // story #2103 — BE `PATCH /api/v1/hitl-requests/{id}`가 human-only 불변식이다(gates.py
   // transition_gate_endpoint와 동형, resolved.type != "human" → 403). #2091(게이트 상세)과
@@ -560,9 +561,9 @@ export function ApprovalsQueue() {
                 {gate.sealed_ads_starts_at && gate.sealed_ads_ends_at ? (
                   <>
                     {' · '}
-                    {formatScheduledAt(gate.sealed_ads_starts_at, displayTimezone).display}
+                    {formatViewerScheduledAt(gate.sealed_ads_starts_at, displayTimezone).display}
                     {' ~ '}
-                    {formatScheduledAt(gate.sealed_ads_ends_at, displayTimezone).display}
+                    {formatViewerScheduledAt(gate.sealed_ads_ends_at, displayTimezone).display}
                   </>
                 ) : null}
                 {gate.sealed_ads_objective ? ` · ${adsBoostObjectiveLabel(gate.sealed_ads_objective, tContent)}` : ''}

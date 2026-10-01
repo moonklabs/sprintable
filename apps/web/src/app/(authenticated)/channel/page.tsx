@@ -9,10 +9,10 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import { toPlainPreview } from '@/components/chat/entity-ref';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { ChannelTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface ChannelMsg {
   id: string;
@@ -32,9 +32,9 @@ function fastapiWsBase(): string {
 }
 
 // story #3493 — 메시지 시각(msg.ts)은 "기록"(3436 묶음 8 정본 formatRelativeTime).
-function fmtTime(ts: string, locale: string, displayTimezone: string): string {
+function fmtTime(ts: string, locale: string, displayTimezone: string | null): string {
   try {
-    return formatRelativeTime(ts, locale, displayTimezone);
+    return formatViewerRelativeTime(ts, locale, displayTimezone);
   } catch {
     return '';
   }
@@ -43,7 +43,7 @@ function fmtTime(ts: string, locale: string, displayTimezone: string): string {
 export default function ChannelPage() {
   const t = useTranslations('channel');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const searchParams = useSearchParams();
   const agentId = searchParams.get('agent_id');
   const { currentTeamMemberId } = useDashboardContext();

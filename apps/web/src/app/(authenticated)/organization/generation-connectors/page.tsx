@@ -10,13 +10,13 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEulReulJosa } from '@/lib/korean-particle';
 import {
   GenerationConnectorRegisterForm,
   GENERATION_CONNECTOR_LOCATIONS,
 } from '@/components/organization/generation-connector-register-form';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #4116(#4112 유나 시안 55a04e8d 승인본, PO 승인 2026-09-21 15:05Z) — 연산
@@ -68,7 +68,7 @@ export default function OrganizationGenerationConnectorsPage() {
   const tc = useTranslations('common');
   const tChannel = useTranslations('channelConnect');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const [connectors, setConnectors] = useState<GenerationConnector[]>([]);
   const [status, setStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
@@ -260,9 +260,9 @@ export default function OrganizationGenerationConnectorsPage() {
                   {/* story #4117 FE 라이더 — #4112 시안 프레임①의 "등록 시각" 행.
                       해지된 커넥터는 해지 시각도 같이(자격 소실 시점을 확認할 수 있게). */}
                   <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    {t('gcRegisteredAt', { time: formatRelativeTime(c.created_at, locale, displayTimezone) })}
+                    {t('gcRegisteredAt', { time: formatViewerRelativeTime(c.created_at, locale, displayTimezone) })}
                     {c.status === 'revoked' && c.revoked_at
-                      ? ` · ${t('gcRevokedAt', { time: formatRelativeTime(c.revoked_at, locale, displayTimezone) })}`
+                      ? ` · ${t('gcRevokedAt', { time: formatViewerRelativeTime(c.revoked_at, locale, displayTimezone) })}`
                       : null}
                   </p>
                   {/* story #4166 CHANGES-1(페드루 PO 리뷰) — 등록 폼의 gcLocationHint를

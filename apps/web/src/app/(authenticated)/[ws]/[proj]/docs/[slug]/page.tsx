@@ -31,11 +31,11 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { copyTextSafely } from '@/lib/clipboard';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 import { isOutsidePress } from '@/components/shared/anchored-popover';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface DocDetail {
   id: string;
@@ -70,7 +70,7 @@ export default function DocSlugPage() {
   const t = useTranslations('docs');
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const ts = useTranslations('share');
   // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
@@ -489,7 +489,7 @@ export default function DocSlugPage() {
                 </>
               ) : null}
               {selectedDoc.updated_at ? (
-                <span className="tabular-nums">{formatRelativeTime(selectedDoc.updated_at, locale, displayTimezone)}</span>
+                <span className="tabular-nums">{formatViewerRelativeTime(selectedDoc.updated_at, locale, displayTimezone)}</span>
               ) : null}
             </>
           }

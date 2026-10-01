@@ -6,8 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { getFileIcon } from '@/lib/file-icon';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
-import { fileExtLabel, formatDate, formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { fileExtLabel, formatDate, formatViewerRelativeTime } from '@/lib/storage/format';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -16,6 +15,7 @@ import { StorageSourceUsageList } from './storage-source-usage-list';
 import { StorageFileGlyph } from './storage-file-glyph';
 import { StorageThumbnail } from './storage-thumbnail';
 import type { Asset } from '@/lib/storage/types';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface StorageDetailPanelProps {
   asset: Asset | null;
@@ -38,7 +38,7 @@ function MetaRow({ label, value, last = false }: { label: string; value: ReactNo
 export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDelete, onClose }: StorageDetailPanelProps) {
   const t = useTranslations('storage');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [tab, setTab] = useState<'detail' | 'usage'>('detail');
 
   if (!asset) {
@@ -126,7 +126,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
               }
             />
             <MetaRow label={t('metaCreated')} value={formatDate(asset.created_at, displayTimezone)} />
-            <MetaRow label={t('metaUpdated')} value={formatRelativeTime(asset.updated_at, locale, displayTimezone)} last />
+            <MetaRow label={t('metaUpdated')} value={formatViewerRelativeTime(asset.updated_at, locale, displayTimezone)} last />
 
             {usageCount > 0 ? (
               <>

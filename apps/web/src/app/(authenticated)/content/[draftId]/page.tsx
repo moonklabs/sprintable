@@ -22,7 +22,7 @@ import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 // story #3483(BE 3482 계약, 3472 2부/§16-7과 동형) — 원문(site_post) 초안의 규칙
@@ -37,6 +37,7 @@ import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -337,7 +338,7 @@ export default function ContentPostEditPage() {
   const router = useRouter();
   // 유나 사전 스티어② — 변형 행의 published_at 표시. 조직 tz 폴백 관례는 channel-posts
   // 상세 화면과 동형(resolveDisplayTimezone()의 기본 인자 규약 그대로 재사용).
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const locale = useLocale();
 
   // story #3499 — publication_id는 hosted_site(publication.publication_id)·외부목적지
@@ -1272,7 +1273,7 @@ export default function ContentPostEditPage() {
           </div>
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
-            {formatScheduledAt(publication.published_at, displayTimezone).display}
+            {formatViewerScheduledAt(publication.published_at, displayTimezone).display}
           </div>
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoByLabel')}</span>{' '}
@@ -1328,13 +1329,13 @@ export default function ContentPostEditPage() {
               {publication.channel_publication.published_at ? (
                 <div>
                   <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoAtLabel')}</span>{' '}
-                  {formatScheduledAt(publication.channel_publication.published_at, displayTimezone).display}
+                  {formatViewerScheduledAt(publication.channel_publication.published_at, displayTimezone).display}
                 </div>
               ) : null}
               {publication.channel_publication.status === 'unpublished' && publication.channel_publication.unpublished_at ? (
                 <div>
                   <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationUnpublishedAtLabel')}</span>{' '}
-                  {formatScheduledAt(publication.channel_publication.unpublished_at, displayTimezone).display}
+                  {formatViewerScheduledAt(publication.channel_publication.unpublished_at, displayTimezone).display}
                 </div>
               ) : null}
             </>
@@ -1467,7 +1468,7 @@ export default function ContentPostEditPage() {
                   <span className="flex items-center gap-2">
                     {v.published_at ? (
                       <span className="text-xs text-muted-foreground" data-testid="content-variants-list-item-published-at">
-                        {formatScheduledAt(v.published_at, displayTimezone).display}
+                        {formatViewerScheduledAt(v.published_at, displayTimezone).display}
                       </span>
                     ) : null}
                     <StatusChip
@@ -1720,7 +1721,7 @@ export default function ContentPostEditPage() {
           <AlertDescription>
             {publishResult.type === 'success' ? (
               <>
-                {t('publishSuccess', { time: formatScheduledAt(publishResult.publishedAt, displayTimezone).display })}
+                {t('publishSuccess', { time: formatViewerScheduledAt(publishResult.publishedAt, displayTimezone).display })}
                 {' '}
                 <a href={publishResult.url} target="_blank" rel="noopener noreferrer" className="underline">
                   {t('publishViewLink')}

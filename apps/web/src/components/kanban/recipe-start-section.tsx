@@ -7,14 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useRecipeStartCandidates, type RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
 import { presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #4082(유나 design CHANGES 2026-09-21) — recipe-stage-label.ts에 미등재된 slug는
 // raw 노출 대신 「단계 n/9」로 자리표시한다(recipeStageLabel 자신의 기존 pass-through
@@ -49,7 +49,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
   const tOrg = useTranslations('organization');
   const tPreset = useTranslations('recipePreset');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { candidates, loading, error: loadError, refresh } = useRecipeStartCandidates(projectId, 'story', storyId);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -264,7 +264,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       </p>
       {c.last_published_at && (
         <p className="text-[11px] text-muted-foreground">
-          {t('recipeLastPublishedLabel')}: {formatRelativeTime(c.last_published_at, locale, displayTimezone)}
+          {t('recipeLastPublishedLabel')}: {formatViewerRelativeTime(c.last_published_at, locale, displayTimezone)}
         </p>
       )}
       {c.conversation_id && (

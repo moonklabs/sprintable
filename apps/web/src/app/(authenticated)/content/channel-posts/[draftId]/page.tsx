@@ -31,7 +31,7 @@ import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFac
 import type { CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import { CommentReplyDialog, type CommentReplyOutcome, type ReplyView } from '@/components/content/comment-reply-dialog';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
 import { ApiUsageBudgetExceededBanner } from '@/components/content/api-usage-budget-exceeded-banner';
@@ -49,6 +49,7 @@ import {
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -1869,7 +1870,7 @@ export default function ChannelPostEditPage() {
     const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
       ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
       : info.kind === 'rate_limited' && info.resetAt
-        ? t('channelPostsRateLimitedUntil', { time: formatScheduledAt(info.resetAt, displayTimezone).display })
+        ? t('channelPostsRateLimitedUntil', { time: formatViewerScheduledAt(info.resetAt, displayTimezone).display })
         : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
     // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
     // 는 뭉치면 안 되는 별개 사실이다. 페드루 PO 블로커 판정(2026-09-04 06:17Z) —
@@ -2185,6 +2186,7 @@ export default function ChannelPostEditPage() {
     return () => clearInterval(timer);
   }, [awaitingWorker]);
 
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known) · before the early returns (hooks)
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
   }
@@ -2361,7 +2363,6 @@ export default function ChannelPostEditPage() {
   // 확認 버튼 비활성)을 쓴다 — 아래 ConfirmDialog 세 자리가 이 값 하나로 갈린다.
   const isNeedsCheckGate = failureAction?.kind === 'needs_check'
     || (failureAction?.kind === 'dead_letter' && failureAction.needsRecheck);
-  const displayTimezone = resolveDisplayTimezone().tz;
 
   // B2(페드루 PO, 2026-09-04 13:27Z·code-review 지적) — 이미지 업로드가 confirm까지
   // 끝나기 전에 저장/상신을 누르면 두 흐름이 독립적으로 각자 새 버전을 만들어 경합한다
@@ -2702,7 +2703,7 @@ export default function ChannelPostEditPage() {
           {draft.published_at ? (
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">{t('publishedInfoAtLabel')}</span>
-              <span>{formatScheduledAt(draft.published_at, displayTimezone).display}</span>
+              <span>{formatViewerScheduledAt(draft.published_at, displayTimezone).display}</span>
             </div>
           ) : null}
           {draft.external_id ? (
@@ -3044,9 +3045,9 @@ export default function ChannelPostEditPage() {
           <Alert variant={publishResult.type === 'error' ? 'destructive' : 'default'} role={publishResult.type === 'error' ? 'alert' : 'status'} data-testid="channel-post-publish-result">
             <AlertDescription>
               {publishResult.type === 'success'
-                ? t('publishSuccess', { time: draft.published_at ? formatScheduledAt(draft.published_at, displayTimezone).display : '' })
+                ? t('publishSuccess', { time: draft.published_at ? formatViewerScheduledAt(draft.published_at, displayTimezone).display : '' })
                 : publishResult.type === 'scheduled'
-                  ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? formatScheduledAt(publishResult.scheduledAt, displayTimezone).display : t('originAuthorUnknown') })
+                  ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? formatViewerScheduledAt(publishResult.scheduledAt, displayTimezone).display : t('originAuthorUnknown') })
                   : (
                     // story #3402 AC11(doc §5-1) — "왜 막혔나"(text)와 "밖으로 나갔나"
                     // (externalImpact)는 서로 다른 사실이라 별도 텍스트 노드로 따로 둔다

@@ -26,14 +26,14 @@ import { RecipeDetailView } from '@/components/organization/recipe-detail-view';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { publishHistorySenderLabel } from '@/lib/member-display';
 import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
 import { recipeKeyDomain } from '@/lib/recipe-role-slots';
 import { presetAction, presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -579,7 +579,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const locale = useLocale();
   const tc = useTranslations('common');
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [state, setState] = useState<PublishHistoryState>({ kind: 'loading' });
 
   useEffect(() => {
@@ -613,7 +613,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
             <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className="text-foreground">{publishHistorySenderLabel(item, t, tc)}</span>
               <span className="flex items-center gap-2 text-muted-foreground">
-                {formatRelativeTime(item.created_at, locale, displayTimezone)}
+                {formatViewerRelativeTime(item.created_at, locale, displayTimezone)}
                 {/* 대상-프로젝트: 발행 이력 항목엔 대화의 프로젝트가 없다(대화 화면이 착지 뒤 자기 프로젝트로 연다). */}
                 <Link href={flatHref(`/chats/${item.conversation_id}`)} className="text-primary hover:underline">
                   {t('eventPublishHistoryOpenChat')}

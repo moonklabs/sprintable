@@ -10,7 +10,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { computeReorderPatch } from '@/lib/epic-steer';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -53,6 +53,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { GoalsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
@@ -189,9 +190,9 @@ function calcSpProgress(stories: Story[]): { done: number; total: number } {
 // 아직 안 온 미래 시점) — §11-2 정본(formatScheduledAt)으로 통일한다. locale
 // 하드코딩(구 #2084 근본원인) 자체가 사라진다 — 이 정본은 tz만 받고 로케일 무관
 // 고정 포맷이라 en/ko 분기가 원천적으로 없다.
-function formatDate(dateStr: string | undefined, displayTimezone: string): string {
+function formatDate(dateStr: string | undefined, displayTimezone: string | null): string {
   if (!dateStr) return '—';
-  return formatScheduledAt(dateStr, displayTimezone).display;
+  return formatViewerScheduledAt(dateStr, displayTimezone).display;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -569,7 +570,7 @@ function outcomeLineText(
   tOutcome: ReturnType<typeof useTranslations<'outcomeLoop'>>,
   status: Goal['outcome_status'],
   measureAfter: string | null | undefined,
-  displayTimezone: string,
+  displayTimezone: string | null,
 ): { text: string; tone: 'green' | 'blue' | 'neutral' } {
   if (status === 'hit') return { text: tOutcome('statusHit'), tone: 'green' };
   if (status === 'miss') return { text: tOutcome('statusMiss'), tone: 'neutral' };
@@ -583,7 +584,7 @@ function outcomeLineText(
 function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalRowProps) {
   const t = useTranslations('goals');
   const tOutcome = useTranslations('outcomeLoop');
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: epic.id,
     disabled: !sortable,
@@ -778,7 +779,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
   // 그대로 재사용(§②-1 기존 상태 낱말, 새 키 0).
   const tBoard = useTranslations('board');
   const tc = useTranslations('common');
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
   const [isEditing, setIsEditing] = useState(false);

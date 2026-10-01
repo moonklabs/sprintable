@@ -11,13 +11,13 @@ import { getEntityHref } from '@/components/chat/embed-card';
 import { isLinkableRef } from '@/components/verify/evidence-section';
 import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { pickEulReulJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import type { EvidenceItem, EvidenceType } from '@/services/verify';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
 import { actorRowLabels, memberDisplayLabel } from '@/lib/member-display';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface ArtifactDetail {
   title: string | null;
@@ -217,7 +217,7 @@ export function ChatV3ContextPanel({
   const tVerify = useTranslations('verify');
   const tCommon = useTranslations('common');
   const locale = useLocale();
-  const { tz } = resolveDisplayTimezone();
+  const tz = useViewerTimeZone(); // story #4443 PR2b
   const artifact = useArtifactDetail(openArtifactId);
   const relatedNeedsMe = needsMe.find((item) => item.conversationId === conversationId) ?? null;
   // OFF 폴백(/inbox)은 이 화면 고유 맥락("오늘 결정 아니면 옛 큐로")이라 목적지 모듈이
@@ -363,7 +363,7 @@ export function ChatV3ContextPanel({
                 return (
                   <li key={item.id} className="text-xs">
                     <span className="text-foreground">{actorName}{pickIGaJosa(actorName)} {historyClaim(item, workItemRef.type, t, locale)}</span>
-                    <span className="ml-1.5 text-muted-foreground">{formatRelativeTime(item.created_at, locale, tz)}</span>
+                    <span className="ml-1.5 text-muted-foreground">{formatViewerRelativeTime(item.created_at, locale, tz)}</span>
                   </li>
                 );
               })}

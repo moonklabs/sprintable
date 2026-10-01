@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { pickIGaJosa } from '@/lib/korean-particle';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChatBubble } from './chat-bubble';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
@@ -37,6 +36,8 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { actorRowLabels } from '@/lib/member-display';
 import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { formatViewerDate } from '@/lib/viewer-time-zone';
 
 interface ChatViewProps {
   threadId: string;
@@ -87,13 +88,11 @@ const MAX_SCROLL_LOAD_ATTEMPTS = 10;
 // 같은 방식(Intl.DateTimeFormat 직접 호출 — 새 포맷 함수 신설 아님, 기존 정본과 동형 패턴)
 // 으로 하드코딩 'ko-KR'만 실제 locale로 교정한다. PR 분류표에 "기록/약속 밖(날짜 구분선)"으로
 // 별도 표기.
-function groupByDate(messages: ChatMessage[], locale: string, displayTimezone: string): MessageGroup[] {
+// story #4443 PR2b — grouped and labelled by the viewer's day (one zone for both); not known yet → one group, no label (never UTC)
+function groupByDate(messages: ChatMessage[], locale: string, displayTimezone: string | null): MessageGroup[] {
   const groups: Record<string, ChatMessage[]> = {};
-  const dateFmt = new Intl.DateTimeFormat(locale, {
-    year: 'numeric', month: 'long', day: 'numeric', timeZone: displayTimezone,
-  });
   for (const msg of messages) {
-    const date = dateFmt.format(new Date(msg.created_at));
+    const date = formatViewerDate(msg.created_at, locale, displayTimezone, { year: 'numeric', month: 'long', day: 'numeric' }) ?? '';
     (groups[date] ??= []).push(msg);
   }
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
@@ -162,7 +161,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story #3194 — 'agents' 네임스페이스의 viewConnectionSettings 키를 그대로 재사용(발명 0,
   // agent-management-tab.tsx의 동일 CTA와 문구 일치).
   const ta = useTranslations('agents');

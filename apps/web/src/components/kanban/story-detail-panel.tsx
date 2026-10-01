@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -69,6 +68,7 @@ import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 export interface Task {
   id: string;
@@ -382,7 +382,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
   // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/more');
@@ -2580,7 +2580,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                             <span>{commentAuthorLabels.get(comment.created_by) ?? authorLabel(comment.created_by)}</span>
                             <span>·</span>
-                            <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
+                            <span>{formatViewerRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
                         </li>
                       ))}
@@ -2614,7 +2614,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                             <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                               <span>{actorName}</span>
                               <span>·</span>
-                              <span>{formatRelativeTime(activity.created_at, locale, displayTimezone)}</span>
+                              <span>{formatViewerRelativeTime(activity.created_at, locale, displayTimezone)}</span>
                               {isLong ? (
                                 <Button
                                   type="button"

@@ -18,13 +18,13 @@ import {
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { orgRoleLabel } from '@/lib/org-role-label';
 import { memberRowLabels } from '@/lib/member-display';
 import { RowName } from '@/components/shared/row-name';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
@@ -34,7 +34,7 @@ import { RowName } from '@/components/shared/row-name';
 export function formatAgentRuntimeLine(
   agent: Pick<OrgAgent, 'client_version' | 'plugin_version' | 'session_started_at'>,
   locale: string,
-  displayTimezone: string,
+  displayTimezone: string | null,
   // story #4129 CI RED(check-i18n-keys.js) — 이 파라미터가 `t`였을 때, 이 파일의
   // `const t = useTranslations('settings')`(scripts/check-i18n-keys.js는 스코프를
   // 모르는 파일 단위 정적 매칭이라 함수 파라미터의 섀도잉을 못 본다)로 오귀속돼
@@ -51,7 +51,7 @@ export function formatAgentRuntimeLine(
     segments.push(translate('agentRuntimePluginSegment', { version: agent.plugin_version }));
   }
   if (agent.session_started_at) {
-    const relative = formatRelativeTime(agent.session_started_at, locale, displayTimezone);
+    const relative = formatViewerRelativeTime(agent.session_started_at, locale, displayTimezone);
     if (relative) segments.push(translate('agentRuntimeSessionSegment', { relative }));
   }
   if (segments.length === 0) return null;
@@ -120,7 +120,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const tc = useTranslations('common');
   const to = useTranslations('organization');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
   // story #4311(유나 비차단) — 행에 조직 역할 배지가 보이므로 그 글자를 roleLabel로 넘긴다(역할이 보이고 서로 다르면 꼬리 없음).

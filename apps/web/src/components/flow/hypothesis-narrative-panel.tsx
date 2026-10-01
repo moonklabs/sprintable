@@ -13,9 +13,10 @@ import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status
 import type { HypothesisStatus } from '@sprintable/core-storage';
 import { cn } from '@/lib/utils';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 지구층 가설 카드를 열면 그 가설의
@@ -136,11 +137,11 @@ export function HypothesisNarrativePanel({
     return () => { cancelled = true; };
   }, [hypothesisId, orgSyncVersion]);
 
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story #3493 — created_at/updated_at은 "기록"(정본 formatRelativeTime). measure_after는
   // 미래 계획 시각("약속")이라 relative decay가 아니라 §11-2 정본(formatScheduledAt).
-  const fmtDate = (iso: string) => formatRelativeTime(iso, locale, displayTimezone);
-  const fmtScheduled = (iso: string) => formatScheduledAt(iso, displayTimezone).display;
+  const fmtDate = (iso: string) => formatViewerRelativeTime(iso, locale, displayTimezone);
+  const fmtScheduled = (iso: string) => formatViewerScheduledAt(iso, displayTimezone).display;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>

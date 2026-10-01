@@ -21,8 +21,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { translateEntityStatus } from '@/components/chat/entity-status-labels';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEulReulJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { actorRowLabels, memberDisplayLabel } from '@/lib/member-display';
 import { STATE_TEXT } from './work-list-row';
@@ -33,6 +32,7 @@ import {
 } from './work-list-detail-actions';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface StoryDetail {
   self_reported: boolean | null;
@@ -253,7 +253,7 @@ export function WorkListDetailPanel({
   const tCommon = useTranslations('common');
   const tCage = useTranslations('cage');
   const locale = useLocale();
-  const { tz } = resolveDisplayTimezone();
+  const tz = useViewerTimeZone(); // story #4443 PR2b
   const { currentMemberType, orgId } = useDashboardContext();
 
   const [story, setStory] = useState<StoryDetail | null>(null);
@@ -748,7 +748,7 @@ export function WorkListDetailPanel({
                       <span className="text-foreground">
                         {actorName}{pickIGaJosa(actorName)} {historyClaim(log, t, locale)}
                       </span>
-                      <span className="ml-1.5 text-muted-foreground">{formatRelativeTime(log.created_at, locale, tz)}</span>
+                      <span className="ml-1.5 text-muted-foreground">{formatViewerRelativeTime(log.created_at, locale, tz)}</span>
                     </li>
                   );
                 })}

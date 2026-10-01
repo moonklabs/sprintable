@@ -30,7 +30,7 @@ export interface CommentReplyFailureNoteProps {
   /** channel_post와 같은 축(failure-action.ts::deriveFailureAction 재사용 — 신규
    * 발명 0, command_status 우선순위 진리표는 한 곳에서만 산다). */
   action: FailureAction;
-  displayTimezone: string;
+  displayTimezone: string | null;
   /** dead_letter 전용 — publication-commands/{id}/retry(공용 엔드포인트, content_kind
    * 무관, BE 신설 0)를 호출한다. command_id가 없으면(레이스) 호출부가 안 넘긴다. */
   onRetry?: () => Promise<CommentReplyRetryResult>;

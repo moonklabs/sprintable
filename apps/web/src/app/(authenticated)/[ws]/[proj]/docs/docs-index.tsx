@@ -9,8 +9,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { useDocsLayout, type Doc } from './docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
 import { DOC_STATUS_TONE, toDocStatusFilter, docStatusLabelKey, type DocStatusFilter } from '@/components/docs/lib/doc-status-tone';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #2955 §2/§6(doc docs-index-reader-redesign-handoff) — 셸 A "지식 인덱스". 미선택
@@ -57,7 +57,7 @@ export function DocsIndex() {
   const t = useTranslations('docs');
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
   const { tree, handleNewDoc, wsSlug, projSlug, loading, loadError, fetchTree } = useDocsLayout();
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null); // null = 전체
@@ -156,7 +156,7 @@ export function DocsIndex() {
 
   // story #3493 — doc.updated_at은 "기록"(마지막으로 편집된 시점) — 3436 묶음 8
   // 정본(formatRelativeTime)으로 통일.
-  const formatDate = (s: string | undefined) => (s ? formatRelativeTime(s, locale, displayTimezone) : '—');
+  const formatDate = (s: string | undefined) => (s ? formatViewerRelativeTime(s, locale, displayTimezone) : '—');
   const [lead, ...rest] = filtered;
 
   return (

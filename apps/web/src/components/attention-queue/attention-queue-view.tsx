@@ -6,8 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { ShieldCheck, ChevronRight } from 'lucide-react';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 import {
   parseAttentionQueueSignals, parseAttentionTruncatedKinds, buildAttentionQueueFromBe,
@@ -18,6 +17,7 @@ import { withProjectParam } from '@/lib/with-project-param';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 const CAP = 7;
 // 9ef0f914: story.trust_stage_changed 버스트(같은 story 연속 전이 등)를 단발 재조회로 병합.
@@ -55,7 +55,7 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
   // 않는다는 원칙).
   const navigable = item.href !== null;
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   return (
     <div
       role={navigable ? 'button' : undefined}
@@ -85,7 +85,7 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
         human={item.actor && !item.actor.isAgent ? { name: item.actor.name, role: '' } : undefined}
         agent={item.actor?.isAgent ? { name: item.actor.name } : undefined}
         gate={navigable ? { action: item.actionLabel, href: item.href!, tone: item.actionTone } : undefined}
-        duration={item.enteredStateAtMs !== null ? formatRelativeTime(new Date(item.enteredStateAtMs).toISOString(), locale, displayTimezone) : undefined}
+        duration={item.enteredStateAtMs !== null ? formatViewerRelativeTime(new Date(item.enteredStateAtMs).toISOString(), locale, displayTimezone) : undefined}
         className="rounded-none border-0"
       />
     </div>

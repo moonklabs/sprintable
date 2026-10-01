@@ -5,8 +5,8 @@ import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, Loader2, type 
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
@@ -21,6 +21,7 @@ import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/servi
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { keepHref } from '@/lib/with-project-param';
 import { actorRowLabels } from '@/lib/member-display';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -593,7 +594,7 @@ function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof u
 export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; refreshKey?: number }) {
   const t = useTranslations('cage');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [items, setItems] = useState<GateActivityLogItem[] | null>(null);
 
   // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — 「눌렀는데
@@ -642,7 +643,7 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
                 {adsBoostLabel ?? (labelKey ? t(labelKey) : item.action)}
                 {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
                 {/* story #3493 — 게이트 활동 로그 항목은 "기록"(정본 formatRelativeTime). */}
-                <span className="ml-1">· {formatRelativeTime(item.created_at, locale, displayTimezone)}</span>
+                <span className="ml-1">· {formatViewerRelativeTime(item.created_at, locale, displayTimezone)}</span>
               </li>
             );
           })}
@@ -779,6 +780,7 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
 function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isRecipeGate: boolean }) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('cage');
+  const viewerTz = useViewerTimeZone(); // story #4443 PR2b
   const draft = gate.linked_channel_draft;
 
   if (!draft) {
@@ -829,7 +831,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
       {draft.sealed_scheduled_at ? (
         <p className="text-muted-foreground">
           {t('linkedChannelDraftScheduledLabel')} ·{' '}
-          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+          <span className="text-foreground">{formatViewerScheduledAt(draft.sealed_scheduled_at, viewerTz).display}</span>
         </p>
       ) : null}
       <LinkedDraftVersionLine version={draft.version} />
@@ -884,6 +886,7 @@ function LinkedDraftVersionLine({ version }: { version: number }) {
 function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
   const t = useTranslations('cage');
   const flatHref = useFlatHref(); // story #4226 — flat 링크 `?p=`
+  const viewerTz = useViewerTimeZone(); // story #4443 PR2b
   const draft = gate.linked_site_draft;
   if (!draft) return null;
   const destinationLabel = draft.channel
@@ -899,7 +902,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
       {draft.sealed_scheduled_at ? (
         <p className="text-muted-foreground">
           {t('linkedChannelDraftScheduledLabel')} ·{' '}
-          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+          <span className="text-foreground">{formatViewerScheduledAt(draft.sealed_scheduled_at, viewerTz).display}</span>
         </p>
       ) : null}
       <LinkedDraftVersionLine version={draft.version} />
@@ -928,7 +931,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   // 복제해 두고 cage가 tContent를 넘겨 그 복제분을 썼다(#3367 주석 정정).
   const channelLabel = useChannelLabel();
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
@@ -949,9 +952,9 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <p>
               <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
               <span className="text-foreground">
-                {formatScheduledAt(facts.adsStartsAt, displayTimezone).display}
+                {formatViewerScheduledAt(facts.adsStartsAt, displayTimezone).display}
                 {' ~ '}
-                {formatScheduledAt(facts.adsEndsAt, displayTimezone).display}
+                {formatViewerScheduledAt(facts.adsEndsAt, displayTimezone).display}
                 {' '}
                 ({t('adsBoostScheduleDays', {
                   days: Math.round(
@@ -1033,7 +1036,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           {facts.newsletterSendScheduledAt ? (
             <p>
               <span className="text-muted-foreground">{t('newsletterSendScheduleLabel')} · </span>
-              <span className="text-foreground">{formatScheduledAt(facts.newsletterSendScheduledAt, displayTimezone).display}</span>
+              <span className="text-foreground">{formatViewerScheduledAt(facts.newsletterSendScheduledAt, displayTimezone).display}</span>
             </p>
           ) : null}
           <p>
@@ -1157,7 +1160,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.scheduledAt ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalScheduledAtLabel')} · </span>
-          <span className="text-foreground">{formatScheduledAt(facts.scheduledAt, displayTimezone).display}</span>
+          <span className="text-foreground">{formatViewerScheduledAt(facts.scheduledAt, displayTimezone).display}</span>
         </p>
       ) : null}
       {/* story #3367(3자기점검, 페드루 지적 2026-09-10·유나 CHANGES 정정) — AC7

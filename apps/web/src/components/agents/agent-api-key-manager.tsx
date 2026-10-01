@@ -20,8 +20,9 @@ import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker
 import { copyTextSafely } from '@/lib/clipboard';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface ApiKey {
   id: string;
@@ -45,7 +46,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(false);
   const [newKeyDialog, setNewKeyDialog] = useState(false);
@@ -322,16 +323,16 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
                     decay시키면 안 됨(음수 diff가 clamp돼 "지금"으로 오표시) — §11-2
                     정본(formatScheduledAt)으로 절대 표기. */}
                 <p className="text-xs text-muted-foreground">
-                  {t('agentApiKeyCreatedAt', { time: formatRelativeTime(key.created_at, locale, displayTimezone) })}
-                  {key.last_used_at && <>{' · '}{t('agentApiKeyLastUsedAt', { time: formatRelativeTime(key.last_used_at, locale, displayTimezone) })}</>}
-                  {key.revoked_at && <>{' · '}{t('agentApiKeyRevokedAt', { time: formatRelativeTime(key.revoked_at, locale, displayTimezone) })}</>}
+                  {t('agentApiKeyCreatedAt', { time: formatViewerRelativeTime(key.created_at, locale, displayTimezone) })}
+                  {key.last_used_at && <>{' · '}{t('agentApiKeyLastUsedAt', { time: formatViewerRelativeTime(key.last_used_at, locale, displayTimezone) })}</>}
+                  {key.revoked_at && <>{' · '}{t('agentApiKeyRevokedAt', { time: formatViewerRelativeTime(key.revoked_at, locale, displayTimezone) })}</>}
                 </p>
                 {key.expires_at && !key.revoked_at && (() => {
                   const expiresDate = new Date(key.expires_at);
                   const daysLeft = Math.ceil((expiresDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
                   const isExpired = daysLeft <= 0;
                   const isWarning = daysLeft > 0 && daysLeft <= 7;
-                  const expiresDisplay = formatScheduledAt(key.expires_at, displayTimezone).display;
+                  const expiresDisplay = formatViewerScheduledAt(key.expires_at, displayTimezone).display;
                   return (
                     <p className={`text-xs mt-0.5 ${isExpired ? 'text-destructive font-medium' : isWarning ? 'text-warning-strong font-medium' : 'text-muted-foreground'}`}>
                       {isExpired

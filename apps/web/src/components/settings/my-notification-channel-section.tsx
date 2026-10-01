@@ -10,10 +10,10 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface WebhookConfig {
   id: string;
@@ -46,10 +46,10 @@ function isWebhookUrlAllowed(url: string): boolean {
 // story #3493 — 웹훅 테스트 핑의 "언제 확認됐나"는 방금 벌어진 기록이라 §11-2
 // 절대형이 아니라 3436 묶음 8 정본(formatRelativeTime)이 맞다. 모듈 스코프 순수
 // 함수라 locale/tz를 인자로 받는다(훅은 컴포넌트 안에서만 호출 가능).
-function formatTs(ts: string | undefined, locale: string, displayTimezone: string): string {
+function formatTs(ts: string | undefined, locale: string, displayTimezone: string | null): string {
   if (!ts) return '';
   try {
-    return formatRelativeTime(ts, locale, displayTimezone);
+    return formatViewerRelativeTime(ts, locale, displayTimezone);
   } catch {
     return '';
   }
@@ -59,7 +59,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { addToast } = useToast();
 
   const [memberId, setMemberId] = useState<string | null>(null);
