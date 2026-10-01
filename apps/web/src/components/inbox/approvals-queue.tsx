@@ -17,7 +17,7 @@ import { gateTypeLabel } from '@/lib/gate-type-label';
 import { gateApproveLabelKey, sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/components/content/schedule-format';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -30,6 +30,7 @@ import { fetchGateById } from '@/lib/fetch-gate';
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { useTeamTimeZone } from '@/components/team-time-zone';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
@@ -144,6 +145,7 @@ function formatUndoRemaining(resolvedAtMs: number, t: ReturnType<typeof useTrans
 }
 
 export function ApprovalsQueue() {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4241 — 결재함은 조직 전체 목록이다. 행 링크는 «현재 프로젝트»가 아니라 결재 자신의 프로젝트를 싣는다(다른 프로젝트 결재를 열면
   // 셸도 그 프로젝트로 — 셸·본문 두 세계 방지). 프로젝트 무관 대상(null)은 지금처럼 현재 프로젝트. flatHref는 이미 실은 p를 보존한다.
@@ -561,9 +563,9 @@ export function ApprovalsQueue() {
                 {gate.sealed_ads_starts_at && gate.sealed_ads_ends_at ? (
                   <>
                     {' · '}
-                    {formatViewerScheduledAt(gate.sealed_ads_starts_at, displayTimezone).display}
+                    {formatScheduledAt(gate.sealed_ads_starts_at, teamTz, displayTimezone).display}
                     {' ~ '}
-                    {formatViewerScheduledAt(gate.sealed_ads_ends_at, displayTimezone).display}
+                    {formatScheduledAt(gate.sealed_ads_ends_at, teamTz, displayTimezone).display}
                   </>
                 ) : null}
                 {gate.sealed_ads_objective ? ` · ${adsBoostObjectiveLabel(gate.sealed_ads_objective, tContent)}` : ''}

@@ -5,6 +5,9 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { validateScheduledAt } from '@/components/content/validate-scheduled-at';
+import { teamOffsetCaption } from '@/components/content/schedule-format';
+import { useTeamTimeZone } from '@/components/team-time-zone';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #3422 ②-d 2/N(doc §11 T8) — 상신 시 scheduled_at 입력 UI. 검증은
 // validateScheduledAt(BE 실물 규칙 재현)을 그대로 재사용 — 이 다이얼로그는 그 결과를
@@ -25,7 +28,10 @@ export function ScheduleAtDialog({ open, onOpenChange, onSubmit, submitting, ser
   const [value, setValue] = useState('');
   const [touched, setTouched] = useState(false);
 
-  const validation = validateScheduledAt(value);
+  // story #4443 PR3b — the time is the team's (the org's zone): read in it, and say so when it is not the viewer's (Yuna 03:27Z)
+  const teamTz = useTeamTimeZone();
+  const orgOffset = teamOffsetCaption(new Date(), teamTz, useViewerTimeZone());
+  const validation = validateScheduledAt(value, teamTz);
   // 페드루 PO 지적(N1, 2026-09-04 12:3x) — value==='' 제외 조건 탓에 빈 값인 채로
   // 확인을 눌러도(touched=true·validation.valid=false) 아무 피드백이 없었다(버튼도
   // 안 막고 오류도 안 뜨고 onSubmit도 안 불림 — 사용자가 클릭이 씹혔다고 느낀다).
@@ -42,15 +48,24 @@ export function ScheduleAtDialog({ open, onOpenChange, onSubmit, submitting, ser
       <DialogContent data-testid="channel-post-schedule-at-dialog">
         <DialogHeader>
           <DialogTitle>{t('channelPostsScheduleAtDialogTitle')}</DialogTitle>
-          <DialogDescription>{t('channelPostsScheduleAtDialogDescription')}</DialogDescription>
+          {/* story #4443 PR3b (Yuna 03:47Z) — Korean breaks between words, not inside one («다 / 시» at 1440 · as 4847's disconnect dialog) */}
+          <DialogDescription className="break-keep">{t('channelPostsScheduleAtDialogDescription')}</DialogDescription>
         </DialogHeader>
-        <input
-          type="datetime-local"
-          value={value}
-          onChange={(e) => { setValue(e.target.value); setTouched(true); }}
-          className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
-          data-testid="channel-post-schedule-at-input"
-        />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <input
+            type="datetime-local"
+            value={value}
+            onChange={(e) => { setValue(e.target.value); setTouched(true); }}
+            className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+            aria-describedby={orgOffset ? 'channel-post-schedule-at-org-time' : undefined}
+            data-testid="channel-post-schedule-at-input"
+          />
+          {orgOffset ? (
+            <span id="channel-post-schedule-at-org-time" className="text-xs text-muted-foreground" data-testid="channel-post-schedule-at-org-time">
+              {t('scheduleOrgTimeCaption', { offset: orgOffset })}
+            </span>
+          ) : null}
+        </div>
         {showError ? (
           <p className="text-xs text-destructive" data-testid="channel-post-schedule-at-error">
             {validation.reason === 'past' ? t('channelPostsScheduleAtErrorPast') : t('channelPostsScheduleAtErrorInvalid')}

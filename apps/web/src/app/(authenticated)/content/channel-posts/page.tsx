@@ -17,7 +17,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt, formatScheduledAt } from '@/components/content/schedule-format';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
@@ -28,6 +28,7 @@ import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sa
 import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { useTeamTimeZone } from '@/components/team-time-zone';
 
 /**
  * story #3402(Phase1·마케팅운영, AC1/AC2/AC3, doc phase1-threads-post-manager-screen-design
@@ -118,6 +119,7 @@ function toStatusTab(status: string | undefined): Exclude<StatusTab, 'all'> {
 }
 
 export default function ChannelPostListPage() {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId } = useDashboardContext();
   // story #4017(PO 확定 2026-09-17) — 아래 대화 CTA(/chats)를 목적지 모듈로.
@@ -357,7 +359,7 @@ export default function ChannelPostListPage() {
         ) : draft.published_at ? (
           formatViewerScheduledAt(draft.published_at, displayTimezone).display
         ) : scheduled ? (
-          formatViewerScheduledAt(scheduled, displayTimezone).display
+          formatScheduledAt(scheduled, teamTz, displayTimezone).display
         ) : (
           '—'
         );

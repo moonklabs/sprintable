@@ -20,6 +20,13 @@ export function resolveDisplayTimezone(orgTimezone?: string | null): { tz: strin
   }
 }
 
+/** story #4443 PR3b (Yuna 03:27Z) — the caption beside a promised-time input: the team's offset («GMT+9») when it is not the
+ *  viewer's at that moment (Seoul ↔ Tokyo: none) · null when they agree or either zone is unknown. */
+export function teamOffsetCaption(at: Date, teamTz: string | null, viewerTz: string | null): string | null {
+  if (!teamTz || !viewerTz) return null;
+  return tzOffsetMs(at, teamTz) === tzOffsetMs(at, viewerTz) ? null : offsetLabel(at, teamTz);
+}
+
 /** story #4443 PR2b — a time in the viewer's own zone: never labelled with an offset (Yuna 22:45Z), and it does not ask the
  *  runtime which zone the viewer is in (in a server render that is the server's UTC, which would add «GMT+9» there and not in
  *  the browser). Not known yet (null) → nothing. */
@@ -105,7 +112,7 @@ function tzOffsetMs(utcInstant: Date, tz: string): number {
  * 따라 경계가 최대 한 시간 어긋날 수 있다. 지금 테스트가 고정하는 네 시간대(KST·UTC·
  * Honolulu·LA)는 전환 시각이 자정이 아니라 이 오차의 영향을 안 받는다 — 조직 시간대
  * 기능이 열려 자정 전환 tz가 실제로 들어올 때 재검토 대상으로 남겨 둔다. */
-function zonedWallClockToIso(dateKey: string, hh: number, mm: number, ss: number, ms: number, tz: string): string {
+export function zonedWallClockToIso(dateKey: string, hh: number, mm: number, ss: number, ms: number, tz: string): string {
   const [y, mo, d] = dateKey.split('-').map(Number);
   const utcGuess = Date.UTC(y, (mo ?? 1) - 1, d, hh, mm, ss, ms);
   const offset = tzOffsetMs(new Date(utcGuess), tz);
