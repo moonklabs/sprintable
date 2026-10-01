@@ -536,6 +536,9 @@ async def retry_dead_letter_command(
         select(PublicationCommand).where(
             PublicationCommand.id == command_id, PublicationCommand.org_id == org_id,
         ).with_for_update()
+        # story #4476 (Qadir 2선 ② · PO 16:53Z) — read the row again under the lock: a copy already in this session can be stale
+        # (two presses overlapping while the worker finishes the row) and would put a finished row back to pending
+        .execution_options(populate_existing=True)
     )).scalar_one_or_none()
     if command is None:
         return None
