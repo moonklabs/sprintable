@@ -235,6 +235,7 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     const line = $('boost-needs-check-reason')!;
     expect(line.textContent).toContain('100,000원');
     expect(line.textContent).toContain('그 예산으로 다시 요청');
+    expect(line.textContent).toContain('시작하지 않았어요'); // Yuna 10:19Z — the card's own verb («시작»)
     expect(line.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/draft-9?p=proj-1'); // carries the project (flat-link rule)
     expect($('boost-needs-check-retry-trigger')).toBeNull();
     expect($('boost-start-trigger')).toBeNull();
