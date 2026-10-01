@@ -23,13 +23,14 @@ def anyio_backend():
 
 # ─── 카탈로그 / PII 가드 ──────────────────────────────────────────────────────
 
-def test_event_catalog_has_canonical_27():
+def test_event_catalog_has_canonical_28():
     # story #4426 — 11 → 14: the three names the web was already sending (silent 422 before)
     # story #4424 — 14 → 17: the desktop setup's three server-written steps (code issued · confirmed · exchanged)
     # story #4424 — 17 → 24: two server marks (tools connected · first result) and the desktop app's five steps
     # story #4427 — 24 → 25: the desktop setup page's desktop_doc_opened (the login hand is the shell's — PO 09:58Z)
     # story #4433 — 25 → 27: the desktop app's agent ended early · agent restarted (Min 11:55Z · signals.agents_ended)
-    assert len(f.EVENT_CATALOG) == 27
+    # story #4452 — 27 → 28: the desktop app's agent start failed (선생님 check A · signals.agents_start_failed)
+    assert len(f.EVENT_CATALOG) == 28
     assert "config_generated" in f.EVENT_CATALOG and "verified" in f.EVENT_CATALOG
     assert len(f.BE_EMIT_EVENTS) == 13
     assert len(f.FAILURE_REASONS) == 8

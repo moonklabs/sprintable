@@ -1338,3 +1338,68 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     expect(row.previousElementSibling?.textContent).toContain('에이전트는 Sprintable 안의 일은 묻지 않고');
   });
 });
+
+// story 4452 (선생님 check A · PO 04:35Z) — setup 576b352b: Any (claude) and Lead (claude) connected their tools, Dev (codex) was
+// refused at start. The page lumped Dev into «not connected» and, 30 s after a person's input, the «연결 안 됨 · 폴더 믿기 · IT»
+// card took the whole progress over. Now Dev has its own block with the real reason; the steps stay; no takeover card.
+describe('[SID:4452] an agent the shell could not start', () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'Date'] }); vi.setSystemTime(Date.parse('2026-10-01T04:20:00Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+  const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); }); };
+  const ANY = 'aaaaaaaa-0000-4000-8000-000000000001'; const DEV = 'aaaaaaaa-0000-4000-8000-000000000002'; const LEAD = 'aaaaaaaa-0000-4000-8000-000000000003';
+  const setup576 = (failed: unknown[] | undefined) => ({
+    setup_id: SETUP_ID, device_name: 'jayui-MacBookPro', state: 'handed_over', recipe_name: '칸반 심플', work_item_id: 'w-1',
+    members: [
+      { stage: 'task_created', role: 'Any', member_id: ANY, kind: 'agent', runtime: 'claude' },
+      { stage: 'in_progress', role: 'Dev', member_id: DEV, kind: 'agent', runtime: 'codex' },
+      { stage: 'done_check', role: 'Lead', member_id: LEAD, kind: 'agent', runtime: 'claude' },
+    ],
+    signals: {
+      tools_connected: [{ member_id: ANY, at: '2026-10-01T04:17:06Z' }, { member_id: LEAD, at: '2026-10-01T04:17:09Z' }],
+      first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null,
+      first_screen_human_input_at: '2026-10-01T04:19:12Z', // 48 s ago — past the 30 s that showed the takeover card
+      ...(failed ? { agents_start_failed: failed } : {}),
+    },
+  });
+  const block = () => container.querySelector('[data-testid=setup-agent-start-failed]');
+
+  it('Dev refused at start (its adapter would not prepare): its own block with the reason · no «연결 안 됨» card · the steps stay', async () => {
+    statusNow = () => setup576([{ member_id: DEV, at: '2026-10-01T04:17:10Z', reason: 'start_refused', code: 'adapter_prepare_failed', runtime: 'codex', limit: null, first_member_id: null }]);
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(text()).not.toContain('연결되지 않았어요'); // ⑦ «not connected» — the card that covered everything
+    expect(container.querySelector('ol')).not.toBeNull(); // the progress is still there
+    expect(block()?.textContent).toContain('개발자 에이전트를 시작하지 못했어요'); // the role as the page names it (Dev → 개발자)
+    expect(block()?.textContent).toContain('Codex가 시작되지 않았어요 — 터미널에서 Codex를 한 번 실행해 첫 화면을 확인한 뒤 다시 시도해 주세요');
+    expect(block()?.textContent).toContain('창 아래 «이 컴퓨터의 에이전트»의 알림에서 [다시 시도]를 눌러 주세요');
+    expect(block()?.querySelector('button')).toBeNull(); // starting is the app's
+    // ① waits only on Dev, which did not start: a still ring, not a spinner
+    expect((container.querySelectorAll('ol > li[data-state]')[0] as HTMLElement).dataset.paused).toBe('true');
+  });
+
+  it('each reason by the next thing to do: session cap with its n · first agent not ready names that role · unknown code → the general line', async () => {
+    statusNow = () => setup576([
+      { member_id: DEV, at: '2026-10-01T04:17:10Z', reason: 'start_refused', code: 'session_limit', runtime: 'codex', limit: 3, first_member_id: null },
+      { member_id: LEAD, at: '2026-10-01T04:17:10Z', reason: 'first_not_ready', code: 'timeout', runtime: 'claude', limit: null, first_member_id: ANY },
+    ]);
+    // Lead counts as failed only while it has no tools connection — take its connection out for this case
+    const s = statusNow() as ReturnType<typeof setup576>; s.signals.tools_connected = s.signals.tools_connected.filter((c) => c.member_id !== LEAD);
+    statusNow = () => s;
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    const rows = [...container.querySelectorAll('[data-testid=setup-agent-start-failed-row]')].map((r) => [(r as HTMLElement).dataset.line, r.textContent]);
+    expect(rows.map((r) => r[0])).toEqual(['sessionLimit', 'firstNotReady']); // the flow's order
+    expect(rows[0]![1]).toContain('동시에 열 수 있는 세션은 3개예요');
+    expect(rows[1]![1]).toContain('누구나 에이전트가 아직 준비되지 않아 띄우지 않았어요'); // the agent it waited on, by its role (Any → 누구나)
+  });
+
+  it('it connected after all (the report is cleared by the server · or a connection is seen): no block · the usual progress', async () => {
+    statusNow = () => { const s = setup576([{ member_id: DEV, at: '2026-10-01T04:17:10Z', reason: 'start_refused', code: 'spawn_failed', runtime: 'codex', limit: null, first_member_id: null }]); s.signals.tools_connected.push({ member_id: DEV, at: '2026-10-01T04:19:30Z' }); return s; };
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(block()).toBeNull();
+  });
+});

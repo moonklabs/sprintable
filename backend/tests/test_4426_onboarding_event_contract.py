@@ -116,6 +116,7 @@ _DESKTOP_META = {
     "desktop_setup_signed_in": {},
     "desktop_agent_ended_early": {"member_id": str(uuid.uuid4()), "runtime": "claude", "exit_code": 1},
     "desktop_agent_restarted": {"member_id": str(uuid.uuid4())},
+    "desktop_agent_start_failed": {"member_id": str(uuid.uuid4()), "reason": "start_refused", "code": "adapter_prepare_failed", "runtime": "codex"},  # story #4452
 }
 
 @pytest.mark.anyio

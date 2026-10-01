@@ -127,6 +127,33 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         {/* while an agent is stopped, ③ does not spin — nothing is moving (Yuna v26); ① · ② likewise when all they wait for stopped (v29) */}
         <Step state={progress.result} paused={!!progress.stopped} label={progress.result === 'done' ? t('stepResultDone') : t('stepResultRunning')} detail={null} />
       </ol>
+      {progress.startFailed.length > 0 ? (
+        // story 4452 (Yuna 04:41Z · 04:43Z · v31): an agent the shell could not start — its own block, before a stopped one, with
+        // the real reason (the next thing to do), never red, no button here (starting is the app's: the notice's [다시 시도])
+        <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-start-failed">
+          {progress.startFailed.map((f) => {
+            const name = f.role ? role(f.role) : '';
+            const runtime = f.runtime ? RUNTIME[f.runtime] : null;
+            // each line by its own key (the dead-key check reads them) · particles picked for the name (never a fixed 를/가)
+            const rt = runtime ? { runtime, eulReul: pickEulReulJosa(runtime), iGa: pickIGaJosa(runtime) } : null;
+            const line = f.line === 'sessionLimit' ? (f.limit ? t('startFailed.sessionLimit', { n: f.limit }) : t('startFailed.sessionLimitNoN'))
+              : f.line === 'runtimeMissing' ? (rt ? t('startFailed.runtimeMissing', rt) : t('startFailed.unknown'))
+              : f.line === 'runtimeDidNotStart' ? (rt ? t('startFailed.runtimeDidNotStart', rt) : t('startFailed.unknown'))
+              : f.line === 'credentials' ? t('startFailed.credentials')
+              : f.line === 'keyUnreadable' ? t('startFailed.keyUnreadable')
+              : f.line === 'firstNotReady' ? (f.firstRole ? t('startFailed.firstNotReady', { firstRole: role(f.firstRole) }) : t('startFailed.firstNotReadyNoRole'))
+              : f.line === 'notConnected' ? t('startFailed.notConnected')
+              : t('startFailed.unknown');
+            return (
+              <div key={f.memberId} data-testid="setup-agent-start-failed-row" data-line={f.line}>
+                <p>{endsWithAgentWord(name, locale) ? t('startFailed.titleBare', { role: name, josa: pickEulReulJosa(name) }) : t('startFailed.title', { role: name })}</p>
+                <p className="text-muted-foreground">{line}</p>
+              </div>
+            );
+          })}
+          <p className="text-muted-foreground">{t('startFailed.where')}</p>
+        </div>
+      ) : null}
       {progress.stopped ? (
         // story 4433 (Yuna v26): one block under the steps, above «결과 보기» · the roles on one line · body colour (there is
         // something to do), never red (the cause can be a person's own choice) · no cause guessed: «멈췄어요» covers both

@@ -57,6 +57,8 @@ EVENT_DOC_OPENED = "desktop_doc_opened"
 # story #4433 (Min 11:55Z) — sent by the desktop app: an agent's session ended early · the person restarted it
 EVENT_AGENT_ENDED_EARLY = "desktop_agent_ended_early"
 EVENT_AGENT_RESTARTED = "desktop_agent_restarted"
+EVENT_AGENT_START_FAILED = "desktop_agent_start_failed"  # story #4452
+from app.services.onboarding_funnel import START_FAILED_CODES, START_FAILED_REASONS  # noqa: E402
 from app.services.onboarding_funnel import EXIT_CODE_RANGE as _EXIT_CODE_RANGE  # noqa: E402
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
 RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
@@ -790,6 +792,46 @@ def _agents_ended(setup: DesktopSetup, rows) -> list[dict]:
     return out
 
 
+def _agents_start_failed(setup: DesktopSetup, rows) -> list[dict]:
+    """story #4452 (선생님 check A · PO 04:35Z) — per agent of this setup that the shell could not start: its last such report
+    (reason · the daemon's code · runtime · a session cap · the agent it waited on), unless the agent connected its tools or was
+    restarted after it. Proven rows only; a member id that is not one of this setup's agents is ignored, and every value is read
+    back through the same closed sets (None otherwise — the web never shows free text). The setup's own agent order."""
+    order: list[str] = []
+    for m in setup.members or []:
+        mid = str(m.get("member_id") or "")
+        if m.get("kind") == "agent" and mid and mid not in order:
+            order.append(mid)
+    failed: dict[str, tuple[dict, datetime]] = {}
+    cleared: dict[str, datetime] = {}
+    for e, meta, at in rows:  # oldest first — the last write wins
+        mid = str((meta or {}).get("member_id") or "")
+        if mid not in order:
+            continue
+        if e == EVENT_AGENT_START_FAILED:
+            failed[mid] = (meta or {}, at)
+        elif e in (EVENT_TOOLS_CONNECTED, EVENT_AGENT_RESTARTED):
+            cleared[mid] = at
+    out = []
+    for mid in order:
+        if mid not in failed:
+            continue
+        meta, at = failed[mid]
+        if mid in cleared and cleared[mid] >= at:
+            continue  # it started after all (tools connected · restarted)
+        limit = meta.get("limit")
+        first = str(meta.get("first_member_id") or "")
+        out.append({
+            "member_id": mid, "at": at,
+            "reason": meta.get("reason") if meta.get("reason") in START_FAILED_REASONS else None,
+            "code": meta.get("code") if meta.get("code") in START_FAILED_CODES else None,
+            "runtime": meta.get("runtime") if meta.get("runtime") in BLOCKED_RUNTIMES else None,
+            "limit": limit if isinstance(limit, int) and not isinstance(limit, bool) and 0 < limit < 1000 else None,
+            "first_member_id": first if first in order and first != mid else None,
+        })
+    return out
+
+
 async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID) -> dict:
     """PO 08:31Z — one read for the web's progress line, the folder-fallback notice and failure ⑥: the setup's state and the
     signals read from its events (session_id = the setup id). A signal that has not happened is None, never guessed."""
@@ -826,6 +868,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     screen_input = first(EVENT_FIRST_SCREEN_INPUT)
     recipe = await _recipe_ref(db, setup)
     agents_ended = _agents_ended(setup, rows)
+    agents_start_failed = _agents_start_failed(setup, rows)
     return {
         "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
         "recipe_name": recipe["name"] if recipe else None,
@@ -839,6 +882,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             "workdir_fallback_at": fallback[1] if fallback else None,
             "first_screen_human_input_at": screen_input[1] if screen_input else None,
             "agents_ended": agents_ended,
+            "agents_start_failed": agents_start_failed,
             "blocked": {
                 "at": blocked[1],
                 "reason": reason if reason in BLOCKED_REASONS else None,

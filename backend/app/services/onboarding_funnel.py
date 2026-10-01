@@ -48,6 +48,9 @@ DESKTOP_SHELL_EMIT_EVENTS = frozenset({
     # story #4433 (Min 11:55Z) — an agent's session ended early (meta member_id · runtime · exit_code) and the person restarted
     # it (meta member_id); the setup status reads them as signals.agents_ended
     "desktop_agent_ended_early", "desktop_agent_restarted",
+    # story #4452 (선생님 check A · PO 04:35Z) — an agent of the setup could not be started (meta member_id · reason · code ·
+    # runtime · limit · first_member_id); the setup status reads it as signals.agents_start_failed
+    "desktop_agent_start_failed",
 })
 # story #4438 (PO 18:42Z) — the meta of each name the desktop app sends, one closed shape per name, checked at the entrance
 # (POST /onboarding/events): a known field of the wrong kind or with an unknown value → 422 `invalid_meta`, nothing stored; a
@@ -60,6 +63,14 @@ BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
 BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
 AGENT_RUNTIMES = frozenset({"claude", "codex"})
 EXIT_CODE_RANGE = range(-(2**31), 2**31)
+# story #4452 — why the shell could not start an agent: its reason, and for a refusal the daemon's closed code (desktop-protocol:
+# adapter_prepare_failed · spawn_failed split out of profile_invalid so the reason is the real one) or the first agent's wait
+# (ended · timeout). The web words each one (Yuna 04:41Z); free text is never sent.
+START_FAILED_REASONS = frozenset({"runtime_missing", "credentials_refused", "start_refused", "key_unreadable", "first_not_ready"})
+START_FAILED_CODES = frozenset({
+    "session_limit", "credentials_missing", "profile_invalid", "unknown_profile", "adapter_prepare_failed", "spawn_failed",
+    "not_connected", "bad_reply", "ended", "timeout",
+})
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
@@ -102,6 +113,14 @@ DESKTOP_SHELL_META_SHAPES: dict[str, dict[str, dict]] = {
         "exit_code": _field(False, type="int32"),
     },
     "desktop_agent_restarted": {"member_id": _field(True, type="uuid")},
+    "desktop_agent_start_failed": {
+        "member_id": _field(True, type="uuid"),
+        "reason": _field(True, enum=sorted(START_FAILED_REASONS)),
+        "code": _field(False, enum=sorted(START_FAILED_CODES)),
+        "runtime": _field(False, enum=sorted(AGENT_RUNTIMES)),
+        "limit": _field(False, type="int32"),  # session_limit's cap (the status read keeps a positive one only)
+        "first_member_id": _field(False, type="uuid"),  # first_not_ready: the agent it waited on (the web names its role)
+    },
 }
 
 
