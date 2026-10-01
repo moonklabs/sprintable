@@ -46,6 +46,10 @@ _NON_TERMINAL_STATUSES = ("pending", "in_progress", "blocked")
 OP_BOOST_START = "boost_start"
 OP_PAUSE = "pause"
 OP_RESUME = "resume"
+# story #4447 (PO 08:13Z · 08:34Z) — the commands that only stop money: never refused for their seal (a pause pressed before a
+# re-seal must still switch the campaign off). Everything else is seal-checked by default — a new operation that spends is checked
+# without anyone remembering to add it (the exempt list is pinned by test_4447_ads_boost_states_contract.py).
+MONEY_STOPPING_OPS: frozenset[str] = frozenset({OP_PAUSE})
 
 # story #3806(Phase3·3-2 PR 13) — process_one_ads_boost_command 실행 성공 지점의
 # ActivityLog action 키. FE gate-evidence.tsx::GATE_ACTIVITY_LABEL_KEY와 1:1 대응.
@@ -260,11 +264,13 @@ async def _request_toggle(
     # story #3806(Phase3·3-2 PR 13 정정) — gate_id로 스코프(위 _latest_toggle
     # docstring과 동형 이유) — 감액 재봉인으로 approved_version이 바뀌어도 "이
     # 게이트가 시작된 적 있나"는 그대로 참이어야 한다.
+    # story #4447 (Qadir 4870 ②) — a re-approval gives the gate a second boost_start (one per approved version):
+    # scalar_one_or_none() raised MultipleResultsFound and pause/resume failed after any re-approval + start. «Ever started».
     started = (await db.execute(
         select(PublicationCommand.id).where(
             PublicationCommand.gate_id == gate.id,
             PublicationCommand.operation == OP_BOOST_START,
-        )
+        ).limit(1)
     )).scalar_one_or_none()
     if started is None:
         raise AdsBoostNotStartedError(gate.id)
@@ -427,6 +433,15 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
         raise AdsBoostAdapterUnavailableError(
             "ADS_BOOST_GATE_NOT_APPROVED", f"gate no longer approved (status={gate.status}): {gate.id}",
         )
+    # story #4447 (Qadir 4870 07:19Z) — a command that spends must belong to the gate's current seal. A re-seal voids only
+    # *pending* commands; an older seal's stopped start (dead_letter · blocked) could still be retried by hand or adopted, and ran
+    # with that older approval (its budget · its content). Every execution path (worker · retry · adopt) passes here: refuse before
+    # any call. PO 08:13Z — a pause stops money, so it is never refused for its seal: a pause pressed before a re-seal and retried
+    # after it must still switch the campaign off. Only the money-stopping operations are exempt (fail-closed for new ones).
+    if command.operation not in MONEY_STOPPING_OPS and command.approved_version != gate.sealed_ads_boost_version_id:
+        raise AdsBoostAdapterUnavailableError(
+            SEAL_REPLACED_CODE, f"command belongs to a replaced seal ({command.approved_version}); current: {gate.sealed_ads_boost_version_id}",
+        )
 
     conn = (await db.execute(
         select(ChannelConnection).where(ChannelConnection.id == gate.sealed_ads_connection_id)
@@ -539,10 +554,13 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
     from app.services.meta_ads_campaign import parse_meta_time
     from app.services.publication_command import retry_dead_letter_command
 
+    # story #4447 (Qadir 07:19Z ②) — only the start of the gate's current seal (an older seal's «outcome unknown» start is not
+    # this boost's to adopt; the execution context refuses it anyway — this keeps adopt from even picking it)
+    current_seal = select(Gate.sealed_ads_boost_version_id).where(Gate.id == gate_id).scalar_subquery()
     command = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id,
-            PublicationCommand.operation == OP_BOOST_START,
+            PublicationCommand.operation == OP_BOOST_START, PublicationCommand.approved_version == current_seal,
         ).order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc()).limit(1)
     )).scalar_one_or_none()
     run = (await db.execute(
@@ -637,6 +655,7 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
 ACCOUNT_CURRENCY_MISMATCH_CODE = "ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH"
 # story #4417 — a start/resume that reaches the worker after the run was blocked for an unreadable spend
 SPEND_BLOCKED_CODE = "ADS_BOOST_SPEND_BLOCKED"
+SEAL_REPLACED_CODE = "ADS_BOOST_SEAL_REPLACED"  # story #4447 — the command is of an older seal (see _resolve_execution_context)
 
 
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
@@ -648,8 +667,8 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     from app.services.provider_call_mark import provider_call_marked
     from app.services.publication_command import (
         PRE_CALL_ERROR_CODE,
-        STATUS_BLOCKED_UNAPPROVED,
         apply_command_failure,
+        mark_blocked_unapproved,
         record_publication_attempt,
     )
 
@@ -658,11 +677,12 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         ctx = await _resolve_execution_context(db, command)
     except AdsBoostAdapterUnavailableError as exc:
         await record_publication_attempt(
-            db, command=command, approval_check="missing" if exc.code == "ADS_BOOST_GATE_NOT_APPROVED" else "ok",
+            db, command=command, approval_check="missing" if exc.code in ("ADS_BOOST_GATE_NOT_APPROVED", SEAL_REPLACED_CODE) else "ok",
             adapter_called=False, started_at=attempt_started_at, finished_at=now, result_code=None,
         )
-        command.status = STATUS_BLOCKED_UNAPPROVED
-        command.last_error = str(exc)[:2000]
+        # story #4447 (Qadir 4870 ①) — the shared shape (`mark_blocked_unapproved`), with the reason code: this path wrote the
+        # status and the error text only, so the card (error_code = reason_code) could not say why the start stopped or what next
+        mark_blocked_unapproved(command, reason_code=exc.code, last_error=str(exc))
         return
 
     gate, module = ctx["gate"], ctx["module"]

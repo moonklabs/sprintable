@@ -179,17 +179,32 @@ async def _start_command(Session, org_id, gate_id, owner_id):
         ))).scalar_one()
 
 
-async def _second_start_command(Session, first) -> uuid.UUID:
-    """A second boost_start for the same gate — what a re-approval produces (commands are unique per approved version)."""
+async def _second_start_command(Session, first, *, reseal: bool = False, same_seal: bool = False) -> uuid.UUID:
+    """A second boost_start for the same gate — what a re-approval produces (commands are unique per approved version).
+
+    story #4447 (Qadir 07:15Z) — `reseal=True` also moves the gate's seal to that version, as the real re-approval does (every
+    re-seal issues a new sealed_ads_boost_version_id): without it the gate still points at the first version, a state that does
+    not happen.
+
+    `same_seal=True` (story #4447) — a second start of the *current* seal (same approved_version, toggle_seq 1 to pass the
+    idempotency key). Real data cannot hold it (a start is toggle 0, one per seal), and the execution context now refuses a start
+    of an older seal before any call — so two starts can only race in a test that builds this duplicate. The campaign-creation
+    claim tests use it: the claim stays a guard of its own behind the seal check."""
+    from sqlalchemy import update
+
+    from app.models.gate import Gate
     from app.models.publication_command import PublicationCommand
 
     second = PublicationCommand(
         id=uuid.uuid4(), org_id=first.org_id, gate_id=first.gate_id, destination=first.destination,
-        approved_version=uuid.uuid4(), operation=first.operation, toggle_seq=0, content_kind=first.content_kind,
+        approved_version=first.approved_version if same_seal else uuid.uuid4(), operation=first.operation,
+        toggle_seq=1 if same_seal else 0, content_kind=first.content_kind,
         status="pending", requested_by_member_id=first.requested_by_member_id, initiated_by=first.initiated_by,
     )
     async with Session() as s:
         s.add(second)
+        if reseal:
+            await s.execute(update(Gate).where(Gate.id == first.gate_id).values(sealed_ads_boost_version_id=second.approved_version))
         await s.commit()
     return second.id
 
@@ -265,7 +280,7 @@ async def test_two_start_commands_of_one_gate_in_two_workers_create_the_campaign
     calls = _spy_create(monkeypatch, delay=0.5)
     try:
         first = await _start_command(Session, org_id, gate_id, owner_id)
-        second_id = await _second_start_command(Session, first)
+        second_id = await _second_start_command(Session, first, same_seal=True)
         await asyncio.gather(_tick(Session), _tick(Session))  # two workers, one command each (SKIP LOCKED)
         assert calls == [1], f"the campaign was created {len(calls)} times"
         commands = [await _command(Session, first.id), await _command(Session, second_id)]
@@ -351,7 +366,7 @@ async def test_mutation_without_the_claim_two_workers_create_twice(monkeypatch):
     calls = _spy_create(monkeypatch, delay=0.5)
     try:
         first = await _start_command(Session, org_id, gate_id, owner_id)
-        await _second_start_command(Session, first)
+        await _second_start_command(Session, first, same_seal=True)
         await asyncio.gather(_tick(Session), _tick(Session))
         assert len(calls) == 2  # the double spend the claim prevents
     finally:

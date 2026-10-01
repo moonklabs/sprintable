@@ -774,13 +774,19 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         OP_BOOST_START,
         expected_campaign_name,
     )
+    from app.services.publication_command import human_retryable
 
     # story #4409 — the newest start command: a re-approval gives the same gate a second boost_start (commands are unique per
     # approved version), where scalar_one_or_none() raised MultipleResultsFound.
+    # story #4447 — a voided start (its approval was replaced) is not «the» start: the screen draws from the valid approval.
+    # Qadir 4870 (06:47Z) ② — nor is a start of an earlier seal: a re-seal voids only the *pending* commands, so an old start that
+    # had already stopped (dead_letter · blocked) stayed «the» start and the card never offered «홍보 시작» for the new approval.
+    # Only the start of the gate's current seal (every re-seal issues a new sealed_ads_boost_version_id = the command's version).
     boost_start_command = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id,
-            PublicationCommand.operation == OP_BOOST_START,
+            PublicationCommand.operation == OP_BOOST_START, PublicationCommand.status != "voided",
+            PublicationCommand.approved_version == gate.sealed_ads_boost_version_id,
         ).order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc()).limit(1)
     )).scalar_one_or_none()
 
@@ -825,6 +831,8 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
             {
                 "id": boost_start_command.id, "status": boost_start_command.status,
                 "failure_kind": boost_start_command.failure_kind, "error_code": boost_start_command.reason_code,
+                # story #4447 — whether a person may retry it (the endpoint's own rule); the router keeps it for people only
+                "human_retryable": human_retryable(boost_start_command),
                 # the campaign the person has to look for — only when the outcome is unknown
                 "campaign_name": (
                     await expected_campaign_name(db, gate)

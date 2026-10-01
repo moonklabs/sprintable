@@ -3,6 +3,7 @@
 import type { useTranslations } from 'next-intl';
 import type { AdsBoostSummaryView } from './types';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { BOOST_RUN_STATUSES } from '@/lib/ads-boost-states.generated';
 
 // story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
 // insights-board-metric-cell.tsx의 「네 갈래 셀 관례」를 그대로 재사용(§절 원문:
@@ -14,8 +15,9 @@ import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components
 // 상태 판정(BE가 주는 신호만으로, 지어내지 않는다):
 //   ① adsBoost === null           → 「해당 없음」(이 발행물에 홍보 요청 자체가 없음)
 //   ② run_status ∈ {null,'pending'} → 「집계 대기」(요청·승인은 됐으나 아직 실행 前)
-//   ③ run_status === 'failed'     → 「미제공」(실행이 실패해 값을 못 낸다)
-//   ④ run_status ∈ {'running','paused'} → 값(광고비 {지출} / {승인예산} + 잔여,
+//   ③ run_status가 계약 밖 값      → 「미제공」(story #4447 — 서버 계약 BOOST_RUN_STATUSES 밖이면 상태를 모른다. 예전 'failed'는
+//      서버가 한 번도 쓰지 않는 값이었다)
+//   ④ run_status ∈ {'running','paused','pause_pending'} → 값(광고비 {지출} / {승인예산} + 잔여,
 //      잔여 음수는 「초과」)
 
 export interface AdsSpendCellProps {
@@ -32,7 +34,7 @@ export function AdsSpendCell({ adsBoost, tBoard, tContent, locale }: AdsSpendCel
     return <span className="text-muted-foreground" data-testid="ads-spend-cell-none">{tBoard('adsSpendNotApplicable')}</span>;
   }
 
-  if (adsBoost.run_status === 'failed') {
+  if (adsBoost.run_status !== null && !(BOOST_RUN_STATUSES as readonly string[]).includes(adsBoost.run_status)) {
     return <span className="text-muted-foreground" data-testid="ads-spend-cell-unavailable">{tBoard('adsSpendUnavailable')}</span>;
   }
 
