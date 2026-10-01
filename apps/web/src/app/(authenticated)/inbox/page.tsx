@@ -27,7 +27,7 @@ import { formatAtLeast } from '@/lib/format-at-least';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { InboxTopBarTitle, useInboxTabLabels } from '@/components/nav/flat-tab-top-bar';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
-import { formatViewerDate } from '@/lib/viewer-time-zone';
+import { dayKeyIn, formatViewerDate, shiftDayKey } from '@/lib/viewer-time-zone';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
@@ -469,9 +469,10 @@ export default function InboxPage() {
 
   // 목업 ③: inboxItems를 날짜 버킷(오늘/어제/날짜)으로 묶어 section 라벨 삽입(dense list 가독).
   const inboxSections = useMemo(() => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfYesterday = startOfToday - 86400000;
+    // story #4443 PR3a — «today» / «yesterday» are the viewer's days (was the runtime's local midnight — the server's UTC in a
+    // server render); not known yet → no bucket label at all
+    const todayKey = displayTimezone ? dayKeyIn(new Date().toISOString(), displayTimezone) : null;
+    const yesterdayKey = todayKey ? shiftDayKey(todayKey, -1) : null;
     // story #3493(페드루 PO 보정) — 오늘/어제보다 오래된 날짜 버킷 라벨은
     // "기록"도 "약속"도 아닌 셋째 자리(날짜만 묶는 section 헤더, 시각 불요).
     // formatScheduledAt(...).display에서 "MM-DD"를 문자열로 발췌하던 첫 처방은
@@ -481,8 +482,10 @@ export default function InboxPage() {
     // 패턴 — 새 포맷 함수 신설 아님)으로 맞춘다.
     // story #4443 PR2b — the viewer's day through formatViewerDate (not known yet → no label, never the UTC day)
     const labelFor = (time: number) => {
-      if (time >= startOfToday) return t('dateToday');
-      if (time >= startOfYesterday) return t('dateYesterday');
+      if (!displayTimezone) return '';
+      const key = dayKeyIn(new Date(time).toISOString(), displayTimezone);
+      if (key === todayKey) return t('dateToday');
+      if (key === yesterdayKey) return t('dateYesterday');
       return formatViewerDate(new Date(time), locale, displayTimezone, { month: '2-digit', day: '2-digit' }) ?? '';
     };
     const sections: { label: string; items: InboxItem[] }[] = [];

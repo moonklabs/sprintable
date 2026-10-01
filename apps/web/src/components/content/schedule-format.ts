@@ -35,14 +35,6 @@ export function toDateKey(iso: string, tz: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 }
 
-/** 이 런타임(= 보는 사람의 브라우저)의 시간대. 서버에서 부르면 서버 시간대라 «보는 사람»이 아니다 — 서버 컴포넌트는 null을 넘긴다. */
-function runtimeTimezone(): string | null {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
-  } catch {
-    return null;
-  }
-}
 
 /** «GMT+9» · «GMT-7» · «GMT+5:30» · UTC는 «GMT» — `shortOffset`은 로케일과 무관하게 같은 모양이 되도록 en-US로 고정(유나 판정 · ko/en 같게). */
 function offsetLabel(date: Date, tz: string): string {
@@ -61,7 +53,9 @@ function offsetLabel(date: Date, tz: string): string {
 export function formatScheduledAt(
   iso: string,
   tz: string | null,
-  viewerTz: string | null = runtimeTimezone(),
+  // story #4443 PR3a (Kadir 4867 second line) — required: the viewer's zone is named by the caller, never asked of the runtime
+  // (in a server render the runtime is UTC: a Seoul viewer's own time got «GMT+9» there and not in the browser)
+  viewerTz: string | null,
 ): { display: string; utcNote: string } {
   // story #4443 PR2b — the viewer's zone not known yet (a first visit's server render and hydration): nothing to draw, never UTC
   if (!tz) return { display: '', utcNote: '' };

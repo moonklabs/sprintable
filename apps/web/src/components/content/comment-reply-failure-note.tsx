@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import type { FailureAction } from '@/components/content/failure-action';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 
@@ -73,7 +73,7 @@ export function CommentReplyFailureNote({
     return (
       <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-failure-note">
         {action.nextRetryAt
-          ? t('commentsReplyFailureRetrying', { time: formatScheduledAt(action.nextRetryAt, displayTimezone).display })
+          ? t('commentsReplyFailureRetrying', { time: formatViewerScheduledAt(action.nextRetryAt, displayTimezone).display })
           : t('commentsReplyFailureRetryingSoon')}
       </p>
     );

@@ -1,5 +1,7 @@
 import type { AgentRunFailureDisposition, RetryableFailureInput } from './agent-retry';
 import { getFailureDisposition } from './agent-retry';
+import { dateKeysToInstants } from '@/components/content/schedule-format';
+import { dayKeyIn, shiftDayKey } from '@/lib/viewer-time-zone';
 
 export const DEFAULT_RUN_STATUS_FILTER = 'completed';
 export const ALL_RUN_STATUS_FILTER = 'all';
@@ -26,35 +28,20 @@ export function getRunFailureDisposition(input: RetryableFailureInput & { failur
   return getFailureDisposition(input);
 }
 
-function parseLocalDateInput(dateInput: string) {
-  const [year, month, day] = dateInput.split('-').map(Number);
-  return { year, month, day };
+
+// story #4443 PR3a — a run happened at a moment; the person picks days in their own zone (the viewer's), so a day's bounds are
+// that zone's midnight and last millisecond (was the runtime's local calendar — the server's UTC in a server render).
+export function getDayStartIso(dateInput: string, timeZone: string) {
+  return dateKeysToInstants(dateInput, dateInput, timeZone).from!;
 }
 
-export function getLocalDayStartIso(dateInput: string) {
-  const { year, month, day } = parseLocalDateInput(dateInput);
-  return new Date(year, month - 1, day, 0, 0, 0, 0).toISOString();
+export function getDayEndIso(dateInput: string, timeZone: string) {
+  return dateKeysToInstants(dateInput, dateInput, timeZone).to!;
 }
 
-export function getLocalDayEndIso(dateInput: string) {
-  const { year, month, day } = parseLocalDateInput(dateInput);
-  return new Date(year, month - 1, day, 23, 59, 59, 999).toISOString();
-}
-
-function toLocalDateInputValue(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-export function getDefaultRunDateFilters(now = new Date()) {
-  const to = new Date(now);
-  const from = new Date(now);
-  from.setDate(from.getDate() - DEFAULT_RUN_LOOKBACK_DAYS);
-
-  return {
-    fromDate: toLocalDateInputValue(from),
-    toDate: toLocalDateInputValue(to),
-  };
+/** The default filter: the last DEFAULT_RUN_LOOKBACK_DAYS days up to the viewer's today — empty while the zone is unknown. */
+export function getDefaultRunDateFilters(timeZone: string | null, now = new Date()) {
+  if (!timeZone) return { fromDate: '', toDate: '' };
+  const toDate = dayKeyIn(now.toISOString(), timeZone);
+  return { fromDate: shiftDayKey(toDate, -DEFAULT_RUN_LOOKBACK_DAYS), toDate };
 }

@@ -100,7 +100,7 @@ export function fileExtLabel(contentType: string, name: string): string {
  * 7일 초과는 "최신성"이 아니라 "그 시각이 정확히 언제였나"로 질문이 바뀐다 — §11-2 정본
  * (`formatScheduledAt`, displayTimezone 기준)으로 폴백한다(구현: UTC 슬라이스, tz 무시).
  */
-export function formatRelativeTime(iso: string, locale: string, displayTimezone: string | null, viewerTz?: string | null): string {
+export function formatRelativeTime(iso: string, locale: string, displayTimezone: string | null, viewerTz: string | null): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return '';
   // PO 지적(2026-09-04 20:04Z) — 서버 created_at이 클라이언트 시계보다 몇 초 앞서는 흔한
@@ -109,7 +109,7 @@ export function formatRelativeTime(iso: string, locale: string, displayTimezone:
   // numeric:'auto'가 "지금"/"now"로 떨어지게 한다.
   const diffMs = Math.max(0, Date.now() - t);
   // story #4443 PR2b — past a week it is a date: in the viewer's zone, or nothing while that is not known (never UTC)
-  if (diffMs >= 7 * 86400000) return (viewerTz === undefined ? formatScheduledAt(iso, displayTimezone) : formatScheduledAt(iso, displayTimezone, viewerTz)).display;
+  if (diffMs >= 7 * 86400000) return formatScheduledAt(iso, displayTimezone, viewerTz).display;
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const sec = Math.round(diffMs / 1000);
   const min = Math.round(sec / 60);

@@ -10,7 +10,8 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { actorRowLabels, memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -379,10 +380,9 @@ function ActivityRow({ item, rowLabel }: { item: ActivityLogItem; rowLabel?: str
   // 으로 통일. document.documentElement.lang 수동 판독도 useLocale()로 정리(같은 뜻,
   // 정본 훅 사용).
   const locale = useLocale();
-  // story #4280 — 기간(위 ActivityLogView)과 같은 표시 시간대 축(조직 timezone 우선).
-  const { orgTimezone } = useDashboardContext();
-  const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
-  const time = formatRelativeTime(item.created_at, locale, displayTimezone);
+  // story #4443 PR3a (PO 00:07Z) — a row says when it happened: the viewer's zone (was the org's, story #4280). The period above
+  // (ActivityLogView's range) stays the org's — a team looks at the same days.
+  const time = formatViewerRelativeTime(item.created_at, locale, useViewerTimeZone());
   const tc = useTranslations('common');
   const { human, agent } = auditActorProps(item, tc, rowLabel);
   return (

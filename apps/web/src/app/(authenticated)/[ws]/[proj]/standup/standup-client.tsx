@@ -11,7 +11,8 @@ import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { formatSeoulDate } from '@/lib/date';
+import { shiftDayKey, teamDayKey } from '@/lib/viewer-time-zone';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { BoardBridgeModal, type BoardBridgeStory } from '@/components/standup/board-bridge-modal';
 import { StandupBoardCard } from '@/components/standup/standup-board-card';
@@ -106,10 +107,9 @@ function buildStorySummary(
   };
 }
 
+// story #4443 PR3a — a day key moved by calendar days (no zone: was a runtime-zone Date then Seoul's zone)
 function shiftDate(dateStr: string, days: number): string {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const d = new Date(year, month - 1, day + days);
-  return formatSeoulDate(d);
+  return shiftDayKey(dateStr, days);
 }
 
 interface StandupClientProps {
@@ -145,9 +145,15 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     const key = storyStatusKeyMap[slug];
     return key ? tBoard(key) : slug;
   };
-  const { currentTeamMemberId, projectMemberships, orgId } = useDashboardContext();
+  const { currentTeamMemberId, projectMemberships, orgId, orgTimezone } = useDashboardContext();
 
-  const [date, setDate] = useState(() => formatSeoulDate());
+  // story #4443 PR3a — «today» is the team's day: the org's zone (the viewer's if the org has none · was Seoul's for every org).
+  // The day a person picks overrides it; null = today. Not known yet (no zone) → '' and nothing is fetched until it is.
+  const viewerTz = useViewerTimeZone();
+  const today = teamDayKey(new Date(), orgTimezone, viewerTz);
+  const [picked, setPicked] = useState<string | null>(null);
+  const date = picked ?? today ?? '';
+  const setDate = (next: string | null | ((d: string) => string)) => setPicked((prev) => (typeof next === 'function' ? next(prev ?? today ?? '') : next));
   const [entries, setEntries] = useState<StandupEntryRow[]>([]);
   const [members, setMembers] = useState<StandupMemberRow[]>([]);
   const [feedback, setFeedback] = useState<StandupFeedbackRow[]>([]);
@@ -267,6 +273,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   }, [date]);
 
   useEffect(() => {
+    if (!date) return; // story #4443 PR3a — the team's day not known yet (no zone): nothing to fetch
     let cancelled = false;
 
     async function load() {
@@ -488,19 +495,22 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   // (h-12) TopBar title (the title and the shrink-0 controls competed for one row).
   const dateNavControls = (
     <>
-      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, -1))} title={t('previousDay')}>
+      {/* story #4443 PR3a (Kadir 4871 ④) — the day is not known yet (no zone): nothing to move from — locked, not «NaN-NaN-NaN».
+          The arrows' names are aria-label (was title: a hover-only name a locked button would not give touch · keyboard · readers) */}
+      <Button variant="ghost" size="icon" className="shrink-0" disabled={!date} onClick={() => setDate((d) => shiftDate(d, -1))} aria-label={t('previousDay')} data-testid="standup-prev-day">
         ←
       </Button>
       <OperatorInput
         type="date"
         value={date}
+        disabled={!date}
         onChange={(event) => setDate(event.target.value)}
         className="w-auto shrink-0"
       />
-      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, 1))} title={t('nextDay')}>
+      <Button variant="ghost" size="icon" className="shrink-0" disabled={!date} onClick={() => setDate((d) => shiftDate(d, 1))} aria-label={t('nextDay')} data-testid="standup-next-day">
         →
       </Button>
-      <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDate(formatSeoulDate())}>
+      <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDate(null)}>
         {t('today')}
       </Button>
     </>

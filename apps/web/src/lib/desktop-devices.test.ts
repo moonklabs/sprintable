@@ -52,7 +52,10 @@ describe('device dates (Yuna: like the notifications)', () => {
   it('this year: month and day; another year: with the year', async () => {
     const { deviceDateOptions } = await import('./desktop-devices');
     const now = new Date('2026-09-30T00:00:00Z');
-    expect(deviceDateOptions('2026-09-29T10:00:00Z', now)).toEqual({ month: 'long', day: 'numeric' });
-    expect(deviceDateOptions('2025-12-01T10:00:00Z', now)).toEqual({ year: 'numeric', month: 'long', day: 'numeric' });
+    expect(deviceDateOptions('2026-09-29T10:00:00Z', now, 'Asia/Seoul')).toEqual({ month: 'long', day: 'numeric' });
+    expect(deviceDateOptions('2025-12-01T10:00:00Z', now, 'Asia/Seoul')).toEqual({ year: 'numeric', month: 'long', day: 'numeric' });
+    // story #4443 PR3a — «this year» is the named zone's: 2025-12-31T20:00Z is already 2026 in Seoul, still 2025 in UTC
+    expect(deviceDateOptions('2025-12-31T20:00:00Z', new Date('2026-06-01T00:00:00Z'), 'Asia/Seoul')).toEqual({ month: 'long', day: 'numeric' });
+    expect(deviceDateOptions('2025-12-31T20:00:00Z', new Date('2026-06-01T00:00:00Z'), 'UTC')).toEqual({ year: 'numeric', month: 'long', day: 'numeric' });
   });
 });

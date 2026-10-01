@@ -58,3 +58,17 @@ export function formatViewerDate(value: string | number | Date, locale: string, 
     return new Intl.DateTimeFormat('en', { ...options, timeZone }).format(date);
   }
 }
+
+/** story #4443 PR3a — a team's calendar day (YYYY-MM-DD: the standup day, a sprint's day) is the org's (PO 22:38Z ①), the
+ *  viewer's when the org has set none; null while neither is known (draw/fetch nothing yet — never the runtime's). */
+export function teamDayKey(now: Date, orgTimeZone: string | null | undefined, viewerTimeZone: string | null): string | null {
+  const tz = validTimeZone(orgTimeZone) ?? viewerTimeZone;
+  return tz ? dayKeyIn(now.toISOString(), tz) : null;
+}
+
+/** A day key moved by whole calendar days — date arithmetic with no zone in it (a key is a calendar date, not an instant). */
+export function shiftDayKey(key: string, days: number): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const t = new Date(Date.UTC(y!, m! - 1, d! + days)); // UTC fields only: calendar arithmetic, not a zone
+  return `${String(t.getUTCFullYear()).padStart(4, '0')}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+}

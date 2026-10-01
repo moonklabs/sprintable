@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { CommentBodyText } from '@/components/content/comment-body-text';
 import { CommentsRefreshButton, type CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { Button } from '@/components/ui/button';
@@ -288,11 +288,11 @@ function CommentsList({
                   시각일 뿐 채널에 올라온 시각이 아니다). */}
               {comment.externalCreatedAt ? (
                 <span className="text-xs text-muted-foreground" data-testid="comments-item-authored-at">
-                  {formatScheduledAt(comment.externalCreatedAt, displayTimezone).display}
+                  {formatViewerScheduledAt(comment.externalCreatedAt, displayTimezone).display}
                 </span>
               ) : (
                 <span className="text-xs text-muted-foreground" data-testid="comments-item-captured-at">
-                  {t('commentsItemCapturedAtLabel', { time: formatScheduledAt(comment.capturedAt, displayTimezone).display })}
+                  {t('commentsItemCapturedAtLabel', { time: formatViewerScheduledAt(comment.capturedAt, displayTimezone).display })}
                 </span>
               )}
             </div>
@@ -440,7 +440,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToT
     );
   }
 
-  const capturedAtDisplay = formatScheduledAt(face.capturedAt, displayTimezone).display;
+  const capturedAtDisplay = formatViewerScheduledAt(face.capturedAt, displayTimezone).display;
 
   if (face.kind === 'empty') {
     return (
