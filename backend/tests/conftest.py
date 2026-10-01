@@ -38,6 +38,7 @@ import inspect
 import json
 import os
 import re
+import sys
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -629,8 +630,89 @@ def _calls_destructive_schema_api(filepath: Path) -> bool:
 # (필터 적용 前 스냅샷을 보므로) 매번 오탐 차단된다 — CI 두 job(Backend pytest·backend-
 # test-destructive) 자체가 못 돌 뻔한 실사고. trylast=True로 내장 디셀렉션 다음에 돌게
 # 고정해 `items`가 최종 선택 결과를 반영하게 한다.
+# story 4459 (Didi · Kadir 2026-10-01) — two ways one test file changed every later file in the same run. Alone each file was
+# green; in a 115-file batch three tests failed, on develop too. Both guards make the file that does it RED, by name, instead
+# of a far-away test failing for no reason.
+#
+# ① A test module that puts this tests/ directory on sys.path while it is imported (`sys.path.insert(0, Path(__file__).parent)`)
+#   leaves it there for the whole run — and tests/mcp/ then shadows the installed `mcp` package (test_2188 failed with
+#   «No module named 'mcp.types'» once test_deeplink_manifest_contract was collected). tests/ is a package: import through it
+#   (`from tests.x import …`). Checked per collected module, so every such module is named, not only the first.
+_TESTS_DIR = Path(__file__).resolve().parent
+_SYS_PATH_LEAKERS: list[str] = []
+
+
+def _tests_dir_entries(path_list: list, tests_dir: Path) -> list:
+    """The sys.path entries that are `tests_dir` (any spelling of it) — empty when it is not on the path."""
+    out = []
+    for p in path_list:
+        if not p:
+            continue
+        try:
+            if Path(p).resolve() == tests_dir:
+                out.append(p)
+        except (OSError, RuntimeError):
+            continue
+    return out
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_make_collect_report(collector):
+    had = bool(_tests_dir_entries(sys.path, _TESTS_DIR))
+    yield
+    added = _tests_dir_entries(sys.path, _TESTS_DIR)
+    if added and not had and isinstance(collector, pytest.Module):
+        _SYS_PATH_LEAKERS.append(collector.nodeid)
+        for p in added:  # take it off again, so the next module is judged on its own (the run stops below anyway)
+            while p in sys.path:
+                sys.path.remove(p)
+
+
+def _sys_path_leak_error(leakers: list) -> str | None:
+    if not leakers:
+        return None
+    return (
+        "these test modules put the tests/ directory on sys.path while being imported (story 4459) — it stays for the whole "
+        "run, and tests/mcp/ then shadows the installed `mcp` package (and any other name under tests/ shadows its "
+        "namesake) for every later file. tests/ is a package: import through it (`from tests.<module> import …`) and drop "
+        "the sys.path line:\n" + "\n".join(sorted(set(leakers)))
+    )
+
+
+# ② A test that replaces app.core.config's settings object (`importlib.reload(app.core.config)`, or assigning a new Settings to
+#   the module) and does not put the old one back: every module imported before keeps reading the old object, while later tests
+#   patch the new one (test_3815_youtube_publish failed only after test_3744 reloaded the config each test). Patch fields on the
+#   one object with monkeypatch.setattr(settings, …) instead. The swap is undone here so it cannot spread, and that test errors.
+def _settings_swap_error(module_before, settings_before, module_now, settings_now, nodeid: str) -> str | None:
+    if module_now is module_before and settings_now is settings_before:
+        return None
+    return (
+        f"{nodeid} replaced app.core.config's settings object and did not put it back (story 4459) — modules imported before "
+        "keep the old one, so later files read stale values. Patch the existing object: monkeypatch.setattr(settings, "
+        "\"field\", value) (undone after the test). The old object was put back here."
+    )
+
+
+@pytest.fixture(autouse=True)
+def _settings_object_stays(request):
+    import app.core.config as config_module
+
+    module_before, settings_before = config_module, config_module.settings
+    yield
+    module_now = sys.modules.get("app.core.config")
+    settings_now = getattr(module_now, "settings", None)
+    error = _settings_swap_error(module_before, settings_before, module_now, settings_now, request.node.nodeid)
+    if error:
+        sys.modules["app.core.config"] = module_before
+        module_before.settings = settings_before
+        pytest.fail(error, pytrace=False)
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(items: list) -> None:
+    leak = _sys_path_leak_error(_SYS_PATH_LEAKERS)  # story 4459 ① — before anything runs
+    if leak:
+        raise pytest.UsageError(leak)
     checked: dict[Path, bool] = {}
     violations: set[str] = set()
     for item in items:

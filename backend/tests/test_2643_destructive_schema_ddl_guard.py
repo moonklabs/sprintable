@@ -21,8 +21,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-import conftest as _conftest  # noqa: E402
+# story 4459: imported through the `tests` package — putting tests/ at the front of sys.path made `import mcp` find tests/mcp/
+# for every later file in the same run (test_2188 then failed with «No module named 'mcp.types'»)
+from tests import conftest as _conftest  # noqa: E402
 
 
 # ─── 단위 테스트 — _calls_raw_ddl_literal / _calls_destructive_schema_api 직접 호출 ──────

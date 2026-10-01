@@ -30,12 +30,10 @@ CI가 즉시 RED**. baseline 안의 기존 62건(현재는 fix로 줄어든 상�
 그것들을 fix하는 게 이 테스트의 책임이 아니라 각자의 SEC-S8 개별 PR(R~EE류)의 책임이다."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from authz_coverage_lib import (  # noqa: E402
+# story 4459: imported through the `tests` package — putting tests/ at the front of sys.path made `import mcp` find tests/mcp/
+# for every later file in the same run (test_2188 then failed with «No module named 'mcp.types'»)
+from tests.authz_coverage_lib import (  # noqa: E402
     PROJECT_GUARD_FUNCTIONS,
     PROJECT_PARAM_RE,
     enumerate_id_mutation_routes,
@@ -200,7 +198,7 @@ def test_hop_recognition_catches_one_hop_body_helper_synthetic():
 
     from fastapi import FastAPI
 
-    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+    from tests.authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
 
     app = FastAPI()
 
@@ -224,7 +222,7 @@ def test_hop_recognition_misses_two_hop_wrapper_known_gap():
 
     from fastapi import FastAPI
 
-    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+    from tests.authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
 
     app = FastAPI()
 
@@ -262,7 +260,7 @@ def test_list_docs_ids_branch_closed_the_two_hop_known_gap():
     새 2-hop 전용 래퍼가 생기고 그 라우트가 body에서 가드를 직접 안 부르면 이 사각이 다시
     실사례를 갖는다 — 그때 새 known-gap 테스트를 추가할 것."""
     from app.main import app
-    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+    from tests.authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
 
     routes = {r.key: r for r in enumerate_routes_matching(app, PROJECT_PARAM_RE)}
     target = routes.get("app.routers.docs:list_docs")
@@ -528,7 +526,7 @@ def test_sibling_asymmetry_advisory_surfaces_high_confidence_candidates():
     RED로 만들진 않음(신규 항목 허용)."""
     from app.main import app
 
-    from authz_coverage_lib import sibling_asymmetry_advisory
+    from tests.authz_coverage_lib import sibling_asymmetry_advisory
 
     surfaced = sibling_asymmetry_advisory(app)
     # 계약(paydown-무관 안정 기준): advisory가 surface하는 모든 엔트리는 반드시 (a) id-뮤테이션
@@ -550,7 +548,7 @@ def test_sibling_asymmetry_advisory_has_teeth_on_synthetic_app():
     from fastapi import FastAPI
 
     from app.services.project_auth import has_project_access
-    from authz_coverage_lib import sibling_asymmetry_advisory
+    from tests.authz_coverage_lib import sibling_asymmetry_advisory
 
     app = FastAPI()
 
