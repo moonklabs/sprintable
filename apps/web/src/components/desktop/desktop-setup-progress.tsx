@@ -78,6 +78,12 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
     return { text: names.join(' · '), last, bare: endsWithAgentWord(last, locale), count: names.length };
   };
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
+  // the first agent's name follows the same rule as the title (Yuna v29 — never «에이전트 에이전트»), its particle the name it ends in
+  const firstNotReadyLine = (firstRole: string | null) => {
+    if (!firstRole) return t('startFailed.firstNotReadyNoRole');
+    const first = role(firstRole);
+    return endsWithAgentWord(first, locale) ? t('startFailed.firstNotReadyBare', { firstRole: first, josa: pickIGaJosa(first) }) : t('startFailed.firstNotReady', { firstRole: first });
+  };
   // one name in one flow (PO 10:39Z ①): the recipe as the list names it — a platform preset by its translation, not the stored
   // name — from the server's recipe (also when the page is opened again without the list's name)
   const task = status.recipe ? presetName(status.recipe, tPreset) : (recipeName || status.recipe_name || '');
@@ -141,7 +147,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
               : f.line === 'runtimeDidNotStart' ? (rt ? t('startFailed.runtimeDidNotStart', rt) : t('startFailed.unknown'))
               : f.line === 'credentials' ? t('startFailed.credentials')
               : f.line === 'keyUnreadable' ? t('startFailed.keyUnreadable')
-              : f.line === 'firstNotReady' ? (f.firstRole ? t('startFailed.firstNotReady', { firstRole: role(f.firstRole) }) : t('startFailed.firstNotReadyNoRole'))
+              : f.line === 'firstNotReady' ? firstNotReadyLine(f.firstRole)
               : f.line === 'notConnected' ? t('startFailed.notConnected')
               : t('startFailed.unknown');
             return (

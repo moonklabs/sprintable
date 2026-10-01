@@ -1395,6 +1395,21 @@ describe('[SID:4452] an agent the shell could not start', () => {
     expect(rows[1]![1]).toContain('누구나 에이전트가 아직 준비되지 않아 띄우지 않았어요'); // the agent it waited on, by its role (Any → 누구나)
   });
 
+  it('a role already named «에이전트» (the «반복 실험» recipe) gets no second «에이전트» — in the title and in the first agent\'s name, particle by that name (Yuna v29)', async () => {
+    const s = setup576([{ member_id: LEAD, at: '2026-10-01T04:17:10Z', reason: 'first_not_ready', code: 'timeout', runtime: 'claude', limit: null, first_member_id: ANY }]);
+    s.members = s.members.map((m) => (m.member_id === ANY || m.member_id === LEAD ? { ...m, role: '에이전트' } : m));
+    // Dev connected here: an agent started and still unconnected after 30 s shows ⑦ over everything (Yuna's side note · not this case)
+    s.signals.tools_connected = [...s.signals.tools_connected.filter((c) => c.member_id !== LEAD), { member_id: DEV, at: '2026-10-01T04:17:08Z' }];
+    statusNow = () => s;
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    const row = container.querySelector('[data-testid=setup-agent-start-failed-row]')!.textContent ?? '';
+    expect(row).not.toContain('에이전트 에이전트');
+    expect(row).toContain('에이전트를 시작하지 못했어요');
+    expect(row).toContain('에이전트가 아직 준비되지 않아 띄우지 않았어요 — 에이전트가 작업 폴더를 믿도록 답한 뒤 다시 시도해 주세요');
+  });
+
   it('it connected after all (the report is cleared by the server · or a connection is seen): no block · the usual progress', async () => {
     statusNow = () => { const s = setup576([{ member_id: DEV, at: '2026-10-01T04:17:10Z', reason: 'start_refused', code: 'spawn_failed', runtime: 'codex', limit: null, first_member_id: null }]); s.signals.tools_connected.push({ member_id: DEV, at: '2026-10-01T04:19:30Z' }); return s; };
     stub(() => new Response('{}', { status: 200 }));
