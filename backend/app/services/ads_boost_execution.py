@@ -132,6 +132,17 @@ async def _refuse_if_seal_replaced(db: AsyncSession, command, gate_id: uuid.UUID
         )
 
 
+def _record_created_adset(run, gate, command, *, adset_was_new: bool) -> None:
+    """story #4458 (Qadir 4881 · PO 11:24Z) — «what the campaign was created with» is recorded once, the moment the budget-carrying
+    ad set first exists — a full create, or a create that failed part-way after the ad set (its partial ids) — with the budget,
+    seal and connection of that call, and never overwritten. A later start that reuses that ad set (another seal, maybe a lower
+    budget) must not stamp its own budget as «created»: the check below would then pass and switch on an ad set made on other values."""
+    if adset_was_new and run.adset_id and run.created_budget_minor is None:
+        run.created_budget_minor = gate.sealed_ads_budget_minor
+        run.created_for_version_id = command.approved_version
+        run.created_connection_id = gate.sealed_ads_connection_id  # PO 09:00Z — the account the campaign lives in
+
+
 def _refuse_if_created_on_another_budget(run, gate) -> None:
     """story #4458 (PO 08:13Z ② (다)) — a campaign made with a budget other than the current seal's is never switched on: a re-seal
     landed while it was being created (on the older seal's values). Switching it on would spend outside the approval; changing
@@ -662,6 +673,7 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
                     "adset_budget_minor": adset_budget, "sealed_budget_minor": gate.sealed_ads_budget_minor,
                 }
             adopted["adset_id"] = adsets[0]["id"]
+            adopted["adset_budget_minor"] = adset_budget
             ads = [a for a in await module.find_boost_ads(
                 client, adset_id=adopted["adset_id"], access_token=access_token, object_story_id=osid, objective=objective,
             ) if eligible(a, parent_field="adset_id", parent_id=adopted["adset_id"])]
@@ -680,6 +692,11 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
     try:
         async with db.begin_nested():
             run.campaign_id = adopted["campaign_id"]
+            if adopted.get("adset_id") and run.created_budget_minor is None:
+                # story #4458 (PO 11:24Z) — the adopted ad set's budget as read from the provider (checked equal to the seal above)
+                run.created_budget_minor = adopted["adset_budget_minor"]
+                run.created_for_version_id = command.approved_version
+                run.created_connection_id = gate.sealed_ads_connection_id
             run.adset_id = adopted.get("adset_id") or run.adset_id
             run.ad_id = adopted.get("ad_id") or run.ad_id
             run.create_claimed_at = None
@@ -695,8 +712,8 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
 ACCOUNT_CURRENCY_MISMATCH_CODE = "ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH"
 # story #4417 — a start/resume that reaches the worker after the run was blocked for an unreadable spend
 SPEND_BLOCKED_CODE = "ADS_BOOST_SPEND_BLOCKED"
-SEAL_REPLACED_CODE = "ADS_BOOST_SEAL_REPLACED"
-CREATED_BUDGET_DIFFERS_CODE = "ADS_BOOST_CREATED_BUDGET_DIFFERS"  # story #4458 — see _refuse_if_created_on_another_budget  # story #4447 — the command is of an older seal (see _resolve_execution_context)
+SEAL_REPLACED_CODE = "ADS_BOOST_SEAL_REPLACED"  # story #4447 — the command is of an older seal (see _resolve_execution_context)
+CREATED_BUDGET_DIFFERS_CODE = "ADS_BOOST_CREATED_BUDGET_DIFFERS"  # story #4458 — see _refuse_if_created_on_another_budget
 
 
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
@@ -791,6 +808,8 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                         run.campaign_id = partial.get("campaign_id") or run.campaign_id
                         run.adset_id = partial.get("adset_id") or run.adset_id
                         run.ad_id = partial.get("ad_id") or run.ad_id
+                        # story #4458 — the ad set made in this call carries this call's budget, even if the ad was rejected
+                        _record_created_adset(run, gate, command, adset_was_new=not existing.get("adset_id") and bool(partial.get("adset_id")))
                         if getattr(create_exc, "code", None) and getattr(create_exc, "outcome_known", False):
                             # story #4404 · #4409 — Meta rejected it (4xx): known «not created» (partial ids recorded above), the
                             # claim is released so a retry may continue.
@@ -807,10 +826,8 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                             "check the ad account before retrying",
                         ) from create_exc
                     run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
-                    # story #4458 — what it was created with (a re-seal during the call leaves it on the older seal's values)
-                    run.created_budget_minor = gate.sealed_ads_budget_minor
-                    run.created_for_version_id = command.approved_version
-                    run.created_connection_id = gate.sealed_ads_connection_id  # PO 09:00Z — the account the campaign lives in
+                    # story #4458 — what it was created with, only if this call made the ad set (a reused ad set keeps its record)
+                    _record_created_adset(run, gate, command, adset_was_new=not existing.get("adset_id"))
                     run.create_claimed_at = None  # story #4404 — ids recorded: the claim is done
                     run.create_call_started_at = None
                     # story #4268 AC2 — 만든 id를 ACTIVE 전환 **전에** 커밋한다. 뒤(ACTIVE · 지출 스냅샷 예약 · 활동 기록)에서 DB
@@ -931,7 +948,8 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         # the new seal's command is the way on
         run.last_error = exc.message[:2000]
         await record_publication_attempt(
-            db, command=command, approval_check="missing", adapter_called=False,
+            # PO 11:24Z — a refusal before the ACTIVE switch can come after a create call went out: the ledger says so
+            db, command=command, approval_check="missing", adapter_called=provider_call_marked(),
             started_at=attempt_started_at, finished_at=now, result_code=exc.code,
         )
         mark_blocked_unapproved(command, reason_code=exc.code, last_error=exc.message)

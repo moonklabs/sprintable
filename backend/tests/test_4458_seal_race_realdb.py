@@ -111,7 +111,10 @@ async def _reseal_during_create(monkeypatch, Session, gate_id, *, new_budget: in
     real_create, real_status = sandbox.create_boost_campaign, sandbox.set_campaign_status
 
     async def create_then_reseal(client, **kwargs):
+        from app.services.provider_call_mark import mark_provider_call
+
         creates.append(kwargs["budget_minor"])
+        mark_provider_call()  # what a real adapter's HTTP write does (provider_client hook); the sandbox sends no HTTP
         result = await real_create(client, **kwargs)
         if len(creates) == 1:
             async with Session() as s:
@@ -157,6 +160,16 @@ async def test_a_campaign_created_on_a_replaced_seal_is_not_switched_on_with_ano
         run = await _run(Session, gate_id)
         assert run.campaign_id and run.created_budget_minor == 100_000 and run.created_for_version_id == old.approved_version
         assert run.created_connection_id == old.destination  # the ad connection it was created under (PO 09:00Z · used by 4461)
+        # PO 11:24Z — the old command's refusal came after its create call went out: the attempt ledger says the adapter was called
+        from sqlalchemy import select
+
+        from app.models.publication_attempt import PublicationAttempt
+
+        async with Session() as s:
+            last = (await s.execute(
+                select(PublicationAttempt).where(PublicationAttempt.command_id == old.id).order_by(PublicationAttempt.started_at.desc()).limit(1)
+            )).scalar_one()
+        assert (last.result_code, last.adapter_called) == ("ADS_BOOST_SEAL_REPLACED", True)
 
         new = await _new_seal_start(Session, org_id, gate_id, owner_id)
         await _tick(Session)
@@ -239,5 +252,87 @@ async def test_resume_does_not_switch_on_a_campaign_whose_budget_the_new_seal_lo
         held = await _command(Session, resume_id)
         assert statuses == ["ACTIVE", "PAUSED"]  # not switched back on
         assert (held.status, held.failure_kind, held.reason_code) == ("dead_letter", "needs_check", "ADS_BOOST_CREATED_BUDGET_DIFFERS"), (held.status, held.failure_kind, held.reason_code, held.last_error)
+    finally:
+        await engine.dispose()
+
+
+async def test_an_adset_from_a_partly_failed_create_keeps_its_budget_record_and_is_not_switched_on_after_a_lower_reseal(monkeypatch):
+    """Qadir 4881 (PO 11:24Z): a create that failed part-way (4xx after the ad set existed) kept the partial ids and released the
+    claim, but recorded no budget. A lower re-seal, then the new seal's start reused that ad set (made on the old budget), created
+    only the ad and recorded the *current* (lower) budget as «created» — the check passed and the old-budget ad set was switched on.
+    «Created» is now recorded once, the moment the budget-carrying ad set first exists (success or partial), with the budget of
+    that call, and never overwritten."""
+    import app.services.ads_sandbox_campaign as sandbox
+    from sqlalchemy import update
+
+    from app.models.gate import Gate
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory(), budget_minor=100_000)
+    real_create, real_status = sandbox.create_boost_campaign, sandbox.set_campaign_status
+    calls: list[dict] = []
+    statuses: list[str] = []
+
+    async def create(client, **kwargs):
+        calls.append({"budget": kwargs["budget_minor"], "existing": dict(kwargs.get("existing") or {})})
+        result = await real_create(client, **kwargs)
+        if len(calls) == 1:  # the ad set (and campaign) exist, then the ad is rejected (4xx)
+            exc = MetaAdsCampaignError("META_ADS_AD_CREATE_FAILED", "sandbox: ad rejected after the ad set", outcome_known=True)
+            exc.partial = {"campaign_id": result["campaign_id"], "adset_id": result["adset_id"]}
+            raise exc
+        return {**result, **{k: v for k, v in (kwargs.get("existing") or {}).items() if v}}
+
+    async def status(client, **kwargs):
+        statuses.append(kwargs["status"])
+        return await real_status(client, **kwargs)
+
+    monkeypatch.setattr(sandbox, "create_boost_campaign", create)
+    monkeypatch.setattr(sandbox, "set_campaign_status", status)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        run = await _run(Session, gate_id)
+        assert run.adset_id and not run.ad_id and run.created_budget_minor == 100_000  # recorded with the partial ad set
+        async with Session() as s:  # a lower re-seal, approved again
+            await s.execute(update(Gate).where(Gate.id == gate_id).values(
+                sealed_ads_boost_version_id=uuid.uuid4(), sealed_ads_budget_minor=40_000, status="approved",
+            ))
+            await s.commit()
+        new = await _new_seal_start(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        assert calls[-1]["existing"].get("adset_id") == run.adset_id  # the old ad set was reused
+        assert statuses == []  # never switched on
+        assert (await _run(Session, gate_id)).created_budget_minor == 100_000  # not overwritten with the lower budget
+        held = await _command(Session, new.id)
+        assert (held.status, held.failure_kind, held.reason_code) == ("dead_letter", "needs_check", "ADS_BOOST_CREATED_BUDGET_DIFFERS"), (held.status, held.reason_code, held.last_error)
+    finally:
+        await engine.dispose()
+
+
+async def test_an_adopted_adset_records_its_budget_and_a_lower_reseal_does_not_switch_it_on(monkeypatch):
+    """The adopt path (PO 11:24Z): it checked the adopted ad set's budget but recorded nothing — null = no later check. It now
+    records the ad set's budget as read from the provider; a later lower re-seal's start is held like any other."""
+    from sqlalchemy import update
+
+    from app.models.gate import Gate
+    from tests.test_4412_boost_adopt_existing_realdb import _adopt, _stopped_unknown
+
+    engine, Session, org_id, owner_id, gate_id, command, creates = await _stopped_unknown("[sandbox:create-unknown]", monkeypatch)
+    try:
+        r = await _adopt(Session, org_id, owner_id, gate_id)
+        assert r.status_code == 200, r.text
+        run = await _run(Session, gate_id)
+        assert run.adset_id and run.created_budget_minor is not None  # the adopted ad set's own budget
+        adopted_budget = run.created_budget_minor
+        async with Session() as s:
+            await s.execute(update(Gate).where(Gate.id == gate_id).values(
+                sealed_ads_boost_version_id=uuid.uuid4(), sealed_ads_budget_minor=adopted_budget - 1, status="approved",
+            ))
+            await s.commit()
+        new = await _new_seal_start(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        held = await _command(Session, new.id)
+        assert (held.failure_kind, held.reason_code) == ("needs_check", "ADS_BOOST_CREATED_BUDGET_DIFFERS"), (held.status, held.reason_code, held.last_error)
     finally:
         await engine.dispose()
