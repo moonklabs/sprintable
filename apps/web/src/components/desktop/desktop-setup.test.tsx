@@ -1168,6 +1168,11 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     await openRecipes();
     expect(recipeInputs().map((i) => i.value)).toEqual(['rec-1', 'rec-2']);
     expect(chosen()?.textContent).toContain('마케팅 루프'); // the card and its [바꾸기] stay while the list is open (Qadir 4869)
+    // …as one line: the name only, no description or roles (Yuna 03:53Z); the list below holds the full cards
+    const card = chosen()!;
+    expect(card.querySelectorAll('.text-xs')).toHaveLength(0);
+    expect(card.className).not.toMatch(/border-primary/);
+    expect(container.querySelector('[data-testid=setup-recipe-list] label')!.querySelectorAll('.text-xs').length).toBeGreaterThan(0);
     await realClick(recipeInputs()[1]);
     expect(recipeInputs()).toHaveLength(0);
     expect(chosen()?.textContent).toContain('조사 한 명');

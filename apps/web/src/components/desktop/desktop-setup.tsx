@@ -435,9 +435,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         <h2 id="setup-recipe" className="text-sm font-medium">{t('recipe')}</h2>
         {recipe ? (
           <div className="mt-2 flex items-start justify-between gap-3 rounded-md border p-3" data-testid="setup-recipe-chosen">
+            {/* while the list is open the card is the current value in one line — the list below is where one chooses, and
+                the primary border is only on the checked radio there (Yuna 03:53Z: one place says «chosen») */}
             <span className="min-w-0"><span className="block text-sm font-medium">{presetName(recipe, tPreset)}</span>
-              {presetDescription(recipe, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(recipe, tPreset)}</span> : null}
-              <RecipeRolesLine recipe={recipe} runtimes={runtimes} /></span>
+              {!pickingRecipe && presetDescription(recipe, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(recipe, tPreset)}</span> : null}
+              {!pickingRecipe ? <RecipeRolesLine recipe={recipe} runtimes={runtimes} /> : null}</span>
             {recipes.length > 1 ? (
               <Button ref={recipeChangeRef} variant="ghost" size="sm" aria-label={t('changeRecipeAria')} aria-expanded={pickingRecipe} aria-controls="setup-recipe-list"
                 onClick={() => (pickingRecipe ? foldRecipes(true) : openRecipes())}>{t('change')}</Button>
