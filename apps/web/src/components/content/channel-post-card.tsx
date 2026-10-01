@@ -8,6 +8,7 @@ import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #3422(doc §11 T8) — 캘린더 격자 셀과 「날짜 미정」 레인이 공유하는 유일한 렌더
 // 단위(설계 코멘트 "ChannelPostCard가 유일한 렌더 단위" 그대로). deriveChannelPostView를
@@ -23,6 +24,9 @@ export interface ChannelPostCardProps {
 export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('content');
+  // story #4443 PR3a — this card draws in the zone it is given (the calendar's: the org's) and labels it when that is not the
+  // viewer's — the viewer's zone is named here, not asked of the runtime (a server render's would be UTC)
+  const viewerTz = useViewerTimeZone();
   const hasGateContract = 'gate_status' in item;
   const view = hasGateContract
     ? deriveChannelPostView({
@@ -65,7 +69,7 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
         </div>
         {item.scheduled_at ? (
           <span className="text-muted-foreground" data-testid="channel-post-calendar-card-time">
-            {formatScheduledAt(item.scheduled_at, displayTimezone).display}
+            {formatScheduledAt(item.scheduled_at, displayTimezone, viewerTz).display}
           </span>
         ) : null}
       </div>
@@ -103,13 +107,13 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
           <span>
             {t('channelPostsNewsletterCampaignScheduleLabel')}
             {' '}
-            {formatScheduledAt(item.newsletter.campaign_scheduled_at, displayTimezone).display}
+            {formatScheduledAt(item.newsletter.campaign_scheduled_at, displayTimezone, viewerTz).display}
           </span>
           <span className="mx-1">·</span>
           <span>
             {t('channelPostsNewsletterSendScheduleLabel')}
             {' '}
-            {formatScheduledAt(item.newsletter.send_scheduled_at, displayTimezone).display}
+            {formatScheduledAt(item.newsletter.send_scheduled_at, displayTimezone, viewerTz).display}
           </span>
         </p>
       ) : null}

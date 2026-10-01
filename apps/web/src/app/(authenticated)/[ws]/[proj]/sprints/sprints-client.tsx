@@ -47,6 +47,8 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { prefetchSprintScreen, sprintScreenUrls, takeSprintScreenOrFetch } from '@/components/sprints/sprint-screen-prefetch';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
+import { shiftDayKey, teamDayKey } from '@/lib/viewer-time-zone';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -148,15 +150,8 @@ interface CreateDialogProps {
 // 값 기본이라(type=date·pre-fill 없음) 이름+목표만 채운 fresh 유저가 disabled 벽에 막혔다. 오늘
 // ~+13일(2주 inclusive) 기본값을 주어 침묵 blocker를 없앤다(둘 다 편집 가능). ⚠️UTC(toISOString)
 // 대신 로컬 시계로 YYYY-MM-DD를 조립해 자정 부근 하루 밀림을 피한다.
+// story #4443 PR3a — «today» is the team's day (the org's zone · the viewer's if none): was the runtime's local calendar.
 const SPRINT_DEFAULT_SPAN_DAYS = 13;
-function localDateISO(offsetDays = 0): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 // story #2755 테스트 접근용 export(내부 사용 불변) — «침묵 금지» 렌더 검증(loud validation) 대상.
 /** 옆 패널 빠른 선언의 빈 값(빈 카드 하나 · 안정 참조). */
@@ -172,12 +167,14 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
   const tc = useTranslations('common');
   // story #4370(유나 판정 (가)) — 여러 줄 칸(목표 · 가설 문장)이 든 폼이라 **폼 전체**가 프로젝트별 초안 하나: 창이 ✕ · 바깥 · Esc로
   // 닫혀도 남고 보이는 «취소»와 만들기 성공에서만 지운다. 빈 값의 기본 날짜는 이 창이 열린 날 기준(마운트마다 한 번).
+  const { orgTimezone } = useDashboardContext();
+  const teamToday = teamDayKey(new Date(), orgTimezone, useViewerTimeZone());
   const emptyForm = useMemo<SprintCreateDraft>(() => ({
-    title: '', startDate: localDateISO(0), endDate: localDateISO(SPRINT_DEFAULT_SPAN_DAYS), goal: '', capacity: '', teamSize: '',
+    title: '', startDate: teamToday ?? '', endDate: teamToday ? shiftDayKey(teamToday, SPRINT_DEFAULT_SPAN_DAYS) : '', goal: '', capacity: '', teamSize: '',
     // E-SPRINT-LOOP FE(278314e9) — sprint-open 定: 단일 optional success_hypothesis는 N-선언으로
     // 흡수(핸드오프 §7 KEEP). 임시저장(planning)은 0개도 허용, 활성화(定)만 ≥1(완결된) 선언 요구.
     declarations: [],
-  }), []);
+  }), [teamToday]);
   const [form, setForm, clearFormDraft] = useJsonFieldDraft<SprintCreateDraft>(
     { surface: 'sprint-create', targetId: projectId, field: 'form' }, emptyForm,
   );
@@ -485,8 +482,10 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   // story #4328 — 첫 물결 선출발: 스프린트 목록 + 아래 「하루 체크인」(embedded 스탠드업 · 목록이 온 뒤에야 마운트된다)의 요청 여섯을 **같이**
   // 출발시키고 각자 넘겨받는다(로딩 경계에서 이미 출발했으면 규칙상 다시 안 보냄). 목록 effect보다 **먼저** 선언 — effect는 선언 순서로 돈다
   // (뒤에 두면 목록이 먼저 새로 요청하고 선출발이 또 보내 두 번 간다).
-  const { currentTeamMemberId: prefetchMemberId } = useDashboardContext();
-  useEffect(() => { prefetchSprintScreen({ memberId: prefetchMemberId, projectId }); }, [prefetchMemberId, projectId]);
+  const prefetchViewerTz = useViewerTimeZone();
+  const { currentTeamMemberId: prefetchMemberId, orgTimezone: prefetchOrgTz } = useDashboardContext();
+  const prefetchDate = teamDayKey(new Date(), prefetchOrgTz, prefetchViewerTz); // story #4443 PR3a — the team's day
+  useEffect(() => { prefetchSprintScreen({ memberId: prefetchMemberId, projectId }, prefetchDate); }, [prefetchMemberId, projectId, prefetchDate]);
 
   const loadSprints = useCallback(async () => {
     setLoading(true);

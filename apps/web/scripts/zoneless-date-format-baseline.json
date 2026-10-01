@@ -1,53 +1,5 @@
 [
   {
-    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::d.setDate(d.getDate() + offsetDays);",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::d.setDate(d.getDate() + offsetDays);#2",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::const y = d.getFullYear();",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::const m = String(d.getMonth() + 1).padStart(2, '0');",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::runtime-calendar::const day = String(d.getDate()).padStart(2, '0');",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::runtime-calendar::const d = new Date(year, month - 1, day + days);",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/(authenticated)/inbox/page.tsx::runtime-calendar::const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/(authenticated)/inbox/page.tsx::runtime-calendar::const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();#2",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/(authenticated)/inbox/page.tsx::runtime-calendar::const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();#3",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "app/privacy/page.tsx::no-arg-display-tz::시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz, null).display}",
-    "reason": "story #4443 — a server-rendered legal page (no viewer hook here): its «시행일» is a legal date for everyone → PR3 names that zone (the org's / the company's), not the server's"
-  },
-  {
-    "key": "app/refund-policy/page.tsx::no-arg-display-tz::시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz, null).display}",
-    "reason": "story #4443 — a server-rendered legal page (no viewer hook here): its «시행일» is a legal date for everyone → PR3 names that zone (the org's / the company's), not the server's"
-  },
-  {
-    "key": "app/terms/page.tsx::no-arg-display-tz::시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz, null).display}",
-    "reason": "story #4443 — a server-rendered legal page (no viewer hook here): its «시행일» is a legal date for everyone → PR3 names that zone (the org's / the company's), not the server's"
-  },
-  {
     "key": "ee/components/billing/billing-tab.tsx::runtime-calendar::const nextBillingDay = new Date().getDate();",
     "reason": "story #4443 — billing: not touched (PO 00:07Z · the billing axis is 선생님's call); frozen so a change here is seen"
   },
@@ -60,39 +12,7 @@
     "reason": "story #4443 — billing: not touched (PO 00:07Z · the billing axis is 선생님's call); frozen so a change here is seen"
   },
   {
-    "key": "lib/date.ts::fixed-zone::timeZone: 'Asia/Seoul',",
-    "reason": "story #4443 — formatSeoulDate: the standup day and the sprint prefetch in Seoul's zone for every org → PR3 (a team date is the org's zone)"
-  },
-  {
-    "key": "lib/desktop-devices.ts::runtime-calendar::const year = (d: Date) => (timeZone ? new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(d) : String(d.getFullYear()));",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "services/agent-run-history.ts::runtime-calendar::return new Date(year, month - 1, day, 0, 0, 0, 0).toISOString();",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "services/agent-run-history.ts::runtime-calendar::return new Date(year, month - 1, day, 23, 59, 59, 999).toISOString();",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "services/agent-run-history.ts::runtime-calendar::const year = date.getFullYear();",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "services/agent-run-history.ts::runtime-calendar::const month = String(date.getMonth() + 1).padStart(2, '0');",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "services/agent-run-history.ts::runtime-calendar::const day = String(date.getDate()).padStart(2, '0');",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "services/agent-run-history.ts::runtime-calendar::from.setDate(from.getDate() - DEFAULT_RUN_LOOKBACK_DAYS);",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
-  },
-  {
-    "key": "services/agent-run-history.ts::runtime-calendar::from.setDate(from.getDate() - DEFAULT_RUN_LOOKBACK_DAYS);#2",
-    "reason": "story #4443 — frozen at PR2a; calendar arithmetic in the runtime's zone → PR3 names the zone (the org's for a team date, the viewer's for when it happened)"
+    "key": "lib/legal-date.ts::fixed-zone::export const LEGAL_TIME_ZONE = 'Asia/Seoul';",
+    "reason": "story #4443 PR3a (PO 01:11Z) — the legal date's zone: 약관 · 개인정보 · 환불 are dates under Korean law (the company's seat); one named constant, the same text for every reader"
   }
 ]

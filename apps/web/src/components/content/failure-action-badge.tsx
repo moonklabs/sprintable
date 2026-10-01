@@ -5,7 +5,7 @@ import {
   CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS, CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS, CHANNEL_POST_VOID_REASON_MESSAGE_KEYS,
   type FailureAction,
 } from '@/components/content/failure-action';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 
 // story #3422 ②-c 2/N(doc §17-13) — 실패 5종 렌더 매핑. 버튼 유무표 그대로:
@@ -162,11 +162,11 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   }
   if (action.kind === 'auto_retry') {
     // B2(페드루 PO 지적) — ISO 원문을 그대로 보간하던 것을 scheduled_at과 같은
-    // formatScheduledAt(...).display로 바꾼다(같은 카드 안에서 두 형식이 섞이던 결함).
+    // formatViewerScheduledAt(...).display로 바꾼다(같은 카드 안에서 두 형식이 섞이던 결함).
     return (
       <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
         {action.nextRetryAt
-          ? t('channelPostsFailureAutoRetryAt', { time: formatScheduledAt(action.nextRetryAt, displayTimezone).display })
+          ? t('channelPostsFailureAutoRetryAt', { time: formatViewerScheduledAt(action.nextRetryAt, displayTimezone).display })
           : t('channelPostsFailureAutoRetryUnknown')}
       </p>
     );

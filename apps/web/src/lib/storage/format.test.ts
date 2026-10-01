@@ -46,40 +46,40 @@ describe('formatRelativeTime() — 로케일별 Intl.RelativeTimeFormat + 7일 �
   afterEach(() => { vi.useRealTimers(); });
 
   it('⭐ko — 정확히 지금(diff=0)은 "지금"(舊 "방금"과 동형 의미, Intl 정본 표현)', () => {
-    expect(formatRelativeTime(new Date(NOW).toISOString(), 'ko', 'UTC')).toBe('지금');
+    expect(formatRelativeTime(new Date(NOW).toISOString(), 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('지금');
   });
 
   it('ko — 초/분/시간/어제 전부 Intl.RelativeTimeFormat 표준 granularity 그대로다(team-activity-view.tsx relativeTime과 동형, 舊 "방금" 뭉뚱그림 없음)', () => {
-    expect(formatRelativeTime(new Date(NOW - 5000).toISOString(), 'ko', 'UTC')).toBe('5초 전');
-    expect(formatRelativeTime(new Date(NOW - 5 * 60000).toISOString(), 'ko', 'UTC')).toBe('5분 전');
-    expect(formatRelativeTime(new Date(NOW - 3 * 3600000).toISOString(), 'ko', 'UTC')).toBe('3시간 전');
-    expect(formatRelativeTime(new Date(NOW - 24 * 3600000).toISOString(), 'ko', 'UTC')).toBe('어제');
+    expect(formatRelativeTime(new Date(NOW - 5000).toISOString(), 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('5초 전');
+    expect(formatRelativeTime(new Date(NOW - 5 * 60000).toISOString(), 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('5분 전');
+    expect(formatRelativeTime(new Date(NOW - 3 * 3600000).toISOString(), 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('3시간 전');
+    expect(formatRelativeTime(new Date(NOW - 24 * 3600000).toISOString(), 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('어제');
   });
 
   it('en — 로케일을 그대로 반영한다(하드코딩 한국어 잔존 0)', () => {
-    expect(formatRelativeTime(new Date(NOW - 5 * 60000).toISOString(), 'en', 'UTC')).toBe('5 minutes ago');
+    expect(formatRelativeTime(new Date(NOW - 5 * 60000).toISOString(), 'en', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('5 minutes ago');
   });
 
   it('⭐7일 이상은 상대시각이 아니라 §11-2 정본 절대시각(formatScheduledAt)으로 폴백한다', () => {
     const iso = new Date(NOW - 8 * 86400000).toISOString();
-    expect(formatRelativeTime(iso, 'ko', 'UTC')).toBe(formatScheduledAt(iso, 'UTC').display);
-    expect(formatRelativeTime(iso, 'ko', 'UTC')).not.toMatch(/일 전$/);
+    expect(formatRelativeTime(iso, 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(formatScheduledAt(iso, 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone).display);
+    expect(formatRelativeTime(iso, 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).not.toMatch(/일 전$/);
   });
 
   it('7일 폴백은 displayTimezone을 그대로 쓴다(§11-2 tz 정본과 동일 소스)', () => {
     const iso = new Date(NOW - 10 * 86400000).toISOString();
-    expect(formatRelativeTime(iso, 'ko', 'Asia/Seoul')).toBe(formatScheduledAt(iso, 'Asia/Seoul').display);
+    expect(formatRelativeTime(iso, 'ko', 'Asia/Seoul', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(formatScheduledAt(iso, 'Asia/Seoul', Intl.DateTimeFormat().resolvedOptions().timeZone).display);
   });
 
   it('잘못된 ISO는 빈 문자열(회귀 0, 舊 구현과 동형)', () => {
-    expect(formatRelativeTime('not-a-date', 'ko', 'UTC')).toBe('');
+    expect(formatRelativeTime('not-a-date', 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('');
   });
 
   it('⭐PO 지적(2026-09-04 20:04Z) — 클라 시계보다 앞선 서버 시각(clock skew)은 "5초 후"가 아니라 "지금"으로 clamp된다', () => {
     const future = new Date(NOW + 5000).toISOString();
-    expect(formatRelativeTime(future, 'ko', 'UTC')).toBe('지금');
-    expect(formatRelativeTime(future, 'ko', 'UTC')).not.toContain('후');
-    expect(formatRelativeTime(future, 'en', 'UTC')).toBe('now');
-    expect(formatRelativeTime(future, 'en', 'UTC')).not.toContain('in ');
+    expect(formatRelativeTime(future, 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('지금');
+    expect(formatRelativeTime(future, 'ko', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).not.toContain('후');
+    expect(formatRelativeTime(future, 'en', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('now');
+    expect(formatRelativeTime(future, 'en', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).not.toContain('in ');
   });
 });

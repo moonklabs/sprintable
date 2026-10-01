@@ -6,6 +6,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
+import { runtimeTimeZone, teamDayKey } from '@/lib/viewer-time-zone';
 
 const { useDashboardContextMock, fetchWithAuthMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(), fetchWithAuthMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
@@ -49,7 +50,7 @@ describe('「하루 체크인」 첫 화면 요청 물결(story #4328)', () => {
   it('⭐스프린트 화면이 먼저 출발시킨 요청을 넘겨받는다 — 같은 주소를 두 번 보내지 않는다', async () => {
     fetchWithAuthMock.mockImplementation(() => new Promise(() => {}));
     const { prefetchSprintScreen } = await import('@/components/sprints/sprint-screen-prefetch');
-    prefetchSprintScreen({ memberId: 'me-1', projectId: 'proj-1' });
+    prefetchSprintScreen({ memberId: 'me-1', projectId: 'proj-1' }, teamDayKey(new Date(), undefined, runtimeTimeZone())); // the standup's first day (story #4443 PR3a)
     const afterPrefetch = fetchWithAuthMock.mock.calls.length;
     expect(afterPrefetch).toBe(7); // 스프린트 목록 + 다섯 + 스탠드업 기록
     await mount();
@@ -60,7 +61,7 @@ describe('「하루 체크인」 첫 화면 요청 물결(story #4328)', () => {
   it('범위가 다르면(다른 사람) 넘겨받지 않고 새로 요청한다', async () => {
     fetchWithAuthMock.mockImplementation(() => new Promise(() => {}));
     const { prefetchSprintScreen } = await import('@/components/sprints/sprint-screen-prefetch');
-    prefetchSprintScreen({ memberId: 'someone-else', projectId: 'proj-1' });
+    prefetchSprintScreen({ memberId: 'someone-else', projectId: 'proj-1' }, teamDayKey(new Date(), undefined, runtimeTimeZone())); // the standup's first day (story #4443 PR3a)
     await mount();
     const urls = fetchWithAuthMock.mock.calls.map((c) => String(c[0]));
     expect(urls.filter((u) => u.startsWith('/api/team-members')).length).toBe(2);

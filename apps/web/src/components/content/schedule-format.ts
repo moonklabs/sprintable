@@ -61,7 +61,9 @@ function offsetLabel(date: Date, tz: string): string {
 export function formatScheduledAt(
   iso: string,
   tz: string | null,
-  viewerTz: string | null = runtimeTimezone(),
+  // story #4443 PR3a (Kadir 4867 second line) — required: the viewer's zone is named by the caller, never asked of the runtime
+  // (in a server render the runtime is UTC: a Seoul viewer's own time got «GMT+9» there and not in the browser)
+  viewerTz: string | null,
 ): { display: string; utcNote: string } {
   // story #4443 PR2b — the viewer's zone not known yet (a first visit's server render and hydration): nothing to draw, never UTC
   if (!tz) return { display: '', utcNote: '' };

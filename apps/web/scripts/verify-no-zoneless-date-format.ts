@@ -8,7 +8,7 @@
  *   ② fixed-locale   : a date format in a hard-coded Korean locale (`Intl.DateTimeFormat('ko-KR'` · `'ko'`) — the viewer's locale
  *                      decides (Yuna 22:45Z: ko «오전 7:18» · en «7:18 AM»)
  *   ③ no-arg-display-tz : `resolveDisplayTimezone()` with no argument — the runtime's zone (PR2b moves these to the viewer's)
- *   ④ fixed-zone     : a place's zone written as a literal (`timeZone: 'Asia/Seoul'`) — a team date is the org's zone, not one
+ *   ④ fixed-zone     : a city's zone written as a string (`timeZone: 'Asia/Seoul'` · or held in a constant) — a team date is the org's zone, not one
  *                      city's (PR3). `'UTC'` is not counted: it is how a calendar-day key or an offset label is drawn on purpose.
  *   ⑤ runtime-calendar : calendar arithmetic in the runtime's zone without saying so — local getters/setters (`getDate()` ·
  *                      `getFullYear()` · `setDate(` …) and `new Date(y, m, d…)` (PO 23:45Z: the same hole outside a formatter —
@@ -87,7 +87,8 @@ export function findZonelessDates(content: string, file: string): ZonelessHit[] 
     if (text.startsWith('//') || text.startsWith('*')) continue;
     raw.push({ kind: 'runtime-calendar', file, line, snippet: text });
   }
-  const literalZone = /\btimeZone\s*:\s*['"]([A-Za-z]+\/[A-Za-z_]+)['"]/g;
+  // any IANA city name written as a string (inline or held in a constant — story #4443 PR3a: a constant must not hide it)
+  const literalZone = /['"](?:Africa|America|Antarctica|Asia|Atlantic|Australia|Europe|Indian|Pacific)\/[A-Za-z_]+(?:\/[A-Za-z_]+)?['"]/g;
   for (let m = literalZone.exec(content); m; m = literalZone.exec(content)) {
     const line = lineOf(content, m.index);
     raw.push({ kind: 'fixed-zone', file, line, snippet: lines[line - 1]!.trim() });
@@ -160,6 +161,7 @@ export const SELF_TEST: { code: string; kinds: ZonelessKind[] }[] = [
   { code: "{e.balance.toLocaleString()} TJSB", kinds: [] },
   { code: "return new Intl.DateTimeFormat('sv-SE', {\n    timeZone: 'Asia/Seoul',\n    year: 'numeric',\n  }).format(value);", kinds: ['fixed-zone'] },
   { code: "new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC', year: 'numeric' })", kinds: [] },
+  { code: "export const LEGAL_TIME_ZONE = 'Asia/Seoul';", kinds: ['fixed-zone'] },
   { code: 'const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();', kinds: ['runtime-calendar', 'runtime-calendar', 'runtime-calendar'] }, // the getters mark it (the constructor's own pattern needs plain arguments)
   { code: 'const d = new Date(year, month - 1, day + days);', kinds: ['runtime-calendar'] },
   { code: 'd.setDate(d.getDate() + offsetDays);', kinds: ['runtime-calendar', 'runtime-calendar'] },

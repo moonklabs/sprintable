@@ -156,8 +156,12 @@ describe('[SID:4443] «오늘» on /today — drawn in the server render too', (
     return el.querySelector('[data-testid="today-v3-today-column"]') as HTMLElement;
   }
 
-  it('the cookie says Seoul → the server render already reads «10월 1일 목요일» (a UTC server said «9월 30일 수요일»)', async () => {
-    expect(visibleText(await serverHtml('Asia/Seoul'))).toContain('10월 1일 목요일');
+  // PR3a (PO 01:30Z): even when the cookie knows the zone, the server render only holds the place — the browser draws the day
+  // right after hydration, so the two can't read different instants either side of midnight (was: drawn here already)
+  it('the cookie says Seoul → the server render still holds the place (no date to read · never «9월 30일» from a UTC server)', async () => {
+    const col = await serverHtml('Asia/Seoul');
+    expect(visibleText(col)).not.toMatch(/\d+월 \d+일 [월화수목금토일]요일/);
+    expect(col.querySelector('[data-testid="viewer-tz-pending"]')).not.toBeNull();
   });
 
   it('a first visit hydrates with no hydration error, then the browser\'s own day appears (Seoul: «10월 1일 목요일»)', async () => {

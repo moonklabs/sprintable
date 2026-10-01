@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { declaredMetricsForChannel } from '@/components/insights-board/channel-declared-metrics';
 import { CHANNEL_LABEL_KEYS } from '@/lib/channel-label';
 // story #3746(유나 design gate CHANGES, 2026-09-09) — 이 유니온을 여기서 다시
@@ -196,7 +196,7 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicati
             </div>
           ))}
           <div className="col-span-full text-xs text-muted-foreground">
-            {t('insightCapturedAtLabel')} {formatRelativeTime(latest.captured_at as string, locale, orgTimezone)}
+            {t('insightCapturedAtLabel')} {formatViewerRelativeTime(latest.captured_at as string, locale, orgTimezone)}
             {' · '}
             {latest.source}
           </div>
@@ -205,7 +205,7 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicati
 
       <ul className="space-y-2" data-testid="insight-snapshot-list">
         {snapshots.map((snap, idx) => {
-          const dueDisplay = snap.due_at ? formatScheduledAt(snap.due_at, orgTimezone).display : null;
+          const dueDisplay = snap.due_at ? formatViewerScheduledAt(snap.due_at, orgTimezone).display : null;
           const toneClass = DESTRUCTIVE_STATUSES.has(snap.status) ? 'text-destructive' : 'text-muted-foreground';
           return (
             <li key={`${snap.source}-${snap.due_at ?? idx}`} className="text-xs" data-testid="insight-snapshot-row">
@@ -236,7 +236,7 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicati
                 </span>
               ) : snap.status === 'captured' && snap.captured_at ? (
                 <span data-testid="insight-snapshot-captured">
-                  {formatRelativeTime(snap.captured_at, locale, orgTimezone)}
+                  {formatViewerRelativeTime(snap.captured_at, locale, orgTimezone)}
                   {dueDisplay ? ` · ${dueDisplay}` : ''}
                 </span>
               ) : (

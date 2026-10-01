@@ -1,5 +1,7 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
+
 import { useTranslations, useLocale } from 'next-intl';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Badge } from '@/components/ui/badge';
@@ -67,6 +69,10 @@ function TodayV3Topbar({ needsMeCount }: { needsMeCount: number }) {
   );
 }
 
+// the held place's text: a fixed date of the same shape («9월 30일 수요일») — the same on the server and in hydration
+const DATE_SAMPLE = new Date('2026-09-30T12:00:00Z');
+const noSubscription = () => () => {};
+
 export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Flags }) {
   const { data, loadError, retry } = useTodaySnapshot();
   const snapshot = data ?? EMPTY_TODAY_SNAPSHOT;
@@ -81,10 +87,16 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
   // 실시간 갱신만 빠진다(마운트 스냅숏, 화면 전환마다 재계산돼 충분한 근사치).
   const chatUnreadTotal = useChatUnreadTotal();
 
-  // story #4443 — «today» is the viewer's today. This line is drawn in the server render too: with no zone given it took the
-  // server's (UTC), so a Korean morning read yesterday's date there. Unknown zone (a first visit) → held, never a UTC day.
+  // story #4443 — «today» is the viewer's today. PR3a (PO 01:30Z): it is drawn by the browser only, right after hydration — the
+  // server render and hydration hold its place with a fixed sample of the same shape, so the two can never read different
+  // instants (two `new Date()` a moment apart can fall either side of midnight · Kadir 4862 second line). Was (PR1): drawn in the
+  // server render already when the cookie knew the zone.
   const viewerTz = useViewerTimeZone();
-  const dateLabel = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long', timeZone: viewerTz ?? 'UTC' }).format(new Date());
+  const hydrated = useSyncExternalStore(noSubscription, () => true, () => false);
+  const dateLabel = viewerTz && hydrated
+    ? new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long', timeZone: viewerTz }).format(new Date())
+    : null;
+  const dateSample = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long', timeZone: 'UTC' }).format(DATE_SAMPLE);
   // story #3962 ④(FE 계산) — 서버는 agent.id를 안 준다(derive-today.ts가 agentName만
   // 파싱), 같은 이름의 다른 에이전트가 동시에 뛰는 경우 과소산정될 수 있으나 "화면
   // 헤더 1줄" 용도의 근사치(§13류 정밀 집계가 아니다)로는 충분 — 새 API 0.
@@ -101,7 +113,7 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
                 항상 빈 셸 자리라 실제로 열 것이 없다 — §3 "선택→상세" 토글은 대상/대화
                 칸에 실 콘텐츠가 생기는 후속 스토리 스코프, 지금은 목록 칸만 있으면 된다). */}
             <section className="min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-[392px]" data-testid="today-v3-today-column">
-              <p className="text-xs text-muted-foreground">{viewerTz ? dateLabel : <InvisibleSample>{dateLabel}</InvisibleSample>}</p>
+              <p className="text-xs text-muted-foreground">{dateLabel ?? <InvisibleSample>{dateSample}</InvisibleSample>}</p>
               <h1 className="mb-1 text-[26px] font-bold tracking-tight text-foreground">{t('title')}</h1>
               <p className="mb-6 text-xs text-muted-foreground">
                 {t('headerSummary', { decisions: snapshot.needsMeCount, agents: distinctAgentCount })}

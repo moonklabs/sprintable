@@ -14,13 +14,13 @@ import { getEntityHref } from '@/components/chat/embed-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { CommentReplyDialog, type CommentReplyOutcome } from '@/components/content/comment-reply-dialog';
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import type { CommentItem } from '@/components/content/comments-section';
 import { shouldShowReplyDetectionUnavailable } from './collection-status';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3805(Phase3·3-1·PR 2[FE]→PR 3, 유나 §절·08:14Z/08:40Z 낱말·범위 정정) —
@@ -137,12 +137,13 @@ async function readJson<T>(res: Response): Promise<T | null> {
 export default function ChannelPostsEngagementPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const router = useRouter();
-  const { orgId, orgTimezone } = useDashboardContext();
+  const { orgId } = useDashboardContext();
   const t = useTranslations('content');
   const channelLabel = useChannelLabel();
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
+  // story #4443 PR3a — collected · captured · answered = when it happened: the viewer's zone (was the org's)
+  const displayTimezone = useViewerTimeZone();
 
   const [statusFilter, setStatusFilter] = useState<TriageStatus | 'all'>('open');
   const [channelFilter, setChannelFilter] = useState<string>('all');
@@ -340,7 +341,7 @@ export default function ChannelPostsEngagementPage() {
             <span key={c.connection_id}>
               {c.last_collected_at
                 ? t('engagementCollectionStatusCollected', {
-                    channel: channelLabel(c.channel), time: formatRelativeTime(c.last_collected_at, locale, displayTimezone),
+                    channel: channelLabel(c.channel), time: formatViewerRelativeTime(c.last_collected_at, locale, displayTimezone),
                   })
                 : t('engagementCollectionStatusNotCollected', { channel: channelLabel(c.channel) })}
               {shouldShowReplyDetectionUnavailable(c) ? (
@@ -481,7 +482,7 @@ export default function ChannelPostsEngagementPage() {
                       ) : null}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 align-top text-muted-foreground">
-                      {formatRelativeTime(item.captured_at, locale, displayTimezone)}
+                      {formatViewerRelativeTime(item.captured_at, locale, displayTimezone)}
                     </td>
                     <td className="px-3 py-2 align-top">
                       <select
@@ -496,7 +497,7 @@ export default function ChannelPostsEngagementPage() {
                       </select>
                       {item.answered_at ? (
                         <p className="mt-1 text-xs text-muted-foreground" data-testid="engagement-answered-marker">
-                          {t('engagementAnsweredAt', { time: formatRelativeTime(item.answered_at, locale, displayTimezone) })}
+                          {t('engagementAnsweredAt', { time: formatViewerRelativeTime(item.answered_at, locale, displayTimezone) })}
                         </p>
                       ) : null}
                     </td>

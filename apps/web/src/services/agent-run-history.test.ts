@@ -3,8 +3,8 @@ import {
   ALL_RUN_STATUS_FILTER,
   DEFAULT_RUN_STATUS_FILTER,
   getDefaultRunDateFilters,
-  getLocalDayEndIso,
-  getLocalDayStartIso,
+  getDayEndIso,
+  getDayStartIso,
   getRunErrorDisplay,
   getRunFailureDisposition,
   getTriggerMemoHref,
@@ -66,15 +66,18 @@ describe('agent-run-history helpers', () => {
     })).toBe('non_retryable');
   });
 
-  it('returns locale-safe default date filter inputs', () => {
-    expect(getDefaultRunDateFilters(new Date('2026-04-07T12:00:00+09:00'))).toEqual({
-      fromDate: '2026-03-31',
-      toDate: '2026-04-07',
-    });
+  // story #4443 PR3a — the viewer's days, named (was the runtime's local calendar)
+  it('returns the default date filter in the viewer\'s days · empty while the zone is unknown', () => {
+    expect(getDefaultRunDateFilters('Asia/Seoul', new Date('2026-04-07T12:00:00+09:00'))).toEqual({ fromDate: '2026-03-31', toDate: '2026-04-07' });
+    // 2026-04-06T22:00Z is still the 6th in UTC, already the 7th in Seoul
+    expect(getDefaultRunDateFilters('Asia/Seoul', new Date('2026-04-06T22:00:00Z')).toDate).toBe('2026-04-07');
+    expect(getDefaultRunDateFilters('UTC', new Date('2026-04-06T22:00:00Z')).toDate).toBe('2026-04-06');
+    expect(getDefaultRunDateFilters(null)).toEqual({ fromDate: '', toDate: '' });
   });
 
-  it('builds local start/end-of-day ISO bounds from date input', () => {
-    expect(getLocalDayStartIso('2026-04-07')).toBe(new Date(2026, 3, 7, 0, 0, 0, 0).toISOString());
-    expect(getLocalDayEndIso('2026-04-07')).toBe(new Date(2026, 3, 7, 23, 59, 59, 999).toISOString());
+  it('builds the start/end of a day in the viewer\'s zone', () => {
+    expect(getDayStartIso('2026-04-07', 'Asia/Seoul')).toBe('2026-04-06T15:00:00.000Z');
+    expect(getDayEndIso('2026-04-07', 'Asia/Seoul')).toBe('2026-04-07T14:59:59.999Z');
+    expect(getDayStartIso('2026-04-07', 'UTC')).toBe('2026-04-07T00:00:00.000Z');
   });
 });
