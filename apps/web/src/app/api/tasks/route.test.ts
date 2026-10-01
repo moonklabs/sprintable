@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 837a36c4(Group B b8): 직접 서비스 핸들러(TaskService) — b7 정석 재사용. proxy 아님.
-// GET=service.list(+story_id면 counts) / POST=parseBody→service.create(201). pagination 헬퍼는 실제 사용.
+// GET=service.list(+story_id면 counts). pagination 헬퍼는 실제 사용. POST는 없다(story #4450 — 아래).
 const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(), createTaskRepository: vi.fn(),
-  list: vi.fn(), create: vi.fn(), parseBody: vi.fn(),
+  list: vi.fn(), parseBody: vi.fn(),
   // story #3718 — getStoryTaskCounts가 service.list(길이 세기) 대신 service.count
   // (BE X-Total-Count)를 쓰도록 바뀌어 mock 표면도 같이 늘어난다.
   count: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, getOrgP
 vi.mock('@/lib/storage/factory', () => ({ createTaskRepository: h.createTaskRepository }));
 vi.mock('@/services/task', async (importActual) => ({
   ...(await importActual<typeof import('@/services/task')>()),
-  TaskService: class { list = h.list; create = h.create; count = h.count; },
+  TaskService: class { list = h.list; count = h.count; },
 }));
 vi.mock('@sprintable/shared', async (importActual) => ({
   // 공유 모듈은 export 다수(VALID_STORY_TRANSITIONS 등 타 소비자 참조) — importActual로 전부 유지·parseBody만 오버라이드.
@@ -21,7 +21,9 @@ vi.mock('@sprintable/shared', async (importActual) => ({
   parseBody: h.parseBody,
 }));
 
-import { GET, POST } from './route';
+import * as route from './route';
+
+const { GET } = route;
 
 const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLimitRemaining: 299, rateLimitResetAt: 0 });
 const task = (id: string, status = 'todo') => ({ id, status, created_at: `2026-06-1${id}T00:00:00Z` });
@@ -60,27 +62,6 @@ describe('/api/tasks (직접 서비스 TaskService)', () => {
     expect(body.meta.doneCount).toBe(1);
     expect(h.count).toHaveBeenCalledWith({ story_id: 's1' });
     expect(h.count).toHaveBeenCalledWith({ story_id: 's1', status: 'done' });
-  });
-
-  it('POST: 401 when unauthenticated', async () => {
-    h.getAuthContext.mockResolvedValue(null);
-    expect((await POST(new Request('http://localhost/api/tasks', { method: 'POST', body: '{}' }))).status).toBe(401);
-  });
-
-  it('POST: invalid body → parseBody 400 response', async () => {
-    h.parseBody.mockResolvedValue({ success: false, response: new Response('bad', { status: 400 }) });
-    const res = await POST(new Request('http://localhost/api/tasks', { method: 'POST', body: '{}' }));
-    expect(res.status).toBe(400);
-    expect(h.create).not.toHaveBeenCalled();
-  });
-
-  it('POST: valid body → service.create wrapped as 201', async () => {
-    h.parseBody.mockResolvedValue({ success: true, data: { title: 'T', story_id: 's1' } });
-    h.create.mockResolvedValue({ id: 't1', title: 'T' });
-    const res = await POST(new Request('http://localhost/api/tasks', { method: 'POST', body: '{}' }));
-    expect(res.status).toBe(201);
-    expect(h.create).toHaveBeenCalledWith({ title: 'T', story_id: 's1' });
-    expect((await res.json()).data).toMatchObject({ id: 't1' });
   });
 });
 
@@ -220,3 +201,14 @@ describe('/api/tasks GET — getStoryTaskCounts가 목록 길이가 아닌 servi
     expect(body.meta.doneCount).toBe(5);
   });
 });
+
+
+// story #4450 — the BFF `POST /api/tasks` had no caller anywhere (web · mobile repo · plugins · docs; the private SDK's
+// tasks.create had no user) and always answered 422 on dev: the web zod schema dropped org_id, which the backend's TaskCreate
+// requires. The handler is gone (agents create tasks through MCP against the backend); with no exported POST, Next answers 405.
+describe('/api/tasks — no POST handler (#4450)', () => {
+  it('the route exports GET only', () => {
+    expect(Object.keys(route).filter((k) => /^(GET|POST|PUT|PATCH|DELETE)$/.test(k)).sort()).toEqual(['GET']);
+  });
+});
+

@@ -11,7 +11,6 @@ import type {
   CreateStoryInput,
   UpdateStoryInput,
   StoryListFilters,
-  CreateTaskInput,
   UpdateTaskInput,
   TaskListFilters,
 } from './types';
@@ -60,8 +59,6 @@ export interface SprintableClient {
   tasks: {
     /** List tasks with optional filters */
     list: (filters?: TaskListFilters) => Promise<Task[]>;
-    /** Create a new task */
-    create: (input: CreateTaskInput) => Promise<Task>;
     /** Update a task */
     update: (id: string, input: UpdateTaskInput) => Promise<Task>;
   };
@@ -156,11 +153,6 @@ export function createSprintableClient(
         const res = await instance.get<ApiResponse<Task[]>>(
           `/api/tasks${buildParams(filters as Record<string, string | number | undefined>)}`,
         );
-        return res.data.data;
-      },
-
-      async create(input) {
-        const res = await instance.post<ApiResponse<Task>>('/api/tasks', input);
         return res.data.data;
       },
 
