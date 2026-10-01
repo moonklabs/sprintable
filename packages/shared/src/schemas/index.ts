@@ -128,14 +128,6 @@ export {
 // ─── Task ────────────────────────────────────
 export const TASK_STATUSES = ['todo', 'in-progress', 'done'] as const;
 
-export const createTaskSchema = z.object({
-  story_id: z.string().min(1),
-  title: z.string().min(1),
-  assignee_id: z.string().optional().nullable(),
-  status: z.enum(TASK_STATUSES).optional(),
-  story_points: z.number().optional().nullable(),
-});
-
 export const updateTaskSchema = z.object({
   title: z.string().min(1).optional(),
   status: z.enum(TASK_STATUSES).optional(),
