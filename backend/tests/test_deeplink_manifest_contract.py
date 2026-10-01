@@ -23,14 +23,12 @@ pass/fail(의도된 실패)로 실증한다.
 """
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-
+# story 4459: imported through the `tests` package — putting tests/ at the front of sys.path made `import mcp` find tests/mcp/
+# for every later file in the same run (test_2188 then failed with «No module named 'mcp.types'»)
 from app.schemas.deeplink_manifest import (  # noqa: E402
     DEEPLINK_MANIFEST,
     MANIFEST_SCHEMA_VERSION,
@@ -39,7 +37,7 @@ from app.schemas.deeplink_manifest import (  # noqa: E402
     UnregisteredDeepLinkTypeError,
     validate_push_payload,
 )
-from deeplink_contract_lib import (  # noqa: E402
+from tests.deeplink_contract_lib import (  # noqa: E402
     scan_dispatch_notification_call_sites,
     target_route_exists,
 )

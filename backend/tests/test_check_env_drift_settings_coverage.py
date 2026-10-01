@@ -14,6 +14,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _INFRA_DIR = _REPO_ROOT / "infra"
 
@@ -27,6 +29,16 @@ def _load_check_env_drift():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _hide_loaded_settings_module(monkeypatch):
+    """story 4459 (Kadir 4879) — a test that ran before (or any fixture) may have loaded app.core.config; a cached module would
+    satisfy an `import app.core.config` in the script without touching pydantic_settings, and this check would pass blind.
+    Hidden for this test only (monkeypatch puts it back): an import of it here really loads it, and the block above bites."""
+    import sys
+
+    for name in ("app.core.config", "pydantic_settings"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
 
 
 def test_settings_field_env_keys_includes_known_fields():
@@ -140,6 +152,7 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", _blocking_import)
+    _hide_loaded_settings_module(monkeypatch)
     mod = _load_check_env_drift()  # 모듈 자체 로드도 이 차단 안에서(위 실측과 동일 조건).
     keys = mod._settings_field_env_keys()
     # #2158: sse_transient_replay_enabled 필드 추가로 82→83(SSE_TRANSIENT_REPLAY_ENABLED 포함).
@@ -298,3 +311,30 @@ def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_c
     )
     names = {name.upper() for name in mod._SETTINGS_FIELD_RE.findall(snippet)}
     assert names == {"YOUTUBE_QUOTA_DAILY_LIMIT_UNITS", "YOUTUBE_API_AUDIT_INCOMPLETE"}
+
+
+def test_a_planted_settings_import_still_fails_the_no_backend_packages_check_whatever_ran_before(monkeypatch, tmp_path):
+    """story 4459 positive control (Kadir 4879): plant `import app.core.config` in a copy of the script, with app.core.config
+    ALREADY loaded (as after any earlier test) — the check above must still turn it into the crash the workflow would see."""
+    import builtins
+
+    import app.core.config  # noqa: F401 — loaded first on purpose: the order that blinded the check
+
+    planted = tmp_path / "check_env_drift.py"
+    source = (_INFRA_DIR / "check_env_drift.py").read_text(encoding="utf-8")
+    future = "from __future__ import annotations\n"
+    assert future in source  # the plant goes right after it (nothing may stand before a __future__ import)
+    planted.write_text(source.replace(future, future + "import app.core.config  # planted regression\n", 1), encoding="utf-8")
+    real_import = builtins.__import__
+
+    def _blocking_import(name, *args, **kwargs):
+        if name == "pydantic_settings" or name.startswith("pydantic_settings."):
+            raise ModuleNotFoundError(f"No module named '{name}'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _blocking_import)
+    _hide_loaded_settings_module(monkeypatch)
+    spec = importlib.util.spec_from_file_location("check_env_drift_planted", planted)
+    module = importlib.util.module_from_spec(spec)
+    with pytest.raises(ModuleNotFoundError, match="pydantic_settings"):
+        spec.loader.exec_module(module)
