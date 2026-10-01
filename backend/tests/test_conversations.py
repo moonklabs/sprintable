@@ -551,10 +551,13 @@ async def test_list_messages_response_shape():
         # _resolve_member가 grant-only 휴먼 폴백 경로(resolve_member)로 빠져 쿼리가 하나 더
         # 필요해진다 — non-None으로 그 분기를 막는다).
         blocked_sender_result.scalars.return_value.first.return_value = mock_member
+        # story #4444 — the isinstance gate is gone (an org person's blocks mask too): the viewer's blocks are read once more
+        viewer_blocks_result = MagicMock()
+        viewer_blocks_result.scalars.return_value.all.return_value = []
 
         session.execute = AsyncMock(side_effect=[
             conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
-            runtime_type_result, refs_result, blocked_sender_result,
+            runtime_type_result, refs_result, blocked_sender_result, viewer_blocks_result,
         ])
 
         async with client as c:

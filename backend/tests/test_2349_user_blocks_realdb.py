@@ -79,13 +79,19 @@ async def _dispose_global_engine_after_test():
 
 
 async def _revoke_project_access(session, member_id, project_id):
-    """멤버를 org에서 「빠진 것처럼」 만든다 — user_blocks 조회 orphan-필터 테스트용.
-    team_members VIEW는 project_access join이라 이 행을 지우면 그 멤버가 뷰에서 사라진다."""
-    from sqlalchemy import delete
+    """멤버를 org에서 빠지게 만든다 — user_blocks 조회 orphan-필터 테스트용.
+    story #4444 — project access alone is no longer «left»: a person still in the org (no project row) can block and be
+    blocked, so their block stays listed (test_4444). Leaving the org is the membership deleted, so this deletes that too."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import delete, update
+
+    from app.models.project import OrgMember
     from app.models.project_access import ProjectAccess
     await session.execute(delete(ProjectAccess).where(
         ProjectAccess.member_id == member_id, ProjectAccess.project_id == project_id,
     ))
+    await session.execute(update(OrgMember).where(OrgMember.id == member_id).values(deleted_at=datetime.now(timezone.utc)))
     await session.commit()
 
 

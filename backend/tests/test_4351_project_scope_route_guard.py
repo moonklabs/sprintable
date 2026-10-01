@@ -83,8 +83,6 @@ _KNOWN = {
     "app/routers/recipe_repeat_schedules.py::run_repeat_schedule_now",
     "app/routers/sprints.py::close_sprint",
     "app/routers/team_members.py::create_team_member",
-    "app/routers/user_blocks.py::create_user_block",
-    "app/routers/user_blocks.py::list_user_blocks",
     "app/routers/verdict_capture.py::capture_pr_verdict",
     "app/routers/verdict_capture.py::capture_review",
     "app/routers/visual_artifacts.py::add_artifact_comment",
