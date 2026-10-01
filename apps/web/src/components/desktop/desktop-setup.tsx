@@ -193,6 +193,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [rows, setRows] = useState<SetupRoleRow[]>([]);
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
+  const [pickingRecipe, setPickingRecipe] = useState(false); // 4446: the recipe list is folded to the chosen one until [바꾸기]
   const [view, setView] = useState<View>({ kind: 'loading' });
   const [rateLine, setRateLine] = useState<string | null>(null);
 
@@ -399,18 +400,30 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         </section>
       ) : null}
 
+      {/* the chosen recipe as one card + [바꾸기] — the list of every recipe pushed «시작» more than a screen below, and a
+          person who did not scroll saw no agent start (4446 · Yuna b2d15f85 ① · PO 00:31Z). [바꾸기] opens the list in place
+          (the chosen one first); picking one folds it again. One recipe only: no [바꾸기]. */}
       <section aria-labelledby="setup-recipe">
         <h2 id="setup-recipe" className="text-sm font-medium">{t('recipe')}</h2>
-        <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2">
-          {recipes.map((r) => (
-            <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
-              <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1" />
-              <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
-                {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
-                <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
-            </label>
-          ))}
-        </div>
+        {pickingRecipe ? (
+          <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list">
+            {[...recipes].sort((a, b) => Number(b.id === recipeId) - Number(a.id === recipeId)).map((r) => (
+              <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
+                <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => { pick(r); setPickingRecipe(false); }} className="mt-1" />
+                <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
+                  {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
+                  <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
+              </label>
+            ))}
+          </div>
+        ) : recipe ? (
+          <div className="mt-2 flex items-start justify-between gap-3 rounded-md border p-3" data-testid="setup-recipe-chosen">
+            <span className="min-w-0"><span className="block text-sm font-medium">{presetName(recipe, tPreset)}</span>
+              {presetDescription(recipe, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(recipe, tPreset)}</span> : null}
+              <RecipeRolesLine recipe={recipe} runtimes={runtimes} /></span>
+            {recipes.length > 1 ? <Button variant="ghost" size="sm" onClick={() => setPickingRecipe(true)}>{t('change')}</Button> : null}
+          </div>
+        ) : null}
       </section>
 
       <section aria-labelledby="setup-roles">
@@ -452,7 +465,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         {!workdirInputOk(workdir) ? <p className="mt-1 text-xs text-muted-foreground">{t('folderHint')}</p> : null}
       </section>
 
-      <footer className="flex flex-col gap-2">
+      {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
+          commands · other tools still ask each time — at the end of the flow, just above the start row (4446) */}
+      <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
+
+      {/* «시작» and its one line stay in sight (4446 · Yuna b2d15f85 ② · PO 00:31Z): stuck to the bottom of whatever scrolls —
+          the window for a new organization, the app shell's main area for an existing one — on the card's own background, a thin
+          line above. Spans the card's padding so it reads as the card's last row. */}
+      <footer className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 pt-3 pb-6" data-testid="setup-start-row">
         <Button onClick={() => void start()} disabled={!canStart}>
           {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{t('start')}
         </Button>
@@ -460,9 +480,6 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           {noAgentRow ? t('noAgentRow')
             : humanRoles.length > 0 ? t('startNoteWithMe', { n: agents, roles: humanList, josa: pickEunNeunJosa(humanList) }) : t('startNote', { n: agents })}
         </p>
-        {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
-            commands · other tools still ask each time */}
-        <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
         {rateLine ? <p className="text-xs text-muted-foreground" data-testid="setup-rate-limited">{rateLine}</p>
           : view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
       </footer>

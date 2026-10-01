@@ -39,6 +39,16 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+// What the runtime's own Intl draws for that locale · zone · options (story #4446, PO 02:01Z). ICU's words differ between Node
+// patches — v22.23.2 drew ko «AM 7:18», v22.23.3 «오전 7:18» — so the expected text is never typed in; the parts check that the
+// right zone was used (Seoul 7:18 · Los Angeles 3:18), whatever the ICU wording.
+function intl(value: string | Date, locale: string, timeZone: string, options: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(new Date(value));
+}
+function part(value: string | Date, locale: string, timeZone: string, options: Intl.DateTimeFormatOptions, type: Intl.DateTimeFormatPartTypes): string | undefined {
+  return new Intl.DateTimeFormat(locale, { ...options, timeZone }).formatToParts(new Date(value)).find((p) => p.type === type)?.value;
+}
+
 function visibleText(el: Element): string {
   const c = el.cloneNode(true) as Element;
   c.querySelectorAll('[data-testid="viewer-tz-pending"]').forEach((n) => n.remove());
@@ -63,14 +73,16 @@ describe('[SID:4443 PR2a] the chat bubble\'s time — the viewer\'s zone and loc
   it('ko viewer in Seoul: «오전 7:18» (was ko-KR two-digit in the runtime\'s zone: «오후 10:18» on a UTC server)', async () => {
     const { ChatBubble } = await import('./chat/chat-bubble');
     await act(async () => { root.render(page(<ChatBubble message={message} isMine={false} />, 'ko', 'Asia/Seoul')); });
-    expect(visibleText(container.querySelector('time')!)).toBe('오전 7:18');
+    expect(visibleText(container.querySelector('time')!)).toBe(intl(message.created_at, 'ko', 'Asia/Seoul', VIEWER_TIME_OPTIONS));
+    expect([part(message.created_at, 'ko', 'Asia/Seoul', VIEWER_TIME_OPTIONS, 'hour'), part(message.created_at, 'ko', 'Asia/Seoul', VIEWER_TIME_OPTIONS, 'minute')]).toEqual(['7', '18']);
   });
 
   it('en viewer in Los Angeles: «3:18 PM» — their clock, their language (was «오후 10:18» in English too)', async () => {
     runtimeTz.value = 'America/Los_Angeles';
     const { ChatBubble } = await import('./chat/chat-bubble');
     await act(async () => { root.render(page(<ChatBubble message={message} isMine={false} />, 'en', 'America/Los_Angeles')); });
-    expect(visibleText(container.querySelector('time')!)).toBe('3:18 PM');
+    expect(visibleText(container.querySelector('time')!)).toBe(intl(message.created_at, 'en', 'America/Los_Angeles', VIEWER_TIME_OPTIONS));
+    expect([part(message.created_at, 'en', 'America/Los_Angeles', VIEWER_TIME_OPTIONS, 'hour'), part(message.created_at, 'en', 'America/Los_Angeles', VIEWER_TIME_OPTIONS, 'minute')]).toEqual(['3', '18']);
   });
 
   it('the zone not known yet: no time can be read (the place is held)', async () => {
@@ -85,9 +97,13 @@ describe('[SID:4443 PR2a] the chat bubble\'s time — the viewer\'s zone and loc
 
 describe('[SID:4443 PR2a] the one formatter', () => {
   it('names the zone it draws in · null while unknown · \'\' for a value that is not a date', () => {
-    expect(formatViewerDate('2026-09-30T22:18:00Z', 'ko', 'Asia/Seoul', VIEWER_TIME_OPTIONS)).toBe('오전 7:18');
-    expect(formatViewerDate('2026-09-30T22:18:00Z', 'en', 'Asia/Seoul', VIEWER_TIME_OPTIONS)).toBe('7:18 AM');
-    expect(formatViewerDate('2026-09-30T22:18:00Z', 'ko', 'Asia/Seoul', { month: 'numeric', day: 'numeric' })).toBe('10. 1.');
+    const at = '2026-09-30T22:18:00Z';
+    expect(formatViewerDate(at, 'ko', 'Asia/Seoul', VIEWER_TIME_OPTIONS)).toBe(intl(at, 'ko', 'Asia/Seoul', VIEWER_TIME_OPTIONS));
+    expect(formatViewerDate(at, 'en', 'Asia/Seoul', VIEWER_TIME_OPTIONS)).toBe(intl(at, 'en', 'Asia/Seoul', VIEWER_TIME_OPTIONS));
+    expect(part(at, 'en', 'Asia/Seoul', VIEWER_TIME_OPTIONS, 'hour')).toBe('7'); // the next morning in Seoul, not 22:18 UTC
+    const md = { month: 'numeric', day: 'numeric' } as const;
+    expect(formatViewerDate(at, 'ko', 'Asia/Seoul', md)).toBe(intl(at, 'ko', 'Asia/Seoul', md));
+    expect([part(at, 'ko', 'Asia/Seoul', md, 'month'), part(at, 'ko', 'Asia/Seoul', md, 'day')]).toEqual(['10', '1']);
     expect(formatViewerDate('2026-09-30T22:18:00Z', 'ko', null, VIEWER_TIME_OPTIONS)).toBeNull();
     expect(formatViewerDate('nope', 'ko', 'Asia/Seoul', VIEWER_TIME_OPTIONS)).toBe('');
   });
@@ -97,7 +113,9 @@ describe('[SID:4443 PR2a] the one formatter', () => {
     vi.setSystemTime(new Date('2026-09-30T22:39:00Z'));
     try {
       await act(async () => { root.render(page(<p><ViewerDate value={new Date()} options={{ month: 'long', day: 'numeric', weekday: 'long' }} /></p>, 'ko', 'Asia/Seoul')); });
-      expect(visibleText(container)).toBe('10월 1일 목요일');
+      const opts = { month: 'long', day: 'numeric', weekday: 'long' } as const;
+      expect(visibleText(container)).toBe(intl(new Date('2026-09-30T22:39:00Z'), 'ko', 'Asia/Seoul', opts));
+      expect(part(new Date('2026-09-30T22:39:00Z'), 'ko', 'Asia/Seoul', opts, 'day')).toBe('1'); // Seoul's day, not the runtime's 30th
     } finally {
       vi.useRealTimers();
     }

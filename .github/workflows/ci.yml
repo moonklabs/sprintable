@@ -1918,7 +1918,9 @@ jobs:
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # exactly this patch (story #4446, PO 02:01Z): «'22'» picked whatever the runner had cached — v22.23.2's ICU drew ko
+          # «AM 7:18», v22.23.3 «오전 7:18» — so the same commit went red or green by runner
+          node-version: '22.23.3'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 
@@ -2623,7 +2625,9 @@ jobs:
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # exactly this patch (story #4446, PO 02:01Z): «'22'» picked whatever the runner had cached — v22.23.2's ICU drew ko
+          # «AM 7:18», v22.23.3 «오전 7:18» — so the same commit went red or green by runner
+          node-version: '22.23.3'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 
@@ -2692,6 +2696,14 @@ jobs:
           echo $! > /tmp/next-start-mobile-width.pid
           for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3108/login && break; sleep 2; done
           PLAYWRIGHT_BASE_URL=http://localhost:3108 pnpm exec playwright test mobile-width-overflow.spec.ts
+
+      # story #4446 — the desktop setup page's «시작» is in sight right after sign-in, with no scrolling, in both modes and their
+      # real parent chains ((가) an existing org inside the app shell · (나) a new org, the window scrolls) at the app's web area
+      # sizes (1440×900 · 1280×700 · 1512×860 windows minus the shell's bottom bar), on the real recipe list. Same production
+      # server as the step above (still running).
+      - name: Run desktop setup «시작» in sight e2e (story #4446)
+        working-directory: apps/web
+        run: PLAYWRIGHT_BASE_URL=http://localhost:3108 pnpm exec playwright test desktop-setup-start-visible.spec.ts
 
       - name: Stop production server (mobile-width)
         if: always()
