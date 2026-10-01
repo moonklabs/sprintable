@@ -131,6 +131,8 @@ export interface ChatMessage {
  * once the answer came. Per tab (module state); small and bounded.
  */
 const SENT_HERE_MAX = 200;
+// story #4442 — this tab's lists, told about each send made from this tab
+const sentHereListeners = new Set<(payload: Record<string, unknown>) => void>();
 const sentHereNonces: string[] = [];
 const sentHereIds: string[] = [];
 
@@ -190,6 +192,7 @@ export function parseDeliveryWithheld(v: unknown): DeliveryWithheld | undefined 
 export function sentMessageFromAnswer(raw: Record<string, unknown>): ChatMessage {
   const payload = (raw.data ?? raw) as Record<string, unknown>;
   rememberSentHere(typeof payload.id === 'string' ? payload.id : null); // story #4440 — its echo is dropped here
+  for (const listener of [...sentHereListeners]) listener(payload); // story #4442 — this tab's lists update their row
   const delivery = parseDeliveryWithheld(raw.delivery);
   return normalizeToMessage(delivery ? { ...payload, delivery_withheld: delivery } : payload);
 }
@@ -262,12 +265,18 @@ interface UseChatSseOptions {
    *  규칙과 충돌 0), 재연결 성공(connected=true) 즉시 멈춘다 — 그 뒤는 기존
    *  onReconnect(backfill)가 이어받는다(중복 fetch 0). */
   onPoll?: () => Promise<boolean | undefined> | boolean | undefined;
+  /**
+   * story #4442 — a message this tab just sent (from its send answer). The tab drops its own echo (#4440), so the lists in
+   * this tab (legacy list · v3 rail) take their row update from here instead. The chat view itself does not subscribe (it
+   * already added the message).
+   */
+  onSentHere?: (payload: Record<string, unknown>) => void;
 }
 
 // story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용, sse-multiplexer.ts와
 // 동일 모듈 재사용)로 뽑았다.
 
-export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorking, onConversationRead, onReconnect, onPoll }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorking, onConversationRead, onReconnect, onPoll, onSentHere }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -290,6 +299,16 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   // useLayoutEffect: DOM commit 후 동기 실행 — useEffect(비동기)보다 먼저 실행되어
   // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
   useLayoutEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
+  // story #4442 — subscribe to this tab's own sends (only when asked: the lists)
+  const onSentHereRef = useRef(onSentHere);
+  useLayoutEffect(() => { onSentHereRef.current = onSentHere; }, [onSentHere]);
+  const wantsSentHere = typeof onSentHere === 'function';
+  useEffect(() => {
+    if (!wantsSentHere) return;
+    const listener = (p: Record<string, unknown>) => onSentHereRef.current?.(p);
+    sentHereListeners.add(listener);
+    return () => { sentHereListeners.delete(listener); };
+  }, [wantsSentHere]);
   useLayoutEffect(() => { onWorkingRef.current = onWorking; }, [onWorking]);
   useLayoutEffect(() => { onConversationReadRef.current = onConversationRead; }, [onConversationRead]);
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);

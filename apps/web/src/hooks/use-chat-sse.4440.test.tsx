@@ -107,3 +107,15 @@ describe('useChatUnreadTotal — a message of mine is never unread (#4440)', () 
     expect(total()).toBe(base + 1);
   });
 });
+
+
+describe('useChatSse — onSentHere (#4442)', () => {
+  it('a send answer from this tab reaches every onSentHere subscriber in the tab (the lists), with the message', async () => {
+    const seen: Record<string, unknown>[] = [];
+    function Lists() { useChatSse({ currentTeamMemberId: ME, onSentHere: (p) => seen.push(p) }); return null; }
+    await act(async () => { root.render(<Lists />); });
+    sentMessageFromAnswer({ data: msg('m-sent-here') });
+    expect(seen.map((p) => p.id)).toEqual(['m-sent-here']);
+    expect(seen[0]!.conversation_id).toBe('c1');
+  });
+});

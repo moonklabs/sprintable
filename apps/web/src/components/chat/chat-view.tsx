@@ -727,6 +727,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     const raw = await res.json() as Record<string, unknown>;
     // AC3: DM fork 응답 감지 → 새 그룹 conversation으로 자동 네비게이션
     if (raw.forked === true && typeof raw.forked_conversation_id === 'string') {
+      // story #4442 (Qadir · PO 00:04Z) — the message belongs to the new group: this tab's lists still hear about it (its
+      // echo is dropped here by the nonce), but this DM's view does not add it
+      const data = (raw.data && typeof raw.data === 'object' ? raw.data : {}) as Record<string, unknown>;
+      sentMessageFromAnswer({ ...raw, data: { ...data, conversation_id: raw.forked_conversation_id } });
       const newPath = pathname.replace(threadId, raw.forked_conversation_id);
       router.push(newPath);
       return;

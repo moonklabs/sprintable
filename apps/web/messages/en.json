@@ -5290,6 +5290,7 @@
     "clickToCopy": "Click to copy",
     "copyCode": "Copy code",
     "attachmentFileAlt": "Attachment",
+    "latestAttachmentOnly": "Attachment",
     "replyCount": "{count, plural, one {# reply} other {# replies}}",
     "removeAttachment": "Remove attachment",
     "attachmentUploadFailed": "Attachment upload failed. Please try again.",

@@ -411,6 +411,108 @@ describe('ChatV3Screen — 스레드 레일 실시간(story #4008 AC3)', () => {
     expect(listCallsAfter).toBe(listCallsBefore + 1);
     expect(messagesCallsAfter).toBe(messagesCallsBefore + 1);
   });
+
+  // story #4442 — the tab that sent it updates its own rail row from the send answer (its echo is dropped since #4440).
+  function sentHereOpts() {
+    return [...useChatSseMock.mock.calls].reverse().map((c) => c[0] as Record<string, unknown>)
+      .find((o) => 'onSentHere' in o) as { onSentHere?: (p: Record<string, unknown>) => void } | undefined;
+  }
+
+  it('⭐#4442 — a send from this tab moves its thread to the top with the new line; my own message leaves no unread dot', async () => {
+    stubTwoThreads();
+    await mount();
+    await act(async () => {
+      sentHereOpts()?.onSentHere?.({ id: 'm-9', conversation_id: 'conv-2', content: '방금 보낸 말', created_at: '2026-09-17T00:02:00Z', sender: { id: 'me-1' } });
+    });
+    const rows = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rows[0]?.textContent).toContain('카디르');
+    expect(rows[0]?.textContent).toContain('방금 보낸 말');
+    expect(rows[0]?.querySelector('[data-testid="chat-v3-unread-dot"]')).toBeNull();
+  });
+
+  // PO 23:25Z (Qadir's two line-2 findings, one root) — `threadsAfterMessage`'s contract: `unknown` = not in the rail yet →
+  // the caller reads the rail again (the SSE path does). A send to such a conversation (a DM that branched into a new group ·
+  // a conversation opened by link, outside the rail's first page) must do the same, or the rail never shows it.
+  it('⭐#4442 — a send to a conversation not in the rail reads the rail again; its row comes up top', async () => {
+    let rail = TWO_THREADS;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => rail };
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    await mount();
+    const railReads = () => fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    const before = railReads();
+    rail = { data: [
+      { id: 'conv-new', participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-3', name: '유나', type: 'agent' }],
+        latest_message: { content: '갈라져 나온 첫 말', created_at: '2026-09-17T00:05:00Z' }, unread_count: 0 },
+      ...TWO_THREADS.data,
+    ] };
+    await act(async () => {
+      sentHereOpts()?.onSentHere?.({ id: 'm-11', conversation_id: 'conv-new', content: '갈라져 나온 첫 말', created_at: '2026-09-17T00:05:00Z', sender: { id: 'me-1' } });
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(railReads()).toBeGreaterThan(before);
+    const rows = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rows[0]?.textContent).toContain('유나');
+    expect(rows[0]?.textContent).toContain('갈라져 나온 첫 말');
+  });
+
+  // PO 00:04Z — the «not in the rail → read again» call ran inside a `setThreads` updater; updaters must be pure and strict
+  // mode calls them twice, so the rail was read twice. Decided outside the updater now: one read.
+  it('⭐#4442 — in strict mode, a send to a conversation not in the rail reads the rail exactly once', async () => {
+    let rail = TWO_THREADS;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => rail };
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    const { StrictMode } = await import('react');
+    const { ChatV3Screen } = await import('./chat-v3-screen');
+    const flags = { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: false };
+    await act(async () => { root.render(<StrictMode>{wrap(<ChatV3Screen flags={flags} />)}</StrictMode>); });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    const railReads = () => fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    const before = railReads();
+    rail = { data: [
+      { id: 'conv-new', participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-3', name: '유나', type: 'agent' }],
+        latest_message: { content: '갈라져 나온 첫 말', created_at: '2026-09-17T00:05:00Z' }, unread_count: 0 },
+      ...TWO_THREADS.data,
+    ] };
+    await act(async () => {
+      sentHereOpts()?.onSentHere?.({ id: 'm-12', conversation_id: 'conv-new', content: '갈라져 나온 첫 말', created_at: '2026-09-17T00:05:00Z', sender: { id: 'me-1' } });
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(railReads() - before).toBe(1);
+  });
+
+  it('⭐#4442 — an attachment-only message reads «첨부 파일» (sent from this tab, and on a thread loaded that way)', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) {
+        return { ok: true, status: 200, json: async () => ({ data: [
+          { ...TWO_THREADS.data[0], latest_message: { content: '', created_at: '2026-09-16T06:41:00Z', has_attachments: true } },
+          TWO_THREADS.data[1],
+        ] }) };
+      }
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    await mount();
+    let rows = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rows[0]?.textContent).toContain('첨부 파일');
+    await act(async () => {
+      sentHereOpts()?.onSentHere?.({ id: 'm-10', conversation_id: 'conv-2', content: '', attachments: [{ url: 'x', name: 'a.png' }], created_at: '2026-09-17T00:03:00Z', sender: { id: 'me-1' } });
+    });
+    rows = [...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')];
+    expect(rows[0]?.textContent).toContain('카디르');
+    expect(rows[0]?.textContent).toContain('첨부 파일');
+  });
 });
 
 // story #4018(E-UX-OVERHAUL·v3 대화·특정 대화 주소) AC1/AC2/AC3/AC4 — PO 확定
