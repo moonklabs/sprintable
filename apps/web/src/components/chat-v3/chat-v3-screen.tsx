@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ChevronLeft, PanelRight } from 'lucide-react';
@@ -98,6 +98,10 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   const { data: todaySnapshot } = useTodaySnapshot();
   const needsMe = todaySnapshot?.needsMe ?? [];
   const [threads, setThreads] = useState<ChatV3Thread[] | null>(null);
+  // story #4442 (PO 00:04Z) — the rail as last rendered, so «not in the rail → read it again» is decided outside a state
+  // updater (updaters stay pure; strict mode calls them twice)
+  const threadsRef = useRef<ChatV3Thread[] | null>(null);
+  useLayoutEffect(() => { threadsRef.current = threads; }, [threads]);
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // story #4006 AC3/AC4(§4, doc 5bc82986) — lg 미만은 레일↔대화 단일 페인. selectedId는
@@ -262,11 +266,12 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   // `unknown` = not in the rail yet (a new group a DM branched into · a conversation opened by link, outside the first page)
   // → read the rail again
   const applyThreadMessage = useCallback((payload: Record<string, unknown>) => {
-    setThreads((prev) => {
-      const { next, unknown } = threadsAfterMessage(prev, payload, { selectedId, meId: me?.id });
-      if (unknown && me) loadConversations(me);
-      return next;
-    });
+    const opts = { selectedId, meId: me?.id };
+    if (threadsAfterMessage(threadsRef.current, payload, opts).unknown) {
+      if (me) loadConversations(me); // once, outside any updater
+      return;
+    }
+    setThreads((prev) => threadsAfterMessage(prev, payload, opts).next);
   }, [selectedId, loadConversations, me]);
 
   const handleThreadMessage = useCallback((payload: Record<string, unknown>) => {

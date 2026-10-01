@@ -460,6 +460,36 @@ describe('ChatV3Screen — 스레드 레일 실시간(story #4008 AC3)', () => {
     expect(rows[0]?.textContent).toContain('갈라져 나온 첫 말');
   });
 
+  // PO 00:04Z — the «not in the rail → read again» call ran inside a `setThreads` updater; updaters must be pure and strict
+  // mode calls them twice, so the rail was read twice. Decided outside the updater now: one read.
+  it('⭐#4442 — in strict mode, a send to a conversation not in the rail reads the rail exactly once', async () => {
+    let rail = TWO_THREADS;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => rail };
+      if (url === '/api/conversations/conv-1/messages') return { ok: true, status: 200, json: async () => MESSAGES };
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    const { StrictMode } = await import('react');
+    const { ChatV3Screen } = await import('./chat-v3-screen');
+    const flags = { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: false };
+    await act(async () => { root.render(<StrictMode>{wrap(<ChatV3Screen flags={flags} />)}</StrictMode>); });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    const railReads = () => fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/conversations?')).length;
+    const before = railReads();
+    rail = { data: [
+      { id: 'conv-new', participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-3', name: '유나', type: 'agent' }],
+        latest_message: { content: '갈라져 나온 첫 말', created_at: '2026-09-17T00:05:00Z' }, unread_count: 0 },
+      ...TWO_THREADS.data,
+    ] };
+    await act(async () => {
+      sentHereOpts()?.onSentHere?.({ id: 'm-12', conversation_id: 'conv-new', content: '갈라져 나온 첫 말', created_at: '2026-09-17T00:05:00Z', sender: { id: 'me-1' } });
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(railReads() - before).toBe(1);
+  });
+
   it('⭐#4442 — an attachment-only message reads «첨부 파일» (sent from this tab, and on a thread loaded that way)', async () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
