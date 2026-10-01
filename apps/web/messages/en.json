@@ -6659,8 +6659,8 @@
         "firstNotReady": "Didn't start it because the {firstRole} agent isn't ready yet — let the {firstRole} agent trust the work folder, then try again",
         "firstNotReadyBare": "Didn't start it because the {firstRole} isn't ready yet — let the {firstRole} trust the work folder, then try again",
         "firstNotReadyNoRole": "Didn't start it because the first agent isn't ready yet — let that agent trust the work folder, then try again",
-        "sessionLimit": "{n, plural, one {You can have # session open at once} other {You can have # sessions open at once}} — close one that's done at the bottom of the window, then try again",
-        "sessionLimitNoN": "You've reached the number of sessions you can have open at once — close one that's done at the bottom of the window, then try again",
+        "sessionLimit": "{n, plural, one {You can have # session open at once} other {You can have # sessions open at once}} — close one you're not using at the bottom of the window, then try again",
+        "sessionLimitNoN": "You've reached the number of sessions you can have open at once — close one you're not using at the bottom of the window, then try again",
         "notConnected": "Lost the connection to this computer's agent runner — wait until the bottom of the window says «Ready to run agents», then try again",
         "unknown": "Couldn't start it — try again"
       },
