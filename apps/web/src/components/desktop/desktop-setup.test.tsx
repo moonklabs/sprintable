@@ -359,7 +359,7 @@ describe('[SID:4427] desktop setup page', () => {
 });
 
 const SETUP_ID = '11111111-2222-4333-8444-555555555555';
-type Sig = { tools_connected: { member_id: string; at: string }[]; first_task_handed_at: string | null; first_result_at: string | null; workdir_fallback_at: string | null; blocked: { at: string; reason: string | null } | null };
+type Sig = { tools_connected: { member_id: string; at: string }[]; first_task_handed_at: string | null; first_result_at: string | null; first_result_member_id?: string | null; workdir_fallback_at: string | null; blocked: { at: string; reason: string | null } | null };
 const status = (state: string, sig: Partial<Sig> = {}) => ({
   setup_id: SETUP_ID, device_name: 'mac', state, recipe_name: '마케팅 루프', work_item_id: 'w-1',
   members: [
@@ -613,6 +613,35 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     const settled = polls();
     await tick(10_000);
     expect(polls()).toBe(settled); // every agent settled → no more reading
+  });
+
+  // story 4468 (Qadir 4880 second line): [다시 확인] and the 2 s reading overlap — an older answer arriving after a newer one
+  // put the page back (setSnap took whatever came last). Each reading is numbered; an answer older than the one shown is dropped.
+  it('[SID:4468] an older answer that arrives late never covers a newer one', async () => {
+    const before = status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
+    const after = status('handed_over', {
+      tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }],
+      first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z', first_result_member_id: 'm1',
+    });
+    let n = 0;
+    let releaseSecond!: (r: Response) => void;
+    stub(() => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (!String(input).includes('/api/desktop/setups/')) return new Response('{}', { status: 404 });
+      n += 1;
+      if (n === 2) return new Promise<Response>((r) => { releaseSecond = r; }); // the 2 s reading, slow
+      return new Response(JSON.stringify(n === 1 ? before : after), { status: 200 });
+    }));
+    const third = () => container.querySelectorAll('ol > li[data-state]')[2] as HTMLElement | undefined;
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(third()?.dataset.state).toBe('running');
+    await tick(2_000); // reading 2 goes out and hangs
+    await tick(2_000); // reading 3 answers: the first result
+    expect(third()?.dataset.state).toBe('done');
+    await act(async () => { releaseSecond(new Response(JSON.stringify(before), { status: 200 })); });
+    await tick(0); // reading 2's older answer lands last
+    expect(third()?.dataset.state).toBe('done'); // not put back to «waiting for the first result»
   });
 
   it('[SID:4464 · Qadir 4880] after the first result an agent that never connects: ⑦ as a block under the three steps after 180 s, then no more reading; [다시 확인] reads once and, connected by then, the block goes', async () => {

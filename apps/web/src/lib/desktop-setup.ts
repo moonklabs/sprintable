@@ -235,6 +235,8 @@ export interface SetupStatus {
     tools_connected: { member_id: string; at: string }[];
     first_task_handed_at: string | null;
     first_result_at: string | null;
+    /** story 4468 — the agent that showed the first result (one of the setup's); null = not known (never guessed). */
+    first_result_member_id?: string | null;
     workdir_fallback_at: string | null;
     blocked: { at: string; reason: string | null } | null;
     /** 디디군 이벤트 신뢰 PR에서 더해질 값 — 없으면 180초 쪽만 쓴다. */
@@ -354,8 +356,10 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
   // story 4464 (Qadir 4880 · PO 10:04Z): after the first result an agent that started and never connects (no failure · not
   // stopped) gets the same threshold and the same ⑦ — as a block under the finished steps (the component: no covering card
   // once the result is in); it then counts as settled, so the reading stops instead of «아직 준비하고 있어요» forever
-  // the first result proves the agent that received the first task is connected (no signal needed — 결과가 연결의 증거)
-  const proven = result === 'done' ? agents[0]?.member_id ?? null : null;
+  // the first result proves the agent that showed it is connected (no signal needed — 결과가 연결의 증거). Which agent: the
+  // server says (story 4468 · Qadir 4880 second line) — it was the flow's first agent guessed, and a result by another one
+  // left that agent «proven» while it never connected. Not known → no one is proven.
+  const proven = result === 'done' ? s.signals.first_result_member_id ?? null : null;
   const unsettled = pendingStarted.filter((id) => !stoppedMembers.has(id) && id !== proven);
   const lateNotConnected = handedOver && result === 'done' && unsettled.length > 0 && pastThreshold;
   const notConnected = (waitingForTools && pastThreshold) || lateNotConnected;

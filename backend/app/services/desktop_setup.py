@@ -879,6 +879,9 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             "tools_connected": [{"member_id": k, "at": v} for k, v in tools.items()],
             "first_task_handed_at": handed[1] if handed else None,
             "first_result_at": result[1] if result else None,
+            # story 4468 (Qadir 4880 second line): which agent showed the first result — the web used to guess the flow's first
+            # agent. Only one of this setup's agents (the mark is written for those only; anything else reads as unknown).
+            "first_result_member_id": _first_result_member(setup, result),
             "workdir_fallback_at": fallback[1] if fallback else None,
             "first_screen_human_input_at": screen_input[1] if screen_input else None,
             "agents_ended": agents_ended,
@@ -891,6 +894,14 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             } if blocked else None,
         },
     }
+
+
+def _first_result_member(setup, result) -> str | None:
+    if not result:
+        return None
+    mid = str((result[0] or {}).get("member_id") or "")
+    agents = {str(m.get("member_id")) for m in (setup.members or []) if m.get("kind") == "agent" and m.get("member_id")}
+    return mid if mid in agents else None
 
 
 async def _mark_once(s: AsyncSession, *, setup_id: uuid.UUID, member_id: uuid.UUID, event: str) -> None:

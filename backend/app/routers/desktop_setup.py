@@ -415,6 +415,7 @@ class SetupSignals(BaseModel):
     tools_connected: list[ToolsConnected]  # per agent: its first MCP connection (the manifest fetch)
     first_task_handed_at: datetime | None
     first_result_at: datetime | None
+    first_result_member_id: str | None = None  # story #4468 — the agent that showed the first result (one of the setup's)
     first_screen_human_input_at: datetime | None  # the person typed on the agent's first screen (PO 12:23Z · web ⑦)
     workdir_fallback_at: datetime | None
     blocked: SetupBlocked | None

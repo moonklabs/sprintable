@@ -742,7 +742,8 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         # PO 10:39Z ① — the status also says which recipe (key · org) so the web names a preset by its translation, as the list does
         assert status["recipe"] == {"key": RECIPE_KEY, "name": RECIPE_NAME, "org_id": str(ORG)}
         assert status["signals"] == {
-            "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "first_screen_human_input_at": None,
+            "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "first_result_member_id": None,
+            "first_screen_human_input_at": None,
             "workdir_fallback_at": None, "blocked": None, "agents_ended": [], "agents_start_failed": [],
         }
 
@@ -764,6 +765,7 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         await _sql(f"INSERT INTO onboarding_events (id, event, session_id, meta, server_ts) VALUES (gen_random_uuid(), 'desktop_first_result_seen', '{setup_id}', '{{}}', now())")
         signals = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()["signals"]
         assert all(signals[k] for k in ("first_task_handed_at", "first_result_at", "workdir_fallback_at", "first_screen_human_input_at"))
+        assert signals["first_result_member_id"] is None  # story 4468: a result row with no setup agent on it names no one (never a guess)
         assert (signals["blocked"]["reason"], signals["blocked"]["runtime"], signals["blocked"]["when"]) == ("managed_mcp", "claude", "found")
         assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(PLAIN))).status_code == 403
         assert (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OUTSIDER, ORG2))).status_code == 404
@@ -801,6 +803,8 @@ async def test_the_first_result_is_the_setup_agents_first_write_on_its_first_wor
         assert await rows() == [(writer["member_id"],)]  # once
         status = (await c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))).json()
         assert status["signals"]["first_result_at"] is not None
+        # story 4468: the status says which agent it was (the web no longer guesses the flow's first agent)
+        assert status["signals"]["first_result_member_id"] == writer["member_id"]
         hands = (await c.get(f"/api/v2/desktop/setups/{setup_id}/hands", headers=_person(OWNER))).json()
         assert hands["minutes_to_first_result"] is not None
 
