@@ -179,8 +179,15 @@ async def _start_command(Session, org_id, gate_id, owner_id):
         ))).scalar_one()
 
 
-async def _second_start_command(Session, first) -> uuid.UUID:
-    """A second boost_start for the same gate — what a re-approval produces (commands are unique per approved version)."""
+async def _second_start_command(Session, first, *, reseal: bool = False) -> uuid.UUID:
+    """A second boost_start for the same gate — what a re-approval produces (commands are unique per approved version).
+
+    story #4447 (Qadir 07:15Z) — `reseal=True` also moves the gate's seal to that version, as the real re-approval does (every
+    re-seal issues a new sealed_ads_boost_version_id): without it the gate still points at the first version, a state that does
+    not happen. The worker tests here (two commands, two workers) do not read the seal and keep the default."""
+    from sqlalchemy import update
+
+    from app.models.gate import Gate
     from app.models.publication_command import PublicationCommand
 
     second = PublicationCommand(
@@ -190,6 +197,8 @@ async def _second_start_command(Session, first) -> uuid.UUID:
     )
     async with Session() as s:
         s.add(second)
+        if reseal:
+            await s.execute(update(Gate).where(Gate.id == first.gate_id).values(sealed_ads_boost_version_id=second.approved_version))
         await s.commit()
     return second.id
 

@@ -151,7 +151,10 @@ async def test_a_provider_error_needs_check_retries_as_before_without_confirmati
 
 
 async def test_spend_takes_the_newest_start_command_when_a_gate_has_two():
-    """A re-approval gives one gate a second boost_start; the summary used scalar_one_or_none() and raised."""
+    """A re-approval gives one gate a second boost_start; the summary used scalar_one_or_none() and raised.
+
+    story #4447 (Qadir 07:15Z) — the re-approval also re-seals the gate (`reseal=True`): /spend reads the start of the current
+    seal, which here is the newest. Two starts under one seal cannot exist (the test below pins why)."""
     from app.main import app
     from tests.test_4404_publish_worker_no_open_tx_realdb import _second_start_command
     from tests.test_e4fc29fa_site_post_orchestration import _session_factory
@@ -159,12 +162,40 @@ async def test_spend_takes_the_newest_start_command_when_a_gate_has_two():
     engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
     try:
         first = await _start_command(Session, org_id, gate_id, owner_id)
-        second_id = await _second_start_command(Session, first)
+        second_id = await _second_start_command(Session, first, reseal=True)
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
             assert (await _spend(client, org_id, gate_id))["start_command"]["id"] == str(second_id)
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_one_seal_cannot_hold_two_start_commands():
+    """story #4447 (Qadir 07:15Z ①) — «two starts under one seal, take the newest» has nothing to choose: the idempotency key
+    (org · destination · approved_version · operation · toggle_seq, start = toggle 0) refuses a second start of the same seal, and
+    a start again under the same approval returns the same row (create_or_get). So /spend's seal filter never hides a newer
+    start of the current seal."""
+    import uuid
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.publication_command import PublicationCommand
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        first = await _start_command(Session, org_id, gate_id, owner_id)
+        twin = PublicationCommand(
+            id=uuid.uuid4(), org_id=first.org_id, gate_id=first.gate_id, destination=first.destination,
+            approved_version=first.approved_version, operation=first.operation, toggle_seq=0, content_kind=first.content_kind,
+            status="pending", requested_by_member_id=first.requested_by_member_id, initiated_by=first.initiated_by,
+        )
+        async with Session() as s:
+            s.add(twin)
+            with pytest.raises(IntegrityError):
+                await s.commit()
+    finally:
         await engine.dispose()
 
 
