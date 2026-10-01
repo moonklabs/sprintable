@@ -429,6 +429,13 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
         raise AdsBoostAdapterUnavailableError(
             "ADS_BOOST_GATE_NOT_APPROVED", f"gate no longer approved (status={gate.status}): {gate.id}",
         )
+    # story #4447 (Qadir 4870 07:19Z) — the command must belong to the gate's current seal. A re-seal voids only *pending*
+    # commands; an older seal's stopped start (dead_letter · blocked) could still be retried by hand or adopted, and ran with that
+    # older approval (its budget · its content). Every execution path (worker · retry · adopt) passes here: refuse before any call.
+    if command.approved_version != gate.sealed_ads_boost_version_id:
+        raise AdsBoostAdapterUnavailableError(
+            SEAL_REPLACED_CODE, f"command belongs to a replaced seal ({command.approved_version}); current: {gate.sealed_ads_boost_version_id}",
+        )
 
     conn = (await db.execute(
         select(ChannelConnection).where(ChannelConnection.id == gate.sealed_ads_connection_id)
@@ -541,10 +548,13 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
     from app.services.meta_ads_campaign import parse_meta_time
     from app.services.publication_command import retry_dead_letter_command
 
+    # story #4447 (Qadir 07:19Z ②) — only the start of the gate's current seal (an older seal's «outcome unknown» start is not
+    # this boost's to adopt; the execution context refuses it anyway — this keeps adopt from even picking it)
+    current_seal = select(Gate.sealed_ads_boost_version_id).where(Gate.id == gate_id).scalar_subquery()
     command = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id,
-            PublicationCommand.operation == OP_BOOST_START,
+            PublicationCommand.operation == OP_BOOST_START, PublicationCommand.approved_version == current_seal,
         ).order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc()).limit(1)
     )).scalar_one_or_none()
     run = (await db.execute(
@@ -639,6 +649,7 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
 ACCOUNT_CURRENCY_MISMATCH_CODE = "ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH"
 # story #4417 — a start/resume that reaches the worker after the run was blocked for an unreadable spend
 SPEND_BLOCKED_CODE = "ADS_BOOST_SPEND_BLOCKED"
+SEAL_REPLACED_CODE = "ADS_BOOST_SEAL_REPLACED"  # story #4447 — the command is of an older seal (see _resolve_execution_context)
 
 
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
@@ -660,7 +671,7 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         ctx = await _resolve_execution_context(db, command)
     except AdsBoostAdapterUnavailableError as exc:
         await record_publication_attempt(
-            db, command=command, approval_check="missing" if exc.code == "ADS_BOOST_GATE_NOT_APPROVED" else "ok",
+            db, command=command, approval_check="missing" if exc.code in ("ADS_BOOST_GATE_NOT_APPROVED", SEAL_REPLACED_CODE) else "ok",
             adapter_called=False, started_at=attempt_started_at, finished_at=now, result_code=None,
         )
         # story #4447 (Qadir 4870 ①) — the shared shape (`mark_blocked_unapproved`), with the reason code: this path wrote the

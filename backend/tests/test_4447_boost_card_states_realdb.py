@@ -228,3 +228,72 @@ async def test_after_a_reseal_and_a_second_start_pause_still_works():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def _reseal_and_approve(Session, org_id, owner_id, gate_id):
+    """The person asks for the boost again (the real request path re-seals the same gate) and it is approved again."""
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.gate import Gate
+    from tests.test_3806_ads_boost_execution import _boost_body
+    from tests.test_3806_ads_boost_gate import _approve_gate
+
+    async with Session() as s:
+        gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+        publication_id, ad_connection_id = uuid.UUID(gate.scope_key), gate.sealed_ads_connection_id
+    _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+    try:
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/publications/{publication_id}/boosts", json=_boost_body(ad_connection_id=ad_connection_id))
+        assert r.status_code in (200, 201), r.text
+    finally:
+        app.dependency_overrides.clear()
+    async with Session() as s:
+        await _approve_gate(s, gate_id, owner_id)
+
+
+async def test_after_a_reseal_adopt_does_not_take_the_old_seals_start(monkeypatch):
+    """Qadir 4870 (07:19Z): adopt-existing picked the gate's newest start by gate alone — an old seal's «outcome unknown» start
+    too — and took it on with the old approval (old budget · old content). Now only the current seal's start can be adopted."""
+    from tests.test_4404_publish_worker_no_open_tx_realdb import _command
+    from tests.test_4412_boost_adopt_existing_realdb import _adopt, _stopped_unknown
+
+    engine, Session, org_id, owner_id, gate_id, command, creates = await _stopped_unknown("[sandbox:create-unknown]", monkeypatch)
+    try:
+        await _reseal_and_approve(Session, org_id, owner_id, gate_id)
+        r = await _adopt(Session, org_id, owner_id, gate_id)
+        assert r.status_code == 409, r.text  # nothing of the current seal to adopt
+        assert creates == [1]  # no provider call beyond the first (stopped) start
+        assert (await _command(Session, command.id)).status == "dead_letter"  # the old start is left as it was
+    finally:
+        await engine.dispose()
+
+
+async def test_an_old_seals_command_is_refused_where_every_execution_passes(monkeypatch):
+    """The root (Qadir 07:19Z ①): every execution path (worker · retry · adopt) goes through the execution context, which checked
+    only that the gate is approved — not that the command belongs to the current seal. An old seal's start retried by hand after a
+    re-seal ran with the old approval. Now the context refuses it before any call, with a reason code (ADS_BOOST_SEAL_REPLACED)."""
+    from app.main import app
+    from tests.test_4404_publish_worker_no_open_tx_realdb import _command, _tick
+    from tests.test_4412_boost_adopt_existing_realdb import _stopped_unknown
+
+    engine, Session, org_id, owner_id, gate_id, command, creates = await _stopped_unknown("[sandbox:create-unknown]", monkeypatch)
+    try:
+        await _reseal_and_approve(Session, org_id, owner_id, gate_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:  # a stale screen retries the old start
+                # the card's own retry for «outcome unknown»: the person confirms no campaign exists (confirmed_no_campaign)
+                r = await client.post(f"/api/v2/organizations/{org_id}/publication-commands/{command.id}/retry", json={"confirmed_no_campaign": True})
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code in (200, 201), r.text
+        await _tick(Session)
+        old = await _command(Session, command.id)
+        assert (old.status, old.reason_code) == ("blocked_unapproved", "ADS_BOOST_SEAL_REPLACED"), (old.status, old.reason_code, old.last_error)
+        assert creates == [1]  # nothing reached the provider for the old seal
+    finally:
+        await engine.dispose()
