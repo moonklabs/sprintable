@@ -40,7 +40,9 @@
 #   CLEANUP_ARTIFACT_NAMES  기본 "playwright-report lighthouse-results shard-durations-0
 #                           shard-durations-1 shard-durations-2 shard-durations-3
 #                           shard-durations-4 shard-durations-5 shard-durations-6
-#                           shard-durations-7 vitest-duration-summary"(story #3890 확장)
+#                           shard-durations-7 vitest-duration-summary
+#                           vitest-duration-summary-1 vitest-duration-summary-2
+#                           vitest-duration-summary-3"(story #3890 확장 · #4467 웹 Test 3조각 — 조각마다 이름)
 #                           — 공백구분 정확 일치 필터 목록(대소문자 구분). 이 목록에 없는
 #                           name은 절대 대상 0.
 #   CLEANUP_CUTOFF_DAYS    기본 7 — 이 값(일)보다 오래된 것만 삭제 대상.
@@ -58,7 +60,7 @@ for arg in "$@"; do
 done
 
 REPO="${CLEANUP_REPO:-moonklabs/sprintable}"
-ARTIFACT_NAMES="${CLEANUP_ARTIFACT_NAMES:-playwright-report lighthouse-results shard-durations-0 shard-durations-1 shard-durations-2 shard-durations-3 shard-durations-4 shard-durations-5 shard-durations-6 shard-durations-7 vitest-duration-summary}"
+ARTIFACT_NAMES="${CLEANUP_ARTIFACT_NAMES:-playwright-report lighthouse-results shard-durations-0 shard-durations-1 shard-durations-2 shard-durations-3 shard-durations-4 shard-durations-5 shard-durations-6 shard-durations-7 vitest-duration-summary vitest-duration-summary-1 vitest-duration-summary-2 vitest-duration-summary-3}"
 CUTOFF_DAYS="${CLEANUP_CUTOFF_DAYS:-7}"
 
 # 공백구분 이름 목록 → jq IN() 연산용 JSON 배열.

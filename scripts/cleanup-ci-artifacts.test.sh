@@ -55,7 +55,8 @@ cat > "$FIXTURE" <<JSON
     {"id": 105, "name": "playwright-report", "expired": true, "created_at": "$OLD_DATE", "size_in_bytes": 5000},
     {"id": 106, "name": "lighthouse-results", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 6000},
     {"id": 107, "name": "shard-durations-2", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 7000},
-    {"id": 108, "name": "vitest-duration-summary", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 8000}
+    {"id": 108, "name": "vitest-duration-summary", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 8000},
+    {"id": 109, "name": "vitest-duration-summary-2", "expired": false, "created_at": "$OLD_DATE", "size_in_bytes": 9000}
   ]
 }
 JSON
@@ -92,14 +93,16 @@ assert_contains "$DRYRUN_OUT" "id=102" "old playwright-report(102) 대상에 포
 assert_contains "$DRYRUN_OUT" "id=106" "old lighthouse-results(106) 대상에 포함(다중 이름 필터)"
 assert_contains "$DRYRUN_OUT" "id=107" "old shard-durations-2(107) 대상에 포함(story #3890 확장)"
 assert_contains "$DRYRUN_OUT" "id=108" "old vitest-duration-summary(108) 대상에 포함(story #3890 확장)"
+assert_contains "$DRYRUN_OUT" "id=109" "old vitest-duration-summary-2(109) 대상에 포함(story #4467 — 웹 Test 조각마다 이름)"
 assert_not_contains "$DRYRUN_OUT" "id=103" "recent playwright-report(103, cutoff 안쪽) 대상 제외"
 assert_not_contains "$DRYRUN_OUT" "id=104" "다른 이름(dockerbuild-abc123, 104) 대상 제외 — name 정확일치 필터"
 assert_not_contains "$DRYRUN_OUT" "id=105" "이미 만료된 artifact(105) 대상 제외"
-assert_contains "$DRYRUN_OUT" "삭제 대상 합계: 5건" "대상 count=5 정확 집계"
+assert_contains "$DRYRUN_OUT" "삭제 대상 합계: 6건" "대상 count=6 정확 집계"
 assert_contains "$DRYRUN_OUT" "playwright-report: 2건" "이름별 분류 — playwright-report 2건"
 assert_contains "$DRYRUN_OUT" "lighthouse-results: 1건" "이름별 분류 — lighthouse-results 1건"
 assert_contains "$DRYRUN_OUT" "shard-durations-2: 1건" "이름별 분류 — shard-durations-2 1건"
 assert_contains "$DRYRUN_OUT" "vitest-duration-summary: 1건" "이름별 분류 — vitest-duration-summary 1건"
+assert_contains "$DRYRUN_OUT" "vitest-duration-summary-2: 1건" "이름별 분류 — vitest-duration-summary-2 1건(story #4467)"
 if [ -s "$DELETE_LOG" ]; then
   echo "  FAIL dry-run인데 DELETE 로그가 비어있지 않다(실 삭제가 나갔다는 뜻)"
   FAIL=1
@@ -120,11 +123,12 @@ assert_not_contains "$DELETED_IDS" "104" "104(다른 이름)는 삭제 요청 �
 assert_not_contains "$DELETED_IDS" "105" "105(이미 만료)는 삭제 요청 안 됨"
 assert_contains "$DELETED_IDS" "107" "107(shard-durations-2)이 삭제 요청됨(story #3890 확장)"
 assert_contains "$DELETED_IDS" "108" "108(vitest-duration-summary)이 삭제 요청됨(story #3890 확장)"
+assert_contains "$DELETED_IDS" "109" "109(vitest-duration-summary-2)가 삭제 요청됨(story #4467)"
 DELETE_COUNT="$(wc -l < "$DELETE_LOG" | tr -d ' ')"
-if [ "$DELETE_COUNT" -eq 5 ]; then
-  echo "  ok   정확히 5건만 삭제 요청됨(과잉살상 0)"
+if [ "$DELETE_COUNT" -eq 6 ]; then
+  echo "  ok   정확히 6건만 삭제 요청됨(과잉살상 0)"
 else
-  echo "  FAIL 삭제 요청 건수=${DELETE_COUNT}(기대 5)"
+  echo "  FAIL 삭제 요청 건수=${DELETE_COUNT}(기대 6)"
   FAIL=1
 fi
 echo
@@ -132,10 +136,10 @@ echo "── --json 출력 ──"
 : > "$DELETE_LOG"
 JSON_OUT="$(run_script --apply --json 2>/dev/null)"
 JSON_DELETED_COUNT="$(echo "$JSON_OUT" | jq -r '.deleted_count')"
-if [ "$JSON_DELETED_COUNT" = "5" ]; then
-  echo "  ok   --json 요약의 deleted_count=5"
+if [ "$JSON_DELETED_COUNT" = "6" ]; then
+  echo "  ok   --json 요약의 deleted_count=6"
 else
-  echo "  FAIL --json deleted_count=${JSON_DELETED_COUNT}(기대 5) — 출력: $JSON_OUT"
+  echo "  FAIL --json deleted_count=${JSON_DELETED_COUNT}(기대 6) — 출력: $JSON_OUT"
   FAIL=1
 fi
 
@@ -181,10 +185,10 @@ else
   echo "  FAIL deleted_count=${DELFAIL_DELETED}(기대 0) — 출력: $DELFAIL_JSON"
   FAIL=1
 fi
-if [ "$DELFAIL_FAILED" = "5" ]; then
-  echo "  ok   failed_count=5(대상 5건 전부 실패로 정확 집계)"
+if [ "$DELFAIL_FAILED" = "6" ]; then
+  echo "  ok   failed_count=6(대상 6건 전부 실패로 정확 집계)"
 else
-  echo "  FAIL failed_count=${DELFAIL_FAILED}(기대 5) — 출력: $DELFAIL_JSON"
+  echo "  FAIL failed_count=${DELFAIL_FAILED}(기대 6) — 출력: $DELFAIL_JSON"
   FAIL=1
 fi
 assert_contains "$DELFAIL_STDERR" "삭제 실패" "실패 stderr 메시지가 실제로 출력됨(카운터만 조용히 틀린 게 아니라 눈에 보임)"

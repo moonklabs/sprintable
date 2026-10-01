@@ -1919,10 +1919,16 @@ jobs:
   # 잡이라 "skip=Success 오판정" 문제 자체가 없다 — required 체크 이름은 아래 `ci` 잡이
   # 단독으로 가진다). `ci` 잡이 required 체크("Lint, Type Check, Test, Build")를 대신
   # 받아 얇게 미러/위임한다(아래).
-  ci-work:
-    name: "CI work (Lint/Type Check/Test/Build/verify:*) — internal, not required"
+  # story #4467(2026-10-01, PO 승인 · 조건 다섯) — 이 일을 한 잡(83 스텝 · develop에서도 14.8~19.3분 · 상한 20분 턱밑 → 느린
+  # 러너면 아무 PR이나 cancelled, 4871 두 번)에서 아래 네 잡으로 나눠 병렬로 돈다: Lint+Type · Test 3조각(matrix) · Build(+산출물
+  # 읽는 verify:build-schema-integrity) · verify:* 나머지. 임계 경로 ≈ Build. `ci-work`는 이름 · if: · 결과 의미를 그대로 두고 그
+  # 넷을 needs로 받아 «넷 다 success면 성공»만 판정한다 — 그래서 required 체크 `ci`(아래) · mirror 스크립트 · 게이트는 손 0.
+  # 새 verify:* 스텝은 ci-web-verify에 넣는다(빌드 산출물 · /tmp 결과를 읽는 것만 그 산출물을 만드는 잡 안에). 상한 10분 = 멈춤
+  # 감지(각 실측의 2~3배 · 좁은 벽시계 예산 아님 — PO 11:04Z).
+  ci-web-lint-type:
+    name: "CI web · Lint + Type Check — internal, not required"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     if: github.event.action != 'edited' || github.event.changes.base != null
 
     steps:
@@ -1944,11 +1950,154 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+
       - name: Lint
         run: pnpm lint
 
       - name: Type Check
         run: pnpm type-check
+
+  ci-web-test:
+    name: "CI web · Test (${{ matrix.shard }}/3) — internal, not required"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event.action != 'edited' || github.event.changes.base != null
+    strategy:
+      # every shard runs to the end — one run shows every failing shard (PO 11:04Z ③)
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          # exactly this patch (story #4446, PO 02:01Z): «'22'» picked whatever the runner had cached — v22.23.2's ICU drew ko
+          # «AM 7:18», v22.23.3 «오전 7:18» — so the same commit went red or green by runner
+          node-version: '22.23.3'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+
+      - name: Test
+        # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
+        # of being masked by tail's 0 — without it the unit-test gate was a no-op
+        # (story 2d5c8662). GitHub's default bash runner does not enable pipefail.
+        #
+        # story #3904 — `--reporter=json --outputFile.json=...`를 default 리포터와 병행
+        # 추가(vitest는 다중 리포터를 동시에 지원 — 콘솔에 찍히는 default 출력은 그대로라
+        # 위 `| tail -80` 계약·판정/exit code 전부 무변, A/B 로컬 실측상 시간 증가도 노이즈
+        # 수준). 이 JSON이 있어야 다음 스텝들이 «성공 run에서도» 테스트별 duration을 읽을
+        # 수 있다(story #3902의 «측정치×3»이 CI 로그 실측 없이 로컬 관측으로 대체된 갭 처방).
+        # ⚠️story #4333 — «측정치×3»으로 시한을 거는 관례 자체는 폐기(벽시계 예산 = 부하 따라 까닭 없이 RED). 이 duration 표는
+        # 느린 테스트를 **찾는** 관측용으로만 남는다 — 시한은 행 가드(5초 이상)뿐 · 일의 양은 결정적으로(scripts/test-utils/fs-work.ts).
+        run: |
+          set -o pipefail
+          pnpm vitest run --shard=${{ matrix.shard }}/3 --reporter=default --reporter=json --outputFile.json=/tmp/vitest-results.json 2>&1 | tail -80
+
+      # story #3904 AC1 — 위 JSON을 후처리해 «느린 테스트 상위 30» 표를 이 스텝 자신의
+      # 로그에 찍는다(별도 스텝 출력이라 위 Test 스텝의 `tail -80`에 안 잘린다). `if:
+      # always()` — 실패 run에서도(부분적으로 완주된 테스트들의) duration을 볼 수 있어야
+      # 디버깅에 쓸모가 있다. 이 스텝 자체의 실패(JSON 파싱 오류 등)가 CI 판정에 영향을
+      # 주면 안 되므로(AC3) 스크립트 내부에서 실패를 삼키고 exit 0 — 여기 워크플로 스텝도
+      # 판정에 안 걸리는 순수 계측.
+      - name: Summarize vitest test durations (story #3904)
+        if: always()
+        run: node apps/web/scripts/ci/summarize-vitest-durations.mjs /tmp/vitest-results.json /tmp/vitest-durations-summary.json 30
+
+      # story #3904 AC2 — 원본 vitest JSON 리포터 출력이 아니라 위 스텝이 다듬은 «작은»
+      # 요약(파일 상대경로·테스트명·ms만)을 올린다. story #3864(2026-09-14, 이 워크플로
+      # 파일 안 실사고)가 겪은 "매 run always() 업로드 누적이 org 단위 artifact 저장
+      # 한도를 채운" 클래스(playwright-report, 실측 7,996개·1,719MB)를 이 카드가 그대로
+      # 재현하지 않도록 payload를 미리 줄여 둔 것 — retention도 짧게.
+      # story #3890(2026-09-16) — 그 "짧게"가 여전히 7일이라 always()로 매 run 누적된
+      # 실측치(100개·49.5MB)가 남아 있었다 — 1일로 더 좁힌다(요약은 그 run 로그로도
+      # 바로 보이므로 다음날까지 남길 이유가 없다).
+      # `if-no-files-found: ignore` — 위 스텝이 JSON 파싱 실패로 요약 파일을 못 쓴
+      # 드문 경우에도 이 업로드 스텝 자체는 실패시키지 않는다(계측 실패가 판정에 안
+      # 번지는 원칙을 여기서도 유지).
+      - name: Upload vitest duration summary (story #3904)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # one name per shard (story #4467 — upload-artifact v4 refuses a second upload under the same name in a run)
+          name: vitest-duration-summary-${{ matrix.shard }}
+          path: /tmp/vitest-durations-summary.json
+          retention-days: 1
+          if-no-files-found: ignore
+
+  ci-web-build:
+    name: "CI web · Build (+ build-output verify) — internal, not required"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event.action != 'edited' || github.event.changes.base != null
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          # exactly this patch (story #4446, PO 02:01Z): «'22'» picked whatever the runner had cached — v22.23.2's ICU drew ko
+          # «AM 7:18», v22.23.3 «오전 7:18» — so the same commit went red or green by runner
+          node-version: '22.23.3'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          LICENSE_CONSENT: agreed
+
+      # story d3dd358b 회귀가드: shared 패키지 stale dist 소비로 zod 스키마 신규 필드가
+      # silent strip되는 클래스(2026-06-10 발견, transpilePackages #1373으로 해소 확인)의
+      # 재발을 clean-checkout 빌드 산출물(.next/standalone) 검사로 자동 차단.
+      - name: Verify build schema integrity (story d3dd358b regression guard)
+        run: pnpm --filter web verify:build-schema-integrity
+
+  ci-web-verify:
+    name: "CI web · verify:* — internal, not required"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event.action != 'edited' || github.event.changes.base != null
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          # exactly this patch (story #4446, PO 02:01Z): «'22'» picked whatever the runner had cached — v22.23.2's ICU drew ko
+          # «AM 7:18», v22.23.3 «오전 7:18» — so the same commit went red or green by runner
+          node-version: '22.23.3'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
 
       # story #1957(P2-S1) breakpoint SSOT 회귀가드: md:(768) 신규 사용은 useIsMobile()의
       # 1024 기준과 어긋나는 route 내 md·lg 혼재를 재도입한다. 기존 사용은 grandfather
@@ -2466,64 +2615,20 @@ jobs:
       - name: "Verify ci.yml wires every package.json verify:* script (story #3739 meta guard)"
         run: pnpm --filter web verify:ci-wires-all-verify-scripts
 
-      - name: Test
-        # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
-        # of being masked by tail's 0 — without it the unit-test gate was a no-op
-        # (story 2d5c8662). GitHub's default bash runner does not enable pipefail.
-        #
-        # story #3904 — `--reporter=json --outputFile.json=...`를 default 리포터와 병행
-        # 추가(vitest는 다중 리포터를 동시에 지원 — 콘솔에 찍히는 default 출력은 그대로라
-        # 위 `| tail -80` 계약·판정/exit code 전부 무변, A/B 로컬 실측상 시간 증가도 노이즈
-        # 수준). 이 JSON이 있어야 다음 스텝들이 «성공 run에서도» 테스트별 duration을 읽을
-        # 수 있다(story #3902의 «측정치×3»이 CI 로그 실측 없이 로컬 관측으로 대체된 갭 처방).
-        # ⚠️story #4333 — «측정치×3»으로 시한을 거는 관례 자체는 폐기(벽시계 예산 = 부하 따라 까닭 없이 RED). 이 duration 표는
-        # 느린 테스트를 **찾는** 관측용으로만 남는다 — 시한은 행 가드(5초 이상)뿐 · 일의 양은 결정적으로(scripts/test-utils/fs-work.ts).
-        run: |
-          set -o pipefail
-          pnpm vitest run --reporter=default --reporter=json --outputFile.json=/tmp/vitest-results.json 2>&1 | tail -80
-
-      # story #3904 AC1 — 위 JSON을 후처리해 «느린 테스트 상위 30» 표를 이 스텝 자신의
-      # 로그에 찍는다(별도 스텝 출력이라 위 Test 스텝의 `tail -80`에 안 잘린다). `if:
-      # always()` — 실패 run에서도(부분적으로 완주된 테스트들의) duration을 볼 수 있어야
-      # 디버깅에 쓸모가 있다. 이 스텝 자체의 실패(JSON 파싱 오류 등)가 CI 판정에 영향을
-      # 주면 안 되므로(AC3) 스크립트 내부에서 실패를 삼키고 exit 0 — 여기 워크플로 스텝도
-      # 판정에 안 걸리는 순수 계측.
-      - name: Summarize vitest test durations (story #3904)
-        if: always()
-        run: node apps/web/scripts/ci/summarize-vitest-durations.mjs /tmp/vitest-results.json /tmp/vitest-durations-summary.json 30
-
-      # story #3904 AC2 — 원본 vitest JSON 리포터 출력이 아니라 위 스텝이 다듬은 «작은»
-      # 요약(파일 상대경로·테스트명·ms만)을 올린다. story #3864(2026-09-14, 이 워크플로
-      # 파일 안 실사고)가 겪은 "매 run always() 업로드 누적이 org 단위 artifact 저장
-      # 한도를 채운" 클래스(playwright-report, 실측 7,996개·1,719MB)를 이 카드가 그대로
-      # 재현하지 않도록 payload를 미리 줄여 둔 것 — retention도 짧게.
-      # story #3890(2026-09-16) — 그 "짧게"가 여전히 7일이라 always()로 매 run 누적된
-      # 실측치(100개·49.5MB)가 남아 있었다 — 1일로 더 좁힌다(요약은 그 run 로그로도
-      # 바로 보이므로 다음날까지 남길 이유가 없다).
-      # `if-no-files-found: ignore` — 위 스텝이 JSON 파싱 실패로 요약 파일을 못 쓴
-      # 드문 경우에도 이 업로드 스텝 자체는 실패시키지 않는다(계측 실패가 판정에 안
-      # 번지는 원칙을 여기서도 유지).
-      - name: Upload vitest duration summary (story #3904)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vitest-duration-summary
-          path: /tmp/vitest-durations-summary.json
-          retention-days: 1
-          if-no-files-found: ignore
-
-      - name: Build
-        run: pnpm build
+  ci-work:
+    name: "CI work (Lint/Type Check/Test/Build/verify:*) — internal, not required"
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    needs: [ci-web-lint-type, ci-web-test, ci-web-build, ci-web-verify]
+    # !cancelled(): a failed job below still reaches this step, so ci-work itself is red (not skipped) and says which one
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    steps:
+      - name: Require every web CI job to have succeeded (story #4467)
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
-          LICENSE_CONSENT: agreed
-
-      # story d3dd358b 회귀가드: shared 패키지 stale dist 소비로 zod 스키마 신규 필드가
-      # silent strip되는 클래스(2026-06-10 발견, transpilePackages #1373으로 해소 확인)의
-      # 재발을 clean-checkout 빌드 산출물(.next/standalone) 검사로 자동 차단.
-      - name: Verify build schema integrity (story d3dd358b regression guard)
-        run: pnpm --filter web verify:build-schema-integrity
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key) = \(.value.result)"'
+          echo "$NEEDS" | jq -e 'length == 4 and all(.[]; .result == "success")' > /dev/null
 
   contrast-guard-e2e:
     name: "Contrast guard (axe runtime · story #2590 B)"
