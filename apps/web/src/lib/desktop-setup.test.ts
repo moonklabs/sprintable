@@ -195,6 +195,9 @@ describe('[SID:4427] 진행 표시 — 상태 조회 한 번을 세 단계로(PO
     expect(setupProgress(s, T0 + 600_000, T0).notConnectedAgents.roles).toEqual(['조사']); // was: 조사 «proven» by the guess
     s.signals = { ...s.signals, first_result_member_id: null };
     expect(setupProgress(s, T0 + 600_000, T0).notConnectedAgents.roles).toEqual(['조사', '작성']); // nobody guessed
+    // an older server that does not send the field at all: the old reading (the flow's first agent) — AC1 compatibility
+    const { first_result_member_id: _absent, ...older } = s.signals;
+    expect(setupProgress({ ...s, signals: older }, T0 + 600_000, T0).notConnectedAgents.roles).toEqual(['작성']);
   });
 
   it('폴더 대체 · 막힘(⑥) · 코드 먼저 끝남(④)', () => {

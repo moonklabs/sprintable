@@ -358,8 +358,10 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
   // once the result is in); it then counts as settled, so the reading stops instead of «아직 준비하고 있어요» forever
   // the first result proves the agent that showed it is connected (no signal needed — 결과가 연결의 증거). Which agent: the
   // server says (story 4468 · Qadir 4880 second line) — it was the flow's first agent guessed, and a result by another one
-  // left that agent «proven» while it never connected. Not known → no one is proven.
-  const proven = result === 'done' ? s.signals.first_result_member_id ?? null : null;
+  // left that agent «proven» while it never connected. The server says null when it does not know → no one is proven; an older
+  // server that does not send the field at all (undefined) keeps the old reading, the flow's first agent (AC1: compatible).
+  const resultBy = s.signals.first_result_member_id;
+  const proven = result !== 'done' ? null : resultBy === undefined ? agents[0]?.member_id ?? null : resultBy;
   const unsettled = pendingStarted.filter((id) => !stoppedMembers.has(id) && id !== proven);
   const lateNotConnected = handedOver && result === 'done' && unsettled.length > 0 && pastThreshold;
   const notConnected = (waitingForTools && pastThreshold) || lateNotConnected;
