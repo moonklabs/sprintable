@@ -162,6 +162,27 @@ async def test_a_campaign_created_on_a_replaced_seal_is_not_switched_on_with_ano
         assert creates == [100_000] and statuses == []  # not created again · not switched on
         held = await _command(Session, new.id)
         assert (held.status, held.failure_kind, held.reason_code) == ("dead_letter", "needs_check", "ADS_BOOST_CREATED_BUDGET_DIFFERS"), (held.status, held.failure_kind, held.reason_code, held.last_error)
+
+        # PO 08:53Z — the card's way on: «그 예산으로 다시 요청하면 켜져요» needs the created budget and the post to request from
+        from sqlalchemy import select
+
+        from app.main import app
+        from app.models.channel_post_version import ChannelPostVersion
+        from app.models.channel_publication import ChannelPublication
+        from app.models.gate import Gate
+        from tests.test_4447_boost_card_states_realdb import _spend
+
+        async with Session() as s:
+            scope = (await s.execute(select(Gate.scope_key).where(Gate.id == gate_id))).scalar_one()
+            draft_id = (await s.execute(
+                select(ChannelPostVersion.draft_id).join(ChannelPublication, ChannelPublication.version_id == ChannelPostVersion.id)
+                .where(ChannelPublication.id == uuid.UUID(scope))
+            )).scalar_one()
+        body = await _spend(app, Session, org_id, owner_id, gate_id)
+        app.dependency_overrides.clear()
+        assert body["start_command"]["error_code"] == "ADS_BOOST_CREATED_BUDGET_DIFFERS"
+        assert body["created_budget_minor"] == 100_000
+        assert body["request_draft_id"] == str(draft_id)
     finally:
         await engine.dispose()
 

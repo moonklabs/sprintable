@@ -225,11 +225,21 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
 
   // story #4458 (PO 08:13Z ②) — a campaign made on another budget (a re-seal during its create) is not switched on: the card says
   // why and offers no retry (it would stop the same way every time)
-  it('needs_check · ADS_BOOST_CREATED_BUDGET_DIFFERS: its line · no retry · no start', async () => {
-    spendNow = { run_status: 'pending', start_command: cmd('dead_letter', 'needs_check', false, 'ADS_BOOST_CREATED_BUDGET_DIFFERS') };
+  it('needs_check · ADS_BOOST_CREATED_BUDGET_DIFFERS: the created budget and «다시 요청» to the post · no retry · no start', async () => {
+    spendNow = { run_status: 'pending', start_command: cmd('dead_letter', 'needs_check', false, 'ADS_BOOST_CREATED_BUDGET_DIFFERS'), created_budget_minor: 100_000, request_draft_id: 'draft-9' };
     await mount();
-    expect($('boost-needs-check-reason')?.textContent).toBe(cage.boostNeedsCheckCreatedBudgetDiffers);
+    const line = $('boost-needs-check-reason')!;
+    expect(line.textContent).toContain('100,000원');
+    expect(line.textContent).toContain('그 예산으로 다시 요청');
+    expect(line.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/draft-9');
     expect($('boost-needs-check-retry-trigger')).toBeNull();
     expect($('boost-start-trigger')).toBeNull();
+  });
+
+  it('needs_check · ADS_BOOST_CREATED_BUDGET_DIFFERS without a post to link: the same line, no link', async () => {
+    spendNow = { run_status: 'pending', start_command: cmd('dead_letter', 'needs_check', false, 'ADS_BOOST_CREATED_BUDGET_DIFFERS'), created_budget_minor: 100_000, request_draft_id: null };
+    await mount();
+    expect($('boost-needs-check-reason')?.querySelector('a')).toBeNull();
+    expect($('boost-needs-check-reason')?.textContent).toContain('100,000원');
   });
 });
