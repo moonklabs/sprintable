@@ -11,14 +11,16 @@ insight_snapshots.py::list_publication_insights_endpoint와 동형 권한 축(�
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.ads_boost_states import BOOST_RUN_STATUSES, COMMAND_FAILURE_KINDS, COMMAND_STATUSES
 from app.services.ads_boost_execution import (
     AdsBoostAlreadyInStateError,
     AdsBoostGateNotApprovedError,
@@ -269,12 +271,23 @@ class SpendSnapshotView(BaseModel):
     spend_minor: int | None
 
 
+# story #4447 — the boost card's value sets, published as openapi enums (the web's types are generated from the same module).
+# Typed `str` with the enum in the schema, not `Literal`: a value outside the set must still read (the card shows it as unknown),
+# never turn the read into a 500.
+_RunStatus = Annotated[str, Field(json_schema_extra={"enum": list(BOOST_RUN_STATUSES)})]
+_CommandStatus = Annotated[str, Field(json_schema_extra={"enum": list(COMMAND_STATUSES)})]
+_FailureKind = Annotated[str, Field(json_schema_extra={"enum": list(COMMAND_FAILURE_KINDS)})]
+
+
 class StartCommandView(BaseModel):
     """story #4409 — the boost_start command's state (dead_letter + needs_check = the person has to look)."""
     id: uuid.UUID
-    status: str
-    failure_kind: str | None
+    status: _CommandStatus
+    failure_kind: _FailureKind | None
     error_code: str | None
+    # story #4447 — the server's own «can the person looking at this retry it» (`human_retryable` · people only): the card shows
+    # the retry button from this value, never from its own reading of the status
+    retryable: bool = False
     # the campaign name to look for in the ad account — only for ADS_BOOST_CREATE_OUTCOME_UNKNOWN
     campaign_name: str | None = None
 
@@ -288,7 +301,7 @@ class SpendSummaryResponse(BaseModel):
     # story #3806(Phase3·3-2 PR5, 디디 3자기점검) — AdsBoostRun.status('pending'|
     # 'running'|'paused'|'failed') 실 관측값. run 행이 아직 없으면 None(gate 승인
     # 직후·실행 요청 前 — "미실행"을 지어낸 상태값으로 가리지 않는다).
-    run_status: str | None
+    run_status: _RunStatus | None
     # story #3806(Phase3·3-2 PR 8, 페드루 PO 確定 2026-09-11) — boost_start 커맨드의
     # `initiated_by`('scheduler'|'human'). run_status와 동형 판단(디디 3자기점검
     # 정신 재사용) — 이 GET이 이미 gate_id 단건 조회 자리라 3번째 GET 신설 안 함.
@@ -354,13 +367,19 @@ async def _get_ads_boost_spend_endpoint(
             status_code=404,
             detail={"code": "ADS_BOOST_GATE_NOT_FOUND", "message": t("ads_boost.gate_not_found", resolved_locale)},
         ) from exc
-    caller_is_human = await _caller_is_human(db, auth, org_id) if summary["run_status"] is not None else False
+    caller_is_human = (
+        await _caller_is_human(db, auth, org_id) if summary["run_status"] is not None or summary.get("start_command") else False
+    )
+    start = summary.get("start_command")
     return SpendSummaryResponse(
         gate_id=summary["gate_id"], sealed_ads_budget_minor=summary["sealed_ads_budget_minor"],
         sealed_ads_currency=summary["sealed_ads_currency"], captured_spend_minor=summary["captured_spend_minor"],
         remaining_minor=summary["remaining_minor"], run_status=summary["run_status"],
         initiated_by=summary["initiated_by"],
-        start_command=StartCommandView(**summary["start_command"]) if summary.get("start_command") else None,
+        start_command=(
+            StartCommandView(**{k: v for k, v in start.items() if k != "human_retryable"}, retryable=caller_is_human and start["human_retryable"])
+            if start else None
+        ),
         cap_reached_at=summary["cap_reached_at"].isoformat() if summary["cap_reached_at"] else None,
         # story #4416 — the ad account id is human-only in the channel-connection list (the agent list leaves it out on
         # purpose), and this read is open to agents: the account and campaign ids (for the Ads Manager link on the human

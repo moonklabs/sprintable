@@ -117,8 +117,9 @@ export interface AdsBoostSummaryView {
   sealed_currency: string | null;
   captured_spend_minor: number;
   remaining_minor: number;
-  // AdsBoostRun 행이 아직 없으면(시작 前) null.
-  run_status: 'pending' | 'running' | 'paused' | 'failed' | null;
+  // AdsBoostRun 행이 아직 없으면(시작 前) null. story #4447 — the server's contract is BOOST_RUN_STATUSES (generated); typed as a
+  // string so a value outside it still arrives and the cell says «미제공» instead of guessing.
+  run_status: string | null;
 }
 
 export type Ga4ConnectionStatus = 'not_connected' | 'needs_reauth' | 'connected';

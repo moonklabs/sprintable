@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -11,6 +12,10 @@ import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
+import {
+  BOOST_RUN_STATUSES, COMMAND_FAILURE_KINDS, COMMAND_STATUSES,
+} from '@/lib/ads-boost-states.generated';
 
 // story #3806(Phase3·3-2 PR5, 유나 §절 §2 「중지 스위치」) — 실행 중인 홍보의 중지/재개.
 // 자리 = 상세(이 컴포넌트, gates/[id]/page.tsx에서 마운트)·성과 보드 행(조각⑥, 같은
@@ -40,7 +45,9 @@ export interface BoostExecutionControlProps {
   onSpendRefreshed?: () => void;
 }
 
-type RunStatus = 'pending' | 'running' | 'paused' | 'failed';
+// story #4447 — the run statuses are the server's contract (generated from backend/app/services/ads_boost_states.py): the web
+// once had `failed` (never written) and lacked `pause_pending` (a delayed pause). A value outside the set renders as unknown.
+const isOneOf = (list: readonly string[], v: string | null | undefined): boolean => v != null && list.includes(v);
 // story #3806 PR 9②(PR8 #4185, 페드루 PO 確定 2026-09-11) — boost_start 커맨드의
 // initiated_by. /spend(SpendSummaryResponse)에 실린다 — POST /start 응답
 // (CommandResponse)에도 있지만 scheduler 기동분은 이 화면이 그 POST를 절대 안
@@ -56,6 +63,8 @@ interface StartCommand {
   error_code: string | null;
   // the campaign to look for in the ad account — only for «outcome unknown» (BE boost_campaign_name)
   campaign_name?: string | null;
+  // story #4447 — the server's own «this person may retry it» (human_retryable · people only); the retry button reads only this
+  retryable?: boolean;
 }
 // Meta may have created the campaign: retried only after the person confirms it does not exist in the ad account.
 const OUTCOME_UNKNOWN = 'ADS_BOOST_CREATE_OUTCOME_UNKNOWN';
@@ -71,7 +80,8 @@ export function isSpendCurrencyCode(code: string): boolean {
 }
 
 interface SpendData {
-  run_status: RunStatus | null;
+  // a string: a value outside the contract must still arrive (and render as unknown), never be assumed to be one of ours
+  run_status: string | null;
   initiated_by?: InitiatedBy | null;
   start_command?: StartCommand | null;
   // story #4416 — the run's campaign for «stop in Ads Manager» and the ad channel (null without a run)
@@ -98,9 +108,11 @@ const ACTIVE_COMMAND_STATUSES = new Set(['pending', 'in_progress']);
 
 function waitSettled(op: WaitOp, d: SpendData): boolean {
   const run = d.run_status ?? null;
-  if (op === 'pause') return run === 'paused' || run === 'failed';
-  if (op === 'resume') return run === 'running' || run === 'failed';
-  if (run === 'running' || run === 'paused' || run === 'failed') return true;
+  // story #4447 — a value outside the contract ends any wait (the card shows it as unknown; polling it would never settle)
+  if (run !== null && !isOneOf(BOOST_RUN_STATUSES, run)) return true;
+  if (op === 'pause') return run === 'paused';
+  if (op === 'resume') return run === 'running';
+  if (run === 'running' || run === 'paused' || run === 'pause_pending') return true;
   // completed · failed · dead_letter · voided · blocked (or no command at all) — nothing left to wait for
   return !d.start_command || !ACTIVE_COMMAND_STATUSES.has(d.start_command.status);
 }
@@ -123,7 +135,8 @@ export function BoostExecutionControl({
   const tContent = useTranslations('content');
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
-  const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
+  const [runStatus, setRunStatus] = useState<string | null>(null);
+  const connectRulesHref = useConnectRulesHref('/organization/channels');
   const [initiatedBy, setInitiatedBy] = useState<InitiatedBy | null>(null);
   const [startCommand, setStartCommand] = useState<StartCommand | null>(null);
   // story #4417 — the spend could not be checked against the budget (the server paused the boost and refuses resume) · the
@@ -206,6 +219,8 @@ export function BoostExecutionControl({
   const afterSpend = (d: SpendData, mayBeginStartWait: boolean) => {
     if (unmountedRef.current) return;
     if (!waitRef.current && mayBeginStartWait && !waitSettled('start', d)) beginWait('start');
+    // story #4447 — a pause already requested (a reload while it has not landed): wait for it with the 4416 cap like after a click
+    if (!waitRef.current && mayBeginStartWait && d.run_status === 'pause_pending') beginWait('pause');
     const wait = waitRef.current;
     if (!wait) return;
     if (waitSettled(wait.op, d)) { endWait(null); return; }
@@ -451,10 +466,25 @@ export function BoostExecutionControl({
     )
   ) : null;
 
-  const needsCheck = startCommand?.status === 'dead_letter' && startCommand.failure_kind === 'needs_check';
-  if (needsCheck && runStatus !== 'running' && runStatus !== 'paused') {
-    const outcomeUnknown = startCommand.error_code === OUTCOME_UNKNOWN;
-    const currencyMismatch = startCommand.error_code === ACCOUNT_CURRENCY_MISMATCH;
+  // story #4447 — the state table, on the server's closed value sets. A voided start (its approval was replaced) is no start;
+  // anything outside the sets is the safe cell — never «홍보 시작».
+  const command = startCommand && startCommand.status !== 'voided' ? startCommand : null;
+  const runKnown = runStatus === null || isOneOf(BOOST_RUN_STATUSES, runStatus);
+  const commandKnown = !command
+    || (isOneOf(COMMAND_STATUSES, command.status) && (command.failure_kind === null || isOneOf(COMMAND_FAILURE_KINDS, command.failure_kind)));
+  if (!runKnown || !commandKnown) {
+    return (
+      <div className="space-y-2 break-keep" data-testid="boost-execution-control">
+        <p className="text-xs text-muted-foreground" data-testid="boost-state-unknown" role="status">{t('boostStateUnknown')}</p>
+      </div>
+    );
+  }
+  const runActive = runStatus === 'running' || runStatus === 'paused' || runStatus === 'pause_pending';
+
+  const needsCheck = command?.status === 'dead_letter' && command.failure_kind === 'needs_check';
+  if (needsCheck && !runActive) {
+    const outcomeUnknown = command.error_code === OUTCOME_UNKNOWN;
+    const currencyMismatch = command.error_code === ACCOUNT_CURRENCY_MISMATCH;
     return (
       <div className="space-y-2 break-keep" data-testid="boost-execution-control">
         <p className="text-xs">
@@ -530,9 +560,9 @@ export function BoostExecutionControl({
               <DialogDescription>{t('boostAdoptWhat')}</DialogDescription>
             </DialogHeader>
             <div className="space-y-1 text-sm">
-              {startCommand.campaign_name ? (
+              {command.campaign_name ? (
                 <p className="text-muted-foreground" data-testid="boost-adopt-campaign">
-                  {t('boostNeedsCheckCampaignToFind', { campaignName: startCommand.campaign_name })}
+                  {t('boostNeedsCheckCampaignToFind', { campaignName: command.campaign_name })}
                 </p>
               ) : null}
               <p className="text-foreground" data-testid="boost-adopt-weight">{t('boostAdoptWeight')}</p>
@@ -563,9 +593,9 @@ export function BoostExecutionControl({
               <div className="space-y-1 text-sm">
                 {/* the weight of a wrong confirmation, then what to look for (Yuna 23:18Z) */}
                 <p className="text-foreground" data-testid="boost-needs-check-weight">{t('boostNeedsCheckWeightOutcomeUnknown')}</p>
-                {startCommand.campaign_name ? (
+                {command.campaign_name ? (
                   <p className="text-muted-foreground" data-testid="boost-needs-check-campaign">
-                    {t('boostNeedsCheckCampaignToFind', { campaignName: startCommand.campaign_name })}
+                    {t('boostNeedsCheckCampaignToFind', { campaignName: command.campaign_name })}
                   </p>
                 ) : null}
               </div>
@@ -596,7 +626,30 @@ export function BoostExecutionControl({
     );
   }
 
-  if (runStatus !== 'running' && runStatus !== 'paused') {
+  // story #4447 — a start that stopped (not for a person to check): the true line and its way on, never «홍보 시작» (which only
+  // returned the same stopped command). The retry button only where the server says this person may retry (`retryable`).
+  if (command && !runActive && (command.status === 'dead_letter' || command.status === 'blocked' || command.status === 'failed')) {
+    const kind = command.failure_kind;
+    const retryable = command.retryable === true && (kind === 'not_sent' || kind === 'transient');
+    const line = kind === 'not_sent' ? t('boostStartFailedNotSent')
+      : kind === 'transient' ? t('boostStartFailedTransient')
+      : kind === 'connection' ? t.rich('boostStartFailedConnection', { link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link> })
+      : kind === 'paused' ? t('boostStartFailedPaused')
+      : t('boostStartBlocked');
+    return (
+      <div className="space-y-2 break-keep" data-testid="boost-execution-control">
+        {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
+        <p className="text-xs text-muted-foreground" data-testid="boost-start-failed">{line}</p>
+        {retryable ? (
+          <Button variant="outline" size="sm" disabled={submitting} onClick={() => void doRetryStart()} data-testid="boost-start-failed-retry">
+            {t('boostNeedsCheckRetry')}
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (!runActive) {
     // 아직 시작 前(run_status=null·pending·failed는 이 조각에선 미시작과 동형 취급 —
     // failed 재시도는 범위 밖). starts_at 자체가 없으면(그라운딩 갭 — 이론상 불가,
     // 봉인 5필드 필수) 버튼을 안 그린다(지어내지 않는다).
@@ -650,7 +703,8 @@ export function BoostExecutionControl({
     <div className="space-y-2 break-keep" data-testid="boost-execution-control">
       <p className="text-xs">
         <span className="font-medium text-foreground">
-          {runStatus === 'running' ? t('boostExecutionStatusRunning') : t('boostExecutionStatusPaused')}
+          {/* story #4447 — a pause not landed yet: the campaign still runs (the «중지 중…» line and the cap say the rest) */}
+          {runStatus === 'paused' ? t('boostExecutionStatusPaused') : t('boostExecutionStatusRunning')}
         </span>
       </p>
       {/* story #3806 PR 9②(PR8 #4185) — initiated_by 없으면(PR8 미착지·boost_start
@@ -705,7 +759,7 @@ export function BoostExecutionControl({
       {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
       {waitingLine}
       {capNoticeBlock}
-      {spendBlockedCode === SPEND_CONTEXT_LOST ? null /* no connection: our pause/resume can't reach Meta */ : runStatus === 'running' ? (
+      {spendBlockedCode === SPEND_CONTEXT_LOST || runStatus === 'pause_pending' ? null /* no connection · or a pause already requested */ : runStatus === 'running' ? (
         <Button
           variant="outline" size="sm" disabled={submitting || waiting === 'pause'}
           onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger"

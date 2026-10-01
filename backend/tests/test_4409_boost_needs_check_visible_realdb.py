@@ -88,6 +88,7 @@ async def test_a_needs_check_start_is_visible_on_spend_and_needs_the_confirmatio
             assert body["start_command"] == {
                 "id": str(command.id), "status": "dead_letter", "failure_kind": "needs_check",
                 "error_code": "ADS_BOOST_CREATE_OUTCOME_UNKNOWN", "campaign_name": name,  # the one the dialog asks to look for
+                "retryable": True,  # story #4447 — the server's own «a person may retry it» (the confirmation is still required)
             }
 
             r = await client.post(f"/api/v2/organizations/{org_id}/publication-commands/{command.id}/retry")

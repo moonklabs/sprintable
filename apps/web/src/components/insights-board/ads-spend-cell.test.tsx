@@ -58,7 +58,8 @@ describe('AdsSpendCell — story #3806(Phase3·3-2 PR5 조각⑥)', () => {
       .toBe(koMessages.insightsBoard.adsSpendAggregationPending);
   });
 
-  it('⭐run_status="failed" → 「미제공」', () => {
+  // story #4447 — 'failed' was never written by the server; a value outside the contract (BOOST_RUN_STATUSES) is «미제공».
+  it('⭐run_status가 계약 밖 값(예: "failed") → 「미제공」', () => {
     mount({
       gate_id: 'gate-1', gate_status: 'approved', sealed_budget_minor: 50_000, sealed_currency: 'KRW',
       captured_spend_minor: 0, remaining_minor: 50_000, run_status: 'failed',
@@ -77,6 +78,14 @@ describe('AdsSpendCell — story #3806(Phase3·3-2 PR5 조각⑥)', () => {
     expect(el?.textContent).toContain('50,000원');
     expect(el?.textContent).toContain('20,000원');
     expect(el?.textContent).not.toContain(koMessages.insightsBoard.adsSpendExceeded.split(' ')[0]);
+  });
+
+  it('⭐#4447 — run_status="pause_pending"(멈춤 반영 전)도 값을 그린다(아직 집행 중)', () => {
+    mount({
+      gate_id: 'gate-1', gate_status: 'approved', sealed_budget_minor: 50_000, sealed_currency: 'KRW',
+      captured_spend_minor: 12_000, remaining_minor: 38_000, run_status: 'pause_pending',
+    });
+    expect(container.querySelector('[data-testid="ads-spend-cell-value"]')).not.toBeNull();
   });
 
   it('⭐run_status="paused"도 값을 그린다(중지됨=실행 이력 있음, 「미제공」 아님)', () => {
