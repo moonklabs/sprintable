@@ -642,18 +642,18 @@ _TESTS_DIR = Path(__file__).resolve().parent
 _SYS_PATH_LEAKERS: list[str] = []
 
 
+@functools.lru_cache(maxsize=512)
+def _resolved_path(p: str) -> Path | None:
+    """sys.path entries resolved once each (the hook asks for every collected module — ~1500 a run)."""
+    try:
+        return Path(p).resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
 def _tests_dir_entries(path_list: list, tests_dir: Path) -> list:
     """The sys.path entries that are `tests_dir` (any spelling of it) — empty when it is not on the path."""
-    out = []
-    for p in path_list:
-        if not p:
-            continue
-        try:
-            if Path(p).resolve() == tests_dir:
-                out.append(p)
-        except (OSError, RuntimeError):
-            continue
-    return out
+    return [p for p in path_list if p and _resolved_path(p) == tests_dir]
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -695,17 +695,29 @@ def _settings_swap_error(module_before, settings_before, module_now, settings_no
 
 @pytest.fixture(autouse=True)
 def _settings_object_stays(request):
-    import app.core.config as config_module
-
-    module_before, settings_before = config_module, config_module.settings
+    # only watched when already loaded — never imported from here: a guard that loads app.core.config before every test would
+    # blind the env-drift check that proves its script runs without the backend's packages (Kadir 4879 — a planted
+    # `import app.core.config` went green)
+    module_before = sys.modules.get("app.core.config")
+    if module_before is None:
+        yield
+        return
+    settings_before = getattr(module_before, "settings", None)
     yield
-    module_now = sys.modules.get("app.core.config")
-    settings_now = getattr(module_now, "settings", None)
-    error = _settings_swap_error(module_before, settings_before, module_now, settings_now, request.node.nodeid)
+    error = _settings_restore_if_swapped(module_before, settings_before, request.node.nodeid)
     if error:
-        sys.modules["app.core.config"] = module_before
-        module_before.settings = settings_before
         pytest.fail(error, pytrace=False)
+
+
+def _settings_restore_if_swapped(module_before, settings_before, nodeid: str, modules: dict | None = None) -> str | None:
+    """After a test: if app.core.config (or its settings object) is not the one from before, put the old one back and say so."""
+    modules = sys.modules if modules is None else modules
+    module_now = modules.get("app.core.config")
+    error = _settings_swap_error(module_before, settings_before, module_now, getattr(module_now, "settings", None), nodeid)
+    if error:
+        modules["app.core.config"] = module_before
+        module_before.settings = settings_before
+    return error
 
 
 @pytest.hookimpl(trylast=True)

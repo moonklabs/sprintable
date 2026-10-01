@@ -46,3 +46,21 @@ def test_the_settings_object_this_test_sees_is_the_one_the_app_reads():
     import app.services.youtube_privacy as privacy_module
 
     assert privacy_module.settings is config_module.settings
+
+
+def test_after_a_swap_the_old_module_and_settings_object_are_put_back():
+    # the teardown path itself, on a stand-in module table (the real one is not touched)
+    old_settings, new_settings = object(), object()
+    module = SimpleNamespace(settings=old_settings)
+    table = {"app.core.config": module}
+    assert conftest._settings_restore_if_swapped(module, old_settings, "t::same", table) is None
+
+    module.settings = new_settings  # what `importlib.reload(app.core.config)` does: same module, a new object
+    error = conftest._settings_restore_if_swapped(module, old_settings, "t::reload", table)
+    assert error is not None and "t::reload" in error
+    assert table["app.core.config"] is module and module.settings is old_settings
+
+    other = SimpleNamespace(settings=new_settings)
+    table["app.core.config"] = other  # a different module object in its place
+    assert conftest._settings_restore_if_swapped(module, old_settings, "t::module", table) is not None
+    assert table["app.core.config"] is module
