@@ -131,3 +131,14 @@ def test_no_bulk_update_writes_a_command_status():
                         status_writes.append(f"{f.relative_to(root)}:{node.lineno}")
     assert bulk_updates >= 1  # the floor: the scan sees the bulk update that exists (recipe_publish_failure.py · updated_at)
     assert not status_writes, f"bulk updates writing a command status (outside the model's validator): {status_writes}"
+
+
+def test_only_a_pause_is_exempt_from_the_seal_check():
+    """PO 08:34Z — the seal check lists what it exempts, not what it checks: an operation added later is checked by default.
+    The exempt set is pinned to the money-stopping operation alone; every other known operation is checked."""
+    import app.services.ads_boost_execution as execution
+
+    assert execution.MONEY_STOPPING_OPS == frozenset({"pause"})
+    known = {v for k, v in vars(execution).items() if k.startswith("OP_") and isinstance(v, str)}
+    assert {"boost_start", "pause", "resume"} <= known  # the floor: the scan sees the operations that exist
+    assert known - execution.MONEY_STOPPING_OPS == {"boost_start", "resume"}  # checked — spending ones

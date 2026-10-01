@@ -46,6 +46,10 @@ _NON_TERMINAL_STATUSES = ("pending", "in_progress", "blocked")
 OP_BOOST_START = "boost_start"
 OP_PAUSE = "pause"
 OP_RESUME = "resume"
+# story #4447 (PO 08:13Z · 08:34Z) — the commands that only stop money: never refused for their seal (a pause pressed before a
+# re-seal must still switch the campaign off). Everything else is seal-checked by default — a new operation that spends is checked
+# without anyone remembering to add it (the exempt list is pinned by test_4447_ads_boost_states_contract.py).
+MONEY_STOPPING_OPS: frozenset[str] = frozenset({OP_PAUSE})
 
 # story #3806(Phase3·3-2 PR 13) — process_one_ads_boost_command 실행 성공 지점의
 # ActivityLog action 키. FE gate-evidence.tsx::GATE_ACTIVITY_LABEL_KEY와 1:1 대응.
@@ -433,8 +437,8 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
     # *pending* commands; an older seal's stopped start (dead_letter · blocked) could still be retried by hand or adopted, and ran
     # with that older approval (its budget · its content). Every execution path (worker · retry · adopt) passes here: refuse before
     # any call. PO 08:13Z — a pause stops money, so it is never refused for its seal: a pause pressed before a re-seal and retried
-    # after it must still switch the campaign off (start · resume only).
-    if command.operation in (OP_BOOST_START, OP_RESUME) and command.approved_version != gate.sealed_ads_boost_version_id:
+    # after it must still switch the campaign off. Only the money-stopping operations are exempt (fail-closed for new ones).
+    if command.operation not in MONEY_STOPPING_OPS and command.approved_version != gate.sealed_ads_boost_version_id:
         raise AdsBoostAdapterUnavailableError(
             SEAL_REPLACED_CODE, f"command belongs to a replaced seal ({command.approved_version}); current: {gate.sealed_ads_boost_version_id}",
         )
