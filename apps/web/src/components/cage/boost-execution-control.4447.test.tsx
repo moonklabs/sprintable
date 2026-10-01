@@ -16,7 +16,11 @@ import { fetchWithAuth } from '@/lib/db/client';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn() }));
-vi.mock('@/app/dashboard/dashboard-shell', () => ({ useConnectRulesHref: (p: string) => `/ws/proj${p}` }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useConnectRulesHref: (p: string) => `/ws/proj${p}`,
+  // story #4458 — useFlatHref (the post link) reads the shell's project
+  useDashboardContext: () => ({ projectId: 'proj-1', inShell: true }),
+}));
 const mockedFetch = vi.mocked(fetchWithAuth);
 const cage = koMessages.cage;
 
@@ -231,7 +235,7 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     const line = $('boost-needs-check-reason')!;
     expect(line.textContent).toContain('100,000원');
     expect(line.textContent).toContain('그 예산으로 다시 요청');
-    expect(line.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/draft-9');
+    expect(line.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/draft-9?p=proj-1'); // carries the project (flat-link rule)
     expect($('boost-needs-check-retry-trigger')).toBeNull();
     expect($('boost-start-trigger')).toBeNull();
   });

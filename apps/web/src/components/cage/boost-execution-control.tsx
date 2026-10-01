@@ -13,6 +13,7 @@ import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import {
   BOOST_RUN_STATUSES, COMMAND_FAILURE_KINDS, COMMAND_STATUSES,
 } from '@/lib/ads-boost-states.generated';
@@ -142,6 +143,7 @@ export function BoostExecutionControl({
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [runStatus, setRunStatus] = useState<string | null>(null);
   const connectRulesHref = useConnectRulesHref('/organization/channels');
+  const flatHref = useFlatHref(); // story #4458 — the post's page carries the project (`?p=`), like every flat link
   const [initiatedBy, setInitiatedBy] = useState<InitiatedBy | null>(null);
   const [startCommand, setStartCommand] = useState<StartCommand | null>(null);
   // story #4417 — the spend could not be checked against the budget (the server paused the boost and refuses resume) · the
@@ -504,7 +506,7 @@ export function BoostExecutionControl({
             const amount = createdBudget.minor !== null && sealedAdsCurrency
               ? formatMinorCurrency(createdBudget.minor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent) : '';
             return createdBudget.draftId
-              ? t.rich('boostNeedsCheckCreatedBudgetDiffers', { amount, link: (chunks) => <Link href={`/content/channel-posts/${createdBudget.draftId}`} className="underline">{chunks}</Link> })
+              ? t.rich('boostNeedsCheckCreatedBudgetDiffers', { amount, link: (chunks) => <Link href={flatHref(`/content/channel-posts/${createdBudget.draftId}`)} className="underline">{chunks}</Link> })
               : t('boostNeedsCheckCreatedBudgetDiffersNoLink', { amount });
           })() : currencyMismatch
             ? (accountCurrency && sealedAdsCurrency
