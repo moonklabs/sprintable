@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchArray } from './fetch-work-list';
 import { useLocale, useTranslations } from 'next-intl';
 import { FileText, Layers, X } from 'lucide-react';
 import Link from 'next/link';
@@ -185,10 +186,12 @@ async function fetchDraftsForWorkItem(
  * gate_type·id)가 필요해 inbox 요약이 아니라 `/api/gates`를 직접 부른다. */
 async function fetchPendingGate(row: WorkListRow, storyId: string): Promise<WorkListGate | null> {
   const tryFetch = async (workItemId: string, workItemType: string) => {
-    const items = await fetchJsonData<WorkListGate[]>(
+    // story #4448 — GET /api/gates passes the backend's bare list through: read as { data } (fetchJsonData) it was always null, so
+    // the panel never showed a pending gate's state, risk or action. The contract's shape only (a non-array is a failed read).
+    const items = await fetchArray<WorkListGate>(
       `/api/gates?work_item_id=${workItemId}&work_item_type=${workItemType}&status=pending`,
     );
-    return items && items.length > 0 ? items[0]! : null;
+    return items.length > 0 ? items[0]! : null;
   };
   const direct = await tryFetch(row.workItemId, row.workItemType);
   if (direct) return direct;
@@ -536,6 +539,10 @@ export function WorkListDetailPanel({
           {stateText ? (
             <p className="text-muted-foreground" data-testid="panel-state">
               {t('panelState')}: <span className={cn('font-medium', stateText.className)}>{t(stateText.key)}</span>
+              {/* story #4448 (Yuna 04:13Z) — low risk has no sentence: its chip ends this line (no box of its own) */}
+              {gate && riskBadge === 'chip' ? (
+                <Badge variant="chip" className="ml-1.5 align-middle" data-testid="panel-risk-chip">{t('chipLowRisk')}</Badge>
+              ) : null}
             </p>
           ) : null}
         </div>
@@ -545,9 +552,10 @@ export function WorkListDetailPanel({
             div는 금지, Card(surface 기본 solid=border-border/80 bg-card)로. 시안 구조·
             레이아웃(flex·gap·padding)은 무변 — Card가 border/bg/radius를 제공하고
             나머지 유틸은 className으로 그대로. */}
-        {gate && riskBadge ? (
+        {/* story #4448 (Yuna 04:13Z) — the box only where there is a sentence (high risk); low risk is the chip above */}
+        {gate && riskBadge === 'warning' ? (
           <Card className="flex items-center gap-2 p-2" data-testid="panel-risk">
-            <Badge variant={riskBadge}>{t(gate.risk_grade === 'high' ? 'riskBadgeHigh' : 'chipLowRisk')}</Badge>
+            <Badge variant={riskBadge}>{t('riskBadgeHigh')}</Badge>
             {/* 픽셀 커밋 CHANGES 3(b, 페드루 PO 판정 09:40Z) — 저위험은 문장 0(pill과
                 같은 사실 반복 금지). 고위험만 riskKey가 채워진다. */}
             {riskKey ? <p className="text-xs text-muted-foreground">{t(riskKey)}</p> : null}

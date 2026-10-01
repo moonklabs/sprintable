@@ -38,7 +38,9 @@ function mockFetchWorkListSources(overrides: { teamMembers?: unknown[]; agentRun
     if (url.includes('/api/stories')) return regulationAEnvelope([]);
     if (url.includes('/api/tasks')) return regulationAEnvelope([]);
     if (url.includes('/api/agent-runs')) return regulationAEnvelope([], overrides.agentRunsHasMore ?? false);
-    if (url.includes('/api/gates/inbox')) return plainArrayEnvelope([]);
+    // story #4448 — GET /api/gates/inbox passes the backend's bare list through (gates/inbox/route.ts: proxyToFastapi): the real
+    // answer is an array, not { data }
+    if (url.includes('/api/gates/inbox')) return jsonResponse([]);
     if (url.includes('/api/team-members')) return plainArrayEnvelope(overrides.teamMembers ?? []);
     if (url.includes('/api/visual-artifacts')) return plainArrayEnvelope([]);
     if (url.includes('/api/hypotheses')) return plainArrayEnvelope([]);
@@ -95,5 +97,45 @@ describe('fetchWorkList — agent-runs hasMore가 partial에 반영된다(story 
     mockFetchWorkListSources({ agentRunsHasMore: false });
     const { workList } = await fetchWorkList('proj-1');
     expect(workList.partial).toBe(false);
+  });
+});
+
+
+// story #4448 — the inbox was read as { data } from a bare array, so it was always empty: the work list never showed a row as
+// «서명 대기 · 승인 대기 · 답 대기» (every row fell back to the task's own status). The mock answered { data: [] } and stayed green.
+describe('fetchWorkList — the inbox answer is a bare array and drives the row states (#4448)', () => {
+  it('⭐ each pending inbox item turns its row into the waiting state — signature · approval · answer', async () => {
+    const story = (id: string) => ({ id, title: `스토리 ${id}`, epic_id: null, status: 'in-progress' });
+    const task = (id: string, storyId: string) => ({ id, story_id: storyId, assignee_id: null, title: `일 ${id}`, status: 'in-progress' });
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/goals')) return regulationAEnvelope([]);
+      if (url.includes('/api/stories')) return regulationAEnvelope([story('s1'), story('s2'), story('s3')]);
+      if (url.includes('/api/tasks')) return regulationAEnvelope([task('t1', 's1'), task('t2', 's2'), task('t3', 's3')]);
+      if (url.includes('/api/agent-runs')) return regulationAEnvelope([]);
+      if (url.includes('/api/gates/inbox')) {
+        return jsonResponse([
+          { source: 'gate', id: 'g1', work_item_id: 't1', work_item_type: 'task', status: 'pending', gate_type: 'external_publish', risk_grade: 'high' },
+          { source: 'gate', id: 'g2', work_item_id: 't2', work_item_type: 'task', status: 'pending', gate_type: 'approval', risk_grade: 'low' },
+          { source: 'hitl', id: 'h1', work_item_id: 's3', status: 'pending', title: '질문', prompt: '어느 쪽으로 할까요?' },
+        ]);
+      }
+      if (url.includes('/api/team-members')) return plainArrayEnvelope([]);
+      if (url.includes('/api/visual-artifacts')) return plainArrayEnvelope([]);
+      if (url.includes('/api/hypotheses')) return plainArrayEnvelope([]);
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const { workList } = await fetchWorkList('proj-1');
+    const rows = workList.groups.flatMap((goal) => goal.stories.flatMap((st) => st.rows));
+    const stateOf = (taskId: string) => rows.find((r) => r.workItemId === taskId)?.state;
+    expect(stateOf('t1')).toBe('awaiting_signature');
+    expect(stateOf('t2')).toBe('awaiting_approval');
+    expect(stateOf('t3')).toBe('awaiting_answer');
+  });
+
+  it('an inbox answer that is not an array (a shape outside the contract) is a failed read — never a silent empty inbox', async () => {
+    mockFetchWorkListSources();
+    const base = fetchWithAuthMock.getMockImplementation()!;
+    fetchWithAuthMock.mockImplementation(async (url: string) => (url.includes('/api/gates/inbox') ? jsonResponse({ data: [] }) : base(url)));
+    await expect(fetchWorkList('proj-1')).rejects.toThrow(/not an array/);
   });
 });
