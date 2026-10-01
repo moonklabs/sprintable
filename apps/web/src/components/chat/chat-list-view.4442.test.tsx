@@ -60,6 +60,10 @@ const rowTexts = () => [...container.querySelectorAll('button, a, li')].map((el)
   .filter((t) => /회의방|기획방|새 그룹방/.test(t));
 
 beforeEach(() => {
+  // story #4446 (PO 02:01Z): the fixtures are fixed times (00:00–00:40Z on 10-01) — the clock is pinned just after them, so the
+  // rows' relative time («방금» · «N분 전») never drifts into a number the assertions could misread (it read «1시간 전» at 01:2xZ)
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-01T00:41:00Z'));
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -69,23 +73,28 @@ afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
+// the unread badge of a row, by the badge element itself (not a pattern over the row's words)
+const rowOf = (title: string) => [...container.querySelectorAll('button, a, li')].find((el) => (el.textContent ?? '').includes(title)) as HTMLElement | undefined;
+const badgeOf = (title: string) => rowOf(title)?.querySelector('span.rounded-full.bg-primary') ?? null;
 
 describe('ChatListView — the sending tab\'s own row (#4442)', () => {
   it('a send from this tab moves its row to the top with the new line; no unread', async () => {
     stub([
-      conv('c-1', '회의방', { content: '먼저 온 말', created_at: '2026-10-01T00:10:00Z' }, '2026-10-01T00:10:00Z'),
+      { ...conv('c-1', '회의방', { content: '먼저 온 말', created_at: '2026-10-01T00:10:00Z' }, '2026-10-01T00:10:00Z'), unread_count: 2 },
       conv('c-2', '기획방', { content: '오래된 말', created_at: '2026-10-01T00:00:00Z' }, '2026-10-01T00:00:00Z'),
     ]);
     await mount();
     expect(rowTexts()[0]).toContain('회의방');
+    expect(badgeOf('회의방')?.textContent).toBe('2'); // the badge is found where there is one (the selector is real)
     await act(async () => {
       latestOpts()?.onSentHere?.({ id: 'm-9', conversation_id: 'c-2', content: '방금 보낸 말', created_at: '2026-10-01T00:20:00Z', sender: { id: ME } });
     });
     const rows = rowTexts();
     expect(rows[0]).toContain('기획방');
     expect(rows[0]).toContain('방금 보낸 말');
-    expect(container.textContent).not.toMatch(/기획방[^회]*\b1\b/); // no unread badge count for my own message
+    expect(badgeOf('기획방')).toBeNull(); // no unread badge for my own message
   });
 
   it('an attachment-only send reads «첨부 파일», and so does a row that loads with one', async () => {
