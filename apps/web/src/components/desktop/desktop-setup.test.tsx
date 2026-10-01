@@ -615,6 +615,31 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(polls()).toBe(settled); // every agent settled → no more reading
   });
 
+  it('[SID:4464 · Qadir 4880] after the first result an agent that never connects: ⑦ as a block under the three steps after 180 s, then no more reading; [다시 확인] reads once and, connected by then, the block goes', async () => {
+    const withResult = (connected: string[]) => status('handed_over', {
+      tools_connected: connected.map((member_id) => ({ member_id, at: 'x' })),
+      first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z',
+    });
+    statusNow = () => withResult(['m1']);
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-still-preparing]')).not.toBeNull();
+    await tick(180_000);
+    const block = container.querySelector('[data-testid=setup-agent-not-connected]');
+    expect(block?.textContent).toContain('작성 에이전트에 Sprintable이 아직 연결되지 않았어요'); // only the role that did not connect
+    expect(container.querySelectorAll('ol > li[data-state=done]').length).toBe(3); // the steps stay: a block, not a card over them
+    expect(container.querySelector('[data-testid=setup-still-preparing]')).toBeNull(); // said once, by the block
+    const stoppedAt = polls();
+    await tick(10_000);
+    expect(polls()).toBe(stoppedAt); // settled: no endless 2-second reading
+    statusNow = () => withResult(['m1', 'm2']);
+    await act(async () => { [...block!.querySelectorAll('button')].find((b) => b.textContent === '다시 확인')!.click(); });
+    await tick(0);
+    expect(polls()).toBe(stoppedAt + 1); // one reading
+    expect(container.querySelector('[data-testid=setup-agent-not-connected]')).toBeNull();
+  });
+
   it('[SID:4464] an agent that could not start counts as settled: reading stops after the first result', async () => {
     const base = status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z' });
     statusNow = () => ({ ...base, signals: { ...base.signals, agents_start_failed: [

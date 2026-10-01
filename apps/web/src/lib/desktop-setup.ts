@@ -347,23 +347,31 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
   const failedIds = new Set(failedRows.map((f) => f.member_id));
   const startFailed = startFailedAgents(failedRows, agents);
   const pendingStarted = agentIds.filter((id) => !connected.has(id) && !failedIds.has(id));
-  const unsettled = pendingStarted.filter((id) => !stoppedMembers.has(id));
   // a stopped agent says what to do itself (its block) — the trust note and ⑦ «not connected» would tell a different story
   const waitingForTools = handedOver && pendingStarted.length > 0 && result === 'running' && !stopped;
-  const notConnected = waitingForTools && (
-    (Number.isFinite(input) && now - input >= NOT_CONNECTED_AFTER_INPUT_MS)
-    || (handedOverSeenAt !== null && now - handedOverSeenAt >= NOT_CONNECTED_AFTER_HANDOVER_MS));
+  const pastThreshold = (Number.isFinite(input) && now - input >= NOT_CONNECTED_AFTER_INPUT_MS)
+    || (handedOverSeenAt !== null && now - handedOverSeenAt >= NOT_CONNECTED_AFTER_HANDOVER_MS);
+  // story 4464 (Qadir 4880 · PO 10:04Z): after the first result an agent that started and never connects (no failure · not
+  // stopped) gets the same threshold and the same ⑦ — as a block under the finished steps (the component: no covering card
+  // once the result is in); it then counts as settled, so the reading stops instead of «아직 준비하고 있어요» forever
+  // the first result proves the agent that received the first task is connected (no signal needed — 결과가 연결의 증거)
+  const proven = result === 'done' ? agents[0]?.member_id ?? null : null;
+  const unsettled = pendingStarted.filter((id) => !stoppedMembers.has(id) && id !== proven);
+  const lateNotConnected = handedOver && result === 'done' && unsettled.length > 0 && pastThreshold;
+  const notConnected = (waitingForTools && pastThreshold) || lateNotConnected;
+  // who ⑦ names: before the result every agent not yet connected; after it, only the ones still unsettled
+  const named = (id: string) => (lateNotConnected ? unsettled.includes(id) : pendingStarted.includes(id));
   return {
     ready, handed, result, pairs,
-    settled: !!s.signals.blocked || s.state === 'not_handed_over' || (result === 'done' && unsettled.length === 0),
+    settled: !!s.signals.blocked || s.state === 'not_handed_over' || (result === 'done' && (unsettled.length === 0 || lateNotConnected)),
     firstAgentRole: agents.find((m) => m.role)?.role ?? null,
     workdirFallback: !!s.signals.workdir_fallback_at,
     trustHint: waitingForTools && !notConnected,
     notConnected,
     notConnectedAgents: {
-      roles: [...new Set(agents.filter((m) => pendingStarted.includes(m.member_id) && m.role).map((m) => m.role as string))],
-      runtimes: [...new Set(agents.filter((m) => pendingStarted.includes(m.member_id) && m.runtime).map((m) => m.runtime as DesktopRuntime))],
-      claude: agents.some((m) => pendingStarted.includes(m.member_id) && m.runtime === 'claude'),
+      roles: [...new Set(agents.filter((m) => named(m.member_id) && m.role).map((m) => m.role as string))],
+      runtimes: [...new Set(agents.filter((m) => named(m.member_id) && m.runtime).map((m) => m.runtime as DesktopRuntime))],
+      claude: agents.some((m) => named(m.member_id) && m.runtime === 'claude'),
     },
     blocked: !!s.signals.blocked,
     expired: s.state === 'not_handed_over',
@@ -372,7 +380,8 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
       && agentIds.filter((id) => !connected.has(id)).every((id) => stoppedMembers.has(id) || failedIds.has(id)),
     handedPaused: handed === 'running' && !!agents[0] && (stoppedMembers.has(agents[0].member_id) || failedIds.has(agents[0].member_id)),
     readyDrawn: ready === 'done' || handed === 'done' ? 'done' : 'running',
-    stillPreparing: ready === 'done' || handed !== 'done' ? [] : stillPreparingRoles(agents, connected, stopped).filter((r) => !startFailed.some((f) => f.role === r)),
+    // an agent past the threshold is said once, by the ⑦ block — never also «아직 준비하고 있어요» (PO 10:05Z)
+    stillPreparing: ready === 'done' || handed !== 'done' || notConnected ? [] : stillPreparingRoles(agents, connected, stopped).filter((r) => !startFailed.some((f) => f.role === r)),
     startFailed,
   };
 }
@@ -437,5 +446,5 @@ export function endsWithAgentWord(name: string, locale: string): boolean {
   return locale === 'ko' ? /에이전트$/.test(n) : /(agent|에이전트)$/i.test(n);
 }
 
-/** 폴링 간격(PO 12:25Z). 결과가 나오거나 화면이 실패로 바뀌면 멈춘다. */
+/** 폴링 간격(PO 12:25Z). 끝 조건은 setupProgress().settled 하나(story 4464): 막힘 · 만료, 또는 첫 결과 뒤 모든 에이전트가 정해짐. */
 export const SETUP_STATUS_POLL_MS = 2_000;

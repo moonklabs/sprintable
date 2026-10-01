@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
+import { NOT_CONNECTED_AFTER_HANDOVER_MS,
   endsWithAgentWord,
   activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
@@ -178,10 +178,15 @@ describe('[SID:4427] 진행 표시 — 상태 조회 한 번을 세 단계로(PO
     expect(setupProgress(s, T0, T0)).toMatchObject({ handed: 'done', result: 'done' });
   });
 
-  it('결과가 나온 뒤엔 연결 신호가 비어도 ⑦ 아님(결과가 연결의 증거)', () => {
+  it('결과가 나온 뒤엔 그 결과를 낸 첫 에이전트는 연결 신호가 비어도 ⑦ 아님(결과가 연결의 증거) — 끝내 안 붙은 다른 에이전트만 ⑦(story 4464)', () => {
     const s = { ...base(), state: 'handed_over' as const };
     s.signals = { ...s.signals, first_result_at: 'y' };
-    expect(setupProgress(s, T0 + 600_000, T0).notConnected).toBe(false);
+    const p = setupProgress(s, T0 + 600_000, T0);
+    expect(p.notConnected).toBe(true);
+    expect(p.notConnectedAgents.roles).toEqual(['작성']); // never 조사 (the result is its)
+    // the first agent alone: the result proves it — no ⑦ at all, settled
+    const one = { ...s, members: s.members.filter((m) => m.member_id !== 'm2') };
+    expect(setupProgress(one, T0 + 600_000, T0)).toMatchObject({ notConnected: false, settled: true });
   });
 
   it('폴더 대체 · 막힘(⑥) · 코드 먼저 끝남(④)', () => {
@@ -212,6 +217,25 @@ describe('[SID:4464] settled — the one end condition for reading the status', 
   it('an agent that could not start, or that stopped, is settled too', () => {
     const failed = [{ member_id: 'm2', runtime: 'codex', reason: 'runtime_missing', at: 'x' }] as never;
     expect(setupProgress(base({ tools_connected: c('m1'), first_result_at: 'r', agents_start_failed: failed }), T0, T0).settled).toBe(true);
+  });
+
+  it('[Qadir 4880] after the first result, one agent that never connects: past the ⑦ threshold it is ⑦ (and settled) — never «아직 준비» too', () => {
+    const late = base({ tools_connected: c('m1'), first_task_handed_at: 'h', first_result_at: 'r' });
+    const early = setupProgress(late, T0 + NOT_CONNECTED_AFTER_HANDOVER_MS - 1_000, T0);
+    expect([early.notConnected, early.settled]).toEqual([false, false]);
+    expect(early.stillPreparing).toEqual(['개발자']);
+    const past = setupProgress(late, T0 + NOT_CONNECTED_AFTER_HANDOVER_MS, T0);
+    expect([past.notConnected, past.settled]).toEqual([true, true]);
+    expect(past.stillPreparing).toEqual([]); // the block says it, once
+    expect(past.notConnectedAgents.roles).toEqual(['개발자']); // only the agent that did not connect
+  });
+
+  it('an agent that stopped after the first result is settled too (the «멈춤» branch)', () => {
+    const ended = [{ member_id: 'm2', runtime: 'codex' as const, at: '2026-09-30T12:01:00Z', exit_code: 1 }];
+    const p = setupProgress(base({ tools_connected: c('m1'), first_result_at: '2026-09-30T12:00:30Z', agents_ended: ended }), T0, T0);
+    expect([p.settled, p.notConnected]).toEqual([true, false]);
+    // contrast: the same agent not stopped is still waited for
+    expect(setupProgress(base({ tools_connected: c('m1'), first_result_at: '2026-09-30T12:00:30Z' }), T0, T0).settled).toBe(false);
   });
 
   it('never before the first result (the page waits for it) — unless blocked or expired', () => {
