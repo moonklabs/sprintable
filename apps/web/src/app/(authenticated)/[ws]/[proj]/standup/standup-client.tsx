@@ -495,16 +495,19 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   // (h-12) TopBar title (the title and the shrink-0 controls competed for one row).
   const dateNavControls = (
     <>
-      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, -1))} title={t('previousDay')}>
+      {/* story #4443 PR3a (Kadir 4871 ④) — the day is not known yet (no zone): nothing to move from — locked, not «NaN-NaN-NaN».
+          The arrows' names are aria-label (was title: a hover-only name a locked button would not give touch · keyboard · readers) */}
+      <Button variant="ghost" size="icon" className="shrink-0" disabled={!date} onClick={() => setDate((d) => shiftDate(d, -1))} aria-label={t('previousDay')} data-testid="standup-prev-day">
         ←
       </Button>
       <OperatorInput
         type="date"
         value={date}
+        disabled={!date}
         onChange={(event) => setDate(event.target.value)}
         className="w-auto shrink-0"
       />
-      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, 1))} title={t('nextDay')}>
+      <Button variant="ghost" size="icon" className="shrink-0" disabled={!date} onClick={() => setDate((d) => shiftDate(d, 1))} aria-label={t('nextDay')} data-testid="standup-next-day">
         →
       </Button>
       <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDate(null)}>

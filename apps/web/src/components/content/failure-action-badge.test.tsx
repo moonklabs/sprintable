@@ -6,7 +6,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { FailureActionBadge } from './failure-action-badge';
 import { blockedByConnection, blockedReason, deriveFailureAction, type FailureAction } from './failure-action';
-import { formatViewerScheduledAt } from './schedule-format';
+import { formatScheduledAt } from './schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock('next/navigation', () => ({ useParams: () => ({}) }));
@@ -75,8 +75,9 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it('⭐auto_retry — 버튼 없음(§17-13 "자동 재시도가 예정되면 수동 버튼 없음"), next_retry_at 보간', async () => {
     await render({ kind: 'auto_retry', nextRetryAt: '2026-09-05T00:00:00Z' });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
-    // story #4443 PR3a — the badge's zone is the viewer's (given by the page): never labelled, whatever machine runs this
-    expect(container.textContent).toBe(koMessages.content.channelPostsFailureAutoRetryAt.replace('{time}', formatViewerScheduledAt('2026-09-05T00:00:00Z', 'UTC').display));
+    // story #4443 PR3a (Kadir 4871 ①) — the badge draws in the zone it is given and labels it when that is not the viewer's (here,
+    // with no provider, the machine's): the expectation is built the same way
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureAutoRetryAt.replace('{time}', formatScheduledAt('2026-09-05T00:00:00Z', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone).display));
     expect(container.textContent).toContain('09-05 00:00');
   });
 

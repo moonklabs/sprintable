@@ -52,7 +52,15 @@ export function InvisibleSample({ children }: { children: ReactNode }) {
 export function ViewerDate({ value, options }: { value: string | number | Date; options: Intl.DateTimeFormatOptions }) {
   const locale = useLocale();
   const tz = useViewerTimeZone();
-  const text = formatViewerDate(value, locale, tz, options);
+  // story #4443 PR3a (Kadir 4871 ③ · rule (c)) — a clock time's day period differs between ICU builds (a server's Node «AM 7:18» ·
+  // the browser «오전 7:18» — Mirko measured dev's Node 20.20.2 / ICU 78.2): such a time is never drawn in the server render or
+  // hydration, only after mount; its place is held by fixed text (the same bytes everywhere, not an Intl result)
+  const hasClock = options.hour !== undefined || options.timeStyle !== undefined;
+  const mounted = useSyncExternalStore(noSubscription, () => true, () => false);
+  const text = hasClock && !mounted ? null : formatViewerDate(value, locale, tz, options);
   if (text !== null) return <>{text}</>;
-  return <InvisibleSample>{formatViewerDate(value, locale, 'UTC', options)}</InvisibleSample>;
+  return <InvisibleSample>{hasClock ? CLOCK_SAMPLE : formatViewerDate(value, locale, 'UTC', options)}</InvisibleSample>;
 }
+
+// the held place of a clock time: fixed text of about its width («오전 7:18» · «7:18 AM»)
+const CLOCK_SAMPLE = '00:00 AM';

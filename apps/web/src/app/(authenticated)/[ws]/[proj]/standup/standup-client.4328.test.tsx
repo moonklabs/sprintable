@@ -40,6 +40,11 @@ async function mount() {
 }
 
 describe('「하루 체크인」 첫 화면 요청 물결(story #4328)', () => {
+  // story #4443 PR3a (Kadir 4871 ⑤) — the test and the screen each compute the team's «today»: a fixed clock, so a run that
+  // straddles midnight can't make them differ (only Date is faked — the prefetch store's timers stay real)
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-30T14:59:59.500Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+
   it('⭐응답이 하나도 안 온 사이에 다섯 요청이 모두 출발한다(앞 둘을 기다리지 않는다)', async () => {
     fetchWithAuthMock.mockImplementation(() => new Promise(() => {})); // 백엔드가 아직 답하지 않음
     await mount();
