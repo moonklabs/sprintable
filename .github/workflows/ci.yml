@@ -1918,7 +1918,9 @@ jobs:
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # exactly this patch (story #4446, PO 02:01Z): «'22'» picked whatever the runner had cached — v22.23.2's ICU drew ko
+          # «AM 7:18», v22.23.3 «오전 7:18» — so the same commit went red or green by runner
+          node-version: '22.23.3'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 
@@ -2623,7 +2625,9 @@ jobs:
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # exactly this patch (story #4446, PO 02:01Z): «'22'» picked whatever the runner had cached — v22.23.2's ICU drew ko
+          # «AM 7:18», v22.23.3 «오전 7:18» — so the same commit went red or green by runner
+          node-version: '22.23.3'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 
