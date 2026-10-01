@@ -1606,10 +1606,86 @@ jobs:
         run: |
           echo "story #2555 — 변경 파일 전부가 백엔드-무관 allowlist 안이라 이 샤드의 destructive-schema 실행을 건너뛰었다."
 
+  # story #4475 (2026-10-01, PO 13:47Z · conditions five) — the non-destructive pytest body (postgres service · alembic heads ·
+  # `-m "not destructive_schema"` · slowest-20 summary) moved here from `backend-test` unchanged, so it runs in parallel with
+  # the 12 destructive shards. Before: `backend-test` (the required check) waited for the slowest shard to gather the
+  # destructive result (story #2293) and then ran this suite itself — shard + pytest in series, the run's longest pole after
+  # the web split (4467): PR 4887's run was a 25-min shard + 14 min of pytest. `backend-test` keeps its name, `if:`, the
+  # edited-only Mirror step, the weights audit and «Require all destructive shards», and now also requires this job's success.
+  # Not required itself (like ci-work); skipped on an edited-only event like the steps it took over.
+  backend-test-work:
+    name: "Backend pytest work (non-destructive) — internal, not required"
+    runs-on: ubuntu-latest
+    if: github.event.action != 'edited' || github.event.changes.base != null
+    # the suite's own ceiling as before (story #2285 AC4: body 7~8 min then, 10~15 now)
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
+        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      PARITY_TEST_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
+      # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — fresh DB를 먼저 heads까지 올린다
+      # (그렇지 않으면 테이블 부재로 realdb 테스트가 실패한다).
+      - name: alembic upgrade heads (fresh DB → baseline)
+        working-directory: backend
+        run: uv run alembic upgrade heads
+
+      - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
+        working-directory: backend
+        run: |
+          set -o pipefail
+          uv run pytest -q -m "not destructive_schema" --durations=20 2>&1 | tee /tmp/pytest_output.log
+
+      # story #2285 AC5: 넘쳤을 때(취소) 무엇이 시간을 먹었는지 최소한이라도 보이게 —
+      # --durations=20이 정상 완주 시엔 정확한 breakdown을 준다. ⛔한계를 그대로 적는다: job이
+      # 25분 천장에 «중간에» 취소되면 이 스텝(과 --durations 출력 자체)도 같이 죽는다 — GitHub
+      # Actions는 타임아웃-취소 시 이후 스텝을 실행할 방법을 안 준다(`if: always()`도 못 막음).
+      # 그래서 이건 "정상 완주했지만 느려지는 중"을 조기에 보이게 하는 것까지가 이 스텝의
+      # 몫 — 그 이상(취소 순간의 실시간 heartbeat 등)은 짓지 않는다(AC6).
+      - name: Slowest tests summary (story #2285 AC5)
+        if: always()
+        run: |
+          {
+            echo "## Backend pytest — slowest 20 (여유: 천장 25분, 08-17 실측 본체 7~8분)"
+            echo '```'
+            awk '/slowest 20 durations/,0' /tmp/pytest_output.log 2>/dev/null || echo "(durations 출력 없음 — 타임아웃-취소로 이 스텝 자체가 못 돌았을 가능성)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   backend-test:
     name: Backend pytest
     runs-on: ubuntu-latest
-    needs: [backend-test-destructive, detect-changed-scope]
+    needs: [backend-test-destructive, backend-test-work, detect-changed-scope]
     # story #3929(2026-09-15) → story #4099로 폐기(2026-09-21, 머지 안전 실사고 — PR #4473).
     # required 체크("Backend pytest") 자신을 edited(base 무변)에서 job-level if:로 skip하던
     # 처방은 alembic-fresh-db 상단 주석과 동일한 이유로 폐기했다. 이제 항상 돌고,
@@ -1650,30 +1726,6 @@ jobs:
     # 때만 60분으로 늘린다(실작업 분기는 원래 25분 그대로 — 25분 예산이 필요한 쪽은
     # non-destructive pytest 본체뿐이라 안 늘려도 된다).
     timeout-minutes: ${{ github.event.action == 'edited' && 60 || 25 }}
-
-    services:
-      postgres:
-        # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
-        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: sprintable
-          POSTGRES_PASSWORD: sprintable
-          POSTGRES_DB: sprintable_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
-      PARITY_TEST_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
-      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
-      JWT_SECRET: ci-test-secret-at-least-32-chars-long
-      SECRET_KEY: ci-test-secret-at-least-32-chars-long
 
     steps:
       - name: Checkout
@@ -1783,36 +1835,14 @@ jobs:
           fi
           exit 1
 
-      # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
-      # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — fresh DB를 먼저 heads까지 올린다
-      # (그렇지 않으면 테이블 부재로 realdb 테스트가 실패한다).
-      - name: alembic upgrade heads (fresh DB → baseline)
-        if: github.event.action != 'edited' || github.event.changes.base != null
-        working-directory: backend
-        run: uv run alembic upgrade heads
-
-      - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
-        if: github.event.action != 'edited' || github.event.changes.base != null
-        working-directory: backend
+      # story #4467 → #4475 (PO 13:47Z) — the non-destructive pytest itself runs in `backend-test-work` (above), in parallel with
+      # the destructive shards, instead of here after the slowest shard (it made every run shard + pytest long). This job keeps
+      # the required check: it is red unless that job succeeded too (skipped ≠ success — a cancel-cascade or a failure there).
+      - name: Require the non-destructive pytest job to have succeeded (story #4475)
+        if: needs.backend-test-work.result != 'success' && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
-          set -o pipefail
-          uv run pytest -q -m "not destructive_schema" --durations=20 2>&1 | tee /tmp/pytest_output.log
-
-      # story #2285 AC5: 넘쳤을 때(취소) 무엇이 시간을 먹었는지 최소한이라도 보이게 —
-      # --durations=20이 정상 완주 시엔 정확한 breakdown을 준다. ⛔한계를 그대로 적는다: job이
-      # 25분 천장에 «중간에» 취소되면 이 스텝(과 --durations 출력 자체)도 같이 죽는다 — GitHub
-      # Actions는 타임아웃-취소 시 이후 스텝을 실행할 방법을 안 준다(`if: always()`도 못 막음).
-      # 그래서 이건 "정상 완주했지만 느려지는 중"을 조기에 보이게 하는 것까지가 이 스텝의
-      # 몫 — 그 이상(취소 순간의 실시간 heartbeat 등)은 짓지 않는다(AC6).
-      - name: Slowest tests summary (story #2285 AC5)
-        if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
-        run: |
-          {
-            echo "## Backend pytest — slowest 20 (여유: 천장 25분, 08-17 실측 본체 7~8분)"
-            echo '```'
-            awk '/slowest 20 durations/,0' /tmp/pytest_output.log 2>/dev/null || echo "(durations 출력 없음 — 타임아웃-취소로 이 스텝 자체가 못 돌았을 가능성)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "backend-test-work result=${{ needs.backend-test-work.result }} — the non-destructive pytest (its only runner) failed or did not run"
+          exit 1
 
   # story #3273(CI사각, 2026-09-01 카디르 QA 발견) — support-gateway/ 디렉토리엔 pytest
   # 스위트(86건 시점 발견, 이 잡 도입 시점 87건)가 있었지만 GHA 어느 워크플로에도 실행 잡이
