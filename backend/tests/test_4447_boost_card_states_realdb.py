@@ -149,3 +149,82 @@ async def test_a_start_stopped_before_the_call_carries_its_reason_to_the_card():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def test_after_a_reseal_the_old_stopped_start_is_not_the_start_command():
+    """Qadir 4870 (06:47Z) ②: a re-seal voids only the *pending* commands; an old start that had already stopped (dead_letter ·
+    blocked) stays. /spend picked the newest non-voided start of the gate — the old one — and the card, seeing a stopped start,
+    never showed «홍보 시작» for the new approval. /spend now reads only the start command of the gate's current seal
+    (approved_version = sealed_ads_boost_version_id, which every re-seal issues anew)."""
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.gate import Gate
+    from tests.test_3806_ads_boost_execution import _boost_body
+    from tests.test_3806_ads_boost_gate import _approve_gate
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        old = (await _start_command(Session, org_id, gate_id, owner_id)).id
+        await _set_command(Session, old, status="dead_letter", failure_kind="not_sent")
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            publication_id, ad_connection_id, old_version = uuid.UUID(gate.scope_key), gate.sealed_ads_connection_id, gate.sealed_ads_boost_version_id
+        # the person asks for the boost again (the real request path re-seals the same gate) and it is approved again
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/publications/{publication_id}/boosts", json=_boost_body(ad_connection_id=ad_connection_id))
+        assert r.status_code in (200, 201), r.text
+        assert uuid.UUID(r.json()["gate_id"]) == gate_id
+        async with Session() as s:
+            await _approve_gate(s, gate_id, owner_id)
+        async with Session() as s:
+            assert (await s.execute(select(Gate.sealed_ads_boost_version_id).where(Gate.id == gate_id))).scalar_one() != old_version
+        body = await _spend(app, Session, org_id, owner_id, gate_id)
+        assert body["start_command"] is None, body["start_command"]  # the new approval has no start yet → the card offers «홍보 시작»
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_after_a_reseal_and_a_second_start_pause_still_works():
+    """The same re-seal case (Qadir 4870 ②), one step on: the new approval is started (a second boost_start row for the gate —
+    commands are unique per approved version). «Has this gate started» (`_request_toggle`) read the gate's start with
+    scalar_one_or_none() and raised MultipleResultsFound — pause/resume failed after any re-approval + start (the 4409 class)."""
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.gate import Gate
+    from tests.test_3806_ads_boost_execution import _boost_body
+    from tests.test_3806_ads_boost_gate import _approve_gate
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    try:
+        old = (await _start_command(Session, org_id, gate_id, owner_id)).id
+        await _set_command(Session, old, status="dead_letter", failure_kind="not_sent")
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            publication_id, ad_connection_id = uuid.UUID(gate.scope_key), gate.sealed_ads_connection_id
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/publications/{publication_id}/boosts", json=_boost_body(ad_connection_id=ad_connection_id))
+            assert r.status_code in (200, 201), r.text
+        async with Session() as s:
+            await _approve_gate(s, gate_id, owner_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r_start = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/start")
+            assert r_start.status_code == 201, r_start.text
+            assert r_start.json()["command_id"] != str(old)  # a second start row, for the new seal
+            r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/pause")
+        assert r.status_code == 201, r.text
+        assert r.json()["operation"] == "pause"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

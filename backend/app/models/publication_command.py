@@ -23,7 +23,7 @@ from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.core.database import Base
 
@@ -152,3 +152,11 @@ class PublicationCommand(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
     )
+
+    @validates("status")
+    def _status_in_the_contract(self, _key: str, value: str) -> str:
+        """story #4447 (Qadir 4870 ①) — fail-closed at the assignment itself: any name, setattr or the constructor. A status the
+        card's contract (PUBLICATION_COMMAND_STATUSES) does not know is a programming error here, not a row for the card to guess."""
+        if value not in PUBLICATION_COMMAND_STATUSES:
+            raise ValueError(f"publication command status outside PUBLICATION_COMMAND_STATUSES: {value!r}")
+        return value

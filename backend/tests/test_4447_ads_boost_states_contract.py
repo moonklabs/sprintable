@@ -77,8 +77,8 @@ def test_every_status_the_server_writes_to_a_command_is_in_the_contract():
     losing the reason and the way on; `cancelled` (channel posts) was missing the same way. The set the card branches on is the
     model's own list, and every value written to `command.status` must be in it — a new status without a contract entry is red here.
 
-    What this misses (declared): writes through another variable name than `command` (none for publication commands today — the
-    other `.status` writers under app/ are other models) and raw SQL status updates (none today)."""
+    Now a second, earlier signal: the model itself refuses a status outside the contract at any assignment (the validator test
+    below — Qadir 4870 06:47Z ①: this scan sees only the name `command`), and bulk updates are pinned to write no status."""
     from app.models.publication_command import PUBLICATION_COMMAND_STATUSES
     from app.services.ads_boost_states import COMMAND_STATUSES
 
@@ -88,3 +88,46 @@ def test_every_status_the_server_writes_to_a_command_is_in_the_contract():
     missing = {v: sorted(files) for v, files in written.items() if v not in COMMAND_STATUSES}
     assert not missing, f"written to command.status but not in the contract: {missing}"
     assert tuple(COMMAND_STATUSES) == tuple(PUBLICATION_COMMAND_STATUSES)
+
+
+def test_the_model_refuses_a_status_outside_the_contract_whatever_the_write():
+    """Qadir 4870 (06:47Z) ①: the AST guard above saw only `command.status = …` — `cmd.status`, `row.status`, `setattr` passed it.
+    The model now refuses any status outside PUBLICATION_COMMAND_STATUSES at the assignment itself (ORM @validates): fail-closed for
+    every name and setattr, and for the constructor. The AST guard stays as a second, earlier signal."""
+    import pytest as _pytest
+
+    from app.models.publication_command import PUBLICATION_COMMAND_STATUSES, PublicationCommand
+
+    cmd = PublicationCommand()
+    row = PublicationCommand()
+    with _pytest.raises(ValueError):
+        cmd.status = "brand_new_status"
+    with _pytest.raises(ValueError):
+        row.status = "voided_by_hand"
+    with _pytest.raises(ValueError):
+        setattr(PublicationCommand(), "status", "set_by_name")
+    with _pytest.raises(ValueError):
+        PublicationCommand(status="from_the_constructor")
+    for value in PUBLICATION_COMMAND_STATUSES:  # every contract value still writes
+        PublicationCommand().status = value
+
+
+def test_no_bulk_update_writes_a_command_status():
+    """The ORM validator does not see `update(PublicationCommand).values(status=…)` (a bulk statement). There is none under app/
+    today (the only bulk update sets updated_at) — this pins it: a new one must use the contract or this goes red."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "app"
+    bulk_updates, status_writes = 0, []
+    for f in root.rglob("*.py"):
+        for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+            # …update(PublicationCommand)…values(...)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "values":
+                chain = ast.unparse(node.func.value)
+                if "update(PublicationCommand)" in chain:
+                    bulk_updates += 1
+                    if any(k.arg == "status" for k in node.keywords):
+                        status_writes.append(f"{f.relative_to(root)}:{node.lineno}")
+    assert bulk_updates >= 1  # the floor: the scan sees the bulk update that exists (recipe_publish_failure.py · updated_at)
+    assert not status_writes, f"bulk updates writing a command status (outside the model's validator): {status_writes}"

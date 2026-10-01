@@ -260,11 +260,13 @@ async def _request_toggle(
     # story #3806(Phase3·3-2 PR 13 정정) — gate_id로 스코프(위 _latest_toggle
     # docstring과 동형 이유) — 감액 재봉인으로 approved_version이 바뀌어도 "이
     # 게이트가 시작된 적 있나"는 그대로 참이어야 한다.
+    # story #4447 (Qadir 4870 ②) — a re-approval gives the gate a second boost_start (one per approved version):
+    # scalar_one_or_none() raised MultipleResultsFound and pause/resume failed after any re-approval + start. «Ever started».
     started = (await db.execute(
         select(PublicationCommand.id).where(
             PublicationCommand.gate_id == gate.id,
             PublicationCommand.operation == OP_BOOST_START,
-        )
+        ).limit(1)
     )).scalar_one_or_none()
     if started is None:
         raise AdsBoostNotStartedError(gate.id)
