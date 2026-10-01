@@ -12,7 +12,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { endsWithAgentWord, forgetActiveSetup, rememberActiveSetup, setupProgress, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepState } from '@/lib/desktop-setup';
+import { endsWithAgentWord, forgetActiveSetup, rememberActiveSetup, setupPollDelayMs, setupProgress, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepState } from '@/lib/desktop-setup';
 import { Failure, ToolsNotConnected } from './desktop-setup';
 
 /**
@@ -55,17 +55,23 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
 
   const status = snap?.status ?? null;
   const progress = snap ? setupProgress(snap.status, snap.at, snap.handedOverSeenAt) : null;
-  // story 4464 — keep reading while an agent is still getting ready after the first result; stop once all are settled
+  // story 4464 — keep reading until every agent is in (PO 12:04Z: also while a block waits for the person — once they act and the
+  // agent connects, the block goes); after 2 minutes of such waiting, every 10 s instead of 2
   const done = !!progress && progress.settled;
   useEffect(() => { stopped.current = done; }, [done]);
+  const delay = progress && status ? setupPollDelayMs(progress, status.signals.first_result_at, snap!.at) : SETUP_STATUS_POLL_MS;
 
   useEffect(() => {
     if (!setupId) return;
-    // the first reading right away (on the next task — no state change inside the effect itself), then every 2 s
+    // the first reading right away (on the next task — no state change inside the effect itself)
     const first = window.setTimeout(() => void poll(), 0);
-    const timer = window.setInterval(() => { if (!stopped.current) void poll(); }, SETUP_STATUS_POLL_MS);
-    return () => { window.clearTimeout(first); window.clearInterval(timer); };
+    return () => { window.clearTimeout(first); };
   }, [setupId, poll]);
+  useEffect(() => {
+    if (!setupId) return;
+    const timer = window.setInterval(() => { if (!stopped.current) void poll(); }, delay);
+    return () => { window.clearInterval(timer); };
+  }, [setupId, poll, delay]);
 
   if (!progress || !status) {
     return <Card className="break-keep p-6"><h1 className="text-lg font-semibold">{t('startedTitle')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p></Card>;

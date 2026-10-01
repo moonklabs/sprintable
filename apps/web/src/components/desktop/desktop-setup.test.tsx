@@ -644,7 +644,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(third()?.dataset.state).toBe('done'); // not put back to «waiting for the first result»
   });
 
-  it('[SID:4464 · Qadir 4880] after the first result an agent that never connects: ⑦ as a block under the three steps after 180 s, then no more reading; [다시 확인] reads once and, connected by then, the block goes', async () => {
+  it('[SID:4464 · Qadir 4880 · PO 12:04Z] after the first result an agent that never connects: ⑦ as a block under the three steps after 180 s; reading goes on (slower), and once it connects the block goes by itself; then reading stops', async () => {
     const withResult = (connected: string[]) => status('handed_over', {
       tools_connected: connected.map((member_id) => ({ member_id, at: 'x' })),
       first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z',
@@ -659,17 +659,20 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(block?.textContent).toContain('작성 에이전트에 Sprintable이 아직 연결되지 않았어요'); // only the role that did not connect
     expect(container.querySelectorAll('ol > li[data-state=done]').length).toBe(3); // the steps stay: a block, not a card over them
     expect(container.querySelector('[data-testid=setup-still-preparing]')).toBeNull(); // said once, by the block
-    const stoppedAt = polls();
+    const waitingAt = polls();
     await tick(10_000);
-    expect(polls()).toBe(stoppedAt); // settled: no endless 2-second reading
-    statusNow = () => withResult(['m1', 'm2']);
-    await act(async () => { [...block!.querySelectorAll('button')].find((b) => b.textContent === '다시 확인')!.click(); });
-    await tick(0);
-    expect(polls()).toBe(stoppedAt + 1); // one reading
-    expect(container.querySelector('[data-testid=setup-agent-not-connected]')).toBeNull();
+    expect(polls()).toBeGreaterThan(waitingAt); // the block waits for the person: still reading (was: stopped here, block stuck)
+    statusNow = () => withResult(['m1', 'm2']); // they trusted the folder — it connects
+    await tick(10_000);
+    expect(container.querySelector('[data-testid=setup-agent-not-connected]')).toBeNull(); // gone without [다시 확인]
+    const end = polls();
+    await tick(30_000);
+    expect(polls()).toBe(end); // every agent in: reading stops
   });
 
-  it('[SID:4464] an agent that could not start counts as settled: reading stops after the first result', async () => {
+  // PO 12:04Z — 선생님's first run as it was: Any's result in, Dev refused at start → [다시 시도] in the app. The block must go when
+  // Dev connects; with reading stopped at the first result it stayed until the page was reloaded.
+  it('[SID:4464 · PO 12:04Z] an agent that could not start keeps the page reading; after [다시 시도] it connects and the block goes, then reading stops', async () => {
     const base = status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z' });
     statusNow = () => ({ ...base, signals: { ...base.signals, agents_start_failed: [
       { member_id: 'm2', runtime: 'codex', reason: 'runtime_missing', code: null, at: '2026-09-30T12:00:05Z', limit: null, first_member_id: null },
@@ -677,9 +680,34 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     stub(() => new Response('{}', { status: 200 }));
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
     await tick(0);
+    expect(container.querySelector('[data-testid=setup-agent-start-failed]')).not.toBeNull();
     const first = polls();
     await tick(10_000);
-    expect(polls()).toBe(first);
+    expect(polls()).toBeGreaterThan(first); // still reading
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'y' }], first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z' });
+    await tick(10_000); // [다시 시도] in the app → Dev connects (the server clears its failure)
+    expect(container.querySelector('[data-testid=setup-agent-start-failed]')).toBeNull();
+    const end = polls();
+    await tick(30_000);
+    expect(polls()).toBe(end);
+  });
+
+  it('[SID:4464 · PO 12:04Z] an agent that stopped after the first result keeps the page reading; restarted and connected, the block goes, then reading stops', async () => {
+    const base = status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z' });
+    statusNow = () => ({ ...base, signals: { ...base.signals, agents_ended: [{ member_id: 'm2', runtime: 'codex', at: '2026-09-30T12:01:00Z', exit_code: 1 }] } });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-agent-stopped]')).not.toBeNull();
+    const first = polls();
+    await tick(10_000);
+    expect(polls()).toBeGreaterThan(first);
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'y' }], first_task_handed_at: '2026-09-30T12:00:02Z', first_result_at: '2026-09-30T12:00:30Z' });
+    await tick(10_000); // [다시 시작] → a new session connects (the server clears the end with «restarted»)
+    expect(container.querySelector('[data-testid=setup-agent-stopped]')).toBeNull();
+    const end = polls();
+    await tick(30_000);
+    expect(polls()).toBe(end);
   });
 
   it('[SID:4433] ② done while another agent is not connected → ① drawn done · «… 에이전트는 아직 준비하고 있어요» muted under it, no pairs line', async () => {

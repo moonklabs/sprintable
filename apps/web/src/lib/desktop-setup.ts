@@ -279,9 +279,13 @@ export const NOT_CONNECTED_AFTER_HANDOVER_MS = 180_000;
 
 export interface SetupProgress {
   /** story 4464 — the one end condition for reading the status: blocked or expired, or the first result is in AND every agent is
-   *  settled (connected · could not start · stopped). Before, the page stopped at the first result, so an agent that connected
-   *  after it stayed «아직 준비하고 있어요» on screen (PO r8 0dbcd38e: Dev connected 45 s after the first result). */
+   *  connected (or proven by that result). Before, the page stopped at the first result, so an agent that connected after it
+   *  stayed «아직 준비하고 있어요» on screen (PO r8 0dbcd38e). PO 12:04Z (the 10:04Z rule was wrong): an agent that could not
+   *  start, that stopped, or that ⑦ is about is NOT settled — the page shows a block asking the person to act ([다시 시도] ·
+   *  [다시 시작] · trust the folder), and only further reading can take the block away once they did. */
   settled: boolean;
+  /** the first result is in and a block waits for the person (an agent not connected yet) — the page reads less often then */
+  waitingOnPerson: boolean;
   ready: StepState;
   handed: StepState;
   result: StepState;
@@ -365,11 +369,14 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
   const unsettled = pendingStarted.filter((id) => !stoppedMembers.has(id) && id !== proven);
   const lateNotConnected = handedOver && result === 'done' && unsettled.length > 0 && pastThreshold;
   const notConnected = (waitingForTools && pastThreshold) || lateNotConnected;
+  // every agent connected, or proven by the first result — the one thing that ends the reading after the result (PO 12:04Z)
+  const everyAgentIn = agentIds.every((id) => connected.has(id) || id === proven);
   // who ⑦ names: before the result every agent not yet connected; after it, only the ones still unsettled
   const named = (id: string) => (lateNotConnected ? unsettled.includes(id) : pendingStarted.includes(id));
   return {
     ready, handed, result, pairs,
-    settled: !!s.signals.blocked || s.state === 'not_handed_over' || (result === 'done' && (unsettled.length === 0 || lateNotConnected)),
+    settled: !!s.signals.blocked || s.state === 'not_handed_over' || (result === 'done' && everyAgentIn),
+    waitingOnPerson: !s.signals.blocked && s.state !== 'not_handed_over' && result === 'done' && !everyAgentIn,
     firstAgentRole: agents.find((m) => m.role)?.role ?? null,
     workdirFallback: !!s.signals.workdir_fallback_at,
     trustHint: waitingForTools && !notConnected,
@@ -452,5 +459,14 @@ export function endsWithAgentWord(name: string, locale: string): boolean {
   return locale === 'ko' ? /에이전트$/.test(n) : /(agent|에이전트)$/i.test(n);
 }
 
-/** 폴링 간격(PO 12:25Z). 끝 조건은 setupProgress().settled 하나(story 4464): 막힘 · 만료, 또는 첫 결과 뒤 모든 에이전트가 정해짐. */
+/** 폴링 간격(PO 12:25Z). 끝 조건은 setupProgress().settled 하나(story 4464): 막힘 · 만료, 또는 첫 결과 뒤 모든 에이전트가 붙음. */
 export const SETUP_STATUS_POLL_MS = 2_000;
+/** story 4464 (PO 12:04Z): a block waiting for the person since the first result came over 2 minutes ago → read every 10 s
+ *  (not stopped — when they act and the agent connects, the block goes; a longer gap, never a fixed sleep). */
+export const SETUP_STATUS_SLOW_POLL_MS = 10_000;
+export const SETUP_STATUS_SLOW_AFTER_MS = 120_000;
+/** How long until the next reading: the usual 2 s, or 10 s while a block has waited for the person for a while. */
+export function setupPollDelayMs(p: Pick<SetupProgress, 'waitingOnPerson'>, firstResultAt: string | null, now: number): number {
+  const since = firstResultAt ? now - Date.parse(firstResultAt) : NaN;
+  return p.waitingOnPerson && Number.isFinite(since) && since >= SETUP_STATUS_SLOW_AFTER_MS ? SETUP_STATUS_SLOW_POLL_MS : SETUP_STATUS_POLL_MS;
+}
