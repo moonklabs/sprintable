@@ -65,6 +65,11 @@ const setHash = async (h: string) => {
   });
 };
 const startButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '시작') as HTMLButtonElement;
+// 4446: the recipe list is folded to the chosen one — open it the way a person does ([바꾸기] on the chosen card)
+const openRecipes = async () => {
+  const b = container.querySelector('[data-testid=setup-recipe-chosen] button') as HTMLButtonElement | null;
+  if (b) await act(async () => { b.click(); });
+};
 
 beforeEach(() => { recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 }); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
@@ -74,15 +79,18 @@ describe('[SID:4427] desktop setup page', () => {
   it('opens with defaults: first recipe · human role «나 · 이름» · agent roles on the first runtime · folder ~/Sprintable/{recipe}', async () => {
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    await openRecipes();
     expect((container.querySelector('input[name=recipe]:checked') as HTMLInputElement).value).toBe('rec-1');
     expect(text()).toContain('나 · 김지우');
     const selects = [...container.querySelectorAll('select')] as HTMLSelectElement[];
     expect(selects.map((s) => s.value)).toEqual(['claude', 'claude']); // 조사 · 작성(either)
     expect(text()).toContain('~/Sprintable/마케팅 루프');
     expect(text()).toContain('에이전트 2개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · 연출은 내가 맡아요');
-    // PO 00:41Z · Yuna v17: right after the «시작» line, same muted size
-    const notes = [...container.querySelectorAll('footer p')].map((p) => p.textContent);
-    expect(notes[1]).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 하고, 이 컴퓨터의 파일을 바꾸거나 명령을 실행하거나 다른 도구를 쓸 땐 그때마다 물어봐요.');
+    // PO 00:41Z · Yuna v17, placed by 4446 (Yuna b2d15f85 ②): the tool note ends the flow just above the start row; the row
+    // itself carries «시작» and its one line
+    const row = container.querySelector('[data-testid=setup-start-row]') as HTMLElement;
+    expect(row.previousElementSibling?.textContent).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 하고, 이 컴퓨터의 파일을 바꾸거나 명령을 실행하거나 다른 도구를 쓸 땐 그때마다 물어봐요.');
+    expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 2개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · 연출은 내가 맡아요');
     expect(text()).not.toContain('발행'); // channel stage → later
     expect(startButton().disabled).toBe(false);
   });
@@ -151,8 +159,8 @@ describe('[SID:4427] desktop setup page', () => {
   it('empty or «~» folder blocks «시작»', async () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
-    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '바꾸기') as HTMLButtonElement).click(); });
-    const input = container.querySelector('input:not([type=radio])') as HTMLInputElement;
+    await act(async () => { (container.querySelector('section[aria-labelledby=setup-folder] button') as HTMLButtonElement).click(); });
+    const input = container.querySelector('section[aria-labelledby=setup-folder] input') as HTMLInputElement;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => { setValue.call(input, '~'); input.dispatchEvent(new Event('input', { bubbles: true })); });
     expect(startButton().disabled).toBe(true);
@@ -278,6 +286,7 @@ describe('[SID:4427] desktop setup page', () => {
     try {
       stub(() => new Response(JSON.stringify({ setup_id: 's', members: [], work_item_id: 'w' }), { status: 200 }));
       await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      await openRecipes();
       const ids = [...container.querySelectorAll('input[name=recipe]')].map((i) => (i as HTMLInputElement).value);
       expect(ids).toEqual(['rec-1', 'rec-2', 'rec-loop']);
       expect(text()).not.toContain('org.moonklabs.work.gate_cycle');
@@ -377,6 +386,7 @@ describe('[SID:4427] the default recipe', () => {
     ] }), { status: 200 });
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    await openRecipes();
     expect(radios().map((r) => r.value)).toEqual(['r-blog', 'r-kanban', 'r-video']);
     expect(radios().find((r) => r.checked)?.value).toBe('r-blog');
     expect(container.textContent).not.toMatch(/추천/);
@@ -389,6 +399,7 @@ describe('[SID:4427] the default recipe', () => {
     ] }), { status: 200 });
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    await openRecipes();
     expect(radios().map((r) => r.value)).toEqual(['r-kanban', 'r-video']);
     expect(radios().find((r) => r.checked)?.value).toBe('r-kanban');
   });
@@ -400,6 +411,7 @@ describe('[SID:4427] the default recipe', () => {
     ] }), { status: 200 });
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    await openRecipes();
     expect(radios().find((r) => r.checked)?.value).toBe('r-kanban');
   });
 });
@@ -452,6 +464,7 @@ describe('[SID:4427] either rows can be «나» · no agent row · the recipe ov
     expect(text()).toContain('역할이 너무 많거나 역할 이름이 너무 길어요. 다른 레시피를 골라 주세요.');
     expect([...container.querySelectorAll('button')].map((b) => b.textContent)).toEqual([chooseLabel]);
     await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === chooseLabel)!.click(); });
+    await openRecipes();
     expect(container.querySelector('input[name=recipe]')).not.toBeNull();
     // a body fault (roles_invalid · FastAPI's own 422 with detail) is not taken for this card
     for (const body of [{ data: null, error: { code: 'roles_invalid' } }, { detail: [{ type: 'too_long', loc: ['body', 'roles'], msg: 'x' }] }]) {
@@ -476,6 +489,7 @@ describe('[SID:4427] either rows can be «나» · no agent row · the recipe ov
     await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === '레시피 다시 불러오기')!.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(calls.map((c) => c.url)).toEqual(['/api/desktop/recipes']);
+    await openRecipes();
     expect(container.querySelector('input[name=recipe]')).not.toBeNull();
   });
 
@@ -486,6 +500,7 @@ describe('[SID:4427] either rows can be «나» · no agent row · the recipe ov
     ] }), { status: 200 });
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await openRecipes();
     expect(text()).toContain('제출·검토');
     expect(text()).not.toContain('Two step (raw)');
     expect(text()).toContain('우리 팀 두 단계');
@@ -787,6 +802,7 @@ describe('[SID:4427] ③ limit and the recipe line (Yuna table)', () => {
   it('each recipe card says its roles in the rows\' order (orderedRecipeRoles · Yuna 12:49Z): «역할 3 · 연출 · 조사 · 작성»', async () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await openRecipes();
     expect(text()).toContain('역할 3 · 연출 · 조사 · 작성');
     expect(text()).toContain('역할 1 · 조사');
   });
@@ -1114,5 +1130,54 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(calls.map((c) => c.url)).not.toContain('/api/invites/mine');
     expect(calls.map((c) => c.url)).toContain('/api/desktop/recipes');
     expect(container.querySelector('[data-testid=setup-new-org]')).toBeNull();
+  });
+});
+
+describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the last row (Yuna b2d15f85 · PO 00:31Z)', () => {
+  const recipeInputs = () => [...container.querySelectorAll('input[name=recipe]')] as HTMLInputElement[];
+  const chosen = () => container.querySelector('[data-testid=setup-recipe-chosen]') as HTMLElement | null;
+
+  it('folded at first: only the chosen recipe, no list, a [바꾸기] on it', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(recipeInputs()).toHaveLength(0);
+    expect(chosen()?.textContent).toContain('마케팅 루프');
+    expect(chosen()?.textContent).not.toContain('조사 한 명');
+    expect(chosen()?.querySelector('button')?.textContent).toBe('바꾸기');
+  });
+
+  it('[바꾸기] opens the list with the chosen one first; picking one folds it again with that one chosen', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await openRecipes();
+    expect(recipeInputs().map((i) => i.value)).toEqual(['rec-1', 'rec-2']);
+    expect(chosen()).toBeNull();
+    await act(async () => { recipeInputs()[1].click(); });
+    expect(recipeInputs()).toHaveLength(0);
+    expect(chosen()?.textContent).toContain('조사 한 명');
+    // opened again: the newly chosen one is now first
+    await openRecipes();
+    expect(recipeInputs().map((i) => i.value)).toEqual(['rec-2', 'rec-1']);
+    expect(recipeInputs()[0].checked).toBe(true);
+  });
+
+  it('one recipe only: its card, no [바꾸기]', async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [RECIPES[1]] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(chosen()?.textContent).toContain('조사 한 명');
+    expect(chosen()?.querySelector('button')).toBeNull();
+  });
+
+  it('«시작» and its one line are the card\'s last row, stuck to the bottom of what scrolls; the tool note sits just above', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const row = container.querySelector('[data-testid=setup-start-row]') as HTMLElement;
+    expect(row.parentElement?.lastElementChild).toBe(row);
+    expect(row.className).toMatch(/\bsticky\b/);
+    expect(row.className).toMatch(/\bbottom-0\b/);
+    expect(row.className).toMatch(/\bbg-card\b/);
+    expect(row.contains(startButton())).toBe(true);
+    expect(row.previousElementSibling?.textContent).toContain('에이전트는 Sprintable 안의 일은 묻지 않고');
   });
 });
