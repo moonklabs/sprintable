@@ -49,6 +49,12 @@ function baseRow(overrides: Partial<WorkListRow> = {}): WorkListRow {
   };
 }
 
+// story #4448 — GET /api/gates passes the backend's bare list through (app/api/gates/route.ts: proxyToFastapi): its real answer
+// is an array, not { data }. The mocks wrapped it like the rest, so the panel read `.data` from a shape that never happens.
+function bareArrayResponse(items: unknown) {
+  return { ok: true, status: 200, json: async () => items };
+}
+
 function jsonResponse(data: unknown, init: { status?: number } = {}) {
   return {
     ok: (init.status ?? 200) < 300,
@@ -105,7 +111,7 @@ function mockFetchRoutes(routes: {
       return jsonResponse({ items: routes.activityLogItems ?? [] });
     }
     if (url.startsWith('/api/gates')) {
-      return jsonResponse(routes.gates ?? []);
+      return bareArrayResponse(routes.gates ?? []);
     }
     return jsonResponse(null, { status: 404 });
   });
@@ -369,7 +375,7 @@ describe('WorkListDetailPanel — 탭→데이터 매핑', () => {
       if (url.startsWith('/api/visual-artifacts')) {
         return new Promise<Response>((resolve) => { resolveArtifacts = resolve; });
       }
-      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+      return url.startsWith('/api/gates') ? bareArrayResponse([]) : jsonResponse(null);
     });
     await mountPanel(baseRow(), 'story-1');
     await act(async () => { (container.querySelector('[data-testid="panel-tab-artifacts"]') as HTMLElement).click(); });
@@ -577,7 +583,7 @@ describe('WorkListDetailPanel — 발행물 탭(story #3988)', () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (url.includes('/channel-posts/drafts')) return new Promise<Response>((r) => { resolveChannel = r; });
       if (url.includes('/site-posts/drafts')) return jsonResponse([]);
-      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+      return url.startsWith('/api/gates') ? bareArrayResponse([]) : jsonResponse(null);
     });
     await mountPanel();
     await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
@@ -612,7 +618,7 @@ describe('WorkListDetailPanel — 발행물 탭(story #3988)', () => {
           { draft_id: 's1', title: '재시도로 뜬 글', slug: 'retry-post', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h1', published_at: null },
         ]);
       }
-      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+      return url.startsWith('/api/gates') ? bareArrayResponse([]) : jsonResponse(null);
     });
     await mountPanel();
     await act(async () => { (container.querySelector('[data-testid="panel-tab-publications"]') as HTMLElement).click(); });
@@ -683,7 +689,7 @@ describe('WorkListDetailPanel — 발행물 탭(story #3988)', () => {
       if (url.includes('/site-posts/drafts?work_item_id=story-B')) {
         return jsonResponse([{ draft_id: 'site-b', title: 'B행 글', slug: 'b', gate_status: null, reapproval_required: null, sealed_content_sha256: null, body_sha256: 'h', published_at: null }]);
       }
-      return jsonResponse(url.startsWith('/api/gates') ? [] : null);
+      return url.startsWith('/api/gates') ? bareArrayResponse([]) : jsonResponse(null);
     });
 
     await mountPanel(baseRow(), 'story-A');
@@ -751,7 +757,7 @@ describe('WorkListDetailPanel — 레시피 발행 게이트 본 초안 버전 (
         bodies.push(JSON.parse(String(init.body)));
         return { ok: false, status: 409, json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'x' }, meta: null }) };
       }
-      if (url.startsWith('/api/gates')) { gateFetches += 1; return jsonResponse([recipeGate('high', gateFetches === 1 ? 1 : 2)]); }
+      if (url.startsWith('/api/gates')) { gateFetches += 1; return bareArrayResponse([recipeGate('high', gateFetches === 1 ? 1 : 2)]); }
       return base(url, init);
     });
     await mountPanel();

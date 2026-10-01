@@ -19,10 +19,15 @@ Lenient reads that accept either shape (`Array.isArray(x) ? x : x.data`, `x?.dat
 today but hide a future mismatch: their count per file is frozen in scripts/web_api_lenient_reads_baseline.json — a file whose
 count grows is RED; a file whose count shrinks must lower its baseline (two-way ratchet: `--update-baseline`).
 
-What this guard does NOT see (declared — story #4445 AC0):
-  1. call sites whose path is a variable or built by a helper (`fetch(path)`, `ORG_NAMES_URL`, billing `path`, …);
-  2. answers inside `Promise.all([...])` arrays or handed to another function before being read (only a response bound to
-     its own variable and read in the next ~40 lines is judged);
+story #4448 — also seen now: (a) a BFF that unwraps the backend's `{data, meta}` and wraps it again (one envelope, not two) and a
+true double envelope (the backend's envelope wrapped again — passes only where the reader reads `.data.data`); (b) calls through a
+registered fetch helper (HELPERS: each helper's expected shape — its call sites are judged by it), and a fetch-wrapping helper that
+is not registered is RED at once (unseen call sites must not grow quietly); (c) calls inside `const [a, b] = await Promise.all([...])`.
+
+What this guard does NOT see (declared — story #4445 AC0, narrowed by #4448):
+  1. call sites whose path is a variable (`fetch(path)`, `ORG_NAMES_URL`, a URL builder passed to a helper, …);
+  2. answers handed to another function before being read (only a response bound to its own variable — or to its name in a
+     Promise.all destructuring — and read in the next ~40 lines is judged);
   3. custom BFF handlers (fetchCall / their own logic) without `apiSuccess` — their shape is not derived;
   4. backend handlers returning a `dict` / no model without a `{"data"` literal — «unknown», not judged;
   5. a read hidden behind a cast or a generic helper the regexes don't recognise;
@@ -113,6 +118,9 @@ def scan_bff(api_root: Path) -> list[dict]:
                 direct = re.search(r"return\s+(?:await\s+)?" + fn + r"\s*\(", block) is not None
                 assigned = re.search(r"=\s*(?:await\s+)?" + fn + r"\s*\(", block) is not None
                 mode = "pass" if direct and not (assigned and wraps) else ("wrapped" if assigned and wraps else "transform")
+                # story #4448 — unwraps the backend's {data, meta} (`beJson.data`) and wraps it again: one envelope, not two
+                if mode == "wrapped" and re.search(r"=\s*\(?\s*await\s+\w+\.json\(\)", block) and re.search(r"\b(\w+)\??\.data\b", block):
+                    mode = "rewrap"
             out.append({"web": norm_path(web), "method": meth, "be": norm_path(p), "mode": mode, "file": str(f)})
     return out
 
@@ -133,7 +141,9 @@ def effective_shape(b: dict | None, meth: str, shapes: dict) -> str | None:
     """array / object / envelope, or None (not judged)."""
     if b is None:
         return None
-    if b["mode"] in ("wrapped", "custom-envelope"):
+    if b["mode"] == "wrapped" and b.get("be") and shapes.get((meth, b["be"])) == "envelope":
+        return "double"  # story #4448 — the backend's envelope wrapped again: { data: { data, … } }
+    if b["mode"] in ("wrapped", "custom-envelope", "rewrap"):
         return "envelope"
     if b["mode"] != "pass":
         return None
@@ -166,10 +176,19 @@ def read_of(src: str, call_start: int, call_end: int) -> dict | None:
     return classify(v, tail[j.start(): j.start() + 1500], cast=cast)
 
 
+_NEXT_FN = re.compile(r"\n(?:export\s+)?(?:async\s+)?function\s|\n(?:export\s+)?const\s+\w+\s*=\s*(?:async\s*)?\(|\n\s*(?:async\s+)?\w+\s*\([^)]*\)\s*\{\s*$", re.M)
+
+
 def classify(v: str, seg: str, cast: str | None) -> dict:
+    # story #4448 — read only up to the next function: a neighbour reusing the same variable name must not lend its reads
+    nxt = _NEXT_FN.search(seg, 1)
+    if nxt:
+        seg = seg[: nxt.start()]
     reads: set[str] = set()
     if re.search(rf"\b{v}\??\.data\b", seg):
         reads.add("data")
+    if re.search(rf"\b{v}\??\.data\??\.data\b", seg):
+        reads.add("data.data")
     if re.search(rf"Array\.isArray\(\s*{v}\s*\)", seg):
         reads.add("isArray")
     if re.search(rf"\b{v}\??\.(?:map|filter|forEach|length|find|slice|some|every|reduce)\b", seg):
@@ -190,7 +209,131 @@ def verdict(shape: str | None, r: dict | None) -> str | None:
         return "a bare object read as { data }"
     if shape == "envelope" and rd & {"isArray", "array-ops", "array-cast"} and "data" not in rd:
         return "a { data } envelope read as an array"
+    if shape == "double" and ("data" in rd or rd & {"isArray", "array-ops", "array-cast"}) and "data.data" not in rd:
+        return "a double envelope ({ data: { data, … } }) read as one"
     return None
+
+
+# story #4448 — fetch helpers (a function that takes a URL, fetches it and parses JSON): what each expects the answer to be.
+# envelope = reads `json.data` (returns it, or { data, meta }) · array = a bare array · raw = returns the body (judged where read)
+# · either = a lenient reader (`data ?? json`) · exempt = takes a URL builder / never reads a success body (not judged; why).
+# A helper found in the source but missing here is RED — new unseen call sites must not grow quietly.
+HELPERS: dict[str, str] = {
+    "components/canvas/artifact-section.tsx::fetchJson": "envelope",
+    "components/canvas/artifact-gallery-view.tsx::fetchJson": "envelope",
+    "components/canvas/story-picker-dialog.tsx::fetchJson": "envelope",
+    "services/canvas-spec-pins.ts::fetchJson": "envelope",
+    "services/canvas-export.ts::fetchJson": "either",             # unwrap(): data ?? json
+    "components/work-list/work-list-detail-panel.tsx::fetchJsonData": "envelope",
+    "components/work-list/fetch-work-list.ts::fetchEnvelope": "envelope",
+    "components/work-list/fetch-work-list.ts::fetchArray": "array",
+    "components/glance/load-glance-data.ts::fetchJson": "raw",
+    "ee/components/billing/billing-actions.ts::postBillingAction": "envelope",
+    "components/flow/next-maker-screen.tsx::fetchAllPages": "exempt",          # takes a URL builder
+    "components/chat-v3/chat-v3-context-panel.tsx::useWorkItemScopedList": "exempt",  # takes a URL builder + an extractor
+    "components/content/publication-retry.tsx::postPublicationRetry": "exempt",       # reads only the status / an error body
+    "lib/db/client.ts::callAuthRoute": "exempt",                   # the auth routes' own envelope (data | error)
+}
+_FN_DEF = re.compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)|(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*(?::[^=]+)?=>")
+
+
+def find_fetch_helpers(src: str) -> list[tuple[str, int]]:
+    """(name, line) of each function here that takes a URL parameter, fetches it and parses JSON."""
+    found = []
+    for m in _FN_DEF.finditer(src):
+        name = m.group(1) or m.group(3); params = m.group(2) if m.group(1) else m.group(4)
+        body = src[m.end(): m.end() + 900]
+        for p in [x.strip().split(":")[0].strip().lstrip(".") for x in (params or "").split(",") if x.strip()]:
+            if re.match(r"^\w+$", p) and re.search(rf"\b(fetch|fetchWithAuth)\s*\(\s*{p}\b", body) and ".json()" in body:
+                found.append((name, src[: m.start()].count("\n") + 1))
+                break
+    return found
+
+
+def resolve_helper(rel: str, src: str, name: str, web_src: Path) -> str | None:
+    """The HELPERS key a call to `name` in this file goes to: a local definition, else the module it is imported from."""
+    if any(n == name for n, _ in find_fetch_helpers(src)):
+        return f"{rel}::{name}"
+    m = re.search(r"import\s*\{[^}]*\b" + re.escape(name) + r"\b[^}]*\}\s*from\s*['\"]([^'\"]+)['\"]", src)
+    if not m:
+        return None
+    spec = m.group(1)
+    base = (web_src / spec[2:]) if spec.startswith("@/") else (web_src / rel).parent / spec
+    for ext in (".ts", ".tsx", "/index.ts"):
+        cand = Path(os.path.normpath(str(base) + ext))
+        if cand.exists():
+            return f"{cand.relative_to(web_src)}::{name}"
+    return None
+
+
+def helper_verdict(expects: str, shape: str | None) -> str | None:
+    if shape is None or expects in ("raw", "either", "exempt"):
+        return None
+    if expects == "envelope" and shape in ("array", "object"):
+        return f"a bare {shape} read through an envelope helper (it reads .data → always empty)"
+    if expects == "envelope" and shape == "double":
+        return "a double envelope read through an envelope helper (.data is { data, … })"
+    if expects == "array" and shape in ("envelope", "double", "object"):
+        return f"a {shape} read through an array helper"
+    return None
+
+
+def _split_top(body: str) -> list[str]:
+    parts, depth, cur, q = [], 0, "", None
+    for ch in body:
+        if q:
+            cur += ch
+            if ch == q:
+                q = None
+            continue
+        if ch in "'\"`":
+            q = ch; cur += ch; continue
+        if ch in "([{":
+            depth += 1
+        if ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(cur); cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        parts.append(cur)
+    return parts
+
+
+def promise_all_reads(src: str) -> list[tuple[int, str, str, dict | None]]:
+    """(offset, path, method, read) of each literal fetch call inside `const [a, b] = await Promise.all([...])`, read by its name."""
+    out = []
+    for m in re.finditer(r"(?:const|let)\s+\[([^\]]*)\]\s*=\s*await\s+Promise\.all\(\s*\[", src):
+        names = [n.strip().split(":")[0].strip() for n in m.group(1).split(",")]
+        start = src.index("[", m.end() - 1); depth = 0; i = start
+        while i < len(src):
+            if src[i] == "[":
+                depth += 1
+            elif src[i] == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        after = src[i: i + 4000]
+        for idx, el in enumerate(_split_top(src[start + 1: i])):
+            cm = CALL.search(el)
+            if not cm or idx >= len(names) or not names[idx]:
+                continue
+            mm = re.search(r"method\s*:\s*['\"](\w+)['\"]", el)
+            name = names[idx]
+            if ".json()" in el:
+                r = classify(name, after, cast=None)
+            else:
+                jm = re.search(r"(?:const|let)\s+(\{[^}]*\}|\w+)\s*(?::[^=]{1,120})?=\s*\(?\s*await\s+" + re.escape(name) + r"\??\.json\(\)", after)
+                if not jm:
+                    r = None
+                elif jm.group(1).startswith("{"):
+                    r = {"reads": {"data"} if re.search(r"(^|[{,\s])data\s*[,}:]", jm.group(1) + ",") else {"fields"}, "lenient": False}
+                else:
+                    r = classify(jm.group(1), after[jm.start(): jm.start() + 1500], cast=None)
+            out.append((start + 1 + src[start + 1: i].find(el), norm_path(cm.group(2)), mm.group(1).upper() if mm else "GET", r))
+    return out
 
 
 def scan(web_src: Path, shapes: dict) -> tuple[list[dict], dict[str, dict[str, int]], int]:
@@ -220,6 +363,34 @@ def scan(web_src: Path, shapes: dict) -> tuple[list[dict], dict[str, dict[str, i
                 why = verdict(shape, r)
                 if why:
                     mismatches.append({"site": f"{rel}:{src[: m.start()].count(chr(10)) + 1}", "call": f"{meth} {path}", "shape": shape, "why": why})
+            # story #4448 (b) — unregistered fetch helpers are RED; calls through registered ones are judged by what they expect
+            for name, line in find_fetch_helpers(src):
+                if f"{rel}::{name}" not in HELPERS:
+                    mismatches.append({"site": f"{rel}:{line}", "call": f"helper {name}", "shape": None,
+                                       "why": "a fetch helper missing from HELPERS — register what it expects (envelope · array · raw · either · exempt)"})
+            helper_names = {k.split("::")[1] for k in HELPERS}
+            for hm in re.finditer(r"\b(" + "|".join(sorted(helper_names)) + r")(?:<[^>]*>)?\s*\(\s*(['\"`])(/api/[^'\"`]*)\2", src):
+                key = resolve_helper(rel, src, hm.group(1), web_src)
+                if key is None or key not in HELPERS:
+                    continue
+                path = norm_path(hm.group(3))
+                args = call_args(src, src.index("(", hm.start()))
+                mm = re.search(r"method\s*:\s*['\"](\w+)['\"]", args)
+                meth = mm.group(1).upper() if mm else "GET"
+                shape = effective_shape(match_bff(bff, path, meth), meth, shapes)
+                if shape:
+                    judged += 1
+                why = helper_verdict(HELPERS[key], shape)
+                if why:
+                    mismatches.append({"site": f"{rel}:{src[: hm.start()].count(chr(10)) + 1}", "call": f"{meth} {path} via {hm.group(1)}", "shape": shape, "why": why})
+            # story #4448 (c) — calls inside a Promise.all destructuring, read by their names
+            for off, path, meth, r in promise_all_reads(src):
+                shape = effective_shape(match_bff(bff, path, meth), meth, shapes)
+                if shape and r:
+                    judged += 1
+                why = verdict(shape, r)
+                if why:
+                    mismatches.append({"site": f"{rel}:{src[:off].count(chr(10)) + 1}", "call": f"{meth} {path} (Promise.all)", "shape": shape, "why": why})
     return mismatches, lenient_counts, judged
 
 
@@ -306,7 +477,64 @@ def self_test() -> int:
         rc_shrink = check(src, shapes, {"components/lenient.tsx": {"isArray-or-data": 2}}, out=msgs.append)
         shrank = rc_shrink == 1 and any("shrank" in m for m in msgs)
         print(f"self-test: mismatches {sites} → {'ok' if ok else 'FAIL'} · lenient growth {'ok' if grew else 'FAIL'} · shrink {'ok' if shrank else 'FAIL'}")
-        return 0 if ok and grew and shrank else 1
+        ok4448 = _self_test_4448()
+        return 0 if ok and grew and shrank and ok4448 else 1
+
+
+def _self_test_4448() -> bool:
+    """story #4448 — re-wrap handler (one envelope) · true double envelope · a registered helper · an unregistered helper · a
+    Promise.all destructuring: the seeded mismatches are caught, the right reads pass."""
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "src"
+        def w(rel: str, text: str) -> None:
+            p = src / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text, encoding="utf-8")
+        w("app/api/blocks/route.ts", "export async function GET(request: Request) {\n  return proxyToFastapi(request, '/api/v2/blocks');\n}\n")
+        w("app/api/env/route.ts", "export async function GET(request: Request) {\n  const _r = await proxyToFastapi(request, '/api/v2/env');\n"
+          "  const beJson = await _r.json();\n  return apiSuccess(beJson.data, beJson.meta);\n}\n")
+        w("app/api/dbl/route.ts", "export async function GET(request: Request) {\n  const _r = await proxyToFastapi(request, '/api/v2/dbl');\n"
+          "  return apiSuccess(await _r.json());\n}\n")
+        shapes = {("GET", "/api/v2/blocks"): "array", ("GET", "/api/v2/env"): "envelope", ("GET", "/api/v2/dbl"): "envelope"}
+        w("components/helper.ts", "export async function getData<T>(url: string): Promise<T | null> {\n  const res = await fetch(url);\n"
+          "  const json = await res.json();\n  return json.data ?? null;\n}\n")
+        w("components/rogue.ts", "export async function rogue(url: string) {\n  const res = await fetchWithAuth(url);\n  return (await res.json()).data;\n}\n")
+        w("components/uses.tsx", "\n".join([
+            "import { getData } from './helper';",
+            "async function rewrapOk() {",
+            "  const res = await fetchWithAuth('/api/env');",
+            "  const json = await res.json() as { data: Row[] };",
+            "  setRows(json.data);",
+            "}",
+            "async function doubleBad() {",
+            "  const res = await fetchWithAuth('/api/dbl');",
+            "  const json = await res.json();",
+            "  setRows(json.data.map((x) => x));",
+            "}",
+            "async function doubleOk() {",
+            "  const res = await fetchWithAuth('/api/dbl');",
+            "  const json = await res.json();",
+            "  setRows(json.data.data);",
+            "}",
+            "async function helperBad() {",
+            "  const rows = await getData<Row[]>('/api/blocks');",
+            "}",
+            "async function allBad() {",
+            "  const [a, b] = await Promise.all([fetch('/api/blocks').then((r) => r.json()), fetch('/api/env').then((r) => r.json())]);",
+            "  use(a.data, b.data);",
+            "}",
+        ]))
+        saved = dict(HELPERS)
+        HELPERS["components/helper.ts::getData"] = "envelope"
+        try:
+            mismatches, _, _ = scan(src, shapes)
+        finally:
+            HELPERS.clear(); HELPERS.update(saved)
+        got = sorted(x["site"] for x in mismatches)
+        want = sorted(["components/uses.tsx:8", "components/uses.tsx:18", "components/rogue.ts:1", "components/uses.tsx:21"])
+        good = got == want
+        print(f"self-test #4448: {got} → {'ok' if good else 'FAIL (want ' + str(want) + ')'}")
+        return good
 
 
 def main(argv: list[str]) -> int:

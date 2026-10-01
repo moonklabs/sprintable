@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchArray } from './fetch-work-list';
 import { useLocale, useTranslations } from 'next-intl';
 import { FileText, Layers, X } from 'lucide-react';
 import Link from 'next/link';
@@ -185,10 +186,12 @@ async function fetchDraftsForWorkItem(
  * gate_type·id)가 필요해 inbox 요약이 아니라 `/api/gates`를 직접 부른다. */
 async function fetchPendingGate(row: WorkListRow, storyId: string): Promise<WorkListGate | null> {
   const tryFetch = async (workItemId: string, workItemType: string) => {
-    const items = await fetchJsonData<WorkListGate[]>(
+    // story #4448 — GET /api/gates passes the backend's bare list through: read as { data } (fetchJsonData) it was always null, so
+    // the panel never showed a pending gate's state, risk or action. The contract's shape only (a non-array is a failed read).
+    const items = await fetchArray<WorkListGate>(
       `/api/gates?work_item_id=${workItemId}&work_item_type=${workItemType}&status=pending`,
     );
-    return items && items.length > 0 ? items[0]! : null;
+    return items.length > 0 ? items[0]! : null;
   };
   const direct = await tryFetch(row.workItemId, row.workItemType);
   if (direct) return direct;
