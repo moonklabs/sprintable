@@ -807,3 +807,38 @@ describe('WorkListDetailPanel — the risk badge per grade (#4448)', () => {
   });
 });
 
+
+
+// story #4456 — the panel's «지금 상태» line and its approve/sign button must not drop to empty for the same task. Every run of the
+// reads first set the gate to «loading» (≈2 s blank on dev); they were keyed on the row object, which the list hands over anew.
+// (The width-breakpoint remount is the shell's — work-list-shell.4456.test.tsx.) A pending read is a fetch that never settles.
+describe('WorkListDetailPanel — the gate stays while it is read again (#4456)', () => {
+  const pendingGate = { id: 'g1', gate_type: 'qa', risk_grade: 'low', status: 'pending', work_item_id: 'task-1', work_item_type: 'task' };
+  const stateLine = () => container.querySelector('[data-testid="panel-state"]');
+  const approveButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith('승인'));
+  const holdGateReads = () => {
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => (
+      String(url).startsWith('/api/gates') ? new Promise(() => {}) : base(url, init)
+    ));
+  };
+
+  it('the same task as a new row object (the list answered again): the line and the button never blank', async () => {
+    mockFetchRoutes({ gates: [pendingGate] });
+    await mountPanel(baseRow());
+    expect(stateLine()).not.toBeNull();
+    holdGateReads();
+    await mountPanel(baseRow()); // same id · a new object
+    expect(stateLine()).not.toBeNull();
+    expect(approveButton()).toBeTruthy();
+  });
+
+  it('another task: never the previous task\'s gate — its own once read', async () => {
+    mockFetchRoutes({ gates: [pendingGate] });
+    await mountPanel(baseRow());
+    expect(stateLine()).not.toBeNull();
+    holdGateReads();
+    await mountPanel(baseRow({ id: 'row-2', workItemId: 'task-2', title: '다른 일' }), 'story-2');
+    expect(approveButton()).toBeFalsy(); // task-2's gate is not known yet — no button from task-1's gate
+  });
+});

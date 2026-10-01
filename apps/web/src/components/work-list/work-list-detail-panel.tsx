@@ -309,6 +309,16 @@ export function WorkListDetailPanel({
     setGate(await fetchPendingGate(row, storyId));
   }, [row, storyId]);
 
+  // story #4456 — the reads below are keyed on what the row *is* (its id and work item), not on the row object: the list answering
+  // again hands the panel a new object for the same task, and keying on the object re-ran every read — first setting the gate back
+  // to «loading», so the «지금 상태» line and the approve/sign button dropped to empty while it was read again. The current row is
+  // read through a ref; a different task (a new id) still starts clean.
+  const rowRef = useRef(row);
+  rowRef.current = row;
+  const rowId = row.id;
+  const rowWorkItemType = row.workItemType;
+  const rowWorkItemId = row.workItemId;
+
   useEffect(() => {
     let cancelled = false;
     setStory(null);
@@ -351,10 +361,10 @@ export function WorkListDetailPanel({
     // story #3976 — 「이력」(기존 activity-logs 재사용, 3971 정정 대상과 같은 API).
     void fetchJsonData<ActivityLogResponse>(`/api/activity-logs?entity_type=story&entity_id=${storyId}`)
       .then((v) => { if (!cancelled) setActivityLogs(v?.items ?? []); });
-    fetchPendingGate(row, storyId).then((v) => { if (!cancelled) setGate(v); }).catch(() => { if (!cancelled) setGate(null); });
+    fetchPendingGate(rowRef.current, storyId).then((v) => { if (!cancelled) setGate(v); }).catch(() => { if (!cancelled) setGate(null); });
 
     return () => { cancelled = true; };
-  }, [row, storyId, runPublicationsFetch]);
+  }, [rowId, rowWorkItemType, rowWorkItemId, storyId, runPublicationsFetch]);
 
   // 카디르 계약값 ⑥(페드루 판정 2026-09-14 10:55Z) — 「같은 화면 두 소스」결함 처방. row.state는
   // 목록 로드 시점의 inbox 스냅샷이고 주 액션 버튼은 이 패널이 연 시점의 fresh gate(gate state,
