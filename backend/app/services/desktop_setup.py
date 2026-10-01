@@ -526,6 +526,9 @@ class Exchanged:
     workdir_hint: str | None
     recipe_name: str | None
     org_name: str | None
+    # story 4470: which org (not only its shown name, which can change and repeat) — the app keeps the agents' default folder
+    # per org, so a setup for another org on the same Mac never works in the folder an earlier org's agents used
+    org_id: uuid.UUID | None = None
 
 
 async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Exchanged | None:
@@ -582,6 +585,7 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
     org_name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
     return Exchanged(
         setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup), org_name=org_name,
+        org_id=setup.org_id,
     )
 
 
