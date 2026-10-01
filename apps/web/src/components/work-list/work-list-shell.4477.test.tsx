@@ -138,3 +138,26 @@ describe('[SID:4477] crossing the width back inside the sheet\'s closing animati
     expect(panelNode!.isConnected).toBe(true);
   });
 });
+
+// the other way (moved here from the mocked-sheet 4462 file · PO 15:00Z): a guard for the opposite direction — it has never been
+// broken; the mutation that turns it red is in PR 4894's body
+describe('[SID:4477] the opposite direction, with the real sheet (a guard — never broken)', () => {
+  it('aside → sheet → aside while the sheet is still closing: the panel stays in the aside; after the animation ends too', async () => {
+    await render();
+    const panelNode = q('[data-testid="panel-assignee"]');
+    expect(q('aside[data-work-list-detail] [data-testid="panel-assignee"]')).toBe(panelNode);
+    mobileRef.current = true; await render();
+    expect(q('[data-slot="sheet-content"] [data-testid="panel-assignee"]')).toBe(panelNode);
+
+    anim.start();
+    mobileRef.current = false; await render(); // back to the aside: the sheet closes and plays its (held) animation
+    expect(q('[data-slot="sheet-content"]')!.hasAttribute('data-ending-style')).toBe(true);
+    expect(q('aside[data-work-list-detail] [data-testid="panel-assignee"]')).toBe(panelNode); // not left in the closing sheet
+
+    anim.release(); anim.hold = false;
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    expect(q('[data-slot="sheet-content"]')).toBeNull();
+    expect(q('aside[data-work-list-detail] [data-testid="panel-assignee"]')).toBe(panelNode);
+    expect(panelNode!.isConnected).toBe(true);
+  });
+});
