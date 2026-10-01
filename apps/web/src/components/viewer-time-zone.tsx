@@ -7,7 +7,8 @@
 // - While the zone is unknown (a first visit's server render and its hydration), a date is not drawn at all: Yuna 22:45Z — an
 //   invisible sample of the same shape holds its width, and a UTC date is never shown «for a moment».
 import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from 'react';
-import { VIEWER_TZ_COOKIE, runtimeTimeZone } from '@/lib/viewer-time-zone';
+import { useLocale } from 'next-intl';
+import { VIEWER_TZ_COOKIE, formatViewerDate, runtimeTimeZone } from '@/lib/viewer-time-zone';
 
 // undefined = no provider above (a component rendered on its own, e.g. in a test): the runtime's zone, as before this story
 const ViewerTimeZoneContext = createContext<string | null | undefined>(undefined);
@@ -44,4 +45,14 @@ export function useViewerTimeZone(): string | null {
 /** Holds a date's place while the viewer's zone is unknown: the same shape of text, invisible and hidden from screen readers. */
 export function InvisibleSample({ children }: { children: ReactNode }) {
   return <span className="invisible" aria-hidden="true" data-testid="viewer-tz-pending">{children}</span>;
+}
+
+/** A «when it happened» drawn for the viewer: their zone and locale; while the zone is unknown, the same shape in an invisible
+ *  sample (never a UTC date on screen). The one component the date places use (story #4443 PR2). */
+export function ViewerDate({ value, options }: { value: string | number | Date; options: Intl.DateTimeFormatOptions }) {
+  const locale = useLocale();
+  const tz = useViewerTimeZone();
+  const text = formatViewerDate(value, locale, tz, options);
+  if (text !== null) return <>{text}</>;
+  return <InvisibleSample>{formatViewerDate(value, locale, 'UTC', options)}</InvisibleSample>;
 }

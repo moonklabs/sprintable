@@ -2287,6 +2287,12 @@ jobs:
       - name: "Verify no member-name fallback (story #4286 regression guard)"
         run: pnpm --filter web verify:no-member-name-fallback
 
+      # story #4443 PR2a 회귀가드 — 이름 없는 시간대로 그리는 날짜 래칫(Intl.DateTimeFormat · next-intl format.dateTime에 timeZone 없음 ·
+      # 한국어 날짜 로케일 고정 · 인자 없는 resolveDisplayTimezone() · 도시 시간대 글자 고정). 남은 자리는 zoneless-date-format-baseline.json에
+      # 이유와 함께 얼리고 새 자리 · 낡은 줄은 FAIL(래칫은 내려가기만).
+      - name: "Verify no zoneless date format (story #4443 regression guard)"
+        run: pnpm --filter web verify:no-zoneless-date-format
+
       # story #4017 CHANGES 2(페드루 PO 지적, "여러 곳에서 목적지를 결정" 재발 방지) —
       # TODAY_V3_ENABLED 등 3개 env 이름은 nav-v3-flags-server.ts 한 곳, '/today'·
       # '/chats' 등 목적지 리터럴은 nav-v3-destinations.ts 한 곳에서만.

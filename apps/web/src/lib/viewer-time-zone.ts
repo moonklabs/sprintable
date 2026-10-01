@@ -33,3 +33,19 @@ export function runtimeTimeZone(): string | null {
 export function dayKeyIn(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 }
+
+/** Yuna 22:45Z — a clock time follows the viewer's locale: ko «오전 7:18» · en «7:18 AM» (12-hour, no leading zero on the hour). */
+export const VIEWER_TIME_OPTIONS: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+
+/** A date or time in the viewer's zone and locale — null while the zone is unknown (the caller holds the place, never UTC).
+ *  The one place a «when it happened» is formatted (story #4443 PR2); an invalid value is ''. */
+export function formatViewerDate(value: string | number | Date, locale: string, timeZone: string | null, options: Intl.DateTimeFormatOptions): string | null {
+  if (!timeZone) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat('en', { ...options, timeZone }).format(date);
+  }
+}

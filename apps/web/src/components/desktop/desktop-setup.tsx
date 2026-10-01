@@ -17,6 +17,7 @@ import { SetupProgressView } from './desktop-setup-progress';
 import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
 import { onboardingRedirect } from '@/lib/auth/onboarding-next';
 import { formatLocaleDate } from '@/lib/i18n';
+import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import {
   agentRowCount, confirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow, withDefaultRecipeFirst } from '@/lib/desktop-setup';
@@ -508,10 +509,12 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onRel
 
 /** (나) the invite's last day as the web's notifications say dates (Yuna 02:46Z): month name + day, the year only when it is not
  * this year — ko «10월 6일» · en "Oct 6" · another year ko «2027년 1월 6일» · en "Jan 6, 2027". */
-export function inviteUntilDate(value: string, locale: string, now: Date = new Date()): string {
+export function inviteUntilDate(value: string, locale: string, timeZone: string, now: Date = new Date()): string {
   const date = new Date(value);
   const ko = locale.startsWith('ko');
-  return formatLocaleDate(date, locale, { month: ko ? 'long' : 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
+  // story #4443 PR2 — the viewer's day and year (an invite ending 23:00Z ends the next day in Seoul)
+  const year = (d: Date) => new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(d);
+  return formatLocaleDate(date, locale, { month: ko ? 'long' : 'short', day: 'numeric', ...(year(date) !== year(now) ? { year: 'numeric' } : {}) }, timeZone);
 }
 
 /**
@@ -521,9 +524,11 @@ export function inviteUntilDate(value: string, locale: string, now: Date = new D
 export function InvitedCard({ invites }: { invites: MyInvite[] }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
+  const viewerTz = useViewerTimeZone(); // story #4443 PR2 — unknown yet: the row's place is held, no UTC day shown
   const inviteRow = (i: MyInvite) => {
     const role = i.role === 'admin' ? t('invited.roleAdmin') : t('invited.roleMember');
-    return t('invited.row', { org: i.org_name, role, josa: pickEuroJosa(role), date: inviteUntilDate(i.expires_at, locale) });
+    const row = t('invited.row', { org: i.org_name, role, josa: pickEuroJosa(role), date: inviteUntilDate(i.expires_at, locale, viewerTz ?? 'UTC') });
+    return viewerTz ? row : <InvisibleSample>{row}</InvisibleSample>;
   };
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-invited">
