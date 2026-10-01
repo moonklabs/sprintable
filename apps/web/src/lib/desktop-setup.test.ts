@@ -4,6 +4,7 @@ import { NOT_CONNECTED_AFTER_HANDOVER_MS,
   activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
   setupProgress, listableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
+  setupPollDelayMs, SETUP_STATUS_POLL_MS, SETUP_STATUS_SLOW_POLL_MS,
 } from './desktop-setup';
 
 const CODE = 'A'.repeat(20) + '_-' + 'b'.repeat(21); // 43
@@ -225,26 +226,30 @@ describe('[SID:4464] settled — the one end condition for reading the status', 
     expect(setupProgress(base({ tools_connected: c('m1', 'm2'), first_result_at: 'r' }), T0, T0).settled).toBe(true);
   });
 
-  it('an agent that could not start, or that stopped, is settled too', () => {
+  // PO 12:04Z (the 10:04Z rule was wrong): a block waiting for the person is not «settled» — reading goes on, so the block can go
+  it('an agent that could not start is NOT settled (its block waits for [다시 시도]); once it connects, settled', () => {
     const failed = [{ member_id: 'm2', runtime: 'codex', reason: 'runtime_missing', at: 'x' }] as never;
-    expect(setupProgress(base({ tools_connected: c('m1'), first_result_at: 'r', agents_start_failed: failed }), T0, T0).settled).toBe(true);
+    const waiting = setupProgress(base({ tools_connected: c('m1'), first_result_at: 'r', agents_start_failed: failed }), T0, T0);
+    expect([waiting.settled, waiting.waitingOnPerson]).toEqual([false, true]);
+    expect(setupProgress(base({ tools_connected: c('m1', 'm2'), first_result_at: 'r' }), T0, T0).settled).toBe(true);
   });
 
-  it('[Qadir 4880] after the first result, one agent that never connects: past the ⑦ threshold it is ⑦ (and settled) — never «아직 준비» too', () => {
+  it('[Qadir 4880] after the first result, one agent that never connects: past the ⑦ threshold it is ⑦ — never «아직 준비» too — and reading goes on (PO 12:04Z)', () => {
     const late = base({ tools_connected: c('m1'), first_task_handed_at: 'h', first_result_at: 'r' });
     const early = setupProgress(late, T0 + NOT_CONNECTED_AFTER_HANDOVER_MS - 1_000, T0);
     expect([early.notConnected, early.settled]).toEqual([false, false]);
     expect(early.stillPreparing).toEqual(['개발자']);
     const past = setupProgress(late, T0 + NOT_CONNECTED_AFTER_HANDOVER_MS, T0);
-    expect([past.notConnected, past.settled]).toEqual([true, true]);
+    expect([past.notConnected, past.settled, past.waitingOnPerson]).toEqual([true, false, true]);
     expect(past.stillPreparing).toEqual([]); // the block says it, once
     expect(past.notConnectedAgents.roles).toEqual(['개발자']); // only the agent that did not connect
   });
 
-  it('an agent that stopped after the first result is settled too (the «멈춤» branch)', () => {
+  it('an agent that stopped after the first result is NOT settled (its block waits for [다시 시작]); restarted and connected → settled', () => {
     const ended = [{ member_id: 'm2', runtime: 'codex' as const, at: '2026-09-30T12:01:00Z', exit_code: 1 }];
     const p = setupProgress(base({ tools_connected: c('m1'), first_result_at: '2026-09-30T12:00:30Z', agents_ended: ended }), T0, T0);
-    expect([p.settled, p.notConnected]).toEqual([true, false]);
+    expect([p.settled, p.notConnected, p.waitingOnPerson]).toEqual([false, false, true]);
+    expect(setupProgress(base({ tools_connected: c('m1', 'm2'), first_result_at: '2026-09-30T12:00:30Z' }), T0, T0).settled).toBe(true);
     // contrast: the same agent not stopped is still waited for
     expect(setupProgress(base({ tools_connected: c('m1'), first_result_at: '2026-09-30T12:00:30Z' }), T0, T0).settled).toBe(false);
   });
@@ -374,5 +379,16 @@ describe('[SID:4433] an agent that stopped before the first result — the progr
 
   it('an unreadable time is left out (never a block from a broken row)', () => {
     expect(setupProgress(base({ agents_ended: [{ member_id: 'm1', at: 'not a time', runtime: 'claude', exit_code: 1, restarted_at: null }] }), T0, T0).stopped).toBeNull();
+  });
+});
+
+describe('[SID:4464] reading less often while a block waits for the person (PO 12:04Z)', () => {
+  it('2 s as usual · 10 s once the first result is 2 minutes old and something still waits · 2 s again when nothing waits', () => {
+    const r = '2026-09-30T12:00:00Z';
+    const at = (s: number) => Date.parse(r) + s * 1000;
+    expect(setupPollDelayMs({ waitingOnPerson: true }, r, at(60))).toBe(SETUP_STATUS_POLL_MS);
+    expect(setupPollDelayMs({ waitingOnPerson: true }, r, at(120))).toBe(SETUP_STATUS_SLOW_POLL_MS);
+    expect(setupPollDelayMs({ waitingOnPerson: false }, r, at(600))).toBe(SETUP_STATUS_POLL_MS);
+    expect(setupPollDelayMs({ waitingOnPerson: true }, null, at(600))).toBe(SETUP_STATUS_POLL_MS);
   });
 });
