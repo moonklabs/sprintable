@@ -468,6 +468,20 @@ class AdsBoostAdapterUnavailableError(Exception):
         super().__init__(message)
 
 
+async def campaign_connection_id(db: AsyncSession, gate) -> uuid.UUID | None:
+    """story #4461 (Qadir 08:57Z · PO 09:00Z) — the ad connection to use for this boost's campaign: the one it was created under
+    (`ads_boost_runs.created_connection_id`, recorded at create) while a campaign exists, else the current seal's. A re-seal can move
+    the boost to another ad account while the campaign lives in the first — a pause sent with the new account's token missed it
+    and the campaign kept spending. Runs made before the record (null) keep the sealed connection. The single rule for pause ·
+    resume · switching an existing campaign on · spend reads · the card's ad-account link."""
+    from app.models.ads_boost_run import AdsBoostRun
+
+    run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate.id))).scalar_one_or_none()
+    if run is not None and run.campaign_id and run.created_connection_id is not None:
+        return run.created_connection_id
+    return gate.sealed_ads_connection_id
+
+
 async def _resolve_execution_context(db: AsyncSession, command: PublicationCommand) -> dict:
     """워커 처리 직전 재검증 + 실행에 필요한 모든 것을 한 번에 모은다 — gate.status
     재확認(요청 시점과 워커 pickup 시점 사이 재오픈될 수 있다, publish_channel_
@@ -494,12 +508,14 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
             SEAL_REPLACED_CODE, f"command belongs to a replaced seal ({command.approved_version}); current: {gate.sealed_ads_boost_version_id}",
         )
 
+    # story #4461 — the campaign's own connection once it exists (a re-seal can point the gate at another ad account)
+    connection_id = await campaign_connection_id(db, gate)
     conn = (await db.execute(
-        select(ChannelConnection).where(ChannelConnection.id == gate.sealed_ads_connection_id)
+        select(ChannelConnection).where(ChannelConnection.id == connection_id)
     )).scalar_one_or_none()
     if conn is None or conn.status != "active":
         raise AdsBoostAdapterUnavailableError(
-            "ADS_BOOST_CONNECTION_UNAVAILABLE", f"ad connection unavailable: {gate.sealed_ads_connection_id}",
+            "ADS_BOOST_CONNECTION_UNAVAILABLE", f"ad connection unavailable: {connection_id}",
         )
 
     publication = None

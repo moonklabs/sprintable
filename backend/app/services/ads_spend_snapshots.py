@@ -155,11 +155,15 @@ async def _resolve_spend_context(db: AsyncSession, snapshot: InsightSnapshot) ->
     if run is None or run.campaign_id is None:
         raise AdsSpendFetchError("ADS_SPEND_NOT_STARTED", f"boost not started at provider yet: {gate.id}")
 
+    # story #4461 — the spend of the campaign is read through the account it lives in (created_connection_id), not the seal's
+    from app.services.ads_boost_execution import campaign_connection_id
+
+    connection_id = await campaign_connection_id(db, gate)
     conn = (await db.execute(
-        select(ChannelConnection).where(ChannelConnection.id == gate.sealed_ads_connection_id)
+        select(ChannelConnection).where(ChannelConnection.id == connection_id)
     )).scalar_one_or_none()
     if conn is None:
-        raise AdsSpendFetchError("ADS_SPEND_CONNECTION_MISSING", f"ad connection missing: {gate.sealed_ads_connection_id}")
+        raise AdsSpendFetchError("ADS_SPEND_CONNECTION_MISSING", f"ad connection missing: {connection_id}")
 
     module_path = "app.services.ads_sandbox_campaign" if conn.channel == "ads_sandbox" else "app.services.meta_ads_campaign"
     module = importlib.import_module(module_path)
@@ -343,8 +347,10 @@ async def _schedule_capture(db: AsyncSession, *, gate: Gate, due_at: datetime) -
     """One pending paid capture for the gate's publication (idempotent per due_at)."""
     from app.models.channel_connection import ChannelConnection
 
-    channel = (await db.execute(
-        select(ChannelConnection.channel).where(ChannelConnection.id == gate.sealed_ads_connection_id)
+    from app.services.ads_boost_execution import campaign_connection_id
+
+    channel = (await db.execute(  # story #4461 — the campaign's account decides the channel (sandbox · meta)
+        select(ChannelConnection.channel).where(ChannelConnection.id == await campaign_connection_id(db, gate))
     )).scalar_one_or_none() or "meta_ads"
     await db.execute(pg_insert(InsightSnapshot).values(
         id=uuid.uuid4(), org_id=gate.org_id, work_item_id=gate.work_item_id, publication_id=uuid.UUID(gate.scope_key),
@@ -521,11 +527,15 @@ async def refresh_ads_boost_spend_now(
         retry_after = int((_SPEND_REFRESH_MIN_INTERVAL - (now - last_captured_at)).total_seconds())
         raise AdsSpendRefreshRateLimitedError(retry_after_seconds=max(retry_after, 1))
 
+    # story #4461 — the spend of the campaign is read through the account it lives in (created_connection_id), not the seal's
+    from app.services.ads_boost_execution import campaign_connection_id
+
+    connection_id = await campaign_connection_id(db, gate)
     conn = (await db.execute(
-        select(ChannelConnection).where(ChannelConnection.id == gate.sealed_ads_connection_id)
+        select(ChannelConnection).where(ChannelConnection.id == connection_id)
     )).scalar_one_or_none()
     if conn is None:
-        raise AdsSpendFetchError("ADS_SPEND_CONNECTION_MISSING", f"ad connection missing: {gate.sealed_ads_connection_id}")
+        raise AdsSpendFetchError("ADS_SPEND_CONNECTION_MISSING", f"ad connection missing: {connection_id}")
 
     snapshot = InsightSnapshot(
         id=uuid.uuid4(), org_id=org_id, work_item_id=gate.work_item_id, publication_id=publication_id,
@@ -805,19 +815,34 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
     if run is not None:
         from app.models.channel_connection import ChannelConnection
 
+        from app.services.ads_boost_execution import campaign_connection_id
+
+        ad_connection_id = await campaign_connection_id(db, gate)  # story #4461 — the card links the campaign's own account
         ad_conn = (await db.execute(
             select(ChannelConnection).where(
-                ChannelConnection.id == gate.sealed_ads_connection_id, ChannelConnection.org_id == org_id,
+                ChannelConnection.id == ad_connection_id, ChannelConnection.org_id == org_id,
             )
-        )).scalar_one_or_none() if gate.sealed_ads_connection_id is not None else None
+        )).scalar_one_or_none() if ad_connection_id is not None else None
         run_ad = {
             "campaign_id": run.campaign_id or None,
             "ad_account_id": ((ad_conn.account_id or "").removeprefix("act_") or None) if ad_conn is not None else None,
             "campaign_name": await expected_campaign_name(db, gate),
             "ad_channel": ad_conn.channel if ad_conn is not None else None,
         }
+    # story #4461 — the latest pause (any seal: a pause is never refused for its seal) — the card tells a stopped one honestly
+    from app.services.ads_boost_execution import OP_PAUSE
+
+    latest_pause = (await db.execute(
+        select(PublicationCommand).where(
+            PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_PAUSE,
+        ).order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc()).limit(1)
+    )).scalar_one_or_none()
     return {
         **run_ad,
+        "pause_command": (
+            {"status": latest_pause.status, "failure_kind": latest_pause.failure_kind, "error_code": latest_pause.reason_code}
+            if latest_pause is not None else None
+        ),
         "created_budget_minor": run.created_budget_minor if run is not None else None,
         "gate_id": gate.id,
         "initiated_by": boost_start_command.initiated_by if boost_start_command is not None else None,
