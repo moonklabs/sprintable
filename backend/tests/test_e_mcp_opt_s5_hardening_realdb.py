@@ -111,6 +111,10 @@ async def test_many_individual_uploads_then_send_message_rejects_over_declared_l
                     CONV, send_body, BackgroundTasks(), db=s, auth=_auth(AGENT), org_id=ORG,
                 )
             assert ei.value.status_code == 400
+            # story #4474: the reason as a code with the values (the envelope passes a dict detail through as the error)
+            assert ei.value.detail["code"] == "ATTACHMENT_LIMIT_EXCEEDED"
+            assert (ei.value.detail["files"], ei.value.detail["total_bytes"]) == (6, 6 * 1024 * 1024)
+            assert (ei.value.detail["max_files"], ei.value.detail["max_total_bytes"]) == (5, 6 * 1024 * 1024)
 
             # 부분 커밋 없음 확인 — 메시지가 실제로 생성 안 됐는지.
             cnt = (await s.execute(
