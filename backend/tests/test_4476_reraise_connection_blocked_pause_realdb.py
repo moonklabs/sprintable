@@ -275,3 +275,86 @@ async def test_a_re_raised_resume_still_turns_nothing_on_when_it_may_not(monkeyp
         assert (await _run(Session, gate_id)).status == "paused"
     finally:
         await engine.dispose()
+
+
+async def _scheduler_pause(Session, org_id, gate_id, owner_id):
+    from app.services.ads_boost_execution import request_ads_boost_pause
+
+    async with Session() as s:
+        command = await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id, initiated_by="scheduler")
+        await s.commit()
+        return command.id
+
+
+async def _activity_count(Session, gate_id) -> int:
+    from sqlalchemy import func, select
+
+    from app.models.activity_log import ActivityLog
+
+    async with Session() as s:
+        return (await s.execute(select(func.count()).select_from(ActivityLog).where(ActivityLog.entity_id == gate_id))).scalar_one()
+
+
+async def test_the_scheduler_does_not_re_raise_a_pause_while_the_connection_is_still_failed(monkeypatch):
+    """Qadir 4896 · PO 16:53Z: the scheduler's pause (cap · approval gone) asks again at every capture. While the campaign's
+    connection is still marked failed it must not re-raise the blocked row (it would only block again, every capture): the row and
+    the activity stay as they are. A person's press still re-raises (the tests above)."""
+    engine, Session, org_id, owner_id, gate_id, provider = await _running(monkeypatch)
+    try:
+        provider["down"] = True
+        pause_id = await _scheduler_pause(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        blocked = await _command(Session, pause_id)
+        assert (blocked.status, blocked.failure_kind) == ("blocked", "connection")
+        activity, calls = await _activity_count(Session, gate_id), len(provider["calls"])
+        assert await _scheduler_pause(Session, org_id, gate_id, owner_id) == pause_id
+        again = await _command(Session, pause_id)
+        assert (again.status, again.failure_kind) == ("blocked", "connection")  # not re-raised
+        await _tick(Session)
+        assert len(provider["calls"]) == calls and await _activity_count(Session, gate_id) == activity
+    finally:
+        await engine.dispose()
+
+
+async def test_after_reconnecting_the_schedulers_next_ask_re_raises_and_the_pause_lands(monkeypatch):
+    """Stopping money needs no person once the connection is back: the scheduler's next ask re-raises the same row and it lands."""
+    engine, Session, org_id, owner_id, gate_id, provider = await _running(monkeypatch)
+    try:
+        provider["down"] = True
+        pause_id = await _scheduler_pause(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        await _reconnect(Session, gate_id, provider)
+        assert await _scheduler_pause(Session, org_id, gate_id, owner_id) == pause_id
+        assert (await _command(Session, pause_id)).status == "pending"
+        await _tick(Session)
+        assert (await _command(Session, pause_id)).status == "completed"
+        assert (await _run(Session, gate_id)).status == "paused"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_row_that_finished_meanwhile_is_not_re_raised_from_a_stale_read(monkeypatch):
+    """Qadir 2선 ② · PO 16:53Z: the retry rule locks the row and must read it again. Two presses can overlap while the worker
+    finishes the row; a stale in-session copy (still blocked) must not put a finished row back to pending — for a resume that
+    would switch the campaign back on after a later pause."""
+    from sqlalchemy import update
+
+    from app.models.publication_command import PublicationCommand
+    from app.services.publication_command import retry_dead_letter_command
+
+    engine, Session, org_id, owner_id, gate_id, provider = await _running(monkeypatch)
+    try:
+        provider["down"] = True
+        pause_id = await _press_pause(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        async with Session() as s:
+            stale = await s.get(PublicationCommand, pause_id)
+            assert stale.status == "blocked"  # loaded into this session
+            async with Session() as other:  # meanwhile the row finished elsewhere
+                await other.execute(update(PublicationCommand).where(PublicationCommand.id == pause_id).values(status="completed"))
+                await other.commit()
+            assert await retry_dead_letter_command(s, org_id=org_id, command_id=pause_id) is None
+            await s.commit()
+        assert (await _command(Session, pause_id)).status == "completed"
+    finally:
+        await engine.dispose()

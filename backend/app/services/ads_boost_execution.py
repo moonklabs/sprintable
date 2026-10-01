@@ -352,6 +352,11 @@ async def _request_toggle(
             # same row · same idempotency key · sent through the campaign's connection now · still disconnected → it stops again).
             # That rule decides what a press may re-raise: a row held by an org-wide pause is not (lifting the pause re-queues it)
             # and comes back unchanged. A resume still passes the worker's approval and created-budget checks before ACTIVE.
+            if initiated_by == "scheduler" and not await _campaign_connection_usable(db, gate):
+                # Qadir 4896 · PO 16:53Z — the scheduler asks again at every capture: while the campaign's connection is still
+                # marked failed, re-raising would only block again, every capture. The row stays as it is (no new record); once
+                # the connection is back, the next ask re-raises it and the money stops with no person needed.
+                return latest
             reraised = await retry_dead_letter_command(db, org_id=org_id, command_id=latest.id)
             await db.commit()
             return reraised or latest
@@ -479,6 +484,17 @@ class AdsBoostAdapterUnavailableError(Exception):
         self.code = code
         self.message = message
         super().__init__(message)
+
+
+async def _campaign_connection_usable(db: AsyncSession, gate) -> bool:
+    """story #4476 — the campaign's ad connection (4461) is not marked failed (active)."""
+    from app.models.channel_connection import ChannelConnection
+
+    connection_id = await campaign_connection_id(db, gate)
+    status = (await db.execute(
+        select(ChannelConnection.status).where(ChannelConnection.id == connection_id)
+    )).scalar_one_or_none() if connection_id else None
+    return status == "active"
 
 
 async def campaign_connection_id(db: AsyncSession, gate) -> uuid.UUID | None:
