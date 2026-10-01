@@ -212,6 +212,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // story #2032 AC2/AC3: 대화별 초안 복원(lazy initializer — 마운트 시 1회, 리마운트당 재평가).
   const [text, setText] = useState(() => loadDraft(threadId));
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  // story #4474: how many files the last add left out over the cap — said out loud instead of dropped in silence
+  const [droppedFiles, setDroppedFiles] = useState(0);
   const [uploadFailed, setUploadFailed] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
   const [sending, setSending] = useState(false);
@@ -455,6 +457,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       }
       setText('');
       setPendingFiles([]);
+      setDroppedFiles(0);
       setCommandQuery(null);
       mentionedIdsRef.current = [];
       onMentionIdsChange?.([]);
@@ -571,6 +574,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const addFiles = (files: File[]) => {
     if (files.length === 0) return;
     setUploadFailed(false);
+    // the files already attached and the first of the new ones are kept; the overflow is always the LAST of the files just
+    // picked — counted so the line below can say so (Yuna: the person must know which ones to pick again)
+    setDroppedFiles(Math.max(0, pendingFiles.length + files.length - MAX_ATTACHMENTS));
     setPendingFiles((prev) => [...prev, ...files].slice(0, MAX_ATTACHMENTS));
   };
 
@@ -596,6 +602,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const removePendingFile = (index: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+    setDroppedFiles(0);
     setUploadFailed(false);
   };
 
@@ -663,7 +670,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       {steerError && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{steerError}</p>
       )}
-      {atMaxAttachments && (
+      {droppedFiles > 0 ? (
+        // story #4474 — the files over the cap are named by count and reason (a status, so a screen reader hears it too)
+        <p role="status" data-testid="chat-attachments-dropped" className="mb-1 break-keep text-xs text-muted-foreground">
+          {t('attachmentsDropped', { dropped: droppedFiles, max: MAX_ATTACHMENTS })}
+        </p>
+      ) : atMaxAttachments && (
         <p className="mb-1 text-xs text-muted-foreground">{t('maxAttachmentsReached', { max: MAX_ATTACHMENTS })}</p>
       )}
 

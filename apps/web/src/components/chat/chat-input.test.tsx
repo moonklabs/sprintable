@@ -702,3 +702,45 @@ describe('ChatInput — @멘션 후보 시스템 발행 제외(story #3997 CHANG
     expect(text).toContain('점검봇');
   });
 });
+
+describe('ChatInput — files over the cap are said, not dropped in silence (story #4474)', () => {
+  const files = (n: number, from = 0) => Array.from({ length: n }, (_, i) => new File(['x'], `f${from + i}.txt`, { type: 'text/plain' }));
+  async function pick(list: File[]) {
+    const input = container.querySelector('input[type=file]') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { configurable: true, value: list });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+  }
+  const dropped = () => container.querySelector('[data-testid=chat-attachments-dropped]');
+
+  it('12 picked at once: 10 are kept and the line says the 2 left out and why', async () => {
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={vi.fn()} />)); });
+    await pick(files(12));
+    expect(container.textContent).toContain('f9.txt');
+    expect(container.textContent).not.toContain('f10.txt');
+    expect(dropped()?.textContent).toBe('고른 파일 중 마지막 2개는 올리지 못했어요 — 한 메시지에 최대 10개까지 올릴 수 있어요.');
+    expect(dropped()?.getAttribute('role')).toBe('status');
+    expect(container.textContent).not.toContain('한 번에 최대 10개까지 올릴 수 있어요.'); // said once, by the dropped line
+  });
+
+  it('8 kept, then 4 more: the 2 that did not fit are counted (not 4)', async () => {
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={vi.fn()} />)); });
+    await pick(files(8));
+    expect(dropped()).toBeNull(); // nothing left out yet
+    await pick(files(4, 8));
+    expect(dropped()?.textContent).toContain('마지막 2개는 올리지 못했어요');
+  });
+
+  it('exactly at the cap: no dropped line, the old «at most 10» line stays; removing one clears a dropped line', async () => {
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={vi.fn()} />)); });
+    await pick(files(10));
+    expect(dropped()).toBeNull();
+    expect(container.textContent).toContain('한 번에 최대 10개까지 올릴 수 있어요.');
+    await pick(files(1, 10));
+    expect(dropped()?.textContent).toContain('마지막 1개는 올리지 못했어요');
+    const removeLabel = (koMessages as { chats: { removeAttachment: string } }).chats.removeAttachment;
+    const remove = container.querySelector(`button[aria-label="${removeLabel}"]`) as HTMLButtonElement;
+    expect(remove).not.toBeNull();
+    await act(async () => { remove.click(); });
+    expect(dropped()).toBeNull();
+  });
+});

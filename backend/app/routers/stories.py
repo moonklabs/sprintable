@@ -656,10 +656,11 @@ def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
     ):
         raise HTTPException(
             status_code=422,
-            detail=(
+            detail=mcp_attachment_upload.mcp_limit_exceeded_detail(
                 f"mcp attachments exceed declared limit: {len(mcp_origin)} files / {total_bytes} bytes "
                 f"(max {mcp_attachment_upload.MCP_MAX_ATTACHMENTS} files / "
-                f"{mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)"
+                f"{mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)",
+                files=len(mcp_origin), total_bytes=total_bytes,
             ),
         )
 

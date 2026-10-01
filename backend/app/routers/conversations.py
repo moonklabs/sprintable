@@ -2774,14 +2774,14 @@ async def send_message_core(
     # 첨부는 기존 100MB/10개 한도만 적용받는다·회귀0).
     if body.attachments:
         mcp_origin = [a for a in body.attachments if _is_mcp_upload_object_path(a.url)]
-        if len(mcp_origin) > _MCP_MAX_ATTACHMENTS or (
-            sum(a.size for a in mcp_origin) > _MCP_MAX_TOTAL_ATTACHMENT_BYTES
-        ):
+        mcp_total_bytes = sum(a.size for a in mcp_origin)
+        if len(mcp_origin) > _MCP_MAX_ATTACHMENTS or mcp_total_bytes > _MCP_MAX_TOTAL_ATTACHMENT_BYTES:
             raise HTTPException(
                 status_code=400,
-                detail=(
+                detail=mcp_attachment_upload.mcp_limit_exceeded_detail(
                     f"mcp attachments exceed declared limit "
-                    f"(max {_MCP_MAX_ATTACHMENTS} files / {_MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)"
+                    f"(max {_MCP_MAX_ATTACHMENTS} files / {_MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)",
+                    files=len(mcp_origin), total_bytes=mcp_total_bytes,
                 ),
             )
 

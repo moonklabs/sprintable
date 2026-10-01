@@ -5295,6 +5295,7 @@
     "removeAttachment": "Remove attachment",
     "attachmentUploadFailed": "Attachment upload failed. Please try again.",
     "maxAttachmentsReached": "You can upload up to {max, plural, one {# file} other {# files}} at once.",
+    "attachmentsDropped": "The last {dropped, plural, one {# file you picked wasn't} other {# files you picked weren't}} attached — a message can carry up to {max, plural, one {# file} other {# files}}.",
     "commandCandidatesLabel": "Command candidates",
     "mentionCandidatesLabel": "Mention candidates",
     "entityCandidatesLabel": "Entity candidates",
