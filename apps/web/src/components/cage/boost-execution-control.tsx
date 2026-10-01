@@ -502,7 +502,8 @@ export function BoostExecutionControl({
             // PO 10:56Z — the facts only: re-seals only lower the budget, so «request again at that budget» never works (no link)
             const money = (minor: number | null) => (minor !== null && sealedAdsCurrency
               ? formatMinorCurrency(minor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent) : '');
-            return t('boostNeedsCheckCreatedBudgetDiffers', { amount: money(createdBudget), approved: money(sealedAdsBudgetMinor) });
+            // Yuna 11:00Z — the approved budget is the «총예산» line right above: not repeated here
+            return t('boostNeedsCheckCreatedBudgetDiffers', { amount: money(createdBudget) });
           })() : currencyMismatch
             ? (accountCurrency && sealedAdsCurrency
               ? t('boostAccountCurrencyMismatch', { accountCurrency, approvedCurrency: sealedAdsCurrency })

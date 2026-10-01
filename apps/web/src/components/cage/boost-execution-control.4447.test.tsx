@@ -235,8 +235,7 @@ describe('BoostExecutionControl — the state table (#4447)', () => {
     await mount();
     const line = $('boost-needs-check-reason')!;
     expect(line.textContent).toContain('100,000원');
-    expect(line.textContent).toContain('30,000원'); // the approved (sealed) budget, next to it
-    expect(line.textContent).toContain('광고비는 나가지 않아요');
+    expect(line.textContent).toContain('광고비는 나가지 않아요'); // Yuna 11:00Z — what the person needs now: no money goes out
     expect(line.querySelector('a')).toBeNull();
     expect($('boost-needs-check-retry-trigger')).toBeNull();
     expect($('boost-start-trigger')).toBeNull();

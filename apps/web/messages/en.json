@@ -5916,7 +5916,7 @@
     "boostStartBlockedApprovalGone": "The approval was withdrawn, so it didn't start — it can start once it's approved again.",
     "boostNeedsCheckOutcomeUnknown": "A campaign may already exist in your ad account, so we didn't retry — check your ad account first.",
     "boostNeedsCheckStopped": "The boost couldn't start. Check your ad account, then try again.",
-    "boostNeedsCheckCreatedBudgetDiffers": "The ad was created with a budget ({amount}) other than the approved one ({approved}), so it didn't start — the campaign is off, so no ad spend goes out.",
+    "boostNeedsCheckCreatedBudgetDiffers": "The ad was created with a budget ({amount}) other than the approved one, so it didn't start — the ad is off, so nothing is being spent.",
     "boostNeedsCheckRetry": "Retry",
     "boostNeedsCheckConfirmTitle": "Retry boost",
     "boostNeedsCheckConfirmNoCampaign": "I confirmed this campaign isn't in my ad account",
