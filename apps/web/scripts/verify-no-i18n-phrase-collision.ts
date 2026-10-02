@@ -387,6 +387,12 @@ export const EXEMPT_PAIRS = new Set<string>([
   // drawn (no retry, no start). «시작» is the card's own verb on purpose (Yuna). Look again if the needs_check branch ever draws
   // the start dialog.
   'cage.boostExecutionStartConfirm <-> cage.boostNeedsCheckCreatedBudgetDiffers',
+  // story #4486 (Yuna 02:54Z) — the cap line («쓴 광고비가 총예산({amount})에 닿아 홍보를 멈췄어요 — …» · {amount} = a money amount)
+  // contains «총예산», the sealed facts' budget label. Not the shape this guard is for (#2352/#2365: two counted phrases read as one
+  // another): the label is drawn only inside the start confirmation (not started) and the link-existing dialog (needs_check), and
+  // the cap line only on a paused card — never on screen together. «총예산» is the same word on purpose (it names that budget).
+  // Look again if the paused card ever draws the sealed facts.
+  'cage.adsBoostBudgetLabel <-> cage.boostPausedCapReached',
   // story #3592(§22-18 정본, 2026-09-07) — 행 액션 접근 이름 재발 가드가 새로 심은
   // aria-label 템플릿 11쌍. 전부 이 가드가 잡으려는 "화면에 «보이는» 두 문구가
   // 헷갈린다"(#2352·#2365) 모양이 아니다 — aria-label은 스크린리더 전용이라 애초에
