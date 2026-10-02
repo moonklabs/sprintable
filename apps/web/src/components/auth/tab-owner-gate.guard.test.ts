@@ -42,6 +42,17 @@ function gated(file: string): boolean {
 
 const readers = routeFiles(APP).filter((f) => READS_SESSION.test(read(f)));
 
+/**
+ * Kadir 4903 — «the gate is somewhere in the file» is not enough: a branch can return before it (the org-less setup page did).
+ * In a file that renders the gate, every JSX `return` must be the gate itself; anything else that renders goes through a value
+ * the gate wraps (the (authenticated) body hands back `{ userId, node }`, so a bare JSX branch there is a type error too).
+ */
+function jsxReturnsOtherThanGate(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/return\s*\(?\s*<\s*([A-Za-z][\w.]*|>)/g)) if (m[1] !== 'TabOwnerGate') out.push(m[0].replace(/\s+/g, ' '));
+  return out;
+}
+
 describe('[SID:4490] every signed-in screen checks the browser owner first', () => {
   it('found the session readers (the scan works)', () => {
     expect(readers.length).toBeGreaterThanOrEqual(5);
@@ -51,6 +62,13 @@ describe('[SID:4490] every signed-in screen checks the browser owner first', () 
     if (file in NO_GATE_NEEDED) return;
     expect(gated(path.join(APP, file)), `${file} reads the session: render <TabOwnerGate userId={session.user_id}> (or add it to NO_GATE_NEEDED with why)`).toBe(true);
   });
+
+  it.each([...readers.map(rel), ...MUST_GATE].filter((f, i, all) => all.indexOf(f) === i && RENDERS_GATE.test(read(path.join(APP, f)))))(
+    '%s returns nothing around the gate (no branch skips it)',
+    (file) => {
+      expect(jsxReturnsOtherThanGate(read(path.join(APP, file))), `${file}: every rendering branch must go through <TabOwnerGate>`).toEqual([]);
+    },
+  );
 
   it.each(MUST_GATE)('%s renders TabOwnerGate', (file) => {
     expect(RENDERS_GATE.test(read(path.join(APP, file)))).toBe(true);
@@ -63,5 +81,9 @@ describe('[SID:4490] every signed-in screen checks the browser owner first', () 
   it('the reader itself: a layout under a gated folder passes · a new top-level session layout fails (positive control)', () => {
     expect(gated(path.join(APP, '(authenticated)/[ws]/[proj]/layout.tsx'))).toBe(true);
     expect(gated(path.join(APP, 'login/page.tsx'))).toBe(false);
+    // an early branch returning before the gate is caught · the gate itself and object hand-backs pass
+    expect(jsxReturnsOtherThanGate("if (x) return <>{children}</>;\n  return <TabOwnerGate userId={u}>{c}</TabOwnerGate>;")).toEqual(['return <>']);
+    expect(jsxReturnsOtherThanGate('if (x) return (\n    <Shell />\n  );')).toEqual(['return ( <Shell']);
+    expect(jsxReturnsOtherThanGate('return { userId, node: <Shell /> };\n  return (\n    <TabOwnerGate userId={u}>{n}</TabOwnerGate>\n  );')).toEqual([]);
   });
 });

@@ -39,11 +39,14 @@ interface OrgMembership {
   timezone?: string | null;
 }
 
+/** story #4490 (Kadir 4903) — the body never renders by itself: it hands back the screen and whose session it is, and the
+ * exported layout always puts TabOwnerGate around it. Every branch (the org-less setup page included) goes through the gate
+ * by construction — a branch returning bare JSX is a type error. */
 async function AuthenticatedLayoutBody({
   children,
 }: {
   children: React.ReactNode;
-}) {
+}): Promise<{ userId: string; node: React.ReactNode }> {
   // AC3: proxy 가 주입한 x-pathname 으로 next 보존(server component 는 현재 경로 직접 못 읽음).
   const hdrs = await headers();
   const currentPath = hdrs.get('x-pathname') ?? '';
@@ -83,7 +86,7 @@ async function AuthenticatedLayoutBody({
   // story 4427 (나): an organization-less person on the desktop setup page stays there, without the shell (it needs an
   // organization) — the page shows the «새 조직» mode, or sends them to the one screen when an invite exists or the check fails
   if (meRes.status === 404) {
-    if (staysForNewOrgSetup(currentPath)) return <>{children}</>;
+    if (staysForNewOrgSetup(currentPath)) return { userId: session.user_id, node: children };
     redirect(onboardingRedirect(currentPath));
   }
 
@@ -96,7 +99,7 @@ async function AuthenticatedLayoutBody({
 
   const me = (await meRes.json()) as MemberContext | null;
   if (!me?.org_id) {
-    if (staysForNewOrgSetup(currentPath)) return <>{children}</>;
+    if (staysForNewOrgSetup(currentPath)) return { userId: session.user_id, node: children };
     redirect(onboardingRedirect(currentPath));
   }
   const memberships: { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[] =
@@ -194,9 +197,9 @@ async function AuthenticatedLayoutBody({
     ? (me?.project_name ?? undefined)
     : undefined;
 
-  // story #4490 — the previous person's browser values go before the shell (or anything in it) reads them
-  return (
-    <TabOwnerGate userId={session.user_id}>
+  return {
+    userId: session.user_id,
+    node: (
       <DashboardShell
         currentTeamMemberId={me?.id}
         orgId={me?.org_id}
@@ -247,8 +250,8 @@ async function AuthenticatedLayoutBody({
           </CrossProjectToastProvider>
         </StorageCapacityToastProvider>
       </DashboardShell>
-    </TabOwnerGate>
-  );
+    ),
+  };
 }
 
 /**
@@ -258,7 +261,8 @@ async function AuthenticatedLayoutBody({
 export default async function AuthenticatedLayout(props: Parameters<typeof AuthenticatedLayoutBody>[0]) {
   const { value, spans, totalMs } = await withServerTiming(() => AuthenticatedLayoutBody(props));
   if (spans.length > 0) logServerTiming('layout', 'ssr', totalMs, spans);
-  return value;
+  // story #4490 — the previous person's browser values go before anything below (every branch) reads them
+  return <TabOwnerGate userId={value.userId}>{value.node}</TabOwnerGate>;
 }
 
 /** proxy가 인코딩해 실은 헤더·쿠키 값 풀기(잘못된 인코딩이면 없는 것으로). */
