@@ -18,7 +18,29 @@ export type DesktopRuntime = (typeof DESKTOP_RUNTIMES)[number];
 const CODE_RE = /^[A-Za-z0-9_-]{43}$/;
 
 /** `setup` = 설정 id(setup-codes 201) — 이 흐름의 이벤트 session_id. 모양이 틀리면 없음으로. */
-export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null; /** 찾았지만 이 컴퓨터에서 도구를 못 붙이는 것(⑥ · 회사 관리 MCP) — runtimes의 부분집합. */ blocked: DesktopRuntime[] }
+export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null; /** 찾았지만 이 컴퓨터에서 도구를 못 붙이는 것(⑥ · 회사 관리 MCP) — runtimes의 부분집합. */ blocked: DesktopRuntime[]; /** story 4494: 이 컴퓨터에 깔렸지만 바닥보다 낮은 판뿐인 런타임(쓸 수 없음) — runtimes에 없는 것만. */ old?: OldRuntime[] }
+
+/** story 4494 (PO 10:00Z (a)): the app's `old=codex:0.153.4:0.156.1` — a runtime installed only below its floor (its version · the
+ * lowest that works). The page says «버전이 낮아» for it instead of «찾지 못했어요». */
+export interface OldRuntime { runtime: DesktopRuntime; version: string; min: string }
+const VERSION_RE = /^\d+\.\d+\.\d+$/;
+/** only when there is one — the parsed shape stays as before for every address without `old=` */
+const withOld = (old: OldRuntime[]): { old?: OldRuntime[] } => (old.length ? { old } : {});
+
+/** `old=` → each runtime at most once, in the fixed order. A broken entry (not three fields · an unknown runtime · a version that is
+ * not N.N.N · one that was also found) is dropped — the page then says what it said before. */
+export function parseOldRuntimes(value: string | null, found: readonly DesktopRuntime[]): OldRuntime[] {
+  const byRuntime = new Map<DesktopRuntime, OldRuntime>();
+  for (const part of (value ?? '').split(',')) {
+    const bits = part.trim().split(':');
+    if (bits.length !== 3) continue;
+    const [r, version, min] = bits as [string, string, string];
+    const runtime = DESKTOP_RUNTIMES.find((x) => x === r);
+    if (!runtime || found.includes(runtime) || byRuntime.has(runtime) || !VERSION_RE.test(version) || !VERSION_RE.test(min)) continue;
+    byRuntime.set(runtime, { runtime, version, min });
+  }
+  return DESKTOP_RUNTIMES.flatMap((r) => (byRuntime.has(r) ? [byRuntime.get(r)!] : []));
+}
 
 /** `?code=&runtimes=claude,codex` → 코드 · 런타임(모르는 값 버림 · 중복 제거 · 고정 순서). 코드가 없거나 틀리면 null
  * (= «데스크톱 앱에서 열어 주세요»). 런타임이 비어 있어도 코드가 맞으면 페이지는 열린다(실패 ① 화면). */
@@ -29,7 +51,7 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const setup = params.get('setup') ?? '';
   const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r));
   const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)) };
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)) };
 }
 
 export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime };
@@ -177,6 +199,7 @@ export function setupFragment(q: SetupQuery): string {
   const p = new URLSearchParams({ code: q.code, runtimes: q.runtimes.join(',') });
   if (q.setupId) p.set('setup', q.setupId);
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
+  if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
   return `#${p.toString().replace(/%2C/g, ',')}`;
 }
 

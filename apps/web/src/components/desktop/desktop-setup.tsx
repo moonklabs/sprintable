@@ -20,7 +20,7 @@ import { formatLocaleDate } from '@/lib/i18n';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
-  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow, withDefaultRecipeFirst } from '@/lib/desktop-setup';
 
 /**
@@ -168,7 +168,7 @@ type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { 
 
 function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [] }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[] }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -408,7 +408,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     const onReloadPage = view.failure === 'has-org'
       // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
       ? () => {
-        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked }));
+        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old }));
         window.location.reload();
       }
       : undefined;
@@ -416,7 +416,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       onChooseRecipe={view.failure === 'agent-limit' || view.failure === 'recipe-too-big' ? () => setView({ kind: 'choose' }) : undefined} />;
   }
   // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
-  if (runtimes.length === 0 && needsAnAgent(rows)) return <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
+  if (runtimes.length === 0 && needsAnAgent(rows)) {
+    // story 4494 (Yuna 10:11Z ⓐ): nothing usable, but installed below the floor — say that, not «찾지 못했어요»
+    return blocked.length === 0 && old.length > 0 ? <TooOldCard old={old} /> : <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
+  }
   if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} />;
   if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} />;
 
@@ -541,6 +544,12 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       <section aria-labelledby="setup-roles">
         <h2 id="setup-roles" className="text-sm font-medium">{t('rolesTitle')}</h2>
         <p className="text-xs text-muted-foreground">{t('found', { list: runtimes.map((r) => RUNTIME_LABEL[r]).join(' · ') || '—' })}</p>
+        {/* story 4494 (Yuna 10:11Z ⓑ): another runtime was found, this one is only below its floor — why it is not offered */}
+        {old.map((o) => (
+          <p key={o.runtime} className="text-xs text-muted-foreground" data-testid="setup-too-old-skipped">
+            {t('tooOld.skipped', { runtime: RUNTIME_LABEL[o.runtime], josa: pickEunNeunJosa(RUNTIME_LABEL[o.runtime]), version: o.version, min: o.min })}
+          </p>
+        ))}
         <ul className="mt-2 flex flex-col divide-y rounded-md border">
           {rows.map((r) => (
             <li key={r.role} className="flex items-center justify-between gap-3 p-3">
@@ -597,6 +606,23 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         {rateLine ? <p className="text-xs text-muted-foreground" data-testid="setup-rate-limited">{rateLine}</p>
           : view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
       </footer>
+    </Card>
+  );
+}
+
+/** story 4494 (Yuna 10:11Z ⓐ): the no-agent card's place and shape — one title and body per runtime that is only below its floor ·
+ * no install command to copy (it is installed) · «다시 찾기» as on the no-agent card. */
+export function TooOldCard({ old }: { old: OldRuntime[] }) {
+  const t = useTranslations('desktop.setup');
+  return (
+    <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-too-old">
+      {old.map((o) => (
+        <div key={o.runtime} className="flex flex-col gap-1">
+          <h1 className="text-lg font-semibold">{t('tooOld.title', { runtime: RUNTIME_LABEL[o.runtime], version: o.version })}</h1>
+          <p className="text-sm text-muted-foreground">{t('tooOld.body', { min: o.min })}</p>
+        </div>
+      ))}
+      <div className="flex gap-2"><Button asChild><a href={SETUP_APP_LINK}>{t('failure.no-agent.action')}</a></Button></div>
     </Card>
   );
 }
@@ -778,7 +804,7 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   }, [id]);
   if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
-  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */

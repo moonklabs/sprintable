@@ -6727,6 +6727,11 @@
         "placeholder": "프로젝트를 골라 주세요",
         "reason": "위에서 시작할 프로젝트를 골라 주세요"
       },
+      "tooOld": {
+        "title": "이 컴퓨터의 {runtime} 버전({version})이 낮아 쓸 수 없어요",
+        "body": "{min} 이상으로 업데이트한 뒤 다시 찾아 주세요.",
+        "skipped": "{runtime}{josa} 버전({version})이 낮아 쓰지 않아요 — {min} 이상이 필요해요"
+      },
       "invited": {
         "title": "초대받은 조직이 있어요",
         "row": "{org}에서 {role}{josa} 초대했어요 · {date}까지",
