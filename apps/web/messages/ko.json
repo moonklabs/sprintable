@@ -5944,6 +5944,7 @@
     "boostCancelled": "취소한 홍보예요 — 같은 글을 다시 요청하면 새로 시작해요.",
     "boostPreviousCycle": "지난 홍보 · {period} · 쓴 광고비 {amount}",
     "boostPausedApprovalGone": "승인이 풀려 홍보를 멈춰 두었어요 — 광고비는 나가지 않아요.",
+    "boostPausedCapReached": "쓴 광고비가 총예산({amount})에 닿아 홍보를 멈췄어요 — 더는 광고비가 나가지 않아요.",
     "boostPauseConnectionLost": "광고 계정 연결이 끊겨 홍보를 멈추지 못했어요 — 광고비가 계속 나갈 수 있으니 광고 관리자에서 직접 멈춰 주세요.",
     "boostPauseConnectionLostReconnect": "<link>연결 확인</link>",
     "boostNeedsCheckCreatedBudgetDiffers": "광고가 승인과 다른 예산({amount})으로 만들어져 시작하지 않았어요 — 광고는 꺼져 있어 광고비는 나가지 않아요.",

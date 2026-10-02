@@ -247,6 +247,16 @@ class AdsBoostSpendBlockedError(Exception):
         super().__init__(f"ads_boost spend is unreadable ({code}), cannot resume: {gate_id}")
 
 
+class AdsBoostCapReachedError(Exception):
+    """story #4486 — the boost was paused because its spend reached the approved total budget (`ads_boost_runs.cap_reached_at`,
+    this cycle): switching it on again would spend past what was approved until the next capture (up to a day). Refused; more
+    spend is a new request (a cancel, then a new cycle — `_reset_run` clears the cap)."""
+
+    def __init__(self, gate_id: uuid.UUID):
+        self.gate_id = gate_id
+        super().__init__(f"ads_boost reached its approved budget, cannot resume: {gate_id}")
+
+
 class AdsBoostNotPausedError(Exception):
     """되돌아갈 paused 상태가 없는데 resume을 요청(토글 이력 0 또는 최신 토글이 pause가
     아님)."""
@@ -359,8 +369,11 @@ async def _request_toggle(
         from app.models.ads_boost_run import AdsBoostRun
 
         blocked = (await db.execute(
-            select(AdsBoostRun.spend_blocked_at, AdsBoostRun.spend_blocked_code).where(AdsBoostRun.gate_id == gate.id)
+            select(AdsBoostRun.spend_blocked_at, AdsBoostRun.spend_blocked_code, AdsBoostRun.cap_reached_at)
+            .where(AdsBoostRun.gate_id == gate.id)
         )).first()
+        if blocked is not None and blocked[2] is not None:
+            raise AdsBoostCapReachedError(gate.id)  # story #4486 — the cap first (the server's reason order: cap · spend · approval)
         if blocked is not None and blocked[0] is not None:
             raise AdsBoostSpendBlockedError(gate.id, blocked[1])
 
@@ -806,6 +819,7 @@ async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, g
 ACCOUNT_CURRENCY_MISMATCH_CODE = "ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH"
 # story #4417 — a start/resume that reaches the worker after the run was blocked for an unreadable spend
 SPEND_BLOCKED_CODE = "ADS_BOOST_SPEND_BLOCKED"
+CAP_REACHED_CODE = "ADS_BOOST_CAP_REACHED"  # story #4486 — see the worker's check before a resume reaches the provider
 SEAL_REPLACED_CODE = "ADS_BOOST_SEAL_REPLACED"  # story #4447 — the command is of an older seal (see _resolve_execution_context)
 CREATED_BUDGET_DIFFERS_CODE = "ADS_BOOST_CREATED_BUDGET_DIFFERS"  # story #4458 — see _refuse_if_created_on_another_budget
 
@@ -858,6 +872,12 @@ async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationC
     try:
         # story #4417 (Qadir 01a0eb71 C) — a start or resume queued before the spend became unreadable: checked again when it
         # runs (the request-time check can't see a block that came later). Refused with the reason; nothing reaches Meta.
+        # story #4486 — the same for the cap: a resume queued before the cap was reached (or after, by another path) would switch
+        # the campaign on past the approved budget until the next capture (up to a day). Refused; nothing reaches the provider.
+        if command.operation == OP_RESUME and run.cap_reached_at is not None:
+            raise MetaAdsCampaignError(
+                CAP_REACHED_CODE, "spend reached the approved total budget — not switched on again", outcome_known=True,
+            )
         if command.operation in (OP_BOOST_START, OP_RESUME) and run.spend_blocked_at is not None:
             raise MetaAdsCampaignError(
                 SPEND_BLOCKED_CODE, f"spend can't be checked against the budget ({run.spend_blocked_code})", outcome_known=True,

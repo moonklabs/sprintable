@@ -27,6 +27,7 @@ from app.services.ads_boost_execution import (
     AdsBoostGateNotFoundError,
     AdsBoostNotPausedError,
     AdsBoostSpendBlockedError,
+    AdsBoostCapReachedError,
     AdsBoostNotStartedError,
     request_ads_boost_pause,
     request_ads_boost_resume,
@@ -246,6 +247,11 @@ async def _resume_ads_boost_endpoint(
         )
     except (AdsBoostGateNotFoundError, AdsBoostGateNotApprovedError) as exc:
         _raise_common_error(exc, resolved_locale)
+    except AdsBoostCapReachedError as exc:  # story #4486
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_CAP_REACHED", "message": t("ads_boost.cap_reached_no_resume", resolved_locale)},
+        ) from exc
     except AdsBoostSpendBlockedError as exc:
         raise HTTPException(
             status_code=409,
