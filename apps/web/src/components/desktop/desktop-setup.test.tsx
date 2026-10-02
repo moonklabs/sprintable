@@ -246,6 +246,25 @@ describe('[SID:4427] desktop setup page', () => {
     expect(window.location.hash).toBe('#section-2');
   });
 
+  it('[SID:4504] values that arrive in-page are kept even when another replace takes the # off the address before this page handles the change', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('데스크톱 앱에서 열어 주세요');
+    // the app puts `#code=…` in (same document) and, before the page's hashchange handler runs, the shell's `?p=` normalization
+    // replaces the address without it — the order a person met in the app (kindnessB 13:07:45Z · 4504 AC0)
+    await act(async () => {
+      const fired = new Promise<void>((r) => window.addEventListener('hashchange', () => r(), { once: true }));
+      window.location.hash = `code=${CODE}&setup=s-1&runtimes=claude`;
+      window.history.replaceState(null, '', '/desktop/setup?p=p-1');
+      await fired;
+    });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    expect(text()).not.toContain('데스크톱 앱에서 열어 주세요');
+    expect(window.location.href).not.toContain(CODE);
+  });
+
   it('when the router query changes (the shell adds ?p=), setup values back in the address are taken off again (dev 실측 15:31Z)', async () => {
     stub(() => new Response('{}'));
     sp.value = new URLSearchParams('');

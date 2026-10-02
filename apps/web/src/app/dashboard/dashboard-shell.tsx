@@ -384,7 +384,9 @@ export function useProjectSsot(
     if (pathProjectId || urlProjectId === effectiveProjectId) return;
     const sp = new URLSearchParams(Array.from(searchParams.entries()));
     sp.set('p', effectiveProjectId);
-    router.replace(`${pathname}?${sp.toString()}`);
+    // story 4504: keep the address `#` — a page that reads its values from there (the desktop setup's `#code=…`, put in by the app
+    // in the same document) would otherwise lose them when this replace lands before the page's `hashchange` handler runs.
+    router.replace(`${pathname}?${sp.toString()}${window.location.hash}`);
   }, [effectiveProjectId, urlProjectId, pathProjectId, pathname, searchParams, router]);
 
   return effectiveProjectId;

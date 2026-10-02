@@ -730,6 +730,12 @@ export function ToolsNotConnected({ onRetry, claude }: { onRetry: () => void; cl
  * 주소의 `#` 뒤에서 설정 값을 읽고 곧바로 주소에서 지운다(코드는 어떤 URL에도 남기지 않는다 — PO 09:45Z). 값은 이 컴포넌트의
  * 메모리에만 있다. 로그인을 거쳐 `#` 없이 돌아오면 데스크톱 앱이 값을 붙여 다시 연다(PO 09:58Z) — 웹은 맡아 두지 않는다.
  */
+/** The `#…` of an address (`#` included), or null when the address cannot be read. */
+function hashOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try { return new URL(url).hash; } catch { return null; }
+}
+
 /** `#progress=<setup id>` — the reload from «설정을 마쳤어요» (4429 ①): the setup id only, never a code. */
 export function progressFromFragment(hash: string): string | null {
   const id = new URLSearchParams(hash.replace(/^#/, '')).get('progress') ?? '';
@@ -760,9 +766,12 @@ export function DesktopSetupEntry() {
     // The values can also arrive AFTER this page is up: after an email login the desktop app reopens the same page with its `#`,
     // and that is a same-document fragment change, not a new load (dev 실측 15:24Z — the page showed «데스크톱 앱에서 열어 주세요»).
     // A newer code replaces an older one (the app restarted the setup).
-    const onHash = () => {
-      const q = parseSetupFragment(window.location.hash);
-      const progress = q ? null : progressFromFragment(window.location.hash);
+    // story 4504: the `#` this change brought, from the event — by the time the handler runs, another replace of the address (the
+    // shell's `?p=` normalization) may already have taken it off `location`.
+    const onHash = (e: HashChangeEvent) => {
+      const hash = hashOf(e.newURL) ?? window.location.hash;
+      const q = parseSetupFragment(hash);
+      const progress = q ? null : progressFromFragment(hash);
       if (!q && !progress) return;
       strip();
       setEntry({ query: q, progress });
