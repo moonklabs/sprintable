@@ -544,13 +544,17 @@ interface GateActivityLogItem {
   action: string;
   actor_id: string | null;
   actor_name: string | null;
+  /** story #4485 — human · agent · platform (BE ActivityLog.actor_type). An older server may not send it. */
+  actor_type?: string;
   context: Record<string, unknown>;
   created_at: string;
 }
 
 // action(BE ActivityLog.action 원문, gate_service.py) → i18n 키. 매핑에 없는 action은 원문 그대로
 // 폴백 렌더(신규 action 추가 시 이 화면이 죽는 대신 정직하게 raw string을 보여줌 — no-fiction).
-const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
+// story #4485 — every action the backend writes on a gate is listed in contracts/gate-activity-actions.json; the backend test keeps
+// that list equal to the code and gate-evidence.4485.test.ts keeps every one of them here with its ko/en label.
+export const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   gate_approved: 'gateActivityActionApproved',
   gate_rejected: 'gateActivityActionRejected',
   gate_resolution_undone: 'gateActivityActionUndone',
@@ -570,6 +574,13 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   // story #4262(유나 표) — newsletter_send_execution.py `_ACTIVITY_ACTION_SEND_*`가 남기는 액션. 원시 문자열이 그대로 보였다.
   newsletter_send_succeeded: 'gateActivityActionNewsletterSendSucceeded',
   newsletter_send_failed: 'gateActivityActionNewsletterSendFailed',
+  // story #4485 (Yuna 02:25Z) — written but never named here, so the history showed the raw key
+  gate_delegated: 'gateActivityActionDelegated',
+  gate_tossed: 'gateActivityActionTossed',
+  gate_discussion_requested: 'gateActivityActionDiscussionRequested',
+  approval_card_delivery_failed: 'gateActivityActionApprovalCardDeliveryFailed',
+  gate_held: 'gateActivityActionHeld',
+  gate_pending: 'gateActivityActionResumed',
 };
 
 // story #3806(Phase3·3-2 PR 14) — ads_boost_paused 한 action이 두 얼굴이다: 사람이
@@ -632,7 +643,9 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
   if (items === null) return null;
   // [SID:4311 PR 3] 활동 줄의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 줄 안에서만).
   // 이름 빔은 기존 폴백 그대로(story #2975) — 이 응답은 떠난 사람과 이름 없는 사람을 둘 다 null로 싣어(gates.py actor_name_map) 가를 수 없다.
-  const actorLabel = (item: GateActivityLogItem) => item.actor_name || t('gateActivityActorFallback');
+  // story #4485 — a row the server itself wrote (actor_type platform, no actor_id) is «시스템», in the same place as a person's name
+  const actorLabel = (item: GateActivityLogItem) =>
+    item.actor_name || (item.actor_type === 'platform' ? t('gateActivityActorSystem') : t('gateActivityActorFallback'));
   const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? actorLabel(item) : null })));
 
   return (

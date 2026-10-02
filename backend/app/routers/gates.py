@@ -2168,6 +2168,9 @@ class GateActivityItem(BaseModel):
     action: str
     actor_id: uuid.UUID | None
     actor_name: str | None = None
+    # story #4485 — who did it, as recorded (`ActivityLog.actor_type`: human · agent · platform — services/activity_log.py
+    # ActorType): a row the server itself wrote has no actor_id, and the web names it «시스템» rather than «알 수 없음».
+    actor_type: str
     context: dict
     created_at: datetime
 
@@ -2222,7 +2225,7 @@ async def list_gate_activity_endpoint(
     return [
         GateActivityItem(
             id=r.id, action=r.action, actor_id=r.actor_id,
-            actor_name=actor_name_map.get(r.actor_id) if r.actor_id else None,
+            actor_name=actor_name_map.get(r.actor_id) if r.actor_id else None, actor_type=r.actor_type,
             context=r.context, created_at=r.created_at,
         )
         for r in rows
