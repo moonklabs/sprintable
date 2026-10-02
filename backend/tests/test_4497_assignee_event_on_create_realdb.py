@@ -181,3 +181,73 @@ async def test_an_announcement_that_fails_on_a_db_write_still_answers_201_once(m
         assert await _assigned_events(Session, uuid.UUID(data["id"])) == []
     finally:
         await engine.dispose()
+
+
+async def _patch(Session, org_id, owner_id, path, payload):
+    from app.main import app
+
+    _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+    try:
+        async with _client_for(app) as client:
+            return await client.patch(path, json=payload)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _seq_fails(monkeypatch, *, times: int):
+    """The agent Event's seq step runs a failing SQL statement `times` times (a real DB error), then works again."""
+    from sqlalchemy import text
+
+    import app.services.event_seq as event_seq
+
+    real = event_seq.assign_recipient_seq
+    left = {"n": times}
+
+    async def maybe_broken(db, ev):
+        if left["n"] > 0:
+            left["n"] -= 1
+            await db.execute(text("SELECT 1/0"))
+        return await real(db, ev)
+
+    monkeypatch.setattr(event_seq, "assign_recipient_seq", maybe_broken)
+
+
+async def test_a_patch_whose_announcement_fails_still_answers_200_with_the_change(monkeypatch):
+    """PO 10:21Z — the same class on PATCH /{id}: the announcement's DB write fails → the committed assignee answers 200 (not a
+    500 disguising a saved change), no half-written story_assigned left."""
+    from sqlalchemy import select
+
+    from app.models.pm import Story
+
+    engine, Session, org_id, project_id, owner_id, _other, agent_id = await _seed()
+    try:
+        r = await _create(Session, org_id, project_id, owner_id)
+        story_id = r.json().get("data", r.json())["id"]
+        _seq_fails(monkeypatch, times=1)
+        r = await _patch(Session, org_id, owner_id, f"/api/v2/stories/{story_id}", {"assignee_id": str(agent_id)})
+        assert r.status_code == 200, r.text
+        async with Session() as s:
+            assert (await s.execute(select(Story.assignee_id).where(Story.id == uuid.UUID(story_id)))).scalar_one() == agent_id
+        assert await _assigned_events(Session, uuid.UUID(story_id)) == []
+    finally:
+        await engine.dispose()
+
+
+async def test_a_bulk_items_failed_announcement_does_not_stop_the_next_ones(monkeypatch):
+    """PO 10:21Z — PATCH /bulk: one item's announcement fails on a DB write → the next item is still announced (before, the
+    session stayed «needs rollback» and every later announcement failed too)."""
+    engine, Session, org_id, project_id, owner_id, _other, agent_id = await _seed()
+    try:
+        ids = []
+        for _ in range(2):
+            r = await _create(Session, org_id, project_id, owner_id)
+            ids.append(r.json().get("data", r.json())["id"])
+        _seq_fails(monkeypatch, times=1)  # the first item's announcement only
+        r = await _patch(Session, org_id, owner_id, "/api/v2/stories/bulk", {
+            "items": [{"id": i, "assignee_id": str(agent_id)} for i in ids],
+        })
+        assert r.status_code == 200, r.text
+        announced = [len(await _assigned_events(Session, uuid.UUID(i))) for i in ids]
+        assert sorted(announced) == [0, 1]  # one failed, the other still reached the agent
+    finally:
+        await engine.dispose()

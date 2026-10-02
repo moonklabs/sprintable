@@ -986,7 +986,8 @@ async def create_story(
         except Exception:
             logger.warning("assignee_changed at create failed (story=%s, the story is already committed)", story.id, exc_info=True)
             # PO 10:20Z — a failed write inside the announcement leaves the session needing a rollback: drop that half (the story
-            # is already committed), or the refresh below raises and the created story answers 500 (a retry would make it twice)
+            # is already committed), or the refresh below raises and the created story answers 500 (a retry would make it twice);
+            # the rollback expires the story — the refresh right below reloads it
             await session.rollback()
         # the response reads the story after these commits: reload it first (lint_commit_before_validate · story #2459 — prod hit
         # MissingGreenlet on a model_validate after a commit despite expire_on_commit=False; the transient fields set above stay)
@@ -2181,6 +2182,13 @@ async def bulk_update_stories(
                 logger.error(
                     "bulk assignee_changed emit 실패(story=%s)", s.id, exc_info=True,
                 )
+                # story #4497 (PO 10:21Z · the same class) — a failed write inside it left the session «needs rollback», so every
+                # later item's announcement failed too (the «one item must not block the rest» above did not hold). The writes
+                # are committed above; only this item's half-written announcement goes. A rollback expires every loaded object:
+                # the items still to announce are reloaded (only on this failure path).
+                await db.rollback()
+                for u in updated:
+                    await db.refresh(u)
     if response is not None:
         response.headers["X-Affected-Entities"] = str(len(updated))
     return results
@@ -2470,6 +2478,11 @@ async def update_story(
             logger.warning(
                 "assignee_changed 알림 발행 실패(story=%s, write는 이미 commit됨)", story.id, exc_info=True,
             )
+            # story #4497 (PO 10:21Z · the same class as create_story) — a failed write inside it left the session «needs
+            # rollback»; the refresh before the response then raised and the committed update answered 500. Drop that half —
+            # a rollback expires every loaded object, so the story is reloaded before the rest of this handler reads it.
+            await db.rollback()
+            await db.refresh(story)
 
     # story #2172 AC2 판정(오르테가군 지시 — "재정렬 전용 이벤트가 필요한지, 기존 것으로
     # 되는지 판단하고 근거 남길 것"): 신규 전용 event_type(`story.position_changed`)을 쓰되,
