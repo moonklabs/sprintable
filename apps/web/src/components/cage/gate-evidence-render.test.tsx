@@ -1467,6 +1467,7 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
   it.each([
     ['approval_gone', 'gateActivityActionAdsBoostAutoPausedApprovalGone'],
     ['spend_unreadable', 'gateActivityActionAdsBoostAutoPausedSpendUnreadable'],
+    ['cancelled', 'gateActivityActionAdsBoostAutoPausedCancelled'], // story #4460 — a cancel the scheduler finished
     [undefined, 'gateActivityActionAdsBoostAutoPaused'],
   ] as const)('a scheduler pause with reason %s reads %s, not the cap', async (reason, key) => {
     vi.mocked(fetchWithAuth).mockResolvedValue({
@@ -1488,6 +1489,32 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     expect(container.textContent).toContain(labels[key]);
     expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
     expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostPaused);
+  });
+
+  // story #4460 (Yuna 02:19Z · 02:20Z) — a cancel's row reads «홍보 취소», and an action the web does not know reads «기타 활동»: the
+  // row stays (an audit record) but its raw key is shown nowhere — not in the text, not in a title — only a console warning.
+  it('a cancel reads «홍보 취소»; an unknown action reads «기타 활동» with no raw key anywhere', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'log-1', action: 'ads_boost_cancelled', actor_id: 'm-1', actor_name: '미르코', context: { reason: '다른 예산으로' }, created_at: '2026-10-02T02:10:00Z' },
+        { id: 'log-2', action: 'some_future_action_4460', actor_id: 'm-1', actor_name: '미르코', context: {}, created_at: '2026-10-02T02:11:00Z' },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    const rows = [...container.querySelectorAll('li')].map((li) => li.textContent ?? '');
+    expect(rows[0]).toContain(koMessages.cage.gateActivityActionAdsBoostCancelled);
+    expect(rows[1]).toContain(koMessages.cage.gateActivityActionOther);
+    expect(container.innerHTML).not.toContain('ads_boost_cancelled');
+    expect(container.innerHTML).not.toContain('some_future_action_4460');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[gate-activity]'), ['some_future_action_4460']);
+    warn.mockRestore();
   });
 
   // story #3806(Phase3·3-2 PR 12) — 「눌렀는데 아무 일도 없었다」 결함 처방 — 형제

@@ -508,7 +508,11 @@ async def _campaign_connection_usable(db: AsyncSession, gate) -> bool:
 def _scheduler_pause_reason(run, gate) -> str | None:
     """story #4466 — why the scheduler paused: the cap (`cap_reached_at`) · the spend could not be checked (`spend_blocked_at`,
     4417) · the gate is no longer approved (4466). The scheduler's pauses come from exactly these (ads_spend_snapshots:
-    _follow_through_cap · _follow_through_block · _pause_if_off_approved)."""
+    _follow_through_cap · _follow_through_block · _pause_if_off_approved).
+    story #4460 (Yuna 02:20Z · PO) — a cancelled boost's gate is voided too, and when the person's fast pause failed the scheduler
+    stops it; that is the cancel, not a withdrawn approval: `cancelled` comes first."""
+    if run.cancel_requested_at is not None:
+        return "cancelled"
     if run.cap_reached_at is not None:
         return "cap_reached"
     if run.spend_blocked_at is not None:

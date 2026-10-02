@@ -431,6 +431,16 @@ async def test_a_failed_pause_request_after_the_cancel_still_answers_cancelling_
         assert [(p.initiated_by, p.status) for p in await _pauses(Session, gate_id)] == [("scheduler", "pending")]
         await _tick(Session)
         assert calls[-1] == ("PAUSED", campaign)
+        # Yuna 02:20Z · PO — the gate is voided by the cancel, but the history must not say «승인 풀림»: the reason is the cancel
+        from sqlalchemy import select
+
+        from app.models.activity_log import ActivityLog
+
+        async with Session() as s:
+            paused = (await s.execute(select(ActivityLog).where(
+                ActivityLog.entity_id == gate_id, ActivityLog.action == "ads_boost_paused",
+            ))).scalars().all()
+        assert [(x.context.get("initiated_by"), x.context.get("reason")) for x in paused] == [("scheduler", "cancelled")]
         cleared = await _run(Session, gate_id)
         assert (cleared.campaign_id, cleared.cancel_requested_at) == (None, None)
         [cycle] = await _cycles(Session, gate_id)
