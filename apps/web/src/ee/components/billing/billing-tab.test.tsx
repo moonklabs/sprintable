@@ -735,6 +735,13 @@ describe('[SID:4488] the money sentence says only what the server has proven', (
     expect(retry).toHaveLength(shown ? 1 : 0);
   });
 
+  it('unresolved before the alert is delivered says «알리고 있어요» · after, «알렸어요» — same shape, tense only (Yuna 04:05Z)', () => {
+    const pp = koMessages.pricingPlans;
+    expect(pp.paymentAttemptNoChargeUnresolved).toBe('하루 동안 다시 확인했지만 청구됐는지 확인하지 못해 담당자에게 알리고 있어요.');
+    expect(pp.paymentAttemptNoChargeUnresolvedNotified).toBe('하루 동안 다시 확인했지만 청구됐는지 확인하지 못해 담당자에게 알렸어요.');
+    expect(enMessages.pricingPlans.paymentAttemptNoChargeUnresolved).toBe("We checked again for a day but couldn't confirm whether you were charged, and we're letting our team know.");
+  });
+
   it('«결제 내역» / "Billing history" never break between the two words (a no-break space — Yuna 03:34Z)', () => {
     for (const msgs of [koMessages.pricingPlans, enMessages.pricingPlans]) {
       for (const k of ['paymentAttemptNoChargePending', 'paymentAttemptUnreadable'] as const) {
