@@ -803,6 +803,26 @@ async def resolve_member_display_name(
     return user.display_name if user else None
 
 
+async def conversation_member_ids_in_org(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+    org_id: uuid.UUID,
+    *where,
+) -> set[uuid.UUID]:
+    """story #4500 (AC2) — the participants a delivery may reach: only when the conversation is this org's, and of its
+    participants only this org's members (`filter_org_member_ids`, the rule 4497 checks assignees with). Participant rows are
+    org-checked at most writes, but not all (a config-named approver · a bridge mapping's conversation); the delivery must not
+    depend on that. `where`: extra conditions on ConversationParticipant (e.g. humans only)."""
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    ids = set((await session.execute(
+        select(ConversationParticipant.member_id)
+        .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id == conversation_id, Conversation.org_id == org_id, *where)
+    )).scalars().all())
+    return await filter_org_member_ids(ids, org_id, session) if ids else set()
+
+
 async def filter_org_member_ids(
     member_ids: set[uuid.UUID],
     org_id: uuid.UUID,

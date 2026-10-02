@@ -893,6 +893,8 @@ async def ack_event(
     # 이벤트(recipient_seq <= seq)를 같은 트랜잭션서 delivered 마킹해 cleanup 회수 대상이 되게
     # 한다. recipient_seq IS NOT NULL = agent SSE 이벤트만(human 이벤트는 seq 없음). status=
     # 'pending' 만 전이 → 이미 delivered/expired 는 무변경(idempotent·재-ack no-op).
+    from app.services.agent_verify import event_in_recipients_own_org
+
     await db.execute(
         update(Event)
         .where(
@@ -900,6 +902,8 @@ async def ack_event(
             Event.recipient_seq.isnot(None),
             Event.recipient_seq <= body.seq,
             Event.status == "pending",
+            # story #4500 (AC3): the agent's own org's events only — its ack never changes another org's rows
+            event_in_recipients_own_org(),
         )
         .values(status="delivered", delivered_at=datetime.now(timezone.utc))
     )
@@ -917,6 +921,7 @@ async def ack_event(
                 Event.recipient_seq.isnot(None),
                 Event.recipient_seq > prior_acked,
                 Event.recipient_seq <= body.seq,
+                event_in_recipients_own_org(),
             ).limit(1)
         )).first()
         if _verify_done:

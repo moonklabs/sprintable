@@ -36,6 +36,16 @@ from app.models.event import Event
 from app.models.member import AgentProjectProfile
 from app.services.event_seq import assign_recipient_seq
 
+
+def event_in_recipients_own_org():
+    """story #4500 (AC3) — «this event belongs to its recipient's own org»: a condition for reads and acks keyed by recipient
+    and seq. An event another org made with this member as its recipient (a write path that let it through) is not counted as
+    this agent's verify, nor marked delivered by its ack (4497 ② closed the inbox read the same way). Correlated on the member
+    (team_members fans out per project for a multi-project agent; the org is the same on every row)."""
+    from app.models.team import TeamMember
+
+    return Event.org_id.in_(select(TeamMember.org_id).where(TeamMember.id == Event.recipient_id))
+
 VERIFY_EVENT_TYPE = "onboarding.connection_test"
 # 6단계 canonical 레일(OB-3 1:1·OB-4 vocab 정합). config_copied 는 FE 권위(BE 는 waiting 부터 관측).
 RAIL_STATES = ("config_copied", "waiting", "mcp_reachable", "event_delivered", "ack", "verified")
@@ -204,6 +214,7 @@ async def get_verification_state(
             Event.recipient_id == agent_id,
             Event.event_type == VERIFY_EVENT_TYPE,
             Event.recipient_seq.isnot(None),
+            event_in_recipients_own_org(),
         ).order_by(desc(Event.recipient_seq)).limit(1)
     )).scalar_one_or_none()
 
@@ -245,6 +256,7 @@ async def get_verified_map(db: AsyncSession, agent_ids: list[uuid.UUID]) -> dict
             Event.recipient_id.in_(agent_ids),
             Event.event_type == VERIFY_EVENT_TYPE,
             Event.recipient_seq.isnot(None),
+            event_in_recipients_own_org(),
         ).group_by(Event.recipient_id)
     )).all()
     verify_seq_map = {row[0]: row[1] for row in verify_seq_rows}
