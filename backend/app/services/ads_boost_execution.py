@@ -1088,6 +1088,10 @@ async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationC
         # (scheduler 귀속 pause도 항상 사람 resolver_id로 채워져 있다 —
         # ads_boost_execution.py::request_ads_boost_pause 그대로) — human/scheduler
         # 구분은 actor가 아니라 context.initiated_by가 담당한다.
+        # story #4484 (PO 02:17Z · 06:56Z) — that recorded what the server did (a cap · approval · spend pause, a scheduled start)
+        # as done by a person (the approver or whoever started). The one place a command's activity is written: a command the
+        # scheduler sent is the platform's (actor_type «platform», no actor — activity_log.py's rule; the history says «시스템»,
+        # 4485) whatever path sent it; a person's press stays theirs. Rows written before stay as they were.
         from app.services.activity_log import ActivityLogService
 
         activity_context: dict = {"initiated_by": command.initiated_by or "human"}
@@ -1099,9 +1103,11 @@ async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationC
             reason = _scheduler_pause_reason(run, gate)
             if reason:
                 activity_context["reason"] = reason
+        by_scheduler = command.initiated_by == "scheduler"
         await ActivityLogService(db).record(
             org_id=command.org_id, action=_ACTIVITY_ACTION_BY_OP[command.operation],
-            actor_id=command.requested_by_member_id, actor_type="human",
+            actor_id=None if by_scheduler else command.requested_by_member_id,
+            actor_type="platform" if by_scheduler else "human",
             entity_type="gate", entity_id=gate.id, context=activity_context,
         )
 

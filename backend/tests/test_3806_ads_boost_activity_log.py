@@ -175,8 +175,9 @@ async def test_resume_execution_records_activity_log():
 async def test_scheduler_cap_pause_execution_records_activity_log_with_cap_reached_reason():
     """상한 도달 자동 중지(PR11, `_enforce_spend_cap`)가 만든 pause 명령이 실행되면
     `context.reason="cap_reached"`가 실려야 한다 — 사람이 누른 pause(위 두 테스트)와
-    구분되는 유일한 차이. actor는 여전히 사람(gate.resolver_id)이다."""
-    from app.models.gate import Gate
+    구분되는 유일한 차이.
+    story #4484 — the actor was the approver (gate.resolver_id) as a human: the server's pause recorded as a person's. That
+    assumption was wrong; a scheduler-sent command is now the platform's (actor_type «platform», no actor)."""
     from app.services.ads_spend_snapshots import process_due_ads_spend_snapshots
     from app.services.publication_command import process_due_publication_commands
     from tests.test_e4fc29fa_site_post_orchestration import _session_factory
@@ -198,12 +199,10 @@ async def test_scheduler_cap_pause_execution_records_activity_log_with_cap_reach
         assert counts["completed"] == 1, counts  # 방금 만들어진 scheduler pause 명령.
 
         async with Session() as s:
-            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
-            resolver_org_member_id = gate.resolver_id
             log = await _activity_log(s, gate_id=gate_id, action="ads_boost_paused")
         assert log is not None
-        assert log.actor_id == resolver_org_member_id
-        assert log.actor_type == "human"
+        assert log.actor_id is None
+        assert log.actor_type == "platform"
         assert log.context == {"initiated_by": "scheduler", "reason": "cap_reached"}
     finally:
         await engine.dispose()

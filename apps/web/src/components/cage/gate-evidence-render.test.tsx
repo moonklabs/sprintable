@@ -1459,7 +1459,8 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
 
     expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
-    expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostPaused);
+    // story #4484 (Yuna 02:20Z) — the scheduler's label now starts with the person's «홍보 중지» on purpose («홍보 중지(까닭)»);
+    // the actor («시스템») tells them apart, so the old «does not contain the person's label» check no longer applies
   });
 
   // story #4466 (PO 17:07Z · Yuna 17:09Z) — a scheduler pause says why it fired: the approval withdrawn · the spend could not be
@@ -1488,7 +1489,8 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     const labels = koMessages.cage as Record<string, string>;
     expect(container.textContent).toContain(labels[key]);
     expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
-    expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostPaused);
+    // story #4484 (Yuna 02:20Z) — the scheduler's label now starts with the person's «홍보 중지» on purpose («홍보 중지(까닭)»);
+    // the actor («시스템») tells them apart, so the old «does not contain the person's label» check no longer applies
   });
 
   // story #4460 (Yuna 02:19Z · 02:20Z) — a cancel's row reads «홍보 취소», and an action the web does not know reads «기타 활동»: the
@@ -1515,6 +1517,33 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     expect(container.innerHTML).not.toContain('some_future_action_4460');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('[gate-activity]'), ['some_future_action_4460']);
     warn.mockRestore();
+  });
+
+  // story #4484 (Yuna 02:20Z) — what the scheduler did reads as the system's: «시스템 · 홍보 시작(시작일 도달)» for the start on the
+  // sealed start date and «시스템 · 홍보 중지(까닭)» for its pauses (the server records them actor_type platform, no actor)
+  it('a scheduled start and a scheduler pause read «시스템» with their reason', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'log-1', action: 'ads_boost_started', actor_id: null, actor_name: null, actor_type: 'platform', context: { initiated_by: 'scheduler' }, created_at: '2026-10-02T03:00:00Z' },
+        { id: 'log-2', action: 'ads_boost_paused', actor_id: null, actor_name: null, actor_type: 'platform', context: { initiated_by: 'scheduler', reason: 'cap_reached' }, created_at: '2026-10-02T04:00:00Z' },
+        { id: 'log-3', action: 'ads_boost_started', actor_id: 'm-1', actor_name: '미르코', actor_type: 'human', context: { initiated_by: 'human' }, created_at: '2026-10-02T05:00:00Z' },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    const rows = [...container.querySelectorAll('li')].map((li) => li.textContent ?? '');
+    expect(rows[0]).toContain(koMessages.cage.gateActivityActorSystem);
+    expect(rows[0]).toContain(koMessages.cage.gateActivityActionAdsBoostAutoStarted);
+    expect(rows[1]).toContain(koMessages.cage.gateActivityActorSystem);
+    expect(rows[1]).toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
+    expect(rows[2]).toContain('미르코');
+    expect(rows[2]).toContain(koMessages.cage.gateActivityActionAdsBoostStarted);
+    expect(rows[2]).not.toContain(koMessages.cage.gateActivityActionAdsBoostAutoStarted);
   });
 
   // story #3806(Phase3·3-2 PR 12) — 「눌렀는데 아무 일도 없었다」 결함 처방 — 형제
