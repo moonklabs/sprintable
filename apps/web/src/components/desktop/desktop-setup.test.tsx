@@ -968,6 +968,60 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(text()).toContain('에이전트를 준비했어요');
   });
 
+  // story 4498 (Qadir 10:43 · PO 10:50Z · Yuna 10:51Z): a setup disconnected from the devices list answers 200 «disconnected» —
+  // the page took it for «not handed over yet» and asked every 2 s forever, its «설정 진행 중» mark kept
+  it('[SID:4498] disconnected before the result → the end card, reading stops, the «설정 진행 중» mark is cleared', async () => {
+    const { activeSetupId } = await import('@/lib/desktop-setup');
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: 'x' });
+    await startSetup();
+    expect(activeSetupId()).toBe(SETUP_ID);
+    // no result yet: only «disconnected» can clear the mark here (a result clears it on its own)
+    statusNow = () => status('disconnected', { tools_connected: [{ member_id: 'm1', at: 'x' }], first_task_handed_at: 'x' });
+    await tick(2_000);
+    expect(text()).toContain('이 기기는 연결이 끊겼어요');
+    expect(text()).toContain('다시 쓰려면 앱에서 다시 시작해 주세요.');
+    expect(text()).not.toContain('첫 결과가 나왔어요');
+    expect(container.querySelector('ol > li[data-state]')).toBeNull();
+    expect(text()).not.toMatch(/떠나도|이어져요/); // no «the setup goes on» line — nothing goes on
+    const app = [...container.querySelectorAll('a')].find((a) => a.textContent === '앱에서 다시 시작') as HTMLAnchorElement;
+    expect(app.getAttribute('href')).toBe(SETUP_APP_LINK);
+    expect(wayOut()?.getAttribute('href')).toBe(TODAY_HREF);
+    expect(activeSetupId()).toBeNull();
+    const ended = polls();
+    await tick(60_000);
+    expect(polls()).toBe(ended); // an end: no more reading
+  });
+
+  it('[SID:4498] disconnected after the first result: the end card, nothing drawn «done» (nothing continues)', async () => {
+    const both = [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }];
+    statusNow = () => status('handed_over', { tools_connected: both, first_task_handed_at: 'x', first_result_at: 'y' });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(text()).toContain('첫 결과가 나왔어요');
+    statusNow = () => status('disconnected', { tools_connected: both, first_task_handed_at: 'x', first_result_at: 'y' });
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(text()).toContain('이 기기는 연결이 끊겼어요');
+    expect(text()).not.toContain('첫 결과가 나왔어요');
+    expect(container.querySelector('ol > li[data-state]')).toBeNull();
+  });
+
+  it('[SID:4498] opened again at its address (code + setup), a disconnected setup shows the same end card at once', async () => {
+    statusNow = () => status('disconnected');
+    stub(() => new Response('{}', { status: 200 }));
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=${SETUP_ID}&runtimes=claude`);
+    await mount(<DesktopSetupEntry />);
+    await tick(0);
+    await tick(0);
+    expect(text()).toContain('이 기기는 연결이 끊겼어요');
+    expect(text()).not.toContain('에이전트를 준비하고 있어요');
+    const ended = polls();
+    await tick(10_000);
+    expect(polls()).toBe(ended);
+  });
+
   it('blocked after start → ⑥ · the code ran out before the app took it → ④', async () => {
     statusNow = () => status('handed_over', { blocked: { at: 'x', reason: 'managed_mcp' } });
     await startSetup();
