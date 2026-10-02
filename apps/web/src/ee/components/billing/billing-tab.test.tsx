@@ -5,6 +5,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
 import { BillingTab, PackPurchaseDialog, UpgradeCheckoutDialog } from './billing-tab';
+// story #4488 (Kadir 4901 ②) — the backend's real 404 body for «no such attempt» (backend/tests/test_4488_no_charge_confirmed.py renders it)
+import ATTEMPT_NOT_FOUND_BODY from '../../../../../../contracts/billing-attempt-not-found.json';
 
 const replaceMock = vi.fn();
 let searchParams = new URLSearchParams();
@@ -371,7 +373,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
     try {
       searchParams = new URLSearchParams(RETURN);
       completeCheckoutMock.mockResolvedValue({ kind: 'unreached' });
-      attemptResponses = [{ ok: false, status: 404, json: async () => ({ detail: 'payment attempt not found' }) }];
+      attemptResponses = [{ ok: false, status: 404, json: async () => structuredClone(ATTEMPT_NOT_FOUND_BODY) }];
       await mount(async () => statusResponse());
       expect(container.querySelector('[data-payment-attempt-state="checking"]')).not.toBeNull();
       expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
@@ -423,7 +425,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
     vi.useFakeTimers();
     try {
       window.localStorage.setItem('sprintable.billing.paymentAttempt:org-1', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
-      attemptResponses = [{ ok: false, status: 404, json: async () => ({ detail: 'payment attempt not found' }) }];
+      attemptResponses = [{ ok: false, status: 404, json: async () => structuredClone(ATTEMPT_NOT_FOUND_BODY) }];
       await mount(async () => statusResponse({ tier: 'starter' }));
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
       const alertEl = container.querySelector('[data-payment-attempt-state="not-started"]');
@@ -702,7 +704,7 @@ describe('[SID:4488] the money sentence says only what the server has proven', (
     vi.useFakeTimers();
     try {
       window.localStorage.setItem(`${KEY}:org-1`, JSON.stringify({ id: 'att-9', kind: 'checkout' }));
-      attemptResponses = [{ ok: false, status: 404, json: async () => ({ detail: 'Not Found' }) }, attemptResponse(attempt({ status: 'succeeded' }))];
+      attemptResponses = [{ ok: false, status: 404, json: async () => ({ data: null, error: { code: 'NOT_FOUND', message: 'Not Found' }, meta: null }) }, attemptResponse(attempt({ status: 'succeeded' }))];
       await mount(async () => statusResponse());
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
       const alertEl = container.querySelector('[data-payment-attempt-state="unreadable"]');

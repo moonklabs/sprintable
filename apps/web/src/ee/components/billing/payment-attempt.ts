@@ -45,8 +45,10 @@ export type AttemptResult =
   | { kind: 'unreadable' }
   | { kind: 'unreached' };
 
-/** The attempt handler's own 404 body (backend routers/org_subscription_checkout.py — `AttemptNotFound`). */
-export const ATTEMPT_NOT_FOUND_DETAIL = 'payment attempt not found';
+/** The attempt handler's own 404 (backend routers/org_subscription_checkout.py `AttemptNotFound` → HTTPException(404) → main.py
+ * `http_exception_handler` envelope `{data: null, error: {code, message}, meta: null}`; the BFF passes it through). The exact body
+ * is contracts/billing-attempt-not-found.json — the backend test renders it with the real handler, the web tests read the same file. */
+export const ATTEMPT_NOT_FOUND = { code: 'NOT_FOUND', message: 'payment attempt not found' } as const;
 
 export function newAttemptId(): string {
   return crypto.randomUUID();
@@ -56,8 +58,9 @@ async function readAttempt(res: Response): Promise<AttemptResult> {
   // story #4488 — «시도 없음» (= nothing was started, nothing charged) only from the attempt handler itself; any other 404 says
   // nothing about this payment, so it is «cannot read», never «청구 0»
   if (res.status === 404) {
-    const detail = await res.json().then((j: { detail?: unknown }) => j?.detail, () => undefined);
-    return detail === ATTEMPT_NOT_FOUND_DETAIL ? { kind: 'notFound' } : { kind: 'unreadable' };
+    const error = await res.json().then((j: { error?: { code?: unknown; message?: unknown } }) => j?.error, () => undefined);
+    const ours = error?.code === ATTEMPT_NOT_FOUND.code && error?.message === ATTEMPT_NOT_FOUND.message;
+    return ours ? { kind: 'notFound' } : { kind: 'unreadable' };
   }
   // PO 04:08Z «결과 모름 = 비종결» — 404 밖 non-OK(400 · 401 · 408 · 409 · 429 · 5xx 전부)는 «거절 · 청구 0»이 아니라 조회로 넘긴다.
   // «청구 0» 안심 문구는 서버가 확정한 결과(Toss 거절 declined · 청구 0이 증명된 failed)나 조회가 «시도 없음(404)»일 때만.
