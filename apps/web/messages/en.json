@@ -6673,9 +6673,10 @@
       "stepResultRunning": "Waiting for the first result",
       "stepResultDone": "The first result is in",
       "workdirFallback": "We couldn't use the folder you chose, so we started in the default folder (~/Sprintable/{recipe}) — the working folder needs to be a folder inside your home folder",
-      "trustHint": "Claude Code asks whether to trust the working folder the first time. Select that agent in the «Agents on this computer» bar at the bottom of the window, then in its terminal use the arrow keys to put ❯ on \"Yes, I trust this folder\" and press Enter — Enter on \"No, exit\" quits the agent.",
+      "trustHint": "In «Agents on this computer» at the bottom of the window, click the «Started» row and answer what the terminal asks — it carries on from there.",
       "seeResult": "See the result",
-      "seeResultReason": "Once the result is in, this takes you to the task",
+      "goToday": "Go to Today",
+      "wayOutNote": "You can leave — setup continues on this computer, and the first result will be in Work.",
       "stopped": "{count, plural, one {The {roles} agent stopped} other {The {roles} agents stopped}} — select it in the «Agents on this computer» bar at the bottom of the window and press Start again.",
       "stoppedTrust": "It may ask again whether to trust the working folder — if it does, use the arrow keys to put ❯ on \"Yes, I trust this folder\", then Enter.",
       "startFailed": {

@@ -12,6 +12,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { endsWithAgentWord, forgetActiveSetup, rememberActiveSetup, setupPollDelayMs, setupProgress, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepState } from '@/lib/desktop-setup';
 import { Failure, ToolsNotConnected } from './desktop-setup';
 
@@ -25,7 +26,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   const locale = useLocale();
   const tOrg = useTranslations('organization');
   const tPreset = useTranslations('recipePreset');
-  const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
+  const { orgId, orgMemberships, currentProjectSlug, navV3Flags } = useDashboardContext();
   const flatHref = useFlatHref();
   // one reading: the status, when it was read, and when this page first saw «handed_over» (the status carries no such time)
   const [snap, setSnap] = useState<{ status: SetupStatus; at: number; handedOverSeenAt: number | null } | null>(null);
@@ -109,6 +110,9 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
     ? storyBoardUrl(orgSlug, currentProjectSlug, status.work_item_id)
     : status.work_item_id ? flatHref(`/flow?story=${status.work_item_id}`) : null;
   const resultReady = progress.result === 'done' && !!resultHref;
+  // story 4492 — «오늘» from the one destination module (no literal path). An org-less person on this page has no dashboard
+  // shell (no flags in the context) — the default flags then, the same as the shell's own default.
+  const todayHref = flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path);
 
   return (
     <Card className="break-keep flex flex-col gap-4 p-6">
@@ -203,10 +207,17 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         </div>
       ) : null}
       <footer className="flex flex-col gap-1">
-        {resultReady
-          ? <div><Button asChild><a href={resultHref!}>{t('seeResult')}</a></Button></div>
-          : <div><Button disabled>{t('seeResult')}</Button></div>}
-        {!resultReady ? <p className="text-xs text-muted-foreground">{t('seeResultReason')}</p> : null}
+        {/* story 4492 (PO 06:40Z · Yuna 06:41Z): one way out, always — next to «결과 보기» (that one stays the main button). The setup
+            goes on in the app (this page only reads its status); the app's «결과 보기» (#progress=) brings the person back here.
+            The line replaces «결과가 나오면 …» (both would say «일감» twice). Words follow nav.zoneNow («오늘» · "Today") and
+            nav.zoneDev («일감» · "Work") — change these with them. */}
+        <div className="flex flex-wrap gap-2" data-testid="setup-way-out">
+          {resultReady
+            ? <Button asChild><a href={resultHref!}>{t('seeResult')}</a></Button>
+            : <Button disabled>{t('seeResult')}</Button>}
+          <Button asChild variant="outline"><a href={todayHref}>{t('goToday')}</a></Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{t('wayOutNote')}</p>
       </footer>
     </Card>
   );

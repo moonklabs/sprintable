@@ -16,6 +16,7 @@ vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next
 import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -519,6 +520,10 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
   };
   const polls = () => calls.filter((c) => c.url.includes('/api/desktop/setups/')).length;
   const resultButton = () => [...container.querySelectorAll('a, button')].find((b) => b.textContent === '결과 보기') as HTMLElement;
+  // story 4492 — «오늘로 가기»: its destination comes from the one destination module (no literal path)
+  const wayOut = () => [...container.querySelectorAll('a')].find((b) => b.textContent === '오늘로 가기') ?? null;
+  // flat links carry the tab's project (useFlatHref) — the same as the page's other flat links
+  const TODAY_HREF = `${resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS).today.path}?p=p-1`;
 
   // PO 10:39Z ① (Mirko's probe) — a platform preset is named on the progress screen as the list names it (its translation by
   // key), not by the stored name: «3단계 칸반», not «칸반 심플» — also when the page is opened again (no name from the list)
@@ -854,7 +859,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(container.querySelectorAll('ol .animate-spin').length).toBe(2);
   });
 
-  it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
+  it('the three steps · the trust note only between handed over and connected · «결과 보기» off until the result · the way out always (story 4492)', async () => {
     statusNow = () => status('waiting_for_app');
     await startSetup();
     expect(container.querySelector('h1')?.textContent).toBe('에이전트를 시작하고 있어요');
@@ -862,11 +867,16 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
     expect((resultButton() as HTMLButtonElement).disabled).toBe(true);
-    expect(text()).toContain('결과가 나오면 눌러서 일감으로 가요');
+    // story 4492 (Yuna 06:41Z): one line under the buttons — it replaces «결과가 나오면 …» (both would say «일감» twice)
+    expect(text()).toContain('떠나도 설정은 이 컴퓨터에서 이어져요 — 첫 결과는 일감에서 볼 수 있어요.');
+    expect(text()).not.toContain('결과가 나오면');
+    expect(wayOut()?.getAttribute('href')).toBe(TODAY_HREF);
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
     await tick(2_000);
-    expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toBe('Claude Code는 처음 켤 때 작업 폴더를 믿을지 물어요. 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널을 열고, 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요 — «No, exit»에서 Enter면 에이전트가 꺼져요.');
+    // story 4492 (Yuna 06:41Z): what to do, where — no agent name, no guess (the board line below says which)
+    expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toBe('창 아래 «이 컴퓨터의 에이전트»에서 «시작됨» 줄을 눌러, 터미널이 묻는 것에 답하면 이어져요.');
+    expect(wayOut()?.getAttribute('href')).toBe(TODAY_HREF);
     expect(container.querySelectorAll('ol > li').length).toBe(3); // the note is inside ②'s item: still three steps for a screen reader
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], workdir_fallback_at: 'x' });
@@ -883,7 +893,11 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(text()).toContain('첫 결과가 나왔어요');
     expect(container.querySelector('h1')?.textContent).toBe('에이전트를 시작했어요');
     expect(resultButton().getAttribute('href')).toBe('/o/proj/flow?story=w-1');
-    expect(text()).not.toContain('결과가 나오면 눌러서 일감으로 가요');
+    expect(text()).not.toContain('결과가 나오면');
+    expect(text()).toContain('떠나도 설정은 이 컴퓨터에서 이어져요 — 첫 결과는 일감에서 볼 수 있어요.');
+    // the way out stays next to «결과 보기» (that one is the main button, first)
+    const row = container.querySelector('[data-testid=setup-way-out]');
+    expect([...(row?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '오늘로 가기']);
     const n = polls();
     await tick(10_000);
     expect(polls()).toBe(n); // stops once the result is in
