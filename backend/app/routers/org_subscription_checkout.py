@@ -81,9 +81,12 @@ class PaymentAttemptResponse(BaseModel):
     # story #4341 — 이 시도에 대한 운영 알림이 운영 대화에 **실제로 전달된** 가장 이른 시각(ISO). 없으면 None — 화면의 «담당자에게
     # 알렸어요» · 환불 실패 연락 줄은 이 값이 있을 때만 켠다. 재시도가 늦게 전달해도 이 값이 따라온다(operator_alerts에서 읽음).
     operator_notified_at: str | None = None
-    # story #4488 — «청구된 금액은 없어요»를 말해도 되는가: 청구 없이 끝났고(declined · failed) 청구 시작 흔적이 없거나 다시 조회하는 창
-    # (`RECHECK_WINDOW`)이 끝났을 때만 참. 거짓인 실패 · 거절은 화면이 «한 번 더 확인하고 있어요»를 말한다(모름 = 비종결).
-    no_charge_confirmed: bool = False
+    # story #4488 — «청구» sentence for an attempt that ended without a charge (declined · failed): `confirmed` (proven —
+    # «청구된 금액은 없어요») · `checking` (the 24 h recheck is still running) · `unresolved` (it closed without a proof). None otherwise.
+    no_charge: Literal["confirmed", "checking", "unresolved"] | None = None
+    # story #4488 — `unresolved` only: when the «no definite answer within the window» alert (recheck_window_closed) reached the
+    # operators (ISO). `operator_notified_at` cannot tell it — other alert kinds of the attempt set it too.
+    unresolved_notified_at: str | None = None
     subscription: CheckoutResponse | None = None
 
 
@@ -97,17 +100,19 @@ async def _attempt_response(session: AsyncSession, attempt: BillingPaymentAttemp
         ).scalar_one_or_none()
         subscription = _to_response(sub) if sub is not None else None
     notified_at = await _operator_notified_at(session, attempt.id)
+    no_charge = attempts.no_charge_state(attempt)
+    unresolved_at = await _operator_notified_at(session, attempt.id, events=("recheck_window_closed",)) if no_charge == "unresolved" else None
     return PaymentAttemptResponse(
         attempt_id=attempt.id, kind=attempt.kind, status=attempt.status, tier=attempt.tier,
         billing_cycle=attempt.billing_cycle,
         declined_reason=attempt.reason if attempt.status == "declined" else None,
         reauth_required=attempt.reauth_required, refund_status=attempt.refund_status,
         operator_notified_at=notified_at.isoformat() if notified_at else None,
-        no_charge_confirmed=attempts.no_charge_confirmed(attempt, attempts._now()), subscription=subscription,
+        no_charge=no_charge, unresolved_notified_at=unresolved_at.isoformat() if unresolved_at else None, subscription=subscription,
     )
 
 
-async def _operator_notified_at(session: AsyncSession, attempt_id: uuid.UUID):
+async def _operator_notified_at(session: AsyncSession, attempt_id: uuid.UUID, *, events: tuple[str, ...] | None = None):
     """story #4341 — 사실 칸 한 곳: 운영 알림 표의 전달 시각에서 읽는다(시도 행에 따로 적으면 재시도 전달 때 두 값이 어긋난다)."""
     from sqlalchemy import func
 
@@ -116,7 +121,7 @@ async def _operator_notified_at(session: AsyncSession, attempt_id: uuid.UUID):
 
     return (await session.execute(
         select(func.min(OperatorAlert.delivered_at)).where(
-            OperatorAlert.dedupe_key.in_([billing_alert_dedupe_key(e, attempt_id) for e in BILLING_ALERT_EVENTS]),
+            OperatorAlert.dedupe_key.in_([billing_alert_dedupe_key(e, attempt_id) for e in (events or BILLING_ALERT_EVENTS)]),
             OperatorAlert.status == "delivered",
         )
     )).scalar_one_or_none()

@@ -89,16 +89,16 @@ UNKNOWN_OUTCOME_STATUSES = frozenset({408, 409, 429})
 TOSS_ENDED_STATUSES = frozenset({"ABORTED", "EXPIRED", "CANCELED"})
 
 
-def no_charge_confirmed(attempt, now: datetime) -> bool:
-    """story #4488 — «청구된 금액은 없어요»를 말해도 되는가. 청구 없이 끝난 시도(declined · failed)라도 청구를 **시작한 흔적**이 있으면
-    `_finish`가 `RECHECK_WINDOW` 동안 다시 조회한다(뒤늦은 Toss DONE → 늦은 성공 · 환불 길) — 그 창이 끝나기 전엔 아직 증명 전.
-    그 밖의 상태(processing · succeeded · voided)는 «청구 0»을 말할 자리가 아니다(False)."""
+def no_charge_state(attempt) -> str | None:
+    """story #4488 (PO · Yuna 03:34Z) — what the screen may say about «청구» for an attempt that ended without a charge:
+    `confirmed` (proven — `no_charge_proven_at`) · `checking` (the recheck window is open — `next_check_at`) · `unresolved` (the
+    window closed without a proof: no definite answer, or a worker that stopped between closing and asking). None for any other
+    state (processing · succeeded · voided) — no «청구» sentence there."""
     if attempt.status not in ("declined", "failed"):
-        return False
-    if attempt.charge_started_at is None:
-        return True
-    finished = attempt.finished_at
-    return finished is not None and now >= finished + RECHECK_WINDOW
+        return None
+    if attempt.no_charge_proven_at is not None:
+        return "confirmed"
+    return "checking" if attempt.next_check_at is not None else "unresolved"
 
 
 class AttemptNotFound(Exception):
@@ -484,6 +484,8 @@ async def _finish(
     attempt.finished_at = now
     attempt.lease_token = None
     attempt.next_check_at = _next_check(now, now) if attempt.charge_started_at is not None else None
+    # story #4488 — no charge was ever started: «nothing was charged» is proven now; a started one waits for the recheck's answer
+    attempt.no_charge_proven_at = now if attempt.charge_started_at is None else None
     if attempt.claim_value is not None:
         await checkout_svc.release_claim(session, org_id=attempt.org_id, claim_value=attempt.claim_value, commit=False)
     await session.commit()
@@ -922,6 +924,14 @@ async def recheck_ended_attempt(session: AsyncSession, attempt_id: uuid.UUID) ->
             await _late_confirmed(session, attempt_id)
         return "late"
     answered = not_found or (lookup is not None and lookup.get("status") in TOSS_ENDED_STATUSES)
+    if closing and answered:
+        # story #4488 — the window's last answer was a definite «no payment»: «nothing was charged» is proven (only if still ended)
+        await session.execute(
+            update(BillingPaymentAttempt)
+            .where(BillingPaymentAttempt.id == attempt_id, BillingPaymentAttempt.status.in_(("failed", "declined")))
+            .values(no_charge_proven_at=_now())
+        )
+        await session.commit()
     if closing and not answered:
         await _alert(
             "recheck_window_closed", attempt_id, f"order {attempt.order_id}: no definite Toss answer within {RECHECK_WINDOW}",

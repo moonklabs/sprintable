@@ -31,9 +31,11 @@ export interface PaymentAttempt {
   refund_status?: PaymentAttemptRefundStatus | null;
   /** story #4341 — 이 시도에 대한 운영 알림이 운영 대화에 **실제로 전달된** 시각(ISO). 없으면 아직 아무에게도 안 갔다. */
   operator_notified_at?: string | null;
-  /** story #4488 — the server has proven nothing was charged (declined · failed, with no charge started or past the recheck
-   * window). Only then may the screen say «청구된 금액은 없어요». Absent (an older server) = not proven. */
-  no_charge_confirmed?: boolean;
+  /** story #4488 — for declined · failed: `confirmed` (proven — «청구된 금액은 없어요») · `checking` (the server rechecks for up to a
+   * day) · `unresolved` (it stopped without a proof). Absent (an older server) = not proven: never «청구 0». */
+  no_charge?: 'confirmed' | 'checking' | 'unresolved' | null;
+  /** story #4488 — `unresolved` only: when the «no answer within a day» alert reached our team (ISO). */
+  unresolved_notified_at?: string | null;
   subscription: PaymentAttemptSubscription | null;
 }
 

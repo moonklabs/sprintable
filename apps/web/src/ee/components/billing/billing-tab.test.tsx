@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
+import enMessages from '../../../../messages/en.json';
 import { BillingTab, PackPurchaseDialog, UpgradeCheckoutDialog } from './billing-tab';
 // story #4488 (Kadir 4901 ②) — the backend's real 404 body for «no such attempt» (backend/tests/test_4488_no_charge_confirmed.py renders it)
 import ATTEMPT_NOT_FOUND_BODY from '../../../../../../contracts/billing-attempt-not-found.json';
@@ -69,12 +70,12 @@ function platformSettingsResponse(overrides: Partial<{ billing_price_public: boo
 let attemptResponses: Array<unknown> = [];
 const attemptFetchUrls: string[] = [];
 
-function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean; refund_status: string | null; operator_notified_at: string | null; no_charge_confirmed: boolean }> = {}) {
+function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean; refund_status: string | null; operator_notified_at: string | null; no_charge: 'confirmed' | 'checking' | 'unresolved' | null; unresolved_notified_at: string | null }> = {}) {
   return {
     attempt_id: 'att-1', kind: overrides.kind ?? 'checkout', status: overrides.status ?? 'processing', tier: overrides.tier ?? 'team',
     billing_cycle: 'monthly', declined_reason: overrides.declined_reason ?? null, reauth_required: overrides.reauth_required ?? false,
     refund_status: overrides.refund_status ?? null, operator_notified_at: overrides.operator_notified_at ?? null,
-    no_charge_confirmed: overrides.no_charge_confirmed ?? false, subscription: null,
+    no_charge: overrides.no_charge ?? null, unresolved_notified_at: overrides.unresolved_notified_at ?? null, subscription: null,
   };
 }
 
@@ -285,7 +286,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
 
   it('거절 → 경고색 · 거절 문장 + 카드사 안내 줄 + «청구된 금액은 없어요»', async () => {
     searchParams = new URLSearchParams({ ...RETURN, tier: 'starter', cycle: 'annual' });
-    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'declined', tier: 'starter', declined_reason: '한도초과', no_charge_confirmed: true }) });
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'declined', tier: 'starter', declined_reason: '한도초과', no_charge: 'confirmed' }) });
     await mount(async () => statusResponse());
 
     const alertEl = container.querySelector('[data-payment-attempt-state="declined"]');
@@ -459,7 +460,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
     vi.useFakeTimers();
     try {
       window.localStorage.setItem('sprintable.billing.paymentAttempt:org-1', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
-      attemptResponses = [attemptResponse(attempt({ status: 'failed', kind: 'change_tier', no_charge_confirmed: true }))];
+      attemptResponses = [attemptResponse(attempt({ status: 'failed', kind: 'change_tier', no_charge: 'confirmed' }))];
       await mount(async () => statusResponse({ tier: 'starter' }));
       expect(replaceMock).toHaveBeenCalledWith('/settings?tab=billing&attempt=att-9');
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
@@ -682,22 +683,51 @@ describe('[SID:4488] the money sentence says only what the server has proven', (
   const KEY = 'sprintable.billing.paymentAttempt';
   const RETURN = { checkout: 'success', tier: 'team', cycle: 'monthly', attempt: 'att-1', authKey: 'ak-1' };
 
-  it.each(['declined', 'failed'] as const)('%s inside the recheck window → «한 번 더 확인하고 있어요», never «청구된 금액은 없어요»', async (status) => {
+  it.each(['declined', 'failed'] as const)('%s while the server rechecks (checking) → «한 번 더 확인하고 있어요», never «청구된 금액은 없어요»', async (status) => {
     searchParams = new URLSearchParams(RETURN);
-    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status, no_charge_confirmed: false }) });
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status, no_charge: 'checking' }) });
     await mount(async () => statusResponse());
     const alertEl = container.querySelector(`[data-payment-attempt-state="${status}"]`);
     expect(alertEl?.textContent).toContain(koMessages.pricingPlans.paymentAttemptNoChargePending);
     expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
   });
 
-  it.each(['declined', 'failed'] as const)('%s proven (no_charge_confirmed) → «청구된 금액은 없어요»', async (status) => {
+  it.each(['declined', 'failed'] as const)('%s from an older server (no no_charge) → never «청구된 금액은 없어요»', async (status) => {
     searchParams = new URLSearchParams(RETURN);
-    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status, no_charge_confirmed: true }) });
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status }) });
+    await mount(async () => statusResponse());
+    expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+  });
+
+  it.each(['declined', 'failed'] as const)('%s proven (confirmed) → «청구된 금액은 없어요»', async (status) => {
+    searchParams = new URLSearchParams(RETURN);
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status, no_charge: 'confirmed' }) });
     await mount(async () => statusResponse());
     const alertEl = container.querySelector(`[data-payment-attempt-state="${status}"]`);
     expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
     expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptNoChargePending);
+  });
+
+  it.each([
+    [null, 'paymentAttemptNoChargeUnresolved'],
+    ['2026-10-02T03:40:00Z', 'paymentAttemptNoChargeUnresolvedNotified'],
+  ] as const)('stopped without a proof (unresolved · notified at %s) → %s · no «청구 0» · no promise of a refund', async (notifiedAt, key) => {
+    searchParams = new URLSearchParams(RETURN);
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'failed', no_charge: 'unresolved', unresolved_notified_at: notifiedAt }) });
+    await mount(async () => statusResponse());
+    const alertEl = container.querySelector('[data-payment-attempt-state="failed"]');
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans[key]);
+    expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+    expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptNoChargePending);
+  });
+
+  it('«결제 내역» / "Billing history" never break between the two words (a no-break space — Yuna 03:34Z)', () => {
+    for (const msgs of [koMessages.pricingPlans, enMessages.pricingPlans]) {
+      for (const k of ['paymentAttemptNoChargePending', 'paymentAttemptUnreadable'] as const) {
+        expect(msgs[k]).toMatch(/«(결제\u00a0내역|Billing\u00a0history)»/);
+        expect(msgs[k]).not.toMatch(/«(결제 내역|Billing history)»/);
+      }
+    }
   });
 
   it('a 404 that is not the attempt handler\'s → «불러올 수 없어요» + [다시 시도] (asks again) · no «청구 0» · the remembered attempt is kept', async () => {

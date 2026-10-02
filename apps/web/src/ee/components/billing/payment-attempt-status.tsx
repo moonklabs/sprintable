@@ -175,8 +175,12 @@ export function PaymentAttemptBanner({
     );
   }
 
-  // story #4488 — «청구된 금액은 없어요» only when the server has proven it (no_charge_confirmed); before that, the honest line
-  const noChargeLine = attempt?.no_charge_confirmed === true ? t('checkoutDeclinedReassurance') : t('paymentAttemptNoChargePending');
+  // story #4488 (Yuna 03:34Z) — «청구된 금액은 없어요» only when the server has proven it; while it rechecks, the honest line; once it
+  // stopped without a proof, what happened (and whether our team was told) — no promise of a refund or of «결제 내역» there
+  const noCharge = attempt?.no_charge;
+  const noChargeLine = noCharge === 'confirmed' ? t('checkoutDeclinedReassurance')
+    : noCharge === 'unresolved' ? (attempt?.unresolved_notified_at ? t('paymentAttemptNoChargeUnresolvedNotified') : t('paymentAttemptNoChargeUnresolved'))
+      : t('paymentAttemptNoChargePending');
 
   if (state.missing) {
     return (
@@ -208,7 +212,7 @@ export function PaymentAttemptBanner({
       <Alert variant="warning" data-payment-attempt-state="failed">
         <AlertDescription className="space-y-2 break-keep">
           <span className="block">{t('paymentAttemptFailed')}</span>
-          <span className="block" data-no-charge-confirmed={attempt.no_charge_confirmed === true ? 'true' : 'false'}>{noChargeLine}</span>
+          <span className="block" data-no-charge={noCharge ?? 'unknown'}>{noChargeLine}</span>
           {attempt && (
             <Button size="sm" variant="outline" onClick={() => onRetry({ kind: state.kind, tier, billingCycle })}>
               {tc('retry')}
@@ -225,7 +229,7 @@ export function PaymentAttemptBanner({
         <AlertDescription className="space-y-1 break-keep">
           <span className="block">{t('checkoutDeclinedBanner')}</span>
           {attempt.declined_reason && <span className="block">{t('checkoutDeclinedReason', { reason: attempt.declined_reason })}</span>}
-          <span className="block" data-no-charge-confirmed={attempt.no_charge_confirmed === true ? 'true' : 'false'}>{noChargeLine}</span>
+          <span className="block" data-no-charge={noCharge ?? 'unknown'}>{noChargeLine}</span>
         </AlertDescription>
       </Alert>
     );
