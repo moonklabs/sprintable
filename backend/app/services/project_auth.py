@@ -771,6 +771,16 @@ async def project_accessible_member_ids(
             WHERE om.org_id = :org_id
               AND om.role IN ('owner', 'admin')
               AND om.deleted_at IS NULL
+            UNION
+            -- story #4507: a person granted this project through an org-member grant row (project_access.member_id NULL —
+            -- not in the team_members view), as has_project_access's human grant branch admits them
+            SELECT om.id
+            FROM project_access pa
+            JOIN org_members om ON om.id = pa.org_member_id
+            WHERE pa.project_id = :project_id
+              AND pa.permission = 'granted'
+              AND om.org_id = :org_id
+              AND om.deleted_at IS NULL
             """
         ),
         {"project_id": project_id, "org_id": org_id},

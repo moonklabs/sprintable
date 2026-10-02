@@ -398,6 +398,27 @@ async def dispatch_notification(
                 if len(_member_project_ids) == 1:
                     _push_project_id = next(iter(_member_project_ids))
 
+            # story #4507: the project a person's bell Event goes under when they have no roster project — the triggering
+            # project, else the project of what this notification is about (its reference: a gate → its work item's
+            # project, a story, a conversation …, the same resolver the bell list uses). Resolved once, only if needed.
+            _ref_project_cache: dict[str, uuid.UUID | None] = {}
+
+            async def _reference_project() -> uuid.UUID | None:
+                if "v" not in _ref_project_cache:
+                    _ref_project_cache["v"] = None
+                    if reference_type and reference_id:
+                        try:
+                            from app.services.notification_targets import resolve_reference_targets
+
+                            _t = (await resolve_reference_targets(db, org_id, [(reference_type, reference_id)])).get(
+                                (reference_type, reference_id),
+                            )
+                            _ref_project_cache["v"] = _t.project_id if _t is not None else None
+                        except Exception:
+                            logger.warning("dispatch_notification: reference project unresolved %s/%s", reference_type,
+                                           reference_id, exc_info=True)
+                return _ref_project_cache["v"]
+
             inserted = False
             created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
             created_for: set[uuid.UUID] = set()  # story #4417 — recipients a notice was actually created for
@@ -465,7 +486,22 @@ async def dispatch_notification(
                         created_for.add(member_row.id)
                     except Exception:
                         logger.warning("Notification INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
-                    if member_row.project_id and member_row.id not in human_event_recorded_for:
+                    # story #4507 (PO 14:27Z · dev 7 days: 474 of 1,937 notifications, 26 people): the bell reads Event rows
+                    # only. An org_members-only person (an org owner with no project team row — 33 of 34 desktop-setup owners)
+                    # resolves with project_id None above, so no Event was written and their bell stayed empty. The rule: the
+                    # person's roster project, else the project that triggered this notification, else the project of its
+                    # reference (several gate kinds are created with no project — ads boost · channel / site posts · newsletter
+                    # · recipe gates). With none, there is no project for the Event (project_id NOT NULL) — the Notification
+                    # alone, logged.
+                    _human_proj = member_row.project_id or source_project_id
+                    if _human_proj is None and member_row.id not in human_event_recorded_for:
+                        _human_proj = await _reference_project()
+                    if _human_proj is None and member_row.id not in human_event_recorded_for:
+                        logger.info(
+                            "dispatch_notification: no project for the bell Event member_id=%s event_type=%s — Notification only",
+                            member_row.id, event_type,
+                        )
+                    if _human_proj and member_row.id not in human_event_recorded_for:
                         try:
                             async with db.begin_nested():
                                 # story #2380: 이 분기는 human Event를 생성 즉시 status="delivered"로
@@ -478,7 +514,7 @@ async def dispatch_notification(
                                 # story #3903 — `dispatch_event`로 명명(위 agent 분기와 동일
                                 # 이유: 함수 파라미터 `event`를 가리면 안 됨).
                                 dispatch_event = Event(
-                                    project_id=member_row.project_id,
+                                    project_id=_human_proj,
                                     org_id=org_id,
                                     event_type="dispatched",
                                     source_entity_type=reference_type,
