@@ -1,0 +1,1 @@
+{"file": "tests/test_4486_no_resume_past_cap_realdb.py", "sec": 8.0, "source": "story-4486 — a boost paused at its cap is not resumed (request 409 · worker refusal · a new cycle after a cancel resumes) — new file measured locally (uv run pytest, 3 cases, about 7s — same method as test_4460)"}

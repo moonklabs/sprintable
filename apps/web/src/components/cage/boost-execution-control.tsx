@@ -79,6 +79,8 @@ interface StartCommand {
 }
 // Meta may have created the campaign: retried only after the person confirms it does not exist in the ad account.
 const OUTCOME_UNKNOWN = 'ADS_BOOST_CREATE_OUTCOME_UNKNOWN';
+// story #4486 — the server's refusal at the cap (request 409 · the worker's blocked_unapproved reason)
+const CAP_REACHED = 'ADS_BOOST_CAP_REACHED';
 // story #4417 — the ad account's currency is not the approved one: nothing was created (the next step is a new request)
 const ACCOUNT_CURRENCY_MISMATCH = 'ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH';
 // story #4458 — a campaign made on another budget (a re-seal during its create): not switched on, a person decides
@@ -116,6 +118,8 @@ interface SpendData {
   previous_cycles?: PreviousCycle[];
   gate_status?: string | null;
   can_cancel?: boolean;
+  // story #4486 — the spend reached the approved total budget in this cycle (the server paused it and refuses a resume)
+  cap_reached_at?: string | null;
 }
 
 interface PreviousCycle {
@@ -184,6 +188,10 @@ export function BoostExecutionControl({
   const [previousCycles, setPreviousCycles] = useState<PreviousCycle[]>([]);
   const [spendGateStatus, setSpendGateStatus] = useState<string | null>(null);
   const [canCancel, setCanCancel] = useState(false);
+  const [capReachedAt, setCapReachedAt] = useState<string | null>(null);
+  // story #4486 (Yuna CHANGES ⓑ) — the start dialog was refused at the cap (an older card · the cap reached while it was open):
+  // [시작] goes off, only [취소] is left
+  const [startRefusedAtCap, setStartRefusedAtCap] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
   const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
@@ -295,6 +303,7 @@ export function BoostExecutionControl({
       setPreviousCycles(Array.isArray(d.previous_cycles) ? d.previous_cycles : []);
       setSpendGateStatus(d.gate_status ?? null);
       setCanCancel(Boolean(d.can_cancel));
+      setCapReachedAt(d.cap_reached_at ?? null);
       setRunAd({
         campaign_id: d.campaign_id ?? null, ad_account_id: d.ad_account_id ?? null,
         campaign_name: d.campaign_name ?? null, ad_channel: d.ad_channel ?? null,
@@ -334,7 +343,12 @@ export function BoostExecutionControl({
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/${operation}`, { method: 'POST' });
       if (!res.ok) {
-        setActionError(t('boostExecutionActionError'));
+        // story #4486 (Yuna 04:02Z) — a refusal at the cap says why and the way on (cancel, then request again), not «failed»
+        const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+        setActionError(body?.error?.code === CAP_REACHED
+          ? (operation === 'start' ? t('boostStartBlockedCapReached') : t('boostCapReachedNoResume'))
+          : t('boostExecutionActionError'));
+        if (body?.error?.code === CAP_REACHED && operation === 'start') setStartRefusedAtCap(true);
         return;
       }
       onDone();
@@ -475,7 +489,7 @@ export function BoostExecutionControl({
     <p role="alert" className="text-sm text-destructive" data-testid="boost-dialog-error">{actionError}</p>
   ) : null;
   // opening a confirmation starts it clean — an older action's refusal is not this one's
-  const openConfirm = (open: (v: boolean) => void) => { setActionError(null); open(true); };
+  const openConfirm = (open: (v: boolean) => void) => { setActionError(null); setStartRefusedAtCap(false); open(true); };
 
   if (!loaded) return null;
 
@@ -568,6 +582,7 @@ export function BoostExecutionControl({
   // story #4460 — /spend says the gate's status too (a cancel voids it while the page still holds the older gate)
   const effectiveGateStatus = spendGateStatus ?? gateStatus ?? null;
   const offApproved = effectiveGateStatus != null && effectiveGateStatus !== 'approved'; // story #4466
+  const capPaused = runStatus === 'paused' && capReachedAt != null; // story #4486
 
   // story #4460 (Yuna 16:46Z) — the cycles that ended before this one: «지난 홍보 · {기간} · 쓴 광고비 {amount}»
   // (a cycle's start and end happened — the viewer's zone, as 4443 draws events; promised times, like the ad window, are the team's)
@@ -813,6 +828,7 @@ export function BoostExecutionControl({
     // Yuna 06:12Z — blocked_unapproved lines by the reason code the worker writes (ads_boost_execution._resolve_execution_context)
     const line = command.status === 'blocked_unapproved'
       ? (code === 'ADS_BOOST_GATE_NOT_APPROVED' ? t('boostStartBlockedApprovalGone')
+        : code === CAP_REACHED ? t('boostStartBlockedCapReached') // story #4486 — the worker refused a start at the cap
         : code === 'ADS_BOOST_CONNECTION_UNAVAILABLE' ? connectionLine()
         : code === 'ADS_BOOST_ORIGINAL_PUBLICATION_MISSING' ? t('boostStartBlockedPostMissing')
         : code === 'ADS_BOOST_ORIGIN_CONNECTION_MISSING' ? t.rich('boostStartBlockedOriginConnection', { link })
@@ -848,12 +864,18 @@ export function BoostExecutionControl({
         {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
         {waitingLine}
         {capNoticeBlock}
-        <Button
-          variant="outline" size="sm" disabled={beforeStart || waiting === 'start'}
-          onClick={() => openConfirm(setStartConfirmOpen)} data-testid="boost-start-trigger"
-        >
-          {t('boostExecutionStart')}
-        </Button>
+        {/* story #4486 (Yuna CHANGES ⓐ) — this cycle reached its cap: no [홍보 시작] whatever the run's state; the fact before
+            anyone presses (muted, not a red refusal) · [홍보 취소] stays the way on */}
+        {capReachedAt != null ? (
+          <p className="text-xs text-muted-foreground" data-testid="boost-start-blocked-cap">{t('boostStartBlockedCapReached')}</p>
+        ) : (
+          <Button
+            variant="outline" size="sm" disabled={beforeStart || waiting === 'start'}
+            onClick={() => openConfirm(setStartConfirmOpen)} data-testid="boost-start-trigger"
+          >
+            {t('boostExecutionStart')}
+          </Button>
+        )}
         {beforeStart ? (
           <p className="text-xs text-muted-foreground" data-testid="boost-start-before-schedule">
             {t('boostExecutionStartBeforeSchedule', { date: formatScheduledAt(sealedAdsStartsAt, teamTz, displayTimezone).display })}
@@ -876,7 +898,7 @@ export function BoostExecutionControl({
               </Button>
               <Button
                 onClick={() => void doAction('start', () => setStartConfirmOpen(false))}
-                disabled={submitting} data-testid="boost-start-confirm"
+                disabled={submitting || startRefusedAtCap} data-testid="boost-start-confirm"
               >
                 {submitting ? t('boostExecutionStarting') : t('boostExecutionStartConfirm')}
               </Button>
@@ -955,7 +977,7 @@ export function BoostExecutionControl({
             </a>
           ) : null}
         </div>
-      ) : spendBlockedCode && runStatus === 'paused' ? (
+      ) : spendBlockedCode && runStatus === 'paused' && !capPaused ? (
         <div className="space-y-1 text-xs" data-testid="boost-spend-blocked">
           <p className="text-muted-foreground" data-testid="boost-spend-unreadable">{isSpendCurrencyCode(spendBlockedCode) ? t('boostSpendUnreadablePaused') : t('boostSpendUncheckedPaused')}</p>
           {/* the same link shape as the cap notice (4820): its own line · text-primary · ↗ */}
@@ -971,7 +993,16 @@ export function BoostExecutionControl({
       ) : null}
       {/* story #4466 (PO 11:51Z) — the gate went back to review: the server paused the boost (no money on values nobody approves).
           Facts only — no «resume once approved»: a lower-budget re-approval leaves the campaign on another budget (4458) */}
-      {offApproved && runStatus === 'paused' ? (
+      {/* story #4486 (Yuna 02:54Z) — paused at the cap: the same place and shape as the approval line; one line only, in the
+          server's reason order (cap · spend · approval). No way to switch it on again is offered: more spend is a new request */}
+      {capPaused ? (
+        <p className="text-xs text-muted-foreground" data-testid="boost-paused-cap-reached">
+          {t('boostPausedCapReached', {
+            amount: sealedAdsBudgetMinor !== null && sealedAdsCurrency
+              ? formatMinorCurrency(sealedAdsBudgetMinor, sealedAdsCurrency as GenerationBudgetCurrency, locale, tContent) : '—',
+          })}
+        </p>
+      ) : offApproved && runStatus === 'paused' ? (
         <p className="text-xs text-muted-foreground" data-testid="boost-paused-approval-gone">{t('boostPausedApprovalGone')}</p>
       ) : null}
       {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
@@ -984,8 +1015,8 @@ export function BoostExecutionControl({
         >
           {t('boostExecutionPause')}
         </Button>
-      ) : spendBlockedCode || offApproved ? null /* story #4417 — resuming would spend with no cap · story #4466 — or on a gate
-          back in review (the server refuses both) */ : (
+      ) : spendBlockedCode || offApproved || capPaused ? null /* story #4417 — resuming would spend with no cap · story #4466 — or
+          on a gate back in review · story #4486 — or past the approved budget (the server refuses all three) */ : (
         <Button
           variant="outline" size="sm" disabled={submitting || waiting === 'resume'}
           onClick={() => void doAction('resume', () => {})} data-testid="boost-resume-trigger"
