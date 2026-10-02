@@ -963,6 +963,28 @@ async def create_story(
         check_description=True, check_acceptance_criteria=True,
         mention_actor_id=_mention_actor_id,
     )
+    # story #4497 (PO 09:56Z) — a story made with an assignee announces it like PATCH /{id} does (the web board makes it without
+    # one and assigns by PATCH, so its rules · webhooks · SSE · story_assigned already run; MCP add_story(assignee_id) and agent
+    # API calls made with one got nothing: the agent's ledger stayed empty). The same function, old = None. After every write of
+    # this request is committed (as update_story does — the function commits too, and calling it earlier would split the
+    # reconcile's «fails → the whole creation rolls back»), and best-effort: a failure here is logged, the created story stands.
+    # Other creation paths stay as they are (story #4497 AC0: a recipe cycle's story reaches its agent by the stage event · a
+    # comment-to-task / insights story is assigned to the requester themselves).
+    if story.assignee_id is not None:
+        await session.commit()
+        try:
+            _actor_id = await _resolve_team_member_id(auth, org_id, session)
+            _actor_name, _actor_role, _actor_type = await _resolve_actor_info(session, _actor_id)
+        except Exception:
+            _actor_id, _actor_name, _actor_role, _actor_type = None, None, None, None
+        try:
+            await emit_story_assignee_changed(
+                session, org_id, story, None,
+                background_tasks=background_tasks,
+                actor_id=_actor_id, actor_name=_actor_name, actor_role=_actor_role, actor_type=_actor_type,
+            )
+        except Exception:
+            logger.warning("assignee_changed at create failed (story=%s, the story is already committed)", story.id, exc_info=True)
     # story #2532: 생성 시점엔 hypothesis_story_links가 있을 수 없다(별도 링크 API라 방금
     # 생성된 story.id를 아직 아무도 못 건다) — DB 쿼리 없이 epic_id만으로 판정(_attach_
     # has_hypothesis_or_goal의 배치쿼리는 목록/재조회 경로 전용, 여기선 불필요).

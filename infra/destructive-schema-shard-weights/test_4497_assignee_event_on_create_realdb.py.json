@@ -1,0 +1,1 @@
+{"file": "tests/test_4497_assignee_event_on_create_realdb.py", "sec": 6.0, "source": "story-4497 — a story made with an assignee announces it (agent Event + seq · human notification · none without · rollback leaves none) — new file measured locally (uv run pytest, 4 cases)"}
