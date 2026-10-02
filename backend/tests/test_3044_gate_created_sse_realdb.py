@@ -148,11 +148,11 @@ async def test_notify_gate_created_inserts_durable_event_for_rostered_recipient(
         await engine.dispose()
 
 
-async def test_notify_gate_created_skips_org_admin_without_project_roster():
-    """id 공간 매핑 경계(페드루 PO 요청) — org_members 권위(role floor)와 team_members
-    메시징 신원(project_access 명시 grant)은 독립된 별개 공간. 이 recipient는 실제로 게이트를
-    승인할 자격이 있어도(rule B org floor) Event FK를 만족 못 해 — 크래시 대신 조용히 스킵
-    되고(로그만), 다른 정상 recipient는 영향받지 않는다(부분 실패 격리)."""
+async def test_notify_gate_created_reaches_org_admin_without_project_roster():
+    """story #4505 (Qadir 4915 · PO 13:56Z) — this test used to pin the opposite: an org admin with no project roster row
+    (an org_members-only person) was skipped, so a new gate never appeared in their open approvals inbox (dev, 30 days: 22
+    gates, 17 pending). Such a person subscribes with that org_members id (/api/v2/me returns it, /events/stream accepts it),
+    so the gate_created signal reaches them now — by 4500's recipient rule — alongside the rostered recipient."""
     from app.services.approval_delivery import notify_gate_created_to_recipients
 
     engine, Session = await _session_factory()
@@ -175,7 +175,7 @@ async def test_notify_gate_created_skips_org_admin_without_project_roster():
             rows = (await s.execute(
                 select(Event.recipient_id).where(Event.source_entity_id == gate_id, Event.event_type == "conversation.gate_created")
             )).scalars().all()
-            assert set(rows) == {rostered_id}, "roster 없는 org admin은 스킵되고 rostered 대상만 Event가 남는다"
+            assert set(rows) == {rostered_id, admin_no_roster_id}, "roster 없는 org admin(org_members)에게도 간다"
     finally:
         await engine.dispose()
 

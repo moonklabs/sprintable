@@ -506,20 +506,28 @@ async def notify_gate_created_to_recipients(
     test_2891 fixture가 이 정확한 케이스 — org admin을 OrgMember만으로 seed, members/
     project_access 없음). 여기서 그 서브셋을 사전에 걸러 스킵한다(로그만, 예외 전파 안 함) —
     dispatch_approval_request_cards의 챗 카드 배달(다른 신원 경로, Conversation 참가자 자격)은
-    이 필터와 무관하게 그대로 간다."""
+    이 필터와 무관하게 그대로 간다.
+
+    ⚠️story #4505 — 위 «team_members에 없으면 못 찾는다»는 판단은 낡았다: org_members-only 사람도 /api/v2/me가
+    그 org_members id를 돌려주고 /events/stream이 그 id로 구독을 받는다(resolve_member_identity) — 결재함이 바로
+    그 신호를 듣는다. 이제 받는 사람 = 4500의 규칙(별칭 → 정본 · 이 조직 멤버), 아래."""
     if not recipient_ids:
         return
 
-    from app.models.team import TeamMember
-    from app.services.member_resolver import lookup_members_by_ids
+    from app.services.member_resolver import canonicalize_member_ids, lookup_members_by_ids
 
-    valid_ids = set((await db.execute(
-        select(TeamMember.id).where(TeamMember.id.in_(recipient_ids), TeamMember.project_id == project_id)
-    )).scalars().all())
-    skipped = set(recipient_ids) - valid_ids
+    # story #4505 (Qadir 4915 · PO 13:56Z): the recipients by 4500's rule — an old alias id resolved to the living member,
+    # then this org's members (team members and org members alike). It used to keep only rows of this project's
+    # team_members view, so an approver who is an org member without a project row (an org owner or admin — dev, 30 days:
+    # 22 gates, 17 pending) never saw a new gate appear in an open approvals inbox. The project is the Event's, below.
+    from app.services.member_resolver import org_recipient_ids
+
+    valid_ids = await org_recipient_ids(set(recipient_ids), org_id, db)
+    _canon = await canonicalize_member_ids(set(recipient_ids), db)
+    skipped = {r for r in recipient_ids if _canon[r] not in valid_ids}
     if skipped:
         logger.warning(
-            "gate_created SSE 스킵 — team_members(project_access) 신원 없음 gate=%s project=%s recipients=%s",
+            "gate_created SSE 스킵 — 이 조직 멤버 아님 gate=%s project=%s recipients=%s",
             gate_id, project_id, skipped,
         )
     if not valid_ids:
@@ -781,6 +789,20 @@ async def dispatch_approval_discussion_reply(
         )
 
 
+async def _card_recipients_in_org(
+    db: AsyncSession, org_id: uuid.UUID, recipient_project_ids: dict[uuid.UUID, uuid.UUID],
+) -> dict[uuid.UUID, uuid.UUID]:
+    """story #4500 · #4505 (one place for the card notices — resolved · tossed): the ids a card mentioned, each resolved to
+    its living member (an old alias id), and only this org's members receive — {canonical id: project}."""
+    from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
+
+    if not recipient_project_ids:
+        return {}
+    canon = await canonicalize_member_ids(set(recipient_project_ids), db)
+    in_org = await filter_org_member_ids(set(canon.values()), org_id, db)
+    return {canon[m]: p for m, p in recipient_project_ids.items() if canon[m] in in_org}
+
+
 async def notify_gate_card_recipients_resolved(
     db: AsyncSession,
     *,
@@ -835,12 +857,7 @@ async def notify_gate_card_recipients_resolved(
                 recipient_project_ids[uuid.UUID(str(mid))] = proj_id
             except (ValueError, TypeError, AttributeError):
                 continue  # 손상된/구형 payload — 지어내지 않고 건너뜀(_batch_resolve_linked_proof 동일 관례).
-    # story #4500: the mentioned ids are the card's — resolved to the living member, only this org's members receive
-    from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
-
-    _canon = await canonicalize_member_ids(set(recipient_project_ids), db)
-    _in_org = await filter_org_member_ids(set(_canon.values()), org_id, db) if _canon else set()
-    recipient_project_ids = {_canon[m]: p for m, p in recipient_project_ids.items() if _canon[m] in _in_org}
+    recipient_project_ids = await _card_recipients_in_org(db, org_id, recipient_project_ids)
     if not recipient_project_ids:
         return []
 
@@ -1072,12 +1089,7 @@ async def notify_gate_tossed(
                 recipient_project_ids[uuid.UUID(str(mid))] = proj_id
             except (ValueError, TypeError, AttributeError):
                 continue  # 손상된/구형 payload — 지어내지 않고 건너뜀.
-    # story #4500: the mentioned ids are the card's — resolved to the living member, only this org's members receive
-    from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
-
-    _canon = await canonicalize_member_ids(set(recipient_project_ids), db)
-    _in_org = await filter_org_member_ids(set(_canon.values()), org_id, db) if _canon else set()
-    recipient_project_ids = {_canon[m]: p for m, p in recipient_project_ids.items() if _canon[m] in _in_org}
+    recipient_project_ids = await _card_recipients_in_org(db, org_id, recipient_project_ids)
     if not recipient_project_ids:
         return []
 

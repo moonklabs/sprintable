@@ -1012,9 +1012,7 @@ async def _dispatch_human_intervention_event(
     # story #4500: this org's conversation · this org's members only
     from app.services.member_resolver import conversation_member_ids_in_org
 
-    human_targets = await conversation_member_ids_in_org(
-        db, conversation.id, org_id, is_human_member_condition(ConversationParticipant.member_id),
-    )
+    human_targets = await conversation_member_ids_in_org(db, conversation.id, org_id, humans_only=True)
     if not human_targets:
         return []
 
@@ -2663,15 +2661,11 @@ async def send_message_core(
     # E-MEMBER-SSOT Phase 0: 저장·DM포크·group 멘션 발송 모든 경로에 org 필터를 한 번 적용.
     #   grant-only 휴먼(org_member) 멘션은 포함하고, cross-org UUID는 저장/발송 전에 제거.
     #   group conversation은 fork 분기가 없어 별도 필터가 누락돼 있던 것을 여기서 함께 막는.
-    valid_mentioned_ids: list[uuid.UUID] = []
-    if body.mentioned_ids:
-        _org_member_ids = await filter_org_member_ids(set(body.mentioned_ids), org_id, db)
-        # 원본 순서 보존 + 중복 제거
-        _seen: set[uuid.UUID] = set()
-        for mid in body.mentioned_ids:
-            if mid in _org_member_ids and mid not in _seen:
-                _seen.add(mid)
-                valid_mentioned_ids.append(mid)
+    # story #4505: an old alias id resolves to the living member first (4500's recipient rule), then the org check — the
+    # mention is stored and sent under the canonical id (원본 순서 보존 + 중복 제거)
+    from app.services.member_resolver import org_mention_ids
+
+    valid_mentioned_ids: list[uuid.UUID] = await org_mention_ids(body.mentioned_ids or [], org_id, db)
 
     # story #2646(2026-08-14, 은퇴): 본문 `@handle` 텍스트 파싱(story #2603 P0,
     # handle_mention_parser.py)을 여기서 mentioned_ids와 합집합하던 블록을 제거했다 —

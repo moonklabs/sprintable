@@ -1,0 +1,1 @@
+{"file": "tests/test_4505_gate_created_org_members_realdb.py", "sec": 6.0, "source": "story-4505 — the new-gate signal reaches org-member approvers; mentions and the human notice resolve aliases first — new file measured locally (uv run pytest)"}

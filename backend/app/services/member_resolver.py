@@ -818,24 +818,53 @@ async def org_recipient_ids(
     return await filter_org_member_ids(canonical, org_id, session)
 
 
+async def org_mention_ids(
+    mentioned_ids: list[uuid.UUID],
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> list[uuid.UUID]:
+    """story #4505 — a message's mentions by the recipient rule (`org_recipient_ids`): each resolved to its living member
+    (an old alias id), only this org's members, in the order given and without repeats — the ids stored and sent."""
+    if not mentioned_ids:
+        return []
+    canon = await canonicalize_member_ids(set(mentioned_ids), session)
+    in_org = await filter_org_member_ids(set(canon.values()), org_id, session)
+    out: list[uuid.UUID] = []
+    for mid in (canon[m] for m in mentioned_ids):
+        if mid in in_org and mid not in out:
+            out.append(mid)
+    return out
+
+
 async def conversation_member_ids_in_org(
     session: AsyncSession,
     conversation_id: uuid.UUID,
     org_id: uuid.UUID,
-    *where,
+    *,
+    humans_only: bool = False,
 ) -> set[uuid.UUID]:
     """story #4500 (AC2) — the participants a delivery may reach: only when the conversation is this org's, and of its
     participants only this org's members (`filter_org_member_ids`, the rule 4497 checks assignees with). Participant rows are
     org-checked at most writes, but not all (a config-named approver · a bridge mapping's conversation); the delivery must not
-    depend on that. `where`: extra conditions on ConversationParticipant (e.g. humans only)."""
+    depend on that. `humans_only`: of those, the people (story #4505 — judged on the canonical ids, after the alias is
+    resolved: a participant stored under an old human id is a person too)."""
     from app.models.conversation import Conversation, ConversationParticipant
 
     ids = set((await session.execute(
         select(ConversationParticipant.member_id)
         .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
-        .where(ConversationParticipant.conversation_id == conversation_id, Conversation.org_id == org_id, *where)
+        .where(ConversationParticipant.conversation_id == conversation_id, Conversation.org_id == org_id)
     )).scalars().all())
-    return await org_recipient_ids(ids, org_id, session)
+    recipients = await org_recipient_ids(ids, org_id, session)
+    if humans_only and recipients:
+        from sqlalchemy import column, values
+        from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
+        candidates = values(column("mid", PG_UUID(as_uuid=True)), name="candidates").data([(m,) for m in recipients])
+        recipients = set((await session.execute(
+            select(candidates.c.mid).where(is_human_member_condition(candidates.c.mid))
+        )).scalars().all())
+    return recipients
 
 
 async def conversation_member_ids_of_its_org(

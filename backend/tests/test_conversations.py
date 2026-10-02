@@ -784,7 +784,10 @@ async def test_send_message_filters_cross_org_mentions_group():
             mention_calls["targets"] = set(mention_targets)
             return []
 
-        with patch("app.routers.conversations.filter_org_member_ids",
+        # story #4505: mentions resolve through member_resolver.org_mention_ids (alias → canonical, then the org filter)
+        with patch("app.services.member_resolver.canonicalize_member_ids",
+                   new=AsyncMock(side_effect=lambda ids, *a, **kw: {i: i for i in ids})), \
+             patch("app.services.member_resolver.filter_org_member_ids",
                    new=AsyncMock(return_value={valid_id})), \
              patch("app.services.conversation_webhook.resolve_conversation_webhook_targets",
                    new=AsyncMock(return_value=[])), \
