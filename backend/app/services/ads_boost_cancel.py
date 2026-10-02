@@ -283,7 +283,7 @@ async def cancel_pause_retry_state(db: AsyncSession, *, run) -> str | None:
     # will make), not inferred from how many pauses failed: a capture that was never written (an error · a condition not met)
     # would have made the card promise a retry that is not coming
     from app.models.insight_snapshot import InsightSnapshot
-    from app.services.ads_spend_snapshots import _PAID_CHANNELS
+    from app.services.ads_spend_snapshots import paid_snapshots_only
 
     gate = (await db.execute(select(Gate).where(Gate.id == run.gate_id))).scalar_one_or_none()
     waiting = None
@@ -292,10 +292,10 @@ async def cancel_pause_retry_state(db: AsyncSession, *, run) -> str | None:
         # waiting capture per post (④) a written retry is always the earliest one, brought forward
         horizon = datetime.now(timezone.utc) + CANCEL_PAUSE_RETRY_DELAYS[-1] + timedelta(minutes=1)
         waiting = (await db.execute(
-            select(InsightSnapshot.id).where(
+            paid_snapshots_only(select(InsightSnapshot.id).where(
                 InsightSnapshot.publication_id == uuid.UUID(gate.scope_key), InsightSnapshot.status == "pending",
-                InsightSnapshot.channel.in_(_PAID_CHANNELS), InsightSnapshot.due_at <= horizon,
-            ).limit(1)
+                InsightSnapshot.due_at <= horizon,
+            )).limit(1)
         )).scalar_one_or_none()
     # …and only within the three retries: past them the regular daily capture still waits, but that is not the retry promised
     failed = await _failed_pauses_this_cycle(db, gate_id=run.gate_id, cycle=run.cycle_no)

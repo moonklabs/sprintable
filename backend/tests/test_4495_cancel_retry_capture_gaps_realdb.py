@@ -193,3 +193,40 @@ async def test_a_pending_runs_second_failed_pause_still_gets_its_retry(monkeypat
         assert len(soon) == 1 and await _pause_retry(Session, org_id, gate_id) == "scheduled"
     finally:
         await engine.dispose()
+
+
+async def test_bringing_a_capture_forward_leaves_a_row_the_worker_took(monkeypatch):
+    """Qadir codex T1 — the waiting capture is found, then brought forward; a worker that took it in between (in_progress) keeps
+    its own due time — the UPDATE moves only a row that still waits."""
+    from sqlalchemy import select, update
+
+    from app.models.gate import Gate
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.ads_boost_gate_exit import _bring_forward
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            row = (await s.execute(select(InsightSnapshot).where(
+                InsightSnapshot.publication_id == uuid.UUID(gate.scope_key), InsightSnapshot.status == "pending",
+            ))).scalar_one()
+            row_id, daily = row.id, row.due_at
+            await s.execute(update(InsightSnapshot).where(InsightSnapshot.id == row_id).values(status="in_progress"))
+            await s.commit()
+        soon = datetime.now(timezone.utc)
+        async with Session() as s:
+            await s.run_sync(lambda sync: _bring_forward(sync.connection(), row_id, soon))
+            await s.commit()
+            assert (await s.get(InsightSnapshot, row_id)).due_at == daily  # taken by the worker: untouched
+            await s.execute(update(InsightSnapshot).where(InsightSnapshot.id == row_id).values(status="pending"))
+            await s.commit()
+        async with Session() as s:
+            await s.run_sync(lambda sync: _bring_forward(sync.connection(), row_id, soon))
+            await s.commit()
+            s.expire_all()
+            assert (await s.get(InsightSnapshot, row_id)).due_at == soon  # still waiting: brought forward
+    finally:
+        await engine.dispose()

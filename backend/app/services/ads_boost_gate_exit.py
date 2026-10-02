@@ -45,6 +45,16 @@ def _capture_now_when_ads_boost_gate_leaves_approved(session: Session, flush_con
                 _schedule_capture_now(session, gate)
 
 
+def _bring_forward(conn, snapshot_id, due: datetime) -> None:
+    """story #4495 (Qadir codex T1) — the waiting capture's due time moves earlier only while it still waits: a row the worker took
+    in between (in_progress · captured) keeps its own."""
+    from app.models.insight_snapshot import InsightSnapshot
+
+    conn.execute(
+        update(InsightSnapshot).where(InsightSnapshot.id == snapshot_id, InsightSnapshot.status == "pending").values(due_at=due)
+    )
+
+
 def _in_session_run(session: Session, gate_id):
     """The gate's run as this session holds it (values not flushed yet win over the database's)."""
     from app.models.ads_boost_run import AdsBoostRun
@@ -62,7 +72,7 @@ def _schedule_capture_now(session: Session, gate, *, due_at: datetime | None = N
     from app.models.ads_boost_run import AdsBoostRun
     from app.models.channel_connection import ChannelConnection
     from app.models.insight_snapshot import InsightSnapshot
-    from app.services.ads_spend_snapshots import _PAID_CHANNELS
+    from app.services.ads_spend_snapshots import paid_snapshots_only
 
     conn = session.connection()  # connection-level statements: no autoflush inside the flush
     run = _in_session_run(session, gate.id) or conn.execute(
@@ -77,14 +87,13 @@ def _schedule_capture_now(session: Session, gate, *, due_at: datetime | None = N
     due = due_at or datetime.now(timezone.utc)
     publication_id = uuid.UUID(gate.scope_key)
     waiting = conn.execute(
-        select(InsightSnapshot.id, InsightSnapshot.due_at).where(
+        paid_snapshots_only(select(InsightSnapshot.id, InsightSnapshot.due_at).where(
             InsightSnapshot.publication_id == publication_id, InsightSnapshot.status == "pending",
-            InsightSnapshot.channel.in_(_PAID_CHANNELS),
-        ).order_by(InsightSnapshot.due_at).limit(1)
+        )).order_by(InsightSnapshot.due_at).limit(1)
     ).first()
     if waiting is not None:
         if due < waiting.due_at:
-            conn.execute(update(InsightSnapshot).where(InsightSnapshot.id == waiting.id).values(due_at=due))
+            _bring_forward(conn, waiting.id, due)
         return
     connection_id = run.created_connection_id or gate.sealed_ads_connection_id  # story #4461 — the campaign's own account
     channel = conn.execute(select(ChannelConnection.channel).where(ChannelConnection.id == connection_id)).scalar_one_or_none()
