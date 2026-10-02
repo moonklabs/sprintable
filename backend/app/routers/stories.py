@@ -1019,14 +1019,32 @@ async def create_story(
     # has_hypothesis_or_goal의 배치쿼리는 목록/재조회 경로 전용, 여기선 불필요).
     if story.epic_id is not None:
         story.has_hypothesis_or_goal = True
-    await _attach_org_project_slugs(session, org_id, [story])
     # story #2933 H4(카디르 QA 실결함, PR#3366 2026-08-22 처방) — 이 인라인 생성 경로에
     # _attach_trust_stage가 빠져 있어 새로 만든 story의 응답이 StoryResponse 기본값
     # trust_stage=None을 그대로 직렬화했다. FE kanban-board.tsx의 storyTrustColumn은
     # status!=='done'이면 story.trust_stage를 그대로 컬럼 판별자로 쓰므로(FE 재파생
     # 폴백 없음, H1/H3 처방과 정합), 이 트랜지언트 속성이 없는 새 story는 신뢰축 뷰의
     # 어느 컬럼에도 안 잡혀(실종) — get_story/list_stories엔 이미 있던 호출을 여기도 붙인다.
-    await _attach_trust_stage(session, org_id, [story])
+    # story #4508 (Qadir 4912 · PO 15:01Z): with an assignee the story is committed above, so a failing enrichment here
+    # answered 500 for a story already saved — a caller retrying would make it twice. Then, as update_story does: logged and
+    # skipped (its failed half rolled back, the story reloaded) — the saved story answers 201. With no early commit nothing is
+    # saved yet: a failure still rolls the whole creation back (500, a retry is safe).
+    _committed = story.assignee_id is not None
+    for _attach_fn, _args in (
+        (_attach_org_project_slugs, (session, org_id, [story])),
+        (_attach_trust_stage, (session, org_id, [story])),
+    ):
+        try:
+            await _attach_fn(*_args)
+        except Exception:
+            if not _committed:
+                raise
+            logger.warning(
+                "%s enrichment at create failed (story=%s, the story is already committed)",
+                _attach_fn.__name__, story.id, exc_info=True,
+            )
+            await session.rollback()
+            await session.refresh(story)
     return StoryResponse.model_validate(story)
 
 
@@ -2016,6 +2034,15 @@ async def bulk_update_stories(
     # 「이례적」 표기 그 필드 재사용)에 차단 사유를 담는다. has_project_access 미충족(존재
     # 비노출)과 달리 이건 「존재하고 접근권도 있는데 승인 대기」라 조용하면 #2067 재현.
     gate_pending_by_id: dict[uuid.UUID, dict] = {}
+    # story #4508 (Qadir 4912 · PO 15:01Z): the same story twice in one request is refused — which of its values would win is
+    # not decided silently, and it used to announce its assignee / status change twice
+    _ids = [i.id for i in payload.items]
+    _dupes = sorted({str(i) for i in _ids if _ids.count(i) > 1})
+    if _dupes:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "DUPLICATE_STORY_IDS", "message": f"Each story may appear once per request: {', '.join(_dupes)}"},
+        )
     # story #4497 — one assignee outside the org refuses the whole request, before any item is written; per item, only an id
     # that story does not have yet is checked (PO 11:25Z — the same as PATCH)
     _given = {i.id: i.assignee_id for i in payload.items if i.assignee_id is not None}
