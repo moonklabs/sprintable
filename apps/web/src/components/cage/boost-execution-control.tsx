@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/components/content/schedule-format';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -16,6 +16,7 @@ import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 import {
   BOOST_RUN_STATUSES, COMMAND_FAILURE_KINDS, COMMAND_STATUSES,
 } from '@/lib/ads-boost-states.generated';
+import { useTeamTimeZone } from '@/components/team-time-zone';
 
 // story #3806(Phase3·3-2 PR5, 유나 §절 §2 「중지 스위치」) — 실행 중인 홍보의 중지/재개.
 // 자리 = 상세(이 컴포넌트, gates/[id]/page.tsx에서 마운트)·성과 보드 행(조각⑥, 같은
@@ -147,6 +148,7 @@ export function BoostExecutionControl({
   orgId, gateId, sealedAdsBudgetMinor, sealedAdsCurrency, sealedAdsStartsAt, sealedAdsEndsAt, sealedAdsObjective, gateStatus,
   onSpendRefreshed,
 }: BoostExecutionControlProps) {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const t = useTranslations('cage');
   const tContent = useTranslations('content');
   const locale = useLocale();
@@ -433,9 +435,9 @@ export function BoostExecutionControl({
         <p>
           <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
           <span className="text-foreground">
-            {formatViewerScheduledAt(sealedAdsStartsAt, displayTimezone).display}
+            {formatScheduledAt(sealedAdsStartsAt, teamTz, displayTimezone).display}
             {' ~ '}
-            {formatViewerScheduledAt(sealedAdsEndsAt, displayTimezone).display}
+            {formatScheduledAt(sealedAdsEndsAt, teamTz, displayTimezone).display}
           </span>
         </p>
       ) : null}
@@ -717,7 +719,7 @@ export function BoostExecutionControl({
         </Button>
         {beforeStart ? (
           <p className="text-xs text-muted-foreground" data-testid="boost-start-before-schedule">
-            {t('boostExecutionStartBeforeSchedule', { date: formatViewerScheduledAt(sealedAdsStartsAt, displayTimezone).display })}
+            {t('boostExecutionStartBeforeSchedule', { date: formatScheduledAt(sealedAdsStartsAt, teamTz, displayTimezone).display })}
           </p>
         ) : null}
 
@@ -765,7 +767,7 @@ export function BoostExecutionControl({
       ) : initiatedBy === 'scheduler' ? (
         <p className="text-xs text-muted-foreground" data-testid="boost-execution-initiated-by">
           {t('boostExecutionInitiatedByScheduler', {
-            date: sealedAdsStartsAt ? formatViewerScheduledAt(sealedAdsStartsAt, displayTimezone).display : '',
+            date: sealedAdsStartsAt ? formatScheduledAt(sealedAdsStartsAt, teamTz, displayTimezone).display : '',
           })}
         </p>
       ) : null}

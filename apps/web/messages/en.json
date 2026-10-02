@@ -3380,7 +3380,8 @@
     "channelPostsPublicationFailedCancelledNotice": "Publishing failed, and the retry was cancelled.",
     "channelPostsPublicationFailedPendingRetryNotice": "Publishing failed. It will retry automatically soon.",
     "channelPostsPublicationFailedInProgressNotice": "Publishing failed. Retrying now.",
-    "channelPostsPublicationFailedRepublishNotice": "Publishing failed. You can try again with {action}."
+    "channelPostsPublicationFailedRepublishNotice": "Publishing failed. You can try again with {action}.",
+    "scheduleOrgTimeCaption": "Organization time · {offset}"
   },
   "docs": {
     "title": "Docs",

@@ -31,7 +31,7 @@ import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFac
 import type { CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import { CommentReplyDialog, type CommentReplyOutcome, type ReplyView } from '@/components/content/comment-reply-dialog';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt, formatScheduledAt } from '@/components/content/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
 import { ApiUsageBudgetExceededBanner } from '@/components/content/api-usage-budget-exceeded-banner';
@@ -50,6 +50,7 @@ import { formatFileSize } from '@/components/docs/extensions/file-node';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { useTeamTimeZone } from '@/components/team-time-zone';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -506,6 +507,7 @@ const BLOCKED_REASON_LINE_KEYS: Record<string, string> = {
 // story #4336 — 워커가 발행하는 동안 초안을 다시 읽는 간격(워커는 1분마다 돈다).
 
 export default function ChannelPostEditPage() {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId, role } = useDashboardContext();
   // story #4017(PO 확定 2026-09-17) — 아래 4곳의 「연결 화면」 링크를 목적지 모듈로.
@@ -3047,7 +3049,7 @@ export default function ChannelPostEditPage() {
               {publishResult.type === 'success'
                 ? t('publishSuccess', { time: draft.published_at ? formatViewerScheduledAt(draft.published_at, displayTimezone).display : '' })
                 : publishResult.type === 'scheduled'
-                  ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? formatViewerScheduledAt(publishResult.scheduledAt, displayTimezone).display : t('originAuthorUnknown') })
+                  ? t('channelPostsPublishScheduled', { time: publishResult.scheduledAt ? formatScheduledAt(publishResult.scheduledAt, teamTz, displayTimezone).display : t('originAuthorUnknown') })
                   : (
                     // story #3402 AC11(doc §5-1) — "왜 막혔나"(text)와 "밖으로 나갔나"
                     // (externalImpact)는 서로 다른 사실이라 별도 텍스트 노드로 따로 둔다

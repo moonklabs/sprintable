@@ -7,6 +7,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { majorToMinor, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { validateScheduledAt } from '@/components/content/validate-scheduled-at';
+import { teamOffsetCaption } from '@/components/content/schedule-format';
+import { useTeamTimeZone } from '@/components/team-time-zone';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #3806(Phase3·3-2 PR5, 유나 §절 §1 「발행물에서 boost 요청 폼」) — 승인된
 // 발행물에서 Meta Ads 「홍보」 요청. Dialog+datetime-local 배선은
@@ -73,8 +76,11 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
       .catch(() => setConnections([]));
   }, [open, orgId]);
 
-  const startsAtValidation = validateScheduledAt(startsAtLocal);
-  const endsAtValidation = validateScheduledAt(endsAtLocal);
+  // story #4443 PR3b — the ad window is the team's (the org's zone): read in it, and say so when it is not the viewer's
+  const teamTz = useTeamTimeZone();
+  const orgOffset = teamOffsetCaption(new Date(), teamTz, useViewerTimeZone());
+  const startsAtValidation = validateScheduledAt(startsAtLocal, teamTz);
+  const endsAtValidation = validateScheduledAt(endsAtLocal, teamTz);
   const scheduleOrderValid = startsAtValidation.valid && endsAtValidation.valid
     && new Date(endsAtValidation.iso).getTime() > new Date(startsAtValidation.iso).getTime();
   const budgetMajorNumber = Number(budgetMajor);
@@ -184,25 +190,41 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
             <label className="text-xs font-medium text-muted-foreground" htmlFor="boost-starts-at">
               {t('boostRequestStartsAtLabel')}
             </label>
-            <input
-              id="boost-starts-at" type="datetime-local"
-              value={startsAtLocal}
-              onChange={(e) => setStartsAtLocal(e.target.value)}
-              className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
-              data-testid="boost-starts-at-input"
-            />
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <input
+                id="boost-starts-at" type="datetime-local"
+                value={startsAtLocal}
+                onChange={(e) => setStartsAtLocal(e.target.value)}
+                className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+                aria-describedby={orgOffset ? 'boost-starts-at-org-time' : undefined}
+                data-testid="boost-starts-at-input"
+              />
+              {orgOffset ? (
+                <span id="boost-starts-at-org-time" className="text-xs text-muted-foreground" data-testid="boost-starts-at-org-time">
+                  {t('scheduleOrgTimeCaption', { offset: orgOffset })}
+                </span>
+              ) : null}
+            </div>
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="boost-ends-at">
               {t('boostRequestEndsAtLabel')}
             </label>
-            <input
-              id="boost-ends-at" type="datetime-local"
-              value={endsAtLocal}
-              onChange={(e) => setEndsAtLocal(e.target.value)}
-              className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
-              data-testid="boost-ends-at-input"
-            />
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <input
+                id="boost-ends-at" type="datetime-local"
+                value={endsAtLocal}
+                onChange={(e) => setEndsAtLocal(e.target.value)}
+                className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+                aria-describedby={orgOffset ? 'boost-ends-at-org-time' : undefined}
+                data-testid="boost-ends-at-input"
+              />
+              {orgOffset ? (
+                <span id="boost-ends-at-org-time" className="text-xs text-muted-foreground" data-testid="boost-ends-at-org-time">
+                  {t('scheduleOrgTimeCaption', { offset: orgOffset })}
+                </span>
+              ) : null}
+            </div>
           </div>
           {touched && (!startsAtValidation.valid || !endsAtValidation.valid) ? (
             <p className="text-xs text-destructive" data-testid="boost-schedule-error">{t('boostRequestScheduleInvalid')}</p>

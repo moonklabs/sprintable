@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/components/content/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
@@ -22,6 +22,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { keepHref } from '@/lib/with-project-param';
 import { actorRowLabels } from '@/lib/member-display';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { useTeamTimeZone } from '@/components/team-time-zone';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -778,6 +779,7 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
  * 정정용으로 남긴다.
  */
 function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isRecipeGate: boolean }) {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('cage');
   const viewerTz = useViewerTimeZone(); // story #4443 PR2b
@@ -831,7 +833,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
       {draft.sealed_scheduled_at ? (
         <p className="text-muted-foreground">
           {t('linkedChannelDraftScheduledLabel')} ·{' '}
-          <span className="text-foreground">{formatViewerScheduledAt(draft.sealed_scheduled_at, viewerTz).display}</span>
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, teamTz, viewerTz).display}</span>
         </p>
       ) : null}
       <LinkedDraftVersionLine version={draft.version} />
@@ -884,6 +886,7 @@ function LinkedDraftVersionLine({ version }: { version: number }) {
  * 초안이 없을 때의 빈 상태는 채널 카드가 그린다(레시피 게이트엔 두 카드 중 하나만 그려진다).
  */
 function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const t = useTranslations('cage');
   const flatHref = useFlatHref(); // story #4226 — flat 링크 `?p=`
   const viewerTz = useViewerTimeZone(); // story #4443 PR2b
@@ -902,7 +905,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
       {draft.sealed_scheduled_at ? (
         <p className="text-muted-foreground">
           {t('linkedChannelDraftScheduledLabel')} ·{' '}
-          <span className="text-foreground">{formatViewerScheduledAt(draft.sealed_scheduled_at, viewerTz).display}</span>
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, teamTz, viewerTz).display}</span>
         </p>
       ) : null}
       <LinkedDraftVersionLine version={draft.version} />
@@ -921,6 +924,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
 }
 
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const t = useTranslations('cage');
   const tContent = useTranslations('content');
   // story #4082(유나 design CHANGES 2026-09-21) — approvals-queue.tsx·gates/[id]/page.tsx와
@@ -952,9 +956,9 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <p>
               <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
               <span className="text-foreground">
-                {formatViewerScheduledAt(facts.adsStartsAt, displayTimezone).display}
+                {formatScheduledAt(facts.adsStartsAt, teamTz, displayTimezone).display}
                 {' ~ '}
-                {formatViewerScheduledAt(facts.adsEndsAt, displayTimezone).display}
+                {formatScheduledAt(facts.adsEndsAt, teamTz, displayTimezone).display}
                 {' '}
                 ({t('adsBoostScheduleDays', {
                   days: Math.round(
@@ -1036,7 +1040,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           {facts.newsletterSendScheduledAt ? (
             <p>
               <span className="text-muted-foreground">{t('newsletterSendScheduleLabel')} · </span>
-              <span className="text-foreground">{formatViewerScheduledAt(facts.newsletterSendScheduledAt, displayTimezone).display}</span>
+              <span className="text-foreground">{formatScheduledAt(facts.newsletterSendScheduledAt, teamTz, displayTimezone).display}</span>
             </p>
           ) : null}
           <p>
@@ -1160,7 +1164,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.scheduledAt ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalScheduledAtLabel')} · </span>
-          <span className="text-foreground">{formatViewerScheduledAt(facts.scheduledAt, displayTimezone).display}</span>
+          <span className="text-foreground">{formatScheduledAt(facts.scheduledAt, teamTz, displayTimezone).display}</span>
         </p>
       ) : null}
       {/* story #3367(3자기점검, 페드루 지적 2026-09-10·유나 CHANGES 정정) — AC7
