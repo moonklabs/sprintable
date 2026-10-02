@@ -6717,6 +6717,15 @@
         "line": "This also creates a new organization, \"{name}\"",
         "later": "You can rename them later in settings."
       },
+      "firstProject": {
+        "line": "This also creates a first project, \"{name}\"",
+        "changeAria": "Change the first project name",
+        "limit": "This organization can have up to {limit, plural, one {# project} other {# projects}} — upgrade your plan to add more."
+      },
+      "projectPick": {
+        "label": "Project to start in",
+        "placeholder": "Choose a project"
+      },
       "invited": {
         "title": "You have an invitation",
         "row": "{org} invited you as {role} · until {date}",

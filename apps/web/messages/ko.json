@@ -6717,6 +6717,15 @@
         "line": "새 조직 «{name}»도 함께 만들어요",
         "later": "이름은 나중에 설정에서 바꿀 수 있어요."
       },
+      "firstProject": {
+        "line": "첫 프로젝트 «{name}»도 함께 만들어요",
+        "changeAria": "첫 프로젝트 이름 바꾸기",
+        "limit": "이 조직은 프로젝트를 {limit}개까지 만들 수 있어요 — 더 만들려면 요금제를 업그레이드해 주세요."
+      },
+      "projectPick": {
+        "label": "시작할 프로젝트",
+        "placeholder": "프로젝트를 골라 주세요"
+      },
       "invited": {
         "title": "초대받은 조직이 있어요",
         "row": "{org}에서 {role}{josa} 초대했어요 · {date}까지",

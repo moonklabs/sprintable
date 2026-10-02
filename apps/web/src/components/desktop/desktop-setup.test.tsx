@@ -1710,3 +1710,82 @@ describe('[SID:4492] a code whose setup was already started opens its progress, 
     expect(startButton()).toBeDefined();
   });
 });
+
+// story 4496 (PO 09:32Z (가) · Mirko 회차5): an organization with no project (or a tab with no project) — «시작» was off with no
+// reason and no project field. Now: no project in the organization → the setup makes the first one; one → that one; more → pick.
+describe('[SID:4496] no project in the tab: the setup makes the first one, or uses / lets the person pick one', () => {
+  const MADE = '99999999-8888-4777-8666-555555555555';
+  let confirmAnswer: () => Response;
+  function stubAll() {
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith('/api/desktop/recipes')) return recipesNow();
+      if (url.endsWith('/api/desktop/setup-codes/confirm')) return confirmAnswer();
+      if (url.endsWith('/api/auth/refresh') || url.endsWith('/api/current-project')) return new Response('{}', { status: 200 });
+      if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }));
+  }
+  async function mountWith(projects: { projectId: string; projectName: string; orgId?: string }[]) {
+    ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: undefined, userName: '김지우', orgId: 'o-1',
+      orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: projects });
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetup code={CODE} runtimes={['claude']} setupId={SETUP_ID} /></NextIntlClientProvider>); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+  }
+  const press = async () => { await act(async () => { startButton().click(); }); for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+  const confirmBodyOf = () => calls.find((c) => c.url.endsWith('/setup-codes/confirm'))?.body as Record<string, unknown> | undefined;
+
+  it('no project in the organization: «첫 프로젝트 «첫 프로젝트»도 함께 만들어요» · «시작» on · the body names the project (no id) · the made one becomes the tab\'s', async () => {
+    confirmAnswer = () => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1', project_id: MADE }), { status: 200 });
+    stubAll();
+    await mountWith([{ projectId: 'other-org-p', projectName: '남의 조직', orgId: 'o-2' }]); // another organization's project does not count
+    expect(text()).toContain('첫 프로젝트 «첫 프로젝트»도 함께 만들어요');
+    expect(container.querySelector('[aria-label="첫 프로젝트 이름 바꾸기"]')).not.toBeNull();
+    expect(startButton().disabled).toBe(false);
+    await press();
+    const body = confirmBodyOf()!;
+    expect(body.project_name).toBe('첫 프로젝트');
+    expect('project_id' in body).toBe(false);
+    expect((calls.find((c) => c.url.endsWith('/api/current-project'))?.body as { project_id: string }).project_id).toBe(MADE);
+  });
+
+  it('one project in the organization: no line · that project is used · nothing named', async () => {
+    confirmAnswer = () => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1', project_id: null }), { status: 200 });
+    stubAll();
+    await mountWith([{ projectId: 'p-only', projectName: '있는 프로젝트', orgId: 'o-1' }]);
+    expect(container.querySelector('[data-testid=setup-first-project]')).toBeNull();
+    expect(container.querySelector('[data-testid=setup-project-pick]')).toBeNull();
+    await press();
+    const body = confirmBodyOf()!;
+    expect(body.project_id).toBe('p-only');
+    expect('project_name' in body).toBe(false);
+  });
+
+  it('several projects: a project field · «시작» off until one is picked · the picked one is sent', async () => {
+    confirmAnswer = () => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1' }), { status: 200 });
+    stubAll();
+    await mountWith([{ projectId: 'p-a', projectName: 'A', orgId: 'o-1' }, { projectId: 'p-b', projectName: 'B', orgId: 'o-1' }]);
+    const pick = container.querySelector('[data-testid=setup-project-pick] select') as HTMLSelectElement;
+    expect(pick).not.toBeNull();
+    expect(container.querySelector('[data-testid=setup-first-project]')).toBeNull();
+    expect(startButton().disabled).toBe(true);
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      set.call(pick, 'p-b'); pick.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(startButton().disabled).toBe(false);
+    await press();
+    expect(confirmBodyOf()!.project_id).toBe('p-b');
+  });
+
+  it('the organization\'s project limit: «이 조직은 프로젝트를 1개까지 만들 수 있어요 — …» (no plan named)', async () => {
+    confirmAnswer = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1 } }), { status: 402 });
+    stubAll();
+    await mountWith([]);
+    await press();
+    expect(text()).toContain('이 조직은 프로젝트를 1개까지 만들 수 있어요 — 더 만들려면 요금제를 업그레이드해 주세요.');
+    expect(text()).not.toContain('무료 플랜');
+  });
+});

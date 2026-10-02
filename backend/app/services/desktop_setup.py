@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -69,7 +69,8 @@ _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 class DesktopSetupError(Exception):
     """A closed code: request_invalid · service_unavailable · code_not_found · code_expired · code_used · code_not_confirmed_yet · verifier_mismatch ·
     already_confirmed · not_org_admin · recipe_not_found · roles_invalid · recipe_too_large · no_agent_role · human_stage_needs_member ·
-    setup_not_found · has_organization · pending_invites (story 4427 (나): the new-organization path)."""
+    setup_not_found · has_organization · pending_invites (story 4427 (나): the new-organization path) · project_required (story 4496:
+    no project chosen while the organization has projects)."""
 
     def __init__(self, code: str, detail: str | None = None):
         super().__init__(detail or code)
@@ -361,6 +362,63 @@ async def confirm_setup_new_org(
         workdir_hint=workdir_hint, background_tasks=background_tasks,
     )
     return setup_id, members, work_item_id, org.id, project.id
+
+
+async def confirm_setup_first_project(
+    db: AsyncSession,
+    *,
+    code: str,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    project_name: str,
+    recipe_id: uuid.UUID,
+    roles: list[RoleChoice],
+    auth,
+    workdir_hint: str | None = None,
+    background_tasks=None,
+) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID]:
+    """story 4496 (PO 09:32Z (가)) — «시작» with no project chosen, in an organization that has **no project yet**: its first
+    project and the setup in **one transaction** (the new-organization path's rule, `confirm_setup_new_org`). Returns (setup_id,
+    members, work_item_id, project_id). Never commits itself; any error before the first stage's publish rolls everything back.
+
+    Order: the code (row lock) → a replay by the same person returns what the code made (**nothing is made before this** — a
+    second press must not make a second project) → the code's state → organization admin → the organization row lock (two codes
+    of one organization at once see one count) → the organization's real project count (any → `project_required`: use one of
+    them, never make another) → the plan's project limit → create → `confirm_setup` itself."""
+    from app.models.organization import Organization
+    from app.models.project import Project
+    from app.services.org_project_create import check_project_create_allowed, create_project_with_member
+    from app.services.project_auth import is_org_owner_or_admin
+
+    setup = await _setup_by_code(db, code)
+    if (
+        setup.confirmed_at is not None and setup.confirmed_by == user_id and setup.org_id == org_id and setup.revoked_at is None
+    ):
+        return setup.id, list(setup.members or []), setup.work_item_id, setup.project_id
+    if setup.revoked_at is not None or setup.exchanged_at is not None:
+        raise DesktopSetupError("code_used")
+    if _now() >= setup.expires_at:
+        raise DesktopSetupError("code_expired")
+    if setup.confirmed_at is not None:
+        raise DesktopSetupError("already_confirmed")
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise DesktopSetupError("not_org_admin")
+
+    await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())
+    existing = (await db.execute(
+        select(func.count()).select_from(Project).where(Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalar_one()
+    if existing:
+        raise DesktopSetupError("project_required", f"org_id={org_id} has {existing} project(s) — choose one")
+    await check_project_create_allowed(db, org_id)
+    project = await create_project_with_member(
+        db, org_id=org_id, name=project_name, description=None, slug=None, user_id=str(user_id),
+    )
+    setup_id, members, work_item_id = await confirm_setup(
+        db, code=code, user_id=user_id, org_id=org_id, project_id=project.id, recipe_id=recipe_id, roles=roles, auth=auth,
+        workdir_hint=workdir_hint, background_tasks=background_tasks,
+    )
+    return setup_id, members, work_item_id, project.id
 
 
 async def confirm_setup(

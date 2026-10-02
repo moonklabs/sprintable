@@ -20,7 +20,7 @@ import { formatLocaleDate } from '@/lib/i18n';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
-  agentRowCount, confirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow, withDefaultRecipeFirst } from '@/lib/desktop-setup';
 
 /**
@@ -177,9 +177,17 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const tOrg = useTranslations('organization');
   const tNewOrg = useTranslations('desktopOnboarding');
   const tOnboarding = useTranslations('onboarding');
-  const { projectId, userName, orgId, orgMemberships } = useDashboardContext();
+  const { projectId, userName, orgId, orgMemberships, projectMemberships } = useDashboardContext();
   const [orgMode, setOrgMode] = useState<OrgMode>(() => (orgId ? { kind: 'has-org' } : { kind: 'checking' }));
   const newOrg = orgMode.kind === 'new';
+  // story 4496 (PO 09:32Z (가)): the tab has no project. An admin's list is the organization's every project (`/me/memberships`
+  // · owner/admin = the whole organization), so: none → the setup makes the first one; one → that one; more → the person picks.
+  // The server counts again and makes a project only when there is none (409 project_required otherwise).
+  const orgProjects = useMemo(() => (projectMemberships ?? []).filter((m) => !m.orgId || m.orgId === orgId), [projectMemberships, orgId]);
+  const firstProject = orgMode.kind === 'has-org' && !projectId && orgProjects.length === 0;
+  const [pickedProject, setPickedProject] = useState('');
+  const chosenProject = projectId ?? (orgProjects.length === 1 ? orgProjects[0].projectId : (pickedProject || undefined));
+  const [editingProjectName, setEditingProjectName] = useState(false);
   // story #4453 — a new organization needs a verified e-mail: that step comes first, not after «시작» (a 403 at the end).
   // Once it opens, read the invites again: the server lists them only for a verified address, so an invited person was
   // «new» while unverified — without this they would meet their invite only after «시작» (pending_invites · PO 05:07Z)
@@ -255,6 +263,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // (나) the new organization's names: the same defaults as the one-screen «조직 만들기» (4832) — «{표시 이름}의 조직» (40 at most)
   // or «내 조직», never the e-mail; «첫 프로젝트». The display name comes from /api/auth/me; a name already typed is kept.
   useEffect(() => {
+    if (firstProject) setProjectName((n) => n || tNewOrg('defaultProjectName'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstProject]);
+  useEffect(() => {
     if (!newOrg) return;
     let off = false;
     const fallback = tNewOrg('defaultOrgName');
@@ -319,7 +331,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const agents = agentRowCount(rows);
 
   async function start() {
-    if (!recipe || (!newOrg && !projectId)) return;
+    if (!recipe || (!newOrg && !firstProject && !chosenProject)) return;
     setRateLine(null);
     setView({ kind: 'starting' });
     try {
@@ -330,10 +342,16 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         })
         : await fetchWithAuth('/api/desktop/setup-codes/confirm', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(confirmBody(code, rows, projectId!, recipe.id, workdir)),
+          body: JSON.stringify(firstProject ? firstProjectConfirmBody(code, rows, recipe.id, workdir, projectName)
+            : confirmBody(code, rows, chosenProject!, recipe.id, workdir)),
         });
       if (res.ok) {
         if (newOrg && !(await joinNewOrg(await res.json().catch(() => null)))) { setView({ kind: 'done-reload' }); return; }
+        // story 4496: the tab had no project — the one made (or the one used) becomes the tab's, the way the new organization's does
+        if (!newOrg && !projectId) {
+          const made = await res.json().catch(() => null) as { project_id?: string | null } | null;
+          if (!(await joinNewOrg({ project_id: made?.project_id ?? chosenProject }))) { setView({ kind: 'done-reload' }); return; }
+        }
         setView({ kind: 'started' });
         return;
       }
@@ -358,6 +376,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       }
       // (나) the words the one-screen «조직 만들기» uses for the same refusals (4832 · Yuna: «같은 오류는 같은 말»)
       const limit = typeof (error as { limit?: unknown } | undefined)?.limit === 'number' ? (error as { limit: number }).limit : 1;
+      // story 4496 (Yuna 09:32Z): the organization's project limit — for any plan, so no plan named
+      if (firstProject && error?.code === 'PLAN_LIMIT_EXCEEDED' && error.resource === 'project') {
+        setView({ kind: 'error', message: t('firstProject.limit', { limit }) });
+        return;
+      }
       const message = !newOrg ? null
         : error?.code === 'EMAIL_VERIFICATION_REQUIRED' ? tOnboarding('emailVerifyRequiredError')
         : error?.code === 'PLAN_LIMIT_EXCEEDED' && error.resource === 'org' ? tOnboarding('orgLimitExceededError', { limit })
@@ -400,8 +423,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // agents found but every either row set to «나»: «시작» off with the reason in the count line's place (Yuna v21 — n = 0 there
   // would be false); the server refuses the same with no_agent_role
   const noAgentRow = needsAnAgent(rows);
-  const namesOk = !newOrg || (!!orgName.trim() && !!projectName.trim());
-  const canStart = !!recipe && (newOrg || !!projectId) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose';
+  const namesOk = firstProject ? !!projectName.trim() : !newOrg || (!!orgName.trim() && !!projectName.trim());
+  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose';
 
   return (
     <Card className="break-keep flex flex-col gap-6 p-6">
@@ -433,6 +456,38 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             </div>
           )}
         </section>
+      ) : null}
+
+      {/* story 4496 (Yuna 09:32Z): the organization has no project yet — the setup makes the first one; the new organization's
+          line and [바꾸기] in the same place */}
+      {firstProject ? (
+        <section aria-label={tNewOrg('projectLabel')} data-testid="setup-first-project">
+          {editingProjectName ? (
+            <div className="flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-sm font-medium">{tNewOrg('projectLabel')}
+                <Input value={projectName} maxLength={100} onChange={(e) => setProjectName(e.target.value)} />
+                {!projectName.trim() ? <span className="text-xs font-normal text-muted-foreground">{tNewOrg('projectRequired')}</span> : null}
+              </label>
+              <p className="text-xs text-muted-foreground">{t('newOrg.later')}</p>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3 rounded-md bg-muted p-3">
+              <p className="min-w-0 text-sm">{t('firstProject.line', { name: projectName })}</p>
+              <Button variant="ghost" size="sm" aria-label={t('firstProject.changeAria')} onClick={() => setEditingProjectName(true)}>{t('change')}</Button>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {/* story 4496 ⓑ: projects exist but the tab has none and there are several — the person picks one (none is made) */}
+      {orgMode.kind === 'has-org' && !projectId && orgProjects.length > 1 ? (
+        <label className="flex flex-col gap-1 text-sm font-medium" data-testid="setup-project-pick">{t('projectPick.label')}
+          <select className="rounded-md border bg-background px-2 py-1 text-base font-normal lg:text-sm" value={pickedProject}
+            onChange={(e) => setPickedProject(e.target.value)}>
+            <option value="" disabled>{t('projectPick.placeholder')}</option>
+            {orgProjects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}
+          </select>
+        </label>
       ) : null}
 
       {/* the chosen recipe as one card + [바꾸기] — the list of every recipe pushed «시작» more than a screen below, and a
