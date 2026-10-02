@@ -13,7 +13,7 @@ import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
-import { endsWithAgentWord, forgetActiveSetup, rememberActiveSetup, setupPollDelayMs, setupProgress, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepState } from '@/lib/desktop-setup';
+import { endsWithAgentWord, forgetActiveSetup, rememberActiveSetup, setupPollDelayMs, setupProgress, stepsShown, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepShown } from '@/lib/desktop-setup';
 import { Failure, ToolsNotConnected } from './desktop-setup';
 
 /**
@@ -110,6 +110,8 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
     ? storyBoardUrl(orgSlug, currentProjectSlug, status.work_item_id)
     : status.work_item_id ? flatHref(`/flow?story=${status.work_item_id}`) : null;
   const resultReady = progress.result === 'done' && !!resultHref;
+  // story 4492: one spinner (the earliest step not done) · the later ones wait with their own words
+  const [readyShown, handedShown, resultShown] = stepsShown(progress);
   // story 4492 — «오늘» from the one destination module (no literal path). An org-less person on this page has no dashboard
   // shell (no flags in the context) — the default flags then, the same as the shell's own default.
   const todayHref = flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path);
@@ -124,7 +126,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
       <ol className="flex flex-col gap-3" aria-live="polite">
         {/* a later step done → the earlier one is drawn done (Yuna 12:22Z): ② proves the receiving agent was ready; the pairs line
             stays for when every agent is really ready, and the others still getting ready are ①'s own detail (not a list item) */}
-        <Step state={progress.readyDrawn} paused={progress.readyPaused} label={progress.readyDrawn === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
+        <Step state={readyShown} paused={progress.readyPaused} label={progress.readyDrawn === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
           detail={progress.ready === 'done' ? progress.pairs.map((p) => `${role(p.role)} · ${RUNTIME[p.runtime]}`).join(', ')
             : progress.stillPreparing.length > 0 ? (() => {
               const g = roleGroup(progress.stillPreparing);
@@ -133,26 +135,26 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
           detailTestId={progress.ready !== 'done' && progress.stillPreparing.length > 0 ? 'setup-still-preparing' : undefined}>
           {/* the notes belong to their step's list item (same place on screen: the step's text column is 28px in) — never a list
               item of their own, so a screen reader counts three steps */}
+          {/* story 4492: the gate is part of getting the agents ready (①) — the note asking the person to answer sits here */}
+          {progress.trustHint && claude ? (
+            <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
+            </span>
+          ) : null}
           {progress.workdirFallback ? (
             <span className="mt-1 flex gap-2 text-xs text-muted-foreground" data-testid="setup-workdir-fallback">
               <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('workdirFallback', { recipe: task })}
             </span>
           ) : null}
         </Step>
-        <Step state={progress.handed} paused={progress.handedPaused} label={progress.handed === 'done' ? t('stepHandedDone') : t('stepHandedRunning')}
+        <Step state={handedShown} paused={progress.handedPaused} label={handedShown === 'done' ? t('stepHandedDone') : handedShown === 'waiting' ? t('stepHandedWaiting') : t('stepHandedRunning')}
           detail={progress.handed === 'running' && task && progress.firstAgentRole
             ? (() => {
               const r = role(progress.firstAgentRole);
               return endsWithAgentWord(r, locale) ? t('stepHandedDetailBare', { task, josa: pickEulReulJosa(task), role: r }) : t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: r });
-            })() : null}>
-          {progress.trustHint && claude ? (
-            <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
-              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
-            </span>
-          ) : null}
-        </Step>
+            })() : null} />
         {/* while an agent is stopped, ③ does not spin — nothing is moving (Yuna v26); ① · ② likewise when all they wait for stopped (v29) */}
-        <Step state={progress.result} paused={!!progress.stopped} label={progress.result === 'done' ? t('stepResultDone') : t('stepResultRunning')} detail={null} />
+        <Step state={resultShown} paused={!!progress.stopped} label={resultShown === 'done' ? t('stepResultDone') : resultShown === 'waiting' ? t('stepResultWaiting') : t('stepResultRunning')} detail={null} />
       </ol>
       {progress.startFailed.length > 0 ? (
         // story 4452 (Yuna 04:41Z · 04:43Z · v31): an agent the shell could not start — its own block, before a stopped one, with
@@ -223,12 +225,12 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   );
 }
 
-function Step({ state, label, detail, paused = false, detailTestId, children }: { state: StepState; label: string; detail: string | null; paused?: boolean; detailTestId?: string; children?: React.ReactNode }) {
+function Step({ state, label, detail, paused = false, detailTestId, children }: { state: StepShown; label: string; detail: string | null; paused?: boolean; detailTestId?: string; children?: React.ReactNode }) {
   return (
     <li className="flex gap-3" data-state={state} data-paused={paused && state !== 'done' ? 'true' : undefined}>
       {state === 'done'
         ? <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-        : paused
+        : paused || state === 'waiting'
           ? <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
           : <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />}
       <span className="min-w-0">

@@ -274,6 +274,20 @@ export function startFailedLine(reason: StartFailedReason | null, code: string |
 }
 
 export type StepState = 'running' | 'done';
+/** story 4492 (PO 07:06Z · Yuna 07:06Z): how a step is drawn — `waiting` = not started yet (an earlier step is not done): a still
+ *  ring and its own words, never a spinner. */
+export type StepShown = StepState | 'waiting';
+
+/**
+ * story 4492 — one spinner: the earliest step that is not done. At the first agent's gate (handed over, its tools not connected)
+ * that is ① — the gate is part of getting the agents ready (`ready` = handed over + every agent's tools connected) — and ② · ③
+ * wait. Three spinners read «just wait», which says the opposite of the note asking the person to answer.
+ */
+export function stepsShown(p: Pick<SetupProgress, 'readyDrawn' | 'handed' | 'result'>): [StepShown, StepShown, StepShown] {
+  const states = [p.readyDrawn, p.handed, p.result] as const;
+  const open = states.findIndex((s) => s !== 'done');
+  return states.map((s, i) => (s === 'done' ? 'done' : i === open ? 'running' : 'waiting')) as [StepShown, StepShown, StepShown];
+}
 export const NOT_CONNECTED_AFTER_INPUT_MS = 30_000;
 export const NOT_CONNECTED_AFTER_HANDOVER_MS = 180_000;
 

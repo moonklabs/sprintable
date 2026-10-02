@@ -752,7 +752,8 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(line?.textContent).toBe('작성 에이전트는 아직 준비하고 있어요');
     expect(line?.className).toContain('text-muted-foreground');
     // ①'s own detail (the «역할 · 런타임» pairs only once every agent is ready) — still three steps for a screen reader
-    expect(first()?.textContent).toBe('에이전트를 준비했어요작성 에이전트는 아직 준비하고 있어요');
+    // story 4492: the trust note sits under ① now (the gate is part of getting ready) — same condition as before
+    expect(first()?.textContent).toBe('에이전트를 준비했어요작성 에이전트는 아직 준비하고 있어요창 아래 «이 컴퓨터의 에이전트»에서 «시작됨» 줄을 눌러, 터미널이 묻는 것에 답하면 이어져요.');
     expect(first()!.contains(line)).toBe(true);
     expect(container.querySelectorAll('ol > li').length).toBe(3);
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
@@ -856,7 +857,8 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: ended('m2') } });
     await tick(2_000);
     expect(paused()).toEqual([false, false, true]);
-    expect(container.querySelectorAll('ol .animate-spin').length).toBe(2);
+    // story 4492: one spinner — the earliest step not done (①); ② waits with a still ring
+    expect(container.querySelectorAll('ol .animate-spin').length).toBe(1);
   });
 
   it('the three steps · the trust note only between handed over and connected · «결과 보기» off until the result · the way out always (story 4492)', async () => {
@@ -901,6 +903,33 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     const n = polls();
     await tick(10_000);
     expect(polls()).toBe(n); // stops once the result is in
+  });
+
+  it('[SID:4492] one spinner — the earliest step not done · the later ones wait (still ring · their own words) · the note under ①', async () => {
+    const steps = () => [...container.querySelectorAll('ol > li[data-state]')].map((li) => ({
+      state: (li as HTMLElement).dataset.state, spin: !!li.querySelector('.animate-spin'), label: li.querySelector('span > span')?.textContent,
+    }));
+    // the gate: handed over, the first agent's tools not connected yet
+    statusNow = () => status('handed_over', { tools_connected: [] });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(steps()).toEqual([
+      { state: 'running', spin: true, label: '에이전트를 준비하고 있어요' },
+      { state: 'waiting', spin: false, label: '첫 일감을 맡겨요' },
+      { state: 'waiting', spin: false, label: '첫 결과를 받아요' },
+    ]);
+    const first = container.querySelectorAll('ol > li[data-state]')[0]!;
+    expect(first.contains(container.querySelector('[data-testid=setup-trust-hint]'))).toBe(true);
+    // every agent ready: ① done · ② spins · ③ waits
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] });
+    await tick(2_000);
+    expect(steps().map((x) => [x.state, x.spin])).toEqual([['done', false], ['running', true], ['waiting', false]]);
+    expect(steps()[1]!.label).toBe('첫 일감을 맡기고 있어요');
+    // the result: all done, nothing spins
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    await tick(2_000);
+    expect(steps().map((x) => [x.state, x.spin])).toEqual([['done', false], ['done', false], ['done', false]]);
   });
 
   it('«설정 진행 중» for doc counting (AC2): refreshed by every status read — a doc opened 31 min in still counts; gone once the result is in (PO 13:00Z)', async () => {
