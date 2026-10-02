@@ -367,7 +367,7 @@ async def create_or_get_publication_command(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, destination: uuid.UUID,
     approved_version: uuid.UUID, requested_by_member_id: uuid.UUID,
     scheduled_at: datetime | None, operation: str = "publish", content_kind: str = "channel_post",
-    toggle_seq: int = 0, initiated_by: str | None = None,
+    toggle_seq: int = 0, initiated_by: str | None = None, ads_boost_cycle: int | None = None,
 ) -> tuple[PublicationCommand, bool]:
     """멱등 upsert(블루프린트 §3 키: org_id+destination+approved_version+operation+
     toggle_seq — story #3806 PR3가 toggle_seq를 추가, 그 전까지는 항상 0이라
@@ -407,7 +407,7 @@ async def create_or_get_publication_command(
         id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=destination,
         approved_version=approved_version, operation=operation, scheduled_at=scheduled_at,
         status="pending", requested_by_member_id=requested_by_member_id, content_kind=content_kind,
-        toggle_seq=toggle_seq, initiated_by=initiated_by,
+        toggle_seq=toggle_seq, initiated_by=initiated_by, ads_boost_cycle=ads_boost_cycle,
     )
     try:
         async with db.begin_nested():

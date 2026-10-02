@@ -83,13 +83,16 @@ async def cancel_ads_boost(
     now = datetime.now(timezone.utc)
     void_ads_boost_gate_for_cancel(gate, actor_member_id=actor_member_id, reason=reason, now=now)
     await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code=CANCEL_VOID_REASON_CODE)  # a queued pause stays (4466)
+    await _void_blocked_starts(db, gate_id=gate.id)
     from app.services.activity_log import ActivityLogService
 
     await ActivityLogService(db).record(
         org_id=org_id, action="ads_boost_cancelled", actor_id=actor_member_id, actor_type="human",
         entity_type="gate", entity_id=gate.id, context={"reason": reason} if reason else {},
     )
-    if run is None or not (run.campaign_id or run.adset_id or run.ad_id or run.create_call_started_at):
+    if run is None or not (
+        run.campaign_id or run.adset_id or run.ad_id or run.create_call_started_at or await _command_out(db, gate_id=gate.id)
+    ):
         if run is not None:
             _reset_run(run)
         await db.commit()
@@ -97,7 +100,12 @@ async def cancel_ads_boost(
     run.cancel_requested_at = now
     run.cancel_requested_by = actor_member_id
     run.cancel_reason = reason
-    live = run.status == "running"
+    # story #4460 (Qadir 02:22Z ⓐ) — a campaign is live, or was made and never confirmed off (a start whose ACTIVE switch went out
+    # and then failed: its outcome is unknown, the run still «pending»): pause it before anything is cleared. While a command of
+    # the gate is still out, the worker's hook asks once it ended (`pause_left_campaign_for_cancel`).
+    live = run.status == "running" or (
+        run.status == "pending" and run.campaign_id is not None and not await _command_out(db, gate_id=gate.id)
+    )
     await db.commit()
     if live:
         from app.services.ads_boost_execution import AdsBoostAlreadyInStateError, request_ads_boost_pause
@@ -125,7 +133,6 @@ async def finish_cancel_if_stopped(db: AsyncSession, *, gate_id: uuid.UUID, now:
     """The one place a cancel finishes: only when the campaign is known to be off — the run paused or never switched on, and no
     command of the gate still out — the ended cycle is kept and the run cleared. Otherwise nothing changes («취소 중»)."""
     from app.models.ads_boost_run import AdsBoostRun, AdsBoostRunCycle
-    from app.models.publication_command import PublicationCommand
     from app.services.ads_spend_snapshots import _captured_spend_minor_for_gate
 
     now = now or datetime.now(timezone.utc)
@@ -134,18 +141,17 @@ async def finish_cancel_if_stopped(db: AsyncSession, *, gate_id: uuid.UUID, now:
         return False
     if run.status not in ("pending", "paused"):
         return False  # running · pause_pending: the money may still be going out
-    out = (await db.execute(
-        select(PublicationCommand.id).where(
-            PublicationCommand.gate_id == gate_id, PublicationCommand.status.in_(_OUT_STATUSES),
-        ).limit(1)
-    )).scalar_one_or_none()
-    if out is not None:
+    if run.status == "pending" and run.campaign_id is not None:
+        # Qadir 02:22Z ⓐ — a campaign that was made but never confirmed off (the ACTIVE switch's outcome unknown) may be spending:
+        # only a landed pause («paused») lets the cycle end and its ids go
+        return False
+    if await _command_out(db, gate_id=gate_id):
         return False  # a command may still reach the provider: wait for its outcome
     gate = (await db.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
     spend = None
     if gate.scope_key:
         spend = await _captured_spend_minor_for_gate(
-            db, org_id=gate.org_id, publication_id=uuid.UUID(gate.scope_key), since=run.cycle_started_at,
+            db, org_id=gate.org_id, publication_id=uuid.UUID(gate.scope_key), cycle=run.cycle_no,
         )
     db.add(AdsBoostRunCycle(
         id=uuid.uuid4(), org_id=run.org_id, gate_id=gate_id, run_id=run.id,
@@ -160,8 +166,64 @@ async def finish_cancel_if_stopped(db: AsyncSession, *, gate_id: uuid.UUID, now:
     return True
 
 
+async def _command_out(db: AsyncSession, *, gate_id: uuid.UUID) -> bool:
+    """A command of the gate may still reach the provider (pending · in progress · stopped for a person)."""
+    from app.models.publication_command import PublicationCommand
+
+    return (await db.execute(
+        select(PublicationCommand.id).where(
+            PublicationCommand.gate_id == gate_id, PublicationCommand.status.in_(_OUT_STATUSES),
+        ).limit(1)
+    )).scalar_one_or_none() is not None
+
+
+async def _void_blocked_starts(db: AsyncSession, *, gate_id: uuid.UUID) -> None:
+    """Qadir 02:22Z ⓑ — a start or resume stopped for a person (blocked: the connection · an org pause) counted as «out» and the
+    cancel waited on it forever; the gate is voided, so it could never switch anything on — void it with the cancel. A blocked
+    pause stays: it stops money (4466 · 4476 re-raise it once the connection is back)."""
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_BOOST_START, OP_RESUME
+
+    for row in (await db.execute(
+        select(PublicationCommand).where(
+            PublicationCommand.gate_id == gate_id, PublicationCommand.status == "blocked",
+            PublicationCommand.operation.in_((OP_BOOST_START, OP_RESUME)),
+        ).with_for_update()
+    )).scalars().all():
+        row.status = "voided"
+        row.reason_code = CANCEL_VOID_REASON_CODE
+
+
+async def pause_left_campaign_for_cancel(db: AsyncSession, *, gate_id: uuid.UUID) -> bool:
+    """Qadir 02:22Z ⓐ — after a command of a cancelled boost ended: a campaign that exists and was never confirmed off (run
+    «pending» with ids) gets a pause, once per cycle — a pause that then fails is not asked again here (4417's retry rules and a
+    person's press carry it; asking at every command would loop). The scheduler's pause, attributed to the person who cancelled."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_PAUSE, in_ads_boost_cycle, request_ads_boost_pause
+
+    run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one_or_none()
+    if (
+        run is None or run.cancel_requested_at is None or run.status != "pending" or run.campaign_id is None
+        or run.cancel_requested_by is None or await _command_out(db, gate_id=gate_id)
+    ):
+        return False
+    asked = (await db.execute(
+        select(PublicationCommand.id).where(
+            PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_PAUSE, in_ads_boost_cycle(run.cycle_no),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if asked is not None:
+        return False
+    await request_ads_boost_pause(
+        db, org_id=run.org_id, gate_id=gate_id, requester_member_id=run.cancel_requested_by, initiated_by="scheduler",
+    )
+    return True
+
+
 def _reset_run(run) -> None:
-    """The run made ready for the next cycle (its ended cycle is kept as a row first)."""
+    """The run made ready for the next cycle (its ended cycle is kept as a row first) — its cycle number goes up, so the ended
+    cycle's commands and captures are no longer this run's (Qadir 02:22Z)."""
     for field in (
         "campaign_id", "adset_id", "ad_id", "started_at", "paused_at", "cap_reached_at", "last_error",
         "spend_blocked_at", "spend_blocked_code", "spend_blocked_notified_at", "account_currency",
@@ -170,3 +232,4 @@ def _reset_run(run) -> None:
     ):
         setattr(run, field, None)
     run.status = "pending"
+    run.cycle_no = (run.cycle_no or 1) + 1

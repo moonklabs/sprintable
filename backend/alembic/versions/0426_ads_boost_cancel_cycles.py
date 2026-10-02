@@ -9,10 +9,17 @@ the cycle that ended is kept as a row, the run is cleared for the next cycle.
   count only this cycle's captures (the org ledger keeps every capture).
 - `ads_boost_runs.cancel_requested_at · cancel_requested_by · cancel_reason`: a cancel asked for and not finished yet («취소 중»):
   the campaign ids are kept until the provider confirmed the pause.
+- `ads_boost_runs.cycle_no` (default 1) · `publication_commands.ads_boost_cycle` (null = 1): an explicit cycle mark (Qadir 02:22Z ·
+  PO) — a cancel's reset raises the run's number, every start/pause/resume command carries the number it was made in, and a
+  toggle, «started» and the card's latest pause read only the current cycle's commands (before: the last cycle's completed pause
+  was «the latest» and refused every pause of the new campaign). A number, not a time comparison: nothing rests on clocks.
+- `insight_snapshots.ads_boost_cycle` (null = 1): a paid capture is stamped with the run's cycle when it is taken — the card's
+  and the cap's total is this cycle's captures (before: `due_at >= cycle_started_at`, so a capture scheduled in the last cycle
+  but taken after the new start, reading the new campaign, fell out of the new cycle's total and its cap).
 - `ads_boost_run_cycles`: one row per ended cycle — the campaign it made, what it was created with, when it ran, why it ended,
   and what it spent — so a past cycle's campaign and spend do not disappear when the run is cleared.
 
-Additive only (new nullable columns · a new table).
+Additive only (new nullable columns · one NOT NULL column with a default · a new table).
 
 Revision ID: 0426
 Revises: 0425
@@ -34,6 +41,9 @@ def upgrade() -> None:
     op.add_column("ads_boost_runs", sa.Column("cancel_requested_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("ads_boost_runs", sa.Column("cancel_requested_by", postgresql.UUID(as_uuid=True), nullable=True))
     op.add_column("ads_boost_runs", sa.Column("cancel_reason", sa.Text(), nullable=True))
+    op.add_column("ads_boost_runs", sa.Column("cycle_no", sa.Integer(), nullable=False, server_default="1"))
+    op.add_column("publication_commands", sa.Column("ads_boost_cycle", sa.Integer(), nullable=True))
+    op.add_column("insight_snapshots", sa.Column("ads_boost_cycle", sa.Integer(), nullable=True))
     op.create_table(
         "ads_boost_run_cycles",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -62,6 +72,9 @@ def downgrade() -> None:
     op.drop_index("ix_ads_boost_run_cycles_gate_id", table_name="ads_boost_run_cycles")
     op.drop_index("ix_ads_boost_run_cycles_org_id", table_name="ads_boost_run_cycles")
     op.drop_table("ads_boost_run_cycles")
+    op.drop_column("insight_snapshots", "ads_boost_cycle")
+    op.drop_column("publication_commands", "ads_boost_cycle")
+    op.drop_column("ads_boost_runs", "cycle_no")
     op.drop_column("ads_boost_runs", "cancel_reason")
     op.drop_column("ads_boost_runs", "cancel_requested_by")
     op.drop_column("ads_boost_runs", "cancel_requested_at")

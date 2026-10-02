@@ -208,8 +208,10 @@ async def test_a_cancel_while_the_start_is_out_at_the_provider_waits_for_it_and_
 
 
 async def test_a_held_needs_check_boost_is_cancelled_at_once_and_a_new_budget_makes_a_new_campaign(monkeypatch):
-    """AC3 (the 4458 dead end): the campaign was created on another budget and held (needs_check, never switched on) → cancel
-    ends it at once (nothing to pause) → a request with another budget → a new campaign."""
+    """AC3 (the 4458 dead end): the campaign was created on another budget and held (needs_check, never switched on) → cancel →
+    its campaign gets a pause first (Qadir 02:22Z ⓐ: a made campaign is cleared only after a landed pause — the run cannot tell a
+    never-switched-on campaign from one whose ACTIVE switch went out and failed) → the cycle ends → a request with another budget
+    → a new campaign."""
     from tests.test_4458_seal_race_realdb import _reseal_during_create
 
     engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
@@ -222,7 +224,10 @@ async def test_a_held_needs_check_boost_is_cancelled_at_once_and_a_new_budget_ma
         held = await _command(Session, new.id)
         assert held.reason_code == "ADS_BOOST_CREATED_BUDGET_DIFFERS"
         old_campaign = (await _run(Session, gate_id)).campaign_id
-        await _cancel(Session, org_id, gate_id, owner_id)
+        assert await _cancel(Session, org_id, gate_id, owner_id) == {"state": "cancelling"}
+        assert (await _run(Session, gate_id)).campaign_id == old_campaign  # kept until the pause lands
+        await _tick(Session)
+        assert statuses[-1] == "PAUSED"
         cleared = await _run(Session, gate_id)
         assert cleared.campaign_id is None and [c.campaign_id for c in await _cycles(Session, gate_id)] == [old_campaign]
         assert "ACTIVE" not in statuses
@@ -334,8 +339,8 @@ async def test_the_requester_who_is_a_plain_member_may_cancel(monkeypatch):
 
 
 async def test_a_queued_start_is_voided_so_a_held_boost_ends_at_once(monkeypatch):
-    """A start queued when the cancel lands would never run (the gate is no longer approved) — it is voided with the cancel, so a
-    boost that is not live ends at once instead of waiting for the worker to refuse that start."""
+    """A start queued when the cancel lands would never run (the gate is no longer approved) — it is voided with the cancel, so the
+    cancel does not wait for the worker to refuse that start; the held campaign is paused, then the cycle ends."""
     from tests.test_4458_seal_race_realdb import _reseal_during_create
 
     engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
@@ -345,8 +350,9 @@ async def test_a_queued_start_is_voided_so_a_held_boost_ends_at_once(monkeypatch
         await _tick(Session)  # created on the old budget, the new seal's start not sent yet
         queued = await _new_seal_start(Session, org_id, gate_id, owner_id)  # queued, not run
         result = await _cancel(Session, org_id, gate_id, owner_id)
-        assert result == {"state": "cancelled"}
+        assert result == {"state": "cancelling"}  # the held campaign's pause first
         assert (await _command(Session, queued.id)).status == "voided"
+        await _tick(Session)
         assert (await _run(Session, gate_id)).campaign_id is None
     finally:
         await engine.dispose()
@@ -445,5 +451,288 @@ async def test_a_failed_pause_request_after_the_cancel_still_answers_cancelling_
         assert (cleared.campaign_id, cleared.cancel_requested_at) == (None, None)
         [cycle] = await _cycles(Session, gate_id)
         assert (cycle.campaign_id, cycle.end_reason) == (campaign, "cancelled")
+    finally:
+        await engine.dispose()
+
+
+# ── Qadir 02:22Z (PO: the root — toggles by an explicit cycle number) ────────────────────────────────────────────────────────
+async def _second_cycle(Session, org_id, owner_id, gate_id, *, budget_minor):
+    """Cycle 1 runs and is cancelled (paused · recorded · cleared); the post is requested again, approved and started: cycle 2
+    runs a new campaign. Returns (old campaign, new campaign)."""
+    await _start_command(Session, org_id, gate_id, owner_id)
+    await _tick(Session)
+    old = (await _run(Session, gate_id)).campaign_id
+    await _cancel(Session, org_id, gate_id, owner_id)
+    await _tick(Session)
+    assert (await _run(Session, gate_id)).campaign_id is None
+    r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=budget_minor)
+    assert r.status_code in (200, 201), r.text
+    async with Session() as s:
+        await _approve_gate(s, gate_id, owner_id)
+    await _new_seal_start(Session, org_id, gate_id, owner_id)
+    await _tick(Session)
+    run = await _run(Session, gate_id)
+    assert run.status == "running" and run.campaign_id and run.campaign_id != old and run.cycle_no == 2
+    return old, run.campaign_id
+
+
+async def test_a_second_cycles_campaign_can_be_paused_by_a_person(monkeypatch):
+    """The blocker: cycle 1's last pause (completed) was «the latest toggle», so a person's [중지] on cycle 2's campaign was
+    refused as «already paused» while it spent. The toggle now reads its own cycle: the pause goes out and lands."""
+    from app.services.ads_boost_execution import request_ads_boost_pause
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    try:
+        _old, new = await _second_cycle(Session, org_id, owner_id, gate_id, budget_minor=250_000)
+        async with Session() as s:
+            pause = await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        assert pause.status == "pending" and pause.ads_boost_cycle == 2
+        await _tick(Session)
+        assert calls[-1] == ("PAUSED", new) and (await _run(Session, gate_id)).status == "paused"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_second_cycles_campaign_is_paused_at_its_cap(monkeypatch):
+    """The cap's automatic pause takes the same toggle path: cycle 2 (budget 10,000 · the sandbox's capture 12,345) reaches its
+    cap and the scheduler's pause stops the new campaign."""
+    from app.services.ads_spend_snapshots import refresh_ads_boost_spend_now
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    try:
+        _old, new = await _second_cycle(Session, org_id, owner_id, gate_id, budget_minor=10_000)
+        async with Session() as s:
+            await refresh_ads_boost_spend_now(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        run = await _run(Session, gate_id)
+        assert run.cap_reached_at is not None
+        await _tick(Session)
+        assert calls[-1] == ("PAUSED", new) and (await _run(Session, gate_id)).status == "paused"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_second_cycle_can_be_cancelled_too(monkeypatch):
+    """Cycle 2's cancel used to be stuck at «취소 중» (its pause refused): now its campaign is paused and the second cycle is
+    recorded next to the first."""
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    try:
+        old, new = await _second_cycle(Session, org_id, owner_id, gate_id, budget_minor=250_000)
+        assert await _cancel(Session, org_id, gate_id, owner_id) == {"state": "cancelling"}
+        await _tick(Session)
+        assert calls[-1] == ("PAUSED", new)
+        run = await _run(Session, gate_id)
+        assert (run.campaign_id, run.cancel_requested_at, run.cycle_no) == (None, None, 3)
+        assert [c.campaign_id for c in await _cycles(Session, gate_id)] == [old, new]
+    finally:
+        await engine.dispose()
+
+
+async def test_a_start_whose_active_switch_went_out_and_failed_is_paused_before_the_cancel_clears_it(monkeypatch):
+    """ⓐ: the ACTIVE switch reached the provider (the campaign is live there) but the call failed after it (a timeout): the start
+    stops with its outcome unknown, the run stays «pending» with the campaign id. A cancel then used to end the cycle at once and
+    clear the id — a live campaign nobody could stop or read. Now the campaign is paused first; only then the cycle ends."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    spy = sandbox.set_campaign_status  # _setup's spy (it records every status call)
+
+    async def active_then_timeout(client, **kwargs):
+        result = await spy(client, **kwargs)
+        if kwargs["status"] == "ACTIVE":
+            raise TimeoutError("the provider switched it on, the answer never came back")
+        return result
+
+    monkeypatch.setattr(sandbox, "set_campaign_status", active_then_timeout)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        stuck = await _run(Session, gate_id)
+        assert stuck.status == "pending" and stuck.campaign_id and ("ACTIVE", stuck.campaign_id) in calls
+        monkeypatch.setattr(sandbox, "set_campaign_status", spy)
+        assert await _cancel(Session, org_id, gate_id, owner_id) == {"state": "cancelling"}
+        assert (await _run(Session, gate_id)).campaign_id == stuck.campaign_id  # kept: it may be spending
+        await _tick(Session)
+        assert calls[-1] == ("PAUSED", stuck.campaign_id)
+        cleared = await _run(Session, gate_id)
+        assert (cleared.campaign_id, cleared.cancel_requested_at) == (None, None)
+        assert [c.campaign_id for c in await _cycles(Session, gate_id)] == [stuck.campaign_id]
+    finally:
+        await engine.dispose()
+
+
+async def test_a_start_stopped_for_a_person_is_voided_by_the_cancel(monkeypatch):
+    """ⓑ: a start held «blocked» (stopped for a person: a connection-classified provider error · an org publish pause) counted
+    as out, so the cancel waited on it forever («취소 중» with nothing to press). The gate is voided, so it could never switch
+    anything on — the cancel voids it and ends. (The state is set directly: how a start gets there is 4476/3953's.)"""
+    from sqlalchemy import update
+
+    from app.models.publication_command import PublicationCommand
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    try:
+        start = await _start_command(Session, org_id, gate_id, owner_id)
+        start_id = getattr(start, "id", start)
+        async with Session() as s:
+            await s.execute(update(PublicationCommand).where(PublicationCommand.id == start_id).values(
+                status="blocked", failure_kind="connection",
+            ))
+            await s.commit()
+        assert await _cancel(Session, org_id, gate_id, owner_id) == {"state": "cancelled"}
+        async with Session() as s:
+            row = await s.get(PublicationCommand, start_id)
+        assert (row.status, row.reason_code) == ("voided", "ADS_BOOST_CANCELLED")
+    finally:
+        await engine.dispose()
+
+
+async def test_a_capture_counts_toward_the_cycle_it_was_taken_in(monkeypatch):
+    """ⓒ: the cycle's total filtered captures by due_at ≥ cycle start, so a capture scheduled in cycle 1 but taken after cycle 2
+    began (it reads the new campaign) fell out of cycle 2's total — and its cap. Captures now carry the cycle they were taken in:
+    cycle 1's capture stays cycle 1's (the ledger keeps both), the late one counts for cycle 2."""
+    import uuid as _uuid
+    from datetime import timedelta
+
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.ads_spend_snapshots import get_ads_boost_spend_summary, refresh_ads_boost_spend_now
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        async with Session() as s:
+            await refresh_ads_boost_spend_now(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)  # cycle 1: 12,345
+        gate = await _gate(Session, gate_id)
+        async with Session() as s:  # scheduled in cycle 1 (due before cycle 2), taken later
+            s.add(InsightSnapshot(
+                id=_uuid.uuid4(), org_id=org_id, work_item_id=gate.work_item_id, publication_id=_uuid.UUID(gate.scope_key),
+                publication_kind="channel_publication", channel="ads_sandbox",
+                due_at=datetime.now(timezone.utc) - timedelta(minutes=1), status="pending",
+            ))
+            await s.commit()
+        await _cancel(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=250_000)
+        assert r.status_code in (200, 201), r.text
+        async with Session() as s:
+            await _approve_gate(s, gate_id, owner_id)
+        await _new_seal_start(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        from tests.test_4466_money_stops_off_approved_realdb import _spend_tick
+
+        await _spend_tick(Session)  # the late capture is taken now, in cycle 2
+        from sqlalchemy import select
+
+        async with Session() as s:
+            summary = await get_ads_boost_spend_summary(s, org_id=org_id, gate_id=gate_id)
+            taken = (await s.execute(
+                select(InsightSnapshot.ads_boost_cycle, InsightSnapshot.due_at).where(
+                    InsightSnapshot.publication_id == _uuid.UUID(gate.scope_key), InsightSnapshot.status == "captured",
+                ).order_by(InsightSnapshot.captured_at)
+            )).all()
+        run = await _run(Session, gate_id)
+        # cycle 1's own capture stays cycle 1's; two captures due in cycle 1 (the planted one · the one 4466's hook queued when
+        # the cancel voided the gate) were taken in cycle 2 and count there — by the old due_at filter they were 0
+        assert [c for c, _ in taken] == [1, 2, 2]
+        assert all(due < run.cycle_started_at for _, due in taken[1:])
+        assert summary["captured_spend_minor"] == 2 * 12_345
+        [cycle1] = await _cycles(Session, gate_id)
+        assert cycle1.spend_minor == 12_345
+    finally:
+        await engine.dispose()
+
+
+async def test_an_agent_does_not_read_a_past_cycles_campaign_id(monkeypatch):
+    """A past cycle's campaign id follows the current one's rule (people only)."""
+    from app.main import app
+    from tests.test_e4fc29fa_site_post_orchestration import _seed_agent, _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
+    _provider(monkeypatch)
+
+    async def spend_as(user_id, *, agent=False):
+        _setup_org_scoped_app(app, Session, org_id, user_id=user_id, agent=agent)
+        try:
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend")
+            assert r.status_code == 200, r.text
+            return r.json()
+        finally:
+            app.dependency_overrides.clear()
+
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        await _cancel(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        async with Session() as s:
+            agent_id = await _seed_agent(s, org_id, project_id)
+        assert (await spend_as(owner_id))["previous_cycles"][0]["campaign_id"]
+        [seen] = (await spend_as(agent_id, agent=True))["previous_cycles"]
+        assert seen["campaign_id"] is None and seen["spend_minor"] is not None
+    finally:
+        await engine.dispose()
+
+
+async def test_a_new_cycle_is_not_started_until_its_own_start_and_shows_no_old_pause(monkeypatch):
+    """«Started» and the card's latest pause read the current cycle: after the cancel and a new approval (no new start yet) a
+    pause is refused as not started (cycle 1's start is not this cycle's), and /spend shows no pause (cycle 1's completed one is
+    not the new campaign's)."""
+    import pytest as _pytest
+
+    from app.services.ads_boost_execution import AdsBoostNotStartedError, request_ads_boost_pause
+    from app.services.ads_spend_snapshots import get_ads_boost_spend_summary
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        await _cancel(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=250_000)
+        assert r.status_code in (200, 201), r.text
+        async with Session() as s:
+            await _approve_gate(s, gate_id, owner_id)
+        async with Session() as s:
+            assert (await get_ads_boost_spend_summary(s, org_id=org_id, gate_id=gate_id))["pause_command"] is None
+            with _pytest.raises(AdsBoostNotStartedError):
+                await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+    finally:
+        await engine.dispose()
+
+
+async def test_a_pause_for_a_cancel_that_fails_is_not_asked_again_and_again(monkeypatch):
+    """ⓐ's follow-up pause is asked once per cycle: if it fails at the provider the cancel stays «취소 중» (honest — the campaign
+    is not known to be off) and the worker does not queue a new pause after every command (a loop)."""
+    import app.services.ads_sandbox_campaign as sandbox
+    from tests.test_4466_money_stops_off_approved_realdb import _pauses
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    spy = sandbox.set_campaign_status
+
+    async def active_then_timeout(client, **kwargs):
+        result = await spy(client, **kwargs)
+        if kwargs["status"] == "ACTIVE":
+            raise TimeoutError("switched on, no answer")
+        return result
+
+    async def pause_fails(client, **kwargs):
+        if kwargs["status"] == "PAUSED":  # a terminal refusal (unmapped → needs_check · dead_letter): nothing is out any more
+            from app.services.meta_ads_campaign import MetaAdsCampaignError
+
+            raise MetaAdsCampaignError("META_ADS_TEST_PAUSE_REFUSED", "the provider refused the pause")
+        return await spy(client, **kwargs)
+
+    monkeypatch.setattr(sandbox, "set_campaign_status", active_then_timeout)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        monkeypatch.setattr(sandbox, "set_campaign_status", pause_fails)
+        await _cancel(Session, org_id, gate_id, owner_id)
+        for _ in range(3):
+            await _tick(Session)
+        pauses = await _pauses(Session, gate_id)
+        assert [p.status for p in pauses] == ["dead_letter"]  # asked once, not again after every command
+        run = await _run(Session, gate_id)
+        assert run.cancel_requested_at is not None and run.campaign_id  # still «취소 중»: the ids stay (not known to be off)
     finally:
         await engine.dispose()

@@ -23,7 +23,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -177,7 +177,7 @@ async def _resolve_spend_context(db: AsyncSession, snapshot: InsightSnapshot) ->
 
 
 async def _captured_spend_minor_for_gate(
-    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, since: datetime | None = None,
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, cycle: int | None = None,
 ) -> int:
     """story #3806(Phase3·3-2 PR 11) — `get_ads_boost_spend_summary`가 이미 하던
     "그 gate의 캡처된 paid spend 합" 계산을 추출(드리프트 금지 — 상한 판정
@@ -188,8 +188,10 @@ async def _captured_spend_minor_for_gate(
             InsightSnapshot.org_id == org_id, InsightSnapshot.publication_id == publication_id,
             InsightSnapshot.source == _PAID_SOURCE, InsightSnapshot.status == "captured",
             # story #4460 — one post can run several cycles (a cancel, then a new request): the card and the cap count the
-            # current cycle's captures only (the org ledger keeps them all)
-            *([InsightSnapshot.due_at >= since] if since is not None else []),
+            # current cycle's captures only (the org ledger keeps them all). By the cycle each capture was taken in (Qadir
+            # 02:22Z ⓒ) — not by when it was due: a capture due in the last cycle but taken after the new start reads the new
+            # campaign and belongs to the new cycle.
+            *([func.coalesce(InsightSnapshot.ads_boost_cycle, 1) == cycle] if cycle is not None else []),
         )
     )).scalars().all()
     return sum((s.normalized or {}).get("spend") or 0 for s in snapshots)
@@ -209,7 +211,7 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
         return False
 
     captured = await _captured_spend_minor_for_gate(
-        db, org_id=gate.org_id, publication_id=uuid.UUID(gate.scope_key), since=run.cycle_started_at,
+        db, org_id=gate.org_id, publication_id=uuid.UUID(gate.scope_key), cycle=run.cycle_no,
     )
     if captured < gate.sealed_ads_budget_minor:
         return False
@@ -587,6 +589,7 @@ async def refresh_ads_boost_spend_now(
                 currency=ctx["gate"].sealed_ads_currency,
             )
         snapshot.normalized = {key: (spend_minor if key == "spend" else None) for key in NORMALIZED_KEYS}
+        snapshot.ads_boost_cycle = ctx["run"].cycle_no  # story #4460 — the cycle this capture was taken in
         snapshot.source = _PAID_SOURCE
         snapshot.captured_at = now
         snapshot.status = "captured"
@@ -683,6 +686,7 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
             # 어댑터는 spend 외 organic 지표를 아예 선언 안 하므로 "미선언"과 같은
             # null, 지어내지 않는다).
             snapshot.normalized = {key: (spend_minor if key == "spend" else None) for key in NORMALIZED_KEYS}
+            snapshot.ads_boost_cycle = ctx["run"].cycle_no  # story #4460 — the cycle this capture was taken in
             snapshot.source = _PAID_SOURCE
             snapshot.captured_at = now
             snapshot.status = "captured"
@@ -837,7 +841,7 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
     # 가져온 `snapshots`로 직접 합해도 값은 같지만, 두 소비처가 각자 다시 적으면
     # 나중에 한쪽만 고쳐질 위험을 없애기 위해 공유 함수를 그대로 부른다.
     captured_spend_minor = await _captured_spend_minor_for_gate(
-        db, org_id=org_id, publication_id=uuid.UUID(gate.scope_key), since=run.cycle_started_at if run is not None else None,
+        db, org_id=org_id, publication_id=uuid.UUID(gate.scope_key), cycle=run.cycle_no if run is not None else None,
     )
     # story #4460 — the cycles that ended before this one (a cancel): their campaign and what they spent stay on the card
     from app.models.ads_boost_run import AdsBoostRunCycle
@@ -874,11 +878,13 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
             "ad_channel": ad_conn.channel if ad_conn is not None else None,
         }
     # story #4461 — the latest pause (any seal: a pause is never refused for its seal) — the card tells a stopped one honestly
-    from app.services.ads_boost_execution import OP_PAUSE
+    # story #4460 — of this cycle: a cancelled cycle's pause (completed · stopped on the connection) is not the new campaign's
+    from app.services.ads_boost_execution import OP_PAUSE, in_ads_boost_cycle
 
     latest_pause = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_PAUSE,
+            in_ads_boost_cycle(run.cycle_no if run is not None else 1),
         ).order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc()).limit(1)
     )).scalar_one_or_none()
     return {

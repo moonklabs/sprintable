@@ -471,7 +471,8 @@ async def _get_ads_boost_spend_endpoint(
             detail={"code": "ADS_BOOST_GATE_NOT_FOUND", "message": t("ads_boost.gate_not_found", resolved_locale)},
         ) from exc
     caller_is_human = (
-        await _caller_is_human(db, auth, org_id) if summary["run_status"] is not None or summary.get("start_command") else False
+        await _caller_is_human(db, auth, org_id)
+        if summary["run_status"] is not None or summary.get("start_command") or summary.get("previous_cycles") else False
     )
     start = summary.get("start_command")
     return SpendSummaryResponse(
@@ -497,7 +498,11 @@ async def _get_ads_boost_spend_endpoint(
         # story #4461 — the latest pause (a pause stopped on the connection is told honestly)
         pause_command=PauseCommandView(**summary["pause_command"]) if summary.get("pause_command") else None,
         cancel_requested=summary.get("cancel_requested", False),
-        previous_cycles=[PreviousCycleView(**c) for c in summary.get("previous_cycles", [])],
+        # story #4460 (Qadir 02:22Z) — a past cycle's campaign id follows the current one's rule: people only
+        previous_cycles=[
+            PreviousCycleView(**{**c, "campaign_id": c["campaign_id"] if caller_is_human else None})
+            for c in summary.get("previous_cycles", [])
+        ],
         gate_status=summary.get("gate_status"),
         can_cancel=await _viewer_can_cancel(db, auth, org_id, summary),
         snapshots=[

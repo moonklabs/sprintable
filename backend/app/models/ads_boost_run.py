@@ -75,6 +75,9 @@ class AdsBoostRun(Base):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_requested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4460 (0426 · Qadir 02:22Z) — the current cycle's number: a cancel's reset raises it; commands carry the number they
+    # were made in (publication_commands.ads_boost_cycle) and the cycle's spend captures carry it too
+    cycle_no: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1", default=1)
     create_call_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
