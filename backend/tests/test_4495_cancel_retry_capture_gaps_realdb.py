@@ -67,6 +67,10 @@ async def test_the_fourth_failure_schedules_nothing_and_nothing_is_swallowed(mon
     """① After the third retry: no retry capture, and no follow-up failure was logged (an overflow swallowed by the isolated
     session would look the same from outside)."""
     engine, Session, org_id, _owner_id, gate_id, _calls, _left = await _race_with_failing_pause(monkeypatch, fails=99)
+    # the app's loggers do not propagate to the root (where caplog listens): its handler goes on that logger itself — checked
+    # red: with the limit removed, the 4th failure's IndexError is logged here
+    side_logger = logging.getLogger("app.services.isolated_side_effect")
+    side_logger.addHandler(caplog.handler)
     try:
         with caplog.at_level(logging.WARNING, logger="app.services.isolated_side_effect"):
             for _ in range(4):
@@ -80,6 +84,7 @@ async def test_the_fourth_failure_schedules_nothing_and_nothing_is_swallowed(mon
         assert [r for r in caplog.records if "부수 작업 실패" in r.getMessage()] == []
         assert await _pause_retry(Session, org_id, gate_id) == "exhausted"
     finally:
+        side_logger.removeHandler(caplog.handler)
         await engine.dispose()
 
 
@@ -151,5 +156,40 @@ async def test_one_waiting_capture_per_post_brought_forward(monkeypatch):
         await _reopen(Session, org_id, owner_id, gate_id)
         waiting = await _waiting_paid(Session, gate_id)
         assert len(waiting) == 1 and waiting[0] <= datetime.now(timezone.utc) + timedelta(seconds=5)
+    finally:
+        await engine.dispose()
+
+
+async def test_a_pending_runs_second_failed_pause_still_gets_its_retry(monkeypatch):
+    """(The mutation rerun found it unpinned) the retry takes a «pending» run with a campaign as live: the ACTIVE answer was lost →
+    cancel → its pause fails → the cancel's own capture → the scheduler's pause fails too → the next retry is still scheduled
+    (a capture within the window · «scheduled»), not dropped because the run never became «running»."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    spy = sandbox.set_campaign_status
+
+    async def active_then_lost(client, **kwargs):
+        result = await spy(client, **kwargs)
+        if kwargs["status"] == "ACTIVE":
+            raise TimeoutError("switched on, no answer")
+        return result
+
+    monkeypatch.setattr(sandbox, "set_campaign_status", active_then_lost)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        assert (await _run(Session, gate_id)).status == "pending"
+        monkeypatch.setattr(sandbox, "set_campaign_status", spy)
+        _pause_fails(monkeypatch, times=99)
+        await _cancel(Session, org_id, gate_id, owner_id)
+        await _tick(Session)  # the cancel's pause → refused (1)
+        soon = [d for d in await _waiting_paid(Session, gate_id) if d < datetime.now(timezone.utc) + timedelta(hours=2)]
+        assert len(soon) == 1
+        await _capture_at(Session, soon[0] + timedelta(seconds=30))  # the scheduler's pause → refused (2)
+        await _tick(Session)
+        assert (await _run(Session, gate_id)).status == "pending"
+        soon = [d for d in await _waiting_paid(Session, gate_id) if d < datetime.now(timezone.utc) + timedelta(hours=2)]
+        assert len(soon) == 1 and await _pause_retry(Session, org_id, gate_id) == "scheduled"
     finally:
         await engine.dispose()
