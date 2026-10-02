@@ -6727,6 +6727,11 @@
         "placeholder": "Choose a project",
         "reason": "Choose a project to start in above"
       },
+      "tooOld": {
+        "title": "{runtime} on this computer is version {version}, which is too old",
+        "body": "Update it to {min} or later, then look again.",
+        "skipped": "{runtime} isn't used: version {version} is too old — {min} or later is needed"
+      },
       "invited": {
         "title": "You have an invitation",
         "row": "{org} invited you as {role} · until {date}",

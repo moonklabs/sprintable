@@ -1793,3 +1793,58 @@ describe('[SID:4496] no project in the tab: the setup makes the first one, or us
     expect(text()).not.toContain('무료 플랜');
   });
 });
+
+// story 4494 (PO 10:00Z (a) · Yuna 10:11Z): a runtime installed only below its floor is «too old», not «not found» (4494 AC1)
+describe('[SID:4494] old= — the page says a runtime is too old, not missing', () => {
+  const OLD_CODEX = { runtime: 'codex' as const, version: '0.153.4', min: '0.156.1' };
+
+  it('ⓐ nothing usable, only a too-old Codex: the no-agent card\'s place says «버전이 낮아» · no install command to copy · «다시 찾기»', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={[]} old={[OLD_CODEX]} />);
+    expect(text()).toContain('이 컴퓨터의 Codex 버전(0.153.4)이 낮아 쓸 수 없어요');
+    expect(text()).toContain('0.156.1 이상으로 업데이트한 뒤 다시 찾아 주세요.');
+    expect(text()).not.toContain('에이전트를 찾지 못했어요');
+    expect(text()).not.toContain('install.sh');
+    expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('다시 찾기');
+  });
+
+  it('ⓐ two too old: one title and body per runtime', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={[]} old={[{ runtime: 'claude', version: '1.0.0', min: '2.0.0' }, OLD_CODEX]} />);
+    expect([...container.querySelectorAll('[data-testid=setup-too-old] h1')].map((h) => h.textContent)).toEqual([
+      '이 컴퓨터의 Claude Code 버전(1.0.0)이 낮아 쓸 수 없어요', '이 컴퓨터의 Codex 버전(0.153.4)이 낮아 쓸 수 없어요',
+    ]);
+  });
+
+  it('ⓑ Claude Code found, Codex too old: the form · under «찾은 에이전트» why Codex is not offered', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} old={[OLD_CODEX]} />);
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    expect(container.querySelector('[data-testid=setup-too-old-skipped]')?.textContent).toBe('Codex는 버전(0.153.4)이 낮아 쓰지 않아요 — 0.156.1 이상이 필요해요');
+  });
+
+  it('no old: the screens as before (① with the install commands · no skipped line)', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={[]} />);
+    expect(text()).toContain('이 컴퓨터에서 에이전트를 찾지 못했어요');
+    expect(text()).toContain('install.sh');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=setup-too-old-skipped]')).toBeNull();
+  });
+
+  it('a broken old= in the address is ignored: ① as before', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-9&runtimes=&old=codex:0.153.4`);
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('이 컴퓨터에서 에이전트를 찾지 못했어요');
+    expect(container.querySelector('[data-testid=setup-too-old]')).toBeNull();
+  });
+
+  it('a good old= in the address reaches the page: ⓐ', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-9&runtimes=&old=codex:0.153.4:0.156.1`);
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('이 컴퓨터의 Codex 버전(0.153.4)이 낮아 쓸 수 없어요');
+  });
+});

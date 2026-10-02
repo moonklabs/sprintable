@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NOT_CONNECTED_AFTER_HANDOVER_MS,
   endsWithAgentWord,
   activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
-  agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, parseOldRuntimes, setupRoleRows, workdirInputOk,
   setupProgress, listableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
   setupPollDelayMs, SETUP_STATUS_POLL_MS, SETUP_STATUS_SLOW_POLL_MS,
 } from './desktop-setup';
@@ -390,5 +390,25 @@ describe('[SID:4464] reading less often while a block waits for the person (PO 1
     expect(setupPollDelayMs({ waitingOnPerson: true }, r, at(120))).toBe(SETUP_STATUS_SLOW_POLL_MS);
     expect(setupPollDelayMs({ waitingOnPerson: false }, r, at(600))).toBe(SETUP_STATUS_POLL_MS);
     expect(setupPollDelayMs({ waitingOnPerson: true }, null, at(600))).toBe(SETUP_STATUS_POLL_MS);
+  });
+});
+
+// story 4494 (PO 10:00Z (a) · Yuna 10:11Z): the app's `old=` — installed only below the floor; a broken entry is dropped
+describe('[SID:4494] old= — a runtime installed only below its floor', () => {
+  it('reads runtime · version · lowest that works, each runtime once, in the fixed order', () => {
+    expect(parseOldRuntimes('codex:0.153.4:0.156.1', [])).toEqual([{ runtime: 'codex', version: '0.153.4', min: '0.156.1' }]);
+    expect(parseOldRuntimes('codex:0.153.4:0.156.1,claude:1.0.0:2.0.0,codex:0.1.0:0.156.1', [])).toEqual([
+      { runtime: 'claude', version: '1.0.0', min: '2.0.0' }, { runtime: 'codex', version: '0.153.4', min: '0.156.1' },
+    ]);
+  });
+  it('a broken entry is dropped: field count · unknown runtime · not N.N.N · empty version · one that was also found', () => {
+    for (const v of ['codex:0.153.4', 'codex:0.153.4:0.156.1:x', 'gemini:1.0.0:2.0.0', 'codex:abc:0.156.1', 'codex::0.156.1', 'codex:0.153.4:', '', null]) {
+      expect(parseOldRuntimes(v, [])).toEqual([]);
+    }
+    expect(parseOldRuntimes('codex:0.153.4:0.156.1', ['codex'])).toEqual([]);
+  });
+  it('the reload fragment keeps it', () => {
+    const q = { code: `${'A'.repeat(20)}_-${'b'.repeat(21)}`, runtimes: ['claude'] as ('claude' | 'codex')[], setupId: 's-1', blocked: [] as ('claude' | 'codex')[], old: [{ runtime: 'codex' as const, version: '0.153.4', min: '0.156.1' }] };
+    expect(parseSetupFragment(setupFragment(q))).toEqual(q);
   });
 });
