@@ -195,25 +195,23 @@ async def _void_blocked_starts(db: AsyncSession, *, gate_id: uuid.UUID) -> None:
 
 
 async def pause_left_campaign_for_cancel(db: AsyncSession, *, gate_id: uuid.UUID) -> bool:
-    """Qadir 02:22Z ⓐ — after a command of a cancelled boost ended: a campaign that exists and was never confirmed off (run
-    «pending» with ids) gets a pause, once per cycle — a pause that then fails is not asked again here (4417's retry rules and a
-    person's press carry it; asking at every command would loop). The scheduler's pause, attributed to the person who cancelled."""
+    """Qadir 02:22Z ⓐ · 04:29Z (PO (가)) — after a command of a cancelled boost ended, a campaign that is not known to be off gets a
+    pause: «pending» with ids (an ACTIVE switch whose answer was lost) and «running» (a start or resume whose ACTIVE went out after
+    the cancel committed, right past the worker's last check) alike — one place for every path that ends a command with the
+    campaign on, not a check after each ACTIVE call. Asked only when the cycle's latest toggle is not already a pause (a person's
+    [중지], or this hook's own earlier pause — one that then fails is not asked again here: 4417's retry rules and a person's press
+    carry it; asking after every command would loop). The scheduler's pause, attributed to the person who cancelled."""
     from app.models.ads_boost_run import AdsBoostRun
-    from app.models.publication_command import PublicationCommand
-    from app.services.ads_boost_execution import OP_PAUSE, in_ads_boost_cycle, request_ads_boost_pause
+    from app.services.ads_boost_execution import OP_PAUSE, _latest_toggle, request_ads_boost_pause
 
     run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one_or_none()
     if (
-        run is None or run.cancel_requested_at is None or run.status != "pending" or run.campaign_id is None
+        run is None or run.cancel_requested_at is None or run.status not in ("pending", "running") or run.campaign_id is None
         or run.cancel_requested_by is None or await _command_out(db, gate_id=gate_id)
     ):
         return False
-    asked = (await db.execute(
-        select(PublicationCommand.id).where(
-            PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_PAUSE, in_ads_boost_cycle(run.cycle_no),
-        ).limit(1)
-    )).scalar_one_or_none()
-    if asked is not None:
+    latest = await _latest_toggle(db, gate_id=gate_id, cycle=run.cycle_no)
+    if latest is not None and latest.operation == OP_PAUSE:
         return False
     await request_ads_boost_pause(
         db, org_id=run.org_id, gate_id=gate_id, requester_member_id=run.cancel_requested_by, initiated_by="scheduler",

@@ -736,3 +736,96 @@ async def test_a_pause_for_a_cancel_that_fails_is_not_asked_again_and_again(monk
         assert run.cancel_requested_at is not None and run.campaign_id  # still «취소 중»: the ids stay (not known to be off)
     finally:
         await engine.dispose()
+
+
+# ── Qadir 04:29Z (PO (가)): a cancel committed between the last check and the ACTIVE call ──────────────────────────────────────
+def _cancel_during_active(monkeypatch, Session, org_id, gate_id, owner_id, *, nth: int = 1, also_person_pause: bool = False):
+    """The provider's ACTIVE call: the person's cancel commits right before it goes out (the worker's last approval check already
+    passed), then the call succeeds — the run ends «running» under a cancel."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    spy = sandbox.set_campaign_status
+    seen = {"active": 0}
+
+    async def cancel_then_active(client, **kwargs):
+        if kwargs["status"] == "ACTIVE":
+            seen["active"] += 1
+            if seen["active"] == nth:
+                seen["cancel"] = await _cancel(Session, org_id, gate_id, owner_id)
+                if also_person_pause:
+                    from app.services.ads_boost_execution import request_ads_boost_pause
+
+                    async with Session() as s:
+                        await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        return await spy(client, **kwargs)
+
+    monkeypatch.setattr(sandbox, "set_campaign_status", cancel_then_active)
+    return seen
+
+
+async def test_a_cancel_landing_right_before_the_start_switches_on_still_pauses_it(monkeypatch):
+    """① The start's ACTIVE goes through after the cancel committed → run «running» under a cancel. The cancel's «after a command
+    ended» hook takes running too: one pause (the scheduler's, for the person who cancelled) → it lands → the cycle ends."""
+    from tests.test_4466_money_stops_off_approved_realdb import _pauses
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    seen = _cancel_during_active(monkeypatch, Session, org_id, gate_id, owner_id)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        await _tick(Session)
+        assert seen["cancel"] == {"state": "cancelling"}
+        campaign = [c for s, c in calls if s == "ACTIVE"][0]
+        assert calls[-1] == ("PAUSED", campaign)
+        pauses = await _pauses(Session, gate_id)
+        assert [(p.initiated_by, p.requested_by_member_id) for p in pauses] == [("scheduler", owner_id)]
+        run = await _run(Session, gate_id)
+        assert (run.campaign_id, run.cancel_requested_at) == (None, None)
+        [cycle] = await _cycles(Session, gate_id)
+        assert (cycle.campaign_id, cycle.end_reason) == (campaign, "cancelled")
+    finally:
+        await engine.dispose()
+
+
+async def test_a_cancel_landing_right_before_a_resume_switches_on_still_pauses_it(monkeypatch):
+    """② The same for a resume: the cycle already has the person's earlier pause, so «asked once» is the latest toggle, not any
+    pause of the cycle — the resume is the latest, the hook asks."""
+    from app.services.ads_boost_execution import request_ads_boost_pause, request_ads_boost_resume
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    seen = _cancel_during_active(monkeypatch, Session, org_id, gate_id, owner_id, nth=2)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        async with Session() as s:
+            await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        await _tick(Session)
+        async with Session() as s:
+            await request_ads_boost_resume(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
+        await _tick(Session)
+        await _tick(Session)
+        assert seen["cancel"] == {"state": "cancelling"}
+        campaign = [c for s, c in calls if s == "ACTIVE"][0]
+        assert calls[-2:] == [("ACTIVE", campaign), ("PAUSED", campaign)]
+        run = await _run(Session, gate_id)
+        assert (run.campaign_id, run.cancel_requested_at) == (None, None)
+    finally:
+        await engine.dispose()
+
+
+async def test_a_person_who_already_pressed_pause_gets_no_second_pause(monkeypatch):
+    """④ A person pressed [중지] in the same moment: that pause is the cycle's latest toggle, the hook sends none — one pause."""
+    from tests.test_4466_money_stops_off_approved_realdb import _pauses
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    _cancel_during_active(monkeypatch, Session, org_id, gate_id, owner_id, also_person_pause=True)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        for _ in range(3):
+            await _tick(Session)
+        pauses = await _pauses(Session, gate_id)
+        assert [p.initiated_by for p in pauses] == [None]  # the person's, not a second one
+        run = await _run(Session, gate_id)
+        assert (run.campaign_id, run.cancel_requested_at) == (None, None)
+    finally:
+        await engine.dispose()
