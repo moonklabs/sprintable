@@ -44,8 +44,9 @@ async def _inbound_to_conversation(
         return {"action": "error", "detail": "conversation_not_found"}
     if conv.org_id != org_id:
         # story #4502 (4500's leftover): the mapping's conversation id is written by hand (no API writes these rows); one that
-        # points at another org's conversation is refused before its author joins it or posts — the caller then keeps the
-        # message as a memo in the mapping's own org, as for a missing conversation
+        # points at another org's conversation is refused before its author joins it or posts. The caller then falls to the
+        # retired memo path (`create_memo` raises NotImplementedError — E-MEMO-RETIRE, bridge_inbound.py), so the request ends
+        # in a 500 and the message is lost — the same as for a missing conversation (Qadir 4916; not new with this check)
         return {"action": "error", "detail": "conversation_not_in_org"}
 
     # 참여자 등록 (없으면 추가)
