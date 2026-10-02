@@ -199,3 +199,41 @@ async def test_a_campaign_whose_active_answer_was_lost_is_also_retried_by_a_capt
         assert (cleared.campaign_id, cleared.cancel_requested_at) == (None, None)
     finally:
         await engine.dispose()
+
+
+async def test_a_cancel_follow_up_that_raises_leaves_the_commands_result_and_the_next_item(monkeypatch):
+    """PO 07:10Z — the cancel's follow-ups run after the command's result is committed, each in its own session. One that raises
+    (here the retry capture) leaves the pause's dead_letter committed, never reaches the batch as an error (the batch session is
+    not rolled back under it), and the next command of the same batch (another boost's start) is processed as usual. Before: the follow-ups ran in the batch session
+    ahead of its commit, so the raise rolled the pause back to in_progress."""
+    import app.services.ads_boost_cancel as cancel_mod
+    from app.models.publication_command import PublicationCommand
+    from tests.test_4404_publish_worker_no_open_tx_realdb import _command
+    from tests.test_4460_cancel_this_boost_realdb import _cancel
+    from tests.test_4466_money_stops_off_approved_realdb import _pauses
+
+    engine_a, Session, org_a, owner_a, gate_a, _calls = await _setup(monkeypatch)
+    engine_b, Session_b, org_b, owner_b, gate_b, _calls_b = await _setup(monkeypatch)
+    _pause_fails(monkeypatch, times=1)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("the retry capture failed")
+
+    monkeypatch.setattr(cancel_mod, "schedule_capture_after_failed_cancel_pause", boom)
+    try:
+        await _start_command(Session, org_a, gate_a, owner_a)
+        await _tick(Session)
+        assert await _cancel(Session, org_a, gate_a, owner_a) == {"state": "cancelling"}  # A's pause queued (it will fail)
+        start_b = await _start_command(Session_b, org_b, gate_b, owner_b)  # queued after A's pause: same batch, next item
+        counts = await _tick(Session)
+        assert counts.get("error", 0) == 0, counts  # a follow-up's failure is not the command's: nothing reaches the batch
+        [pause_a] = await _pauses(Session, gate_a)
+        assert pause_a.status == "dead_letter"  # the result stays although its follow-up raised
+        start_b_id = getattr(start_b, "id", start_b)
+        assert (await _command(Session_b, start_b_id)).status == "completed"
+        assert (await _run(Session_b, gate_b)).status == "running"
+        async with Session() as s:
+            assert (await s.get(PublicationCommand, pause_a.id)).status == "dead_letter"
+    finally:
+        await engine_a.dispose()
+        await engine_b.dispose()

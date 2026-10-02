@@ -837,8 +837,13 @@ CREATED_BUDGET_DIFFERS_CODE = "ADS_BOOST_CREATED_BUDGET_DIFFERS"  # story #4458 
 
 
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
-    gate_id = command.gate_id
+    gate_id, command_id = command.gate_id, command.id
     await _process_one_ads_boost_command(db, command, now=now)
+    # story #4491 (PO 07:10Z) — the command's result is committed first; the cancel's follow-ups below then run each in its own
+    # session (isolated_side_effect — the worker-side rule): before, they ran in the batch session ahead of the batch's commit,
+    # so one that raised made the batch roll back the command's own result too (a pause's dead_letter back to in_progress, picked
+    # up again by the stuck-command recovery), and a rollback there expires the batch session's objects for the next item.
+    await db.commit()
     # story #4460 — a cancel waits for the gate's commands: once this one ended (a pause landed · a start refused before ACTIVE),
     # the cancel may finish (the one place: ads_boost_cancel.finish_cancel_if_stopped)
     from app.services.ads_boost_cancel import (
@@ -846,14 +851,28 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         pause_left_campaign_for_cancel,
         schedule_capture_after_failed_cancel_pause,
     )
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
 
-    if await finish_cancel_if_stopped(db, gate_id=gate_id, now=now):
-        await db.commit()
-    else:
+    finished = {"done": False}
+
+    async def _finish(side: AsyncSession) -> None:
+        finished["done"] = await finish_cancel_if_stopped(side, gate_id=gate_id, now=now)
+
+    async def _pause_left(side: AsyncSession) -> None:
         # Qadir 02:22Z ⓐ — a cancelled boost whose campaign was made and never confirmed off: pause it (once), then the cancel ends
-        await pause_left_campaign_for_cancel(db, gate_id=gate_id)
+        await pause_left_campaign_for_cancel(side, gate_id=gate_id)
+
+    async def _retry_capture(side: AsyncSession) -> None:
         # story #4491 — that pause (or any of the cycle's) failed at the provider: a spend capture soon, so the scheduler retries
-        await schedule_capture_after_failed_cancel_pause(db, command=command, now=now)
+        done = await side.get(PublicationCommand, command_id)
+        if done is not None:
+            await schedule_capture_after_failed_cancel_pause(side, command=done, now=now)
+
+    tag = f"ads_boost cancel follow-up gate_id={gate_id} command_id={command_id}"
+    await run_side_effect_in_own_session(db, _finish, describe=f"{tag} ADS_BOOST_CANCEL_FINISH_FAILED")
+    if not finished["done"]:
+        await run_side_effect_in_own_session(db, _pause_left, describe=f"{tag} ADS_BOOST_CANCEL_PAUSE_LEFT_FAILED")
+        await run_side_effect_in_own_session(db, _retry_capture, describe=f"{tag} ADS_BOOST_CANCEL_RETRY_CAPTURE_FAILED")
 
 
 async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
