@@ -1,0 +1,1 @@
+{"file": "tests/test_4491_cancel_pause_retry_capture_realdb.py", "sec": 8.0, "source": "story-4491 — a cancel's failed pause is tried again by a spend capture (5 · 20 · 80 min, then a person) — new file measured locally (uv run pytest, 3 cases)"}

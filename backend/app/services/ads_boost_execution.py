@@ -841,13 +841,19 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     await _process_one_ads_boost_command(db, command, now=now)
     # story #4460 — a cancel waits for the gate's commands: once this one ended (a pause landed · a start refused before ACTIVE),
     # the cancel may finish (the one place: ads_boost_cancel.finish_cancel_if_stopped)
-    from app.services.ads_boost_cancel import finish_cancel_if_stopped, pause_left_campaign_for_cancel
+    from app.services.ads_boost_cancel import (
+        finish_cancel_if_stopped,
+        pause_left_campaign_for_cancel,
+        schedule_capture_after_failed_cancel_pause,
+    )
 
     if await finish_cancel_if_stopped(db, gate_id=gate_id, now=now):
         await db.commit()
     else:
         # Qadir 02:22Z ⓐ — a cancelled boost whose campaign was made and never confirmed off: pause it (once), then the cancel ends
         await pause_left_campaign_for_cancel(db, gate_id=gate_id)
+        # story #4491 — that pause (or any of the cycle's) failed at the provider: a spend capture soon, so the scheduler retries
+        await schedule_capture_after_failed_cancel_pause(db, command=command, now=now)
 
 
 async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:

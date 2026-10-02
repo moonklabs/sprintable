@@ -33,7 +33,8 @@ def _capture_now_when_ads_boost_gate_leaves_approved(session: Session, flush_con
         _schedule_capture_now(session, obj)
 
 
-def _schedule_capture_now(session: Session, gate) -> None:
+def _schedule_capture_now(session: Session, gate, *, due_at: datetime | None = None) -> None:
+    """A spend capture for this live boost, due now (or at `due_at` — story #4491: the retry after a cancel's failed pause)."""
     from app.models.ads_boost_run import AdsBoostRun
     from app.models.channel_connection import ChannelConnection
     from app.models.insight_snapshot import InsightSnapshot
@@ -49,5 +50,5 @@ def _schedule_capture_now(session: Session, gate) -> None:
     conn.execute(pg_insert(InsightSnapshot).values(
         id=uuid.uuid4(), org_id=gate.org_id, work_item_id=gate.work_item_id, publication_id=uuid.UUID(gate.scope_key),
         publication_kind="channel_publication", channel=channel or "meta_ads", external_id=None,
-        due_at=datetime.now(timezone.utc), status="pending",
+        due_at=due_at or datetime.now(timezone.utc), status="pending",
     ).on_conflict_do_nothing(constraint="uq_insight_snapshots_publication_due_at"))

@@ -777,6 +777,12 @@ class AdsBoostGateNotFoundForSpendError(Exception):
         super().__init__(f"ads_boost gate not found: {gate_id}")
 
 
+async def _cancel_pause_retry_state(db: AsyncSession, *, run) -> str | None:
+    from app.services.ads_boost_cancel import cancel_pause_retry_state
+
+    return await cancel_pause_retry_state(db, run=run)
+
+
 async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID) -> dict:
     """story #3806(Phase3·3-2 PR4) — 「승인 예산 대비 지출」. 승인 게이트가 봉인한
     예산(`gate.sealed_ads_budget_minor`, 불변)과 이 gate의 발행물에 걸린 `source==
@@ -895,6 +901,8 @@ async def get_ads_boost_spend_summary(db: AsyncSession, *, org_id: uuid.UUID, ga
         ),
         "created_budget_minor": run.created_budget_minor if run is not None else None,
         "cancel_requested": run is not None and run.cancel_requested_at is not None,  # story #4460 — «취소 중»
+        # story #4491 — under «취소 중», the cycle's pause failed at the provider: retried automatically or not any more
+        "pause_retry": await _cancel_pause_retry_state(db, run=run),
         "gate_status": gate.status,  # story #4460 — the card says «취소됨» without the page reloading the gate
         "requested_by_member_id": gate.requested_by_member_id,
         "previous_cycles": previous_cycles,
