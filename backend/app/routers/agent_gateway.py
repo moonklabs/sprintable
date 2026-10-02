@@ -333,6 +333,13 @@ async def _fetch_events(
     ì ë ¬: recipient_seq ASC. per-recipient dense â gap-free.
     gap-free ë³´ì¥ì acked_seq ì¬ì¤ìº(caller)ì´ ë´ë¹; ì´ í¨ìë ë¨ì ì¡°í.
     """
+    # d0bca260: conversation_title — joined only when payload.conversation_id is uuid-shaped (non-conversation events get NULL;
+    # the 36-char uuid pattern guard keeps the ::uuid cast from erroring). d0bca260 AC3: sender_name — events.sender_id is a
+    # team_members FK, joined directly.
+    # story #4497 (Qadir 01a0fc4a · PO 11:29Z): the agent's own org only — an event another org made with this agent as its
+    # recipient (a write path that let it through) never reaches it. No event kind legitimately crosses orgs (events.org_id NOT
+    # NULL · agent grants same-org · A2A org-scoped · verify in the agent's org). The skipped rows leave gaps in recipient_seq:
+    # readers resume from the highest seq they got (no wait for seq+1).
     rows = await session.execute(
         text("""
             SELECT
@@ -350,17 +357,10 @@ async def _fetch_events(
                 c.title               AS conversation_title,
                 tm.name               AS sender_name
             FROM events e
-            -- d0bca260: conversation_title 도출. payload.conversation_id가 uuid 형태일 때만 join
-            -- (비-대화 이벤트는 NULL → 안전). 36자 uuid 패턴 가드로 ::uuid 캐스트 에러 0.
             LEFT JOIN conversations c
                 ON e.payload->>'conversation_id' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
                AND c.id = (e.payload->>'conversation_id')::uuid
-            -- d0bca260 AC3: sender_name. events.sender_id는 team_members FK라 직접 join(canonical 무관).
             LEFT JOIN team_members tm ON tm.id = e.sender_id
-            -- story #4497 (Qadir 01a0fc4a · PO 11:29Z): the agent's own org only — an event another org made with this
-            -- agent as its recipient (a write path that let it through) never reaches it. No event kind legitimately crosses
-            -- orgs (events.org_id NOT NULL · agent grants same-org · A2A org-scoped · verify in the agent's org). The skipped
-            -- rows leave gaps in recipient_seq: readers resume from the highest seq they got (no wait for seq+1).
             WHERE e.recipient_id = CAST(:agent_id AS uuid)
               AND e.org_id = CAST(:org_id AS uuid)
               AND e.recipient_seq > :after_seq
