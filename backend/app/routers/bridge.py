@@ -30,6 +30,8 @@ async def _inbound_to_conversation(
     content: str,
     external_thread_ts: str | None,
     message_ts: str | None = None,
+    *,
+    org_id: uuid.UUID,
 ) -> dict:
     """external inbound → ConversationMessage 생성.
 
@@ -40,6 +42,11 @@ async def _inbound_to_conversation(
     conv = await session.get(Conversation, conversation_id)
     if conv is None:
         return {"action": "error", "detail": "conversation_not_found"}
+    if conv.org_id != org_id:
+        # story #4502 (4500's leftover): the mapping's conversation id is written by hand (no API writes these rows); one that
+        # points at another org's conversation is refused before its author joins it or posts — the caller then keeps the
+        # message as a memo in the mapping's own org, as for a missing conversation
+        return {"action": "error", "detail": "conversation_not_in_org"}
 
     # 참여자 등록 (없으면 추가)
     existing_participant = (await session.execute(
@@ -191,6 +198,7 @@ async def slack_events(request: Request, session: AsyncSession = Depends(get_db)
                 content,
                 norm_event.get("threadTs"),
                 message_ts=norm_event.get("messageTs"),
+                org_id=org_id,
             )
             if result.get("action") == "error":
                 raise ValueError(result["detail"])
@@ -401,6 +409,7 @@ async def teams_events(request: Request, session: AsyncSession = Depends(get_db)
                 content,
                 norm_event.get("threadTs"),
                 message_ts=norm_event.get("messageTs"),
+                org_id=org_id,
             )
             if result.get("action") == "error":
                 raise ValueError(result["detail"])
