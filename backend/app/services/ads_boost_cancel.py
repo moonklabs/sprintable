@@ -200,7 +200,9 @@ async def pause_left_campaign_for_cancel(db: AsyncSession, *, gate_id: uuid.UUID
     the cancel committed, right past the worker's last check) alike — one place for every path that ends a command with the
     campaign on, not a check after each ACTIVE call. Asked only when the cycle's latest toggle is not already a pause (a person's
     [중지], or this hook's own earlier pause — one that then fails is not asked again here: 4417's retry rules and a person's press
-    carry it; asking after every command would loop). The scheduler's pause, attributed to the person who cancelled."""
+    carry it; asking after every command would loop). The scheduler's pause (initiated_by «scheduler»): the person who cancelled is
+    its requester on the command, and its history row is the platform's — «시스템» (4484: a scheduler-sent command's activity is
+    actor_type «platform», no actor)."""
     from app.models.ads_boost_run import AdsBoostRun
     from app.services.ads_boost_execution import OP_PAUSE, _latest_toggle, request_ads_boost_pause
 
@@ -277,9 +279,28 @@ async def cancel_pause_retry_state(db: AsyncSession, *, run) -> str | None:
     latest = await _latest_toggle(db, gate_id=run.gate_id, cycle=run.cycle_no)
     if latest is None or latest.operation != OP_PAUSE or latest.status != "dead_letter":
         return None
+    # story #4495 (Qadir 07:53Z ②) — «scheduled» only when a paid capture is really waiting for this post (the retry the server
+    # will make), not inferred from how many pauses failed: a capture that was never written (an error · a condition not met)
+    # would have made the card promise a retry that is not coming
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.ads_spend_snapshots import paid_snapshots_only
+
+    gate = (await db.execute(select(Gate).where(Gate.id == run.gate_id))).scalar_one_or_none()
+    waiting = None
+    if gate is not None and gate.scope_key:
+        # within the retry window (the longest delay): the boost's regular daily capture, a day out, is not the retry — with one
+        # waiting capture per post (④) a written retry is always the earliest one, brought forward
+        horizon = datetime.now(timezone.utc) + CANCEL_PAUSE_RETRY_DELAYS[-1] + timedelta(minutes=1)
+        waiting = (await db.execute(
+            paid_snapshots_only(select(InsightSnapshot.id).where(
+                InsightSnapshot.publication_id == uuid.UUID(gate.scope_key), InsightSnapshot.status == "pending",
+                InsightSnapshot.due_at <= horizon,
+            )).limit(1)
+        )).scalar_one_or_none()
+    # …and only within the three retries: past them the regular daily capture still waits, but that is not the retry promised
     failed = await _failed_pauses_this_cycle(db, gate_id=run.gate_id, cycle=run.cycle_no)
     live = run.status in ("running", "pending") and run.campaign_id is not None
-    return "scheduled" if live and failed <= len(CANCEL_PAUSE_RETRY_DELAYS) else "exhausted"
+    return "scheduled" if live and waiting is not None and failed <= len(CANCEL_PAUSE_RETRY_DELAYS) else "exhausted"
 
 
 def _reset_run(run) -> None:

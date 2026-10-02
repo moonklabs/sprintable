@@ -38,6 +38,11 @@ _EXEMPT_FILES: dict[str, str] = {
         "자기 자신에게 부를 이유가 없다(반대 방향 필터가 필요하면 그건 별개 술어)."
     ),
     "app/models/__init__.py": "모델 클래스 import(SQLAlchemy 등록용)뿐 — 쿼리 0건.",
+    "app/services/ads_boost_cancel.py": (
+        "story #4495 — the cancel's «a retry capture really waits» check reads the post's waiting **paid** captures on purpose (the "
+        "spend capture the scheduler pauses from) — it calls `paid_snapshots_only()`, the opposite predicate; organic rows are "
+        "not its business."
+    ),
     "app/routers/measurement_connections.py": "docstring/주석 안 언급뿐 — 실 쿼리 0건(grep 확認).",
     "app/services/channel_adapters.py": "주석 안 언급뿐 — 실 쿼리 0건(grep 확認).",
     "app/services/publication_reconciliation.py": (
