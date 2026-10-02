@@ -656,12 +656,16 @@ async def test_agent_key_requests_to_the_setup_api_are_not_recorded_as_tool_call
 
 async def _stream_events(agent_id: str) -> list:
     """What the agent's stream sends on its very first connection (no cursor, no Last-Event-ID): the stream's own read."""
+    from sqlalchemy import text
+
     from app.routers.agent_gateway import _fetch_events
 
     eng = create_async_engine(_ASYNC, poolclass=NullPool)
     try:
         async with async_sessionmaker(eng)() as s:
-            return await _fetch_events(s, uuid.UUID(agent_id), 0, 100)
+            # story #4497: the stream reads the agent's own org's events — the org it resolves at connect (members.org_id)
+            org = (await s.execute(text("SELECT org_id FROM members WHERE id = :m"), {"m": uuid.UUID(agent_id)})).scalar_one()
+            return await _fetch_events(s, uuid.UUID(agent_id), 0, 100, org)
     finally:
         await eng.dispose()
 

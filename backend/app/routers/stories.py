@@ -727,6 +727,27 @@ async def _assert_human_owner(
         )
 
 
+async def _assert_assignees_in_org(
+    session: AsyncSession, org_id: uuid.UUID, ids: "list[uuid.UUID | None]", already: "set[uuid.UUID] | None" = None,
+) -> None:
+    """story #4497 (Qadir codex 01a0fc4a · PO 11:22Z) — every assignee given (single and multiple) must be a member of this org,
+    checked before anything is saved or announced. There was no check on create · PATCH · bulk: another org's agent member id
+    as the assignee was saved, and the announcement put the story's title and description into that agent's inbox (the gateway
+    filters by recipient only). The org-membership rule mentions · conversations already use (`filter_org_member_ids`).
+
+    `already` (PO 11:25Z): the story's current assignees — only an id being added is checked. The web sends the assignee back
+    unchanged when it edits another field, and one already on the story can be outside today's rule (a person who left · an old
+    member id); an edit that does not touch the assignee must not be refused for it."""
+    wanted = {i for i in ids if i is not None} - (already or set())
+    if not wanted:
+        return
+    if wanted - await filter_org_member_ids(wanted, org_id, session):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "ASSIGNEE_NOT_IN_ORG", "message": "The assignee must be a member of this organization."},
+        )
+
+
 async def _reconcile_story_references_and_candidates(
     db: AsyncSession,
     *,
@@ -827,6 +848,7 @@ async def create_story(
         body.assignee_id if body.assignee_id is not None
         else (effective_ids[0] if effective_ids else None)
     )
+    await _assert_assignees_in_org(session, org_id, [*effective_ids, primary_assignee])
     if body.attachments:
         # story #2055 AC1: 이미지 첨부 픽셀 크기를 서버가 측정해 채운다 — client 제공 width/height는
         # asset_id와 동일하게 위조 가능하므로 신뢰하지 않고 항상 서버 측정값으로 덮어쓴다(server
@@ -963,6 +985,35 @@ async def create_story(
         check_description=True, check_acceptance_criteria=True,
         mention_actor_id=_mention_actor_id,
     )
+    # story #4497 (PO 09:56Z) — a story made with an assignee announces it like PATCH /{id} does (the web board makes it without
+    # one and assigns by PATCH, so its rules · webhooks · SSE · story_assigned already run; MCP add_story(assignee_id) and agent
+    # API calls made with one got nothing: the agent's ledger stayed empty). The same function, old = None. After every write of
+    # this request is committed (as update_story does — the function commits too, and calling it earlier would split the
+    # reconcile's «fails → the whole creation rolls back»), and best-effort: a failure here is logged, the created story stands.
+    # Other creation paths stay as they are (story #4497 AC0: a recipe cycle's story reaches its agent by the stage event · a
+    # comment-to-task / insights story is assigned to the requester themselves).
+    if story.assignee_id is not None:
+        await session.commit()
+        try:
+            _actor_id = await _resolve_team_member_id(auth, org_id, session)
+            _actor_name, _actor_role, _actor_type = await _resolve_actor_info(session, _actor_id)
+        except Exception:
+            _actor_id, _actor_name, _actor_role, _actor_type = None, None, None, None
+        try:
+            await emit_story_assignee_changed(
+                session, org_id, story, None,
+                background_tasks=background_tasks,
+                actor_id=_actor_id, actor_name=_actor_name, actor_role=_actor_role, actor_type=_actor_type,
+            )
+        except Exception:
+            logger.warning("assignee_changed at create failed (story=%s, the story is already committed)", story.id, exc_info=True)
+            # PO 10:20Z — a failed write inside the announcement leaves the session needing a rollback: drop that half (the story
+            # is already committed), or the refresh below raises and the created story answers 500 (a retry would make it twice);
+            # the rollback expires the story — the refresh right below reloads it
+            await session.rollback()
+        # the response reads the story after these commits: reload it first (lint_commit_before_validate · story #2459 — prod hit
+        # MissingGreenlet on a model_validate after a commit despite expire_on_commit=False; the transient fields set above stay)
+        await session.refresh(story)
     # story #2532: 생성 시점엔 hypothesis_story_links가 있을 수 없다(별도 링크 API라 방금
     # 생성된 story.id를 아직 아무도 못 건다) — DB 쿼리 없이 epic_id만으로 판정(_attach_
     # has_hypothesis_or_goal의 배치쿼리는 목록/재조회 경로 전용, 여기선 불필요).
@@ -1965,6 +2016,17 @@ async def bulk_update_stories(
     # 「이례적」 표기 그 필드 재사용)에 차단 사유를 담는다. has_project_access 미충족(존재
     # 비노출)과 달리 이건 「존재하고 접근권도 있는데 승인 대기」라 조용하면 #2067 재현.
     gate_pending_by_id: dict[uuid.UUID, dict] = {}
+    # story #4497 — one assignee outside the org refuses the whole request, before any item is written; per item, only an id
+    # that story does not have yet is checked (PO 11:25Z — the same as PATCH)
+    _given = {i.id: i.assignee_id for i in payload.items if i.assignee_id is not None}
+    if _given:
+        _single = dict((await db.execute(
+            select(Story.id, Story.assignee_id).where(Story.id.in_(list(_given)), Story.org_id == repo.org_id)
+        )).all())
+        _joined = await StoryAssigneeRepository(db, repo.org_id).map_member_ids(list(_given))
+        await _assert_assignees_in_org(db, repo.org_id, [
+            _aid for _sid, _aid in _given.items() if _aid != _single.get(_sid) and _aid not in _joined.get(_sid, [])
+        ])
     for item in payload.items:
         # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
         # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
@@ -2139,6 +2201,10 @@ async def bulk_update_stories(
     # 보낸다. "지금 아무도 안 밟지만 계약은 깨져 있는" 자리를 여기서 닫는다). old_assignee_by_id는
     # 멤버십으로 "실제 변경"만 담아뒀으므로 그대로 재사용(중복 판정 없음, status와 동형).
     if old_assignee_by_id:
+        # story #4497 (PO 10:35Z) — the status loop above and each announcement below write rows of their own (activity records ·
+        # a person's notification) that the request would commit only at its end. Committed here and after every announcement,
+        # so the rollback on one item's failure drops only that item's half — not the status loop's writes or the items before.
+        await db.commit()
         for s in updated:
             if s.id not in old_assignee_by_id:
                 continue
@@ -2149,10 +2215,18 @@ async def bulk_update_stories(
                     background_tasks=background_tasks,
                     actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
                 )
+                await db.commit()
             except Exception:  # noqa: BLE001 — 한 item의 emit 실패가 나머지 item을 막지 않음.
                 logger.error(
                     "bulk assignee_changed emit 실패(story=%s)", s.id, exc_info=True,
                 )
+                # story #4497 (PO 10:21Z · the same class) — a failed write inside it left the session «needs rollback», so every
+                # later item's announcement failed too (the «one item must not block the rest» above did not hold). The writes
+                # are committed above; only this item's half-written announcement goes. A rollback expires every loaded object:
+                # the items still to announce are reloaded (only on this failure path).
+                await db.rollback()
+                for u in updated:
+                    await db.refresh(u)
     if response is not None:
         response.headers["X-Affected-Entities"] = str(len(updated))
     return results
@@ -2216,6 +2290,8 @@ async def update_story(
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
     if assignee_ids_in is not None and "assignee_id" not in data:
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
+    _current = {_story_for_access.assignee_id, *await StoryAssigneeRepository(db, repo.org_id).list_member_ids(id)} - {None}
+    await _assert_assignees_in_org(db, repo.org_id, [*(assignee_ids_in or []), data.get("assignee_id")], already=_current)
     # story #2254(그라운딩 doc e5bc0789, 2026-08-25) — append/restore도 stories 컬럼이
     # 아니므로 분리(allow_shrink와 동형). 실제 반영은 아래 story_before 조회 블록에서.
     _append_by_field = {
@@ -2442,6 +2518,11 @@ async def update_story(
             logger.warning(
                 "assignee_changed 알림 발행 실패(story=%s, write는 이미 commit됨)", story.id, exc_info=True,
             )
+            # story #4497 (PO 10:21Z · the same class as create_story) — a failed write inside it left the session «needs
+            # rollback»; the refresh before the response then raised and the committed update answered 500. Drop that half —
+            # a rollback expires every loaded object, so the story is reloaded before the rest of this handler reads it.
+            await db.rollback()
+            await db.refresh(story)
 
     # story #2172 AC2 판정(오르테가군 지시 — "재정렬 전용 이벤트가 필요한지, 기존 것으로
     # 되는지 판단하고 근거 남길 것"): 신규 전용 event_type(`story.position_changed`)을 쓰되,
