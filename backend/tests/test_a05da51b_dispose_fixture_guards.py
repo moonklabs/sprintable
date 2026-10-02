@@ -27,18 +27,6 @@ def _copy_conftest(tmp_path: Path) -> None:
     (tmp_path / "conftest.py").write_text(conftest_src, encoding="utf-8")
 
 
-_ASYNC_NON_DESTRUCTIVE_VICTIM = """
-    import pytest
-
-    @pytest.fixture
-    def anyio_backend():
-        return "asyncio"
-
-    @pytest.mark.anyio
-    async def test_ordinary_async():
-        assert 1 + 1 == 2
-"""
-
 _SYNC_NON_DESTRUCTIVE_VICTIM = """
     def test_ordinary_sync():
         assert 1 + 1 == 2
@@ -70,14 +58,51 @@ def _run_setup_plan(tmp_path: Path, extra_args: list[str]) -> str:
     return result.stdout + result.stderr
 
 
+_ASYNCIO_NON_DESTRUCTIVE_VICTIM = """
+    async def test_ordinary_asyncio():
+        assert 1 + 1 == 2
+"""
+
+_ANYIO_DISPOSE_IN_LOOP_VICTIM = """
+    import pytest
+    import conftest
+
+    @pytest.fixture
+    def anyio_backend():
+        return "asyncio"
+
+    @pytest.mark.anyio
+    async def test_ordinary_async(request):
+        assert getattr(request.node.obj, conftest.TEST_LOOP_DISPOSE_MARK, False) is True
+        assert "_dispose_global_engine_for_non_destructive_tests" not in request.fixturenames
+"""
+
+
 def test_positive_control_async_non_destructive_test_gets_dispose_fixture_injected(tmp_path: Path):
-    """⭐AC — 이 fixture가 collection 시점에 실제로 주입되는지(뮤테이션 대상: conftest.py의
-    주입 루프를 지우면 이 테스트가 RED가 된다 — 아래 뮤테이션 절 참조)."""
-    (tmp_path / "test_async_victim.py").write_text(textwrap.dedent(_ASYNC_NON_DESTRUCTIVE_VICTIM))
+    """⭐AC — pytest-asyncio 테스트(`asyncio_mode = "auto"` · pyproject 그대로)에 이 fixture가 collection 시점에 실제로
+    주입되는지(뮤테이션 대상: conftest.py의 주입 루프를 지우면 이 테스트가 RED가 된다 — 아래 뮤테이션 절 참조)."""
+    (tmp_path / "pytest.ini").write_text("[pytest]\nasyncio_mode = auto\n")
+    (tmp_path / "test_async_victim.py").write_text(textwrap.dedent(_ASYNCIO_NON_DESTRUCTIVE_VICTIM))
     _copy_conftest(tmp_path)
 
     output = _run_setup_plan(tmp_path, [])
     assert f"SETUP    F {_FIXTURE_NAME}" in output, f"async non-destructive 테스트에 dispose fixture가 주입되지 않음\n{output}"
+
+
+def test_positive_control_anyio_non_destructive_test_disposes_inside_its_own_loop(tmp_path: Path):
+    """story #4395 — `@pytest.mark.anyio` 테스트는 fixture가 아니라 테스트 코루틴의 마지막 단계로 dispose한다(fixture는 pytest-asyncio
+    루프에서 돌아 anyio 루프의 연결을 다른 루프에서 닫다 못 닫았다 · CI run 36947226511). 뮤테이션: anyio 갈래를 지우면 RED."""
+    (tmp_path / "pytest.ini").write_text("[pytest]\nasyncio_mode = auto\n")
+    (tmp_path / "test_anyio_victim.py").write_text(textwrap.dedent(_ANYIO_DISPOSE_IN_LOOP_VICTIM))
+    _copy_conftest(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", str(tmp_path), "-q", "-p", "no:cacheprovider"],
+        capture_output=True, text=True, cwd=tmp_path,
+        env={"PARITY_TEST_DATABASE_URL": "", "ALEMBIC_DATABASE_URL": "", "PATH": __import__("os").environ["PATH"],
+             "PYTHONPATH": str(Path(__file__).parent.parent.resolve())},  # 테스트 끝 dispose가 app.core.database를 import
+    )
+    assert result.returncode == 0 and "1 passed" in result.stdout, result.stdout + result.stderr
 
 
 def test_sync_non_destructive_test_does_not_get_dispose_fixture_injected(tmp_path: Path):
