@@ -542,12 +542,102 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
         )
 
 
+async def _dispose_global_engine() -> None:
+    from app.core.database import engine as _global_engine
+
+    await _global_engine.dispose()
+
+
+def _in_test_loop(test_fn, after, mark: str):
+    """story #4395 — anyio 테스트: `after`(drain → dispose · 또는 dispose)를 테스트 코루틴의 마지막 단계로(같은 루프). 테스트가 이미
+    실패했으면 그 실패가 먼저다(정리의 실패가 원래 단언을 덮지 않게 — 정리는 그래도 돈다)."""
+
+    @functools.wraps(test_fn)
+    async def run(*args, **kwargs):
+        try:
+            result = await test_fn(*args, **kwargs)
+        except BaseException:
+            try:
+                await after()
+            except pytest.fail.Exception:
+                pass
+            raise
+        await after()
+        return result
+
+    setattr(run, mark, True)
+    return run
+
+
+TEST_LOOP_DRAIN_MARK = "__story_4395_drain_in_test_loop__"
+TEST_LOOP_DISPOSE_MARK = "__story_4395_dispose_in_test_loop__"
+
+
 @pytest.fixture
 async def _drain_and_dispose_global_engine_for_destructive_tests():
     """story #4395 — autouse가 아니다: 아래 `pytest_collection_modifyitems`가 destructive **async** 테스트에만 주입한다(비파괴 쪽
     `_dispose_global_engine_for_non_destructive_tests`와 같은 까닭 — sync 테스트는 async fixture를 몰라야 한다)."""
     yield
     await drain_global_background_work()
+
+
+# story #4395 (PO 09-30 결정 · 같은 부류 둘째 표본 test_4258) — 파일마다 고치지 않고 가드 한 곳: destructive 테스트가 끝났을 때 이
+# DB에 트랜잭션을 연 채 쉬는 세션(idle in transaction)이 남아 있으면 **그 테스트가** 실패한다. 남겨 두면 다음 테스트 리셋(DROP
+# SCHEMA)이 lock_timeout으로 실패해 엉뚱한 테스트를 가리킨다. CI destructive 샤드는 파일마다 새 DB라 이 DB의 세션은 이 파일의 것이다.
+# 실패하기 전에 그 세션들을 끊는다(다음 테스트로 번지지 않게). 위 drain fixture보다 뒤에 돈다: autouse가 먼저 서니 나중에 걷힌다.
+IDLE_IN_TX_GRACE_S = 2.0  # 커밋이 막 오가는 중인 세션을 범인으로 잡지 않게 — 이만큼 다시 본 뒤에도 남은 것만
+
+
+def _idle_in_transaction_sessions(engine) -> list[tuple]:
+    with engine.connect() as conn:
+        return conn.execute(text(
+            "SELECT pid, COALESCE(application_name, ''), state, now() - state_change, left(regexp_replace(query, '\\s+', ' ', 'g'), 200) "
+            "FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND state LIKE 'idle in transaction%' ORDER BY pid"
+        )).all()
+
+
+def check_no_idle_in_transaction(url: str, nodeid: str, grace: float = IDLE_IN_TX_GRACE_S) -> None:
+    """이 DB에 idle in transaction 세션이 `grace` 뒤에도 남아 있으면 끊고, 앱 이름 · 상태 · 쉰 시간 · 마지막 쿼리를 싣고 실패한다."""
+    import time
+
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(_sync_url(url), poolclass=NullPool)
+    try:
+        deadline = time.monotonic() + grace
+        rows = _idle_in_transaction_sessions(engine)
+        while rows and time.monotonic() < deadline:
+            time.sleep(0.1)
+            rows = _idle_in_transaction_sessions(engine)
+        if not rows:
+            return
+        with engine.connect() as conn:
+            for pid, *_ in rows:
+                conn.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
+        lines = []
+        for pid, app, state, idle_for, query in rows:
+            owner = _resolve_global_engine_test_tag(app)
+            who = f" test={owner}" if owner else ""
+            lines.append(f"  pid={pid} app={app!r}{who} state={state} idle_for={idle_for} query={query!r}")
+    finally:
+        engine.dispose()
+    pytest.fail(
+        f"story #4395 — {nodeid}: 테스트가 끝났는데 트랜잭션을 연 채 쉬는 세션 {len(rows)}개(끊음) — 다음 테스트 리셋을 막는다. "
+        "세션을 닫거나(async with) 커밋/롤백해 주세요:\n" + "\n".join(lines),
+        pytrace=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_idle_in_transaction_after_destructive_test(request):
+    if request.node.get_closest_marker(_MARKER_NAME) is None:
+        yield
+        return
+    yield
+    url = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+    if url:
+        check_no_idle_in_transaction(url, request.node.nodeid)
 
 
 # story 8236bbc3: destructive_schema 마커 drift 자기표면화 가드(PO crux 게이트②, 2026-07-03).
@@ -803,14 +893,28 @@ def pytest_collection_modifyitems(items: list) -> None:
     # sync 테스트는 이 fixture를 아예 몰라야 한다. `inspect.iscoroutinefunction`으로
     # "실행 시점에 걸러도" 이미 늦으므로(경고는 dispatch 시점에 남), collection
     # 시점의 `item.fixturenames` 주입만이 sync 테스트를 완전히 비켜간다.
+    # story #4395 — 아래 destructive 쪽과 같은 까닭으로 anyio 테스트는 dispose도 테스트 루프 안에서(fixture는 pytest-asyncio 루프라
+    # anyio 루프의 연결을 다른 루프에서 닫다 «Future attached to a different loop»로 못 닫고 남겼다).
     for item in non_destructive_items:
         test_func = getattr(item, "function", None)
-        if inspect.iscoroutinefunction(test_func):
+        if not inspect.iscoroutinefunction(test_func):
+            continue
+        if item.get_closest_marker("anyio") is not None:
+            item.obj = _in_test_loop(item.obj, _dispose_global_engine, TEST_LOOP_DISPOSE_MARK)
+        else:
             item.fixturenames.append("_dispose_global_engine_for_non_destructive_tests")
-    # story #4395 — destructive async 테스트엔 drain → dispose(위 fixture). 파일별 `_dispose_global_engine_after_test`에 기대지 않는다.
+    # story #4395 — destructive async 테스트엔 drain → dispose. 파일별 `_dispose_global_engine_after_test`에 기대지 않는다.
+    # drain은 **테스트와 같은 루프**에서 돌아야 한다: `asyncio_mode = "auto"`라 async fixture는 pytest-asyncio 루프에서 도는데
+    # `@pytest.mark.anyio` 테스트는 anyio 루프에서 돈다 — fixture로 걸면 다른 루프를 보고(남은 작업 0), anyio가 자기 루프를 닫으며
+    # 연결 초기화 중이던 배경 작업을 취소해 서버에 idle in transaction을 남겼다(test_2985 · CI run 36947226511 shard 8 · 로컬 10판 중
+    # 5판). anyio 테스트는 테스트 함수를 감싸 그 코루틴의 마지막 단계로 drain한다.
     for item in destructive_items:
         test_func = getattr(item, "function", None)
-        if inspect.iscoroutinefunction(test_func):
+        if not inspect.iscoroutinefunction(test_func):
+            continue
+        if item.get_closest_marker("anyio") is not None:
+            item.obj = _in_test_loop(item.obj, drain_global_background_work, TEST_LOOP_DRAIN_MARK)
+        else:
             item.fixturenames.append("_drain_and_dispose_global_engine_for_destructive_tests")
 
 

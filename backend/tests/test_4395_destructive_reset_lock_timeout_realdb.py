@@ -154,8 +154,11 @@ async def _idle_in_tx_tagged() -> int:
 
 
 @pytest.mark.anyio
-async def test_destructive_async_tests_get_the_drain_fixture_injected(request):
-    assert "_drain_and_dispose_global_engine_for_destructive_tests" in request.fixturenames
+async def test_anyio_destructive_tests_drain_inside_the_test_loop_not_as_a_fixture(request):
+    """anyio 테스트는 drain을 테스트 코루틴의 마지막 단계로(같은 루프) — pytest-asyncio fixture로 주입하면 다른 루프를 본다(CI run
+    36947226511 shard 8). 뮤테이션: anyio 갈래를 fixture 주입으로 되돌리면 RED."""
+    assert getattr(request.node.obj, conftest_module.TEST_LOOP_DRAIN_MARK, False) is True
+    assert "_drain_and_dispose_global_engine_for_destructive_tests" not in request.fixturenames
 
 
 @pytest.mark.anyio
@@ -200,3 +203,232 @@ async def test_drain_waits_for_a_slow_but_finishing_task():
     fire_and_forget(_slow_4395())
     await conftest_module.drain_global_background_work(timeout=5)
     assert await _idle_in_tx_tagged() == 0
+
+
+# ── story #4395 (PO 09-30): 테스트가 끝날 때 idle in transaction이 남으면 **그 테스트가** 실패 ──
+
+def _open_idle_in_transaction(app_name: str):
+    """다른 세션: 트랜잭션을 열고 읽은 뒤 쉰다(CI 표본의 모양). 돌려준 연결을 닫을 때까지 idle in transaction."""
+    eng = create_engine(conftest_module._sync_url(_REAL_DB_URL), connect_args={"application_name": app_name})
+    conn = eng.connect()
+    conn.execute(text("SELECT 1"))  # autobegin — 커밋 · 롤백 없이 둔다
+    return eng, conn
+
+
+def _alive(pid: int) -> bool:
+    eng = create_engine(conftest_module._sync_url(_REAL_DB_URL))
+    try:
+        with eng.connect() as c:
+            return c.execute(text("SELECT count(*) FROM pg_stat_activity WHERE pid = :p"), {"p": pid}).scalar_one() == 1
+    finally:
+        eng.dispose()
+
+
+def test_idle_in_transaction_left_at_the_end_fails_naming_it_and_is_ended():
+    """양성 대조: 쉬는 트랜잭션이 남으면 앱 이름을 싣고 실패하고, 그 세션을 끊는다(다음 테스트 리셋으로 번지지 않게).
+    뮤테이션: 끊기를 빼면 마지막 단언이 RED · 실패를 빼면 raises가 RED."""
+    eng, conn = _open_idle_in_transaction("story4395-idle")
+    pid = conn.execute(text("SELECT pg_backend_pid()")).scalar_one()
+    try:
+        with pytest.raises(pytest.fail.Exception, match=r"(?s)tests/x\.py::t.*story4395-idle.*state=idle in transaction"):
+            conftest_module.check_no_idle_in_transaction(_REAL_DB_URL, "tests/x.py::t", grace=0.3)
+        assert not _alive(pid)
+    finally:
+        conn.invalidate()
+        eng.dispose()
+
+
+def test_a_transaction_that_ends_within_the_grace_is_not_blamed():
+    """음성 대조: 커밋이 막 오가는 세션(곧 끝나는 트랜잭션)은 범인이 아니다. 뮤테이션: 다시 보기(grace)를 빼면 RED."""
+    eng, conn = _open_idle_in_transaction("story4395-finishing")
+    timer = threading.Timer(0.3, conn.rollback)
+    timer.start()
+    try:
+        conftest_module.check_no_idle_in_transaction(_REAL_DB_URL, "tests/x.py::t", grace=3.0)
+    finally:
+        timer.join()
+        conn.close()
+        eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_idle_check_runs_after_the_drain(request):
+    """순서: 배경 작업 drain(테스트 코루틴 끝 · 같은 루프) → idle 검사(autouse fixture의 teardown — 테스트가 다 끝난 뒤).
+    뮤테이션: autouse를 떼면 RED."""
+    assert "_no_idle_in_transaction_after_destructive_test" in request.fixturenames
+    assert getattr(request.node.obj, conftest_module.TEST_LOOP_DRAIN_MARK, False) is True
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+def test_end_to_end_the_leaking_test_fails_and_the_next_one_is_not_blocked(pytester: pytest.Pytester):
+    """실 pytest 서브프로세스(실 conftest · 버리는 DB): 앞 테스트가 sync · async 둘 다 쉬는 트랜잭션을 남긴다 → **그 테스트**가
+    이름과 함께 실패하고, 다음 테스트는 리셋이 막히지 않아 통과한다. 이 가드 없이는 앞 둘은 통과, 다음 테스트가 리셋에서
+    lock_timeout(30s)으로 실패했다(엉뚱한 테스트를 가리킴)."""
+    import shutil
+    from pathlib import Path
+
+    from tests.test_2662_missing_model_import_guard import _create_disposable_pg_database, _drop_disposable_pg_database
+
+    shutil.copy(Path(__file__).parent / "conftest.py", pytester.path / "conftest.py")
+    url, name = _create_disposable_pg_database(_REAL_DB_URL)
+    pytester.makepyfile(
+        test_leak_4395='''
+import pytest
+from sqlalchemy import text
+
+pytestmark = pytest.mark.destructive_schema
+_kept = []
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+def test_sync_leaks_an_open_read():
+    import os
+    from sqlalchemy import create_engine
+    from tests.conftest import _sync_url
+
+    eng = create_engine(_sync_url(os.environ["PARITY_TEST_DATABASE_URL"]))
+    conn = eng.connect()
+    conn.execute(text("SELECT 1"))
+    _kept.append((eng, conn))
+
+
+@pytest.mark.anyio
+async def test_async_leaks_an_open_read_on_the_global_engine():
+    from app.core.database import async_session_factory
+
+    s = async_session_factory()
+    await s.execute(text("SELECT 1"))
+    _kept.append(s)
+
+
+def test_next_runs_after_both():
+    pass
+'''
+    )
+    backend_dir = str(Path(__file__).parent.parent.resolve())
+    mp = pytest.MonkeyPatch()
+    mp.setenv("PYTHONPATH", backend_dir + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    mp.setenv("PARITY_TEST_DATABASE_URL", url)
+    mp.setenv("ALEMBIC_DATABASE_URL", url)
+    mp.setenv("DATABASE_URL", "postgresql+asyncpg://" + conftest_module._sync_url(url).split("://", 1)[1])
+    try:
+        result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-m", "destructive_schema", "-v", "-p", "no:randomly")
+    finally:
+        mp.undo()
+        _drop_disposable_pg_database(_REAL_DB_URL, name)
+    out = "\n".join(result.outlines)
+    assert "ERROR at teardown of test_sync_leaks_an_open_read" in out, out
+    assert "ERROR at teardown of test_async_leaks_an_open_read_on_the_global_engine" in out, out
+    assert "test_next_runs_after_both PASSED" in out, out
+    assert "ERROR at setup of test_next_runs_after_both" not in out, out
+    result.assert_outcomes(passed=3, errors=2)  # 둘은 call은 통과 · teardown에서 가드가 실패 — 다음 테스트는 통과
+
+
+_LOOP_PROBE = '''
+import asyncio
+import os
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.destructive_schema
+MARK = Path(os.environ["STORY_4395_MARK"])
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_returns_while_its_background_work_still_runs():
+    """after_commit 발행 꼴: 테스트가 띄운 배경 작업(0.3초 뒤 끝남)이 남은 채 테스트가 돌아온다."""
+    from app.services.pg_pubsub import fire_and_forget
+
+    async def _publish_like_4395():
+        await asyncio.sleep(0.3)
+        MARK.write_text("done")
+
+    fire_and_forget(_publish_like_4395())
+
+
+def test_that_work_finished():
+    # 같은 루프의 drain이 기다렸으면 끝났다 · 다른 루프를 봤으면 anyio가 루프를 닫으며 끊었다
+    assert MARK.exists()
+'''
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+def test_end_to_end_the_drain_sees_the_anyio_test_loop(pytester: pytest.Pytester):
+    """회귀(CI run 36947226511 · test_2985): anyio 테스트가 돌아올 때 남은 배경 작업을 drain이 **테스트 루프**에서 끝까지 기다린다
+    (그 작업이 남긴 표시를 다음 테스트가 봄). 뮤테이션(양성 대조): anyio 갈래를 pytest-asyncio fixture 주입으로 되돌리면 drain이
+    다른 루프를 보고(남은 작업 0) anyio가 루프를 닫으며 그 작업을 끊어 표시가 없음 → RED. (test_2985의 누수 자체 — 첫 연결 초기화
+    도중 끊김 — 는 타이밍 경합이라 여기서 결정적으로 못 만든다 · 그 파일 반복 판은 PR 본문.)"""
+    import shutil
+    from pathlib import Path
+
+    from tests.test_2662_missing_model_import_guard import _create_disposable_pg_database, _drop_disposable_pg_database
+
+    shutil.copy(Path(__file__).parent / "conftest.py", pytester.path / "conftest.py")
+    url, name = _create_disposable_pg_database(_REAL_DB_URL)
+    # pyproject의 값 그대로 — 이것 없이(strict) 돌리면 주입된 async fixture를 anyio가 맡아 테스트 루프에서 돌아 이 결함이 안 보인다
+    pytester.makeini("[pytest]\nasyncio_mode = auto\n")
+    pytester.makepyfile(test_loop_probe_4395=_LOOP_PROBE)
+    mark = pytester.path / "story4395.mark"
+    backend_dir = str(Path(__file__).parent.parent.resolve())
+    mp = pytest.MonkeyPatch()
+    mp.setenv("PYTHONPATH", backend_dir + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    mp.setenv("PARITY_TEST_DATABASE_URL", url)
+    mp.setenv("ALEMBIC_DATABASE_URL", url)
+    mp.setenv("DATABASE_URL", "postgresql+asyncpg://" + conftest_module._sync_url(url).split("://", 1)[1])
+    mp.setenv("STORY_4395_MARK", str(mark))
+    try:
+        result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-m", "destructive_schema", "-v", "-p", "no:randomly")
+    finally:
+        mp.undo()
+        _drop_disposable_pg_database(_REAL_DB_URL, name)
+    result.assert_outcomes(passed=2)
+
+
+_NON_DESTRUCTIVE_PROBE = '''
+import pytest
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_dispose_runs_in_this_loop(request):
+    import conftest
+    assert getattr(request.node.obj, conftest.TEST_LOOP_DISPOSE_MARK, False) is True
+    assert "_dispose_global_engine_for_non_destructive_tests" not in request.fixturenames
+
+
+async def test_asyncio_mode_test_keeps_the_fixture(request):
+    assert "_dispose_global_engine_for_non_destructive_tests" in request.fixturenames
+'''
+
+
+def test_non_destructive_anyio_tests_dispose_inside_the_test_loop_too(pytester: pytest.Pytester):
+    """같은 부류(3330 dispose fixture): anyio 비파괴 테스트도 dispose를 테스트 루프 안에서 · pytest-asyncio 테스트는 fixture 그대로.
+    뮤테이션: 비파괴 anyio 갈래를 fixture 주입으로 되돌리면 RED."""
+    import shutil
+    from pathlib import Path
+
+    shutil.copy(Path(__file__).parent / "conftest.py", pytester.path / "conftest.py")
+    pytester.makeini("[pytest]\nasyncio_mode = auto\n")  # pyproject의 값 그대로 — pytest-asyncio 테스트가 fixture를 받는 모드
+    pytester.makepyfile(test_nd_probe_4395=_NON_DESTRUCTIVE_PROBE)
+    backend_dir = str(Path(__file__).parent.parent.resolve())
+    mp = pytest.MonkeyPatch()
+    mp.setenv("PYTHONPATH", backend_dir + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    try:
+        result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-m", "not destructive_schema", "-v", "-p", "no:randomly")
+    finally:
+        mp.undo()
+    result.assert_outcomes(passed=2)
