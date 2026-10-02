@@ -1462,6 +1462,34 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostPaused);
   });
 
+  // story #4466 (PO 17:07Z · Yuna 17:09Z) — a scheduler pause says why it fired: the approval withdrawn · the spend could not be
+  // checked · the cap; a scheduler pause without a reason says «자동 중지» only — never «광고비 상한 도달» it did not reach.
+  it.each([
+    ['approval_gone', 'gateActivityActionAdsBoostAutoPausedApprovalGone'],
+    ['spend_unreadable', 'gateActivityActionAdsBoostAutoPausedSpendUnreadable'],
+    [undefined, 'gateActivityActionAdsBoostAutoPaused'],
+  ] as const)('a scheduler pause with reason %s reads %s, not the cap', async (reason, key) => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        {
+          id: 'log-1', action: 'ads_boost_paused', actor_id: 'm-1', actor_name: '미르코',
+          context: reason ? { initiated_by: 'scheduler', reason } : { initiated_by: 'scheduler' }, created_at: '2026-10-01T17:06:09Z',
+        },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    const labels = koMessages.cage as Record<string, string>;
+    expect(container.textContent).toContain(labels[key]);
+    expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
+    expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostPaused);
+  });
+
   // story #3806(Phase3·3-2 PR 12) — 「눌렀는데 아무 일도 없었다」 결함 처방 — 형제
   // BoostExecutionControl의 뮤테이션이 이 컴포넌트에 반영되는 유일한 경로(refreshKey).
   it('refreshKey가 바뀌면 재조회한다(형제 컴포넌트 뮤테이션 반영 경로)', async () => {

@@ -497,6 +497,19 @@ async def _campaign_connection_usable(db: AsyncSession, gate) -> bool:
     return status == "active"
 
 
+def _scheduler_pause_reason(run, gate) -> str | None:
+    """story #4466 — why the scheduler paused: the cap (`cap_reached_at`) · the spend could not be checked (`spend_blocked_at`,
+    4417) · the gate is no longer approved (4466). The scheduler's pauses come from exactly these (ads_spend_snapshots:
+    _follow_through_cap · _follow_through_block · _pause_if_off_approved)."""
+    if run.cap_reached_at is not None:
+        return "cap_reached"
+    if run.spend_blocked_at is not None:
+        return "spend_unreadable"
+    if gate.status != "approved":
+        return "approval_gone"
+    return None
+
+
 async def campaign_connection_id(db: AsyncSession, gate) -> uuid.UUID | None:
     """story #4461 (Qadir 08:57Z · PO 09:00Z) — the ad connection to use for this boost's campaign: the one it was created under
     (`ads_boost_runs.created_connection_id`, recorded at create) while a campaign exists, else the current seal's. A re-seal can move
@@ -971,10 +984,13 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
 
         activity_context: dict = {"initiated_by": command.initiated_by or "human"}
         if command.operation == OP_PAUSE and command.initiated_by == "scheduler":
-            # 이 조합(scheduler 귀속 pause)의 유일한 발생원은 _enforce_spend_cap
-            # (ads_spend_snapshots.py)의 상한 도달 자동 중지뿐이다(다른 scheduler
-            # 발신 pause 경로 0, grep 확認) — reason을 지어내지 않고 그 사실 그대로.
-            activity_context["reason"] = "cap_reached"
+            # story #4466 (PO 17:07Z, the live run) — a scheduler pause is not only the cap's: the spend could not be checked
+            # (4417) and the gate left «approved» (4466) pause it too, and the history said «광고비 상한 도달» for all of them.
+            # The reason is the one that fired, read from what each source leaves on the run/gate; none left (re-approved in
+            # between) → no reason (the history says «자동 중지» only).
+            reason = _scheduler_pause_reason(run, gate)
+            if reason:
+                activity_context["reason"] = reason
         await ActivityLogService(db).record(
             org_id=command.org_id, action=_ACTIVITY_ACTION_BY_OP[command.operation],
             actor_id=command.requested_by_member_id, actor_type="human",
