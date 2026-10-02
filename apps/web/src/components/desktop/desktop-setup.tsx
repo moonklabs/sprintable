@@ -686,9 +686,41 @@ export function DesktopSetupEntry() {
   }, [searchParams]);
   if (!entry) return null;
   if (!entry.query && entry.progress) return <ResumeProgress setupId={entry.progress} />;
-  return entry.query
-    ? <DesktopSetup key={entry.query.code} code={entry.query.code} runtimes={entry.query.runtimes} blocked={entry.query.blocked} setupId={entry.query.setupId} />
-    : <OpenInDesktopApp />;
+  return entry.query ? <SetupOrProgress key={entry.query.code} query={entry.query} /> : <OpenInDesktopApp />;
+}
+
+/** A setup id the server can hold (the same shape the /api/desktop/setups/{id} route lets through). */
+const SETUP_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * story 4492 AC3 (PO 09:23Z (가)): the page opened with a code whose setup was already started (the app reopens it after
+ * «오늘로 가기» · back · a reload) shows that setup's progress, not the form again — whichever way it was reached. Asked once
+ * before anything is drawn: 200 (a confirmed setup is in this organization) → the progress, and the address becomes
+ * `#progress=<id>` so a reload keeps it; anything else (404 not confirmed · another account's · offline · 5xx) → the form as
+ * before (a «시작» there is the server's same-person replay or its refusal — nothing new is made). The loading card stays until
+ * the answer: no form drawn first, so no «시작» to press in between.
+ */
+function SetupOrProgress({ query }: { query: SetupQuery }) {
+  const t = useTranslations('desktop.setup');
+  const id = query.setupId && SETUP_ID_SHAPE.test(query.setupId) ? query.setupId : null;
+  const [started, setStarted] = useState<boolean | null>(id ? null : false);
+  useEffect(() => {
+    if (!id) return;
+    let off = false;
+    void fetchWithAuth(`/api/desktop/setups/${id}`)
+      .then((res) => res.ok)
+      .catch(() => false)
+      .then((ok) => {
+        if (off) return;
+        // replaceState, not `location.hash =`: no hashchange for the page's own handler (same as 4429 ②)
+        if (ok) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(id));
+        setStarted(ok);
+      });
+    return () => { off = true; };
+  }, [id]);
+  if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */

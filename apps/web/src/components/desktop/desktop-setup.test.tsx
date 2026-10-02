@@ -1647,3 +1647,66 @@ describe('[SID:4452] an agent the shell could not start', () => {
     expect(block()).toBeNull();
   });
 });
+
+// story 4492 AC3 (PO 09:23Z (가) · Mirko 회차4 09:21Z): the app reopened the setup page with a code whose setup was already
+// started (after «오늘로 가기» · back to /desktop/setup) and the web drew the start form again. Now: asked first, the answer decides.
+describe('[SID:4492] a code whose setup was already started opens its progress, not the form', () => {
+  const startedStatus = () => ({ ...status('handed_over'), members: [{ stage: 'research', role: '조사', member_id: 'm1', kind: 'agent', runtime: 'claude' }] });
+  /** fetch: GET /api/desktop/setups/{id} answers `setup()`; recipes as usual; everything else 404. */
+  function stubSetup(setup: () => Promise<Response>) {
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith('/api/desktop/recipes')) return recipesNow();
+      if (url.includes('/api/desktop/setups/')) return setup();
+      return new Response('{}', { status: 404 });
+    }));
+  }
+  const open = async () => {
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=${SETUP_ID}&runtimes=claude`);
+    await mount(<DesktopSetupEntry />);
+  };
+  const confirms = () => calls.filter((c) => c.url.includes('/api/desktop/setup-codes/')).length;
+
+  it('started (200): the progress, the address becomes #progress=<id> (a reload keeps it) · no form · no «시작» · nothing confirmed', async () => {
+    stubSetup(async () => new Response(JSON.stringify(startedStatus()), { status: 200 }));
+    await open();
+    expect(text()).toContain('에이전트를 시작하고 있어요');
+    expect(window.location.hash).toBe(`#progress=${SETUP_ID}`);
+    expect(window.location.href).not.toContain(CODE);
+    expect(text()).not.toContain('에이전트를 이 컴퓨터에서 시작해요');
+    expect(startButton()).toBeUndefined();
+    expect(confirms()).toBe(0);
+  });
+
+  it('not started (404 — not confirmed, or another account\'s): the form as before', async () => {
+    stubSetup(async () => new Response(JSON.stringify({ detail: { code: 'setup_not_found' } }), { status: 404 }));
+    await open();
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    expect(startButton()).toBeDefined();
+    expect(window.location.hash).toBe('');
+  });
+
+  it('the ask fails (offline · 5xx): the form (a «시작» there is the server\'s same-person replay — nothing new is made)', async () => {
+    stubSetup(async () => { throw new TypeError('Failed to fetch'); });
+    await open();
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    stubSetup(async () => new Response('{}', { status: 503 }));
+    await open();
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+  });
+
+  it('while asking: the loading card only — no form drawn first, no «시작» to press in between', async () => {
+    let answer!: (r: Response) => void;
+    stubSetup(() => new Promise<Response>((r) => { answer = r; }));
+    await open();
+    expect(container.querySelector('[aria-label="불러오는 중"], svg.animate-spin')).not.toBeNull();
+    expect(startButton()).toBeUndefined();
+    expect(text()).not.toContain('에이전트를 이 컴퓨터에서 시작해요');
+    await act(async () => { answer(new Response('{}', { status: 404 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(startButton()).toBeDefined();
+  });
+});
