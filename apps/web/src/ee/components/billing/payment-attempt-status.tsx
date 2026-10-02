@@ -41,10 +41,12 @@ export interface PaymentAttemptState {
   attempt: PaymentAttempt | null;
   /** 서버에 이 시도가 없다(요청이 닿지 않음) — 청구 0. */
   missing: boolean;
+  /** story #4488 — the result could not be read (a 404 that is not the attempt handler's): never «청구 0» · [다시 시도] asks again */
+  unreadable?: boolean;
   long: boolean;
 }
 
-export function usePaymentAttempt({ onSettled }: { onSettled?: (attempt: PaymentAttempt) => void } = {}) {
+export function usePaymentAttempt({ orgId, onSettled }: { orgId: string; onSettled?: (attempt: PaymentAttempt) => void }) {
   const [state, setState] = useState<PaymentAttemptState | null>(null);
   const onSettledRef = useRef(onSettled);
   useEffect(() => {
@@ -53,25 +55,30 @@ export function usePaymentAttempt({ onSettled }: { onSettled?: (attempt: Payment
 
   const settle = useCallback((id: string, result: AttemptResult) => {
     if (result.kind === 'ok' && result.attempt.status !== 'processing') {
-      forgetAttempt();
+      forgetAttempt(orgId);
       setState((s) => (s && s.id === id ? { ...s, phase: 'done', attempt: result.attempt } : s));
       onSettledRef.current?.(result.attempt);
       return true;
     }
     if (result.kind === 'notFound') {
-      forgetAttempt();
+      forgetAttempt(orgId);
       setState((s) => (s && s.id === id ? { ...s, phase: 'done', missing: true } : s));
+      return true;
+    }
+    // story #4488 — cannot read the result: stop asking, keep the remembered attempt (nothing is known), offer one more look
+    if (result.kind === 'unreadable') {
+      setState((s) => (s && s.id === id ? { ...s, phase: 'done', unreadable: true } : s));
       return true;
     }
     if (result.kind === 'ok') {
       setState((s) => (s && s.id === id ? { ...s, attempt: result.attempt } : s));
     }
     return false;
-  }, []);
+  }, [orgId]);
 
   /** 결제 요청을 보낸 직후. 응답이 끊기거나 늦으면 «확인 중»으로 넘어가 조회만 한다. */
   const start = useCallback((id: string, kind: PaymentAttemptKind, request: Promise<AttemptResult>) => {
-    rememberAttempt({ id, kind });
+    rememberAttempt(orgId, { id, kind });
     setState({ id, kind, phase: 'processing', attempt: null, missing: false, long: false });
     void request.then((result) => {
       if (result.kind === 'unreached') {
@@ -80,7 +87,7 @@ export function usePaymentAttempt({ onSettled }: { onSettled?: (attempt: Payment
       }
       settle(id, result);
     });
-  }, [settle]);
+  }, [orgId, settle]);
 
   /** 새로고침 · 재진입 — 요청은 이미 갔다. 조회만. */
   const resume = useCallback((id: string, kind: PaymentAttemptKind) => {
@@ -118,10 +125,13 @@ export function PaymentAttemptBanner({
   state,
   onRetry,
   onReauth,
+  onRecheck,
 }: {
   state: PaymentAttemptState;
   onRetry: (attempt: { kind: PaymentAttemptKind; tier: string; billingCycle: string | null }) => void;
   onReauth: (attempt: { tier: string; billingCycle: string | null }) => void;
+  /** story #4488 — the same lookup once more (the «cannot read» state's [다시 시도]) */
+  onRecheck: () => void;
 }) {
   const t = useTranslations('pricingPlans');
   const tc = useTranslations('common');
@@ -153,6 +163,25 @@ export function PaymentAttemptBanner({
   // 요청이 400 · 422로 거절됐거나 서버에 닿지 않음)는 원인을 단정하지 않는 «결제가 시작되지 않았어요» 갈래.
   const reauth = attempt?.status === 'failed' && attempt.reauth_required;
 
+  // story #4488 (Yuna 03:18Z) — the result could not be read: never «청구 0» · where to see it · the same lookup once more
+  if (state.unreadable) {
+    return (
+      <Alert variant="warning" data-payment-attempt-state="unreadable">
+        <AlertDescription className="space-y-2 break-keep">
+          <span className="block">{t('paymentAttemptUnreadable')}</span>
+          <Button size="sm" variant="outline" onClick={onRecheck}>{tc('retry')}</Button>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  // story #4488 (Yuna 03:34Z) — «청구된 금액은 없어요» only when the server has proven it; while it rechecks, the honest line; once it
+  // stopped without a proof, what happened (and whether our team was told) — no promise of a refund or of «결제 내역» there
+  const noCharge = attempt?.no_charge;
+  const noChargeLine = noCharge === 'confirmed' ? t('checkoutDeclinedReassurance')
+    : noCharge === 'unresolved' ? (attempt?.unresolved_notified_at ? t('paymentAttemptNoChargeUnresolvedNotified') : t('paymentAttemptNoChargeUnresolved'))
+      : t('paymentAttemptNoChargePending');
+
   if (state.missing) {
     return (
       <Alert variant="warning" data-payment-attempt-state="not-started">
@@ -183,8 +212,10 @@ export function PaymentAttemptBanner({
       <Alert variant="warning" data-payment-attempt-state="failed">
         <AlertDescription className="space-y-2 break-keep">
           <span className="block">{t('paymentAttemptFailed')}</span>
-          <span className="block">{t('checkoutDeclinedReassurance')}</span>
-          {attempt && (
+          <span className="block" data-no-charge={noCharge ?? 'unknown'}>{noChargeLine}</span>
+          {/* story #4488 (Kadir · PO 03:48Z) — no [다시 시도] once the server stopped without a proof: the first attempt may still be
+              charged, and a new one would charge twice. This closes the screen's path only — the server's refusal is story #4489. */}
+          {attempt && noCharge !== 'unresolved' && (
             <Button size="sm" variant="outline" onClick={() => onRetry({ kind: state.kind, tier, billingCycle })}>
               {tc('retry')}
             </Button>
@@ -200,7 +231,7 @@ export function PaymentAttemptBanner({
         <AlertDescription className="space-y-1 break-keep">
           <span className="block">{t('checkoutDeclinedBanner')}</span>
           {attempt.declined_reason && <span className="block">{t('checkoutDeclinedReason', { reason: attempt.declined_reason })}</span>}
-          <span className="block">{t('checkoutDeclinedReassurance')}</span>
+          <span className="block" data-no-charge={noCharge ?? 'unknown'}>{noChargeLine}</span>
         </AlertDescription>
       </Alert>
     );

@@ -586,6 +586,10 @@ async def test_declined_charge_ends_declined_with_no_approval_and_releases_the_s
         await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
         done = await svc.get_attempt(s, attempt_id)
         assert done.status == "declined" and "REJECT_CARD_COMPANY" in done.reason
+        # story #4488 — the charge was started (then refused): «nothing charged» is not proven — the recheck is still running
+        from app.routers.org_subscription_checkout import _attempt_response
+        assert done.charge_started_at is not None and done.no_charge_proven_at is None
+        assert (await _attempt_response(s, done)).no_charge == "checking"
         sub = await _row(s, "SELECT status, checkout_claimed_at FROM org_subscriptions WHERE org_id=:o", o=org_id)
         assert (sub.status, sub.checkout_claimed_at) == ("pending", None)
     assert toss.approvals == 0
@@ -605,6 +609,7 @@ async def test_reconcile_before_charge_marks_failed_with_zero_charge_proven_by_t
         await _expire_lease(s, attempt_id)
         done = await svc.reconcile_attempt(s, attempt_id)
         assert (done.status, done.stage, done.reauth_required, done.reason) == ("failed", "received", True, svc.REASON_INTERRUPTED_BEFORE_CHARGE)
+        assert (svc.no_charge_state(done), done.no_charge_proven_at is not None) == ("confirmed", True)  # story #4488 — no charge ever started
         assert (await _row(s, "SELECT checkout_claimed_at FROM org_subscriptions WHERE org_id=:o", o=org_id)).checkout_claimed_at is None
     assert toss.charge_calls == [] and toss.lookup_calls == []
 
@@ -713,6 +718,7 @@ async def test_not_found_at_toss_stays_checking_until_the_fence_window_then_fail
         await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(seconds=1))
         done = await svc.reconcile_attempt(s, attempt_id)
         assert (done.status, done.reason) == ("failed", svc.REASON_NOT_FOUND_AT_TOSS)
+        assert svc.no_charge_state(done) == "checking"  # story #4488 — a charge was started: still rechecked, not proven
     toss.hang_event.set()
     await worker
     async with Session() as s:
@@ -1363,6 +1369,61 @@ async def test_recheck_stops_after_24h_and_alerts_only_without_a_definite_answer
         await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
         await svc.recheck_ended_attempt(s, attempt_id)
     assert ("recheck_window_closed", attempt_id) in alerts
+
+
+@pytest.mark.anyio
+async def test_story_4488_no_charge_is_said_only_on_a_recorded_proof(Session, toss, alerts):
+    """story #4488 (Kadir 4901 ① · PO 03:33Z) — «청구된 금액은 없어요» only on a positive record (`no_charge_proven_at`):
+    ① the worker stopped: the window has passed but the recheck has not closed (next_check_at still set) → `checking`
+    ② the window closes and its last answer is definite (NOT_FOUND) → `confirmed`
+    ③ the window closes without an answer (lookup error) → `unresolved` (+ the window-closed alert's delivery time, once delivered)
+    ④ the closing turn committed and the worker died before asking → `unresolved` (no alert · no answer · never «청구 0»)."""
+    from app.models.operator_alert import OperatorAlert
+    from app.routers.org_subscription_checkout import _attempt_response
+    from app.services import billing_payment_attempt as svc
+
+    now = datetime.now(timezone.utc)
+    past = now - svc.RECHECK_WINDOW - timedelta(minutes=1)
+
+    # ① worker stopped
+    _, a1 = await _ended_not_found_checkout(Session, toss)
+    async with Session() as s:
+        await _set(s, a1, finished_at=past)
+        row = await svc.get_attempt(s, a1)
+        assert (row.next_check_at is not None, (await _attempt_response(s, row)).no_charge) == (True, "checking")
+
+    # ② closes with a definite «no payment»
+    _, a2 = await _ended_not_found_checkout(Session, toss)
+    toss.charged.clear()
+    async with Session() as s:
+        await _set(s, a2, finished_at=past, next_check_at=now - timedelta(seconds=1))
+        assert await svc.recheck_ended_attempt(s, a2) == "still_ended"
+        row = await svc.get_attempt(s, a2)
+        assert row.no_charge_proven_at is not None
+        assert (await _attempt_response(s, row)).no_charge == "confirmed"
+
+    # ③ closes without an answer → unresolved; the window-closed alert's delivery time once it reached the operators
+    org3, a3 = await _ended_not_found_checkout(Session, toss)
+    toss.lookup_status = "error"
+    async with Session() as s:
+        await _set(s, a3, finished_at=past, next_check_at=now - timedelta(seconds=1))
+        await svc.recheck_ended_attempt(s, a3)
+        row = await svc.get_attempt(s, a3)
+        response = await _attempt_response(s, row)
+        assert (row.no_charge_proven_at, response.no_charge, response.unresolved_notified_at) == (None, "unresolved", None)
+        s.add(OperatorAlert(dedupe_key=svc.billing_alert_dedupe_key("recheck_window_closed", a3), kind="billing.recheck_window_closed",
+                            target_org_id=org3, target={}, facts={}, status="delivered", next_attempt_at=now, delivered_at=now))
+        await s.commit()
+        assert (await _attempt_response(s, row)).unresolved_notified_at is not None
+    assert ("recheck_window_closed", a3) in alerts
+    toss.lookup_status = None
+
+    # ④ closing committed (next_check_at cleared) and the worker died before asking Toss
+    _, a4 = await _ended_not_found_checkout(Session, toss)
+    async with Session() as s:
+        await _set(s, a4, finished_at=past, next_check_at=None)
+        row = await svc.get_attempt(s, a4)
+        assert (await _attempt_response(s, row)).no_charge == "unresolved"
 
 
 @pytest.mark.anyio

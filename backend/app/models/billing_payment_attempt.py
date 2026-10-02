@@ -59,3 +59,6 @@ class BillingPaymentAttempt(Base, TimestampMixin, OrgScopedMixin):
     base_offering_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     refund_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4488 — when «nothing was charged» was proven (ended before any charge · or the recheck window's last answer was a
+    # definite «no payment»). Null = not proven: the screen does not say «청구 0».
+    no_charge_proven_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
