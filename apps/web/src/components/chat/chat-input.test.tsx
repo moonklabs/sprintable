@@ -86,8 +86,21 @@ describe('ChatInput — 진입 시 자동 포커스(story #2032 AC1)', () => {
 });
 
 describe('ChatInput — 대화별 임시저장(story #2032 AC2/AC3/AC6)', () => {
+  // story #4490 — drafts carry this browser's owner (`u:<user>:`): the same conversation's draft of another person is not read
+  beforeEach(() => { window.localStorage.setItem('sprintable_tab_owner', 'user-a'); });
+  afterEach(() => { window.localStorage.removeItem('sprintable_tab_owner'); });
+
+  it('another person\'s draft for the same conversation is not shown (story #4490)', async () => {
+    window.localStorage.setItem('sprintable:chat-draft:u:user-b:c1', 'B의 초안');
+    window.localStorage.setItem('sprintable:chat-draft:c1', '주인 없는 옛 초안');
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
+    });
+    expect(textarea().value).toBe('');
+  });
+
   it('마운트 시 그 대화의 저장된 초안을 복원한다(AC2)', async () => {
-    window.localStorage.setItem('sprintable:chat-draft:c1', '쓰던 내용');
+    window.localStorage.setItem('sprintable:chat-draft:u:user-a:c1', '쓰던 내용');
     await act(async () => {
       root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
     });
@@ -104,20 +117,20 @@ describe('ChatInput — 대화별 임시저장(story #2032 AC2/AC3/AC6)', () => 
       setter.call(el, '작성 중');
       el.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(window.localStorage.getItem('sprintable:chat-draft:c1')).toBe('작성 중');
+    expect(window.localStorage.getItem('sprintable:chat-draft:u:user-a:c1')).toBe('작성 중');
   });
 
   it('대화별로 분리된다 — A 대화 초안이 B 대화에 나타나지 않는다(AC3)', async () => {
-    window.localStorage.setItem('sprintable:chat-draft:conv-A', 'A 대화 초안');
+    window.localStorage.setItem('sprintable:chat-draft:u:user-a:conv-A', 'A 대화 초안');
     await act(async () => {
       root.render(withIntl(<ChatInput threadId="conv-B" onSend={vi.fn()} />));
     });
     expect(textarea().value).toBe(''); // B에는 A의 초안이 안 보임
-    expect(window.localStorage.getItem('sprintable:chat-draft:conv-A')).toBe('A 대화 초안'); // A 것은 그대로 보존
+    expect(window.localStorage.getItem('sprintable:chat-draft:u:user-a:conv-A')).toBe('A 대화 초안'); // A 것은 그대로 보존
   });
 
   it('메시지를 전송하면 그 대화의 임시저장이 비워진다(AC6)', async () => {
-    window.localStorage.setItem('sprintable:chat-draft:c1', '보낼 내용');
+    window.localStorage.setItem('sprintable:chat-draft:u:user-a:c1', '보낼 내용');
     const onSend = vi.fn().mockResolvedValue(undefined);
     await act(async () => {
       root.render(withIntl(<ChatInput threadId="c1" onSend={onSend} />));
@@ -129,7 +142,7 @@ describe('ChatInput — 대화별 임시저장(story #2032 AC2/AC3/AC6)', () => 
       await Promise.resolve();
     });
     expect(onSend).toHaveBeenCalledWith('보낼 내용', undefined, undefined);
-    expect(window.localStorage.getItem('sprintable:chat-draft:c1')).toBeNull();
+    expect(window.localStorage.getItem('sprintable:chat-draft:u:user-a:c1')).toBeNull();
   });
 });
 

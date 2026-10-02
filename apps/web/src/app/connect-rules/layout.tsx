@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
 
 /**
  * story #3982(E-UX-OVERHAUL·「연결·규칙」 구현 2/N) — `/connect-rules`는 (authenticated)
@@ -16,5 +17,6 @@ export default async function ConnectRulesV3Layout({ children }: { children: Rea
   const session = await getServerSession();
   if (!session) redirect(buildLoginRedirect(currentPath));
 
-  return <>{children}</>;
+  // story #4490 — the previous person's browser values go before anything below reads them
+  return <TabOwnerGate userId={session.user_id}>{children}</TabOwnerGate>;
 }

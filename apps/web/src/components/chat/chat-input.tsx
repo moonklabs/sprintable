@@ -35,6 +35,7 @@ import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberDisplayLabel, memberRowLabels, type MemberRow } from '@/lib/member-display';
+import { draftOwnerSegment } from '@/lib/tab-owner';
 
 // story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
 // 산다 — 여기선 재-export만 해서 기존 소비부(테스트 등)의 import 경로를 그대로 둔다.
@@ -137,8 +138,10 @@ function mentionMemberRoleLabel(
 // ChatInput을 통째로 리마운트시키므로(page.tsx), threadId가 이 컴포넌트 수명 중에 바뀌는
 // 경우 자체가 없다 — 마운트 시 lazy initializer로 그 대화의 초안을 1회 읽으면 AC3(대화별
 // 분리)가 별도 분기 없이 성립한다.
+// story #4490 — the owner segment (`u:<user>:`): another person on this browser (even in the same conversation) never sees it,
+// and the same person gets it back after switching away and back.
 function draftStorageKey(threadId: string): string {
-  return `sprintable:chat-draft:${threadId}`;
+  return `sprintable:chat-draft:${draftOwnerSegment('local')}${threadId}`;
 }
 
 function loadDraft(threadId: string): string {

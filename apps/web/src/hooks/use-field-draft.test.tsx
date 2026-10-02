@@ -144,8 +144,10 @@ describe('useFieldDraft(story #4370)', () => {
     expect(api.value).toBe('그래도 입력');
   });
 
-  it('키 모양: 표면 · 대상(없으면 new) · 칸', () => {
-    expect(fieldDraftStorageKey(GOAL)).toBe('sprintable:field-draft:v1:goal-create:new:description');
-    expect(fieldDraftStorageKey(GATE_A)).toBe('sprintable:field-draft:v1:gate-reject:gate-a:reason');
+  it('키 모양: 주인(story #4490 · 모르면 -) · 표면 · 대상(없으면 new) · 칸', () => {
+    expect(fieldDraftStorageKey(GOAL)).toBe('sprintable:field-draft:v1:u:-:goal-create:new:description');
+    window.sessionStorage.setItem('sprintable_tab_owner', 'user-a');
+    expect(fieldDraftStorageKey(GATE_A)).toBe('sprintable:field-draft:v1:u:user-a:gate-reject:gate-a:reason');
+    window.sessionStorage.removeItem('sprintable_tab_owner');
   });
 });

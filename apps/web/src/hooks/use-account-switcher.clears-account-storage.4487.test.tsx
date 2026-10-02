@@ -75,8 +75,9 @@ function seed() {
 
 function expectOnlyAccountKeysGone(moment: 'signout' | 'switch') {
   for (const e of BROWSER_STORAGE_KEYS) {
+    if (e.where.includes('lib/tab-owner.ts') && e.scope === 'kept') continue; // the owner keys are rewritten on purpose (story #4490, own test)
     const v = store(e.area).getItem(sample(e));
-    if (e.scope === 'account' && e.on.includes(moment)) expect(v, `${e.area}:${sample(e)} should be cleared`).toBeNull();
+    if (e.scope === 'account' && (e.on as readonly string[]).includes(moment)) expect(v, `${e.area}:${sample(e)} should be cleared`).toBeNull();
     else expect(v, `${e.area}:${sample(e)} should stay`).toBe('1');
   }
   for (const [area, k] of DRAFTS) {

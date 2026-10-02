@@ -22,7 +22,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => (
 
 const sp = koMessages.sprints as unknown as Record<string, string>;
 const SPRINT = { id: 'sp-1', title: '스프린트 1', status: 'planning', start_date: '2026-09-01', end_date: '2026-09-14' };
-const DRAFT_KEY = 'sprintable:field-draft:v1:sprint-quick-hypotheses:sp-1:form';
+const DRAFT_KEY = 'sprintable:field-draft:v1:u:-:sprint-quick-hypotheses:sp-1:form'; // story #4490 — owner segment (none set: -)
 const LINKED = { ...EMPTY_DECLARATION, mode: 'link' as const, linkedHypothesisId: 'h-1', linkedPreview: { statement: '온보딩을 줄이면 완료율이 오른다', status: 'draft' } };
 
 let container: HTMLDivElement;
