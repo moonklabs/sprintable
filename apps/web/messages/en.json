@@ -6666,6 +6666,10 @@
           "title": "You already have an organization",
           "body": "An organization was created elsewhere. Reload to continue with it.",
           "action": "Reload"
+        },
+        "disconnected": {
+          "title": "This device was disconnected",
+          "body": "To use it again, start again in the app."
         }
       },
       "direct": {

@@ -368,6 +368,8 @@ export interface SetupProgress {
   stillPreparing: string[];
   /** story 4452 — the agents the shell could not start (flow order · one per agent): role, runtime, the reason line and its
    *  values. Such an agent is in no other list (not «not connected», not «still getting ready»). */
+  /** story 4498 — the setup was disconnected («연결 끊기» on the devices list): the end card, nothing of the steps. */
+  disconnected: boolean;
   startFailed: { memberId: string; role: string | null; runtime: DesktopRuntime | null; line: StartFailedLine; limit: number | null; firstRole: string | null }[];
 }
 
@@ -421,8 +423,9 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
   const named = (id: string) => (lateNotConnected ? unsettled.includes(id) : pendingStarted.includes(id));
   return {
     ready, handed, result, pairs,
-    settled: !!s.signals.blocked || s.state === 'not_handed_over' || (result === 'done' && everyAgentIn),
-    waitingOnPerson: !s.signals.blocked && s.state !== 'not_handed_over' && result === 'done' && !everyAgentIn,
+    // story 4498 (PO 10:50Z): a disconnected setup is an end like an expired one — the reading stops (it asked every 2 s forever)
+    settled: !!s.signals.blocked || s.state === 'not_handed_over' || s.state === 'disconnected' || (result === 'done' && everyAgentIn),
+    waitingOnPerson: !s.signals.blocked && s.state !== 'not_handed_over' && s.state !== 'disconnected' && result === 'done' && !everyAgentIn,
     firstAgentRole: agents.find((m) => m.role)?.role ?? null,
     workdirFallback: !!s.signals.workdir_fallback_at,
     trustHint: waitingForTools && !notConnected,
@@ -434,6 +437,7 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     },
     blocked: !!s.signals.blocked,
     expired: s.state === 'not_handed_over',
+    disconnected: s.state === 'disconnected',
     stopped,
     readyPaused: !(ready === 'done' || handed === 'done') && agentIds.some((id) => !connected.has(id))
       && agentIds.filter((id) => !connected.has(id)).every((id) => stoppedMembers.has(id) || failedIds.has(id)),

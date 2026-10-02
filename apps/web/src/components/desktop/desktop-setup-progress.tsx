@@ -47,7 +47,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
       if (n < reads.current.shown) return; // a newer answer is already on the page
       reads.current.shown = n;
       // «설정 진행 중» 표시(문서 열림 셈 · AC2): 흐름이 끝나면 지우고, 아니면 읽을 때마다 새로 적는다(PO 13:00Z)
-      if (s.signals.first_result_at || s.signals.blocked || s.state === 'not_handed_over') forgetActiveSetup();
+      if (s.signals.first_result_at || s.signals.blocked || s.state === 'not_handed_over' || s.state === 'disconnected') forgetActiveSetup();
       else rememberActiveSetup(setupId);
       const at = Date.now();
       setSnap((prev) => ({ status: s, at, handedOverSeenAt: prev?.handedOverSeenAt ?? (s.state === 'handed_over' ? at : null) }));
@@ -77,6 +77,9 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   if (!progress || !status) {
     return <Card className="break-keep p-6"><h1 className="text-lg font-semibold">{t('startedTitle')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p></Card>;
   }
+  // story 4498 (PO 10:50Z · Yuna 10:51Z): a disconnected setup ends here — whatever the steps had reached before (a result
+  // shown before the disconnect is not drawn as «done»: nothing continues), and opened again by its address the same card
+  if (progress.disconnected) return <Failure failure="disconnected" todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} />;
   if (progress.blocked) return <Failure failure="managed" />;
   if (progress.expired) return <Failure failure="expired" />;
   // the folder-trust question is Claude Code's (Codex does not ask it) — Yuna v24 · PO 11:19Z

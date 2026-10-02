@@ -258,6 +258,10 @@ describe('[SID:4464] settled — the one end condition for reading the status', 
     expect(setupProgress(base({ tools_connected: c('m1', 'm2') }), T0, T0).settled).toBe(false);
     expect(setupProgress(base({ blocked: { at: 'x' } as never }), T0, T0).settled).toBe(true);
     expect(setupProgress(base({}, 'not_handed_over'), T0, null).settled).toBe(true);
+    // story 4498: a disconnected setup is an end too — settled, not waiting on the person, its own flag (the card)
+    const off = setupProgress(base({ first_result_at: 'y' }, 'disconnected'), T0, null);
+    expect([off.settled, off.waitingOnPerson, off.disconnected, off.expired]).toEqual([true, false, true, false]);
+    expect(setupProgress(base({}, 'handed_over'), T0, null).disconnected).toBe(false);
   });
 });
 
