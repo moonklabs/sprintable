@@ -173,6 +173,9 @@ async def checkout(
         )
     except attempts.AttemptNotFound as exc:
         raise HTTPException(status_code=404, detail="payment attempt not found") from exc
+    except attempts.PaymentUnresolved as exc:
+        # story #4489 — an earlier payment of this org may still have been charged: a new one could charge twice
+        raise HTTPException(status_code=409, detail={"code": "PAYMENT_UNRESOLVED", "message": str(exc)}) from exc
     except CheckoutInProgress as exc:
         # #2511 — 같은 org의 다른 결제가 진행 中. 사용자 입력·내부 상태 오류가 아니라
         # 타이밍 충돌이라 409(재시도 가능함을 뜻함).
@@ -221,6 +224,8 @@ async def change_tier_endpoint(
         )
     except attempts.AttemptNotFound as exc:
         raise HTTPException(status_code=404, detail="payment attempt not found") from exc
+    except attempts.PaymentUnresolved as exc:
+        raise HTTPException(status_code=409, detail={"code": "PAYMENT_UNRESOLVED", "message": str(exc)}) from exc
     except TierChangeInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TierChangeError as exc:
