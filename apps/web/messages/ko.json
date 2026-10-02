@@ -4151,6 +4151,7 @@
     "paymentAttemptNoChargePending": "청구가 없었는지 한 번 더 확인하고 있어요(최대 하루). 혹시 청구됐다면 플랜에 적용하거나 전액 환불해요 — 이 결제 화면의 «결제 내역»에서 볼 수 있어요.",
     "paymentAttemptNoChargeUnresolvedNotified": "하루 동안 다시 확인했지만 청구됐는지 확인하지 못해 담당자에게 알렸어요.",
     "paymentAttemptNoChargeUnresolved": "하루 동안 다시 확인했지만 청구됐는지 확인하지 못해 담당자에게 알리고 있어요.",
+    "paymentUnresolvedRefused": "앞서 한 결제가 청구됐는지 아직 확인되지 않아 새 결제를 시작할 수 없어요. 두 번 청구되지 않도록 막아 둔 거예요 — 확인되면 다시 결제할 수 있어요.",
     "paymentAttemptUnreadable": "이 결제의 결과를 지금 불러올 수 없어요. 청구됐는지는 이 결제 화면의 «결제 내역»에서 확인해 주세요.",
     "changeTierRefundPending": "기존 플랜의 남은 기간 금액은 환불하고 있어요. 카드사에 따라 반영까지 시간이 걸릴 수 있어요.",
     "changeTierRefundFailed": "기존 플랜의 남은 기간 금액을 환불하지 못했어요.",

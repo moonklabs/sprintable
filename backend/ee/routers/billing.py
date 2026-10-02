@@ -22,6 +22,7 @@ from app.models.billing_order import BillingOrder
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.project import OrgMember
+from app.services.billing_payment_attempt import blocking_unresolved_attempt
 from app.services.payment.factory import get_payment_adapter
 from app.services.platform_settings import get_platform_settings, require_billing_checkout_enabled
 
@@ -47,6 +48,12 @@ def _require_ee() -> None:
     """EE 비활성화 환경에서 호출 시 403 반환 (방어적 guard)."""
     if not settings.is_ee_enabled:
         raise HTTPException(status_code=403, detail="Enterprise Edition not enabled")
+
+
+async def _payment_unresolved(session: AsyncSession, org_id: uuid.UUID) -> bool:
+    """story #4489 — an earlier payment may still have been charged: the checkout / plan-change dialogs say so before card auth.
+    The same function as the start refusal answers it (one source); the refusal (409) is what actually stops a payment."""
+    return await blocking_unresolved_attempt(session, org_id) is not None
 
 
 @router.get("/status")
@@ -85,6 +92,7 @@ async def get_billing_status(
             "au_current": au_current,
             "au_limit": au_limit,
             "au_paused": False,
+            "payment_unresolved": await _payment_unresolved(session, org_id),
         }
 
     # story #2892(P0, 실사고 2026-08-21) — org_subscription_checkout.py의 상태기계는
@@ -124,6 +132,7 @@ async def get_billing_status(
         "au_current": au_current,
         "au_limit": au_limit,
         "au_paused": sub.au_paused_at is not None,
+        "payment_unresolved": await _payment_unresolved(session, org_id),
     }
 
 

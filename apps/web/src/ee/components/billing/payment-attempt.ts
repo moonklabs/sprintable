@@ -45,12 +45,18 @@ export type AttemptResult =
   | { kind: 'notFound' }
   /** story #4488 — a 404 that is not the attempt handler's own (a route that is not there · a deploy mismatch): the result cannot be read */
   | { kind: 'unreadable' }
+  /** story #4489 — the server refused to start: an earlier payment of this organization may still have been charged */
+  | { kind: 'refusedUnresolved' }
   | { kind: 'unreached' };
 
 /** The attempt handler's own 404 (backend routers/org_subscription_checkout.py `AttemptNotFound` → HTTPException(404) → main.py
  * `http_exception_handler` envelope `{data: null, error: {code, message}, meta: null}`; the BFF passes it through). The exact body
  * is contracts/billing-attempt-not-found.json — the backend test renders it with the real handler, the web tests read the same file. */
 export const ATTEMPT_NOT_FOUND = { code: 'NOT_FOUND', message: 'payment attempt not found' } as const;
+
+/** story #4489 — the start refusal's `error.code` (backend routers/org_subscription_checkout.py `PaymentUnresolved` → 409). The status
+ * and code are contracts/billing-payment-unresolved.json — the backend test renders the real response, the web test reads the file. */
+export const PAYMENT_UNRESOLVED_CODE = 'PAYMENT_UNRESOLVED';
 
 export function newAttemptId(): string {
   return crypto.randomUUID();
@@ -63,6 +69,12 @@ async function readAttempt(res: Response): Promise<AttemptResult> {
     const error = await res.json().then((j: { error?: { code?: unknown; message?: unknown } }) => j?.error, () => undefined);
     const ours = error?.code === ATTEMPT_NOT_FOUND.code && error?.message === ATTEMPT_NOT_FOUND.message;
     return ours ? { kind: 'notFound' } : { kind: 'unreadable' };
+  }
+  // story #4489 — the start was refused before anything was created: nothing to look up · say why (only for this exact code)
+  if (res.status === 409) {
+    const code = await res.json().then((j: { error?: { code?: unknown } }) => j?.error?.code, () => undefined);
+    if (code === PAYMENT_UNRESOLVED_CODE) return { kind: 'refusedUnresolved' };
+    return { kind: 'unreached' };
   }
   // PO 04:08Z «결과 모름 = 비종결» — 404 밖 non-OK(400 · 401 · 408 · 409 · 429 · 5xx 전부)는 «거절 · 청구 0»이 아니라 조회로 넘긴다.
   // «청구 0» 안심 문구는 서버가 확정한 결과(Toss 거절 declined · 청구 0이 증명된 failed)나 조회가 «시도 없음(404)»일 때만.

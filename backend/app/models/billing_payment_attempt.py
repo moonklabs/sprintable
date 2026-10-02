@@ -34,6 +34,18 @@ class BillingPaymentAttempt(Base, TimestampMixin, OrgScopedMixin):
             "refund_status IS NULL OR refund_status IN ('pending', 'confirmed', 'failed')",
             name="ck_billing_payment_attempts_refund_status",
         ),
+        # story #4489 (0428) — a proof always says what proved it · an operator's mark always says who, why and on what evidence
+        CheckConstraint(
+            "(no_charge_proven_at IS NULL AND no_charge_proof IS NULL) OR "
+            "(no_charge_proven_at IS NOT NULL AND no_charge_proof IS NOT NULL AND no_charge_proof IN ('record', 'provider', 'operator'))",
+            name="ck_billing_payment_attempts_no_charge_proof",
+        ),
+        CheckConstraint(
+            "no_charge_proof IS DISTINCT FROM 'operator' OR (no_charge_marked_by IS NOT NULL AND no_charge_mark_reason IS NOT NULL "
+            "AND no_charge_mark_evidence IS NOT NULL AND length(btrim(no_charge_mark_reason)) > 0 "
+            "AND length(btrim(no_charge_mark_evidence)) > 0)",
+            name="ck_billing_payment_attempts_operator_mark",
+        ),
         UniqueConstraint("order_id", name="uq_billing_payment_attempts_order_id"),
     )
 
@@ -62,3 +74,10 @@ class BillingPaymentAttempt(Base, TimestampMixin, OrgScopedMixin):
     # story #4488 — when «nothing was charged» was proven (ended before any charge · or the recheck window's last answer was a
     # definite «no payment»). Null = not proven: the screen does not say «청구 0».
     no_charge_proven_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4489 — what proved it: record (ended before any charge) · provider (a definite Toss «no payment») · operator (by hand)
+    no_charge_proof: Mapped[str | None] = mapped_column(Text, nullable=True)
+    no_charge_marked_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    no_charge_mark_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    no_charge_mark_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # the last time an operator asked Toss again (also when the answer was still not definite)
+    provider_rechecked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

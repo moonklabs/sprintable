@@ -41,6 +41,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.billing_order import BillingOrder
 from app.models.billing_payment_attempt import BillingPaymentAttempt
 from app.models.offering_version import OfferingVersion
@@ -103,6 +104,58 @@ def no_charge_state(attempt) -> str | None:
 
 class AttemptNotFound(Exception):
     """이 org의 시도가 아니거나 없는 id — 라우터가 404."""
+
+
+class PaymentUnresolved(Exception):
+    """story #4489 — this org has an attempt that ended without a proof (unresolved): it may still have been charged, so a new
+    payment could charge twice. The router answers 409 `PAYMENT_UNRESOLVED`; an operator resolves it (`operator_recheck` ·
+    `operator_mark_no_charge`)."""
+
+
+class AttemptNotUnresolved(Exception):
+    """story #4489 — the operator's resolve actions only act on an unresolved attempt (409 `ATTEMPT_NOT_UNRESOLVED`)."""
+
+
+class AttemptBusy(Exception):
+    """story #4489 — another resolve action holds this attempt right now (409 `ATTEMPT_BUSY`) — try again."""
+
+
+def unresolved_clause():
+    """The SQL twin of `no_charge_state(...) == "unresolved"`: ended (failed · declined) · not proven · the recheck window closed."""
+    return (
+        BillingPaymentAttempt.status.in_(("failed", "declined"))
+        & BillingPaymentAttempt.no_charge_proven_at.is_(None)
+        & BillingPaymentAttempt.next_check_at.is_(None)
+    )
+
+
+def operator_resolve_open() -> bool:
+    """story #4489 (PO 04:11Z) — the refusal and the operator's way to lift it open in the same environments only: a refusal with
+    no way out is a dead end. The resolve actions sit behind admin billing's prod guard (`routers/admin_billing._reject_prod`),
+    so the refusal follows the same rule."""
+    return not settings.is_prod_deploy
+
+
+async def blocking_unresolved_attempt(
+    session: AsyncSession, org_id: uuid.UUID, *, other_than: uuid.UUID | None = None,
+) -> uuid.UUID | None:
+    """story #4489 — the one answer to «does an unresolved attempt block a new payment for this org?»: the start refusal (409) and
+    the billing status flag (`payment_unresolved`, read when a checkout / plan-change dialog opens) both ask this (PO 04:32Z — one
+    source, no copied query). None where the refusal is off (`operator_resolve_open`)."""
+    if not operator_resolve_open():
+        return None
+    q = select(BillingPaymentAttempt.id).where(BillingPaymentAttempt.org_id == org_id, unresolved_clause())
+    if other_than is not None:
+        q = q.where(BillingPaymentAttempt.id != other_than)
+    return (await session.execute(q.limit(1))).scalar_one_or_none()
+
+
+async def _refuse_if_unresolved(session: AsyncSession, org_id: uuid.UUID, attempt_id: uuid.UUID) -> None:
+    """story #4489 (Kadir · PO 03:48Z) — a new payment never starts while an earlier one of this org is unresolved."""
+    found = await blocking_unresolved_attempt(session, org_id, other_than=attempt_id)
+    if found is not None:
+        await session.rollback()
+        raise PaymentUnresolved(f"org_id={org_id}: payment attempt {found} is unresolved — an operator must resolve it first")
 
 
 def _now() -> datetime:
@@ -214,6 +267,7 @@ async def start_checkout_attempt(
     )
     if await _settle_other_processing(session, org_id, attempt_id):
         raise checkout_svc.CheckoutInProgress(f"org_id={org_id}: another payment is in progress — retry after it finishes")
+    await _refuse_if_unresolved(session, org_id, attempt_id)
 
     now = _now()
     token = uuid.uuid4()
@@ -253,6 +307,7 @@ async def start_change_tier_attempt(
     base_offering_id = sub.offering_version_id
     if await _settle_other_processing(session, org_id, attempt_id):
         raise tier_svc.TierChangeInProgress(f"org_id={org_id}: another payment is in progress — retry after it finishes")
+    await _refuse_if_unresolved(session, org_id, attempt_id)
 
     now = _now()
     token = uuid.uuid4()
@@ -486,6 +541,7 @@ async def _finish(
     attempt.next_check_at = _next_check(now, now) if attempt.charge_started_at is not None else None
     # story #4488 — no charge was ever started: «nothing was charged» is proven now; a started one waits for the recheck's answer
     attempt.no_charge_proven_at = now if attempt.charge_started_at is None else None
+    attempt.no_charge_proof = "record" if attempt.charge_started_at is None else None
     if attempt.claim_value is not None:
         await checkout_svc.release_claim(session, org_id=attempt.org_id, claim_value=attempt.claim_value, commit=False)
     await session.commit()
@@ -929,7 +985,7 @@ async def recheck_ended_attempt(session: AsyncSession, attempt_id: uuid.UUID) ->
         await session.execute(
             update(BillingPaymentAttempt)
             .where(BillingPaymentAttempt.id == attempt_id, BillingPaymentAttempt.status.in_(("failed", "declined")))
-            .values(no_charge_proven_at=_now())
+            .values(no_charge_proven_at=_now(), no_charge_proof="provider")
         )
         await session.commit()
     if closing and not answered:
@@ -938,6 +994,104 @@ async def recheck_ended_attempt(session: AsyncSession, attempt_id: uuid.UUID) ->
             org_id=attempt.org_id,
         )
     return "still_ended"
+
+
+# ── story #4489 — the operator resolves an unresolved attempt ─────────────────────────────────────────────────────────
+
+# A DONE found by an operator's recheck hands the attempt to the late-success path; until that ends the attempt is «checking»
+# (not unresolved — no hand mark), and if the path dies midway the sweep's recheck picks it up again after this.
+OPERATOR_DONE_HANDOFF = timedelta(minutes=5)
+
+
+async def _lock_unresolved(session: AsyncSession, org_id: uuid.UUID, attempt_id: uuid.UUID) -> BillingPaymentAttempt:
+    """This org's attempt, row-locked, only while unresolved. Held by another resolve action → `AttemptBusy` (no waiting)."""
+    attempt = (
+        await session.execute(
+            select(BillingPaymentAttempt)
+            .where(BillingPaymentAttempt.id == attempt_id, BillingPaymentAttempt.org_id == org_id)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if attempt is None:
+        await session.rollback()
+        exists = (
+            await session.execute(
+                select(BillingPaymentAttempt.id).where(BillingPaymentAttempt.id == attempt_id, BillingPaymentAttempt.org_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if exists is None:
+            raise AttemptNotFound(str(attempt_id))
+        raise AttemptBusy(str(attempt_id))
+    if no_charge_state(attempt) != "unresolved":
+        state = no_charge_state(attempt) or attempt.status
+        await session.rollback()
+        raise AttemptNotUnresolved(f"payment attempt {attempt_id} is {state}, not unresolved")
+    return attempt
+
+
+async def operator_recheck(session: AsyncSession, *, org_id: uuid.UUID, attempt_id: uuid.UUID) -> tuple[str, str | None]:
+    """«Ask the provider again» — one Toss lookup by order_id, whatever the recheck window says. Returns (outcome, Toss status):
+    `charged` (DONE → the existing late-success path: rights applied, or voided + refund) · `no_charge` (a definite «no payment» →
+    proven by the provider) · `unknown` (still no definite answer → stays unresolved; the time of this lookup is recorded)."""
+    attempt = await _lock_unresolved(session, org_id, attempt_id)
+    lookup, not_found = await _lookup(attempt)  # the row stays locked for this one lookup (≤ 15 s): no hand mark meanwhile
+    now = _now()
+    attempt.provider_rechecked_at = now
+    toss_status = None if lookup is None else lookup.get("status")
+    if lookup is not None and toss_status == "DONE" and lookup.get("paymentKey"):
+        attempt.next_check_at = now + OPERATOR_DONE_HANDOFF
+        await session.commit()
+        if await _record_done(session, attempt, lookup):
+            await _void_ended(session, attempt_id, "Toss DONE but no local order record")
+        else:
+            await _late_confirmed(session, attempt_id)
+        return "charged", toss_status
+    if not_found or toss_status in TOSS_ENDED_STATUSES:
+        attempt.no_charge_proven_at = now
+        attempt.no_charge_proof = "provider"
+        await session.commit()
+        return "no_charge", "NOT_FOUND" if not_found else toss_status
+    await session.commit()
+    return "unknown", toss_status
+
+
+async def operator_mark_no_charge(
+    session: AsyncSession, *, org_id: uuid.UUID, attempt_id: uuid.UUID, actor_email: str, reason: str, evidence: str,
+) -> BillingPaymentAttempt:
+    """An operator marks «nothing was charged» by hand — only with who · why · on what evidence (0428 enforces it too). Refused if
+    a confirmed charge for this attempt's order is on record: money we know was taken is never marked away."""
+    reason, evidence = reason.strip(), evidence.strip()
+    if not reason or not evidence:
+        raise ValueError("reason and evidence are both required")
+    attempt = await _lock_unresolved(session, org_id, attempt_id)
+    charged = (
+        await session.execute(
+            select(BillingOrder.id).where(BillingOrder.order_id == attempt.order_id, BillingOrder.status == "confirmed")
+        )
+    ).scalar_one_or_none()
+    if charged is not None:
+        await session.rollback()
+        raise AttemptNotUnresolved(f"payment attempt {attempt_id} has a confirmed charge on record")
+    attempt.no_charge_proven_at = _now()
+    attempt.no_charge_proof = "operator"
+    attempt.no_charge_marked_by = actor_email
+    attempt.no_charge_mark_reason = reason
+    attempt.no_charge_mark_evidence = evidence
+    await session.commit()
+    return attempt
+
+
+async def list_unresolved(session: AsyncSession, *, limit: int = 200) -> list[BillingPaymentAttempt]:
+    """Every unresolved attempt, oldest first — whether or not its operator alert was delivered (the safety net when saving or
+    sending that alert failed)."""
+    return list(
+        (
+            await session.execute(
+                select(BillingPaymentAttempt).where(unresolved_clause()).order_by(BillingPaymentAttempt.finished_at.asc()).limit(limit)
+            )
+        ).scalars().all()
+    )
 
 
 # ── 쓸기(`billing-payment-attempts` 크론, 5분) ─────────────────────────────────────────────────────────

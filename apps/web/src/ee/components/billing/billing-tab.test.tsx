@@ -8,6 +8,9 @@ import enMessages from '../../../../messages/en.json';
 import { BillingTab, PackPurchaseDialog, UpgradeCheckoutDialog } from './billing-tab';
 // story #4488 (Kadir 4901 ②) — the backend's real 404 body for «no such attempt» (backend/tests/test_4488_no_charge_confirmed.py renders it)
 import ATTEMPT_NOT_FOUND_BODY from '../../../../../../contracts/billing-attempt-not-found.json';
+// story #4489 — the start refusal the backend really sends (backend/tests/test_4489_unresolved_payment_contract.py renders it)
+import PAYMENT_UNRESOLVED from '../../../../../../contracts/billing-payment-unresolved.json';
+import { postAttempt } from './payment-attempt';
 
 const replaceMock = vi.fn();
 let searchParams = new URLSearchParams();
@@ -790,3 +793,77 @@ describe('[SID:4488] the money sentence says only what the server has proven', (
   });
 });
 
+describe('[SID:4489] an earlier payment may still have been charged — no new payment', () => {
+  const REFUSED = koMessages.pricingPlans.paymentUnresolvedRefused;
+  const status = (tier: string, unresolved: boolean | 'fail') =>
+    unresolved === 'fail'
+      ? { ok: false, status: 500, json: async () => ({}) }
+      : { ok: true, json: async () => ({ data: { org_id: 'org-1', tier, billing_cycle: tier === 'free' ? null : 'monthly', status: 'active', current_period_end: null, can_manage: true, payment_unresolved: unresolved } }) };
+  // the page's own read, then the read when the dialog opens
+  const reads = (tier: string, page: boolean, atOpen: boolean | 'fail') => {
+    const queue = [status(tier, page), status(tier, atOpen)];
+    return async () => queue.shift() ?? status(tier, atOpen);
+  };
+  const dialog = () => document.body.querySelector('[role="dialog"]');
+  const confirmButton = (label: string) => [...(dialog()?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.includes(label));
+  async function openCard() {
+    const upgrade = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.pricingPlans.upgradeCta)!;
+    await act(async () => { upgrade.click(); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  }
+
+  it.each([
+    ['checkout (free org)', 'free', 'checkoutDialogConfirm'],
+    ['plan change (paid org)', 'starter', 'changeTierDialogConfirm'],
+  ] as const)('%s: the dialog reads fresh when it opens → the sentence inside it · confirm off · card auth never opens', async (_n, tier, key) => {
+    await mount(reads(tier, false, true));
+    await openCard();
+    const alertEl = dialog()?.querySelector('[data-payment-unresolved]');
+    expect(alertEl?.textContent).toBe(REFUSED);
+    const confirm = confirmButton(koMessages.pricingPlans[key])!;
+    expect(confirm.disabled).toBe(true);
+    expect([...(dialog()?.querySelectorAll('button') ?? [])].some((b) => b.textContent === koMessages.common.retry)).toBe(false);
+    await act(async () => { confirm.click(); });
+    expect(startBillingAuthMock).not.toHaveBeenCalled();
+  });
+
+  it('an operator resolved it after the page loaded: the read at open says no → no sentence, confirm on', async () => {
+    await mount(reads('free', true, false));
+    await openCard();
+    expect(dialog()?.querySelector('[data-payment-unresolved]')).toBeNull();
+    expect(confirmButton(koMessages.pricingPlans.checkoutDialogConfirm)!.disabled).toBe(false);
+  });
+
+  it('the read at open fails → not blocked (only the server\'s 409 stops a payment)', async () => {
+    await mount(reads('free', false, 'fail'));
+    await openCard();
+    expect(dialog()?.querySelector('[data-payment-unresolved]')).toBeNull();
+    expect(confirmButton(koMessages.pricingPlans.checkoutDialogConfirm)!.disabled).toBe(false);
+  });
+
+  it('the start answered 409 PAYMENT_UNRESOLVED (the contract body) → postAttempt says refusedUnresolved · another 409 stays «결과 모름»', async () => {
+    const body = { data: null, error: { code: PAYMENT_UNRESOLVED.code, message: 'x' }, meta: null };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: PAYMENT_UNRESOLVED.status, json: async () => body })));
+    expect(await postAttempt('/api/billing/change-tier', {})).toEqual({ kind: 'refusedUnresolved' });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ data: null, error: { code: 'HTTP_409', message: 'busy' }, meta: null }) })));
+    expect(await postAttempt('/api/billing/change-tier', {})).toEqual({ kind: 'unreached' });
+  });
+
+  it('a refused start (after card auth, or an old screen) → the same sentence on the payment card · no buttons · nothing to look up', async () => {
+    vi.useFakeTimers();
+    try {
+      searchParams = new URLSearchParams({ checkout: 'success', tier: 'team', cycle: 'monthly', attempt: 'att-1', authKey: 'ak-1' });
+      completeCheckoutMock.mockResolvedValue({ kind: 'refusedUnresolved' });
+      await mount(async () => statusResponse());
+      const alertEl = container.querySelector('[data-payment-attempt-state="refused-unresolved"]');
+      expect(alertEl?.textContent).toBe(REFUSED);
+      expect(alertEl?.querySelectorAll('button').length).toBe(0);
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+      await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+      expect(attemptFetchUrls).toEqual([]);
+      expect(window.localStorage.getItem('sprintable.billing.paymentAttempt:org-1')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

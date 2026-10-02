@@ -18,8 +18,10 @@ from app.dependencies.admin_auth import AdminOperator, require_admin_operator
 from app.dependencies.database import get_db
 from app.models.grandfather_policy import GrandfatherPolicy
 from app.models.offering_version import OfferingVersion
+from app.services import billing_payment_attempt as attempts
 from app.services.admin_billing import (
     AdminBillingError,
+    _audit,
     GrantTier,
     create_grandfather_policy,
     create_offering_version,
@@ -247,3 +249,85 @@ async def list_grandfather_policies(
     q = q.order_by(GrandfatherPolicy.effective_from.desc(), GrandfatherPolicy.id.desc())
     rows = (await session.execute(q)).scalars().all()
     return [GrandfatherPolicyResponse.model_validate(r) for r in rows]
+
+
+# ── story #4489 — resolve a payment attempt that ended without a proof (unresolved) ─────────────────────────────────────
+
+
+class MarkNoChargeRequest(BaseModel):
+    # why the operator is sure · what they checked (a Toss console screen, a statement line …) — both required (PO 04:11Z)
+    reason: str = Field(..., min_length=1)
+    evidence: str = Field(..., min_length=1)
+
+
+def _attempt_view(a) -> dict:
+    return {
+        "attempt_id": str(a.id), "org_id": str(a.org_id), "kind": a.kind, "tier": a.tier, "status": a.status,
+        "order_id": a.order_id, "charge_started_at": a.charge_started_at, "finished_at": a.finished_at,
+        "no_charge": attempts.no_charge_state(a), "no_charge_proof": a.no_charge_proof, "provider_rechecked_at": a.provider_rechecked_at,
+    }
+
+
+def _resolve_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, attempts.AttemptNotFound):
+        return HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "payment attempt not found"})
+    if isinstance(exc, attempts.AttemptBusy):
+        return HTTPException(status_code=409, detail={"code": "ATTEMPT_BUSY", "message": "another resolve action holds this attempt — try again"})
+    return HTTPException(status_code=409, detail={"code": "ATTEMPT_NOT_UNRESOLVED", "message": str(exc)})
+
+
+@router.post("/orgs/{org_id}/billing/attempts/{attempt_id}/recheck")
+async def recheck_payment_attempt(
+    org_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    operator: AdminOperator = Depends(require_admin_operator),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """story #4489 ① — ask Toss once more about an unresolved attempt: DONE → the late-success path · a definite «no payment» →
+    proven · anything else → stays unresolved (the lookup time is recorded)."""
+    _reject_prod()
+    try:
+        outcome, toss_status = await attempts.operator_recheck(session, org_id=org_id, attempt_id=attempt_id)
+    except (attempts.AttemptNotFound, attempts.AttemptBusy, attempts.AttemptNotUnresolved) as e:
+        raise _resolve_error(e) from e
+    attempt = await attempts.get_attempt(session, attempt_id, org_id=org_id)
+    _audit(
+        actor_email=operator.email, org_id=org_id, action="payment_attempt_recheck", before={"no_charge": "unresolved"},
+        after={"attempt_id": str(attempt_id), "outcome": outcome, "toss_status": toss_status, "status": attempt.status},
+    )
+    return {"outcome": outcome, "toss_status": toss_status, "attempt": _attempt_view(attempt)}
+
+
+@router.post("/orgs/{org_id}/billing/attempts/{attempt_id}/mark-no-charge")
+async def mark_payment_attempt_no_charge(
+    org_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    body: MarkNoChargeRequest,
+    operator: AdminOperator = Depends(require_admin_operator),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """story #4489 ② — an operator marks an unresolved attempt «nothing was charged», with why and on what evidence."""
+    _reject_prod()
+    if not body.reason.strip() or not body.evidence.strip():
+        raise HTTPException(status_code=422, detail={"code": "REASON_AND_EVIDENCE_REQUIRED", "message": "reason and evidence are both required"})
+    try:
+        attempt = await attempts.operator_mark_no_charge(
+            session, org_id=org_id, attempt_id=attempt_id, actor_email=operator.email, reason=body.reason, evidence=body.evidence,
+        )
+    except (attempts.AttemptNotFound, attempts.AttemptBusy, attempts.AttemptNotUnresolved) as e:
+        raise _resolve_error(e) from e
+    _audit(
+        actor_email=operator.email, org_id=org_id, action="payment_attempt_mark_no_charge", before={"no_charge": "unresolved"},
+        after={"attempt_id": str(attempt_id), "reason": attempt.no_charge_mark_reason, "evidence": attempt.no_charge_mark_evidence},
+    )
+    return {"attempt": _attempt_view(attempt)}
+
+
+@router.get("/billing/attempts")
+async def list_payment_attempts(
+    state: Literal["unresolved"],
+    operator: AdminOperator = Depends(require_admin_operator),
+    session: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """story #4489 ③ — every unresolved attempt, whether or not its operator alert went out (the net when that alert failed)."""
+    return [_attempt_view(a) for a in await attempts.list_unresolved(session)]

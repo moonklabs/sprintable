@@ -43,6 +43,8 @@ export interface PaymentAttemptState {
   missing: boolean;
   /** story #4488 — the result could not be read (a 404 that is not the attempt handler's): never «청구 0» · [다시 시도] asks again */
   unreadable?: boolean;
+  /** story #4489 — the server refused to start it: an earlier payment may still have been charged (no attempt was created) */
+  refusedUnresolved?: boolean;
   long: boolean;
 }
 
@@ -68,6 +70,11 @@ export function usePaymentAttempt({ orgId, onSettled }: { orgId: string; onSettl
     // story #4488 — cannot read the result: stop asking, keep the remembered attempt (nothing is known), offer one more look
     if (result.kind === 'unreadable') {
       setState((s) => (s && s.id === id ? { ...s, phase: 'done', unreadable: true } : s));
+      return true;
+    }
+    if (result.kind === 'refusedUnresolved') {
+      forgetAttempt(orgId);
+      setState((s) => (s && s.id === id ? { ...s, phase: 'done', refusedUnresolved: true } : s));
       return true;
     }
     if (result.kind === 'ok') {
@@ -171,6 +178,15 @@ export function PaymentAttemptBanner({
           <span className="block">{t('paymentAttemptUnreadable')}</span>
           <Button size="sm" variant="outline" onClick={onRecheck}>{tc('retry')}</Button>
         </AlertDescription>
+      </Alert>
+    );
+  }
+
+  // story #4489 (Yuna 04:11Z) — refused to start: why, and that it opens again once confirmed · no [다시 시도] (the same 409)
+  if (state.refusedUnresolved) {
+    return (
+      <Alert variant="warning" data-payment-attempt-state="refused-unresolved">
+        <AlertDescription className="break-keep">{t('paymentUnresolvedRefused')}</AlertDescription>
       </Alert>
     );
   }

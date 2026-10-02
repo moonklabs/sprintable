@@ -68,6 +68,8 @@ interface BillingStatus {
   /** story #2909② — 하향(#2881)/취소(#2882) 예약 슬롯 공유. 'free'=취소, 그 외=하향. */
   pending_tier: string | null;
   pending_change_apply_at: string | null;
+  /** story #4489 — an earlier payment may still have been charged: a new one cannot start (the server's 409 is what stops it) */
+  payment_unresolved?: boolean;
 }
 
 function toTierId(raw: string | undefined): TierId {
@@ -101,6 +103,24 @@ export function BillingTab({ orgId }: { orgId: string }) {
   const [changeTierTarget, setChangeTierTarget] = useState<Exclude<TierId, 'free'> | null>(null);
   const [downgradeTarget, setDowngradeTarget] = useState<Exclude<TierId, 'free'> | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  // story #4489 (PO 04:32Z) — read fresh each time a payment dialog opens: an operator may have resolved it since the page loaded.
+  // A failed read never blocks — this is only a heads-up before card auth; the server's 409 is what stops a payment.
+  const [paymentUnresolved, setPaymentUnresolved] = useState(false);
+  const readPaymentUnresolved = () => {
+    setPaymentUnresolved(false);
+    fetchWithAuth('/api/billing/status', { credentials: 'include' })
+      .then((r) => (r.ok ? (r.json() as Promise<{ data: BillingStatus }>) : null))
+      .then((json) => setPaymentUnresolved(json?.data?.payment_unresolved === true))
+      .catch(() => setPaymentUnresolved(false));
+  };
+  const openCheckout = (tier: TierId) => {
+    readPaymentUnresolved();
+    setUpgradeTarget(tier);
+  };
+  const openChangeTier = (tier: Exclude<TierId, 'free'>) => {
+    readPaymentUnresolved();
+    setChangeTierTarget(tier);
+  };
 
   const refetchStatus = () => {
     setLoading(true);
@@ -228,8 +248,8 @@ export function BillingTab({ orgId }: { orgId: string }) {
           onRecheck={() => paymentAttempt.state && paymentAttempt.resume(paymentAttempt.state.id, paymentAttempt.state.kind)}
           onRetry={({ kind, tier }) => {
             paymentAttempt.dismiss();
-            if (kind === 'checkout') setUpgradeTarget(toTierId(tier));
-            else setChangeTierTarget(toTierId(tier) as Exclude<TierId, 'free'>);
+            if (kind === 'checkout') openCheckout(toTierId(tier));
+            else openChangeTier(toTierId(tier) as Exclude<TierId, 'free'>);
           }}
           onReauth={({ tier, billingCycle }) => {
             startBillingAuth({
@@ -280,9 +300,9 @@ export function BillingTab({ orgId }: { orgId: string }) {
                 // change-tier(기존 billing_key로 즉시 전액+잔여 부분취소)를 타야 한다.
                 // checkout은 BE가 이제 활성 유료 org 재진입을 400으로 거부한다(#2909①).
                 if (currentTier === 'free') {
-                  setUpgradeTarget(target);
+                  openCheckout(target);
                 } else {
-                  setChangeTierTarget(target as Exclude<TierId, 'free'>);
+                  openChangeTier(target as Exclude<TierId, 'free'>);
                 }
               }}
               onDowngrade={(target) => {
@@ -317,10 +337,12 @@ export function BillingTab({ orgId }: { orgId: string }) {
         tierId={upgradeTarget}
         cycle={cycle}
         currentSeats={TIER_DEFINITIONS[currentTier].limits.seats}
+        paymentUnresolved={paymentUnresolved}
         onClose={() => setUpgradeTarget(null)}
       />
       <ChangeTierConfirmDialog
         tierId={changeTierTarget}
+        paymentUnresolved={paymentUnresolved}
         onClose={() => setChangeTierTarget(null)}
         onConfirm={startTierChange}
       />
@@ -344,11 +366,14 @@ export function UpgradeCheckoutDialog({
   tierId,
   cycle,
   currentSeats,
+  paymentUnresolved = false,
   onClose,
 }: {
   tierId: TierId | null;
   cycle: 'monthly' | 'yearly';
   currentSeats: number;
+  /** story #4489 — an earlier payment of this organization may still have been charged: say so, and do not open card auth */
+  paymentUnresolved?: boolean;
   onClose: () => void;
 }) {
   const t = useTranslations('pricingPlans');
@@ -364,7 +389,7 @@ export function UpgradeCheckoutDialog({
   // 돌아오지 않는다(리다이렉트 복귀 後 새 마운트가 처리). 실패(예: 카드 인증창 자체가 안
   // 열림)만 여기서 잡아 재시도 가능한 상태로 되돌린다 — 이중제출 방어(유나 시안 v2).
   const handleConfirm = () => {
-    if (submitting) return;
+    if (submitting || paymentUnresolved) return;
     setSubmitting(true);
     setSubmitError(false);
     startBillingAuth({ tier: tierId, cycle }).catch(() => {
@@ -411,6 +436,11 @@ export function UpgradeCheckoutDialog({
             <AlertDescription>{t('checkoutWidgetOpenErrorInline')}</AlertDescription>
           </Alert>
         )}
+        {paymentUnresolved && (
+          <Alert variant="warning" data-payment-unresolved="">
+            <AlertDescription className="break-keep">{t('paymentUnresolvedRefused')}</AlertDescription>
+          </Alert>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>
             {t('checkoutDialogCancel')}
@@ -419,7 +449,7 @@ export function UpgradeCheckoutDialog({
             variant="default"
             className="bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={handleConfirm}
-            disabled={submitting}
+            disabled={submitting || paymentUnresolved}
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" />
@@ -440,10 +470,13 @@ export function UpgradeCheckoutDialog({
  */
 function ChangeTierConfirmDialog({
   tierId,
+  paymentUnresolved = false,
   onClose,
   onConfirm,
 }: {
   tierId: Exclude<TierId, 'free'> | null;
+  /** story #4489 — as in UpgradeCheckoutDialog */
+  paymentUnresolved?: boolean;
   onClose: () => void;
   /** story #4335 — 결제 시도를 시작하고(화면 위 배너가 처리 중 · 확인 중 · 결과를 보여줌) 창은 바로 닫힌다. */
   onConfirm: (tierId: Exclude<TierId, 'free'>) => void;
@@ -454,6 +487,7 @@ function ChangeTierConfirmDialog({
   const chargeKrw = withVatKrw(tier.priceMonthlyKrw);
 
   const handleConfirm = () => {
+    if (paymentUnresolved) return;
     onConfirm(tierId);
     onClose();
   };
@@ -475,6 +509,11 @@ function ChangeTierConfirmDialog({
             <dd className="font-semibold">{t('changeTierDialogRefundValue')}</dd>
           </div>
         </dl>
+        {paymentUnresolved && (
+          <Alert variant="warning" data-payment-unresolved="">
+            <AlertDescription className="break-keep">{t('paymentUnresolvedRefused')}</AlertDescription>
+          </Alert>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             {t('checkoutDialogCancel')}
@@ -483,6 +522,7 @@ function ChangeTierConfirmDialog({
             variant="default"
             className="bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={handleConfirm}
+            disabled={paymentUnresolved}
           >
             {t('changeTierDialogConfirm')}
           </Button>

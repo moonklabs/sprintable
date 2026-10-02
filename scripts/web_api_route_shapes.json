@@ -51,6 +51,11 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/admin/billing/attempts",
+"kind": "array"
+},
+{
+"method": "GET",
 "path": "/api/v2/admin/grandfather-policies",
 "kind": "array"
 },
@@ -68,6 +73,16 @@
 "method": "POST",
 "path": "/api/v2/admin/offering-versions",
 "kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/admin/orgs/{}/billing/attempts/{}/mark-no-charge",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/admin/orgs/{}/billing/attempts/{}/recheck",
+"kind": "unknown"
 },
 {
 "method": "POST",

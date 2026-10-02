@@ -14,10 +14,14 @@ def test_admin_billing_router_surface_is_pinned():
         for method in route.methods
     )
     assert routes == [
+        # story #4489 — resolve a payment attempt that ended without a proof: list (GET) · ask Toss again · hand mark (POST)
+        ("/api/v2/admin/billing/attempts", "GET"),
         ("/api/v2/admin/grandfather-policies", "GET"),
         ("/api/v2/admin/grandfather-policies", "POST"),
         ("/api/v2/admin/offering-versions", "GET"),
         ("/api/v2/admin/offering-versions", "POST"),
+        ("/api/v2/admin/orgs/{org_id}/billing/attempts/{attempt_id}/mark-no-charge", "POST"),
+        ("/api/v2/admin/orgs/{org_id}/billing/attempts/{attempt_id}/recheck", "POST"),
         ("/api/v2/admin/orgs/{org_id}/billing/credit-grant", "POST"),
         # story #2989 — admin 결제수단 초기화(테스트/운영 개입). GET/POST만(mutation은
         # POST로 명시 액션화 — PATCH/PUT류로 슬쩍 상태를 바꾸지 않는다는 이 파일의 원 취지와
