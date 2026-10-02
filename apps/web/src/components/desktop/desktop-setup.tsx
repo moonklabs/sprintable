@@ -188,6 +188,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [pickedProject, setPickedProject] = useState('');
   const chosenProject = projectId ?? (orgProjects.length === 1 ? orgProjects[0].projectId : (pickedProject || undefined));
   const [editingProjectName, setEditingProjectName] = useState(false);
+  const needsProjectPick = orgMode.kind === 'has-org' && !projectId && orgProjects.length > 1 && !pickedProject;
   // story #4453 — a new organization needs a verified e-mail: that step comes first, not after «시작» (a 403 at the end).
   // Once it opens, read the invites again: the server lists them only for a verified address, so an invited person was
   // «new» while unverified — without this they would meet their invite only after «시작» (pending_invites · PO 05:07Z)
@@ -589,6 +590,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         </Button>
         <p className="text-xs text-muted-foreground">
           {noAgentRow ? t('noAgentRow')
+            // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
+            : needsProjectPick ? t('projectPick.reason')
             : humanRoles.length > 0 ? t('startNoteWithMe', { n: agents, roles: humanList, josa: pickEunNeunJosa(humanList) }) : t('startNote', { n: agents })}
         </p>
         {rateLine ? <p className="text-xs text-muted-foreground" data-testid="setup-rate-limited">{rateLine}</p>

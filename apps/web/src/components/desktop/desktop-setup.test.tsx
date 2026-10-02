@@ -1737,12 +1737,12 @@ describe('[SID:4496] no project in the tab: the setup makes the first one, or us
   const press = async () => { await act(async () => { startButton().click(); }); for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
   const confirmBodyOf = () => calls.find((c) => c.url.endsWith('/setup-codes/confirm'))?.body as Record<string, unknown> | undefined;
 
-  it('no project in the organization: «첫 프로젝트 «첫 프로젝트»도 함께 만들어요» · «시작» on · the body names the project (no id) · the made one becomes the tab\'s', async () => {
+  it('no project in the organization: «새 프로젝트 «첫 프로젝트»도 함께 만들어요» · «시작» on · the body names the project (no id) · the made one becomes the tab\'s', async () => {
     confirmAnswer = () => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1', project_id: MADE }), { status: 200 });
     stubAll();
     await mountWith([{ projectId: 'other-org-p', projectName: '남의 조직', orgId: 'o-2' }]); // another organization's project does not count
-    expect(text()).toContain('첫 프로젝트 «첫 프로젝트»도 함께 만들어요');
-    expect(container.querySelector('[aria-label="첫 프로젝트 이름 바꾸기"]')).not.toBeNull();
+    expect(text()).toContain('새 프로젝트 «첫 프로젝트»도 함께 만들어요');
+    expect(container.querySelector('[aria-label="새 프로젝트 이름 바꾸기"]')).not.toBeNull();
     expect(startButton().disabled).toBe(false);
     await press();
     const body = confirmBodyOf()!;
@@ -1763,7 +1763,7 @@ describe('[SID:4496] no project in the tab: the setup makes the first one, or us
     expect('project_name' in body).toBe(false);
   });
 
-  it('several projects: a project field · «시작» off until one is picked · the picked one is sent', async () => {
+  it('several projects: a project field · «시작» off with its reason in the count line\'s place until one is picked · the picked one is sent', async () => {
     confirmAnswer = () => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1' }), { status: 200 });
     stubAll();
     await mountWith([{ projectId: 'p-a', projectName: 'A', orgId: 'o-1' }, { projectId: 'p-b', projectName: 'B', orgId: 'o-1' }]);
@@ -1771,11 +1771,15 @@ describe('[SID:4496] no project in the tab: the setup makes the first one, or us
     expect(pick).not.toBeNull();
     expect(container.querySelector('[data-testid=setup-first-project]')).toBeNull();
     expect(startButton().disabled).toBe(true);
+    expect(text()).toContain('위에서 시작할 프로젝트를 골라 주세요'); // why «시작» is off (Yuna 10:05Z ②)
+    expect(text()).not.toContain('에이전트 2개를 이 컴퓨터에 만들고');
     await act(async () => {
       const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
       set.call(pick, 'p-b'); pick.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(startButton().disabled).toBe(false);
+    expect(text()).not.toContain('위에서 시작할 프로젝트를 골라 주세요'); // picked: the count line is back
+    expect(text()).toContain('이 컴퓨터에 만들고');
     await press();
     expect(confirmBodyOf()!.project_id).toBe('p-b');
   });

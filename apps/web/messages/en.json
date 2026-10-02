@@ -6718,13 +6718,14 @@
         "later": "You can rename them later in settings."
       },
       "firstProject": {
-        "line": "This also creates a first project, \"{name}\"",
-        "changeAria": "Change the first project name",
+        "line": "This also creates a new project, \"{name}\"",
+        "changeAria": "Change the new project name",
         "limit": "This organization can have up to {limit, plural, one {# project} other {# projects}} — upgrade your plan to add more."
       },
       "projectPick": {
         "label": "Project to start in",
-        "placeholder": "Choose a project"
+        "placeholder": "Choose a project",
+        "reason": "Choose a project to start in above"
       },
       "invited": {
         "title": "You have an invitation",
