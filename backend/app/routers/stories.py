@@ -727,6 +727,23 @@ async def _assert_human_owner(
         )
 
 
+async def _assert_assignees_in_org(
+    session: AsyncSession, org_id: uuid.UUID, ids: "list[uuid.UUID | None]",
+) -> None:
+    """story #4497 (Qadir codex 01a0fc4a · PO 11:22Z) — every assignee given (single and multiple) must be a member of this org,
+    checked before anything is saved or announced. There was no check on create · PATCH · bulk: another org's agent member id
+    as the assignee was saved, and the announcement put the story's title and description into that agent's inbox (the gateway
+    filters by recipient only). The org-membership rule mentions · conversations already use (`filter_org_member_ids`)."""
+    wanted = {i for i in ids if i is not None}
+    if not wanted:
+        return
+    if wanted - await filter_org_member_ids(wanted, org_id, session):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "ASSIGNEE_NOT_IN_ORG", "message": "The assignee must be a member of this organization."},
+        )
+
+
 async def _reconcile_story_references_and_candidates(
     db: AsyncSession,
     *,
@@ -827,6 +844,7 @@ async def create_story(
         body.assignee_id if body.assignee_id is not None
         else (effective_ids[0] if effective_ids else None)
     )
+    await _assert_assignees_in_org(session, org_id, [*effective_ids, primary_assignee])
     if body.attachments:
         # story #2055 AC1: 이미지 첨부 픽셀 크기를 서버가 측정해 채운다 — client 제공 width/height는
         # asset_id와 동일하게 위조 가능하므로 신뢰하지 않고 항상 서버 측정값으로 덮어쓴다(server
@@ -1994,6 +2012,8 @@ async def bulk_update_stories(
     # 「이례적」 표기 그 필드 재사용)에 차단 사유를 담는다. has_project_access 미충족(존재
     # 비노출)과 달리 이건 「존재하고 접근권도 있는데 승인 대기」라 조용하면 #2067 재현.
     gate_pending_by_id: dict[uuid.UUID, dict] = {}
+    # story #4497 — one assignee outside the org refuses the whole request, before any item is written
+    await _assert_assignees_in_org(db, repo.org_id, [i.assignee_id for i in payload.items])
     for item in payload.items:
         # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
         # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
@@ -2257,6 +2277,7 @@ async def update_story(
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
     if assignee_ids_in is not None and "assignee_id" not in data:
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
+    await _assert_assignees_in_org(db, repo.org_id, [*(assignee_ids_in or []), data.get("assignee_id")])
     # story #2254(그라운딩 doc e5bc0789, 2026-08-25) — append/restore도 stories 컬럼이
     # 아니므로 분리(allow_shrink와 동형). 실제 반영은 아래 story_before 조회 블록에서.
     _append_by_field = {

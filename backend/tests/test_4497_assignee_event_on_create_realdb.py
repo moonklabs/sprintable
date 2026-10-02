@@ -295,3 +295,94 @@ async def test_a_bulk_items_failure_drops_only_its_own_half_not_the_others_write
         assert sorted(map(str, status_rows)) == sorted(ids)
     finally:
         await engine.dispose()
+
+
+# story #4497 (Qadir codex 01a0fc4a · PO 11:22Z) — an assignee from another org: refused before anything is saved or announced,
+# on all three paths (it used to be saved, and the announcement put the story's title and description into that agent's inbox)
+
+async def _foreign_agent(Session):
+    async with Session() as s:
+        org2, project2 = await _seed_org(s)
+        return await _seed_agent(s, org2, project2, grant=True)
+
+
+async def _events_to(Session, member_id):
+    from sqlalchemy import select
+
+    from app.models.event import Event
+
+    async with Session() as s:
+        return (await s.execute(select(Event).where(Event.recipient_id == member_id))).scalars().all()
+
+
+async def _stories_in(Session, project_id):
+    from sqlalchemy import select
+
+    from app.models.pm import Story
+
+    async with Session() as s:
+        return (await s.execute(select(Story).where(Story.project_id == project_id))).scalars().all()
+
+
+def _refused(r):
+    assert r.status_code == 422, r.text
+    assert "ASSIGNEE_NOT_IN_ORG" in r.text
+
+
+async def test_creating_with_another_orgs_agent_as_assignee_is_refused_and_nothing_is_saved_or_sent():
+    engine, Session, org_id, project_id, owner_id, _other, agent_id = await _seed()
+    try:
+        foreign = await _foreign_agent(Session)
+        _refused(await _create(Session, org_id, project_id, owner_id, assignee_id=str(foreign)))
+        # one of several is enough to refuse — the org's own agent alongside does not let it through
+        _refused(await _create(Session, org_id, project_id, owner_id, assignee_ids=[str(agent_id), str(foreign)]))
+        assert await _stories_in(Session, project_id) == []
+        assert await _events_to(Session, foreign) == []
+        # contrast: the org's own agent alone still goes through
+        assert (await _create(Session, org_id, project_id, owner_id, assignee_ids=[str(agent_id)])).status_code == 201
+    finally:
+        await engine.dispose()
+
+
+async def test_patching_another_orgs_agent_in_is_refused_and_the_story_keeps_its_assignee():
+    from sqlalchemy import select
+
+    from app.models.pm import Story
+
+    engine, Session, org_id, project_id, owner_id, _other, agent_id = await _seed()
+    try:
+        foreign = await _foreign_agent(Session)
+        r = await _create(Session, org_id, project_id, owner_id, assignee_id=str(agent_id))
+        story_id = r.json().get("data", r.json())["id"]
+        path = f"/api/v2/stories/{story_id}"
+        _refused(await _patch(Session, org_id, owner_id, path, {"assignee_id": str(foreign)}))
+        _refused(await _patch(Session, org_id, owner_id, path, {"assignee_ids": [str(agent_id), str(foreign)]}))
+        async with Session() as s:
+            assert (await s.execute(select(Story.assignee_id).where(Story.id == uuid.UUID(story_id)))).scalar_one() == agent_id
+        assert await _events_to(Session, foreign) == []
+    finally:
+        await engine.dispose()
+
+
+async def test_bulk_with_one_foreign_assignee_refuses_the_whole_request():
+    from sqlalchemy import select
+
+    from app.models.pm import Story
+
+    engine, Session, org_id, project_id, owner_id, _other, agent_id = await _seed()
+    try:
+        foreign = await _foreign_agent(Session)
+        ids = []
+        for _ in range(2):
+            r = await _create(Session, org_id, project_id, owner_id)
+            ids.append(r.json().get("data", r.json())["id"])
+        _refused(await _patch(Session, org_id, owner_id, "/api/v2/stories/bulk", {"items": [
+            {"id": ids[0], "assignee_id": str(agent_id), "status": "ready-for-dev"},
+            {"id": ids[1], "assignee_id": str(foreign)},
+        ]}))
+        async with Session() as s:
+            rows = (await s.execute(select(Story.assignee_id, Story.status).where(Story.id.in_([uuid.UUID(i) for i in ids])))).all()
+        assert all(a is None for a, _ in rows) and all(st != "ready-for-dev" for _, st in rows)  # not even the valid item
+        assert await _events_to(Session, foreign) == [] and await _events_to(Session, agent_id) == []
+    finally:
+        await engine.dispose()
