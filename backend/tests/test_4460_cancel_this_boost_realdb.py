@@ -385,3 +385,55 @@ async def test_the_card_learns_who_may_cancel_and_the_gate_status_from_spend(mon
         assert len(after["previous_cycles"]) == 1 and after["previous_cycles"][0]["started_at"]
     finally:
         await engine.dispose()
+
+
+async def test_a_failed_pause_request_after_the_cancel_still_answers_cancelling_and_the_scheduler_stops_the_money(monkeypatch, caplog):
+    """PO 00:40Z (Qadir lens ①): the cancel is committed before the person's pause is requested. If that request fails with
+    anything but «already in that state», the answer is still 200 «cancelling» (not 500 — the cancel stands), the failure is logged
+    with its code and the gate, and the money is stopped the other way: the gate left approved, so 4466's hook queued a capture due
+    now, the scheduler pauses the campaign there, and the cancel then finishes. Without the hook nothing would pause it."""
+    import logging
+
+    import app.services.ads_boost_execution as execution
+    from app.main import app
+    from tests.test_4466_money_stops_off_approved_realdb import _pauses, _spend_tick
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        campaign = (await _run(Session, gate_id)).campaign_id
+        assert campaign
+
+        async def pause_fails(*args, **kwargs):
+            raise RuntimeError("provider queue unavailable")
+
+        real_pause = execution.request_ads_boost_pause
+        monkeypatch.setattr(execution, "request_ads_boost_pause", pause_fails)
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            with caplog.at_level(logging.ERROR, logger="app.services.ads_boost_cancel"):
+                async with _client_for(app) as client:
+                    r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/cancel", json={})
+        finally:
+            app.dependency_overrides.clear()
+            monkeypatch.setattr(execution, "request_ads_boost_pause", real_pause)  # only the person's request failed
+        assert (r.status_code, r.json()) == (200, {"state": "cancelling"}), r.text
+        [record] = [x for x in caplog.records if getattr(x, "code", None) == "ADS_BOOST_CANCEL_PAUSE_REQUEST_FAILED"]
+        assert record.gate_id == str(gate_id)
+
+        assert (await _gate(Session, gate_id)).status == "voided"
+        cancelling = await _run(Session, gate_id)
+        assert (cancelling.cancel_requested_at is not None, cancelling.campaign_id) == (True, campaign)
+        assert await _pauses(Session, gate_id) == []  # the person's pause never got queued
+
+        await _spend_tick(Session)  # the capture 4466's hook queued when the gate left approved
+        assert [(p.initiated_by, p.status) for p in await _pauses(Session, gate_id)] == [("scheduler", "pending")]
+        await _tick(Session)
+        assert calls[-1] == ("PAUSED", campaign)
+        cleared = await _run(Session, gate_id)
+        assert (cleared.campaign_id, cleared.cancel_requested_at) == (None, None)
+        [cycle] = await _cycles(Session, gate_id)
+        assert (cycle.campaign_id, cycle.end_reason) == (campaign, "cancelled")
+    finally:
+        await engine.dispose()

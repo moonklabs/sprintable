@@ -18,6 +18,7 @@ The provider's old campaign stays paused there (no archive call — noted).
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -25,6 +26,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
+
+logger = logging.getLogger(__name__)
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
 CANCEL_VOID_REASON_CODE = "ADS_BOOST_CANCELLED"
@@ -103,6 +106,16 @@ async def cancel_ads_boost(
             await request_ads_boost_pause(db, org_id=org_id, gate_id=gate_id, requester_member_id=actor_member_id)
         except AdsBoostAlreadyInStateError:
             pass  # a pause is already queued or done
+        except Exception:
+            # PO 00:40Z (Qadir lens ①) — the cancel is already committed (gate voided · run «취소 중»), so a failed fast pause must
+            # not answer 500: the person would read «failed» while the cancel stands. The money is still stopped — the gate left
+            # approved, so 4466's hook (ads_boost_gate_exit) queued a capture due now and the scheduler pauses the campaign there.
+            logger.exception(
+                "ads_boost cancel: the person's pause request failed after the cancel was committed — the scheduler's pause stops it",
+                extra={"code": "ADS_BOOST_CANCEL_PAUSE_REQUEST_FAILED", "gate_id": str(gate_id)},
+            )
+            await db.rollback()
+            return {"state": "cancelling"}
     finished = await finish_cancel_if_stopped(db, gate_id=gate_id, now=now)
     await db.commit()
     return {"state": "cancelled" if finished else "cancelling"}
