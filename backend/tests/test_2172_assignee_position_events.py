@@ -27,6 +27,16 @@ import pytest
 from app.routers import stories as stories_mod
 from app.routers.stories import BulkUpdateRequest, bulk_update_stories
 
+
+# story #4497 — the routes now refuse an assignee outside the org (filter_org_member_ids, a real query). This mocked session
+# has no member rows; the assignee here stands for an org member, so membership answers «every id given is in the org».
+@pytest.fixture(autouse=True)
+def _assignees_are_org_members(monkeypatch):
+    async def _all_in(ids, org_id, session):
+        return set(ids)
+
+    monkeypatch.setattr("app.routers.stories.filter_org_member_ids", _all_in)
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = pytest.mark.destructive_schema

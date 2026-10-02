@@ -453,3 +453,28 @@ async def test_an_old_id_that_is_only_a_second_assignee_is_also_already_on_the_s
         assert r.status_code == 200, r.text
     finally:
         await engine.dispose()
+
+
+async def test_an_agents_inbox_gives_only_its_own_orgs_events():
+    """PO 11:29Z ② (the read side) — whatever write path makes another org's event with this agent as recipient, the gateway
+    inbox (`_fetch_events`, backfill and wake) does not hand it out: another org's row (seq 1) is skipped, the agent's own (seq
+    2) comes; the reader resumes past the gap."""
+    from sqlalchemy import text
+
+    from app.routers.agent_gateway import _fetch_events
+
+    engine, Session, org_b, project_b, _owner, _other, agent_b = await _seed()
+    try:
+        async with Session() as s:
+            org_a, project_a = await _seed_org(s)
+            for seq, org, project in ((1, org_a, project_a), (2, org_b, project_b)):
+                await s.execute(text(
+                    "INSERT INTO events (id, org_id, project_id, event_type, recipient_id, recipient_type, payload, status, recipient_seq) "
+                    "VALUES (:i, :o, :p, 'story_assigned', :r, 'agent', '{}', 'pending', :q)"
+                ), {"i": uuid.uuid4(), "o": org, "p": project, "r": agent_b, "q": seq})
+            await s.commit()
+        async with Session() as s:
+            rows = await _fetch_events(s, agent_b, 0, 10, org_b)
+        assert [(r.recipient_seq, r.org_id) for r in rows] == [(2, str(org_b))]
+    finally:
+        await engine.dispose()

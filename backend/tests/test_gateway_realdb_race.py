@@ -405,7 +405,7 @@ async def test_fetch_events_real_db_recipient_seq():
 
         # CAST(:agent_id AS uuid) 문법으로 _fetch_events 실행
         async with async_session() as db:
-            rows = await _fetch_events(db, agent_id, 0, 10)
+            rows = await _fetch_events(db, agent_id, 0, 10, org_id)
 
         assert len(rows) >= 1
         assert rows[0].recipient_seq == seq
@@ -479,7 +479,7 @@ async def test_send_message_creates_event_with_recipient_seq_no_generated_always
         # _fetch_events로 스트림 조회 가능한지 확인 (CAST fix 검증 포함)
         from app.routers.agent_gateway import _fetch_events
         async with async_session() as db:
-            rows = await _fetch_events(db, agent_id, 0, 10)
+            rows = await _fetch_events(db, agent_id, 0, 10, org_id)
 
         assert len(rows) >= 1
         assert rows[0].recipient_seq == event.recipient_seq
@@ -658,7 +658,7 @@ async def test_send_message_in_agent_conversation_creates_event_with_recipient_s
 
         # _fetch_events로 조회 — project_id 없으면 이 이벤트가 없음
         async with async_session() as db:
-            rows = await _fetch_events(db, agent_id, 0, 10)
+            rows = await _fetch_events(db, agent_id, 0, 10, org_id)
 
         seq_found = [r.recipient_seq for r in rows if r.event_id == str(event_id)]
         assert len(seq_found) >= 1, "Event not found via _fetch_events — check project_id, dispatch, or recipient_seq"

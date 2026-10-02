@@ -326,6 +326,7 @@ async def _fetch_events(
     agent_id: uuid.UUID,
     after_seq: int,
     limit: int,
+    org_id: uuid.UUID,
 ) -> list:
     """recipient_seq > after_seqì¸ visible ì´ë²¤í¸ ë°í (raw rows).
 
@@ -356,12 +357,17 @@ async def _fetch_events(
                AND c.id = (e.payload->>'conversation_id')::uuid
             -- d0bca260 AC3: sender_name. events.sender_id는 team_members FK라 직접 join(canonical 무관).
             LEFT JOIN team_members tm ON tm.id = e.sender_id
+            -- story #4497 (Qadir 01a0fc4a · PO 11:29Z): the agent's own org only — an event another org made with this
+            -- agent as its recipient (a write path that let it through) never reaches it. No event kind legitimately crosses
+            -- orgs (events.org_id NOT NULL · agent grants same-org · A2A org-scoped · verify in the agent's org). The skipped
+            -- rows leave gaps in recipient_seq: readers resume from the highest seq they got (no wait for seq+1).
             WHERE e.recipient_id = CAST(:agent_id AS uuid)
+              AND e.org_id = CAST(:org_id AS uuid)
               AND e.recipient_seq > :after_seq
             ORDER BY e.recipient_seq ASC
             LIMIT :limit
         """),
-        {"agent_id": str(agent_id), "after_seq": after_seq, "limit": limit},
+        {"agent_id": str(agent_id), "org_id": str(org_id), "after_seq": after_seq, "limit": limit},
     )
     return rows.fetchall()
 
@@ -673,7 +679,7 @@ async def agent_stream(
 
             # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
             async with async_session_factory() as db:
-                rows = await _fetch_events(db, agent_id, start_seq, _BACKFILL_LIMIT)
+                rows = await _fetch_events(db, agent_id, start_seq, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
 
             # PO 14:35Z ② — the backfill is a batch too (it runs once the first heartbeat is read, which can be later)
             if rows:
@@ -779,7 +785,7 @@ async def agent_stream(
                                 select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
                             )).scalar_one_or_none()
                             scan_from = max(start_seq, cur.acked_seq if cur else 0)
-                            new_rows = await _fetch_events(db, agent_id, scan_from, _BACKFILL_LIMIT)
+                            new_rows = await _fetch_events(db, agent_id, scan_from, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
 
                         # PO 14:35Z ② — a batch goes out only if access still holds (rechecked if the last check is 5 s old)
                         if new_rows:
