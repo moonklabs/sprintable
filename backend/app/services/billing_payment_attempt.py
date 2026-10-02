@@ -89,6 +89,18 @@ UNKNOWN_OUTCOME_STATUSES = frozenset({408, 409, 429})
 TOSS_ENDED_STATUSES = frozenset({"ABORTED", "EXPIRED", "CANCELED"})
 
 
+def no_charge_confirmed(attempt, now: datetime) -> bool:
+    """story #4488 — «청구된 금액은 없어요»를 말해도 되는가. 청구 없이 끝난 시도(declined · failed)라도 청구를 **시작한 흔적**이 있으면
+    `_finish`가 `RECHECK_WINDOW` 동안 다시 조회한다(뒤늦은 Toss DONE → 늦은 성공 · 환불 길) — 그 창이 끝나기 전엔 아직 증명 전.
+    그 밖의 상태(processing · succeeded · voided)는 «청구 0»을 말할 자리가 아니다(False)."""
+    if attempt.status not in ("declined", "failed"):
+        return False
+    if attempt.charge_started_at is None:
+        return True
+    finished = attempt.finished_at
+    return finished is not None and now >= finished + RECHECK_WINDOW
+
+
 class AttemptNotFound(Exception):
     """이 org의 시도가 아니거나 없는 id — 라우터가 404."""
 

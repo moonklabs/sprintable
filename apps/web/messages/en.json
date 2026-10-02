@@ -4148,6 +4148,8 @@
     "paymentAttemptReauthRequired": "The connection dropped before your card was registered. Please start again from card authentication.",
     "paymentAttemptNotStarted": "The payment didn't start, and you haven't been charged. Please start again from card authentication.",
     "paymentAttemptNotStartedNoCharge": "The payment didn't start, and you haven't been charged.",
+    "paymentAttemptNoChargePending": "We're double-checking that nothing was charged (up to a day). If a charge did go through, we'll apply it to your plan or refund it in full — you'll see it under «Billing history» on this page.",
+    "paymentAttemptUnreadable": "We can't load this payment's result right now. Check «Billing history» on this page to see whether you were charged.",
     "changeTierRefundPending": "We're refunding the unused portion of your previous plan. Depending on your card issuer, it may take some time to show up.",
     "changeTierRefundFailed": "We couldn't refund the unused portion of your previous plan.",
     "paymentAttemptVoided": "The payment went through, but we couldn't apply it to your plan, so we canceled it.",

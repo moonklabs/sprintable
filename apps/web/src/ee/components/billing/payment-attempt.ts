@@ -31,6 +31,9 @@ export interface PaymentAttempt {
   refund_status?: PaymentAttemptRefundStatus | null;
   /** story #4341 — 이 시도에 대한 운영 알림이 운영 대화에 **실제로 전달된** 시각(ISO). 없으면 아직 아무에게도 안 갔다. */
   operator_notified_at?: string | null;
+  /** story #4488 — the server has proven nothing was charged (declined · failed, with no charge started or past the recheck
+   * window). Only then may the screen say «청구된 금액은 없어요». Absent (an older server) = not proven. */
+  no_charge_confirmed?: boolean;
   subscription: PaymentAttemptSubscription | null;
 }
 
@@ -38,14 +41,24 @@ export interface PaymentAttempt {
 export type AttemptResult =
   | { kind: 'ok'; attempt: PaymentAttempt }
   | { kind: 'notFound' }
+  /** story #4488 — a 404 that is not the attempt handler's own (a route that is not there · a deploy mismatch): the result cannot be read */
+  | { kind: 'unreadable' }
   | { kind: 'unreached' };
+
+/** The attempt handler's own 404 body (backend routers/org_subscription_checkout.py — `AttemptNotFound`). */
+export const ATTEMPT_NOT_FOUND_DETAIL = 'payment attempt not found';
 
 export function newAttemptId(): string {
   return crypto.randomUUID();
 }
 
 async function readAttempt(res: Response): Promise<AttemptResult> {
-  if (res.status === 404) return { kind: 'notFound' };
+  // story #4488 — «시도 없음» (= nothing was started, nothing charged) only from the attempt handler itself; any other 404 says
+  // nothing about this payment, so it is «cannot read», never «청구 0»
+  if (res.status === 404) {
+    const detail = await res.json().then((j: { detail?: unknown }) => j?.detail, () => undefined);
+    return detail === ATTEMPT_NOT_FOUND_DETAIL ? { kind: 'notFound' } : { kind: 'unreadable' };
+  }
   // PO 04:08Z «결과 모름 = 비종결» — 404 밖 non-OK(400 · 401 · 408 · 409 · 429 · 5xx 전부)는 «거절 · 청구 0»이 아니라 조회로 넘긴다.
   // «청구 0» 안심 문구는 서버가 확정한 결과(Toss 거절 declined · 청구 0이 증명된 failed)나 조회가 «시도 없음(404)»일 때만.
   if (!res.ok) return { kind: 'unreached' };
@@ -87,24 +100,27 @@ export async function fetchAttempt(attemptId: string): Promise<AttemptResult> {
 
 // 재진입(파라미터 없이 결제 화면으로 다시 옴)에도 같은 시도를 보여주려고 진행 중 시도 id를 기억한다 — 결과를 보여준 뒤 지운다.
 // 저장이 막힌 브라우저(시크릿 창 등)에선 조용히 건너뛴다(URL의 attempt 파라미터가 새로고침은 덮는다).
+// story #4488 — per organization: another organization's billing tab in the same browser tab never picks this attempt up (it
+// used to, and said «청구된 금액은 없어요» about it on the server's 404), and never forgets it.
 const STORAGE_KEY = 'sprintable.billing.paymentAttempt';
+const keyFor = (orgId: string) => `${STORAGE_KEY}:${orgId}`;
 
 export interface RememberedAttempt {
   id: string;
   kind: PaymentAttemptKind;
 }
 
-export function rememberAttempt(value: RememberedAttempt): void {
+export function rememberAttempt(orgId: string, value: RememberedAttempt): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    window.localStorage.setItem(keyFor(orgId), JSON.stringify(value));
   } catch {
     /* 저장 불가 — URL 파라미터로만 이어진다 */
   }
 }
 
-export function recallAttempt(): RememberedAttempt | null {
+export function recallAttempt(orgId: string): RememberedAttempt | null {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(keyFor(orgId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<RememberedAttempt>;
     return typeof parsed.id === 'string' && (parsed.kind === 'checkout' || parsed.kind === 'change_tier')
@@ -115,9 +131,9 @@ export function recallAttempt(): RememberedAttempt | null {
   }
 }
 
-export function forgetAttempt(): void {
+export function forgetAttempt(orgId: string): void {
   try {
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(keyFor(orgId));
   } catch {
     /* 저장 불가 — 지울 것도 없다 */
   }

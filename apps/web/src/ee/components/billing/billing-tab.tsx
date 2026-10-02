@@ -130,6 +130,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
   }, []);
 
   const paymentAttempt = usePaymentAttempt({
+    orgId,
     onSettled: (attempt) => {
       if (attempt.status === 'succeeded') refetchStatus();
     },
@@ -170,10 +171,10 @@ export function BillingTab({ orgId }: { orgId: string }) {
       return;
     }
     if (attemptParam) {
-      paymentAttempt.resume(attemptParam, recallAttempt()?.id === attemptParam ? recallAttempt()!.kind : 'checkout');
+      paymentAttempt.resume(attemptParam, recallAttempt(orgId)?.id === attemptParam ? recallAttempt(orgId)!.kind : 'checkout');
       return;
     }
-    const remembered = recallAttempt();
+    const remembered = recallAttempt(orgId);
     if (remembered) {
       paymentAttempt.resume(remembered.id, remembered.kind);
       showAttemptInUrl(remembered.id);
@@ -224,6 +225,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
       {paymentAttempt.state && (
         <PaymentAttemptBanner
           state={paymentAttempt.state}
+          onRecheck={() => paymentAttempt.state && paymentAttempt.resume(paymentAttempt.state.id, paymentAttempt.state.kind)}
           onRetry={({ kind, tier }) => {
             paymentAttempt.dismiss();
             if (kind === 'checkout') setUpgradeTarget(toTierId(tier));

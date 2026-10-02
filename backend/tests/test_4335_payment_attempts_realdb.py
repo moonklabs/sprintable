@@ -586,6 +586,11 @@ async def test_declined_charge_ends_declined_with_no_approval_and_releases_the_s
         await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
         done = await svc.get_attempt(s, attempt_id)
         assert done.status == "declined" and "REJECT_CARD_COMPANY" in done.reason
+        # story #4488 — the charge was started (then refused): «nothing charged» is not proven until the recheck window ends
+        from app.routers.org_subscription_checkout import _attempt_response
+        assert done.charge_started_at is not None
+        assert (await _attempt_response(s, done)).no_charge_confirmed is False
+        assert svc.no_charge_confirmed(done, done.finished_at + svc.RECHECK_WINDOW) is True
         sub = await _row(s, "SELECT status, checkout_claimed_at FROM org_subscriptions WHERE org_id=:o", o=org_id)
         assert (sub.status, sub.checkout_claimed_at) == ("pending", None)
     assert toss.approvals == 0
@@ -605,6 +610,7 @@ async def test_reconcile_before_charge_marks_failed_with_zero_charge_proven_by_t
         await _expire_lease(s, attempt_id)
         done = await svc.reconcile_attempt(s, attempt_id)
         assert (done.status, done.stage, done.reauth_required, done.reason) == ("failed", "received", True, svc.REASON_INTERRUPTED_BEFORE_CHARGE)
+        assert svc.no_charge_confirmed(done, svc._now()) is True  # story #4488 — no charge was ever started: proven at once
         assert (await _row(s, "SELECT checkout_claimed_at FROM org_subscriptions WHERE org_id=:o", o=org_id)).checkout_claimed_at is None
     assert toss.charge_calls == [] and toss.lookup_calls == []
 
@@ -713,6 +719,7 @@ async def test_not_found_at_toss_stays_checking_until_the_fence_window_then_fail
         await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(seconds=1))
         done = await svc.reconcile_attempt(s, attempt_id)
         assert (done.status, done.reason) == ("failed", svc.REASON_NOT_FOUND_AT_TOSS)
+        assert svc.no_charge_confirmed(done, svc._now()) is False  # story #4488 — a charge was started: still rechecked, not proven
     toss.hang_event.set()
     await worker
     async with Session() as s:

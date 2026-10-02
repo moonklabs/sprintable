@@ -67,11 +67,12 @@ function platformSettingsResponse(overrides: Partial<{ billing_price_public: boo
 let attemptResponses: Array<unknown> = [];
 const attemptFetchUrls: string[] = [];
 
-function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean; refund_status: string | null; operator_notified_at: string | null }> = {}) {
+function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean; refund_status: string | null; operator_notified_at: string | null; no_charge_confirmed: boolean }> = {}) {
   return {
     attempt_id: 'att-1', kind: overrides.kind ?? 'checkout', status: overrides.status ?? 'processing', tier: overrides.tier ?? 'team',
     billing_cycle: 'monthly', declined_reason: overrides.declined_reason ?? null, reauth_required: overrides.reauth_required ?? false,
-    refund_status: overrides.refund_status ?? null, operator_notified_at: overrides.operator_notified_at ?? null, subscription: null,
+    refund_status: overrides.refund_status ?? null, operator_notified_at: overrides.operator_notified_at ?? null,
+    no_charge_confirmed: overrides.no_charge_confirmed ?? false, subscription: null,
   };
 }
 
@@ -282,7 +283,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
 
   it('거절 → 경고색 · 거절 문장 + 카드사 안내 줄 + «청구된 금액은 없어요»', async () => {
     searchParams = new URLSearchParams({ ...RETURN, tier: 'starter', cycle: 'annual' });
-    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'declined', tier: 'starter', declined_reason: '한도초과' }) });
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'declined', tier: 'starter', declined_reason: '한도초과', no_charge_confirmed: true }) });
     await mount(async () => statusResponse());
 
     const alertEl = container.querySelector('[data-payment-attempt-state="declined"]');
@@ -370,7 +371,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
     try {
       searchParams = new URLSearchParams(RETURN);
       completeCheckoutMock.mockResolvedValue({ kind: 'unreached' });
-      attemptResponses = [{ ok: false, status: 404, json: async () => ({}) }];
+      attemptResponses = [{ ok: false, status: 404, json: async () => ({ detail: 'payment attempt not found' }) }];
       await mount(async () => statusResponse());
       expect(container.querySelector('[data-payment-attempt-state="checking"]')).not.toBeNull();
       expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
@@ -395,7 +396,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
   ] as const)('⭐change-tier 성공 + 옛 요금제 환불 %s → 환불 줄 %s(까디르 P2 4704)', async (refund, key) => {
     vi.useFakeTimers();
     try {
-      window.localStorage.setItem('sprintable.billing.paymentAttempt', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
+      window.localStorage.setItem('sprintable.billing.paymentAttempt:org-1', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
       attemptResponses = [attemptResponse(attempt({ status: 'succeeded', kind: 'change_tier', refund_status: refund }))];
       await mount(async () => statusResponse({ tier: 'starter' }));
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
@@ -421,8 +422,8 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
   it('⭐change-tier 조회 404 → «시작되지 않았어요 · 청구 0» 두 문장만(원인 단정 · 버튼 없음 · 유나 4704)', async () => {
     vi.useFakeTimers();
     try {
-      window.localStorage.setItem('sprintable.billing.paymentAttempt', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
-      attemptResponses = [{ ok: false, status: 404, json: async () => ({}) }];
+      window.localStorage.setItem('sprintable.billing.paymentAttempt:org-1', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
+      attemptResponses = [{ ok: false, status: 404, json: async () => ({ detail: 'payment attempt not found' }) }];
       await mount(async () => statusResponse({ tier: 'starter' }));
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
       const alertEl = container.querySelector('[data-payment-attempt-state="not-started"]');
@@ -455,8 +456,8 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
   it('⭐재진입(파라미터 없음) → 기억해 둔 진행 중 시도를 조회로 보여줌 · 실패면 «청구된 금액은 없어요» + 다시 시도', async () => {
     vi.useFakeTimers();
     try {
-      window.localStorage.setItem('sprintable.billing.paymentAttempt', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
-      attemptResponses = [attemptResponse(attempt({ status: 'failed', kind: 'change_tier' }))];
+      window.localStorage.setItem('sprintable.billing.paymentAttempt:org-1', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
+      attemptResponses = [attemptResponse(attempt({ status: 'failed', kind: 'change_tier', no_charge_confirmed: true }))];
       await mount(async () => statusResponse({ tier: 'starter' }));
       expect(replaceMock).toHaveBeenCalledWith('/settings?tab=billing&attempt=att-9');
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
@@ -466,7 +467,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
       expect(alertEl?.textContent).toContain(koMessages.pricingPlans.paymentAttemptFailed);
       expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
       expect(alertEl?.textContent).toContain(koMessages.common.retry);
-      expect(window.localStorage.getItem('sprintable.billing.paymentAttempt')).toBeNull();
+      expect(window.localStorage.getItem('sprintable.billing.paymentAttempt:org-1')).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -672,3 +673,67 @@ describe('PackPurchaseDialog — 「구매 확認」 표면 차단(story #3211, 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+// story #4488 — «청구된 금액은 없어요» only when the server has proven it; a 404 that is not the attempt handler's is «cannot read»;
+// the remembered attempt is per organization.
+describe('[SID:4488] the money sentence says only what the server has proven', () => {
+  const KEY = 'sprintable.billing.paymentAttempt';
+  const RETURN = { checkout: 'success', tier: 'team', cycle: 'monthly', attempt: 'att-1', authKey: 'ak-1' };
+
+  it.each(['declined', 'failed'] as const)('%s inside the recheck window → «한 번 더 확인하고 있어요», never «청구된 금액은 없어요»', async (status) => {
+    searchParams = new URLSearchParams(RETURN);
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status, no_charge_confirmed: false }) });
+    await mount(async () => statusResponse());
+    const alertEl = container.querySelector(`[data-payment-attempt-state="${status}"]`);
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.paymentAttemptNoChargePending);
+    expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+  });
+
+  it.each(['declined', 'failed'] as const)('%s proven (no_charge_confirmed) → «청구된 금액은 없어요»', async (status) => {
+    searchParams = new URLSearchParams(RETURN);
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status, no_charge_confirmed: true }) });
+    await mount(async () => statusResponse());
+    const alertEl = container.querySelector(`[data-payment-attempt-state="${status}"]`);
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+    expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptNoChargePending);
+  });
+
+  it('a 404 that is not the attempt handler\'s → «불러올 수 없어요» + [다시 시도] (asks again) · no «청구 0» · the remembered attempt is kept', async () => {
+    vi.useFakeTimers();
+    try {
+      window.localStorage.setItem(`${KEY}:org-1`, JSON.stringify({ id: 'att-9', kind: 'checkout' }));
+      attemptResponses = [{ ok: false, status: 404, json: async () => ({ detail: 'Not Found' }) }, attemptResponse(attempt({ status: 'succeeded' }))];
+      await mount(async () => statusResponse());
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      const alertEl = container.querySelector('[data-payment-attempt-state="unreadable"]');
+      expect(alertEl?.textContent).toContain(koMessages.pricingPlans.paymentAttemptUnreadable);
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptNotStarted);
+      expect(window.localStorage.getItem(`${KEY}:org-1`)).not.toBeNull();
+      const retry = [...(alertEl?.querySelectorAll('button') ?? [])].find((b) => b.textContent === koMessages.common.retry)!;
+      await act(async () => { retry.click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(attemptFetchUrls).toEqual(['/api/billing/attempts/att-9', '/api/billing/attempts/att-9']);
+      expect(container.querySelector('[data-payment-attempt-state="unreadable"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('another organization\'s remembered attempt is not picked up (and not forgotten) · an old key without an organization is left alone', async () => {
+    vi.useFakeTimers();
+    try {
+      window.localStorage.setItem(`${KEY}:org-2`, JSON.stringify({ id: 'att-a', kind: 'checkout' }));
+      window.localStorage.setItem(KEY, JSON.stringify({ id: 'att-old', kind: 'checkout' }));
+      await mount(async () => statusResponse());
+      await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+      expect(attemptFetchUrls).toEqual([]);
+      expect(container.querySelector('[data-payment-attempt-state]')).toBeNull();
+      expect(window.localStorage.getItem(`${KEY}:org-2`)).not.toBeNull();
+      expect(window.localStorage.getItem(KEY)).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
