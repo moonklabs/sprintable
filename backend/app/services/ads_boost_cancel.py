@@ -277,9 +277,28 @@ async def cancel_pause_retry_state(db: AsyncSession, *, run) -> str | None:
     latest = await _latest_toggle(db, gate_id=run.gate_id, cycle=run.cycle_no)
     if latest is None or latest.operation != OP_PAUSE or latest.status != "dead_letter":
         return None
+    # story #4495 (Qadir 07:53Z ②) — «scheduled» only when a paid capture is really waiting for this post (the retry the server
+    # will make), not inferred from how many pauses failed: a capture that was never written (an error · a condition not met)
+    # would have made the card promise a retry that is not coming
+    from app.models.insight_snapshot import InsightSnapshot
+    from app.services.ads_spend_snapshots import _PAID_CHANNELS
+
+    gate = (await db.execute(select(Gate).where(Gate.id == run.gate_id))).scalar_one_or_none()
+    waiting = None
+    if gate is not None and gate.scope_key:
+        # within the retry window (the longest delay): the boost's regular daily capture, a day out, is not the retry — with one
+        # waiting capture per post (④) a written retry is always the earliest one, brought forward
+        horizon = datetime.now(timezone.utc) + CANCEL_PAUSE_RETRY_DELAYS[-1] + timedelta(minutes=1)
+        waiting = (await db.execute(
+            select(InsightSnapshot.id).where(
+                InsightSnapshot.publication_id == uuid.UUID(gate.scope_key), InsightSnapshot.status == "pending",
+                InsightSnapshot.channel.in_(_PAID_CHANNELS), InsightSnapshot.due_at <= horizon,
+            ).limit(1)
+        )).scalar_one_or_none()
+    # …and only within the three retries: past them the regular daily capture still waits, but that is not the retry promised
     failed = await _failed_pauses_this_cycle(db, gate_id=run.gate_id, cycle=run.cycle_no)
     live = run.status in ("running", "pending") and run.campaign_id is not None
-    return "scheduled" if live and failed <= len(CANCEL_PAUSE_RETRY_DELAYS) else "exhausted"
+    return "scheduled" if live and waiting is not None and failed <= len(CANCEL_PAUSE_RETRY_DELAYS) else "exhausted"
 
 
 def _reset_run(run) -> None:

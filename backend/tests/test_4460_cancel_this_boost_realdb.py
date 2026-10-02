@@ -630,11 +630,12 @@ async def test_a_capture_counts_toward_the_cycle_it_was_taken_in(monkeypatch):
                 ).order_by(InsightSnapshot.captured_at)
             )).all()
         run = await _run(Session, gate_id)
-        # cycle 1's own capture stays cycle 1's; two captures due in cycle 1 (the planted one · the one 4466's hook queued when
-        # the cancel voided the gate) were taken in cycle 2 and count there — by the old due_at filter they were 0
-        assert [c for c, _ in taken] == [1, 2, 2]
+        # cycle 1's own capture stays cycle 1's; the capture due in cycle 1 (the planted one — 4466's hook, at the cancel, brings
+        # the post's one waiting capture forward instead of adding a second: story #4495 ④) was taken in cycle 2 and counts there —
+        # by the old due_at filter it was 0
+        assert [c for c, _ in taken] == [1, 2]
         assert all(due < run.cycle_started_at for _, due in taken[1:])
-        assert summary["captured_spend_minor"] == 2 * 12_345
+        assert summary["captured_spend_minor"] == 12_345
         [cycle1] = await _cycles(Session, gate_id)
         assert cycle1.spend_minor == 12_345
     finally:

@@ -106,7 +106,9 @@ async def test_a_failed_cancel_pause_is_tried_again_by_a_capture_and_the_cancel_
         assert run.status == "running" and run.cancel_requested_at is not None  # the pause failed: still live
         due = await _pending_captures(Session, gate_id)
         start = datetime.now(timezone.utc)
-        assert len(due) == 1 and timedelta(minutes=4) < due[0] - start <= timedelta(minutes=5)
+        # story #4495 ③ ④ — the cancel itself already queued a capture due now (the run was «pending» with its campaign at the
+        # cancel), and the +5 retry is merged into that earlier one: one capture, due no later than +5
+        assert len(due) == 1 and due[0] - start <= timedelta(minutes=5)
         assert await _pause_retry(Session, org_id, gate_id) == "scheduled"
         await _capture_at(Session, start + timedelta(minutes=6))  # the scheduler's pause (4417: a new one after a failed one)
         await _tick(Session)
@@ -120,7 +122,8 @@ async def test_a_failed_cancel_pause_is_tried_again_by_a_capture_and_the_cancel_
 
 
 async def test_a_pause_that_keeps_failing_is_retried_three_times_then_left_to_a_person(monkeypatch):
-    """5 · 20 · 80 minutes, then nothing more here (no loop) and /spend says «exhausted»."""
+    """5 · 20 · 80 minutes, then nothing more here (no loop) and /spend says «exhausted». (Since 4495 the first is the capture the
+    cancel queued at once — the 5-minute retry merges into it.)"""
     from tests.test_4466_money_stops_off_approved_realdb import _pauses
 
     engine, Session, org_id, _owner_id, gate_id, _calls, _left = await _race_with_failing_pause(monkeypatch, fails=99)
@@ -133,7 +136,7 @@ async def test_a_pause_that_keeps_failing_is_retried_three_times_then_left_to_a_
             gaps.append(round((due[0] - now).total_seconds() / 60))
             await _capture_at(Session, due[0] + timedelta(seconds=30))
             await _tick(Session)
-        assert gaps == [5, 20, 80]
+        assert gaps == [0, 20, 80]  # story #4495 ③ ④ — the cancel's own capture (due now) takes the first retry's place
         assert await _pending_captures(Session, gate_id) == []  # the 4th failure schedules nothing
         assert [p.status for p in await _pauses(Session, gate_id)] == ["dead_letter"] * 4
         assert await _pause_retry(Session, org_id, gate_id) == "exhausted"

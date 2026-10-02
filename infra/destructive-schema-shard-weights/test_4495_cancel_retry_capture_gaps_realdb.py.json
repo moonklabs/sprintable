@@ -1,0 +1,1 @@
+{"file": "tests/test_4495_cancel_retry_capture_gaps_realdb.py", "sec": 8.0, "source": "story-4495 — four gaps in the cancel retry capture (limit pinned with no swallowed failure · scheduled only with a waiting capture · capture at a pending run's cancel · one waiting capture per post) — new file measured locally (uv run pytest, 4 cases)"}
