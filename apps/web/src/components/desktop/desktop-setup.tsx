@@ -216,6 +216,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const recipeListRef = useRef<HTMLDivElement | null>(null);
   const recipeChangeRef = useRef<HTMLButtonElement | null>(null);
   const focusAfterFold = useRef<'list' | 'change' | null>(null);
+  // story 4504 AC4: a press on a card's text moves focus off the radio before the click arrives (a label's text is not
+  // focusable) — that blur must not fold the list, or the click lands on nothing and the choice never changes
+  const pressInList = useRef(false);
   // the list's order is fixed when it opens (the chosen one first) — arrow keys change the choice while it is open, and a
   // list that re-sorted on every choice would move under the person's keyboard (Yuna 02:56Z)
   const [recipeOrder, setRecipeOrder] = useState<string[]>([]);
@@ -524,7 +527,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               if (el.name === 'recipe' && !el.checked) { const r = recipes.find((x) => x.id === el.value); if (r) pick(r); }
               foldRecipes(true);
             }}
+            onPointerDown={() => {
+              pressInList.current = true;
+              // released anywhere (on the card → its click folds; elsewhere → the list stays until focus moves on)
+              window.addEventListener('pointerup', () => { pressInList.current = false; }, { once: true });
+            }}
             onBlur={(e) => {
+              if (pressInList.current) return; // a press inside the list: its click decides
               const to = e.relatedTarget as Node | null;
               if (e.currentTarget.contains(to) || to === recipeChangeRef.current) return; // [바꾸기]'s own click folds it
               foldRecipes(to === null && document.hasFocus());
@@ -730,6 +739,12 @@ export function ToolsNotConnected({ onRetry, claude }: { onRetry: () => void; cl
  * 주소의 `#` 뒤에서 설정 값을 읽고 곧바로 주소에서 지운다(코드는 어떤 URL에도 남기지 않는다 — PO 09:45Z). 값은 이 컴포넌트의
  * 메모리에만 있다. 로그인을 거쳐 `#` 없이 돌아오면 데스크톱 앱이 값을 붙여 다시 연다(PO 09:58Z) — 웹은 맡아 두지 않는다.
  */
+/** The `#…` of an address (`#` included), or null when the address cannot be read. */
+function hashOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try { return new URL(url).hash; } catch { return null; }
+}
+
 /** `#progress=<setup id>` — the reload from «설정을 마쳤어요» (4429 ①): the setup id only, never a code. */
 export function progressFromFragment(hash: string): string | null {
   const id = new URLSearchParams(hash.replace(/^#/, '')).get('progress') ?? '';
@@ -760,9 +775,12 @@ export function DesktopSetupEntry() {
     // The values can also arrive AFTER this page is up: after an email login the desktop app reopens the same page with its `#`,
     // and that is a same-document fragment change, not a new load (dev 실측 15:24Z — the page showed «데스크톱 앱에서 열어 주세요»).
     // A newer code replaces an older one (the app restarted the setup).
-    const onHash = () => {
-      const q = parseSetupFragment(window.location.hash);
-      const progress = q ? null : progressFromFragment(window.location.hash);
+    // story 4504: the `#` this change brought, from the event — by the time the handler runs, another replace of the address (the
+    // shell's `?p=` normalization) may already have taken it off `location`.
+    const onHash = (e: HashChangeEvent) => {
+      const hash = hashOf(e.newURL) ?? window.location.hash;
+      const q = parseSetupFragment(hash);
+      const progress = q ? null : progressFromFragment(hash);
       if (!q && !progress) return;
       strip();
       setEntry({ query: q, progress });

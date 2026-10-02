@@ -246,6 +246,25 @@ describe('[SID:4427] desktop setup page', () => {
     expect(window.location.hash).toBe('#section-2');
   });
 
+  it('[SID:4504] values that arrive in-page are kept even when another replace takes the # off the address before this page handles the change', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('데스크톱 앱에서 열어 주세요');
+    // the app puts `#code=…` in (same document) and, before the page's hashchange handler runs, the shell's `?p=` normalization
+    // replaces the address without it — the order a person met in the app (kindnessB 13:07:45Z · 4504 AC0)
+    await act(async () => {
+      const fired = new Promise<void>((r) => window.addEventListener('hashchange', () => r(), { once: true }));
+      window.location.hash = `code=${CODE}&setup=s-1&runtimes=claude`;
+      window.history.replaceState(null, '', '/desktop/setup?p=p-1');
+      await fired;
+    });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    expect(text()).not.toContain('데스크톱 앱에서 열어 주세요');
+    expect(window.location.href).not.toContain(CODE);
+  });
+
   it('when the router query changes (the shell adds ?p=), setup values back in the address are taken off again (dev 실측 15:31Z)', async () => {
     stub(() => new Response('{}'));
     sp.value = new URLSearchParams('');
@@ -1569,6 +1588,31 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     await act(async () => { (document.activeElement as HTMLElement).blur(); });
     expect(recipeInputs()).toHaveLength(0);
     expect(document.activeElement).toBe(document.body);
+    hasFocus.mockRestore();
+  });
+
+  it('[SID:4504] AC4 a person\'s mouse click on another card chooses it — the press moving focus off the radio does not fold the list first', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    await openRecipes();
+    expect(document.activeElement).toBe(recipeInputs().find((i) => i.checked)); // opening put focus on the chosen radio
+    const label = recipeInputs()[1].closest('label') as HTMLLabelElement; // the card's text, not its small radio
+    // a browser's order for one press on the card: pointerdown · mousedown → focus leaves the radio for nothing (a label's text
+    // is not focusable) → pointerup · mouseup → click (detail 1) on the label, which the label passes to its radio
+    await act(async () => {
+      label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+      label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+      (document.activeElement as HTMLElement).blur();
+    });
+    await act(async () => {
+      label.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+      label.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, detail: 1 }));
+      label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    });
+    expect(recipeInputs()).toHaveLength(0); // folded by the click
+    expect(chosen()?.textContent).toContain('조사 한 명'); // …with the card that was pressed
+    expect(document.activeElement).toBe(chosen()!.querySelector('button'));
     hasFocus.mockRestore();
   });
 
