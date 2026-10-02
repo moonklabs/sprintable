@@ -603,6 +603,8 @@ const SCHEDULER_PAUSE_LABEL: Record<string, string> = {
 };
 
 function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof useTranslations>): string | null {
+  // story #4484 (Yuna 02:20Z) — a start the scheduler made on the sealed start date (the actor reads «시스템»)
+  if (item.action === 'ads_boost_started' && item.context['initiated_by'] === 'scheduler') return t('gateActivityActionAdsBoostAutoStarted');
   if (item.action !== 'ads_boost_paused' || item.context['initiated_by'] !== 'scheduler') return null;
   const reason = item.context['reason'];
   return t((typeof reason === 'string' && SCHEDULER_PAUSE_LABEL[reason]) || SCHEDULER_PAUSE_LABEL.none);

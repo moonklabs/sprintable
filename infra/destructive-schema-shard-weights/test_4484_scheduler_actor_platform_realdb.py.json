@@ -1,0 +1,1 @@
+{"file": "tests/test_4484_scheduler_actor_platform_realdb.py", "sec": 8.0, "source": "story-4484 — a scheduler-sent ad command is recorded as the platform (cap · approval · scheduled start), a person's stays theirs — new file measured locally (uv run pytest, 4 cases)"}

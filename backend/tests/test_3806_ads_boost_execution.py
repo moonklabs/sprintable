@@ -50,13 +50,17 @@ def _configure_secrets(monkeypatch):
     importlib.reload(crypto_module)
 
 
-async def _setup_approved_gate(session_factory_result, *, approve=True, objective="POST_ENGAGEMENT", budget_minor=100_000):
+async def _setup_approved_gate(
+    session_factory_result, *, approve=True, objective="POST_ENGAGEMENT", budget_minor=100_000, on_a_story=False,
+):
     """PR 2 API 경유로 게이트를 만들고(봉인 6열 전부 실제로 채워짐), approve=True면
     바로 승인까지 전이시킨다. 반환: (engine, Session, org_id, owner_id, gate_id).
     `objective`는 워커 fix 테스트가 [sandbox:budget-exceeded]/[sandbox:pause-delayed]
     마커를 실어 보내는 자리(ads_sandbox_campaign.py 모듈 docstring 참고). `budget_minor`는
     PR 11(상한 판정) 테스트가 sandbox 고정 spend(12,345/스냅샷)와 대조해 상한을 의도적으로
-    낮게 봉인할 자리."""
+    낮게 봉인할 자리.
+    `on_a_story` (story #4484 · PO 07:05Z) — the post belongs to a real story in the org's project (what a person makes), so routes
+    that resolve the gate's project (the gate history) answer as they do for users; off, the post's work item is a bare id."""
     from app.main import app
 
     engine, Session = session_factory_result
@@ -66,7 +70,15 @@ async def _setup_approved_gate(session_factory_result, *, approve=True, objectiv
         conn = await _seed_channel_connection(s, org_id, channel="threads")
         ad_conn = await _seed_channel_connection(s, org_id, channel="ads_sandbox")
         await _seed_default_role(s, org_id)
-        pub, _ = await _seed_publication(s, org_id=org_id, connection_id=conn.id)
+        work_item_id = None
+        if on_a_story:
+            from app.models.pm import Story
+
+            story = Story(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="홍보할 글")
+            s.add(story)
+            await s.commit()
+            work_item_id = story.id
+        pub, _ = await _seed_publication(s, org_id=org_id, connection_id=conn.id, work_item_id=work_item_id)
 
     _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
     async with _client_for(app) as client:
