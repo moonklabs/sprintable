@@ -111,6 +111,11 @@ async def test_ack_retire_semantics_realdb():
                 text("INSERT INTO projects (id, org_id, name) VALUES (:i, :o, :n)"),
                 {"i": proj, "o": org, "n": f"ack-proj-{proj}"},
             )
+            # story #4500: the ack counts only the agent's own org's events — the agent is a member of this org
+            await db.execute(text("INSERT INTO members (id, org_id, type, name) VALUES (:i, :o, 'agent', 'ack 에이전트')"),
+                             {"i": agent, "o": org})
+            await db.execute(text("INSERT INTO agent_project_profiles (id, member_id, project_id) VALUES (gen_random_uuid(), :m, :p)"),
+                             {"m": agent, "p": proj})
             for seq in (1, 2, 3):
                 await db.execute(
                     text(
@@ -140,6 +145,7 @@ async def test_ack_retire_semantics_realdb():
             finally:
                 await db.execute(text("DELETE FROM events WHERE recipient_id = :r"), {"r": agent})
                 await db.execute(text("DELETE FROM agent_event_cursors WHERE agent_id = :a"), {"a": agent})
+                await db.execute(text("DELETE FROM members WHERE id = :a"), {"a": agent})
                 await db.execute(text("DELETE FROM projects WHERE id = :i"), {"i": proj})
                 await db.execute(text("DELETE FROM organizations WHERE id = :i"), {"i": org})
                 await db.commit()

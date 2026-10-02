@@ -16,6 +16,26 @@ import pytest
 # 호출한다(그 함수 자체가 내부적으로 db.execute를 더 쓴다) — 기존 db.execute side_effect
 # 리스트를 안 건드리려고 그 함수 자체를 patch해 고정 depth를 준다. depth=1(<=cap)로 두면
 # 이 파일의 기존(P1 이전) 시나리오들은 전부 무회귀로 그대로 통과한다.
+
+# story #4500 — the delivery reads participants through member_resolver's org-scoped helpers (one query each, then the org-member
+# filter — another query). This mocked session answers queries in order, and its participants stand for members of the org:
+# the helpers answer as the participant query did before — one query, every participant.
+async def _participants_as_one_query(session, conversation_id, *_a, **_k):
+    r = await session.execute(None)
+    try:
+        vals = r.scalars().all()
+        if isinstance(vals, list):
+            return set(vals)
+    except Exception:  # noqa: BLE001 — a mock answering rows only
+        pass
+    return {row[0] for row in r.all()}
+
+
+@pytest.fixture(autouse=True)
+def _participants_are_org_members(monkeypatch):
+    monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_in_org", _participants_as_one_query)
+    monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_of_its_org", _participants_as_one_query)
+
 _NOT_EXPIRED = patch(
     "app.services.channel_router.compute_agent_chain_depth", AsyncMock(return_value=1),
 )

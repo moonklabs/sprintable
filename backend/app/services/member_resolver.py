@@ -823,6 +823,25 @@ async def conversation_member_ids_in_org(
     return await filter_org_member_ids(ids, org_id, session) if ids else set()
 
 
+async def conversation_member_ids_of_its_org(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """story #4500 (AC2) — the same rule as `conversation_member_ids_in_org` where the caller holds no org (a message carries
+    none — its conversation does): the participants that are members of the conversation's own org. One query reads the
+    participants with that org."""
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    rows = (await session.execute(
+        select(ConversationParticipant.member_id, Conversation.org_id)
+        .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id == conversation_id)
+    )).all()
+    if not rows:
+        return set()
+    return await filter_org_member_ids({r[0] for r in rows}, rows[0][1], session)
+
+
 async def filter_org_member_ids(
     member_ids: set[uuid.UUID],
     org_id: uuid.UUID,
