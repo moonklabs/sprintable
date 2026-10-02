@@ -32,10 +32,14 @@ const flush = async () => { await act(async () => { await new Promise((r) => set
 const started = { id: 'cmd-1', status: 'completed', failure_kind: null, error_code: null, campaign_name: null, retryable: false };
 const capLine = cage.boostPausedCapReached.replace('{amount}', '30,000원');
 
+let refuseWithCap = false;
+
 beforeEach(() => {
+  refuseWithCap = false;
   mockedFetch.mockReset();
   mockedFetch.mockImplementation(async (url, init) => {
     if (String(url).endsWith('/spend') && !init) return jsonResponse({ data: spendNow });
+    if (refuseWithCap && init) return jsonResponse({ error: { code: 'ADS_BOOST_CAP_REACHED', message: 'server words' } }, 409);
     return jsonResponse({ data: {} });
   });
   container = document.createElement('div');
@@ -88,5 +92,35 @@ describe('[SID:4486] a boost paused at its cap', () => {
     await mount();
     expect($('boost-paused-cap-reached')).toBeNull();
     expect($('boost-resume-trigger')).not.toBeNull();
+  });
+
+  // Yuna 04:02Z — the refusal at the cap says why and the way on, never the generic «failed»
+  it('a start refused at the cap says so inside the start dialog', async () => {
+    spendNow = { run_status: null, start_command: null, gate_status: 'approved' };
+    refuseWithCap = true;
+    await mount();
+    await act(async () => { $('boost-start-trigger')!.click(); });
+    await act(async () => { $('boost-start-confirm')!.click(); });
+    await flush();
+    const dialog = $('boost-start-confirm-dialog')!;
+    expect(dialog.querySelector('[data-testid="boost-dialog-error"]')?.textContent).toBe(cage.boostStartBlockedCapReached);
+  });
+
+  it('a start the worker stopped at the cap reads the same sentence on the card', async () => {
+    spendNow = {
+      run_status: 'pending', gate_status: 'approved',
+      start_command: { id: 'cmd-2', status: 'blocked_unapproved', failure_kind: null, error_code: 'ADS_BOOST_CAP_REACHED', campaign_name: null, retryable: false },
+    };
+    await mount();
+    expect($('boost-start-failed')?.textContent).toBe(cage.boostStartBlockedCapReached);
+  });
+
+  it('a resume refused at the cap (a card that had not caught up) says why', async () => {
+    spendNow = { run_status: 'paused', start_command: started, gate_status: 'approved', cap_reached_at: null };
+    refuseWithCap = true;
+    await mount();
+    await act(async () => { $('boost-resume-trigger')!.click(); });
+    await flush();
+    expect($('boost-execution-error')?.textContent).toBe(cage.boostCapReachedNoResume);
   });
 });

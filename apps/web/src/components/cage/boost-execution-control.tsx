@@ -79,6 +79,8 @@ interface StartCommand {
 }
 // Meta may have created the campaign: retried only after the person confirms it does not exist in the ad account.
 const OUTCOME_UNKNOWN = 'ADS_BOOST_CREATE_OUTCOME_UNKNOWN';
+// story #4486 — the server's refusal at the cap (request 409 · the worker's blocked_unapproved reason)
+const CAP_REACHED = 'ADS_BOOST_CAP_REACHED';
 // story #4417 — the ad account's currency is not the approved one: nothing was created (the next step is a new request)
 const ACCOUNT_CURRENCY_MISMATCH = 'ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH';
 // story #4458 — a campaign made on another budget (a re-seal during its create): not switched on, a person decides
@@ -338,7 +340,11 @@ export function BoostExecutionControl({
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/${operation}`, { method: 'POST' });
       if (!res.ok) {
-        setActionError(t('boostExecutionActionError'));
+        // story #4486 (Yuna 04:02Z) — a refusal at the cap says why and the way on (cancel, then request again), not «failed»
+        const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+        setActionError(body?.error?.code === CAP_REACHED
+          ? (operation === 'start' ? t('boostStartBlockedCapReached') : t('boostCapReachedNoResume'))
+          : t('boostExecutionActionError'));
         return;
       }
       onDone();
@@ -818,6 +824,7 @@ export function BoostExecutionControl({
     // Yuna 06:12Z — blocked_unapproved lines by the reason code the worker writes (ads_boost_execution._resolve_execution_context)
     const line = command.status === 'blocked_unapproved'
       ? (code === 'ADS_BOOST_GATE_NOT_APPROVED' ? t('boostStartBlockedApprovalGone')
+        : code === CAP_REACHED ? t('boostStartBlockedCapReached') // story #4486 — the worker refused a start at the cap
         : code === 'ADS_BOOST_CONNECTION_UNAVAILABLE' ? connectionLine()
         : code === 'ADS_BOOST_ORIGINAL_PUBLICATION_MISSING' ? t('boostStartBlockedPostMissing')
         : code === 'ADS_BOOST_ORIGIN_CONNECTION_MISSING' ? t.rich('boostStartBlockedOriginConnection', { link })

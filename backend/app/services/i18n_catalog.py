@@ -877,10 +877,14 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "광고비를 예산과 맞춰 볼 수 없어 멈춘 홍보라 다시 켤 수 없어요.",
         "en": "This boost was paused because its ad spend can't be checked against the budget, so it can't be resumed.",
     },
-    # story #4486 — a resume refused because the spend reached the approved total budget (the card hides [재개]; a fallback)
+    # story #4486 (Yuna 04:02Z) — a resume · a start refused because the spend reached the approved total budget this cycle
     "ads_boost.cap_reached_no_resume": {
-        "ko": "쓴 광고비가 총예산에 닿아 멈춘 홍보라 다시 켤 수 없어요.",
-        "en": "This boost was paused because its ad spend reached the total budget, so it can't be resumed.",
+        "ko": "쓴 광고비가 총예산에 닿아 멈춘 홍보라 다시 켤 수 없어요 — 더 쓰려면 «홍보 취소» 뒤 같은 글로 새로 요청해 주세요.",
+        "en": "This promotion stopped when its ad spend reached the total budget, so it can't be switched on again. To spend more, cancel it («Cancel promotion») and request the same post again.",
+    },
+    "ads_boost.cap_reached_no_start": {
+        "ko": "다시 승인돼도 총예산에 닿아 멈춘 홍보는 다시 시작하지 않아요 — 더 쓰려면 «홍보 취소» 뒤 같은 글로 새로 요청해 주세요.",
+        "en": "Even with a new approval, a promotion that stopped at its total budget won't start again. To spend more, cancel it («Cancel promotion») and request the same post again.",
     },
     "ads_boost.spend_unreadable_title": {
         "ko": "광고 홍보를 멈췄어요",

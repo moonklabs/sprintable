@@ -252,9 +252,10 @@ class AdsBoostCapReachedError(Exception):
     this cycle): switching it on again would spend past what was approved until the next capture (up to a day). Refused; more
     spend is a new request (a cancel, then a new cycle — `_reset_run` clears the cap)."""
 
-    def __init__(self, gate_id: uuid.UUID):
+    def __init__(self, gate_id: uuid.UUID, operation: str = "resume"):
         self.gate_id = gate_id
-        super().__init__(f"ads_boost reached its approved budget, cannot resume: {gate_id}")
+        self.operation = operation  # «resume» · «boost_start» (PO 04:01Z — a person's start after a re-approval)
+        super().__init__(f"ads_boost reached its approved budget, cannot {operation}: {gate_id}")
 
 
 class AdsBoostNotPausedError(Exception):
@@ -331,6 +332,17 @@ async def request_ads_boost_start(
     「누가 시작했나」 두 세계 처방). 필수 kwarg(기본값 0)로 둬 새 호출부가 이 축을
     빠뜨리면 즉시 TypeError로 드러나게 한다(조용히 None으로 새는 것을 막는다)."""
     gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id)
+    if initiated_by == "human":
+        # story #4486 (PO 04:01Z) — a person's start of a boost paused at its cap this cycle (the same post requested again and
+        # re-approved without a cancel) is refused with its reason; the worker refuses any start that still reaches it. The
+        # scheduler's starts only open gates with no run yet, so they never meet a cap.
+        from app.models.ads_boost_run import AdsBoostRun
+
+        capped = (await db.execute(
+            select(AdsBoostRun.cap_reached_at).where(AdsBoostRun.gate_id == gate.id)
+        )).scalar_one_or_none()
+        if capped is not None:
+            raise AdsBoostCapReachedError(gate.id, OP_BOOST_START)
     command, _ = await create_or_get_publication_command(
         db, org_id=org_id, gate_id=gate.id, destination=gate.sealed_ads_connection_id,
         approved_version=gate.sealed_ads_boost_version_id, requested_by_member_id=requester_member_id,
@@ -872,12 +884,13 @@ async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationC
     try:
         # story #4417 (Qadir 01a0eb71 C) — a start or resume queued before the spend became unreadable: checked again when it
         # runs (the request-time check can't see a block that came later). Refused with the reason; nothing reaches Meta.
-        # story #4486 — the same for the cap: a resume queued before the cap was reached (or after, by another path) would switch
-        # the campaign on past the approved budget until the next capture (up to a day). Refused; nothing reaches the provider.
-        if command.operation == OP_RESUME and run.cap_reached_at is not None:
-            raise MetaAdsCampaignError(
-                CAP_REACHED_CODE, "spend reached the approved total budget — not switched on again", outcome_known=True,
-            )
+        # story #4486 — the same for the cap, start and resume alike: a resume queued before the cap was reached, or a new seal's
+        # start after the same post was requested again without a cancel (PO 04:01Z — it switched the existing campaign on, 4458
+        # only refuses one made on another budget), would run past the approved budget until the next capture (up to a day).
+        # Stopped before any provider call (blocked_unapproved · ADS_BOOST_CAP_REACHED — the card says why); more spend is a
+        # cancel and a new request (the new cycle's reset clears the cap).
+        if command.operation in (OP_BOOST_START, OP_RESUME) and run.cap_reached_at is not None:
+            raise _SealReplacedBeforeCall("spend reached the approved total budget — not switched on again", code=CAP_REACHED_CODE)
         if command.operation in (OP_BOOST_START, OP_RESUME) and run.spend_blocked_at is not None:
             raise MetaAdsCampaignError(
                 SPEND_BLOCKED_CODE, f"spend can't be checked against the budget ({run.spend_blocked_code})", outcome_known=True,

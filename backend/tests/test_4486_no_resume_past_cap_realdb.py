@@ -16,7 +16,7 @@ from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_ap
 from tests.test_3806_ads_boost_gate import _approve_gate
 from tests.test_4404_publish_worker_no_open_tx_realdb import _command, _run, _start_command, _tick
 from tests.test_4142_recipe_async_video_publish_command_realdb import _configure_secrets  # noqa: F401 — autouse
-from tests.test_4460_cancel_this_boost_realdb import _cancel, _new_seal_start, _request_again, _setup
+from tests.test_4460_cancel_this_boost_realdb import _cancel, _new_seal_start, _request_again, _setup  # noqa: F401
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -82,7 +82,8 @@ async def test_a_capped_boost_cannot_be_resumed(monkeypatch):
         finally:
             app.dependency_overrides.clear()
         assert r.status_code == 409, r.text
-        assert r.json()["error"]["code"] == "ADS_BOOST_CAP_REACHED" if "error" in r.json() else r.json()["detail"]["code"] == "ADS_BOOST_CAP_REACHED"
+        err = r.json().get("error") or r.json().get("detail")
+        assert err["code"] == "ADS_BOOST_CAP_REACHED" and "홍보 취소" in err["message"]
         async with Session() as s:
             resumes = (await s.execute(select(PublicationCommand).where(
                 PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_RESUME,
@@ -151,5 +152,70 @@ async def test_a_new_cycle_after_a_cancel_resumes_normally(monkeypatch):
             await request_ads_boost_resume(s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id)
         await _tick(Session)
         assert calls[-1] == ("ACTIVE", run.campaign_id) and (await _run(Session, gate_id)).status == "running"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_capped_boost_is_not_started_again_by_a_re_request(monkeypatch):
+    """PO 04:01Z — the same class: the same post requested again without a cancel → re-approved → the new seal's start reached the
+    worker, which switched the existing campaign on again (4458 only refuses a campaign made on another budget) while the cap
+    stayed reached: money past the approved budget. The worker refuses it before any provider call (blocked_unapproved ·
+    ADS_BOOST_CAP_REACHED — the card says so); the way to spend more stays one: a cancel and a new request."""
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup_small(monkeypatch)
+    try:
+        campaign = await _capped(Session, org_id, owner_id, gate_id, calls)
+        r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=10_000)
+        assert r.status_code in (200, 201), r.text
+        async with Session() as s:
+            await _approve_gate(s, gate_id, owner_id)
+        # a start that reaches the worker anyway (queued before the cap was found · any path the request check does not see —
+        # a person's [시작] is refused at request, see the next test): queued here without that check
+        from app.services.ads_boost_execution import request_ads_boost_start
+
+        async with Session() as s:
+            start = await request_ads_boost_start(
+                s, org_id=org_id, gate_id=gate_id, requester_member_id=owner_id, initiated_by="scheduler",
+            )
+        await _tick(Session)
+        assert ("ACTIVE", campaign) not in calls[calls.index(("PAUSED", campaign)):]
+        done = await _command(Session, start.id)
+        assert (done.status, done.reason_code) == ("blocked_unapproved", "ADS_BOOST_CAP_REACHED")
+        run = await _run(Session, gate_id)
+        assert run.status == "paused" and run.cap_reached_at is not None
+    finally:
+        await engine.dispose()
+
+
+async def test_a_persons_start_of_a_capped_boost_is_refused_with_its_reason(monkeypatch):
+    """PO 04:01Z — at request time too: after a re-request and a re-approval, a person's [시작] gets 409 ADS_BOOST_CAP_REACHED with
+    Yuna's sentence (cancel, then request again), and nothing is queued."""
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_BOOST_START
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup_small(monkeypatch)
+    try:
+        await _capped(Session, org_id, owner_id, gate_id, calls)
+        r = await _request_again(Session, org_id, owner_id, gate_id, budget_minor=10_000)
+        assert r.status_code in (200, 201), r.text
+        async with Session() as s:
+            await _approve_gate(s, gate_id, owner_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/start")
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 409, r.text
+        body = r.json()
+        err = body.get("error") or body.get("detail")
+        assert err["code"] == "ADS_BOOST_CAP_REACHED" and "홍보 취소" in err["message"]
+        async with Session() as s:
+            starts = (await s.execute(select(PublicationCommand.id).where(
+                PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_BOOST_START,
+            ))).scalars().all()
+        assert len(starts) == 1  # only the first cycle's start
     finally:
         await engine.dispose()
