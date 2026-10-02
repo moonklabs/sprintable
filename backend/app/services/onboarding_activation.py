@@ -94,7 +94,7 @@ async def is_org_agent_connected(db: AsyncSession, org_id: uuid.UUID) -> bool:
     ]
     if agent_ids:
         from app.services.agent_verify import get_verified_map
-        verified_map = await get_verified_map(db, agent_ids)
+        verified_map = await get_verified_map(db, agent_ids, org_id=org_id)
         if any(verified_map.values()):
             return True
     return await is_org_first_roundtrip_done(db, org_id)

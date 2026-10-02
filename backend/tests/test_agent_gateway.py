@@ -85,6 +85,7 @@ async def test_ack_creates_cursor():
     ctx = MagicMock()
     ctx.user_id = str(AGENT_ID)
     ctx.claims = {"app_metadata": {"api_key_id": "ak_test"}}
+    ctx.org_id = str(ORG_ID)  # story #4500: the key's org — the ack acts on its events only
 
     session = AsyncMock()
     existing_result = MagicMock(); existing_result.scalar_one_or_none.return_value = None
@@ -124,6 +125,7 @@ async def test_ack_updates_cursor_if_higher():
     ctx = MagicMock()
     ctx.user_id = str(AGENT_ID)
     ctx.claims = {"app_metadata": {"api_key_id": "ak_test"}}
+    ctx.org_id = str(ORG_ID)  # story #4500: the key's org — the ack acts on its events only
 
     existing_cursor = MagicMock(spec=AgentEventCursor)
     existing_cursor.acked_seq = 10
@@ -162,6 +164,7 @@ async def test_ack_ignores_lower_seq():
     ctx = MagicMock()
     ctx.user_id = str(AGENT_ID)
     ctx.claims = {"app_metadata": {"api_key_id": "ak_test"}}
+    ctx.org_id = str(ORG_ID)  # story #4500: the key's org — the ack acts on its events only
 
     existing_cursor = MagicMock(spec=AgentEventCursor)
     existing_cursor.acked_seq = 100

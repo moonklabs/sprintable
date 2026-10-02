@@ -26,9 +26,10 @@ def anyio_backend():
     return "asyncio"
 
 
-def _api_key_auth(agent_id: uuid.UUID) -> SimpleNamespace:
+def _api_key_auth(agent_id: uuid.UUID, org_id: uuid.UUID | None = None) -> SimpleNamespace:
+    # story #4500: an API key carries its organization; the ack acts on that org's events only
     return SimpleNamespace(
-        claims={"app_metadata": {"api_key_id": "k1"}},
+        claims={"app_metadata": {"api_key_id": "k1", "org_id": str(org_id or uuid.uuid4())}},
         user_id=str(agent_id),
     )
 
@@ -129,7 +130,7 @@ async def test_ack_retire_semantics_realdb():
                 )
             await db.commit()
             try:
-                await ack_event(AckRequest(seq=2), db=db, auth=_api_key_auth(agent))
+                await ack_event(AckRequest(seq=2), db=db, auth=_api_key_auth(agent, org))
 
                 rows = (await db.execute(
                     text("SELECT recipient_seq, status FROM events WHERE recipient_id = :r"),
@@ -141,7 +142,7 @@ async def test_ack_retire_semantics_realdb():
                 assert by_seq[3] == "pending", ">seq 이벤트는 유지(미-ack)"
 
                 # 재-ack: 동일 seq → no-op(idempotent), 에러 없음
-                await ack_event(AckRequest(seq=2), db=db, auth=_api_key_auth(agent))
+                await ack_event(AckRequest(seq=2), db=db, auth=_api_key_auth(agent, org))
             finally:
                 await db.execute(text("DELETE FROM events WHERE recipient_id = :r"), {"r": agent})
                 await db.execute(text("DELETE FROM agent_event_cursors WHERE agent_id = :a"), {"a": agent})

@@ -68,7 +68,7 @@ async def get_team_presence(
     from app.services.project_auth import accessible_project_ids_in_org
 
     accessible = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
-    responses = await _inject_active_stories(unique, session, accessible_project_ids=accessible)
+    responses = await _inject_active_stories(unique, session, accessible_project_ids=accessible, org_id=org_id)
     working_ids = await chat_presence.working_member_ids()
 
     return [

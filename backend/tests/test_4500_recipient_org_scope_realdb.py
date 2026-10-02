@@ -164,7 +164,7 @@ async def test_an_agents_ack_marks_only_its_own_orgs_events_delivered():
     engine, Session, w = await _two_orgs()
     try:
         await _plant_events(Session, w)
-        auth = SimpleNamespace(claims={"app_metadata": {"api_key_id": "k"}}, user_id=str(w.foreign))
+        auth = SimpleNamespace(claims={"app_metadata": {"api_key_id": "k", "org_id": str(w.org_b)}}, user_id=str(w.foreign))
         async with Session() as s:
             await ack_event(AckRequest(seq=2), db=s, auth=auth)
         async with Session() as s:
@@ -181,7 +181,7 @@ async def test_verify_counts_only_a_verify_event_of_the_agents_own_org():
     try:
         await _plant_events(Session, w, event_type=VERIFY_EVENT_TYPE)
         async with Session() as s:
-            state = await get_verification_state(s, w.foreign)
+            state = await get_verification_state(s, w.foreign, org_id=w.org_b)
             assert state["verify_seq"] == 2  # its own org's (seq 2) — org A's verify row (seq 1) is not this agent's
     finally:
         await engine.dispose()
@@ -197,12 +197,12 @@ async def test_verify_counts_only_a_verify_event_of_the_agents_own_org():
             ), {"i": uuid.uuid4(), "o": w.org_a, "p": w.project_a, "t": VERIFY_EVENT_TYPE, "r": w.foreign})
             await s.commit()
         async with Session() as s:
-            assert (await get_verification_state(s, w.foreign))["verify_seq"] is None
+            assert (await get_verification_state(s, w.foreign, org_id=w.org_b))["verify_seq"] is None
             from app.models.agent_gateway import AgentEventCursor
 
             s.add(AgentEventCursor(agent_id=w.foreign, acked_seq=7))
             await s.commit()
-            assert (await get_verified_map(s, [w.foreign]))[w.foreign] is False
+            assert (await get_verified_map(s, [w.foreign], org_id=w.org_b))[w.foreign] is False
     finally:
         await engine.dispose()
 
@@ -351,5 +351,42 @@ async def test_an_approval_card_update_reaches_only_this_orgs_members_in_this_or
             tossed = await notify_gate_tossed(s, org_id=w.org_a, gate_id=gate_id, target_conversation_id=conv_a, tossed_by_id=w.own)
             await s.rollback()
         assert {p for p, _ in tossed} == {str(w.own)}
+    finally:
+        await engine.dispose()
+
+
+async def test_an_ack_counts_an_org_members_only_recipients_event_of_the_keys_org():
+    """PO 12:57Z — 109 of dev's last-7-day events are addressed to a person in org_members only (no team_members row). The
+    ack and verify compare the caller's org with Event.org_id directly; a lookup of the recipient in team_members would have
+    dropped them. Such a recipient's event in the key's org is marked delivered (positive control); another org's is not."""
+    from sqlalchemy import select, text
+
+    from app.models.event import Event
+    from app.models.project import OrgMember
+    from app.models.user import User
+    from app.routers.agent_gateway import AckRequest, ack_event
+
+    engine, Session, w = await _two_orgs()
+    try:
+        async with Session() as s:
+            user = User(id=uuid.uuid4(), email=f"om-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+            s.add(user)
+            await s.flush()
+            om = OrgMember(id=uuid.uuid4(), org_id=w.org_a, user_id=user.id, role="member")
+            s.add(om)
+            await s.flush()
+            for seq, org, project in ((1, w.org_a, w.project_a), (2, w.org_b, w.project_b)):
+                await s.execute(text(
+                    "INSERT INTO events (id, org_id, project_id, event_type, recipient_id, recipient_type, payload, status, recipient_seq) "
+                    "VALUES (:i, :o, :p, 'story_assigned', :r, 'human', '{}', 'pending', :q)"
+                ), {"i": uuid.uuid4(), "o": org, "p": project, "r": om.id, "q": seq})
+            await s.commit()
+            om_id = om.id
+        auth = SimpleNamespace(claims={"app_metadata": {"api_key_id": "k", "org_id": str(w.org_a)}}, user_id=str(om_id))
+        async with Session() as s:
+            await ack_event(AckRequest(seq=2), db=s, auth=auth)
+        async with Session() as s:
+            status = dict((await s.execute(select(Event.recipient_seq, Event.status).where(Event.recipient_id == om_id))).all())
+        assert status == {1: "delivered", 2: "pending"}
     finally:
         await engine.dispose()

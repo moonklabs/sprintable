@@ -635,7 +635,7 @@ async def agent_stream(
                 # 충족된다, sse_bridge.py 의 자동 ack 재사용·발명 0). 이미 verified 인 재연결은
                 # 재트리거 안 함(매 재접속마다 이벤트 스팸 방지).
                 from app.services.agent_verify import get_verification_state, start_verification
-                _prior_verify = await get_verification_state(_pdb, agent_id, transport="stdio")
+                _prior_verify = await get_verification_state(_pdb, agent_id, org_id=uuid.UUID(org_id_str), transport="stdio")
                 _newly_started = not _prior_verify["verified"]
                 if _newly_started:
                     await start_verification(
@@ -873,6 +873,11 @@ async def ack_event(
 
     agent_id = uuid.UUID(auth.user_id)
     _newly_verified_org_id: uuid.UUID | None = None
+    # story #4500 (AC3 · PO 12:57Z): the ack acts on the key's own org's events only — the org the API key belongs to
+    _key_org = getattr(auth, "org_id", None) or auth.claims.get("app_metadata", {}).get("org_id")
+    if not _key_org:
+        raise HTTPException(status_code=403, detail="API key has no organization")
+    key_org_id = uuid.UUID(str(_key_org))
 
     # UPSERT acked_seq (ë ëì ê°ë§ ê°±ì )
     existing = (await db.execute(
@@ -893,8 +898,6 @@ async def ack_event(
     # 이벤트(recipient_seq <= seq)를 같은 트랜잭션서 delivered 마킹해 cleanup 회수 대상이 되게
     # 한다. recipient_seq IS NOT NULL = agent SSE 이벤트만(human 이벤트는 seq 없음). status=
     # 'pending' 만 전이 → 이미 delivered/expired 는 무변경(idempotent·재-ack no-op).
-    from app.services.agent_verify import event_in_recipients_own_org
-
     await db.execute(
         update(Event)
         .where(
@@ -902,8 +905,8 @@ async def ack_event(
             Event.recipient_seq.isnot(None),
             Event.recipient_seq <= body.seq,
             Event.status == "pending",
-            # story #4500 (AC3): the agent's own org's events only — its ack never changes another org's rows
-            event_in_recipients_own_org(),
+            # story #4500 (AC3): the key's org's events only — its ack never changes another org's rows
+            Event.org_id == key_org_id,
         )
         .values(status="delivered", delivered_at=datetime.now(timezone.utc))
     )
@@ -921,7 +924,7 @@ async def ack_event(
                 Event.recipient_seq.isnot(None),
                 Event.recipient_seq > prior_acked,
                 Event.recipient_seq <= body.seq,
-                event_in_recipients_own_org(),
+                Event.org_id == key_org_id,
             ).limit(1)
         )).first()
         if _verify_done:
