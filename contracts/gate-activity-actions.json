@@ -1,0 +1,23 @@
+{
+  "story": "4485",
+  "about": "Every ActivityLog action the backend records on a gate (entity_type \"gate\"), shown in the web's approval history. backend/tests/test_4485_gate_activity_actions_contract.py keeps this list equal to what the code writes; apps/web gate-evidence test keeps every one labelled in ko and en.",
+  "actions": [
+    "ads_boost_paused",
+    "ads_boost_resumed",
+    "ads_boost_started",
+    "ads_spend_refresh_requested",
+    "approval_card_delivery_failed",
+    "gate_approved",
+    "gate_delegated",
+    "gate_discussion_requested",
+    "gate_held",
+    "gate_overridden",
+    "gate_pending",
+    "gate_rejected",
+    "gate_resolution_undone",
+    "gate_tossed",
+    "gate_voided",
+    "newsletter_send_failed",
+    "newsletter_send_succeeded"
+  ]
+}

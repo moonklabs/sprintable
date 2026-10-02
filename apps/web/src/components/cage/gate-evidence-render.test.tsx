@@ -1780,3 +1780,55 @@ describe('generation_budget 한도·사용·남음 한 줄(story #4085 AC4-B)', 
     expect(container.textContent).toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
   });
 });
+
+// story #4485 — a row the server itself wrote (actor_type platform, no actor_id · approval_card_delivery_failed) is named
+// «시스템» in the actor's place, not «알 수 없음»; the actions AC0 found unnamed show their words, not the raw key.
+describe('[SID:4485] GateActivityHistory — the server as actor · the actions that showed raw', () => {
+  afterEach(() => {
+    vi.mocked(fetchWithAuth).mockReset();
+  });
+
+  it('platform row → «시스템» · delegated/tossed/discussion/delivery-failed/held/resumed → their words', async () => {
+    const row = (id: string, action: string, actor: Partial<{ actor_id: string | null; actor_name: string | null; actor_type: string }>) => ({
+      id, action, actor_id: null, actor_name: null, context: {}, created_at: '2026-10-02T02:30:00Z', ...actor,
+    });
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        row('l1', 'approval_card_delivery_failed', { actor_type: 'platform' }),
+        row('l2', 'gate_delegated', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+        row('l3', 'gate_tossed', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+        row('l4', 'gate_discussion_requested', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+        row('l5', 'gate_held', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+        row('l6', 'gate_pending', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    const text = container.textContent ?? '';
+    expect(text).toContain(`${koMessages.cage.gateActivityActorSystem} · ${koMessages.cage.gateActivityActionApprovalCardDeliveryFailed}`);
+    expect(text).not.toContain(koMessages.cage.gateActivityActorFallback);
+    for (const key of ['gateActivityActionDelegated', 'gateActivityActionTossed', 'gateActivityActionDiscussionRequested', 'gateActivityActionHeld', 'gateActivityActionResumed'] as const) {
+      expect(text).toContain(koMessages.cage[key]);
+    }
+    for (const raw of ['approval_card_delivery_failed', 'gate_delegated', 'gate_tossed', 'gate_discussion_requested', 'gate_held', 'gate_pending']) {
+      expect(text).not.toContain(raw);
+    }
+  });
+
+  it('an older server without actor_type: no name → still «알 수 없음» (nothing invented)', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([{ id: 'l1', action: 'gate_approved', actor_id: null, actor_name: null, context: {}, created_at: '2026-10-02T02:30:00Z' }]),
+    } as Response);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActorFallback);
+  });
+});
