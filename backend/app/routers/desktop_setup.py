@@ -22,6 +22,7 @@ from app.services.desktop_setup import (
     DesktopSetupError,
     RoleChoice,
     confirm_setup,
+    confirm_setup_first_project,
     confirm_setup_new_org,
     create_setup_code,
     exchange_setup,
@@ -55,6 +56,8 @@ _STATUS = {
     # story 4427 (나): the new-organization path — the person already has one (use the usual confirm) · has an invite (join)
     "has_organization": 409,
     "pending_invites": 409,
+    # story 4496: no project chosen, and the organization has projects — the web picks one of them (none is made)
+    "project_required": 409,
 }
 
 
@@ -120,12 +123,26 @@ SETUP_CODE_FIELD = Field(min_length=20, max_length=128)
 
 class ConfirmRequest(BaseModel):
     code: str = SETUP_CODE_FIELD
-    project_id: uuid.UUID
+    # story 4496: left out → the setup makes the organization's first project (`project_name`) — only when it has none
+    project_id: uuid.UUID | None = None
+    project_name: str | None = Field(default=None, min_length=1, max_length=100)
     recipe_id: uuid.UUID
     roles: list[RoleIn] = Field(max_length=ROLES_FIELD_CAP)  # abuse cap only — the product limit is recipe_too_large
     # the folder chosen on the web, handed back as is in the exchange (≤200 · no control characters); the desktop app judges
     # the path itself (under home · no `..`), the server does not
     workdir_hint: str | None = Field(default=None, max_length=200)
+
+    @field_validator("project_name")
+    @classmethod
+    def _project_name_trimmed(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be blank")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise ValueError("must not contain control characters")
+        return v
 
     @field_validator("workdir_hint")
     @classmethod
@@ -146,6 +163,8 @@ class ConfirmResponse(BaseModel):
     setup_id: uuid.UUID
     members: list[ConfirmedMember]
     work_item_id: uuid.UUID  # the story the recipe's first stage was published on
+    # story 4496: the organization's first project, when this confirmation made it (the web makes it the tab's project)
+    project_id: uuid.UUID | None = None
 
 
 @router.post("/setup-codes/confirm", response_model=ConfirmResponse)
@@ -157,19 +176,30 @@ async def post_confirm(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     user_id = _human_only(auth)
+    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner) for r in body.roles]
+    made_project: uuid.UUID | None = None
     try:
-        setup_id, members, work_item_id = await confirm_setup(
-            db, code=body.code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
-            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
-            background_tasks=background_tasks,
-        )
+        if body.project_id is None and not body.project_name:
+            raise DesktopSetupError("request_invalid", "project_id or project_name is required")
+        if body.project_id is None:
+            # story 4496 (PO 09:32Z (가)): no project chosen — the first project is made with the setup when the organization has
+            # none (the server counts; the web's list is not trusted for it), else 409 project_required
+            setup_id, members, work_item_id, made_project = await confirm_setup_first_project(
+                db, code=body.code, user_id=user_id, org_id=org_id, project_name=body.project_name,
+                recipe_id=body.recipe_id, roles=roles, auth=auth, workdir_hint=body.workdir_hint, background_tasks=background_tasks,
+            )
+        else:
+            setup_id, members, work_item_id = await confirm_setup(
+                db, code=body.code, user_id=user_id, org_id=org_id, project_id=body.project_id, recipe_id=body.recipe_id,
+                roles=roles, auth=auth, workdir_hint=body.workdir_hint, background_tasks=background_tasks,
+            )
     except DesktopSetupError as e:
         # AC2: any error leaves the request by raising, and get_db rolls the whole session back — e.g. the plan's agent
         # limit (402) on the second agent takes the first one with it
         raise _error(e) from None
     await db.commit()
     return ConfirmResponse(
-        setup_id=setup_id, work_item_id=work_item_id,
+        setup_id=setup_id, work_item_id=work_item_id, project_id=made_project,
         members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members],
     )
 

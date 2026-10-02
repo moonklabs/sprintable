@@ -140,6 +140,13 @@ export interface ConfirmBody {
 
 /** 확인 요청(4424 confirm) — 에이전트가 맡는 역할마다 {role, runtime}(역할 하나 = 에이전트 하나), «나»를 고른 either 줄은
  * {role, owner: 'me'}. 사람만 맡는 줄은 싣지 않는다(BE가 확인을 누른 사람에게 묶는다 — PO 07:14Z). */
+/** story 4496 — no project chosen and the organization has none: the same body with the first project's name instead of an id
+ * (the server makes it with the setup — only when the organization really has no project, else 409 project_required). */
+export function firstProjectConfirmBody(code: string, rows: readonly SetupRoleRow[], recipeId: string, workdirHint: string, projectName: string): Omit<ConfirmBody, 'project_id'> & { project_name: string } {
+  const { project_id: _none, ...rest } = confirmBody(code, rows, '', recipeId, workdirHint);
+  return { ...rest, project_name: projectName.trim() };
+}
+
 export function confirmBody(code: string, rows: readonly SetupRoleRow[], projectId: string, recipeId: string, workdirHint: string): ConfirmBody {
   return {
     code,
