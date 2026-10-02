@@ -550,6 +550,65 @@ async def _drain_and_dispose_global_engine_for_destructive_tests():
     await drain_global_background_work()
 
 
+# story #4395 (PO 09-30 결정 · 같은 부류 둘째 표본 test_4258) — 파일마다 고치지 않고 가드 한 곳: destructive 테스트가 끝났을 때 이
+# DB에 트랜잭션을 연 채 쉬는 세션(idle in transaction)이 남아 있으면 **그 테스트가** 실패한다. 남겨 두면 다음 테스트 리셋(DROP
+# SCHEMA)이 lock_timeout으로 실패해 엉뚱한 테스트를 가리킨다. CI destructive 샤드는 파일마다 새 DB라 이 DB의 세션은 이 파일의 것이다.
+# 실패하기 전에 그 세션들을 끊는다(다음 테스트로 번지지 않게). 위 drain fixture보다 뒤에 돈다: autouse가 먼저 서니 나중에 걷힌다.
+IDLE_IN_TX_GRACE_S = 2.0  # 커밋이 막 오가는 중인 세션을 범인으로 잡지 않게 — 이만큼 다시 본 뒤에도 남은 것만
+
+
+def _idle_in_transaction_sessions(engine) -> list[tuple]:
+    with engine.connect() as conn:
+        return conn.execute(text(
+            "SELECT pid, COALESCE(application_name, ''), state, now() - state_change, left(regexp_replace(query, '\\s+', ' ', 'g'), 200) "
+            "FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND state LIKE 'idle in transaction%' ORDER BY pid"
+        )).all()
+
+
+def check_no_idle_in_transaction(url: str, nodeid: str, grace: float = IDLE_IN_TX_GRACE_S) -> None:
+    """이 DB에 idle in transaction 세션이 `grace` 뒤에도 남아 있으면 끊고, 앱 이름 · 상태 · 쉰 시간 · 마지막 쿼리를 싣고 실패한다."""
+    import time
+
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(_sync_url(url), poolclass=NullPool)
+    try:
+        deadline = time.monotonic() + grace
+        rows = _idle_in_transaction_sessions(engine)
+        while rows and time.monotonic() < deadline:
+            time.sleep(0.1)
+            rows = _idle_in_transaction_sessions(engine)
+        if not rows:
+            return
+        with engine.connect() as conn:
+            for pid, *_ in rows:
+                conn.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
+        lines = []
+        for pid, app, state, idle_for, query in rows:
+            owner = _resolve_global_engine_test_tag(app)
+            who = f" test={owner}" if owner else ""
+            lines.append(f"  pid={pid} app={app!r}{who} state={state} idle_for={idle_for} query={query!r}")
+    finally:
+        engine.dispose()
+    pytest.fail(
+        f"story #4395 — {nodeid}: 테스트가 끝났는데 트랜잭션을 연 채 쉬는 세션 {len(rows)}개(끊음) — 다음 테스트 리셋을 막는다. "
+        "세션을 닫거나(async with) 커밋/롤백해 주세요:\n" + "\n".join(lines),
+        pytrace=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_idle_in_transaction_after_destructive_test(request):
+    if request.node.get_closest_marker(_MARKER_NAME) is None:
+        yield
+        return
+    yield
+    url = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+    if url:
+        check_no_idle_in_transaction(url, request.node.nodeid)
+
+
 # story 8236bbc3: destructive_schema 마커 drift 자기표면화 가드(PO crux 게이트②, 2026-07-03).
 # 마커 부여 자체는 수동이라(하드코딩 파일리스트와 동일 클래스의 drift 위험) 이 가드가 없으면
 # "새 create_all/drop_all 테스트가 마커 없이 들어오면?" 질문에 "alembic-fresh-db job에서 공유
