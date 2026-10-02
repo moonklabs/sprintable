@@ -803,6 +803,60 @@ async def resolve_member_display_name(
     return user.display_name if user else None
 
 
+async def org_recipient_ids(
+    member_ids: set[uuid.UUID],
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> set[uuid.UUID]:
+    """story #4500 (PO 13:16Z) — the recipients among these ids: each resolved to its canonical member first
+    (`canonicalize_member_ids` — an old id aliased to a living member, e.g. a story's assignee stored under a legacy human id),
+    then only this org's members (`filter_org_member_ids`). Filtering first would drop a person who still receives today
+    (dev: 4 stories' assignees). Returns the canonical ids — who the delivery is for."""
+    if not member_ids:
+        return set()
+    canonical = set((await canonicalize_member_ids(member_ids, session)).values())
+    return await filter_org_member_ids(canonical, org_id, session)
+
+
+async def conversation_member_ids_in_org(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+    org_id: uuid.UUID,
+    *where,
+) -> set[uuid.UUID]:
+    """story #4500 (AC2) — the participants a delivery may reach: only when the conversation is this org's, and of its
+    participants only this org's members (`filter_org_member_ids`, the rule 4497 checks assignees with). Participant rows are
+    org-checked at most writes, but not all (a config-named approver · a bridge mapping's conversation); the delivery must not
+    depend on that. `where`: extra conditions on ConversationParticipant (e.g. humans only)."""
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    ids = set((await session.execute(
+        select(ConversationParticipant.member_id)
+        .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id == conversation_id, Conversation.org_id == org_id, *where)
+    )).scalars().all())
+    return await org_recipient_ids(ids, org_id, session)
+
+
+async def conversation_member_ids_of_its_org(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """story #4500 (AC2) — the same rule as `conversation_member_ids_in_org` where the caller holds no org (a message carries
+    none — its conversation does): the participants that are members of the conversation's own org. One query reads the
+    participants with that org."""
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    rows = (await session.execute(
+        select(ConversationParticipant.member_id, Conversation.org_id)
+        .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id == conversation_id)
+    )).all()
+    if not rows:
+        return set()
+    return await org_recipient_ids({r[0] for r in rows}, rows[0][1], session)
+
+
 async def filter_org_member_ids(
     member_ids: set[uuid.UUID],
     org_id: uuid.UUID,

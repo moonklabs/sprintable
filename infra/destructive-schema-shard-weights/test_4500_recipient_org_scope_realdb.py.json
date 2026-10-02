@@ -1,0 +1,1 @@
+{"file": "tests/test_4500_recipient_org_scope_realdb.py", "sec": 6.0, "source": "story-4500 — recipients drawn from assignees · participants and the ack · verify reads keep to the org (another org planted directly, own org as control) — new file measured locally (uv run pytest)"}

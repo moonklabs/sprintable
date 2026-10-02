@@ -843,12 +843,12 @@ async def _dispatch_conversation_event(
                 "attachment_context SSE 주입 실패 message_id=%s", msg.id, exc_info=True,
             )
 
-    # 참여자 조회
-    rows = (await db.execute(
-        select(ConversationParticipant.member_id)
-        .where(ConversationParticipant.conversation_id == conversation.id)
-    )).all()
-    participant_ids = {r[0] for r in rows} - {sender.id} - (exclude_ids or set())
+    # 참여자 조회 — story #4500: this org's conversation · this org's members only
+    from app.services.member_resolver import conversation_member_ids_in_org
+
+    participant_ids = (
+        await conversation_member_ids_in_org(db, conversation.id, org_id)
+    ) - {sender.id} - (exclude_ids or set())
 
     if not participant_ids:
         return []
@@ -1009,12 +1009,12 @@ async def _dispatch_human_intervention_event(
     # 단독으론 org_member-only 휴먼(SSOT 전환 이후 org 다수)이 조용히 human_targets에서
     # 빠졌다(chain-expired 개입 알림이 그 휴먼에게 영원히 안 감). is_human_member_condition
     # (member_resolver.py, #3627과 같은 판정자)으로 통일.
-    human_targets = set((await db.execute(
-        select(ConversationParticipant.member_id).where(
-            ConversationParticipant.conversation_id == conversation.id,
-            is_human_member_condition(ConversationParticipant.member_id),
-        )
-    )).scalars().all())
+    # story #4500: this org's conversation · this org's members only
+    from app.services.member_resolver import conversation_member_ids_in_org
+
+    human_targets = await conversation_member_ids_in_org(
+        db, conversation.id, org_id, is_human_member_condition(ConversationParticipant.member_id),
+    )
     if not human_targets:
         return []
 

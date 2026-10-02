@@ -488,7 +488,7 @@ async def verify_agent_connection(
         raise HTTPException(status_code=400, detail="agent has no project scope to verify")
 
     if transport == "http":
-        state = await get_verification_state(session, agent_id, transport="http")
+        state = await get_verification_state(session, agent_id, org_id=org_id, transport="http")
         return {
             "agent_id": str(agent_id),
             "verification_seq": None,
@@ -510,7 +510,7 @@ async def verify_agent_connection(
     from app.routers.agent_gateway import wake_agent
     wake_agent(str(agent_id), seq)
 
-    state = await get_verification_state(session, agent_id)
+    state = await get_verification_state(session, agent_id, org_id=org_id)
     return {
         "agent_id": str(agent_id),
         "verification_seq": seq,
@@ -537,7 +537,7 @@ async def agent_verification_status(
     if member is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    state = await get_verification_state(session, agent_id, transport=transport)
+    state = await get_verification_state(session, agent_id, org_id=org_id, transport=transport)
     return {
         "agent_id": str(agent_id),
         "verification_seq": state["verify_seq"],

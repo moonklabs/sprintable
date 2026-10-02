@@ -54,6 +54,20 @@ def _parse_uuid(value: str, *, field_name: str) -> uuid.UUID:
 async def _resolve_work_item_stakeholders(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
 ) -> set[uuid.UUID]:
+    """story #4500 (Qadir 4912 QA 12:28Z · PO): the stakeholders are members of this org only. The ids come from stored rows
+    (assignees · owner · join rows) and from the payload (gate requester · draft author) — any of them can be outside the org
+    (written before 4497's check, another write path, a payload naming someone else's member), and a recipient outside the org
+    would get this org's event. The final set goes through `org_recipient_ids` — aliases resolved to the living member, then
+    `filter_org_member_ids` (the rule 4497's write check uses) — every branch (story · task · goal) and the payload keys alike."""
+    from app.services.member_resolver import org_recipient_ids
+
+    ids = await _work_item_stakeholders_unfiltered(db, org_id=org_id, payload=payload)
+    return await org_recipient_ids(ids, org_id, db)
+
+
+async def _work_item_stakeholders_unfiltered(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
+) -> set[uuid.UUID]:
     """work_item_type/work_item_id → 그 작업의 이해관계자(담당자·human owner·복수 assignee).
     타입별 필드가 제각각이라(story/task/goal 전부 다른 모델) 여기서 타입별 분기 — 코드베이스에
     범용 헬퍼가 없어 이 스토리에서 신설(그라운딩 확認, #2620/#2617류 재사용 대상 없음).
@@ -93,10 +107,14 @@ async def _resolve_work_item_stakeholders(
                 Story.id == work_item_id, Story.org_id == org_id,
             )
         )).one_or_none()
-        if row is not None:
-            ids |= {m for m in row if m is not None}
+        if row is None:
+            # story #4500: not this org's story (or none) — its assignees are not read at all (they used to be merged anyway)
+            return ids
+        ids |= {m for m in row if m is not None}
         extra = (await db.execute(
-            select(StoryAssignee.member_id).where(StoryAssignee.story_id == work_item_id)
+            select(StoryAssignee.member_id).where(
+                StoryAssignee.story_id == work_item_id, StoryAssignee.org_id == org_id,
+            )
         )).scalars().all()
         ids |= set(extra)
         return ids
@@ -141,7 +159,12 @@ async def _resolve_goal_owner(db: AsyncSession, *, org_id: uuid.UUID, payload: d
     assignee = (await db.execute(
         select(Goal.assignee_id).where(Goal.id == goal_id, Goal.org_id == org_id)
     )).scalar_one_or_none()
-    return {assignee} if assignee else set()
+    if not assignee:
+        return set()
+    # story #4500: the same recipient rule as work_item_stakeholders
+    from app.services.member_resolver import org_recipient_ids
+
+    return await org_recipient_ids({assignee}, org_id, db)
 
 
 async def _resolve_none(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> set[uuid.UUID]:  # noqa: ARG001

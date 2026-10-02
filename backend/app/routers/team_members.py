@@ -98,7 +98,7 @@ async def _org_max_plugin_version(org_id: uuid.UUID, session: AsyncSession) -> s
 
 
 async def _inject_active_stories(
-    members: list, session: AsyncSession, *, accessible_project_ids: Collection[uuid.UUID],
+    members: list, session: AsyncSession, *, accessible_project_ids: Collection[uuid.UUID], org_id: uuid.UUID,
 ) -> list[TeamMemberResponse]:
     """AC6: active_story_id → stories batch 조회 후 inject.
 
@@ -124,7 +124,7 @@ async def _inject_active_stories(
     online_map = await presence_online.get_online_map([m.id for m in members])
 
     from app.services.agent_verify import get_verified_map
-    verified_map = await get_verified_map(session, [m.id for m in members])
+    verified_map = await get_verified_map(session, [m.id for m in members], org_id=org_id)
 
     # story #4129 — 조직 전체 기준 max(전달된 members 부분집합이 아니라, 같은 org_id면
     # 매 호출 동일값 → 호출 경로별 배지 불일치 방지, 위 _org_max_plugin_version 참고).
@@ -250,7 +250,7 @@ async def list_team_members(
             from app.services.project_auth import accessible_project_ids_in_org
 
             accessible = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
-            result.extend(await _inject_active_stories(agents, session, accessible_project_ids=accessible))
+            result.extend(await _inject_active_stories(agents, session, accessible_project_ids=accessible, org_id=org_id))
         return result
 
     # ratchet round2(story 8aec83b3): project_id 지정 분기가 접근권 검증 없이 repo.list로
@@ -271,7 +271,7 @@ async def list_team_members(
 
     # 이 프로젝트 구성원이라도 «지금 하는 스토리»는 다른 프로젝트일 수 있다 — 같은 규칙으로 거른다.
     accessible = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
-    return await _inject_active_stories(members, session, accessible_project_ids=accessible)
+    return await _inject_active_stories(members, session, accessible_project_ids=accessible, org_id=org_id)
 
 
 _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}

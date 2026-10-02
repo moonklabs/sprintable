@@ -134,11 +134,10 @@ async def route_message(
             )).scalar_one_or_none()
 
         # 3. conversation participants (발신자 제외)
-        participant_rows = (await db.execute(
-            select(ConversationParticipant.member_id).where(
-                ConversationParticipant.conversation_id == msg.conversation_id,
-            )
-        )).scalars().all()
+        # story #4500: the conversation's own org's members only (a message carries no org — its conversation does)
+        from app.services.member_resolver import conversation_member_ids_of_its_org
+
+        participant_rows = await conversation_member_ids_of_its_org(db, msg.conversation_id)
         recipient_ids = [pid for pid in participant_rows if pid != msg.sender_id]
 
         # story #2349 AC3 — 라이브 검증(2026-08-03, PO+디디, 스레드 7256d5cc)에서 실측으로 발견:

@@ -819,8 +819,10 @@ async def notify_gate_card_recipients_resolved(
         return []
 
     conv_ids = {row.conversation_id for row in rows}
+    # story #4500: only this org's conversations — a card message is found by gate_id alone, and a conversation of another
+    # org is skipped below like one with no project
     conv_project_ids = dict((await db.execute(
-        select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids))
+        select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids), Conversation.org_id == org_id)
     )).all())
 
     recipient_project_ids: dict[uuid.UUID, uuid.UUID] = {}
@@ -833,6 +835,12 @@ async def notify_gate_card_recipients_resolved(
                 recipient_project_ids[uuid.UUID(str(mid))] = proj_id
             except (ValueError, TypeError, AttributeError):
                 continue  # 손상된/구형 payload — 지어내지 않고 건너뜀(_batch_resolve_linked_proof 동일 관례).
+    # story #4500: the mentioned ids are the card's — resolved to the living member, only this org's members receive
+    from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
+
+    _canon = await canonicalize_member_ids(set(recipient_project_ids), db)
+    _in_org = await filter_org_member_ids(set(_canon.values()), org_id, db) if _canon else set()
+    recipient_project_ids = {_canon[m]: p for m, p in recipient_project_ids.items() if _canon[m] in _in_org}
     if not recipient_project_ids:
         return []
 
@@ -1048,8 +1056,10 @@ async def notify_gate_tossed(
         return []
 
     conv_ids = {row.conversation_id for row in rows}
+    # story #4500: only this org's conversations — a card message is found by gate_id alone, and a conversation of another
+    # org is skipped below like one with no project
     conv_project_ids = dict((await db.execute(
-        select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids))
+        select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids), Conversation.org_id == org_id)
     )).all())
 
     recipient_project_ids: dict[uuid.UUID, uuid.UUID] = {}
@@ -1062,6 +1072,12 @@ async def notify_gate_tossed(
                 recipient_project_ids[uuid.UUID(str(mid))] = proj_id
             except (ValueError, TypeError, AttributeError):
                 continue  # 손상된/구형 payload — 지어내지 않고 건너뜀.
+    # story #4500: the mentioned ids are the card's — resolved to the living member, only this org's members receive
+    from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
+
+    _canon = await canonicalize_member_ids(set(recipient_project_ids), db)
+    _in_org = await filter_org_member_ids(set(_canon.values()), org_id, db) if _canon else set()
+    recipient_project_ids = {_canon[m]: p for m, p in recipient_project_ids.items() if _canon[m] in _in_org}
     if not recipient_project_ids:
         return []
 
