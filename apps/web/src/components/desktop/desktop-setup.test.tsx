@@ -16,6 +16,7 @@ vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next
 import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -519,6 +520,10 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
   };
   const polls = () => calls.filter((c) => c.url.includes('/api/desktop/setups/')).length;
   const resultButton = () => [...container.querySelectorAll('a, button')].find((b) => b.textContent === '결과 보기') as HTMLElement;
+  // story 4492 — «오늘로 가기»: its destination comes from the one destination module (no literal path)
+  const wayOut = () => [...container.querySelectorAll('a')].find((b) => b.textContent === '오늘로 가기') ?? null;
+  // flat links carry the tab's project (useFlatHref) — the same as the page's other flat links
+  const TODAY_HREF = `${resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS).today.path}?p=p-1`;
 
   // PO 10:39Z ① (Mirko's probe) — a platform preset is named on the progress screen as the list names it (its translation by
   // key), not by the stored name: «3단계 칸반», not «칸반 심플» — also when the page is opened again (no name from the list)
@@ -527,7 +532,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     stub(() => new Response('{}', { status: 200 }));
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
     await tick(0);
-    expect(text()).toContain('«3단계 칸반»을 조사 에이전트에게 건네는 중이에요');
+    expect(text()).toContain('준비가 끝나면 «3단계 칸반»을 조사 에이전트에게 건네요'); // ② waits (story 4492)
     expect(container.querySelector('header p')?.textContent).toContain('3단계 칸반');
     expect(text()).not.toContain('칸반 심플');
   });
@@ -537,7 +542,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     stub(() => new Response('{}', { status: 200 }));
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
     await tick(0);
-    expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
+    expect(text()).toContain('준비가 끝나면 «마케팅 루프»를 조사 에이전트에게 건네요'); // ② waits (story 4492)
   });
 
   // Yuna v24 · PO 11:19Z — the trust note is Claude Code's question: with only Codex agents it is not shown at all
@@ -747,7 +752,8 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(line?.textContent).toBe('작성 에이전트는 아직 준비하고 있어요');
     expect(line?.className).toContain('text-muted-foreground');
     // ①'s own detail (the «역할 · 런타임» pairs only once every agent is ready) — still three steps for a screen reader
-    expect(first()?.textContent).toBe('에이전트를 준비했어요작성 에이전트는 아직 준비하고 있어요');
+    // story 4492: the trust note sits under ① now (the gate is part of getting ready) — same condition as before
+    expect(first()?.textContent).toBe('에이전트를 준비했어요작성 에이전트는 아직 준비하고 있어요창 아래 «이 컴퓨터의 에이전트»에서 «시작됨» 줄을 눌러, 터미널이 묻는 것에 답하면 이어져요.');
     expect(first()!.contains(line)).toBe(true);
     expect(container.querySelectorAll('ol > li').length).toBe(3);
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' });
@@ -764,12 +770,12 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
       signals: { ...status('handed_over').signals, tools_connected: [{ member_id: 'm0', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' } });
     const ended = [{ member_id: 'm1', at: '2026-09-30T12:00:05Z', runtime: 'claude', exit_code: 1, restarted_at: null }];
     const cases: [locale: 'ko' | 'en', name: string, stopped: string, handed: string, still: string][] = [
-      ['ko', '에이전트', '에이전트가 멈췄어요 — ', '«마케팅 루프»를 에이전트에게 건네는 중이에요', '에이전트는 아직 준비하고 있어요'],
-      ['ko', '블로그 에이전트', '블로그 에이전트가 멈췄어요 — ', '«마케팅 루프»를 블로그 에이전트에게 건네는 중이에요', '블로그 에이전트는 아직 준비하고 있어요'],
-      ['ko', 'Writer', 'Writer 에이전트가 멈췄어요 — ', '«마케팅 루프»를 Writer 에이전트에게 건네는 중이에요', 'Writer 에이전트는 아직 준비하고 있어요'],
-      ['en', '에이전트', '에이전트 stopped — ', 'Handing «마케팅 루프» to 에이전트', '에이전트 is still getting ready'],
-      ['en', 'Research Agent', 'Research Agent stopped — ', 'Handing «마케팅 루프» to Research Agent', 'Research Agent is still getting ready'],
-      ['en', 'Writer', 'The Writer agent stopped — ', 'Handing «마케팅 루프» to the Writer agent', 'The Writer agent is still getting ready'],
+      ['ko', '에이전트', '에이전트가 멈췄어요 — ', '준비가 끝나면 «마케팅 루프»를 에이전트에게 건네요', '에이전트는 아직 준비하고 있어요'],
+      ['ko', '블로그 에이전트', '블로그 에이전트가 멈췄어요 — ', '준비가 끝나면 «마케팅 루프»를 블로그 에이전트에게 건네요', '블로그 에이전트는 아직 준비하고 있어요'],
+      ['ko', 'Writer', 'Writer 에이전트가 멈췄어요 — ', '준비가 끝나면 «마케팅 루프»를 Writer 에이전트에게 건네요', 'Writer 에이전트는 아직 준비하고 있어요'],
+      ['en', '에이전트', '에이전트 stopped — ', 'Once ready, «마케팅 루프» goes to 에이전트', '에이전트 is still getting ready'],
+      ['en', 'Research Agent', 'Research Agent stopped — ', 'Once ready, «마케팅 루프» goes to Research Agent', 'Research Agent is still getting ready'],
+      ['en', 'Writer', 'The Writer agent stopped — ', 'Once ready, «마케팅 루프» goes to the Writer agent', 'The Writer agent is still getting ready'],
     ];
     ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
     stub(() => new Response('{}', { status: 200 }));
@@ -827,7 +833,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
     await tick(0);
     expect(container.querySelector('[data-testid=setup-agent-stopped] p')?.textContent?.startsWith('에이전트가 멈췄어요 — ')).toBe(true);
-    expect(text()).toContain('«마케팅 루프»를 에이전트에게 건네는 중이에요'); // ② detail, first agent «에이전트 »
+    expect(text()).toContain('준비가 끝나면 «마케팅 루프»를 에이전트에게 건네요'); // ② detail (waiting), first agent «에이전트 »
     // still getting ready: 조사 connected and handed · the other («에이전트 ») not yet
     statusNow = () => at({ tools_connected: [{ member_id: 'm2', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' }) as ReturnType<typeof status>;
     await tick(2_000);
@@ -851,22 +857,28 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     statusNow = () => ({ ...status('handed_over'), signals: { ...status('handed_over').signals, agents_ended: ended('m2') } });
     await tick(2_000);
     expect(paused()).toEqual([false, false, true]);
-    expect(container.querySelectorAll('ol .animate-spin').length).toBe(2);
+    // story 4492: one spinner — the earliest step not done (①); ② waits with a still ring
+    expect(container.querySelectorAll('ol .animate-spin').length).toBe(1);
   });
 
-  it('the three steps · the trust note only between handed over and connected · «결과 보기» off with its reason until the result', async () => {
+  it('the three steps · the trust note only between handed over and connected · «결과 보기» off until the result · the way out always (story 4492)', async () => {
     statusNow = () => status('waiting_for_app');
     await startSetup();
     expect(container.querySelector('h1')?.textContent).toBe('에이전트를 시작하고 있어요');
     expect(text()).toContain('에이전트를 준비하고 있어요');
-    expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
+    expect(text()).toContain('준비가 끝나면 «마케팅 루프»를 조사 에이전트에게 건네요'); // ② waits (story 4492)
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
     expect((resultButton() as HTMLButtonElement).disabled).toBe(true);
-    expect(text()).toContain('결과가 나오면 눌러서 일감으로 가요');
+    // story 4492 (Yuna 06:41Z): one line under the buttons — it replaces «결과가 나오면 …» (both would say «일감» twice)
+    expect(text()).toContain('떠나도 설정은 이 컴퓨터에서 이어져요 — 첫 결과는 일감에서 볼 수 있어요.');
+    expect(text()).not.toContain('결과가 나오면');
+    expect(wayOut()?.getAttribute('href')).toBe(TODAY_HREF);
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }] });
     await tick(2_000);
-    expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toBe('Claude Code는 처음 켤 때 작업 폴더를 믿을지 물어요. 창 아래 «이 컴퓨터의 에이전트» 줄에서 그 에이전트를 눌러 터미널을 열고, 화살표 키로 ❯를 «Yes, I trust this folder»에 맞춘 뒤 Enter를 눌러 주세요 — «No, exit»에서 Enter면 에이전트가 꺼져요.');
+    // story 4492 (Yuna 06:41Z): what to do, where — no agent name, no guess (the board line below says which)
+    expect(container.querySelector('[data-testid=setup-trust-hint]')?.textContent).toBe('창 아래 «이 컴퓨터의 에이전트»에서 «시작됨» 줄을 눌러, 터미널이 묻는 것에 답하면 이어져요.');
+    expect(wayOut()?.getAttribute('href')).toBe(TODAY_HREF);
     expect(container.querySelectorAll('ol > li').length).toBe(3); // the note is inside ②'s item: still three steps for a screen reader
 
     statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], workdir_fallback_at: 'x' });
@@ -883,10 +895,53 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(text()).toContain('첫 결과가 나왔어요');
     expect(container.querySelector('h1')?.textContent).toBe('에이전트를 시작했어요');
     expect(resultButton().getAttribute('href')).toBe('/o/proj/flow?story=w-1');
-    expect(text()).not.toContain('결과가 나오면 눌러서 일감으로 가요');
+    expect(text()).not.toContain('결과가 나오면');
+    expect(text()).toContain('떠나도 설정은 이 컴퓨터에서 이어져요 — 첫 결과는 일감에서 볼 수 있어요.');
+    // the way out stays next to «결과 보기» (that one is the main button, first)
+    const row = container.querySelector('[data-testid=setup-way-out]');
+    expect([...(row?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '오늘로 가기']);
     const n = polls();
     await tick(10_000);
     expect(polls()).toBe(n); // stops once the result is in
+  });
+
+  it('[SID:4492] ②\'s line: «준비가 끝나면 … 건네요» while it waits · «… 건네는 중이에요» once it runs (ko · bare · en)', async () => {
+    const handedLine = () => (container.querySelectorAll('ol > li[data-state]')[1]!.querySelector('span > span + span')?.textContent ?? '');
+    statusNow = () => status('handed_over', { tools_connected: [] }); // ② waits
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(handedLine()).toBe('준비가 끝나면 «마케팅 루프»를 조사 에이전트에게 건네요');
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] }); // ② runs
+    await tick(2_000);
+    expect(handedLine()).toBe('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
+  });
+
+  it('[SID:4492] one spinner — the earliest step not done · the later ones wait (still ring · their own words) · the note under ①', async () => {
+    const steps = () => [...container.querySelectorAll('ol > li[data-state]')].map((li) => ({
+      state: (li as HTMLElement).dataset.state, spin: !!li.querySelector('.animate-spin'), label: li.querySelector('span > span')?.textContent,
+    }));
+    // the gate: handed over, the first agent's tools not connected yet
+    statusNow = () => status('handed_over', { tools_connected: [] });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(steps()).toEqual([
+      { state: 'running', spin: true, label: '에이전트를 준비하고 있어요' },
+      { state: 'waiting', spin: false, label: '첫 일감을 맡겨요' },
+      { state: 'waiting', spin: false, label: '첫 결과를 받아요' },
+    ]);
+    const first = container.querySelectorAll('ol > li[data-state]')[0]!;
+    expect(first.contains(container.querySelector('[data-testid=setup-trust-hint]'))).toBe(true);
+    // every agent ready: ① done · ② spins · ③ waits
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] });
+    await tick(2_000);
+    expect(steps().map((x) => [x.state, x.spin])).toEqual([['done', false], ['running', true], ['waiting', false]]);
+    expect(steps()[1]!.label).toBe('첫 일감을 맡기고 있어요');
+    // the result: all done, nothing spins
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    await tick(2_000);
+    expect(steps().map((x) => [x.state, x.spin])).toEqual([['done', false], ['done', false], ['done', false]]);
   });
 
   it('«설정 진행 중» for doc counting (AC2): refreshed by every status read — a doc opened 31 min in still counts; gone once the result is in (PO 13:00Z)', async () => {
