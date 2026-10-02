@@ -1591,6 +1591,31 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     hasFocus.mockRestore();
   });
 
+  it('[SID:4504] AC4 a person\'s mouse click on another card chooses it — the press moving focus off the radio does not fold the list first', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    await openRecipes();
+    expect(document.activeElement).toBe(recipeInputs().find((i) => i.checked)); // opening put focus on the chosen radio
+    const label = recipeInputs()[1].closest('label') as HTMLLabelElement; // the card's text, not its small radio
+    // a browser's order for one press on the card: pointerdown · mousedown → focus leaves the radio for nothing (a label's text
+    // is not focusable) → pointerup · mouseup → click (detail 1) on the label, which the label passes to its radio
+    await act(async () => {
+      label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+      label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+      (document.activeElement as HTMLElement).blur();
+    });
+    await act(async () => {
+      label.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+      label.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, detail: 1 }));
+      label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    });
+    expect(recipeInputs()).toHaveLength(0); // folded by the click
+    expect(chosen()?.textContent).toContain('조사 한 명'); // …with the card that was pressed
+    expect(document.activeElement).toBe(chosen()!.querySelector('button'));
+    hasFocus.mockRestore();
+  });
+
   it('one recipe only: its card, no [바꾸기]', async () => {
     recipesNow = () => new Response(JSON.stringify({ recipes: [RECIPES[1]] }), { status: 200 });
     stub(() => new Response('{}'));
