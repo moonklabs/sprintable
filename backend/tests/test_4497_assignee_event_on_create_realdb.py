@@ -155,3 +155,29 @@ async def test_a_creation_rolled_back_by_its_reconcile_leaves_no_story_and_no_ev
             ))).scalars().all() == []
     finally:
         await engine.dispose()
+
+
+async def test_an_announcement_that_fails_on_a_db_write_still_answers_201_once(monkeypatch):
+    """PO 10:20Z — the announcement's own DB write fails (here at the agent Event's seq, after its flush): the story is already
+    committed, so the request answers 201 with it (one row, no announcement left half-written) — not a 500 that a retrying agent
+    or MCP client would turn into a second story."""
+    from sqlalchemy import select, text
+
+    import app.services.event_seq as event_seq
+    from app.models.pm import Story
+
+    async def broken_seq(db, ev):
+        await db.execute(text("SELECT 1/0"))  # a real DB error: the session now needs a rollback
+
+    monkeypatch.setattr(event_seq, "assign_recipient_seq", broken_seq)
+    engine, Session, org_id, project_id, owner_id, _other, agent_id = await _seed()
+    try:
+        r = await _create(Session, org_id, project_id, owner_id, assignee_id=str(agent_id))
+        assert r.status_code == 201, r.text
+        data = r.json().get("data", r.json())
+        assert data["assignee_id"] == str(agent_id) and data["assignee_ids"] == [str(agent_id)]
+        async with Session() as s:
+            assert len((await s.execute(select(Story).where(Story.project_id == project_id))).scalars().all()) == 1
+        assert await _assigned_events(Session, uuid.UUID(data["id"])) == []
+    finally:
+        await engine.dispose()

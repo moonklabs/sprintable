@@ -985,6 +985,9 @@ async def create_story(
             )
         except Exception:
             logger.warning("assignee_changed at create failed (story=%s, the story is already committed)", story.id, exc_info=True)
+            # PO 10:20Z — a failed write inside the announcement leaves the session needing a rollback: drop that half (the story
+            # is already committed), or the refresh below raises and the created story answers 500 (a retry would make it twice)
+            await session.rollback()
         # the response reads the story after these commits: reload it first (lint_commit_before_validate · story #2459 — prod hit
         # MissingGreenlet on a model_validate after a commit despite expire_on_commit=False; the transient fields set above stay)
         await session.refresh(story)
