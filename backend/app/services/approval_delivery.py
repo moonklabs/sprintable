@@ -835,11 +835,12 @@ async def notify_gate_card_recipients_resolved(
                 recipient_project_ids[uuid.UUID(str(mid))] = proj_id
             except (ValueError, TypeError, AttributeError):
                 continue  # 손상된/구형 payload — 지어내지 않고 건너뜀(_batch_resolve_linked_proof 동일 관례).
-    # story #4500: the mentioned ids are the card's — only this org's members receive
-    from app.services.member_resolver import filter_org_member_ids
+    # story #4500: the mentioned ids are the card's — resolved to the living member, only this org's members receive
+    from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
 
-    _in_org = await filter_org_member_ids(set(recipient_project_ids), org_id, db) if recipient_project_ids else set()
-    recipient_project_ids = {m: p for m, p in recipient_project_ids.items() if m in _in_org}
+    _canon = await canonicalize_member_ids(set(recipient_project_ids), db)
+    _in_org = await filter_org_member_ids(set(_canon.values()), org_id, db) if _canon else set()
+    recipient_project_ids = {_canon[m]: p for m, p in recipient_project_ids.items() if _canon[m] in _in_org}
     if not recipient_project_ids:
         return []
 
@@ -1071,11 +1072,12 @@ async def notify_gate_tossed(
                 recipient_project_ids[uuid.UUID(str(mid))] = proj_id
             except (ValueError, TypeError, AttributeError):
                 continue  # 손상된/구형 payload — 지어내지 않고 건너뜀.
-    # story #4500: the mentioned ids are the card's — only this org's members receive
-    from app.services.member_resolver import filter_org_member_ids
+    # story #4500: the mentioned ids are the card's — resolved to the living member, only this org's members receive
+    from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
 
-    _in_org = await filter_org_member_ids(set(recipient_project_ids), org_id, db) if recipient_project_ids else set()
-    recipient_project_ids = {m: p for m, p in recipient_project_ids.items() if m in _in_org}
+    _canon = await canonicalize_member_ids(set(recipient_project_ids), db)
+    _in_org = await filter_org_member_ids(set(_canon.values()), org_id, db) if _canon else set()
+    recipient_project_ids = {_canon[m]: p for m, p in recipient_project_ids.items() if _canon[m] in _in_org}
     if not recipient_project_ids:
         return []
 

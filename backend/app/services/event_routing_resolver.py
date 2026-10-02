@@ -57,12 +57,12 @@ async def _resolve_work_item_stakeholders(
     """story #4500 (Qadir 4912 QA 12:28Z · PO): the stakeholders are members of this org only. The ids come from stored rows
     (assignees · owner · join rows) and from the payload (gate requester · draft author) — any of them can be outside the org
     (written before 4497's check, another write path, a payload naming someone else's member), and a recipient outside the org
-    would get this org's event. The final set goes through `filter_org_member_ids` (the rule 4497's write check uses) — every
-    branch (story · task · goal) and the payload keys alike."""
-    from app.services.member_resolver import filter_org_member_ids
+    would get this org's event. The final set goes through `org_recipient_ids` — aliases resolved to the living member, then
+    `filter_org_member_ids` (the rule 4497's write check uses) — every branch (story · task · goal) and the payload keys alike."""
+    from app.services.member_resolver import org_recipient_ids
 
     ids = await _work_item_stakeholders_unfiltered(db, org_id=org_id, payload=payload)
-    return await filter_org_member_ids(ids, org_id, db) if ids else ids
+    return await org_recipient_ids(ids, org_id, db)
 
 
 async def _work_item_stakeholders_unfiltered(
@@ -161,10 +161,10 @@ async def _resolve_goal_owner(db: AsyncSession, *, org_id: uuid.UUID, payload: d
     )).scalar_one_or_none()
     if not assignee:
         return set()
-    # story #4500: the same org-member rule as work_item_stakeholders
-    from app.services.member_resolver import filter_org_member_ids
+    # story #4500: the same recipient rule as work_item_stakeholders
+    from app.services.member_resolver import org_recipient_ids
 
-    return await filter_org_member_ids({assignee}, org_id, db)
+    return await org_recipient_ids({assignee}, org_id, db)
 
 
 async def _resolve_none(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> set[uuid.UUID]:  # noqa: ARG001

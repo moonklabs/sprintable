@@ -390,3 +390,54 @@ async def test_an_ack_counts_an_org_members_only_recipients_event_of_the_keys_or
         assert status == {1: "delivered", 2: "pending"}
     finally:
         await engine.dispose()
+
+
+async def test_an_assignee_stored_under_a_living_persons_old_alias_id_still_receives():
+    """PO 13:16Z (dev: 4 stories' assignee_id is an old id aliased in member_identity_aliases to a living org member of the same
+    org) — the recipient rule resolves aliases first, then keeps this org's members: the person is reached, under the canonical
+    id. Filtering the raw ids would drop them (they used to receive). The same for a conversation participant stored under the
+    old id."""
+    from sqlalchemy import text
+
+    from app.models.member import Member, MemberIdentityAlias
+    from app.models.team import TeamMember
+    from app.services.member_resolver import conversation_member_ids_in_org
+
+    engine, Session, w = await _two_orgs()
+    try:
+        person, old = uuid.uuid4(), uuid.uuid4()
+        async with Session() as s:
+            s.add(Member(id=person, org_id=w.org_a, type="human", name="살아 있는 사람"))
+            s.add(TeamMember(id=person, org_id=w.org_a, project_id=w.project_a, type="human", name="살아 있는 사람", is_active=True))
+            await s.flush()
+            s.add(MemberIdentityAlias(alias_id=old, member_id=person, org_id=w.org_a, alias_source="human_team_member"))
+            await s.execute(text("UPDATE stories SET assignee_id = :m WHERE id = :s"), {"m": old, "s": w.story})
+            await s.commit()
+        got = await _stakeholders(Session, w.org_a, {"work_item_type": "story", "work_item_id": str(w.story)})
+        assert got == {person}
+        conv_id, _ = await _conversation(Session, w, participants=(w.own, old))
+        async with Session() as s:
+            assert await conversation_member_ids_in_org(s, conv_id, w.org_a) == {w.own, person}
+        # an approval card that mentioned the old id: the card's update reaches the person (canonical id)
+        from app.models.conversation import ConversationMessage
+        from app.services.approval_delivery import notify_gate_card_recipients_resolved
+
+        gate_id = uuid.uuid4()
+        async with Session() as s:
+            s.add(ConversationMessage(id=uuid.uuid4(), conversation_id=conv_id, sender_id=w.own, content="카드",
+                                      mentioned_ids=[old], msg_metadata={"approval_target": {"gate_id": str(gate_id)}}))
+            await s.commit()
+        async with Session() as s:
+            pushes = await notify_gate_card_recipients_resolved(
+                s, org_id=w.org_a, gate_id=gate_id, status="approved", resolver_id=None, resolved_at=None,
+            )
+            await s.rollback()
+        assert {p for p, _ in pushes} == {str(person)}
+        from app.services.approval_delivery import notify_gate_tossed
+
+        async with Session() as s:
+            tossed = await notify_gate_tossed(s, org_id=w.org_a, gate_id=gate_id, target_conversation_id=conv_id, tossed_by_id=w.own)
+            await s.rollback()
+        assert {p for p, _ in tossed} == {str(person)}
+    finally:
+        await engine.dispose()

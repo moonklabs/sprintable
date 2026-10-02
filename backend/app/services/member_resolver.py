@@ -803,6 +803,21 @@ async def resolve_member_display_name(
     return user.display_name if user else None
 
 
+async def org_recipient_ids(
+    member_ids: set[uuid.UUID],
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> set[uuid.UUID]:
+    """story #4500 (PO 13:16Z) — the recipients among these ids: each resolved to its canonical member first
+    (`canonicalize_member_ids` — an old id aliased to a living member, e.g. a story's assignee stored under a legacy human id),
+    then only this org's members (`filter_org_member_ids`). Filtering first would drop a person who still receives today
+    (dev: 4 stories' assignees). Returns the canonical ids — who the delivery is for."""
+    if not member_ids:
+        return set()
+    canonical = set((await canonicalize_member_ids(member_ids, session)).values())
+    return await filter_org_member_ids(canonical, org_id, session)
+
+
 async def conversation_member_ids_in_org(
     session: AsyncSession,
     conversation_id: uuid.UUID,
@@ -820,7 +835,7 @@ async def conversation_member_ids_in_org(
         .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
         .where(ConversationParticipant.conversation_id == conversation_id, Conversation.org_id == org_id, *where)
     )).scalars().all())
-    return await filter_org_member_ids(ids, org_id, session) if ids else set()
+    return await org_recipient_ids(ids, org_id, session)
 
 
 async def conversation_member_ids_of_its_org(
@@ -839,7 +854,7 @@ async def conversation_member_ids_of_its_org(
     )).all()
     if not rows:
         return set()
-    return await filter_org_member_ids({r[0] for r in rows}, rows[0][1], session)
+    return await org_recipient_ids({r[0] for r in rows}, rows[0][1], session)
 
 
 async def filter_org_member_ids(
