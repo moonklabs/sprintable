@@ -104,6 +104,20 @@ describe('[SID:4486] a boost paused at its cap', () => {
     await flush();
     const dialog = $('boost-start-confirm-dialog')!;
     expect(dialog.querySelector('[data-testid="boost-dialog-error"]')?.textContent).toBe(cage.boostStartBlockedCapReached);
+    // Yuna CHANGES ⓑ — after that refusal [시작] is off; only the dialog's close button is left to press
+    expect(($('boost-start-confirm') as HTMLButtonElement).disabled).toBe(true);
+    const close = [...dialog.querySelectorAll('button')].find((b) => b.textContent === cage.boostExecutionCancel) as HTMLButtonElement;
+    expect(close.disabled).toBe(false);
+  });
+
+  it('a capped cycle offers no [홍보 시작] whatever the run says — the fact as a muted line, [홍보 취소] kept', async () => {
+    spendNow = { run_status: null, start_command: null, gate_status: 'approved', can_cancel: true, cap_reached_at: '2026-10-02T01:52:42Z' };
+    await mount();
+    expect($('boost-start-trigger')).toBeNull();
+    const line = $('boost-start-blocked-cap')!;
+    expect(line.textContent).toBe(cage.boostStartBlockedCapReached);
+    expect(line.className).toContain('text-muted-foreground');
+    expect($('boost-cancel-trigger')).not.toBeNull();
   });
 
   it('a start the worker stopped at the cap reads the same sentence on the card', async () => {

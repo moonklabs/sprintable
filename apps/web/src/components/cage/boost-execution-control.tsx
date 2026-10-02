@@ -189,6 +189,9 @@ export function BoostExecutionControl({
   const [spendGateStatus, setSpendGateStatus] = useState<string | null>(null);
   const [canCancel, setCanCancel] = useState(false);
   const [capReachedAt, setCapReachedAt] = useState<string | null>(null);
+  // story #4486 (Yuna CHANGES ⓑ) — the start dialog was refused at the cap (an older card · the cap reached while it was open):
+  // [시작] goes off, only [취소] is left
+  const [startRefusedAtCap, setStartRefusedAtCap] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
   const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
@@ -345,6 +348,7 @@ export function BoostExecutionControl({
         setActionError(body?.error?.code === CAP_REACHED
           ? (operation === 'start' ? t('boostStartBlockedCapReached') : t('boostCapReachedNoResume'))
           : t('boostExecutionActionError'));
+        if (body?.error?.code === CAP_REACHED && operation === 'start') setStartRefusedAtCap(true);
         return;
       }
       onDone();
@@ -485,7 +489,7 @@ export function BoostExecutionControl({
     <p role="alert" className="text-sm text-destructive" data-testid="boost-dialog-error">{actionError}</p>
   ) : null;
   // opening a confirmation starts it clean — an older action's refusal is not this one's
-  const openConfirm = (open: (v: boolean) => void) => { setActionError(null); open(true); };
+  const openConfirm = (open: (v: boolean) => void) => { setActionError(null); setStartRefusedAtCap(false); open(true); };
 
   if (!loaded) return null;
 
@@ -860,12 +864,18 @@ export function BoostExecutionControl({
         {actionError ? <p className="text-xs text-destructive" data-testid="boost-execution-error">{actionError}</p> : null}
         {waitingLine}
         {capNoticeBlock}
-        <Button
-          variant="outline" size="sm" disabled={beforeStart || waiting === 'start'}
-          onClick={() => openConfirm(setStartConfirmOpen)} data-testid="boost-start-trigger"
-        >
-          {t('boostExecutionStart')}
-        </Button>
+        {/* story #4486 (Yuna CHANGES ⓐ) — this cycle reached its cap: no [홍보 시작] whatever the run's state; the fact before
+            anyone presses (muted, not a red refusal) · [홍보 취소] stays the way on */}
+        {capReachedAt != null ? (
+          <p className="text-xs text-muted-foreground" data-testid="boost-start-blocked-cap">{t('boostStartBlockedCapReached')}</p>
+        ) : (
+          <Button
+            variant="outline" size="sm" disabled={beforeStart || waiting === 'start'}
+            onClick={() => openConfirm(setStartConfirmOpen)} data-testid="boost-start-trigger"
+          >
+            {t('boostExecutionStart')}
+          </Button>
+        )}
         {beforeStart ? (
           <p className="text-xs text-muted-foreground" data-testid="boost-start-before-schedule">
             {t('boostExecutionStartBeforeSchedule', { date: formatScheduledAt(sealedAdsStartsAt, teamTz, displayTimezone).display })}
@@ -888,7 +898,7 @@ export function BoostExecutionControl({
               </Button>
               <Button
                 onClick={() => void doAction('start', () => setStartConfirmOpen(false))}
-                disabled={submitting} data-testid="boost-start-confirm"
+                disabled={submitting || startRefusedAtCap} data-testid="boost-start-confirm"
               >
                 {submitting ? t('boostExecutionStarting') : t('boostExecutionStartConfirm')}
               </Button>
