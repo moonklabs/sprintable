@@ -24,16 +24,21 @@ interface StorageKeyBase {
   where: string[];
 }
 
-/** account: cleared at the moments in `on` (required and never empty — every account key says when) · kept: stays with the device */
+/** An account key is always cleared on a sign-out (Kadir · PO 05:02Z — `['switch']` alone would outlive a sign-out); a switch is optional. */
+export type AccountClearMoments = readonly ['signout'] | readonly ['signout', 'switch'];
+
+/** account: cleared at the moments in `on` (required · always with `signout`) · kept: stays with the device */
 export type StorageKeyEntry =
-  | (StorageKeyBase & { scope: 'account'; on: readonly [ClearMoment, ...ClearMoment[]] })
+  | (StorageKeyBase & { scope: 'account'; on: AccountClearMoments })
   | (StorageKeyBase & { scope: 'kept'; on?: never });
 
 export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   // ── account: flows into the next account's screen or requests, or holds a person's words · state ──
   { key: 'sprintable_tab_project_id', area: 'session', scope: 'account', on: ['signout', 'switch'],
     where: ['app/dashboard/dashboard-shell.tsx', 'lib/project-context-client.ts', 'components/nav/org-hint-banner.tsx', 'hooks/use-unified-switcher.ts'] },
-  { key: 'sprintable:field-draft:v1:', prefix: true, area: 'session', scope: 'account', on: ['signout'], where: ['hooks/use-field-draft.ts'] },
+  // drafts are `…:u:<owner>:…` since story #4490 (owner-keyed: a switch keeps them, nobody else sees them); the head stays the
+  // prefix so a sign-out also clears drafts written before then (no owner segment) — lib/tab-owner.ts adopts those
+  { key: 'sprintable:field-draft:v1:', prefix: true, area: 'session', scope: 'account', on: ['signout'], where: ['hooks/use-field-draft.ts', 'lib/tab-owner.ts'] },
   { key: 'sp_onboarding_org_draft:', prefix: true, area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-form.tsx'] },
   { key: 'sprintable_onboarding_session_id', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-telemetry.ts'] },
   { key: 'sprintable_pending_toast', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/chat/cross-project-toast-provider.tsx'] },
@@ -41,7 +46,7 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'au-usage-warn-dismissed-band', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['ee/components/billing/au-usage-banner.tsx'] },
   { key: 'storage-capacity-toast-shown', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/storage/storage-capacity-toast-provider.tsx'] },
   { key: 'storage-capacity-warn-dismissed', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/storage/storage-capacity-banner.tsx'] },
-  { key: 'sprintable:chat-draft:', prefix: true, area: 'local', scope: 'account', on: ['signout'], where: ['components/chat/chat-input.tsx'] },
+  { key: 'sprintable:chat-draft:', prefix: true, area: 'local', scope: 'account', on: ['signout'], where: ['components/chat/chat-input.tsx', 'lib/tab-owner.ts'] },
   { key: 'steer-recipients:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['app/(authenticated)/[ws]/[proj]/goals/steer-dispatch-modal.tsx'] },
   { key: 'docs:recents:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['components/docs/use-recent-docs.ts'] },
   { key: 'sprintable_activation_checklist_complete', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['hooks/use-activation-status.ts'] },
@@ -69,23 +74,28 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'sp_reopen_once_url', area: 'session', scope: 'kept', where: ['lib/hard-reload.ts'] },
   { key: 'sprintable.releaseNotes.seen.', prefix: true, area: 'local', scope: 'kept', where: ['components/release-notes/release-notes-gate.tsx'] },
   { key: 'sprintable.billing.paymentAttempt', prefix: true, area: 'local', scope: 'kept', where: ['ee/components/billing/payment-attempt.ts'] },
+  // story #4490 — who these values belong to (one per store) and the one-shot «the next owner change is an intended switch» mark
+  { key: 'sprintable_tab_owner', area: 'local', scope: 'kept', where: ['lib/tab-owner.ts'] },
+  { key: 'sprintable_tab_owner', area: 'session', scope: 'kept', where: ['lib/tab-owner.ts'] },
+  { key: 'sprintable_owner_handoff', area: 'local', scope: 'kept', where: ['lib/tab-owner.ts'] },
 ];
 
 function matches(entry: StorageKeyEntry, key: string): boolean {
   return entry.prefix ? key.startsWith(entry.key) : key === entry.key;
 }
 
-/** The account's keys this browser holds now that `moment` clears, from both stores. Kept keys (and anything unknown) stay. */
-export function clearAccountScopedStorage(moment: ClearMoment): void {
+/** The account's keys this browser holds now that `moment` clears, from both stores (or only `areas`). Kept keys (and anything
+ * unknown) stay. */
+export function clearAccountScopedStorage(moment: ClearMoment, areas: readonly StorageArea[] = ['session', 'local']): void {
   if (typeof window === 'undefined') return;
-  for (const area of ['session', 'local'] as const) {
+  for (const area of areas) {
     let store: Storage;
     try {
       store = area === 'session' ? window.sessionStorage : window.localStorage;
     } catch {
       continue; // storage blocked (a private window): nothing was kept there
     }
-    const entries = BROWSER_STORAGE_KEYS.filter((e) => e.area === area && e.scope === 'account' && e.on.includes(moment));
+    const entries = BROWSER_STORAGE_KEYS.filter((e) => e.area === area && e.scope === 'account' && (e.on as readonly ClearMoment[]).includes(moment));
     const doomed: string[] = [];
     try {
       for (let i = 0; i < store.length; i += 1) {

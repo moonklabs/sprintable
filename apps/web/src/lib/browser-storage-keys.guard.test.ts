@@ -36,7 +36,15 @@ const NOT_A_STORAGE_KEY: Record<string, string> = {
   'preset.marketing.blog_article': 'lib/desktop-setup.ts DEFAULT_SETUP_RECIPE_KEY — a recipe id sent to the server, never stored',
 };
 
-const users = sourceFiles(SRC).filter((f) => CALL.test(fs.readFileSync(f, 'utf8')) && !(rel(f) in NOT_A_KEY_OWNER));
+// story #4490 (Kadir 05:06Z) — a helper that takes its key from the caller and calls storage itself: the caller never calls
+// storage, so it is read here as a user too (its `storageKey: '…'` / `…StorageKey = useMemo(() => '…')` must be in the list).
+// Today the one such helper is useContextualPanelState (components/ui/contextual-panel-layout.tsx).
+const KEY_TO_HELPER = /useContextualPanelState\(\s*\{/;
+
+const users = sourceFiles(SRC).filter((f) => {
+  const text = fs.readFileSync(f, 'utf8');
+  return (CALL.test(text) || KEY_TO_HELPER.test(text)) && !(rel(f) in NOT_A_KEY_OWNER);
+});
 
 /** Key spellings in a file that uses the storage API. Template heads before the first `${` · empty heads are skipped. */
 function spelledKeys(text: string): string[] {
@@ -92,6 +100,9 @@ describe('[SID:4487] every browser storage key has a scope', () => {
     // an alias and an injected store (Kadir 4902)
     expect(spelledKeys("const s = window.localStorage; s.setItem('alias-key', '1');").filter((k) => !known(k))).toEqual(['alias-key']);
     expect(spelledKeys("const ACTIVE = 'injected-key'; storage?.setItem(ACTIVE, v);").filter((k) => !known(k))).toEqual(['injected-key']);
+    // a key handed to the storage helper by a file that never calls storage itself (Kadir 05:06Z)
+    expect(KEY_TO_HELPER.test("useContextualPanelState({ storageKey: 'zz-panel', defaultOpen: true })")).toBe(true);
+    expect(spelledKeys("useContextualPanelState({ storageKey: 'zz-panel', defaultOpen: true })").filter((k) => !known(k))).toEqual(['zz-panel']);
     // a short head is not a longer entry's key
     expect(known('sprintable_')).toBe(false);
     expect(known('docs:')).toBe(false);

@@ -213,7 +213,8 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
     const { violations, fileCount } = __scan;
     expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
     expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
-    expect(fileCount).toBe(128);
+    // story #4490 — `onboarding/layout.tsx`(브라우저 주인 확인 TabOwnerGate) 하나로 128→129(default export만).
+    expect(fileCount).toBe(129);
     expect(violations).toEqual([]);
   });
 });

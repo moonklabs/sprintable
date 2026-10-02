@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { RealtimeProvider } from '@/components/realtime-provider';
+import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
 
 /**
  * story #4008(E-UX-OVERHAUL·v3 셸 실시간) — v3 라우트(`/chat`, 추후 `/today`)는
@@ -43,5 +44,10 @@ export default async function V3Layout({ children }: { children: React.ReactNode
   }).catch(() => null);
   const me = meRes?.ok ? ((await meRes.json()) as { id?: string } | null) : null;
 
-  return <RealtimeProvider currentTeamMemberId={me?.id}>{children}</RealtimeProvider>;
+  // story #4490 — the previous person's browser values go before anything below reads them
+  return (
+    <TabOwnerGate userId={session.user_id}>
+      <RealtimeProvider currentTeamMemberId={me?.id}>{children}</RealtimeProvider>
+    </TabOwnerGate>
+  );
 }

@@ -7,6 +7,7 @@ import { ACCOUNT_CAP } from '@/lib/auth/account-limits';
 import { fetchWithAuth } from '@/lib/db/client';
 import { notifyAccountChanged } from '@/lib/native-shell-bridge';
 import { clearAccountScopedStorage } from '@/lib/browser-storage-keys';
+import { handOwnerTo, markIntendedSwitch } from '@/lib/tab-owner';
 
 export interface Account {
   account_id: string;
@@ -81,6 +82,7 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
       }
       notifyAccountChanged(); // story #4397 — the app re-registers its push device for the new account
       clearAccountScopedStorage('switch'); // story #4487 — the previous account's browser values do not reach the next one (drafts stay)
+      handOwnerTo(acc.account_id); // story #4490 — the vault account id is the next user's id (RT sub): an intended owner change
       window.location.assign('/inbox'); // active 전환 → 풀 리로드로 전 컨텍스트 리셋
     } catch {
       setError(t('switchFailed'));
@@ -105,6 +107,7 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
       }
       const j = (await r.json().catch(() => null)) as { data?: { redirect?: string } } | null;
       clearAccountScopedStorage('switch'); // story #4487 — the account being added signs in next in this tab (drafts stay)
+      markIntendedSwitch(); // story #4490 — who signs in next is not known yet: the next owner change is intended (10 min)
       window.location.assign(j?.data?.redirect ?? '/login');
     } catch {
       // story #3638(유나 §8 별건) — 계정 추가 실패 시 busy 스피너만 멈추고 조용했다.

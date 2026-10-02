@@ -45,7 +45,9 @@ beforeEach(() => {
 async function shellProps(): Promise<Record<string, unknown>> {
   const { default: AuthenticatedLayout } = await import('./layout');
   const el = (await AuthenticatedLayout({ children: null })) as ReactElement<Record<string, unknown>>;
-  return el.props;
+  // story #4490 — the shell sits inside TabOwnerGate (the browser owner is checked first)
+  const shell = el.props['children'] as ReactElement<Record<string, unknown>>;
+  return shell.props;
 }
 
 describe('(authenticated) 레이아웃 — 첫 문서 임계 경로(story #4219 F1·D1)', () => {

@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
 
 /**
  * story #3962(E-UX-OVERHAUL·「오늘」 구현 3/N) — `/today`는 (authenticated) 레이아웃
@@ -18,5 +19,6 @@ export default async function TodayV3Layout({ children }: { children: React.Reac
   const session = await getServerSession();
   if (!session) redirect(buildLoginRedirect(currentPath));
 
-  return <>{children}</>;
+  // story #4490 — the previous person's browser values go before anything below reads them
+  return <TabOwnerGate userId={session.user_id}>{children}</TabOwnerGate>;
 }

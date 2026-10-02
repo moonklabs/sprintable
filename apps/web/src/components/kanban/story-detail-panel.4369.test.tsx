@@ -182,7 +182,7 @@ describe('StoryDetailPanel — 댓글 칸 Esc · 초안([SID:4369] 유나 규칙
 // 유나 (가) — 초안 남은 설명/AC는 다시 열면 편집 모드로 초안 · «취소» = 초안 지우고 보기 모드 · 서버 글이 바뀌었어도 초안(합치기 없음).
 describe('StoryDetailPanel — 설명 · AC 초안([SID:4369] 유나 (가))', () => {
   const S1D = { ...S1, description: '원래 설명', acceptance_criteria: '원래 AC' } as KanbanStory;
-  const draftKey = (field: string) => `sprintable:field-draft:v1:story-panel:s1:${field}`;
+  const draftKey = (field: string) => `sprintable:field-draft:v1:u:-:story-panel:s1:${field}`; // story #4490 — owner segment (none set: -)
   const editorOf = (orig: string) => [...container.querySelectorAll('textarea')].find((t) => t.value.startsWith(orig)) ?? null;
   async function openEditor(label: string) {
     const head = [...container.querySelectorAll('span')].find((x) => x.textContent === label)!;
