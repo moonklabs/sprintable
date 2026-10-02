@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
@@ -217,6 +217,69 @@ async def pause_left_campaign_for_cancel(db: AsyncSession, *, gate_id: uuid.UUID
         db, org_id=run.org_id, gate_id=gate_id, requester_member_id=run.cancel_requested_by, initiated_by="scheduler",
     )
     return True
+
+
+# story #4491 (PO 06:26Z) — a cancel's pause that failed at the provider (dead_letter): the spend capture is scheduled again after
+# these delays (by how many of the cycle's pauses have failed); past them, the regular daily capture and a person in Ads Manager
+CANCEL_PAUSE_RETRY_DELAYS = (timedelta(minutes=5), timedelta(minutes=20), timedelta(minutes=80))
+
+
+async def _failed_pauses_this_cycle(db: AsyncSession, *, gate_id: uuid.UUID, cycle: int) -> int:
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import OP_PAUSE, in_ads_boost_cycle
+
+    return (await db.execute(
+        select(func.count()).select_from(PublicationCommand).where(
+            PublicationCommand.gate_id == gate_id, PublicationCommand.operation == OP_PAUSE,
+            PublicationCommand.status == "dead_letter", in_ads_boost_cycle(cycle),
+        )
+    )).scalar_one()
+
+
+async def schedule_capture_after_failed_cancel_pause(db: AsyncSession, *, command, now: datetime) -> bool:
+    """story #4491 (Qadir 05:25Z · PO 06:26Z) — a cancelled boost whose pause ended dead_letter at the provider: nothing retried it
+    (a dead_letter has no next attempt · the cancel's hook asks once · 4466's capture-now needed the run live at the cancel), so
+    the campaign ran until the next daily capture — or never, past the boost's end. Here the gate is voided, so a spend capture
+    makes the scheduler pause it again (`_pause_if_off_approved` · 4417's «a failed pause makes a new one»). Scheduled 5 · 20 ·
+    80 minutes after the 1st · 2nd · 3rd failed pause of the cycle (`_schedule_capture_now` with a due time — the 4466 row);
+    after the third, nothing more here: the daily captures and the card («광고 관리자에서 직접 멈춰 주세요»). A new cycle counts
+    from zero. For a run «running», or «pending» with a campaign (the ACTIVE answer lost — PO 06:34Z: treated as on)."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.services.ads_boost_execution import OP_PAUSE
+    from app.services.ads_boost_gate_exit import _schedule_capture_now
+
+    if command.operation != OP_PAUSE or command.status != "dead_letter":
+        return False
+    run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == command.gate_id))).scalar_one_or_none()
+    if (
+        run is None or run.cancel_requested_at is None or run.status not in ("running", "pending") or run.campaign_id is None
+        or (command.ads_boost_cycle or 1) != run.cycle_no
+    ):
+        return False  # «pending» with ids under a cancel = not known to be off, as live as «running» (PO 06:34Z)
+    failed = await _failed_pauses_this_cycle(db, gate_id=command.gate_id, cycle=run.cycle_no)
+    if failed < 1 or failed > len(CANCEL_PAUSE_RETRY_DELAYS):
+        return False
+    gate = (await db.execute(select(Gate).where(Gate.id == command.gate_id))).scalar_one()
+    due_at = now + CANCEL_PAUSE_RETRY_DELAYS[failed - 1]
+    await db.run_sync(lambda session: _schedule_capture_now(session, gate, due_at=due_at))
+    await db.commit()
+    return True
+
+
+async def cancel_pause_retry_state(db: AsyncSession, *, run) -> str | None:
+    """story #4491 (Yuna 06:27Z) — what the card says under «취소 중» when the cycle's latest pause failed at the provider:
+    «scheduled» (the server will try again — a capture is due) · «exhausted» (no automatic try left: a person in Ads Manager).
+    None otherwise (no cancel · no failed pause · a pause in flight)."""
+    from app.services.ads_boost_execution import OP_PAUSE, _latest_toggle
+
+    if run is None or run.cancel_requested_at is None:
+        return None
+    latest = await _latest_toggle(db, gate_id=run.gate_id, cycle=run.cycle_no)
+    if latest is None or latest.operation != OP_PAUSE or latest.status != "dead_letter":
+        return None
+    failed = await _failed_pauses_this_cycle(db, gate_id=run.gate_id, cycle=run.cycle_no)
+    live = run.status in ("running", "pending") and run.campaign_id is not None
+    return "scheduled" if live and failed <= len(CANCEL_PAUSE_RETRY_DELAYS) else "exhausted"
 
 
 def _reset_run(run) -> None:

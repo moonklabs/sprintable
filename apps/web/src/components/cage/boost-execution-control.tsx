@@ -115,6 +115,8 @@ interface SpendData {
   // story #4460 — a cancel asked for and not finished · the cycles that ended before this one · the gate's status (voided =
   // cancelled) · whether this viewer may cancel (the requester or an owner/admin — the server's own rule)
   cancel_requested?: boolean;
+  // story #4491 — under «취소 중», the cycle's pause failed at the provider: tried again automatically · no automatic try left
+  pause_retry?: 'scheduled' | 'exhausted' | null;
   previous_cycles?: PreviousCycle[];
   gate_status?: string | null;
   can_cancel?: boolean;
@@ -185,6 +187,7 @@ export function BoostExecutionControl({
   const [pauseCommand, setPauseCommand] = useState<SpendData['pause_command']>(null);
   // story #4460 — «홍보 취소»
   const [cancelRequested, setCancelRequested] = useState(false);
+  const [pauseRetry, setPauseRetry] = useState<'scheduled' | 'exhausted' | null>(null);
   const [previousCycles, setPreviousCycles] = useState<PreviousCycle[]>([]);
   const [spendGateStatus, setSpendGateStatus] = useState<string | null>(null);
   const [canCancel, setCanCancel] = useState(false);
@@ -300,6 +303,7 @@ export function BoostExecutionControl({
       setCreatedBudget(d.created_budget_minor ?? null);
       setPauseCommand(d.pause_command ?? null);
       setCancelRequested(Boolean(d.cancel_requested));
+      setPauseRetry(d.pause_retry === 'scheduled' || d.pause_retry === 'exhausted' ? d.pause_retry : null);
       setPreviousCycles(Array.isArray(d.previous_cycles) ? d.previous_cycles : []);
       setSpendGateStatus(d.gate_status ?? null);
       setCanCancel(Boolean(d.can_cancel));
@@ -649,7 +653,25 @@ export function BoostExecutionControl({
         {pauseStoppedOnConnection(pauseCommand) ? (
           <p className="text-xs text-foreground" data-testid="boost-pause-connection-lost">{t('boostPauseConnectionLost')}</p>
         ) : null}
-        {capNoticeBlock}
+        {/* story #4491 (Yuna 06:27Z) — the server knows the pause failed: say so now (the 4461 line's place and shape), not after
+            the 3-minute notice. Retrying → the try is promised, not a time; none left → Ads Manager (Meta only) */}
+        {pauseRetry ? (
+          <>
+            <p className="text-xs text-foreground" data-testid="boost-cancel-pause-failed">
+              {pauseRetry === 'scheduled'
+                ? (runAd.ad_channel === 'ads_sandbox' ? t('boostCancelPauseFailedRetryingSandbox') : t('boostCancelPauseFailedRetrying'))
+                : (runAd.ad_channel === 'ads_sandbox' ? t('boostCancelPauseFailedExhaustedSandbox') : t('boostCancelPauseFailedExhausted'))}
+            </p>
+            {pauseRetry === 'exhausted' && runAd.ad_channel === 'meta_ads' ? (
+              <a
+                href={adsManagerCampaignUrl(runAd.ad_account_id, runAd.campaign_id)} target="_blank" rel="noopener noreferrer"
+                className="text-xs text-primary hover:underline" data-testid="boost-cancel-pause-failed-link"
+              >
+                {t('boostOpenAdsManager')}<span aria-hidden="true"> ↗</span>
+              </a>
+            ) : null}
+          </>
+        ) : capNoticeBlock}
         {previousCyclesBlock}
       </div>
     );

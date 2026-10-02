@@ -361,6 +361,9 @@ class SpendSummaryResponse(BaseModel):
     pause_command: PauseCommandView | None = None
     # story #4460 — a cancel asked for and not finished («취소 중») · the cycles that ended before this one (campaign · spend)
     cancel_requested: bool = False
+    # story #4491 (Yuna 06:27Z) — under «취소 중», the cycle's pause failed at the provider: «scheduled» (tried again
+    # automatically) · «exhausted» (no automatic try left — Ads Manager) · null otherwise
+    pause_retry: str | None = None
     previous_cycles: list[PreviousCycleView] = []
     # story #4460 (Yuna 16:46Z) — the gate's status (voided = cancelled) and whether this viewer may cancel it (the requester or an
     # owner/admin, on a gate a cancel still applies to): the card shows «홍보 취소» only then; the 403 line is a fallback
@@ -509,6 +512,7 @@ async def _get_ads_boost_spend_endpoint(
         # story #4461 — the latest pause (a pause stopped on the connection is told honestly)
         pause_command=PauseCommandView(**summary["pause_command"]) if summary.get("pause_command") else None,
         cancel_requested=summary.get("cancel_requested", False),
+        pause_retry=summary.get("pause_retry"),
         # story #4460 (Qadir 02:22Z) — a past cycle's campaign id follows the current one's rule: people only
         previous_cycles=[
             PreviousCycleView(**{**c, "campaign_id": c["campaign_id"] if caller_is_human else None})
