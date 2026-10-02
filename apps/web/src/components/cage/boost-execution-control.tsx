@@ -469,6 +469,14 @@ export function BoostExecutionControl({
     }
   };
 
+  // story #4460 (Yuna 00:38Z · PO: every confirmation in this file) — while a confirmation is open, its refusal is said inside
+  // it, above the buttons: the card's line sits under the overlay, and the money button would look as if it did nothing.
+  const dialogError = actionError ? (
+    <p role="alert" className="text-sm text-destructive" data-testid="boost-dialog-error">{actionError}</p>
+  ) : null;
+  // opening a confirmation starts it clean — an older action's refusal is not this one's
+  const openConfirm = (open: (v: boolean) => void) => { setActionError(null); open(true); };
+
   if (!loaded) return null;
 
   // the approved conditions (budget · schedule · objective) — the start confirmation and the «link existing campaign»
@@ -579,7 +587,7 @@ export function BoostExecutionControl({
   // story #4460 — «홍보 취소» (only for whom the server says may: the requester or an owner/admin) and its confirmation
   const cancelControls = canCancel && !cancelRequested && !offApproved ? (
     <>
-      <Button variant="outline" size="sm" disabled={submitting} onClick={() => setCancelConfirmOpen(true)} data-testid="boost-cancel-trigger">
+      <Button variant="outline" size="sm" disabled={submitting} onClick={() => openConfirm(setCancelConfirmOpen)} data-testid="boost-cancel-trigger">
         {t('boostCancel')}
       </Button>
       <Dialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
@@ -592,6 +600,7 @@ export function BoostExecutionControl({
           {runAd.ad_channel === 'meta_ads' ? (
             <p className="text-sm text-muted-foreground" data-testid="boost-cancel-confirm-meta">{t('boostCancelConfirmMetaNote')}</p>
           ) : null}
+          {dialogError}
           <DialogFooter>
             <Button variant="outline" autoFocus onClick={() => setCancelConfirmOpen(false)} disabled={submitting}>
               {t('boostCancelClose')}
@@ -663,12 +672,12 @@ export function BoostExecutionControl({
             // story #4412 — link the campaign this start may have made (Yuna 00:49Z: link first, then retry, both outline)
             <Button
               variant="outline" size="sm" disabled={adopting}
-              onClick={() => { setAdoptOutcome(null); setAdoptOpen(true); }} data-testid="boost-adopt-trigger"
+              onClick={() => { setAdoptOutcome(null); openConfirm(setAdoptOpen); }} data-testid="boost-adopt-trigger"
             >
               {t('boostAdoptTitle')}
             </Button>
           ) : null}
-          <Button variant="outline" size="sm" onClick={() => setNeedsCheckOpen(true)} data-testid="boost-needs-check-retry-trigger">
+          <Button variant="outline" size="sm" onClick={() => openConfirm(setNeedsCheckOpen)} data-testid="boost-needs-check-retry-trigger">
             {t('boostNeedsCheckRetry')}
           </Button>
         </div>
@@ -725,6 +734,7 @@ export function BoostExecutionControl({
               <p className="text-foreground" data-testid="boost-adopt-weight">{t('boostAdoptWeight')}</p>
             </div>
             {sealedFacts}
+            {dialogError}
             <DialogFooter>
               <Button variant="outline" onClick={() => setAdoptOpen(false)} disabled={adopting}>
                 {t('boostExecutionCancel')}
@@ -766,6 +776,7 @@ export function BoostExecutionControl({
               />
               {outcomeUnknown ? t('boostNeedsCheckConfirmNoCampaign') : t('boostNeedsCheckConfirmChecked')}
             </label>
+            {dialogError}
             <DialogFooter>
               <Button variant="outline" onClick={() => setNeedsCheckOpen(false)} disabled={submitting}>
                 {t('boostExecutionCancel')}
@@ -838,7 +849,7 @@ export function BoostExecutionControl({
         {capNoticeBlock}
         <Button
           variant="outline" size="sm" disabled={beforeStart || waiting === 'start'}
-          onClick={() => setStartConfirmOpen(true)} data-testid="boost-start-trigger"
+          onClick={() => openConfirm(setStartConfirmOpen)} data-testid="boost-start-trigger"
         >
           {t('boostExecutionStart')}
         </Button>
@@ -857,6 +868,7 @@ export function BoostExecutionControl({
             {/* 봉인 3값 그대로 재확인(페드루 PO 콜①) — RecipeApprovalFactsBlock과 같은
                 포맷터 재사용(formatMinorCurrency·formatScheduledAt), 새 표시 로직 0. */}
             {sealedFacts}
+            {dialogError}
             <DialogFooter>
               <Button variant="outline" onClick={() => setStartConfirmOpen(false)} disabled={submitting}>
                 {t('boostExecutionCancel')}
@@ -967,7 +979,7 @@ export function BoostExecutionControl({
       {spendBlockedCode === SPEND_CONTEXT_LOST || runStatus === 'pause_pending' ? null /* no connection · or a pause already requested */ : runStatus === 'running' ? (
         <Button
           variant="outline" size="sm" disabled={submitting || waiting === 'pause'}
-          onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger"
+          onClick={() => openConfirm(setPauseConfirmOpen)} data-testid="boost-pause-trigger"
         >
           {t('boostExecutionPause')}
         </Button>
@@ -1011,6 +1023,7 @@ export function BoostExecutionControl({
             <DialogTitle>{t('boostExecutionPauseConfirmTitle')}</DialogTitle>
             <DialogDescription>{t('boostExecutionPauseConfirmDescription')}</DialogDescription>
           </DialogHeader>
+          {dialogError}
           <DialogFooter>
             <Button variant="outline" onClick={() => setPauseConfirmOpen(false)} disabled={submitting}>
               {t('boostExecutionCancel')}
