@@ -200,7 +200,9 @@ async def pause_left_campaign_for_cancel(db: AsyncSession, *, gate_id: uuid.UUID
     the cancel committed, right past the worker's last check) alike — one place for every path that ends a command with the
     campaign on, not a check after each ACTIVE call. Asked only when the cycle's latest toggle is not already a pause (a person's
     [중지], or this hook's own earlier pause — one that then fails is not asked again here: 4417's retry rules and a person's press
-    carry it; asking after every command would loop). The scheduler's pause, attributed to the person who cancelled."""
+    carry it; asking after every command would loop). The scheduler's pause (initiated_by «scheduler»): the person who cancelled is
+    its requester on the command, and its history row is the platform's — «시스템» (4484: a scheduler-sent command's activity is
+    actor_type «platform», no actor)."""
     from app.models.ads_boost_run import AdsBoostRun
     from app.services.ads_boost_execution import OP_PAUSE, _latest_toggle, request_ads_boost_pause
 
