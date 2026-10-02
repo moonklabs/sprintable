@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt, formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -570,6 +570,7 @@ export function BoostExecutionControl({
   const offApproved = effectiveGateStatus != null && effectiveGateStatus !== 'approved'; // story #4466
 
   // story #4460 (Yuna 16:46Z) — the cycles that ended before this one: «지난 홍보 · {기간} · 쓴 광고비 {amount}»
+  // (a cycle's start and end happened — the viewer's zone, as 4443 draws events; promised times, like the ad window, are the team's)
   const previousCyclesBlock = previousCycles.length ? (
     <ul className="space-y-1 text-xs text-muted-foreground" data-testid="boost-previous-cycles">
       {previousCycles.map((c) => (
