@@ -246,7 +246,11 @@ async def _pause_if_off_approved(db: AsyncSession, *, gate: Gate, run) -> None:
     """story #4466 (다) — no money on values nobody approved: a live boost whose gate is no longer approved (re-request · undo ·
     then void / hold / reject) is paused by the scheduler («다시 결재 중»). Every capture checks it; leaving «approved» schedules a
     capture right away (`ads_boost_gate_exit`). Already paused or a pause in flight → nothing (no second pause)."""
-    if gate.status == "approved" or run.status not in _LIVE_RUN_STATUSES or not run.campaign_id:
+    if gate.status == "approved" or not run.campaign_id:
+        return
+    # story #4491 (PO 06:34Z) — under a cancel, a campaign that was made and never confirmed off (run «pending» with its ids: the
+    # ACTIVE answer was lost — 4460 treats it as on) is paused like a running one: a pause sent in error does no harm
+    if run.status not in _LIVE_RUN_STATUSES and not (run.status == "pending" and run.cancel_requested_at is not None):
         return
     if await _pause_by_scheduler(db, gate=gate, run=run):
         logger.info("ads_boost_paused_off_approved gate_id=%s gate_status=%s", gate.id, gate.status)

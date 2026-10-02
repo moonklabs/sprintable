@@ -41,9 +41,13 @@ def _schedule_capture_now(session: Session, gate, *, due_at: datetime | None = N
 
     conn = session.connection()  # connection-level statements: no autoflush inside the flush
     run = conn.execute(
-        select(AdsBoostRun.campaign_id, AdsBoostRun.status, AdsBoostRun.created_connection_id).where(AdsBoostRun.gate_id == gate.id)
+        select(
+            AdsBoostRun.campaign_id, AdsBoostRun.status, AdsBoostRun.created_connection_id, AdsBoostRun.cancel_requested_at,
+        ).where(AdsBoostRun.gate_id == gate.id)
     ).first()
-    if run is None or not run.campaign_id or run.status != "running" or not gate.scope_key:
+    # live = running · or, under a cancel, «pending» with a campaign (its ACTIVE answer was lost — story #4491)
+    live = run is not None and (run.status == "running" or (run.status == "pending" and run.cancel_requested_at is not None))
+    if not live or not run.campaign_id or not gate.scope_key:
         return  # nothing live to stop
     connection_id = run.created_connection_id or gate.sealed_ads_connection_id  # story #4461 — the campaign's own account
     channel = conn.execute(select(ChannelConnection.channel).where(ChannelConnection.id == connection_id)).scalar_one_or_none()

@@ -159,3 +159,43 @@ async def test_a_persons_failed_pause_without_a_cancel_schedules_nothing(monkeyp
         assert await _pause_retry(Session, org_id, gate_id) is None
     finally:
         await engine.dispose()
+
+
+async def test_a_campaign_whose_active_answer_was_lost_is_also_retried_by_a_capture(monkeypatch):
+    """PO 06:34Z — 4460's ⓐ: the ACTIVE switch went out and its answer was lost (run «pending» with the campaign — treated as on).
+    Under a cancel its pause was refused → the same retry: a capture at +5 → the scheduler pauses it (a pending run counts as live
+    here) → lands → the cancel ends. Not «exhausted» at once."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    engine, Session, org_id, owner_id, gate_id, calls = await _setup(monkeypatch)
+    spy = sandbox.set_campaign_status
+
+    async def active_then_lost(client, **kwargs):
+        result = await spy(client, **kwargs)
+        if kwargs["status"] == "ACTIVE":
+            raise TimeoutError("the provider switched it on, the answer never came back")
+        return result
+
+    monkeypatch.setattr(sandbox, "set_campaign_status", active_then_lost)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        stuck = await _run(Session, gate_id)
+        assert stuck.status == "pending" and stuck.campaign_id
+        monkeypatch.setattr(sandbox, "set_campaign_status", spy)
+        _pause_fails(monkeypatch, times=1)
+        from tests.test_4460_cancel_this_boost_realdb import _cancel
+
+        assert await _cancel(Session, org_id, gate_id, owner_id) == {"state": "cancelling"}
+        await _tick(Session)  # the cancel's pause → refused → dead_letter
+        assert (await _run(Session, gate_id)).status == "pending"
+        assert await _pause_retry(Session, org_id, gate_id) == "scheduled"
+        due = await _pending_captures(Session, gate_id)
+        assert len(due) == 1
+        await _capture_at(Session, due[0] + timedelta(seconds=30))
+        await _tick(Session)
+        assert calls[-1] == ("PAUSED", stuck.campaign_id)
+        cleared = await _run(Session, gate_id)
+        assert (cleared.campaign_id, cleared.cancel_requested_at) == (None, None)
+    finally:
+        await engine.dispose()

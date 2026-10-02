@@ -243,7 +243,7 @@ async def schedule_capture_after_failed_cancel_pause(db: AsyncSession, *, comman
     makes the scheduler pause it again (`_pause_if_off_approved` · 4417's «a failed pause makes a new one»). Scheduled 5 · 20 ·
     80 minutes after the 1st · 2nd · 3rd failed pause of the cycle (`_schedule_capture_now` with a due time — the 4466 row);
     after the third, nothing more here: the daily captures and the card («광고 관리자에서 직접 멈춰 주세요»). A new cycle counts
-    from zero. Only for a live run: the capture's pause needs it «running»."""
+    from zero. For a run «running», or «pending» with a campaign (the ACTIVE answer lost — PO 06:34Z: treated as on)."""
     from app.models.ads_boost_run import AdsBoostRun
     from app.services.ads_boost_execution import OP_PAUSE
     from app.services.ads_boost_gate_exit import _schedule_capture_now
@@ -252,10 +252,10 @@ async def schedule_capture_after_failed_cancel_pause(db: AsyncSession, *, comman
         return False
     run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == command.gate_id))).scalar_one_or_none()
     if (
-        run is None or run.cancel_requested_at is None or run.status != "running" or run.campaign_id is None
+        run is None or run.cancel_requested_at is None or run.status not in ("running", "pending") or run.campaign_id is None
         or (command.ads_boost_cycle or 1) != run.cycle_no
     ):
-        return False
+        return False  # «pending» with ids under a cancel = not known to be off, as live as «running» (PO 06:34Z)
     failed = await _failed_pauses_this_cycle(db, gate_id=command.gate_id, cycle=run.cycle_no)
     if failed < 1 or failed > len(CANCEL_PAUSE_RETRY_DELAYS):
         return False
@@ -278,7 +278,8 @@ async def cancel_pause_retry_state(db: AsyncSession, *, run) -> str | None:
     if latest is None or latest.operation != OP_PAUSE or latest.status != "dead_letter":
         return None
     failed = await _failed_pauses_this_cycle(db, gate_id=run.gate_id, cycle=run.cycle_no)
-    return "scheduled" if run.status == "running" and failed <= len(CANCEL_PAUSE_RETRY_DELAYS) else "exhausted"
+    live = run.status in ("running", "pending") and run.campaign_id is not None
+    return "scheduled" if live and failed <= len(CANCEL_PAUSE_RETRY_DELAYS) else "exhausted"
 
 
 def _reset_run(run) -> None:
