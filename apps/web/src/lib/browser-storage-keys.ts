@@ -24,9 +24,9 @@ interface StorageKeyBase {
   where: string[];
 }
 
-/** account: cleared at the moments in `on` (required — every account key says when) · kept: stays with the device */
+/** account: cleared at the moments in `on` (required and never empty — every account key says when) · kept: stays with the device */
 export type StorageKeyEntry =
-  | (StorageKeyBase & { scope: 'account'; on: readonly ClearMoment[] })
+  | (StorageKeyBase & { scope: 'account'; on: readonly [ClearMoment, ...ClearMoment[]] })
   | (StorageKeyBase & { scope: 'kept'; on?: never });
 
 export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
@@ -46,6 +46,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'docs:recents:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['components/docs/use-recent-docs.ts'] },
   { key: 'sprintable_activation_checklist_complete', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['hooks/use-activation-status.ts'] },
   { key: 'sprintable:intent-suggestion:dismissed', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/intent-suggestion-dismissal.ts'] },
+  // the desktop setup in progress in this tab (30 min) — a document opened after a switch would report the previous account's setup
+  { key: 'sprintable_desktop_setup_active', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['lib/desktop-setup.ts'] },
   { key: 'sprintable:reference-candidates:rejected', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/reference-candidates.ts'] },
 
   // ── kept: view settings inside one project · device layout · per-person keys · in-flight payment (its own card, 4488) ──

@@ -52,7 +52,7 @@ const DRAFTS: Array<['session' | 'local', string]> = [
 ];
 // cleared on a sign-out and on a switch / add
 const MUST_CLEAR: Array<['session' | 'local', string]> = [
-  ['session', 'sprintable_tab_project_id'], ['session', 'sp_onboarding_org_draft:u-1'],
+  ['session', 'sprintable_tab_project_id'], ['session', 'sp_onboarding_org_draft:u-1'], ['session', 'sprintable_desktop_setup_active'],
   ['session', 'sprintable_onboarding_session_id'], ['session', 'sprintable_pending_toast'], ['session', 'au-usage-warn-dismissed-band'],
   ['session', 'storage-capacity-toast-shown'], ['session', 'storage-capacity-warn-dismissed'],
   ['local', 'steer-recipients:p-1'], ['local', 'docs:recents:p-1'], ['local', 'sprintable_activation_checklist_complete:o-1'],
