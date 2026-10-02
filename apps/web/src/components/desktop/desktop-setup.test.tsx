@@ -532,7 +532,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     stub(() => new Response('{}', { status: 200 }));
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
     await tick(0);
-    expect(text()).toContain('«3단계 칸반»을 조사 에이전트에게 건네는 중이에요');
+    expect(text()).toContain('준비가 끝나면 «3단계 칸반»을 조사 에이전트에게 건네요'); // ② waits (story 4492)
     expect(container.querySelector('header p')?.textContent).toContain('3단계 칸반');
     expect(text()).not.toContain('칸반 심플');
   });
@@ -542,7 +542,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     stub(() => new Response('{}', { status: 200 }));
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
     await tick(0);
-    expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
+    expect(text()).toContain('준비가 끝나면 «마케팅 루프»를 조사 에이전트에게 건네요'); // ② waits (story 4492)
   });
 
   // Yuna v24 · PO 11:19Z — the trust note is Claude Code's question: with only Codex agents it is not shown at all
@@ -770,12 +770,12 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
       signals: { ...status('handed_over').signals, tools_connected: [{ member_id: 'm0', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' } });
     const ended = [{ member_id: 'm1', at: '2026-09-30T12:00:05Z', runtime: 'claude', exit_code: 1, restarted_at: null }];
     const cases: [locale: 'ko' | 'en', name: string, stopped: string, handed: string, still: string][] = [
-      ['ko', '에이전트', '에이전트가 멈췄어요 — ', '«마케팅 루프»를 에이전트에게 건네는 중이에요', '에이전트는 아직 준비하고 있어요'],
-      ['ko', '블로그 에이전트', '블로그 에이전트가 멈췄어요 — ', '«마케팅 루프»를 블로그 에이전트에게 건네는 중이에요', '블로그 에이전트는 아직 준비하고 있어요'],
-      ['ko', 'Writer', 'Writer 에이전트가 멈췄어요 — ', '«마케팅 루프»를 Writer 에이전트에게 건네는 중이에요', 'Writer 에이전트는 아직 준비하고 있어요'],
-      ['en', '에이전트', '에이전트 stopped — ', 'Handing «마케팅 루프» to 에이전트', '에이전트 is still getting ready'],
-      ['en', 'Research Agent', 'Research Agent stopped — ', 'Handing «마케팅 루프» to Research Agent', 'Research Agent is still getting ready'],
-      ['en', 'Writer', 'The Writer agent stopped — ', 'Handing «마케팅 루프» to the Writer agent', 'The Writer agent is still getting ready'],
+      ['ko', '에이전트', '에이전트가 멈췄어요 — ', '준비가 끝나면 «마케팅 루프»를 에이전트에게 건네요', '에이전트는 아직 준비하고 있어요'],
+      ['ko', '블로그 에이전트', '블로그 에이전트가 멈췄어요 — ', '준비가 끝나면 «마케팅 루프»를 블로그 에이전트에게 건네요', '블로그 에이전트는 아직 준비하고 있어요'],
+      ['ko', 'Writer', 'Writer 에이전트가 멈췄어요 — ', '준비가 끝나면 «마케팅 루프»를 Writer 에이전트에게 건네요', 'Writer 에이전트는 아직 준비하고 있어요'],
+      ['en', '에이전트', '에이전트 stopped — ', 'Once ready, «마케팅 루프» goes to 에이전트', '에이전트 is still getting ready'],
+      ['en', 'Research Agent', 'Research Agent stopped — ', 'Once ready, «마케팅 루프» goes to Research Agent', 'Research Agent is still getting ready'],
+      ['en', 'Writer', 'The Writer agent stopped — ', 'Once ready, «마케팅 루프» goes to the Writer agent', 'The Writer agent is still getting ready'],
     ];
     ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
     stub(() => new Response('{}', { status: 200 }));
@@ -833,7 +833,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
     await tick(0);
     expect(container.querySelector('[data-testid=setup-agent-stopped] p')?.textContent?.startsWith('에이전트가 멈췄어요 — ')).toBe(true);
-    expect(text()).toContain('«마케팅 루프»를 에이전트에게 건네는 중이에요'); // ② detail, first agent «에이전트 »
+    expect(text()).toContain('준비가 끝나면 «마케팅 루프»를 에이전트에게 건네요'); // ② detail (waiting), first agent «에이전트 »
     // still getting ready: 조사 connected and handed · the other («에이전트 ») not yet
     statusNow = () => at({ tools_connected: [{ member_id: 'm2', at: 'x' }], first_task_handed_at: '2026-09-30T12:00:02Z' }) as ReturnType<typeof status>;
     await tick(2_000);
@@ -866,7 +866,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     await startSetup();
     expect(container.querySelector('h1')?.textContent).toBe('에이전트를 시작하고 있어요');
     expect(text()).toContain('에이전트를 준비하고 있어요');
-    expect(text()).toContain('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
+    expect(text()).toContain('준비가 끝나면 «마케팅 루프»를 조사 에이전트에게 건네요'); // ② waits (story 4492)
     expect(container.querySelector('[data-testid=setup-trust-hint]')).toBeNull();
     expect((resultButton() as HTMLButtonElement).disabled).toBe(true);
     // story 4492 (Yuna 06:41Z): one line under the buttons — it replaces «결과가 나오면 …» (both would say «일감» twice)
@@ -903,6 +903,18 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     const n = polls();
     await tick(10_000);
     expect(polls()).toBe(n); // stops once the result is in
+  });
+
+  it('[SID:4492] ②\'s line: «준비가 끝나면 … 건네요» while it waits · «… 건네는 중이에요» once it runs (ko · bare · en)', async () => {
+    const handedLine = () => (container.querySelectorAll('ol > li[data-state]')[1]!.querySelector('span > span + span')?.textContent ?? '');
+    statusNow = () => status('handed_over', { tools_connected: [] }); // ② waits
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(handedLine()).toBe('준비가 끝나면 «마케팅 루프»를 조사 에이전트에게 건네요');
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }] }); // ② runs
+    await tick(2_000);
+    expect(handedLine()).toBe('«마케팅 루프»를 조사 에이전트에게 건네는 중이에요');
   });
 
   it('[SID:4492] one spinner — the earliest step not done · the later ones wait (still ring · their own words) · the note under ①', async () => {

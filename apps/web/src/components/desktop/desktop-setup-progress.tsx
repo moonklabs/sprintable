@@ -151,7 +151,10 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
           detail={progress.handed === 'running' && task && progress.firstAgentRole
             ? (() => {
               const r = role(progress.firstAgentRole);
-              return endsWithAgentWord(r, locale) ? t('stepHandedDetailBare', { task, josa: pickEulReulJosa(task), role: r }) : t('stepHandedDetail', { task, josa: pickEulReulJosa(task), role: r });
+              const v = { task, josa: pickEulReulJosa(task), role: r };
+              // story 4492 (Yuna 07:17Z): while ② waits its line says what happens next, not «건네는 중» · each key spelled out
+              if (handedShown === 'waiting') return endsWithAgentWord(r, locale) ? t('stepHandedWaitingDetailBare', v) : t('stepHandedWaitingDetail', v);
+              return endsWithAgentWord(r, locale) ? t('stepHandedDetailBare', v) : t('stepHandedDetail', v);
             })() : null} />
         {/* while an agent is stopped, ③ does not spin — nothing is moving (Yuna v26); ① · ② likewise when all they wait for stopped (v29) */}
         <Step state={resultShown} paused={!!progress.stopped} label={resultShown === 'done' ? t('stepResultDone') : resultShown === 'waiting' ? t('stepResultWaiting') : t('stepResultRunning')} detail={null} />
