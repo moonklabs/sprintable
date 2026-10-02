@@ -1,0 +1,1 @@
+{"file": "tests/test_4460_cancel_this_boost_realdb.py", "sec": 18.0, "source": "story-4460 — a person cancels a boost; a new request makes a new campaign (cancel · pause first · cycle row · reopen · permissions · spend per cycle · cycle numbers · races) — re-measured locally after the cycle rework (uv run pytest, 22 cases, about 15–17s)"}

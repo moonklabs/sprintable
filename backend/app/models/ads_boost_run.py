@@ -69,6 +69,15 @@ class AdsBoostRun(Base):
     # story #4404 (0419) — campaign creation at most once: the claim (conditional UPDATE) and the marker committed right before the
     # create call. Expired claim + marker + no ids = outcome unknown → needs_check, never re-created automatically.
     create_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4460 (0426) — the current cycle began (null = the run's first): the card's and the cap's spend count this cycle only
+    cycle_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4460 (0426) — a cancel asked for and not finished («취소 중»): the campaign ids stay until the pause is confirmed
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4460 (0426 · Qadir 02:22Z) — the current cycle's number: a cancel's reset raises it; commands carry the number they
+    # were made in (publication_commands.ads_boost_cycle) and the cycle's spend captures carry it too
+    cycle_no: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1", default=1)
     create_call_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -76,3 +85,28 @@ class AdsBoostRun(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
     )
+
+
+class AdsBoostRunCycle(Base):
+    """story #4460 (0426) — one ended cycle of a boost: the campaign it made, what that campaign was created with, when it ran, why
+    it ended and what it spent. A cancel clears the run for the next cycle; this row keeps the past one (card · history)."""
+
+    __tablename__ = "ads_boost_run_cycles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    gate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    campaign_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    adset_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ad_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_budget_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_for_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spend_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    ended_by_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

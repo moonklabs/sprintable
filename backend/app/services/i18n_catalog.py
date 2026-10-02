@@ -847,6 +847,19 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이 조직에 없는 광고 홍보(boost) 건이에요.",
         "en": "Ads boost not found in this organization.",
     },
+    # story #4460 — a boost's cancel (drafts · Yuna's copy)
+    "ads_boost.cancel_forbidden": {
+        "ko": "이 홍보는 요청한 사람이나 관리자만 취소할 수 있어요.",
+        "en": "Only the person who requested this promotion or an admin can cancel it.",
+    },
+    "ads_boost.already_cancelled": {
+        "ko": "이미 취소된 홍보예요.",
+        "en": "This promotion is already cancelled.",
+    },
+    "ads_boost.cancel_in_progress": {
+        "ko": "이 글의 홍보를 취소하는 중이에요 — 광고가 멈춘 게 확인되면 다시 요청할 수 있어요.",
+        "en": "This post's promotion is being cancelled — you can request again once the ad is confirmed paused.",
+    },
     "ads_boost.gate_not_approved": {
         "ko": "아직 승인되지 않은 광고 홍보(boost) 건이에요.",
         "en": "This ads boost hasn't been approved yet.",

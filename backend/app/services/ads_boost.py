@@ -175,6 +175,20 @@ async def request_ads_boost(
     )
 
     now = datetime.now(timezone.utc)
+    if gate.status == "voided":
+        # story #4460 — the boost was cancelled: this request starts a new cycle on the same gate (a post has one ads_boost gate)
+        # — fresh (no «lower only» against the cancelled seal), and the run's next start makes a new campaign. While the cancel has
+        # not finished (the old campaign not known to be off yet), no new cycle.
+        from app.models.ads_boost_run import AdsBoostRun
+        from app.services.ads_boost_cancel import AdsBoostCancelInProgressError
+
+        run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate.id).with_for_update())).scalar_one_or_none()
+        if run is not None and run.cancel_requested_at is not None:
+            raise AdsBoostCancelInProgressError(gate.id)
+        gate.sealed_ads_budget_minor = None
+        if run is not None:
+            run.cycle_started_at = now
+    gate.requested_by_member_id = requester_member_id  # story #4460 — who asked (again) for it: a cancel is theirs or an admin's
     # 「이 게이트가 이전에 한 번이라도 봉인된 적 있나」 — sealed_ads_budget_minor
     # 자체가 유일하게 믿을 신호다(gate.status는 이 함수 호출 前에 이미 pending/
     # approved/rejected 등 다양할 수 있어 "fresh"의 판별원이 못 된다).

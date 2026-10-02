@@ -31,7 +31,7 @@ import uuid
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
@@ -113,9 +113,11 @@ class _SealReplacedBeforeCall(Exception):
 
     code = "ADS_BOOST_SEAL_REPLACED"
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, *, code: str | None = None):
         super().__init__(message)
         self.message = message
+        if code:
+            self.code = code  # story #4460 — the gate left «approved» right before the call (a cancel · a reopen)
 
 
 async def _refuse_if_seal_replaced(db: AsyncSession, command, gate_id: uuid.UUID) -> None:
@@ -125,7 +127,13 @@ async def _refuse_if_seal_replaced(db: AsyncSession, command, gate_id: uuid.UUID
     (MONEY_STOPPING_OPS)."""
     if command.operation in MONEY_STOPPING_OPS:
         return
-    current = (await db.execute(select(Gate.sealed_ads_boost_version_id).where(Gate.id == gate_id))).scalar_one_or_none()
+    current, status = (await db.execute(
+        select(Gate.sealed_ads_boost_version_id, Gate.status).where(Gate.id == gate_id)
+    )).one_or_none() or (None, None)
+    if status != "approved":
+        # story #4460 (PO 16:32Z) — a cancel (or a reopen) landed while this command was already out: what it may have created is
+        # never switched on; the cancel finishes once this command ended
+        raise _SealReplacedBeforeCall(f"the gate is no longer approved before the provider call (status {status})", code="ADS_BOOST_GATE_NOT_APPROVED")
     if current != command.approved_version:
         raise _SealReplacedBeforeCall(
             f"the gate was re-sealed before the provider call (command {command.approved_version} · current {current})",
@@ -270,19 +278,35 @@ async def _resolve_gate(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UU
     return gate
 
 
-async def _latest_toggle(db: AsyncSession, *, gate_id: uuid.UUID) -> PublicationCommand | None:
+async def current_ads_boost_cycle(db: AsyncSession, *, gate_id: uuid.UUID) -> int:
+    """story #4460 (Qadir 02:22Z · PO) — the gate's current cycle: the run's number (a cancel's reset raises it); 1 before a run."""
+    from app.models.ads_boost_run import AdsBoostRun
+
+    return (await db.execute(select(AdsBoostRun.cycle_no).where(AdsBoostRun.gate_id == gate_id))).scalar_one_or_none() or 1
+
+
+def in_ads_boost_cycle(cycle: int):
+    """A command of this cycle (`ads_boost_cycle` null = made before the mark = the first cycle)."""
+    return func.coalesce(PublicationCommand.ads_boost_cycle, 1) == cycle
+
+
+async def _latest_toggle(db: AsyncSession, *, gate_id: uuid.UUID, cycle: int) -> PublicationCommand | None:
     """story #3806(Phase3·3-2 PR 13, 페드루 PO 確定 2026-09-11 19:58Z 정정) —
     「명령 사슬 정체성」은 `gate_id`(PublicationCommand 자체 컬럼)다, `(destination,
     approved_version)`이 아니다. `approved_version`(=gate.sealed_ads_boost_version_id)
     은 재봉인마다 새로 발급되는 값이라 "재봉인해도 실행 중 run은 하나"라는 불변식을
     못 담는다 — 감액 재봉인 뒤 이 스코프로 조회하면 최초 실행 당시(낡은 version)의
     토글 이력을 못 찾아 「한 번도 토글된 적 없다」로 오판했다(라이브 재측 中 PO
-    발견: 실행 중인데 「중지」가 409, 상한 도달 자동 중지도 조용히 실패)."""
+    발견: 실행 중인데 「중지」가 409, 상한 도달 자동 중지도 조용히 실패).
+    story #4460 (Qadir 02:22Z) — and within the current cycle only: after a cancel and a new start, the last cycle's completed
+    pause was «the latest» and every pause of the new campaign (a person's · the cap's · the scheduler's) was refused as «already
+    paused» while it spent."""
     return (await db.execute(
         select(PublicationCommand)
         .where(
             PublicationCommand.gate_id == gate_id,
             PublicationCommand.operation.in_((OP_PAUSE, OP_RESUME)),
+            in_ads_boost_cycle(cycle),
         )
         .order_by(PublicationCommand.toggle_seq.desc())
         .limit(1)
@@ -301,7 +325,7 @@ async def request_ads_boost_start(
         db, org_id=org_id, gate_id=gate.id, destination=gate.sealed_ads_connection_id,
         approved_version=gate.sealed_ads_boost_version_id, requested_by_member_id=requester_member_id,
         scheduled_at=None, operation=OP_BOOST_START, content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=0,
-        initiated_by=initiated_by,
+        initiated_by=initiated_by, ads_boost_cycle=await current_ads_boost_cycle(db, gate_id=gate.id),
     )
     await db.commit()
     return command
@@ -320,10 +344,12 @@ async def _request_toggle(
     # 게이트가 시작된 적 있나"는 그대로 참이어야 한다.
     # story #4447 (Qadir 4870 ②) — a re-approval gives the gate a second boost_start (one per approved version):
     # scalar_one_or_none() raised MultipleResultsFound and pause/resume failed after any re-approval + start. «Ever started».
+    cycle = await current_ads_boost_cycle(db, gate_id=gate.id)
     started = (await db.execute(
         select(PublicationCommand.id).where(
             PublicationCommand.gate_id == gate.id,
             PublicationCommand.operation == OP_BOOST_START,
+            in_ads_boost_cycle(cycle),  # story #4460 — started in this cycle (a cancelled cycle's start is not this one's)
         ).limit(1)
     )).scalar_one_or_none()
     if started is None:
@@ -338,12 +364,18 @@ async def _request_toggle(
         if blocked is not None and blocked[0] is not None:
             raise AdsBoostSpendBlockedError(gate.id, blocked[1])
 
-    latest = await _latest_toggle(db, gate_id=gate.id)
+    latest = await _latest_toggle(db, gate_id=gate.id, cycle=cycle)
 
     if latest is None:
         if operation == OP_RESUME:
             raise AdsBoostNotPausedError(gate.id)
-        toggle_seq = 1
+        # story #4460 — numbering goes on across cycles (a new cycle's first toggle never reuses an earlier toggle's number)
+        last_seq = (await db.execute(
+            select(func.max(PublicationCommand.toggle_seq)).where(
+                PublicationCommand.gate_id == gate.id, PublicationCommand.operation.in_((OP_PAUSE, OP_RESUME)),
+            )
+        )).scalar_one_or_none()
+        toggle_seq = (last_seq or 0) + 1
     elif latest.operation == operation:
         if latest.status == "blocked":
             # story #4476 (PO 14:27Z) — a toggle stopped on the connection is waiting for a person, not in flight: the double-click
@@ -377,7 +409,7 @@ async def _request_toggle(
     command, _ = await create_or_get_publication_command(
         db, org_id=org_id, gate_id=gate.id, destination=destination, approved_version=approved_version,
         requested_by_member_id=requester_member_id, scheduled_at=None, operation=operation,
-        content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=toggle_seq, initiated_by=initiated_by,
+        content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=toggle_seq, initiated_by=initiated_by, ads_boost_cycle=cycle,
     )
     await db.commit()
     return command
@@ -500,7 +532,11 @@ async def _campaign_connection_usable(db: AsyncSession, gate) -> bool:
 def _scheduler_pause_reason(run, gate) -> str | None:
     """story #4466 — why the scheduler paused: the cap (`cap_reached_at`) · the spend could not be checked (`spend_blocked_at`,
     4417) · the gate is no longer approved (4466). The scheduler's pauses come from exactly these (ads_spend_snapshots:
-    _follow_through_cap · _follow_through_block · _pause_if_off_approved)."""
+    _follow_through_cap · _follow_through_block · _pause_if_off_approved).
+    story #4460 (Yuna 02:20Z · PO) — a cancelled boost's gate is voided too, and when the person's fast pause failed the scheduler
+    stops it; that is the cancel, not a withdrawn approval: `cancelled` comes first."""
+    if run.cancel_requested_at is not None:
+        return "cancelled"
     if run.cap_reached_at is not None:
         return "cap_reached"
     if run.spend_blocked_at is not None:
@@ -775,6 +811,20 @@ CREATED_BUDGET_DIFFERS_CODE = "ADS_BOOST_CREATED_BUDGET_DIFFERS"  # story #4458 
 
 
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
+    gate_id = command.gate_id
+    await _process_one_ads_boost_command(db, command, now=now)
+    # story #4460 — a cancel waits for the gate's commands: once this one ended (a pause landed · a start refused before ACTIVE),
+    # the cancel may finish (the one place: ads_boost_cancel.finish_cancel_if_stopped)
+    from app.services.ads_boost_cancel import finish_cancel_if_stopped, pause_left_campaign_for_cancel
+
+    if await finish_cancel_if_stopped(db, gate_id=gate_id, now=now):
+        await db.commit()
+    else:
+        # Qadir 02:22Z ⓐ — a cancelled boost whose campaign was made and never confirmed off: pause it (once), then the cancel ends
+        await pause_left_campaign_for_cancel(db, gate_id=gate_id)
+
+
+async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
     """`app/services/publication_command.py::_process_one_command`의 content_kind==
     "ads_boost" 분기가 이 함수로 넘긴다(site_post/comment_reply와 동형 위임 패턴).
     실패 시 `apply_command_failure`(publication_command.py)를 그대로 재사용 —

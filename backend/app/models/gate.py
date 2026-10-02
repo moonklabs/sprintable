@@ -94,6 +94,9 @@ class Gate(Base):
     # 액션) 그대로 — 회귀 0. 지정자가 아니어도 owner/admin의 해소 권한 자체는 무변화(SoD와
     # 별개 축 — 이건 «기본 노출»만 좁힌다).
     designated_approver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #4460 (0426) — who asked for it (ads_boost: stamped again on every request) — a boost's cancel is the requester's or an
+    # owner's/admin's. Null on gates made before the column (owner/admin only).
+    requested_by_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # ⭐S31: hold 만료(시한부 보류). status='held' 일 때만 의미·무기한 hold 면 None. 0132 마이그(post-0096).
     # FE 가 gate 직독으로 held_until 배지 렌더(step_run 경유 leaky 회피)·step_run.held_until 도 SLA 동기화.
     held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

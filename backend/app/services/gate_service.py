@@ -1999,6 +1999,35 @@ async def _notify_gate_discussion_requester(
         return False
 
 
+# story #4460 (PO 16:30Z ②) — the ads_boost cancel's own transition. A cancel voids an *approved* boost (pending → voided is the only
+# void in `_VALID_TRANSITIONS`): rather than a quiet set_gate_status outside the FSM, this is a named transition — only ads_boost,
+# only from the cancel service (ads_boost_cancel.cancel_ads_boost), and it leaves who and why on the gate (resolver · note · the
+# decision history) like a decision. The activity log line is the cancel service's.
+_ADS_BOOST_CANCELLABLE_STATUSES = frozenset({"approved", "pending", "held", "rejected"})
+
+
+def void_ads_boost_gate_for_cancel(gate: Gate, *, actor_member_id: uuid.UUID, reason: str | None, now: datetime) -> None:
+    if gate.gate_type != "ads_boost":
+        raise ValueError(f"only an ads_boost gate is voided by a boost cancel: {gate.gate_type}")
+    if gate.status not in _ADS_BOOST_CANCELLABLE_STATUSES:
+        raise ValueError(f"an ads_boost gate in {gate.status} is not cancelled")
+    prior = gate.status
+    note = f"ads_boost cancelled{': ' + reason.strip() if reason and reason.strip() else ''}"[:500]
+    set_gate_status(gate, "voided", now=now)
+    gate.resolver_id = actor_member_id
+    gate.resolution_note = note
+    gate.resolved_at = now
+    gate.requires_human = False
+    facts = dict(gate.neutral_facts or {})
+    history = list(facts.get("decision_history") or [])
+    history.append({
+        "action": "ads_boost_cancelled", "from_status": prior, "by_member_id": str(actor_member_id), "at": now.isoformat(),
+        "reason": (reason or "").strip()[:500] or None,
+    })
+    facts["decision_history"] = history
+    gate.neutral_facts = facts
+
+
 async def void_gate(
     session: AsyncSession,
     org_id: uuid.UUID,

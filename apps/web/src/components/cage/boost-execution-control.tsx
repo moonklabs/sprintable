@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt, formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEuroJosa, pickIRaJosa } from '@/lib/korean-particle';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -110,23 +110,39 @@ interface SpendData {
   created_budget_minor?: number | null;
   // story #4461 — the latest pause (a stopped one on the connection is told honestly)
   pause_command?: { status: string; failure_kind: string | null; error_code: string | null } | null;
+  // story #4460 — a cancel asked for and not finished · the cycles that ended before this one · the gate's status (voided =
+  // cancelled) · whether this viewer may cancel (the requester or an owner/admin — the server's own rule)
+  cancel_requested?: boolean;
+  previous_cycles?: PreviousCycle[];
+  gate_status?: string | null;
+  can_cancel?: boolean;
+}
+
+interface PreviousCycle {
+  campaign_id: string | null;
+  spend_minor: number | null;
+  currency: string | null;
+  started_at: string | null;
+  ended_at: string;
+  end_reason: string;
 }
 
 // story #4416 — start · retry · pause · resume are queued commands the worker runs later (every minute, transient failures
 // retried 2 → 4 → 8 → 16 min), so the card reads /spend until the state it waits for lands (PO A, 2026-09-29 01:01Z): 5 s for
 // the first 3 min, then 30 s, up to 35 min for a start; pause and resume wait 3 min for run_status. The cap is wall-clock
 // from the start of the wait; the tab being hidden stops the timer and a return reads once.
-type WaitOp = 'start' | 'pause' | 'resume';
+type WaitOp = 'start' | 'pause' | 'resume' | 'cancel';
 const POLL_FAST_MS = 5_000;
 const POLL_SLOW_MS = 30_000;
 const POLL_FAST_WINDOW_MS = 3 * 60_000;
-const POLL_CAP_MS: Record<WaitOp, number> = { start: 35 * 60_000, pause: 3 * 60_000, resume: 3 * 60_000 };
+const POLL_CAP_MS: Record<WaitOp, number> = { start: 35 * 60_000, pause: 3 * 60_000, resume: 3 * 60_000, cancel: 3 * 60_000 };
 const ACTIVE_COMMAND_STATUSES = new Set(['pending', 'in_progress']);
 
 function waitSettled(op: WaitOp, d: SpendData): boolean {
   const run = d.run_status ?? null;
   // story #4447 — a value outside the contract ends any wait (the card shows it as unknown; polling it would never settle)
   if (run !== null && !isOneOf(BOOST_RUN_STATUSES, run)) return true;
+  if (op === 'cancel') return !d.cancel_requested; // story #4460 — the cancel finished (the campaign known to be off)
   if (op === 'pause') return run === 'paused';
   if (op === 'resume') return run === 'running';
   if (run === 'running' || run === 'paused' || run === 'pause_pending') return true;
@@ -163,6 +179,12 @@ export function BoostExecutionControl({
   const [accountCurrency, setAccountCurrency] = useState<string | null>(null);
   const [createdBudget, setCreatedBudget] = useState<number | null>(null);
   const [pauseCommand, setPauseCommand] = useState<SpendData['pause_command']>(null);
+  // story #4460 — «홍보 취소»
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const [previousCycles, setPreviousCycles] = useState<PreviousCycle[]>([]);
+  const [spendGateStatus, setSpendGateStatus] = useState<string | null>(null);
+  const [canCancel, setCanCancel] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [needsCheckOpen, setNeedsCheckOpen] = useState(false);
   const [needsCheckConfirmed, setNeedsCheckConfirmed] = useState(false);
   // story #4412 — «it is already in my ad account»: the lookup's answer when it did not adopt
@@ -215,7 +237,7 @@ export function BoostExecutionControl({
     clearTimer();
     waitRef.current = null;
     setWaiting(null);
-    setCapNotice(cappedOp);
+    setCapNotice(cappedOp === 'cancel' ? 'pause' : cappedOp); // story #4460 — a cancel waits for its pause: the same notice
   };
 
   // The one place that decides the next read — after a response or a failed read alike — so the cap (wall-clock
@@ -242,6 +264,8 @@ export function BoostExecutionControl({
     if (!waitRef.current && mayBeginStartWait && !waitSettled('start', d)) beginWait('start');
     // story #4447 — a pause already requested (a reload while it has not landed): wait for it with the 4416 cap like after a click
     if (!waitRef.current && mayBeginStartWait && d.run_status === 'pause_pending') beginWait('pause');
+    // story #4460 — a cancel not finished yet (a reload while it waits for the pause): wait for it within the pause's cap
+    if (!waitRef.current && mayBeginStartWait && d.cancel_requested) beginWait('cancel');
     const wait = waitRef.current;
     if (!wait) return;
     // story #4461 (PO 14:05Z) — a pause that could not reach the campaign's account will not land: «중지 중…» would be false comfort
@@ -267,6 +291,10 @@ export function BoostExecutionControl({
       setAccountCurrency(d.account_currency ?? null);
       setCreatedBudget(d.created_budget_minor ?? null);
       setPauseCommand(d.pause_command ?? null);
+      setCancelRequested(Boolean(d.cancel_requested));
+      setPreviousCycles(Array.isArray(d.previous_cycles) ? d.previous_cycles : []);
+      setSpendGateStatus(d.gate_status ?? null);
+      setCanCancel(Boolean(d.can_cancel));
       setRunAd({
         campaign_id: d.campaign_id ?? null, ad_account_id: d.ad_account_id ?? null,
         campaign_name: d.campaign_name ?? null, ad_channel: d.ad_channel ?? null,
@@ -311,6 +339,30 @@ export function BoostExecutionControl({
       }
       onDone();
       beginWait(operation);
+      void load();
+    } catch {
+      setActionError(t('boostExecutionActionError'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // story #4460 — «홍보 취소»: the server voids the gate now and pauses a live campaign; the card then reads /spend until the cancel
+  // finished (or the pause's cap). A refusal shows the server's own words (403 · already cancelled).
+  const doCancel = async () => {
+    setSubmitting(true);
+    setActionError(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/ads-boosts/${gateId}/cancel`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        setActionError(body?.error?.message || t('boostExecutionActionError'));
+        return;
+      }
+      setCancelConfirmOpen(false);
+      beginWait('cancel');
       void load();
     } catch {
       setActionError(t('boostExecutionActionError'));
@@ -417,6 +469,14 @@ export function BoostExecutionControl({
     }
   };
 
+  // story #4460 (Yuna 00:38Z · PO: every confirmation in this file) — while a confirmation is open, its refusal is said inside
+  // it, above the buttons: the card's line sits under the overlay, and the money button would look as if it did nothing.
+  const dialogError = actionError ? (
+    <p role="alert" className="text-sm text-destructive" data-testid="boost-dialog-error">{actionError}</p>
+  ) : null;
+  // opening a confirmation starts it clean — an older action's refusal is not this one's
+  const openConfirm = (open: (v: boolean) => void) => { setActionError(null); open(true); };
+
   if (!loaded) return null;
 
   // the approved conditions (budget · schedule · objective) — the start confirmation and the «link existing campaign»
@@ -453,7 +513,7 @@ export function BoostExecutionControl({
   // story #4416 — the line while waiting (the button words, or «trying again» while the start retries on its own)
   const startRetrying = startCommand !== null && startCommand.failure_kind === 'transient'
     && ACTIVE_COMMAND_STATUSES.has(startCommand.status);
-  const waitingLine = waiting ? (
+  const waitingLine = waiting && waiting !== 'cancel' ? (
     <p className="text-xs text-muted-foreground" data-testid="boost-execution-waiting" role="status">
       {waiting === 'start'
         ? (startRetrying ? t('boostExecutionStartRetrying') : t('boostExecutionStarting'))
@@ -505,7 +565,80 @@ export function BoostExecutionControl({
     );
   }
   const runActive = runStatus === 'running' || runStatus === 'paused' || runStatus === 'pause_pending';
-  const offApproved = gateStatus != null && gateStatus !== 'approved'; // story #4466
+  // story #4460 — /spend says the gate's status too (a cancel voids it while the page still holds the older gate)
+  const effectiveGateStatus = spendGateStatus ?? gateStatus ?? null;
+  const offApproved = effectiveGateStatus != null && effectiveGateStatus !== 'approved'; // story #4466
+
+  // story #4460 (Yuna 16:46Z) — the cycles that ended before this one: «지난 홍보 · {기간} · 쓴 광고비 {amount}»
+  // (a cycle's start and end happened — the viewer's zone, as 4443 draws events; promised times, like the ad window, are the team's)
+  const previousCyclesBlock = previousCycles.length ? (
+    <ul className="space-y-1 text-xs text-muted-foreground" data-testid="boost-previous-cycles">
+      {previousCycles.map((c) => (
+        <li key={`${c.ended_at}-${c.campaign_id ?? ''}`} data-testid="boost-previous-cycle">
+          {t('boostPreviousCycle', {
+            period: `${c.started_at ? formatViewerScheduledAt(c.started_at, displayTimezone).display : ''} ~ ${formatViewerScheduledAt(c.ended_at, displayTimezone).display}`,
+            amount: c.spend_minor !== null && c.currency
+              ? formatMinorCurrency(c.spend_minor, c.currency as GenerationBudgetCurrency, locale, tContent) : '—',
+          })}
+        </li>
+      ))}
+    </ul>
+  ) : null;
+
+  // story #4460 — «홍보 취소» (only for whom the server says may: the requester or an owner/admin) and its confirmation
+  const cancelControls = canCancel && !cancelRequested && !offApproved ? (
+    <>
+      <Button variant="outline" size="sm" disabled={submitting} onClick={() => openConfirm(setCancelConfirmOpen)} data-testid="boost-cancel-trigger">
+        {t('boostCancel')}
+      </Button>
+      <Dialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+        <DialogContent data-testid="boost-cancel-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('boostCancelConfirmTitle')}</DialogTitle>
+            <DialogDescription>{t('boostCancelConfirmBody')}</DialogDescription>
+          </DialogHeader>
+          {/* Yuna 16:46Z — the one way money can go out again: a paused Meta ad turned back on in Ads Manager */}
+          {runAd.ad_channel === 'meta_ads' ? (
+            <p className="text-sm text-muted-foreground" data-testid="boost-cancel-confirm-meta">{t('boostCancelConfirmMetaNote')}</p>
+          ) : null}
+          {dialogError}
+          <DialogFooter>
+            <Button variant="outline" autoFocus onClick={() => setCancelConfirmOpen(false)} disabled={submitting}>
+              {t('boostCancelClose')}
+            </Button>
+            <Button variant="destructive" onClick={() => void doCancel()} disabled={submitting} data-testid="boost-cancel-confirm">
+              {t('boostCancel')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  ) : null;
+
+  // story #4460 — cancelled: the gate is voided and the run cleared (the cycle kept). No action here; a new request starts again.
+  // A gate voided another way while its campaign is still there (paused) is not «취소됨»: it keeps 4466's approval-gone line.
+  if (effectiveGateStatus === 'voided' && !cancelRequested && !runActive) {
+    return (
+      <div className="space-y-2 break-keep" data-testid="boost-execution-control">
+        <p className="text-xs text-muted-foreground" data-testid="boost-cancelled">{t('boostCancelled')}</p>
+        {previousCyclesBlock}
+      </div>
+    );
+  }
+  // story #4460 — «취소 중»: the campaign is not known to be off yet. The 4461 block stays (a pause stopped on the connection —
+  // money may still go out); nothing else to press.
+  if (cancelRequested) {
+    return (
+      <div className="space-y-2 break-keep" data-testid="boost-execution-control">
+        <p className="text-xs text-muted-foreground" data-testid="boost-cancelling" role="status">{t('boostCancelInProgress')}</p>
+        {pauseStoppedOnConnection(pauseCommand) ? (
+          <p className="text-xs text-foreground" data-testid="boost-pause-connection-lost">{t('boostPauseConnectionLost')}</p>
+        ) : null}
+        {capNoticeBlock}
+        {previousCyclesBlock}
+      </div>
+    );
+  }
 
   const needsCheck = command?.status === 'dead_letter' && command.failure_kind === 'needs_check';
   if (needsCheck && !runActive) {
@@ -540,12 +673,12 @@ export function BoostExecutionControl({
             // story #4412 — link the campaign this start may have made (Yuna 00:49Z: link first, then retry, both outline)
             <Button
               variant="outline" size="sm" disabled={adopting}
-              onClick={() => { setAdoptOutcome(null); setAdoptOpen(true); }} data-testid="boost-adopt-trigger"
+              onClick={() => { setAdoptOutcome(null); openConfirm(setAdoptOpen); }} data-testid="boost-adopt-trigger"
             >
               {t('boostAdoptTitle')}
             </Button>
           ) : null}
-          <Button variant="outline" size="sm" onClick={() => setNeedsCheckOpen(true)} data-testid="boost-needs-check-retry-trigger">
+          <Button variant="outline" size="sm" onClick={() => openConfirm(setNeedsCheckOpen)} data-testid="boost-needs-check-retry-trigger">
             {t('boostNeedsCheckRetry')}
           </Button>
         </div>
@@ -602,6 +735,7 @@ export function BoostExecutionControl({
               <p className="text-foreground" data-testid="boost-adopt-weight">{t('boostAdoptWeight')}</p>
             </div>
             {sealedFacts}
+            {dialogError}
             <DialogFooter>
               <Button variant="outline" onClick={() => setAdoptOpen(false)} disabled={adopting}>
                 {t('boostExecutionCancel')}
@@ -643,6 +777,7 @@ export function BoostExecutionControl({
               />
               {outcomeUnknown ? t('boostNeedsCheckConfirmNoCampaign') : t('boostNeedsCheckConfirmChecked')}
             </label>
+            {dialogError}
             <DialogFooter>
               <Button variant="outline" onClick={() => setNeedsCheckOpen(false)} disabled={submitting}>
                 {t('boostExecutionCancel')}
@@ -656,6 +791,7 @@ export function BoostExecutionControl({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        {cancelControls}
       </div>
     );
   }
@@ -695,6 +831,7 @@ export function BoostExecutionControl({
             {t('boostNeedsCheckRetry')}
           </Button>
         ) : null}
+        {cancelControls}
       </div>
     );
   }
@@ -713,7 +850,7 @@ export function BoostExecutionControl({
         {capNoticeBlock}
         <Button
           variant="outline" size="sm" disabled={beforeStart || waiting === 'start'}
-          onClick={() => setStartConfirmOpen(true)} data-testid="boost-start-trigger"
+          onClick={() => openConfirm(setStartConfirmOpen)} data-testid="boost-start-trigger"
         >
           {t('boostExecutionStart')}
         </Button>
@@ -732,6 +869,7 @@ export function BoostExecutionControl({
             {/* 봉인 3값 그대로 재확인(페드루 PO 콜①) — RecipeApprovalFactsBlock과 같은
                 포맷터 재사용(formatMinorCurrency·formatScheduledAt), 새 표시 로직 0. */}
             {sealedFacts}
+            {dialogError}
             <DialogFooter>
               <Button variant="outline" onClick={() => setStartConfirmOpen(false)} disabled={submitting}>
                 {t('boostExecutionCancel')}
@@ -745,6 +883,8 @@ export function BoostExecutionControl({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        {cancelControls}
+        {previousCyclesBlock}
       </div>
     );
   }
@@ -840,7 +980,7 @@ export function BoostExecutionControl({
       {spendBlockedCode === SPEND_CONTEXT_LOST || runStatus === 'pause_pending' ? null /* no connection · or a pause already requested */ : runStatus === 'running' ? (
         <Button
           variant="outline" size="sm" disabled={submitting || waiting === 'pause'}
-          onClick={() => setPauseConfirmOpen(true)} data-testid="boost-pause-trigger"
+          onClick={() => openConfirm(setPauseConfirmOpen)} data-testid="boost-pause-trigger"
         >
           {t('boostExecutionPause')}
         </Button>
@@ -853,6 +993,7 @@ export function BoostExecutionControl({
           {submitting ? t('boostExecutionResuming') : t('boostExecutionResume')}
         </Button>
       )}
+      {cancelControls}
       {/* story #3806(PR 12) — 자연 스케줄(+1d/+7d)을 기다리지 않고 즉시 1회
           캡처. comments/refresh와 동형 손잡이(같은 5분 rate-limit 사상). */}
       <Button
@@ -876,12 +1017,14 @@ export function BoostExecutionControl({
       ) : null}
 
       {/* story #3806(유나 §절 §2 「비용 명확」) — 확認 다이얼로그 문구는 §절 원문 그대로. */}
+      {previousCyclesBlock}
       <Dialog open={pauseConfirmOpen} onOpenChange={setPauseConfirmOpen}>
         <DialogContent data-testid="boost-pause-confirm-dialog">
           <DialogHeader>
             <DialogTitle>{t('boostExecutionPauseConfirmTitle')}</DialogTitle>
             <DialogDescription>{t('boostExecutionPauseConfirmDescription')}</DialogDescription>
           </DialogHeader>
+          {dialogError}
           <DialogFooter>
             <Button variant="outline" onClick={() => setPauseConfirmOpen(false)} disabled={submitting}>
               {t('boostExecutionCancel')}

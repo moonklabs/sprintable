@@ -2,6 +2,7 @@
   "story": "4485",
   "about": "Every ActivityLog action the backend records on a gate (entity_type \"gate\"), shown in the web's approval history. backend/tests/test_4485_gate_activity_actions_contract.py keeps this list equal to what the code writes; apps/web gate-evidence test keeps every one labelled in ko and en.",
   "actions": [
+    "ads_boost_cancelled",
     "ads_boost_paused",
     "ads_boost_resumed",
     "ads_boost_started",

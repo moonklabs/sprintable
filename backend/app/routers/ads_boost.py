@@ -21,6 +21,7 @@ from app.services.ads_boost import (
     AdsBudgetExceedsSealError,
     request_ads_boost,
 )
+from app.services.ads_boost_cancel import AdsBoostCancelInProgressError
 from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member
 
@@ -152,6 +153,12 @@ async def _create_ads_boost_endpoint(
                 "code": "ADS_BOOST_APPROVER_ROLE_MISSING",
                 "message": t("ads_boost.approver_role_missing", resolved_locale),
             },
+        ) from exc
+    except AdsBoostCancelInProgressError as exc:
+        # story #4460 — the post's last boost is being cancelled (its campaign not known to be off yet): no new cycle until it is
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_CANCEL_IN_PROGRESS", "message": t("ads_boost.cancel_in_progress", resolved_locale)},
         ) from exc
     except AdsBudgetExceedsSealError as exc:
         raise HTTPException(
