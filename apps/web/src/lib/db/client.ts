@@ -48,7 +48,7 @@ export async function loginWithPassword(
 
 export async function logoutUser(refreshToken?: string): Promise<void> {
   invalidateMeCache(); // story #4184
-  clearAccountScopedStorage(); // story #4487
+  clearAccountScopedStorage('signout'); // story #4487
   await fetch('/api/auth/logout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

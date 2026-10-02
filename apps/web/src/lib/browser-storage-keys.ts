@@ -5,40 +5,48 @@
 // project id — ⓓ capture 6). View settings inside one project stay: the next account cannot open that project, and the
 // same person signing in again keeps their board and docs settings (PO 03:13Z).
 //
+// When (PO 04:17Z · Yuna): a sign-out clears every account key; an account switch or add keeps the drafts (chat · field) so
+// A → B → A does not lose what was being written — the rest (tab project · banners · recipients · recents …) still goes.
+//
 // browser-storage-keys.guard.test.ts keeps this list complete: every file that calls the storage API must be named here, and
 // every key it spells must match an entry — a new key cannot slip in without a scope.
 
 export type StorageArea = 'session' | 'local';
+/** signout: this account · all · the sign-out error path · logoutUser — switch: an account switch · adding an account */
+export type ClearMoment = 'signout' | 'switch';
 
-export interface StorageKeyEntry {
+interface StorageKeyBase {
   /** the key, or its fixed head when `prefix` */
   key: string;
   prefix?: true;
   area: StorageArea;
-  /** account: cleared on sign-out · switch · add · kept: stays with the device */
-  scope: 'account' | 'kept';
   /** the files (under apps/web/src) that use it */
   where: string[];
 }
 
+/** account: cleared at the moments in `on` (required — every account key says when) · kept: stays with the device */
+export type StorageKeyEntry =
+  | (StorageKeyBase & { scope: 'account'; on: readonly ClearMoment[] })
+  | (StorageKeyBase & { scope: 'kept'; on?: never });
+
 export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   // ── account: flows into the next account's screen or requests, or holds a person's words · state ──
-  { key: 'sprintable_tab_project_id', area: 'session', scope: 'account',
+  { key: 'sprintable_tab_project_id', area: 'session', scope: 'account', on: ['signout', 'switch'],
     where: ['app/dashboard/dashboard-shell.tsx', 'lib/project-context-client.ts', 'components/nav/org-hint-banner.tsx', 'hooks/use-unified-switcher.ts'] },
-  { key: 'sprintable:field-draft:v1:', prefix: true, area: 'session', scope: 'account', where: ['hooks/use-field-draft.ts'] },
-  { key: 'sp_onboarding_org_draft:', prefix: true, area: 'session', scope: 'account', where: ['app/onboarding/onboarding-form.tsx'] },
-  { key: 'sprintable_onboarding_session_id', area: 'session', scope: 'account', where: ['app/onboarding/onboarding-telemetry.ts'] },
-  { key: 'sprintable_pending_toast', area: 'session', scope: 'account', where: ['components/chat/cross-project-toast-provider.tsx'] },
+  { key: 'sprintable:field-draft:v1:', prefix: true, area: 'session', scope: 'account', on: ['signout'], where: ['hooks/use-field-draft.ts'] },
+  { key: 'sp_onboarding_org_draft:', prefix: true, area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-form.tsx'] },
+  { key: 'sprintable_onboarding_session_id', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-telemetry.ts'] },
+  { key: 'sprintable_pending_toast', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/chat/cross-project-toast-provider.tsx'] },
   // dismissed banners carry no organization in the key — kept, they would hide the next account's banner
-  { key: 'au-usage-warn-dismissed-band', area: 'session', scope: 'account', where: ['ee/components/billing/au-usage-banner.tsx'] },
-  { key: 'storage-capacity-toast-shown', area: 'session', scope: 'account', where: ['components/storage/storage-capacity-toast-provider.tsx'] },
-  { key: 'storage-capacity-warn-dismissed', area: 'session', scope: 'account', where: ['components/storage/storage-capacity-banner.tsx'] },
-  { key: 'sprintable:chat-draft:', prefix: true, area: 'local', scope: 'account', where: ['components/chat/chat-input.tsx'] },
-  { key: 'steer-recipients:', prefix: true, area: 'local', scope: 'account', where: ['app/(authenticated)/[ws]/[proj]/goals/steer-dispatch-modal.tsx'] },
-  { key: 'docs:recents:', prefix: true, area: 'local', scope: 'account', where: ['components/docs/use-recent-docs.ts'] },
-  { key: 'sprintable_activation_checklist_complete', prefix: true, area: 'local', scope: 'account', where: ['hooks/use-activation-status.ts'] },
-  { key: 'sprintable:intent-suggestion:dismissed', prefix: true, area: 'local', scope: 'account', where: ['lib/intent-suggestion-dismissal.ts'] },
-  { key: 'sprintable:reference-candidates:rejected', prefix: true, area: 'local', scope: 'account', where: ['lib/reference-candidates.ts'] },
+  { key: 'au-usage-warn-dismissed-band', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['ee/components/billing/au-usage-banner.tsx'] },
+  { key: 'storage-capacity-toast-shown', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/storage/storage-capacity-toast-provider.tsx'] },
+  { key: 'storage-capacity-warn-dismissed', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/storage/storage-capacity-banner.tsx'] },
+  { key: 'sprintable:chat-draft:', prefix: true, area: 'local', scope: 'account', on: ['signout'], where: ['components/chat/chat-input.tsx'] },
+  { key: 'steer-recipients:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['app/(authenticated)/[ws]/[proj]/goals/steer-dispatch-modal.tsx'] },
+  { key: 'docs:recents:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['components/docs/use-recent-docs.ts'] },
+  { key: 'sprintable_activation_checklist_complete', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['hooks/use-activation-status.ts'] },
+  { key: 'sprintable:intent-suggestion:dismissed', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/intent-suggestion-dismissal.ts'] },
+  { key: 'sprintable:reference-candidates:rejected', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/reference-candidates.ts'] },
 
   // ── kept: view settings inside one project · device layout · per-person keys · in-flight payment (its own card, 4488) ──
   { key: 'board_axis_mode_', prefix: true, area: 'local', scope: 'kept', where: ['components/kanban/kanban-board.tsx'] },
@@ -65,8 +73,8 @@ function matches(entry: StorageKeyEntry, key: string): boolean {
   return entry.prefix ? key.startsWith(entry.key) : key === entry.key;
 }
 
-/** The account's keys this browser holds now, cleared from both stores. Kept keys (and anything unknown) stay. */
-export function clearAccountScopedStorage(): void {
+/** The account's keys this browser holds now that `moment` clears, from both stores. Kept keys (and anything unknown) stay. */
+export function clearAccountScopedStorage(moment: ClearMoment): void {
   if (typeof window === 'undefined') return;
   for (const area of ['session', 'local'] as const) {
     let store: Storage;
@@ -75,7 +83,7 @@ export function clearAccountScopedStorage(): void {
     } catch {
       continue; // storage blocked (a private window): nothing was kept there
     }
-    const entries = BROWSER_STORAGE_KEYS.filter((e) => e.area === area && e.scope === 'account');
+    const entries = BROWSER_STORAGE_KEYS.filter((e) => e.area === area && e.scope === 'account' && e.on.includes(moment));
     const doomed: string[] = [];
     try {
       for (let i = 0; i < store.length; i += 1) {

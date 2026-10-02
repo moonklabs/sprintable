@@ -2,7 +2,8 @@
 //
 // story #4487 — a sign-out (this · all), an account switch and adding an account clear the browser values that belong to the
 // account (lib/browser-storage-keys.ts): the next account's screens and requests never carry the previous one's (the desktop
-// setup's «결과 보기» took the previous account's project id). The device's view settings, theme and language stay.
+// setup's «결과 보기» took the previous account's project id). The device's view settings, theme and language stay. A switch or
+// an add keeps the drafts (chat · field) so A → B → A does not lose what was being written; a sign-out clears them (PO 04:17Z).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -45,10 +46,15 @@ class MemoryStorage implements Storage {
 const sample = (e: (typeof BROWSER_STORAGE_KEYS)[number]) => (e.prefix ? `${e.key}x-1` : e.key);
 
 // PO 03:13Z — written out here on purpose (not read from the list): a key moved to the wrong side of the list must fail.
+// drafts — cleared on a sign-out only (PO 04:17Z · Yuna)
+const DRAFTS: Array<['session' | 'local', string]> = [
+  ['session', 'sprintable:field-draft:v1:doc:1:body'], ['local', 'sprintable:chat-draft:t-1'],
+];
+// cleared on a sign-out and on a switch / add
 const MUST_CLEAR: Array<['session' | 'local', string]> = [
-  ['session', 'sprintable_tab_project_id'], ['session', 'sprintable:field-draft:v1:doc:1:body'], ['session', 'sp_onboarding_org_draft:u-1'],
+  ['session', 'sprintable_tab_project_id'], ['session', 'sp_onboarding_org_draft:u-1'],
   ['session', 'sprintable_onboarding_session_id'], ['session', 'sprintable_pending_toast'], ['session', 'au-usage-warn-dismissed-band'],
-  ['session', 'storage-capacity-toast-shown'], ['session', 'storage-capacity-warn-dismissed'], ['local', 'sprintable:chat-draft:t-1'],
+  ['session', 'storage-capacity-toast-shown'], ['session', 'storage-capacity-warn-dismissed'],
   ['local', 'steer-recipients:p-1'], ['local', 'docs:recents:p-1'], ['local', 'sprintable_activation_checklist_complete:o-1'],
   ['local', 'sprintable:intent-suggestion:dismissed'], ['local', 'sprintable:reference-candidates:rejected'],
 ];
@@ -63,15 +69,19 @@ const store = (area: 'session' | 'local') => (area === 'session' ? window.sessio
 
 function seed() {
   for (const e of BROWSER_STORAGE_KEYS) store(e.area).setItem(sample(e), '1');
-  for (const [area, k] of [...MUST_CLEAR, ...MUST_KEEP]) store(area).setItem(k, '1');
+  for (const [area, k] of [...DRAFTS, ...MUST_CLEAR, ...MUST_KEEP]) store(area).setItem(k, '1');
   window.localStorage.setItem('theme', 'dark'); // next-themes — not ours, never touched
 }
 
-function expectOnlyAccountKeysGone() {
+function expectOnlyAccountKeysGone(moment: 'signout' | 'switch') {
   for (const e of BROWSER_STORAGE_KEYS) {
     const v = store(e.area).getItem(sample(e));
-    if (e.scope === 'account') expect(v, `${e.area}:${sample(e)} should be cleared`).toBeNull();
+    if (e.scope === 'account' && e.on.includes(moment)) expect(v, `${e.area}:${sample(e)} should be cleared`).toBeNull();
     else expect(v, `${e.area}:${sample(e)} should stay`).toBe('1');
+  }
+  for (const [area, k] of DRAFTS) {
+    if (moment === 'signout') expect(store(area).getItem(k), `${area}:${k} — a sign-out clears drafts (PO 04:17Z)`).toBeNull();
+    else expect(store(area).getItem(k), `${area}:${k} — a switch / add keeps drafts (PO 04:17Z)`).toBe('1');
   }
   for (const [area, k] of MUST_CLEAR) expect(store(area).getItem(k), `${area}:${k} must be cleared (PO 03:13Z)`).toBeNull();
   for (const [area, k] of MUST_KEEP) expect(store(area).getItem(k), `${area}:${k} must stay (PO 03:13Z)`).not.toBeNull();
@@ -108,14 +118,20 @@ function answer(body: unknown) {
 
 describe('[SID:4487] the account\'s browser values go with the account', () => {
   it.each([
-    ['an account switch', 'switch', { data: { ok: true } }],
-    ['adding an account', 'add', { data: { redirect: '/login' } }],
-    ['«log out only this account» (another stays)', 'out-this', { data: { next: 'acc-2' } }],
-    ['a full logout', 'out-all', { data: { next: null } }],
-  ] as const)('%s clears the account\'s keys · keeps view settings, layout, theme', async (_name, id, body) => {
+    ['an account switch', 'switch', { data: { ok: true } }, 'switch'],
+    ['adding an account', 'add', { data: { redirect: '/login' } }, 'switch'],
+    ['«log out only this account» (another stays)', 'out-this', { data: { next: 'acc-2' } }, 'signout'],
+    ['a full logout', 'out-all', { data: { next: null } }, 'signout'],
+  ] as const)('%s clears the account\'s keys (drafts only on a sign-out) · keeps view settings, layout, theme', async (_name, id, body, moment) => {
     answer(body);
     await press(id);
-    expectOnlyAccountKeysGone();
+    expectOnlyAccountKeysGone(moment);
+  });
+
+  it('a sign-out that fails still clears everything, drafts too (it goes to /login)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    await press('out-all');
+    expectOnlyAccountKeysGone('signout');
   });
 
   it('a store that cannot be listed never stops the sign-out (it still goes to /login)', async () => {
@@ -132,6 +148,6 @@ describe('[SID:4487] the account\'s browser values go with the account', () => {
   it('a logout through logoutUser (session expiry paths) clears them too', async () => {
     answer({});
     await logoutUser('rt');
-    expectOnlyAccountKeysGone();
+    expectOnlyAccountKeysGone('signout');
   });
 });
