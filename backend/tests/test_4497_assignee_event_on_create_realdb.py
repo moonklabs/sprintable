@@ -386,3 +386,70 @@ async def test_bulk_with_one_foreign_assignee_refuses_the_whole_request():
         assert await _events_to(Session, foreign) == [] and await _events_to(Session, agent_id) == []
     finally:
         await engine.dispose()
+
+
+async def _story_with_an_assignee_outside_todays_rule(Session, org_id, project_id, owner_id):
+    """A story whose assignee was saved before this check and matches no member row today — what an old member id (the legacy
+    table's · a removed member's) looks like to the rule. The columns have no FK (grant-only people), so such ids exist."""
+    from sqlalchemy import text
+
+    r = await _create(Session, org_id, project_id, owner_id)
+    story_id = r.json().get("data", r.json())["id"]
+    gone = uuid.uuid4()
+    async with Session() as s:
+        await s.execute(text("UPDATE stories SET assignee_id = :m WHERE id = :s"), {"m": gone, "s": uuid.UUID(story_id)})
+        await s.execute(text("INSERT INTO story_assignees (id, org_id, story_id, member_id) VALUES (:i, :o, :s, :m)"),
+                        {"i": uuid.uuid4(), "o": org_id, "s": uuid.UUID(story_id), "m": gone})
+        await s.commit()
+    return story_id, gone
+
+
+async def test_an_edit_that_sends_back_an_assignee_already_on_the_story_is_not_refused():
+    """PO 11:25Z — the web sends the assignee back unchanged with another field; one already on the story but outside today's
+    rule must not refuse the edit (PATCH single · multiple · bulk). Adding a new outside id is still refused."""
+    from sqlalchemy import select
+
+    from app.models.pm import Story
+
+    engine, Session, org_id, project_id, owner_id, _other, _agent = await _seed()
+    try:
+        story_id, gone = await _story_with_an_assignee_outside_todays_rule(Session, org_id, project_id, owner_id)
+        path = f"/api/v2/stories/{story_id}"
+        r = await _patch(Session, org_id, owner_id, path, {"title": "제목만 바꿈", "assignee_id": str(gone)})
+        assert r.status_code == 200, r.text
+        r = await _patch(Session, org_id, owner_id, path, {"title": "또 바꿈", "assignee_ids": [str(gone)]})
+        assert r.status_code == 200, r.text
+        r = await _patch(Session, org_id, owner_id, "/api/v2/stories/bulk", {"items": [{"id": story_id, "assignee_id": str(gone), "priority": "high"}]})
+        assert r.status_code == 200, r.text
+        async with Session() as s:
+            row = (await s.execute(select(Story.title, Story.assignee_id, Story.priority).where(Story.id == uuid.UUID(story_id)))).one()
+        assert (row.title, row.assignee_id, row.priority) == ("또 바꿈", gone, "high")
+        # contrast: the same id is refused where it is new
+        other = (await _create(Session, org_id, project_id, owner_id)).json()
+        other_id = other.get("data", other)["id"]
+        _refused(await _patch(Session, org_id, owner_id, f"/api/v2/stories/{other_id}", {"assignee_id": str(gone)}))
+        _refused(await _patch(Session, org_id, owner_id, "/api/v2/stories/bulk", {"items": [{"id": other_id, "assignee_id": str(gone)}]}))
+    finally:
+        await engine.dispose()
+
+
+async def test_an_old_id_that_is_only_a_second_assignee_is_also_already_on_the_story():
+    """The same rule when the old id is only in the join rows (a second assignee — the single column holds the org's agent):
+    PATCH sending both back and bulk naming it are not refused."""
+    from sqlalchemy import text
+
+    engine, Session, org_id, project_id, owner_id, _other, agent_id = await _seed()
+    try:
+        r = await _create(Session, org_id, project_id, owner_id, assignee_id=str(agent_id))
+        story_id = r.json().get("data", r.json())["id"]
+        gone = uuid.uuid4()
+        async with Session() as s:
+            await s.execute(text("INSERT INTO story_assignees (id, org_id, story_id, member_id) VALUES (:i, :o, :s, :m)"),
+                            {"i": uuid.uuid4(), "o": org_id, "s": uuid.UUID(story_id), "m": gone})
+            await s.commit()
+        r = await _patch(Session, org_id, owner_id, f"/api/v2/stories/{story_id}", {"title": "둘째 담당 그대로", "assignee_ids": [str(agent_id), str(gone)]})
+        assert r.status_code == 200, r.text
+        r = await _patch(Session, org_id, owner_id, "/api/v2/stories/bulk", {"items": [{"id": story_id, "assignee_id": str(gone)}]})
+        assert r.status_code == 200, r.text
+    finally:
+        await engine.dispose()

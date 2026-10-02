@@ -728,13 +728,17 @@ async def _assert_human_owner(
 
 
 async def _assert_assignees_in_org(
-    session: AsyncSession, org_id: uuid.UUID, ids: "list[uuid.UUID | None]",
+    session: AsyncSession, org_id: uuid.UUID, ids: "list[uuid.UUID | None]", already: "set[uuid.UUID] | None" = None,
 ) -> None:
     """story #4497 (Qadir codex 01a0fc4a · PO 11:22Z) — every assignee given (single and multiple) must be a member of this org,
     checked before anything is saved or announced. There was no check on create · PATCH · bulk: another org's agent member id
     as the assignee was saved, and the announcement put the story's title and description into that agent's inbox (the gateway
-    filters by recipient only). The org-membership rule mentions · conversations already use (`filter_org_member_ids`)."""
-    wanted = {i for i in ids if i is not None}
+    filters by recipient only). The org-membership rule mentions · conversations already use (`filter_org_member_ids`).
+
+    `already` (PO 11:25Z): the story's current assignees — only an id being added is checked. The web sends the assignee back
+    unchanged when it edits another field, and one already on the story can be outside today's rule (a person who left · an old
+    member id); an edit that does not touch the assignee must not be refused for it."""
+    wanted = {i for i in ids if i is not None} - (already or set())
     if not wanted:
         return
     if wanted - await filter_org_member_ids(wanted, org_id, session):
@@ -2012,8 +2016,17 @@ async def bulk_update_stories(
     # 「이례적」 표기 그 필드 재사용)에 차단 사유를 담는다. has_project_access 미충족(존재
     # 비노출)과 달리 이건 「존재하고 접근권도 있는데 승인 대기」라 조용하면 #2067 재현.
     gate_pending_by_id: dict[uuid.UUID, dict] = {}
-    # story #4497 — one assignee outside the org refuses the whole request, before any item is written
-    await _assert_assignees_in_org(db, repo.org_id, [i.assignee_id for i in payload.items])
+    # story #4497 — one assignee outside the org refuses the whole request, before any item is written; per item, only an id
+    # that story does not have yet is checked (PO 11:25Z — the same as PATCH)
+    _given = {i.id: i.assignee_id for i in payload.items if i.assignee_id is not None}
+    if _given:
+        _single = dict((await db.execute(
+            select(Story.id, Story.assignee_id).where(Story.id.in_(list(_given)), Story.org_id == repo.org_id)
+        )).all())
+        _joined = await StoryAssigneeRepository(db, repo.org_id).map_member_ids(list(_given))
+        await _assert_assignees_in_org(db, repo.org_id, [
+            _aid for _sid, _aid in _given.items() if _aid != _single.get(_sid) and _aid not in _joined.get(_sid, [])
+        ])
     for item in payload.items:
         # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
         # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
@@ -2277,7 +2290,8 @@ async def update_story(
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
     if assignee_ids_in is not None and "assignee_id" not in data:
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
-    await _assert_assignees_in_org(db, repo.org_id, [*(assignee_ids_in or []), data.get("assignee_id")])
+    _current = {_story_for_access.assignee_id, *await StoryAssigneeRepository(db, repo.org_id).list_member_ids(id)} - {None}
+    await _assert_assignees_in_org(db, repo.org_id, [*(assignee_ids_in or []), data.get("assignee_id")], already=_current)
     # story #2254(그라운딩 doc e5bc0789, 2026-08-25) — append/restore도 stories 컬럼이
     # 아니므로 분리(allow_shrink와 동형). 실제 반영은 아래 story_before 조회 블록에서.
     _append_by_field = {
