@@ -721,6 +721,20 @@ describe('[SID:4488] the money sentence says only what the server has proven', (
     expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptNoChargePending);
   });
 
+  it.each([
+    ['unresolved', false],
+    ['checking', true],
+    ['confirmed', true],
+  ] as const)('a failed attempt with no_charge=%s → [다시 시도] shown: %s (unresolved may still be charged — a new one would charge twice · PO 03:48Z)', async (noCharge, shown) => {
+    searchParams = new URLSearchParams(RETURN);
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'failed', no_charge: noCharge }) });
+    await mount(async () => statusResponse());
+    const alertEl = container.querySelector('[data-payment-attempt-state="failed"]');
+    expect(alertEl).not.toBeNull();
+    const retry = [...(alertEl?.querySelectorAll('button') ?? [])].filter((b) => b.textContent === koMessages.common.retry);
+    expect(retry).toHaveLength(shown ? 1 : 0);
+  });
+
   it('«결제 내역» / "Billing history" never break between the two words (a no-break space — Yuna 03:34Z)', () => {
     for (const msgs of [koMessages.pricingPlans, enMessages.pricingPlans]) {
       for (const k of ['paymentAttemptNoChargePending', 'paymentAttemptUnreadable'] as const) {

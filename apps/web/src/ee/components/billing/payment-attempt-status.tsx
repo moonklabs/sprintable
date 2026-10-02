@@ -213,7 +213,9 @@ export function PaymentAttemptBanner({
         <AlertDescription className="space-y-2 break-keep">
           <span className="block">{t('paymentAttemptFailed')}</span>
           <span className="block" data-no-charge={noCharge ?? 'unknown'}>{noChargeLine}</span>
-          {attempt && (
+          {/* story #4488 (Kadir · PO 03:48Z) — no [다시 시도] once the server stopped without a proof: the first attempt may still be
+              charged, and a new one would charge twice. This closes the screen's path only — the server's refusal is story #4489. */}
+          {attempt && noCharge !== 'unresolved' && (
             <Button size="sm" variant="outline" onClick={() => onRetry({ kind: state.kind, tier, billingCycle })}>
               {tc('retry')}
             </Button>
