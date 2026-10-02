@@ -985,6 +985,9 @@ async def create_story(
             )
         except Exception:
             logger.warning("assignee_changed at create failed (story=%s, the story is already committed)", story.id, exc_info=True)
+        # the response reads the story after these commits: reload it first (lint_commit_before_validate · story #2459 — prod hit
+        # MissingGreenlet on a model_validate after a commit despite expire_on_commit=False; the transient fields set above stay)
+        await session.refresh(story)
     # story #2532: 생성 시점엔 hypothesis_story_links가 있을 수 없다(별도 링크 API라 방금
     # 생성된 story.id를 아직 아무도 못 건다) — DB 쿼리 없이 epic_id만으로 판정(_attach_
     # has_hypothesis_or_goal의 배치쿼리는 목록/재조회 경로 전용, 여기선 불필요).
