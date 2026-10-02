@@ -251,3 +251,47 @@ async def test_a_bulk_items_failed_announcement_does_not_stop_the_next_ones(monk
         assert sorted(announced) == [0, 1]  # one failed, the other still reached the agent
     finally:
         await engine.dispose()
+
+
+@pytest.mark.parametrize("failing", [1, 2])
+async def test_a_bulk_items_failure_drops_only_its_own_half_not_the_others_writes(monkeypatch, failing):
+    """PO 10:35Z — the rollback on one item's failure must not take what the request wrote and had not committed yet: the status
+    loop's activity records and the earlier items' announcements (a person's notification). Three items move status and get a
+    person as assignee; one announcement fails on a DB write → the others keep their story_assigned notification, every item
+    keeps its status_changed activity. The first item failing pins the commit before the loop (nothing committed the status
+    loop's writes yet); the second failing pins the commit after each announcement (the first item's notification)."""
+    from sqlalchemy import select, text
+
+    import app.services.notification_dispatch as notification_dispatch
+    from app.models.pm import StoryActivity
+
+    real = notification_dispatch.dispatch_notification
+    calls = {"n": 0}
+
+    async def second_fails(db, **kwargs):
+        if kwargs.get("event_type") == "story_assigned":
+            calls["n"] += 1
+            if calls["n"] == failing:
+                await db.execute(text("SELECT 1/0"))
+        return await real(db, **kwargs)
+
+    monkeypatch.setattr(notification_dispatch, "dispatch_notification", second_fails)
+    engine, Session, org_id, project_id, owner_id, other_human, _agent = await _seed()
+    try:
+        ids = []
+        for _ in range(3):
+            r = await _create(Session, org_id, project_id, owner_id)
+            ids.append(r.json().get("data", r.json())["id"])
+        r = await _patch(Session, org_id, owner_id, "/api/v2/stories/bulk", {
+            "items": [{"id": i, "status": "ready-for-dev", "assignee_id": str(other_human)} for i in ids],
+        })
+        assert r.status_code == 200, r.text
+        notified = [len(await _assigned_notifications(Session, uuid.UUID(i))) for i in ids]
+        assert notified == [0 if n == failing else 1 for n in (1, 2, 3)], notified
+        async with Session() as s:
+            status_rows = (await s.execute(select(StoryActivity.story_id).where(
+                StoryActivity.activity_type == "status_changed", StoryActivity.story_id.in_([uuid.UUID(i) for i in ids]),
+            ))).scalars().all()
+        assert sorted(map(str, status_rows)) == sorted(ids)
+    finally:
+        await engine.dispose()

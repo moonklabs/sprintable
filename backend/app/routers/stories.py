@@ -2168,6 +2168,10 @@ async def bulk_update_stories(
     # 보낸다. "지금 아무도 안 밟지만 계약은 깨져 있는" 자리를 여기서 닫는다). old_assignee_by_id는
     # 멤버십으로 "실제 변경"만 담아뒀으므로 그대로 재사용(중복 판정 없음, status와 동형).
     if old_assignee_by_id:
+        # story #4497 (PO 10:35Z) — the status loop above and each announcement below write rows of their own (activity records ·
+        # a person's notification) that the request would commit only at its end. Committed here and after every announcement,
+        # so the rollback on one item's failure drops only that item's half — not the status loop's writes or the items before.
+        await db.commit()
         for s in updated:
             if s.id not in old_assignee_by_id:
                 continue
@@ -2178,6 +2182,7 @@ async def bulk_update_stories(
                     background_tasks=background_tasks,
                     actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
                 )
+                await db.commit()
             except Exception:  # noqa: BLE001 — 한 item의 emit 실패가 나머지 item을 막지 않음.
                 logger.error(
                     "bulk assignee_changed emit 실패(story=%s)", s.id, exc_info=True,
