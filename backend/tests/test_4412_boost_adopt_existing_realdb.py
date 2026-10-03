@@ -264,14 +264,21 @@ async def test_an_ad_of_that_name_under_another_adset_is_not_adopted(monkeypatch
 
 async def test_two_runs_adopting_the_same_campaign_at_once_only_one_wins(monkeypatch):
     """Qadir 01a0eada ① (PO 01:59Z) — each run locks only its own row, so the «not recorded on another run» filter can pass
-    for both; the unique indexes (0420) let only one of the two writes through, the other gets already_linked."""
+    for both; the unique indexes (0420) let only one of the two writes through, the other gets already_linked.
+
+    PR 4935 CI (Qadir · PO 11:00Z): the two runs only overlap if both read the other runs before either commits — the test
+    left that to the event loop, and on some trees the second always read after the first had committed (→ not_found, the
+    sequential answer, pinned by the next test). A barrier at the provider lookup — called after that read — makes the
+    overlap certain."""
     import asyncio
 
     import app.services.ads_sandbox_campaign as sandbox
 
     now = (datetime.now(UTC) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S+0000")
+    both_have_read = asyncio.Barrier(2)
 
     async def the_same_campaign(client, **kwargs):
+        await both_have_read.wait()  # both runs have read «the other runs' ids» (before the lookup) — now they race
         return [{"id": "shared-campaign", "name": sandbox.boost_campaign_name(kwargs["object_story_id"]), "created_time": now}]
 
     async def the_same_adset(client, **kwargs):
@@ -341,3 +348,44 @@ async def test_two_boosts_of_one_post_with_the_same_sealed_values_get_different_
     finally:
         for w in worlds:
             await w[0].dispose()
+
+
+
+async def test_a_run_adopting_after_another_finished_finds_nothing_left(monkeypatch):
+    """The sequential order (PR 4935 CI · PO 11:00Z): the second run starts after the first committed its adoption, so the
+    shared campaign is already another run's and is filtered out — not_found, by design (not already_linked), and the second
+    run records nothing."""
+    import app.services.ads_sandbox_campaign as sandbox
+
+    now = (datetime.now(UTC) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S+0000")
+
+    async def the_same_campaign(client, **kwargs):
+        return [{"id": "shared-campaign", "name": sandbox.boost_campaign_name(kwargs["object_story_id"]), "created_time": now}]
+
+    async def the_same_adset(client, **kwargs):
+        return [{"id": "shared-adset", "name": sandbox.boost_adset_name(kwargs["object_story_id"]), "campaign_id": "shared-campaign",
+                 "created_time": now, sandbox.BOOST_ADSET_BUDGET_FIELD: str(kwargs.get("expected_budget_minor"))}]
+
+    async def the_same_ad(client, **kwargs):
+        return [{"id": "shared-ad", "name": sandbox.boost_ad_name(kwargs["object_story_id"]), "adset_id": "shared-adset",
+                 "created_time": now}]
+
+    first = await _stopped_unknown("[sandbox:create-unknown]", monkeypatch)
+    second = await _stopped_unknown("[sandbox:create-unknown]", monkeypatch)
+    monkeypatch.setattr(sandbox, "find_boost_campaigns", the_same_campaign)
+    monkeypatch.setattr(sandbox, "find_boost_adsets", the_same_adset)
+    monkeypatch.setattr(sandbox, "find_boost_ads", the_same_ad)
+    from app.services.ads_boost_execution import adopt_existing_boost_objects
+
+    try:
+        answers = []
+        for world in (first, second):  # one after the other
+            async with world[1]() as s:
+                answers.append(await adopt_existing_boost_objects(s, org_id=world[2], gate_id=world[4]))
+                await s.commit()
+        assert [a["result"] for a in answers] == ["adopted", "not_found"], answers
+        runs = [await _run(first[1], first[4]), await _run(second[1], second[4])]
+        assert [r.campaign_id or "" for r in runs] == ["shared-campaign", ""]
+    finally:
+        await first[0].dispose()
+        await second[0].dispose()
