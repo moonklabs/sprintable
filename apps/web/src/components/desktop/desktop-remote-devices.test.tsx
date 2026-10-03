@@ -119,7 +119,8 @@ describe('DesktopRemoteDevices (story #4533)', () => {
   it('empty, and the org with remote control off', async () => {
     answers([], false);
     await render();
-    expect(text()).toContain('아직 짝지은 폰이 없어요 — 데스크톱 앱 띠의 «원격 제어 켜짐»에서 [폰 짝짓기]로 짝지어요');
+    expect(text()).toContain('아직 짝지은 폰이 없어요');
+    expect(text()).not.toContain('폰 짝짓기'); // the tail comes back with 4531's button, and only with the org on (PO · Yuna 19:00Z)
     expect(text()).toContain('지금 조직(문클랩스)은 원격 제어가 꺼져 있어요 — 짝지은 기기로 상태는 보이지만 제어는 안 돼요');
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });

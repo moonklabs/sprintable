@@ -8,6 +8,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgRemoteControl } from '@/lib/org-remote-control';
 
 /**
  * story #4533 AC3 (명세 모음 «B-1 ③ 웹 내 설정 · 원격 기기 — 목록과 [빼기]만») — my phones as pairs, one line per phone ↔ computer:
@@ -21,7 +22,9 @@ export function DesktopRemoteDevices() {
   const t = useTranslations('desktop.remoteDevices');
   const { orgId, orgMemberships } = useDashboardContext();
   const orgName = orgMemberships.find((o) => o.orgId === orgId)?.orgName ?? null;
-  const [remoteControlOn, setRemoteControlOn] = useState<boolean | null>(null);
+  // the switch card's own value (story #4535 · PO 18:58Z): turned on or off there, the «꺼져 있어요» line follows at once
+  const [remoteControl] = useOrgRemoteControl(orgId);
+  const remoteControlOn = remoteControl ? remoteControl.enabled : null;
   const [phones, setPhones] = useState<Phone[] | null>(null);
   const [asking, setAsking] = useState<string | null>(null); // `${phone}:${setup}` being confirmed
   const [result, setResult] = useState('');
@@ -48,15 +51,6 @@ export function DesktopRemoteDevices() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { // «꺼져 있으면» line: the same read the «원격 제어» card makes
-    if (!orgId) return;
-    let off = false;
-    void fetchWithAuth(`/api/organizations/${orgId}/remote-control`)
-      .then(async (res) => (res.ok ? ((await res.json()) as { data?: { enabled: boolean } }).data?.enabled ?? null : null))
-      .catch(() => null)
-      .then((v) => { if (!off) setRemoteControlOn(v); });
-    return () => { off = true; };
-  }, [orgId]);
 
   const remove = useCallback(async (phone: Phone, pair: Pair) => {
     try {
