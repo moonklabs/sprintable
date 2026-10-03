@@ -541,12 +541,25 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               // and a key in the list clears it too. Story 4516: the press ends in one place — the mark stays only when its click
               // will reach a radio (released on the card it was pressed on); released anywhere else (between cards · on another
               // card · outside the list) or cancelled (a touch that became a scroll) there is no radio click to wait for, so it
-              // is cleared at once and the next blur folds the list.
+              // is cleared at once.
+              // Story 4516 (live 2026-10-03 · Min ①b): clearing alone is not enough — the press itself took focus off the radio (a
+              // press between cards lands on the list, which takes no focus → body) and that blur was held for this press's click,
+              // which will not come. With focus already out of the list no later blur can fold it, so the held blur is settled here:
+              // released inside the list (or cancelled) → focus back on the chosen radio — pressing empty space chooses nothing and
+              // folds nothing, and the next click outside or Tab folds it as usual; released outside the list → folded now, as a
+              // click outside does.
               const card = recipeCardOf(down.target);
               const release = (up: PointerEvent) => {
                 window.removeEventListener('pointerup', release);
                 window.removeEventListener('pointercancel', release);
-                if (up.type === 'pointercancel' || !card || recipeCardOf(up.target) !== card || !recipeListRef.current?.contains(card)) pressInList.current = false;
+                const list = recipeListRef.current;
+                if (up.type !== 'pointercancel' && card && recipeCardOf(up.target) === card && list?.contains(card)) return; // its radio click comes
+                pressInList.current = false;
+                if (!list || list.contains(document.activeElement)) return; // focus still in the list: its next blur folds as usual
+                if (up.type === 'pointercancel' || (up.target instanceof Node && list.contains(up.target))) {
+                  // without scrolling: after a cancelled touch the person was scrolling the list — never pull it back (PO 06:26Z)
+                  list.querySelector<HTMLInputElement>('input[name=recipe]:checked')?.focus({ preventScroll: true });
+                } else foldRecipes(document.hasFocus());
               };
               window.addEventListener('pointerup', release);
               window.addEventListener('pointercancel', release);
