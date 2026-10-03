@@ -21,6 +21,9 @@ export interface NavV3Flags {
   todayV3Enabled: boolean;
   chatV3Enabled: boolean;
   connectRulesV3Enabled: boolean;
+  /** story #4524 — `DESKTOP_DOWNLOAD_ENABLED` (server-only), the gate `/desktop` itself redirects on: the sidebar's «데스크톱 앱»
+   * link shows only when it is on (no link to a page that sends you back). Absent = off (prod-safe, as the env's own default). */
+  desktopDownloadEnabled?: boolean;
 }
 
 /** static = 그대로 href로 쓰는 절대경로. resource = org/project 접두가 필요한 조각(호출부의 resourceLink류가 해석). */
