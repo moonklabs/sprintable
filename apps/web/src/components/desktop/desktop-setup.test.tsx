@@ -1677,29 +1677,42 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     expect(recipeInputs()).toHaveLength(2);
   });
 
-  // story 4516: a press that will not end in a radio's click must not leave the «pressing» mark behind — the next blur (a click
-  // elsewhere · Tab) folds the list. Each release is the browser's: pointerup where the pointer is, then (only on the same
-  // element) a click — none of these has a click on a radio, so none is sent.
-  for (const [what, end] of [
-    ['released between cards (the list\'s gap)', (list: HTMLElement) => list.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }))],
-    ['released on another card', (list: HTMLElement) => list.querySelectorAll('label')[0].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }))],
-    ['released outside the list', () => document.body.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }))],
-    ['a cancelled press (a touch that became a scroll)', (list: HTMLElement) => list.querySelectorAll('label')[1].dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, cancelable: true }))],
+  // story 4516 (live 2026-10-03 · Min ①b): in a browser a press that is not on a radio moves focus off it BEFORE the release (a
+  // press between cards lands on the list, which takes no focus → body) — that blur is held for the press's click. When no
+  // radio click follows, the release settles it: released inside the list (or cancelled) → focus back on the chosen radio, list
+  // open, choice unchanged — and the next click outside / Tab folds it; released outside → folded at once.
+  for (const [what, end, folds] of [
+    ['released between cards (the list\'s gap)', (list: HTMLElement) => list.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true })), false],
+    ['released on another card', (list: HTMLElement) => list.querySelectorAll('label')[0].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true })), false],
+    ['a cancelled press (a touch that became a scroll)', (list: HTMLElement) => list.querySelectorAll('label')[1].dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, cancelable: true })), false],
+    ['released outside the list', () => document.body.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true })), true],
   ] as const) {
-    it(`[SID:4516] ${what}: no radio click follows, so the mark is gone — the next blur folds the list, the choice unchanged`, async () => {
+    it(`[SID:4516] ${what}, in the browser's order (the press's blur first): no radio click follows — ${folds ? 'folded at once' : 'focus back on the chosen radio, then the next blur folds'}; the choice unchanged`, async () => {
       stub(() => new Response('{}'));
       await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
       const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
       await openRecipes();
       const list = container.querySelector('[data-testid=setup-recipe-list]') as HTMLElement;
       const card = recipeInputs()[1].closest('label') as HTMLLabelElement;
+      const target = what.startsWith('released between') ? list : card;
       await act(async () => {
-        card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-        end(list);
+        target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        (document.activeElement as HTMLElement).blur(); // the press took focus off the radio (to body) — held, the press decides
       });
-      expect(recipeInputs()).toHaveLength(2); // the release alone folds nothing
-      await act(async () => { (document.activeElement as HTMLElement).blur(); }); // a click elsewhere · Tab out of the window's list
-      expect(recipeInputs()).toHaveLength(0);
+      expect(recipeInputs()).toHaveLength(2); // held while pressing
+      const focusSpy = vi.spyOn(HTMLElement.prototype, 'focus');
+      await act(async () => { end(list); });
+      // focus comes back without scrolling (a cancelled touch was a scroll — never pulled back · PO 06:26Z)
+      if (!folds) { expect(focusSpy).toHaveBeenCalledTimes(1); expect(focusSpy.mock.calls[0][0]).toEqual({ preventScroll: true }); } // (a fold moves focus to [바꾸기] — not this change's)
+      focusSpy.mockRestore();
+      if (folds) {
+        expect(recipeInputs()).toHaveLength(0);
+      } else {
+        expect(recipeInputs()).toHaveLength(2);
+        expect(document.activeElement).toBe(recipeInputs().find((i) => i.checked)); // back in the list
+        await act(async () => { (document.activeElement as HTMLElement).blur(); }); // then a click outside · Tab
+        expect(recipeInputs()).toHaveLength(0);
+      }
       expect(chosen()?.textContent).toContain('마케팅 루프');
       hasFocus.mockRestore();
     });
