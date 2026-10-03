@@ -278,3 +278,30 @@ async def test_the_report_carries_no_raw_input_and_only_this_devices_sessions_an
         assert person.status_code == 401  # a person's token is no device
         assert (await _sql(fetch="SELECT count(*) FROM agent_permission_requests WHERE setup_id = :s",
                            params={"s": device["setup_id"]}))[0][0] == 0
+
+
+async def test_a_persons_own_api_key_neither_answers_nor_adds_a_phone(world):
+    """A script holding the owner's hu_live_ key must not answer for them or register a phone in their name — the person's own
+    session (the phone app's login) does both."""
+    from app.core.database import async_session_factory
+    from app.repositories.human_api_key import HumanApiKeyRepository
+
+    async with async_session_factory() as s:
+        _hkey, plaintext = await HumanApiKeyRepository(s).create(member_id=OWNER_TM, name="d4533 script", expires_at=None)
+        await s.commit()
+    person_key = {"Authorization": f"Bearer {plaintext}", "X-Org-Id": str(ORG)}
+    try:
+        async with _client() as c:
+            device = await _device(c, name="d4424 mac 4533h")
+            agent = await _with_session(c, device)
+            phone_id, der = await _register(c)
+            await _pair(c, device["device_token"], der)
+            made = (await _post_ask(c, device, _ask(agent))).json()
+            refused = await c.post(f"{REQS}/{made['id']}/answer", json=_answer(phone_id), headers=person_key)
+            assert refused.status_code == 403 and refused.json()["error"]["code"] == "person_session_required"
+            assert (await _sql(fetch=f"SELECT state FROM agent_permission_requests WHERE id = '{made['id']}'"))[0][0] == "pending"
+            added = await c.post(PHONES, json={"label": "x", "public_key": _phone_key()[0]}, headers=person_key)
+            assert added.status_code == 403 and added.json()["error"]["code"] == "person_session_required"
+            assert (await c.post(f"{REQS}/{made['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))).status_code == 200
+    finally:
+        await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
