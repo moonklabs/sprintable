@@ -12,6 +12,7 @@ export type AnswerOutcome =
   | { kind: 'answered_by'; name: string | null; decision: 'allow' | 'deny' | null } // someone else answered first
   | { kind: 'cancelled' } // the person did not confirm on the OS prompt — the request is still open
   | { kind: 'biometric_required' } // API 24–29 with no fingerprint enrolled
+  | { kind: 'no_screen_lock' } // no screen lock: no key can be made or used
   | { kind: 'key_invalidated' } // a new fingerprint made the phone's key unusable — pair again
   | { kind: 'not_paired' } // 409 phone_not_paired — the request is still open
   | { kind: 'expired' } // the window passed
@@ -28,6 +29,7 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
     switch (signed.code) {
       case 'cancelled': return { kind: 'cancelled' };
       case 'biometric_required': return { kind: 'biometric_required' };
+      case 'no_screen_lock': return { kind: 'no_screen_lock' };
       case 'key_invalidated': return { kind: 'key_invalidated' };
       case 'expired': return { kind: 'expired' };
       case 'not_pending':

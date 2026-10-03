@@ -24,6 +24,7 @@ describe('[4532] answerOnPhone', () => {
   it.each([
     ['cancelled', 'cancelled'],
     ['biometric_required', 'biometric_required'],
+    ['no_screen_lock', 'no_screen_lock'],
     ['key_invalidated', 'key_invalidated'],
     ['expired', 'expired'],
     ['not_pending', 'closed'],
