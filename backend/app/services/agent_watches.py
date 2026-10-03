@@ -317,10 +317,10 @@ async def _upsert_pr(db: AsyncSession, org_id: uuid.UUID, repo: str, number: int
     ))
 
 
-async def _event_org(db: AsyncSession, payload: dict, repo: str, resolved: uuid.UUID | None) -> uuid.UUID | None:
-    """The org the webhook resolved to; else the handler's own rule — an app installation, or the legacy repo-owner match."""
-    if resolved is not None:
-        return resolved
+async def _event_org(db: AsyncSession, payload: dict, repo: str) -> uuid.UUID | None:
+    """The org that owns the event's repo: its app installation, else the legacy repo-owner exactly-one match — never the org
+    the handler may take from a story's SID in the PR title (Qadir 09:04Z: a title line would put a PR record, and its watches,
+    in another org)."""
     installation_id = (payload.get("installation") or {}).get("id")
     if installation_id:
         from app.models.github_installation import GithubInstallation
@@ -333,13 +333,13 @@ async def _event_org(db: AsyncSession, payload: dict, repo: str, resolved: uuid.
     return await org_of_repo(db, repo)
 
 
-async def on_github_event(db: AsyncSession, event: str, payload: dict, *, org_id: uuid.UUID | None = None) -> int:
-    """Called at the end of the webhook handler, in its transaction (after the delivery-id dedup) — `org_id` is the org the
-    handler resolved. Records the PR under that org and fires only that org's watches. Returns watches fired."""
+async def on_github_event(db: AsyncSession, event: str, payload: dict) -> int:
+    """Called at the end of the webhook handler, in its transaction (after the delivery-id dedup). Records the PR under the org
+    that owns its repo (_event_org) and fires only that org's watches. Returns watches fired."""
     repo = _repo_of(payload)
     if repo is None:
         return 0
-    org_id = await _event_org(db, payload, repo, org_id)
+    org_id = await _event_org(db, payload, repo)
     if org_id is None:
         return 0  # no org owns it: nothing recorded, nothing fired
     fired = 0

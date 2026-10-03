@@ -353,3 +353,45 @@ async def test_a_github_app_orgs_pr_is_watched_and_fires_while_another_org_gets_
     finally:
         await _sql("DELETE FROM github_pull_requests WHERE repo = 'd4536app/inst'",
                    "DELETE FROM github_installation WHERE installation_id = 4536002")
+
+
+
+async def test_an_org_found_only_by_a_titles_sid_gets_no_pr_record_and_no_watch_fires(world):
+    """Qadir 09:04Z — a legacy webhook whose repo owner resolves no org: the handler may still take a story's org from the SID
+    in the PR title (for the verdict), but the watches' record never does — no PR recorded, no watch fired."""
+    stranger_repo = "d4536nobody/r"
+    async with _client() as c:
+        agent, h = await _agent(c)
+        await _sql(f"INSERT INTO agent_watches (id, org_id, project_id, agent_member_id, condition, target, status, expires_at) "
+                   f"VALUES (gen_random_uuid(), '{ORG}', '{PROJ}', '{agent}', 'github.pr_merged', "
+                   f"'{{\"repo\": \"{stranger_repo}\", \"pr\": 130}}', 'active', now() + interval '1 day')")
+        sid = uuid.uuid4()  # a story of the watching org: the legacy SID path finds it across orgs by its id
+        await _sql(f"INSERT INTO stories (id, org_id, project_id, title, status, priority) "
+                   f"VALUES ('{sid}', '{ORG}', '{PROJ}', 'd4536 sid story', 'backlog', 'medium')")
+        event = {"action": "closed", "number": 130, "repository": {"full_name": stranger_repo},
+                 "pull_request": {"number": 130, "state": "closed", "merged": True, "merged_at": _ts(3), "merge_commit_sha": SHA(130),
+                                  "title": f"[SID:{sid}] a change", "base": {"ref": "develop"}, "head": {"sha": SHA(7130)},
+                                  "merged_by": {"login": "x"}}}
+        await _hook(c, "pull_request", event)
+        assert (await _sql(fetch=f"SELECT count(*) FROM github_pull_requests WHERE repo = '{stranger_repo}'"))[0][0] == 0
+        assert await _fired_events(agent) == []
+    await _sql(f"DELETE FROM agent_watches WHERE target->>'repo' = '{stranger_repo}'", f"DELETE FROM stories WHERE id = '{sid}'")
+
+
+async def test_a_watch_step_that_fails_in_the_database_leaves_the_webhooks_own_records(owned, monkeypatch):
+    """Qadir 09:04Z lens ③ — the watch step runs in its own savepoint: a database error there drops that step only; the
+    delivery record (and the verdict work before it) still commits. Without the savepoint the aborted transaction would take
+    the delivery with it."""
+    from sqlalchemy import text
+
+    import app.services.agent_watches as svc
+
+    async def broken(db, *a, **k):
+        await db.execute(text("SELECT 1/0"))  # a real database error, not only a Python exception
+
+    monkeypatch.setattr(svc, "_upsert_pr", broken)
+    async with _client() as c:
+        delivery, _body, _headers = await _hook(c, "pull_request", _pr_event(140, "opened"))
+    rows = await _sql(fetch=f"SELECT status FROM github_webhook_delivery WHERE delivery_id = '{delivery}'")
+    assert len(rows) == 1 and rows[0][0] != "received", rows
+    assert (await _sql(fetch=f"SELECT count(*) FROM github_pull_requests WHERE repo = '{REPO}' AND number = 140"))[0][0] == 0
