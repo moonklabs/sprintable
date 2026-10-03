@@ -192,7 +192,8 @@ async def test_commands_four_kinds_a_schema_each_one_row_per_key_numbered_per_de
         conv = str(uuid.uuid4())
         first = await _enqueue(sid, "send_prompt", {"session_key": "s", "text": "hi", "conversation_id": conv, "signed": "sig"}, "same")
         again = await _enqueue(sid, "send_prompt", {"session_key": "s", "text": "other", "conversation_id": conv, "signed": "sig"}, "same")
-        assert again.id == first.id and again.payload == {"session_key": "s", "text": "hi"}
+        # the same key: the first row as it was (the second body is not taken — v1.9 fields carried as sent)
+        assert again.id == first.id and again.payload == {"session_key": "s", "text": "hi", "conversation_id": conv, "signed": "sig"}
         second = await _enqueue(sid, "start_session", {"agent_member_id": agent, "runtime": "codex"}, "k2")
         assert (first.device_seq, second.device_seq) == (1, 2)
 

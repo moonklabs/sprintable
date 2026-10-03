@@ -84,12 +84,13 @@ function Strip({ view }: { view: View & { state: SessionState } }) {
         {label}
       </span>
       {view.device_name ? <span className="text-muted-foreground">{view.device_name}</span> : null}
-      <Line view={view} t={t} href={flatHref('/inbox?tab=gates')} />
+      <Line view={view} href={flatHref('/inbox?tab=gates')} />
     </div>
   );
 }
 
-function Line({ view, t, href }: { view: View & { state: SessionState }; t: ReturnType<typeof useTranslations>; href: string }) {
+function Line({ view, href }: { view: View & { state: SessionState }; href: string }) {
+  const t = useTranslations('chats.agentSession');
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
   if (view.state === 'waiting_permission') {
     return <Link className="w-full text-muted-foreground underline" href={href} data-testid="agent-session-line">{t('line.inbox')}</Link>;
