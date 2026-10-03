@@ -235,9 +235,10 @@ async def _send_personal_webhook_targets(
 
 
 def _bell_extras(event: dict | None) -> dict:
-    """What the bell line reads from a person's dispatched Event besides title/body/event_type (story #4520): the gate's name."""
-    name = ((event or {}).get("payload") or {}).get("gate_name")
-    return {"gate_name": name} if isinstance(name, str) and name else {}
+    """What the bell line reads from a person's dispatched Event besides title/body/event_type: the gate's name (story #4520),
+    the waiting agent's name (story #4533 «권한 대기 · {에이전트}»)."""
+    payload = (event or {}).get("payload") or {}
+    return {k: payload[k] for k in ("gate_name", "agent_name") if isinstance(payload.get(k), str) and payload[k]}
 
 
 async def dispatch_notification(

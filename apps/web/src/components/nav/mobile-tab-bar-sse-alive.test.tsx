@@ -76,11 +76,20 @@ describe('MobileTabBar — 결재 대기 수 SSE 라이브 · 생존 시 포커�
 
   it('⭐게이트 SSE 이벤트(승인 · 위임 · 토스)를 구독하고, 이벤트가 오면 다시 물어 배지가 바뀐다', async () => {
     await mount();
-    expect(Object.keys(muxState.handlers).sort()).toEqual(['conversation.gate_delegated', 'conversation.gate_resolved', 'conversation.gate_tossed']);
+    // story #4533 — and an agent's permission request sent to me (its bell notice): the server counts it into the same number
+    expect(Object.keys(muxState.handlers).sort()).toEqual(['conversation.gate_delegated', 'conversation.gate_resolved', 'conversation.gate_tossed', 'event_notification']);
     expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('2');
     serverCount = 1;
     await act(async () => { muxState.handlers['conversation.gate_resolved']!(JSON.stringify({ gate_id: 'g-1' })); });
     await flush();
     expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('1');
+    serverCount = 5;
+    await act(async () => { muxState.handlers['event_notification']!(JSON.stringify({ event_type: 'dispatched', payload: { event_type: 'conversation.message' } })); });
+    await flush();
+    expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('1'); // any other notice: no recount
+    serverCount = 2;
+    await act(async () => { muxState.handlers['event_notification']!(JSON.stringify({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } })); });
+    await flush();
+    expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('2');
   });
 });

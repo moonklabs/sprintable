@@ -335,7 +335,30 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
             db.add(row)
     except IntegrityError:
         return (await db.execute(q)).scalar_one(), False
+    if recipient is not None:
+        await _notify(db, setup, row, recipient)
     return row, True
+
+
+PERMISSION_EVENT_TYPE = "agent.permission_request"
+
+
+async def _notify(db: AsyncSession, setup: DesktopSetup, row: AgentPermissionRequest, recipient: uuid.UUID) -> None:
+    """The recipient's bell line (and the phone push channel every notice takes): an agent waits at a prompt with a window, so
+    not knowing until the inbox is opened leaves it standing (PO 14:28Z). The words are the spec's (명세 B-2 · 폰 알림) — the
+    agent and the tool only: no summary, no working folder, no command (a lock screen · a notice history keeps them). Sent once,
+    with the row (the same request_id again finds the row and sends nothing). To the chain's head too when no phone is paired —
+    the look-only card is theirs."""
+    from app.models.member import Member
+    from app.services.notification_dispatch import dispatch_notification
+
+    agent_name = (await db.execute(select(Member.name).where(Member.id == row.agent_member_id))).scalar_one_or_none() or ""
+    await dispatch_notification(
+        db, org_id=setup.org_id, event_type=PERMISSION_EVENT_TYPE, target_member_ids=[recipient],
+        title=f"권한 대기 · {agent_name}".rstrip(" ·"), body=f"{row.tool} 허용을 기다리고 있어요 — 눌러서 확인해 주세요",
+        reference_type="agent_permission_request", reference_id=row.id, source_project_id=setup.project_id,
+        event={"payload": {"agent_name": agent_name}},
+    )
 
 
 class Withdrawal(BaseModel):

@@ -13,6 +13,10 @@ import type { PermissionRequest } from '@/lib/agent-permissions';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
+let onNotice: ((n: { event_type: string; payload: Record<string, unknown> | null }) => void) | undefined;
+vi.mock('@/hooks/use-sse-notifications', () => ({
+  useSseNotifications: (o: { onNotification?: typeof onNotice }) => { onNotice = o.onNotification; },
+}));
 const { AgentPermissionRequests } = await import('./agent-permission-requests');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -109,6 +113,19 @@ describe('AgentPermissionRequests (story #4533)', () => {
     await render();
     fetchWithAuth.mockResolvedValueOnce(answer([req()]));
     await act(async () => { vi.advanceTimersByTime(15_000); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
+  });
+
+  it('a new request\'s bell notice reads at once — even with nothing shown — and other notices do not', async () => {
+    fetchWithAuth.mockResolvedValueOnce(answer([]));
+    await render();
+    expect(container.innerHTML).toBe('');
+    await act(async () => { onNotice?.({ event_type: 'dispatched', payload: { event_type: 'conversation.message' } }); });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+    fetchWithAuth.mockResolvedValueOnce(answer([req()]));
+    await act(async () => { onNotice?.({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } }); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
     expect(line()).toBe('짝지은 폰에서 답할 수 있어요');

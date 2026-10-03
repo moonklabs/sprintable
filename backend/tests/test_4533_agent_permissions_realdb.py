@@ -313,3 +313,30 @@ async def test_a_persons_own_api_key_neither_answers_nor_adds_a_phone(world):
             assert (await c.post(f"{REQS}/{made['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))).status_code == 200
     finally:
         await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
+
+
+async def test_the_recipient_gets_one_bell_line_with_the_agent_and_tool_only(world):
+    """PO 14:28Z — a request has a window: the recipient hears of it at once (a bell line), nobody else does, the same
+    request_id again rings nothing more, and the words carry no summary or working folder (a notice history keeps them)."""
+    plain_tm = await _plain_member()
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4533i")
+        agent = await _with_session(c, device)
+        _phone, der = await _register(c)
+        await _pair(c, device["device_token"], der)
+        body = _ask(agent, summary="git push --force ••••(가림)", workdir="~/secret-project")
+        assert (await _post_ask(c, device, body)).status_code == 201
+        assert (await _post_ask(c, device, body)).status_code == 200  # the same request again
+
+        def bell(member):
+            return _sql(fetch=("SELECT payload FROM events WHERE recipient_id = :m AND event_type = 'dispatched' "
+                               "AND payload->>'event_type' = 'agent.permission_request'"), params={"m": member})
+
+        mine, theirs = await bell(OWNER_TM), await bell(plain_tm)
+        assert len(mine) == 1 and theirs == []
+        payload = mine[0][0]
+        assert payload["agent_name"] and payload["title"] == f"권한 대기 · {payload['agent_name']}"
+        assert payload["body"] == "Bash 허용을 기다리고 있어요 — 눌러서 확인해 주세요"
+        assert "git push" not in str(payload) and "secret-project" not in str(payload)
+        listed = await c.get("/api/v2/event-notifications", headers=_person(OWNER))
+        assert listed.status_code == 200 and "agent.permission_request" in listed.text, listed.text[:300]

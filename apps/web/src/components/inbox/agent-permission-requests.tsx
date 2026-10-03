@@ -1,16 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { permissionLine, stillShown, waitedMinutes, type PermissionRequest } from '@/lib/agent-permissions';
 
 /**
  * story #4533 (E-DESKTOP-2 B-2 · 명세 모음 «B-2 폰 권한 요청 카드(웹은 읽기 전용)») — the approvals inbox's top group «에이전트 권한
  * 요청»: an agent waiting at a permission prompt on its computer, sent to the person who decides it. The web only looks (no device
  * key to sign with): the button place holds one line — the phone · the window passed · the computer gone quiet · no paired phone.
- * Read again every 15 s while a request is shown (the computer coming back or an answer from the phone changes the card).
+ * Read again every 15 s while a request is shown (the computer coming back or an answer from the phone changes the card), and at
+ * once when a new one's bell notice arrives (PO 14:28Z).
  */
 const REFRESH_MS = 15_000;
 
@@ -31,8 +33,16 @@ export function AgentPermissionRequests() {
   const [now, setNow] = useState(() => Date.now());
   const shown = (requests ?? []).filter((r) => stillShown(r, now));
   const waiting = shown.length > 0;
+  const [notices, setNotices] = useState(0);
+  const readFor = useRef(-1);
 
-  // read on mount, then again every 15 s while something is shown; a failed read keeps what was shown
+  useSseNotifications({
+    onNotification: (n) => {
+      if (n.event_type === 'dispatched' && n.payload?.event_type === 'agent.permission_request') setNotices((k) => k + 1);
+    },
+  });
+
+  // read on mount and on each new request's notice, then every 15 s while something is shown; a failed read keeps what was shown
   useEffect(() => {
     let off = false;
     const read = () => void readRequests().then((list) => {
@@ -40,10 +50,10 @@ export function AgentPermissionRequests() {
       setRequests((prev) => list ?? prev ?? []);
       setNow(Date.now());
     });
-    if (requests === null) read();
+    if (readFor.current !== notices) { readFor.current = notices; read(); }
     const id = waiting ? setInterval(read, REFRESH_MS) : null;
     return () => { off = true; if (id) clearInterval(id); };
-  }, [waiting]); // eslint-disable-line react-hooks/exhaustive-deps -- `requests` only gates the first read
+  }, [waiting, notices]);
 
   if (shown.length === 0) return null; // nothing waiting: the inbox as it was
 
