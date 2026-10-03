@@ -4517,7 +4517,7 @@
     "runProfileEffortMax": "Max",
     "runProfileEffortUltra": "Ultra",
     "runProfileKeep": "Leave as is",
-    "runProfileMixedLine": "These agents use different runtimes — choose one runtime to change the model and thinking depth",
+    "runProfileMixedLine": "The chosen agents use different runtimes — set one runtime above to change the model and thinking depth too",
     "runProfileSave": "Save",
     "runProfileSaving": "Saving…",
     "runProfileLoadFailed": "Couldn't load the run settings",

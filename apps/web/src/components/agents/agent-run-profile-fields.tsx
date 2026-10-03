@@ -5,6 +5,7 @@
  * One set of fields for one agent and for many: with many, every field starts «그대로 두기», and model · effort are offered
  * only when the chosen agents share a runtime (or a runtime is chosen for all of them).
  */
+import { useId } from 'react';
 import { useTranslations } from 'next-intl';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
@@ -105,6 +106,7 @@ interface FieldsProps {
 
 export function AgentRunProfileFields({ options, draft, onChange, keepAllowed = false, sharedRuntime = null, disabled = false }: FieldsProps) {
   const ta = useTranslations('agents');
+  const ids = { runtime: useId(), model: useId(), effort: useId() };
   const runtime = effectiveRuntime(draft, sharedRuntime);
   const keepOption = keepAllowed ? [{ value: KEEP, label: ta('runProfileKeep') }] : [];
 
@@ -132,10 +134,11 @@ export function AgentRunProfileFields({ options, draft, onChange, keepAllowed = 
   return (
     <div className="space-y-3">
       <div className="grid gap-1.5 sm:grid-cols-[8rem_1fr] sm:items-center">
-        <span className="text-sm text-muted-foreground">{ta('runProfileRuntime')}</span>
+        <span id={ids.runtime} className="text-sm text-muted-foreground">{ta('runProfileRuntime')}</span>
         <OperatorDropdownSelect
           value={draft.runtime}
           onValueChange={(v) => onChange(withRuntime(draft, v, keepAllowed))}
+          ariaLabelledBy={ids.runtime}
           options={runtimeOptions}
           placeholder={ta('runProfileRuntime')}
           disabled={disabled}
@@ -144,11 +147,12 @@ export function AgentRunProfileFields({ options, draft, onChange, keepAllowed = 
       {runtime ? (
         <>
           <div className="grid gap-1.5 sm:grid-cols-[8rem_1fr] sm:items-start">
-            <span className="text-sm text-muted-foreground sm:pt-2">{ta('runProfileModel')}</span>
+            <span id={ids.model} className="text-sm text-muted-foreground sm:pt-2">{ta('runProfileModel')}</span>
             <div className="space-y-1.5">
               <OperatorDropdownSelect
                 value={draft.modelChoice}
                 onValueChange={(v) => onChange(withModel(draft, v, options, runtime))}
+                ariaLabelledBy={ids.model}
                 options={modelOptions}
                 disabled={disabled}
               />
@@ -169,11 +173,12 @@ export function AgentRunProfileFields({ options, draft, onChange, keepAllowed = 
             </div>
           </div>
           <div className="grid gap-1.5 sm:grid-cols-[8rem_1fr] sm:items-center">
-            <span className="text-sm text-muted-foreground">{ta('runProfileEffort')}</span>
+            <span id={ids.effort} className="text-sm text-muted-foreground">{ta('runProfileEffort')}</span>
             <div className="flex items-center gap-2">
               <OperatorDropdownSelect
                 value={draft.effort}
                 onValueChange={(v) => onChange({ ...draft, effort: v })}
+                ariaLabelledBy={ids.effort}
                 options={effortOptions}
                 disabled={disabled}
                 className="flex-1"

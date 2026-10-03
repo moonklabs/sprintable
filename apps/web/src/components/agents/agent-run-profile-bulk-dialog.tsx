@@ -5,7 +5,7 @@
  * Every field starts «그대로 두기»; with mixed runtimes, model · effort open only once one runtime is chosen for all. The server
  * takes it all or nothing. After saving there is no restart here — the line points to the desktop app (PO ⓓ).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -28,6 +28,12 @@ export function AgentRunProfileBulkDialog({ agents, open, onOpenChange, onSaved 
   const [draft, setDraft] = useState<RunProfileDraft>(initialDraft(null, null));
   const [saving, setSaving] = useState(false);
   const [line, setLine] = useState<{ kind: 'saved' | 'error'; key: string } | null>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  // [적용] turns into [닫기] after saving — focus goes to it, not to the page (유나 4943 ②)
+  useEffect(() => {
+    if (line?.kind === 'saved') closeRef.current?.focus();
+  }, [line]);
 
   useEffect(() => {
     if (!open) return;
@@ -85,7 +91,7 @@ export function AgentRunProfileBulkDialog({ agents, open, onOpenChange, onSaved 
         ) : null}
         <DialogFooter>
           {line?.kind === 'saved' ? (
-            <Button variant="hero" onClick={() => onOpenChange(false)}>{tc('close')}</Button>
+            <Button ref={closeRef} variant="hero" onClick={() => onOpenChange(false)}>{tc('close')}</Button>
           ) : (
             <>
               <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>{tc('cancel')}</Button>

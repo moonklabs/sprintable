@@ -4517,7 +4517,7 @@
     "runProfileEffortMax": "맥스",
     "runProfileEffortUltra": "울트라",
     "runProfileKeep": "그대로 두기",
-    "runProfileMixedLine": "런타임이 서로 달라요 — 런타임을 하나로 고르면 모델 · 생각 깊이를 바꿀 수 있어요",
+    "runProfileMixedLine": "고른 에이전트의 런타임이 서로 달라요 — 위 런타임 칸에서 하나로 정하면 모델 · 생각 깊이도 바꿀 수 있어요",
     "runProfileSave": "저장",
     "runProfileSaving": "저장하는 중…",
     "runProfileLoadFailed": "실행 설정을 불러오지 못했어요",

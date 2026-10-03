@@ -12,6 +12,7 @@ import koMessages from '../../../messages/ko.json';
 import { effortsFor, keepEffortIfTaken, modelNameOk, saveErrorKey, sharedRuntime, type RunProfileOptions } from '@/lib/agent-run-profile';
 import { CUSTOM, DEFAULT, KEEP, draftBody, draftReady, initialDraft, withModel, withRuntime } from './agent-run-profile-fields';
 import { AgentRunProfileSection } from './agent-run-profile-section';
+import { AgentRunProfileBulkDialog } from './agent-run-profile-bulk-dialog';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,6 +28,10 @@ const OPTIONS: RunProfileOptions = {
   ],
   model_pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$',
 };
+
+function nameOf(el: Element): string {
+  return (el.getAttribute('aria-labelledby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+}
 
 describe('the table the pickers follow', () => {
   it('a listed model has its own efforts; a typed-in name or the default gets the shared ones, low → high', () => {
@@ -139,5 +144,68 @@ describe('AgentRunProfileSection', () => {
     expect(buttons.some((b) => b.includes('다시 시작'))).toBe(false);
     const save = [...container.querySelectorAll('button')].find((b) => b.textContent === '저장') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
+  });
+
+  it('each picker is named by its field — «런타임 · 모델 · 생각 깊이» before its value (유나 4943 ①)', async () => {
+    await render(true);
+    const triggers = [...container.querySelectorAll('button[aria-labelledby]')];
+    expect(triggers.map(nameOf)).toEqual(['런타임 Codex', '모델 gpt-6-sol', '생각 깊이 울트라']);
+  });
+});
+
+describe('AgentRunProfileBulkDialog', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('opens «그대로 두기» everywhere, says why model · effort wait with mixed runtimes, and after saving focus is on [닫기] (유나 4943 ②)', async () => {
+    const puts: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/options')) return new Response(JSON.stringify({ data: OPTIONS }));
+      puts.push(String(init?.body));
+      return new Response(JSON.stringify({ data: { profiles: [] } }));
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <AgentRunProfileBulkDialog
+            agents={[{ id: 'a', runtime_type: 'codex' }, { id: 'b', runtime_type: 'claude-code' }]}
+            open
+            onOpenChange={() => {}}
+            onSaved={() => {}}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const named = [...document.querySelectorAll('button[aria-labelledby]')];
+    expect(named.map(nameOf)).toEqual(['런타임 그대로 두기']);
+    expect(document.body.textContent).toContain('고른 에이전트의 런타임이 서로 달라요');
+
+    const trigger = named[0] as HTMLElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent === 'Claude Code') as HTMLElement;
+    await act(async () => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const apply = [...document.querySelectorAll('button')].find((b) => b.textContent === '에이전트 2개에 적용') as HTMLButtonElement;
+    expect(apply.disabled).toBe(false);
+    await act(async () => { apply.click(); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(JSON.parse(puts[0])).toEqual({ agent_ids: ['a', 'b'], runtime: 'claude-code', model: null, effort: null });
+    expect(document.activeElement?.textContent).toBe('닫기');
+    expect(document.body.textContent).toContain('지금 바꾸려면 데스크톱 앱에서 차례로 다시 시작해 주세요');
   });
 });
