@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { DesktopDevices } from '@/components/desktop/desktop-devices';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { DesktopRemoteControlCard } from '@/components/desktop/desktop-remote-control-card';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -32,6 +33,8 @@ export default function DesktopPage() {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 p-6">
       <DesktopDownloadCard />
+      {/* story #4535 — the org's «원격 제어» (an owner switches it; everyone else reads its state) */}
+      <DesktopRemoteControlCard />
       {/* story #4424 — «연결된 기기» (org owner/admin only; nothing for a member) */}
       <DesktopDevices />
     </div>

@@ -37,9 +37,11 @@ describe('DesktopPage — story #4012 서버 게이트', () => {
     const { default: DesktopPage } = await import('./page');
     const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
     const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
+    const { DesktopRemoteControlCard } = await import('@/components/desktop/desktop-remote-control-card');
     const result = DesktopPage() as { props: { children: Array<{ type: unknown } | null> } };
     expect(redirectMock).not.toHaveBeenCalled();
-    expect(result.props.children.filter(Boolean).map((c) => c!.type)).toEqual([DesktopDownloadCard, DesktopDevices]);
+    // story #4535 — «원격 제어» between the two (Yuna 09:24Z)
+    expect(result.props.children.filter(Boolean).map((c) => c!.type)).toEqual([DesktopDownloadCard, DesktopRemoteControlCard, DesktopDevices]);
   });
 
   it('DESKTOP_DOWNLOAD_ENABLED=false → /org-briefing으로 redirect(카드 렌더 없음)', async () => {
