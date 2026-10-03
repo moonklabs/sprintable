@@ -17,10 +17,12 @@ import pytest
 from fastapi import HTTPException
 
 from tests.agent_stream_auth import agent_stream_claims, seed_agent_stream_key
-from tests.test_2602_sse_lease_lifespan_reclaim import _realdb_session, _REAL_DB_URL, _seed_org_project_agent
+from tests.test_1994_backlink_api_realdb import _make_agent_member, _make_org, _make_project, _session_factory
 
+_REAL_DB_URL = __import__("os").getenv("PARITY_TEST_DATABASE_URL") or __import__("os").getenv("ALEMBIC_DATABASE_URL")
+
+# rows on the migrated schema, removed after — no create_all/drop_all (the schema-drift guard · story #3896)
 pytestmark = [
-    pytest.mark.destructive_schema,
     pytest.mark.anyio,
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),
 ]
@@ -63,10 +65,14 @@ class _Req:
 async def _world():
     import app.routers.agent_gateway as gw
 
-    engine, Session = await _realdb_session()
+    engine, Session = await _session_factory()
+    org_id = None
     try:
         async with Session() as s:
-            _org, _project, agent_id = await _seed_org_project_agent(s)
+            org = await _make_org(s)
+            org_id = org.id
+            project = await _make_project(s, org.id)
+            agent_id = await _make_agent_member(s, org.id, project.id)
             key_id = await seed_agent_stream_key(s, agent_id)
         auth = MagicMock()
         auth.user_id = str(agent_id)
@@ -87,9 +93,24 @@ async def _world():
         gw._agent_connections.pop(str(agent_id), None)
         for k in [k for k in gw._receiver_streams if k[0] == str(agent_id)]:
             gw._receiver_streams.pop(k, None)
-        from app.core.database import Base
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
+        if org_id is not None:
+            from sqlalchemy import text
+
+            for stmt in (  # each on its own, best effort — leftovers carry fresh uuids and harm nothing
+                "DELETE FROM agent_sessions WHERE agent_id IN (SELECT id FROM members WHERE org_id = :o)",
+                "DELETE FROM agent_api_keys WHERE team_member_id IN (SELECT id FROM members WHERE org_id = :o)",
+                "DELETE FROM project_access WHERE member_id IN (SELECT id FROM members WHERE org_id = :o)",
+                "DELETE FROM agent_project_profiles WHERE member_id IN (SELECT id FROM members WHERE org_id = :o)",
+                "DELETE FROM members WHERE org_id = :o",
+                "DELETE FROM projects WHERE org_id = :o",
+                "DELETE FROM organizations WHERE id = :o",
+            ):
+                try:
+                    async with Session() as s:
+                        await s.execute(text(stmt), {"o": org_id})
+                        await s.commit()
+                except Exception:  # noqa: BLE001
+                    pass
         await engine.dispose()
         from app.core import shutdown as _shutdown_module
         _shutdown_module.reset_shutdown_event()
