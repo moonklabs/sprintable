@@ -72,8 +72,8 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(rows[0].textContent).toContain('짝: SYJ-MacBook-Pro');
     expect(rows[0].textContent).toContain('10월 2일');
     expect(rows[1].textContent).toContain('짝: Mac-mini');
-    expect(text()).toContain('확인 숫자 482 917');
-    expect(container.querySelector('[title="폰 앱 설정의 확인 숫자와 같으면 그 폰이 맞아요"]')).not.toBeNull();
+    expect(text()).toContain('폰 확인 숫자 482 917'); // v1.11: the fixed number has its own name (유나 21:00Z)
+    expect(container.querySelector('[title="폰 앱 설정 › 이 폰의 폰 확인 숫자와 같으면 그 폰이 맞아요"]')).not.toBeNull();
     expect(button('빼기')).toHaveLength(2);
     expect(text()).not.toContain('짝짓기]로'); // the empty line only when empty
     expect(text()).not.toContain('원격 제어가 꺼져 있어요');
