@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -234,6 +235,30 @@ async def _mark_agent_disconnected(
 #   legacy /events/stream은 폐기 수순이라 카운터 통합 시 잘못된 상호 제약이 생긴다. → 분리 유지.
 _MAX_AGENT_SSE_CONNECTIONS: int = int(os.getenv("MAX_AGENT_SSE_CONNECTIONS", "100"))
 _agent_sse_connection_count: int = 0
+
+# story #4509 AC1b — a receiver's own id (one desktop install · contract with the daemon, Mirko 10:35Z): not a key, only a name
+# for «the same place reconnecting». The streams this instance holds per (agent, receiver), so a reconnect can hand over.
+RECEIVER_ID_HEADER = "x-sprintable-receiver-id"
+_RECEIVER_ID_RE = re.compile(r"^rcv_[A-Za-z0-9_-]{22}$")
+_receiver_streams: dict[tuple[str, str], asyncio.Queue] = {}
+
+
+def _signal_superseded(queue: asyncio.Queue) -> None:
+    """Tell a handed-over stream to end — the wake path's #2530 shape: a full queue (a dead old stream piling up wakes — the very
+    moment a hand-over is needed) drops its oldest signal to make room; if a racer refills it, this signal is given up (Qadir
+    01a101bf T1: an uncaught QueueFull here was a 500 that kept the lease and the old queue registered)."""
+    signal = {"__superseded__": True}
+    try:
+        queue.put_nowait(signal)
+    except asyncio.QueueFull:
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(signal)
+        except asyncio.QueueFull:
+            pass
 
 # E-INFRA S5: per-API-key(=agent) 동시 스트림 제한 (tier-aware, abuse/fair-use).
 # 한 키가 무제한 스트림을 열어 메모리/큐를 독점하는 것 방지. per-key 카운트 = _agent_connections[agent_id] size.
@@ -541,14 +566,24 @@ async def agent_stream(
     # #2121: per-key lease(Redis 공유·TTL 자가회수) 주경로·Redis 불가 시 in-process(_agent_connections len) 폴백.
     from app.services import sse_lease
     _lease_conn_id = str(uuid.uuid4())
-    _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _lease_conn_id)
+    # story #4509 AC1b — a receiver (one desktop install) names itself; its reconnect takes back its own slot instead of a 429
+    # read as «another place is receiving» (the old connection's lease outlives a fast reconnect or a daemon restart by up to
+    # the lease TTL). Without the header: a connection id, as before. The slot is the receiver's (`rcv:<id>`) for this agent.
+    _receiver_id = request.headers.get(RECEIVER_ID_HEADER)
+    if _receiver_id is not None and not _RECEIVER_ID_RE.match(_receiver_id):
+        raise HTTPException(status_code=422, detail={"code": "invalid_receiver_id", "message": "X-Sprintable-Receiver-Id must be rcv_ and 22 base64url characters"})
+    _pk_member = f"rcv:{_receiver_id}" if _receiver_id else _lease_conn_id
+    _superseded_queue = _receiver_streams.get((agent_id_str, _receiver_id)) if _receiver_id else None
+    _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _pk_member)
     # story #2602: `_agent_connections`는 defaultdict(set) — `[...]` 서브스크립트는 키가 없으면
     # 빈 set을 **만들면서** 반환한다. 이 줄은 판정(길이 체크)일 뿐인데 거부(429)로 끝나는 요청도
     # 매번 agent_id 하나를 이 dict에 영구 등록해버렸다("거부가 자원을 만드는" 결함 — len에는
     # 무해(빈 set)지만 한 번이라도 한도초과 조회를 겪은 모든 agent_id가 dict key로 영구 잔류).
     # `.get(..., ())` 로 조회를 read-only로 고정 — 존재하는 키만 세션 등록 시 만들어진다(L471).
+    _open_here = _agent_connections.get(agent_id_str, ())
     if _pk_lease is False or (
-        _pk_lease is None and len(_agent_connections.get(agent_id_str, ())) >= _per_key_limit
+        # the same receiver's earlier stream on this instance is about to be handed over — it does not count against it
+        _pk_lease is None and len(_open_here) - (1 if _superseded_queue in _open_here else 0) >= _per_key_limit
     ):
         # story #2582: flat _AGENT_STREAM_RETRY_AFTER(기본 5s)는 orphan lease(비정상 종료 —
         # kill -9 등으로 finally/release가 안 돈 연결)의 실제 자가회수 시한(sse_lease._TTL_SEC,
@@ -578,15 +613,25 @@ async def agent_stream(
         _gl_lease is None and _agent_sse_connection_count >= _MAX_AGENT_SSE_CONNECTIONS
     ):
         # 전역 초과로 거부 → 이미 획득한 per-key lease 롤백(누수 방지·미획득이면 no-op).
-        await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
+        if not _receiver_id:  # a receiver's slot may still be its earlier stream's (not handed over yet) — the TTL frees it
+            await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
         raise HTTPException(status_code=503, detail="Agent stream connection limit reached")
     _agent_sse_connection_count += 1  # in-process shadow(Redis 다운 시 폴백용 유지)
 
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
+    if _superseded_queue is not None:
+        # handed over only now — both limits passed, so a refused reconnect never ends the stream it would replace
+        _agent_connections.get(agent_id_str, set()).discard(_superseded_queue)
+        _signal_superseded(_superseded_queue)
     _agent_connections[agent_id_str].add(queue)
+    if _receiver_id:
+        _receiver_streams[(agent_id_str, _receiver_id)] = queue
 
     # story #2128: 연결 시작 시점에 이미 종료 예정 시각을 갖고 태어난다(#2161과 동일 원리).
     # monotonic — 벽시계 조정에 영향 안 받음.
+    def _owns_receiver_slot() -> bool:
+        return not _receiver_id or _receiver_streams.get((agent_id_str, _receiver_id)) is queue
+
     _lifespan_deadline = time.monotonic() + _AGENT_SSE_LIFESPAN_SEC + random.uniform(0, _AGENT_SSE_LIFESPAN_JITTER_SEC)
 
     async def generate():
@@ -757,7 +802,8 @@ async def agent_stream(
                     # #2121: lease score 재갱신(live 연결이 슬롯 유지·TTL 만료 방지). off/다운 no-op.
                     if not _skip_refresh:
                         await sse_lease.refresh("agent_global", _lease_conn_id)
-                        await sse_lease.refresh(f"perkey:{agent_id_str}", _lease_conn_id)
+                        if _owns_receiver_slot():
+                            await sse_lease.refresh(f"perkey:{agent_id_str}", _pk_member)
                     last_presence_tick = _now
                 get_task = asyncio.create_task(queue.get())
                 shutdown_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
@@ -778,6 +824,10 @@ async def agent_stream(
                             break
                         continue
                     signal = get_task.result()
+                    if signal.get("__superseded__"):
+                        # story #4509 AC1b — the same receiver reconnected: this stream hands its slot over and ends
+                        yield "event: superseded\ndata: {}\n\n"
+                        return
                     if signal.get("__wake__"):
                         # ìµì  acked_seq ì¡°í (í´ë¼ì´ì¸í¸ê° ACK ë³´ëì ì ìì)
                         async with async_session_factory() as db:
@@ -832,7 +882,10 @@ async def agent_stream(
             _agent_sse_connection_count -= 1
             # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
             await sse_lease.release("agent_global", _lease_conn_id)
-            await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
+            if _owns_receiver_slot():  # a superseded stream leaves the slot to the one that took it over
+                await sse_lease.release(f"perkey:{agent_id_str}", _pk_member)
+                if _receiver_id:
+                    _receiver_streams.pop((agent_id_str, _receiver_id), None)
             _agent_connections[agent_id_str].discard(queue)
             if not _agent_connections[agent_id_str]:
                 _agent_connections.pop(agent_id_str, None)

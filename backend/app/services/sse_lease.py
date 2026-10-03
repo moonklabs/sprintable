@@ -42,9 +42,16 @@ _TTL_SEC = _HEARTBEAT_SEC * 3
 _KEY_TTL_SEC = _TTL_SEC * 4  # ZSET 키 자체 leak backstop
 
 # KEYS[1]=zset · ARGV[1]=now(만료 evict 기준) · ARGV[2]=now+TTL(신규 score) · ARGV[3]=limit ·
-# ARGV[4]=conn_id · ARGV[5]=key TTL. 만료(score<=now) evict → ZCARD → count<limit 이면 ZADD 후 1, 아니면 0.
+# ARGV[4]=conn_id · ARGV[5]=key TTL. 만료(score<=now) evict → 이미 그 몫을 쥔 member면 갱신 후 1(story #4509 AC1b: 같은
+# 받는 곳의 다시 붙음은 자기 몫을 다시 쥔다 — 연결마다 새 uuid인 member는 미리 있을 수 없어 기존 동작 무변) → ZCARD →
+# count<limit 이면 ZADD 후 1, 아니면 0.
 _ACQUIRE_LUA = """
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+if redis.call('ZSCORE', KEYS[1], ARGV[4]) then
+  redis.call('ZADD', KEYS[1], ARGV[2], ARGV[4])
+  redis.call('EXPIRE', KEYS[1], ARGV[5])
+  return 1
+end
 local count = redis.call('ZCARD', KEYS[1])
 if count < tonumber(ARGV[3]) then
   redis.call('ZADD', KEYS[1], ARGV[2], ARGV[4])
