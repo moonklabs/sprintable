@@ -334,6 +334,19 @@ def _event_to_payload(event: "Event") -> dict:
     }
 
 
+def _backfill_frame_data(event: "Event") -> dict:
+    """story #4505 (Mirko live 00:51Z · PO 01:06Z) — a backfill frame in the shape of the live one. A live frame is the pushed
+    dict, whose payload keys are top-level (`gate_id`, `status`, `conversation_id` …); a backfill frame was `_event_to_payload`,
+    where they sit only under `payload` — so a handler reading the live shape (the approvals inbox `payload.gate_id`, the chat
+    approval card) dropped every event that came by backfill: a gate created before the stream opened or in a reconnect gap
+    never appeared until reload. The payload's keys are also put at the top level here, never over a key the frame already
+    has (event_id · event_type · source · sender_id · payload · content · created_at · created_xid). Backfill only — the live
+    dispatch (`dispatch_router`) and the agent gateway build their own frames and are unchanged."""
+    data = _event_to_payload(event)
+    flat = {k: v for k, v in (event.payload or {}).items() if k not in data}
+    return {**flat, **data}
+
+
 # ─── SSE endpoint ─────────────────────────────────────────────────────────────
 
 
@@ -597,7 +610,7 @@ async def agent_event_stream(
 
                 for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
-                    batch_data = [_event_to_payload(evt) for evt in batch]
+                    batch_data = [_backfill_frame_data(evt) for evt in batch]  # story #4505: the live frame's shape
                     # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
                     # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
