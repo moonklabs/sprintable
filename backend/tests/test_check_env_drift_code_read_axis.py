@@ -348,7 +348,8 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     assert len(high) == 1, high
     assert len(low) == 9, low
     # story #4398 — EDGE_CLIENT_IP_SECRET은 dev 배포(프런트 · 백엔드 --update-secrets)에 배선돼 covered — exempt 없음(34).
-    assert len(exempt) == 34
+    # story #4513 — K_REVISION (Cloud Run injects it into every revision; the health reads report it) → 35.
+    assert len(exempt) == 35
 
 
 # ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────

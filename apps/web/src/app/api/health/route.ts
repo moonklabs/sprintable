@@ -16,7 +16,7 @@ function shaped(value: string | undefined, pattern: RegExp): string {
 
 function readBuildTime(): string | undefined {
   try {
-    return readFileSync(process.env.APP_BUILD_TIME_FILE ?? '/app/.build_time', 'utf8');
+    return readFileSync('/app/.build_time', 'utf8'); // written by the Dockerfile's last layer
   } catch {
     return undefined;
   }

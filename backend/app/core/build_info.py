@@ -11,7 +11,7 @@ import os
 import re
 from pathlib import Path
 
-_BUILD_TIME_FILE = Path(os.environ.get("APP_BUILD_TIME_FILE", "/app/.build_time"))
+_BUILD_TIME_FILE = Path("/app/.build_time")  # written by the Dockerfile's last layer
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 _REVISION = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
