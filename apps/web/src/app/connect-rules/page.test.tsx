@@ -24,12 +24,15 @@ describe('/connect-rules page — 플래그 게이트', () => {
     connectRules: process.env.CONNECT_RULES_V3_ENABLED,
     today: process.env.TODAY_V3_ENABLED,
     chat: process.env.CHAT_V3_ENABLED,
+    desktop: process.env.DESKTOP_DOWNLOAD_ENABLED,  // story #4524 — the nav flags carry it too
   };
 
   afterEach(() => {
     process.env.CONNECT_RULES_V3_ENABLED = original.connectRules;
     process.env.TODAY_V3_ENABLED = original.today;
     process.env.CHAT_V3_ENABLED = original.chat;
+    if (original.desktop === undefined) delete process.env.DESKTOP_DOWNLOAD_ENABLED;
+    else process.env.DESKTOP_DOWNLOAD_ENABLED = original.desktop;
     notFoundMock.mockClear();
     screenMock.mockClear();
   });
@@ -51,16 +54,18 @@ describe('/connect-rules page — 플래그 게이트', () => {
     process.env.CONNECT_RULES_V3_ENABLED = 'true';
     delete process.env.TODAY_V3_ENABLED;
     delete process.env.CHAT_V3_ENABLED;
+    delete process.env.DESKTOP_DOWNLOAD_ENABLED;
     const result = ConnectRulesV3Page() as unknown as { type: unknown; props: { flags: Record<string, unknown> } };
     expect(result.type).toBe(screenMock);
-    expect(result.props.flags).toEqual({ todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
+    expect(result.props.flags).toEqual({ todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true, desktopDownloadEnabled: false });
   });
 
   it('오늘·대화 v3 플래그 on — 화면 element props의 flags에 true/true', () => {
     process.env.CONNECT_RULES_V3_ENABLED = 'true';
     process.env.TODAY_V3_ENABLED = 'true';
     process.env.CHAT_V3_ENABLED = 'true';
+    process.env.DESKTOP_DOWNLOAD_ENABLED = 'true';
     const result = ConnectRulesV3Page() as unknown as { type: unknown; props: { flags: Record<string, unknown> } };
-    expect(result.props.flags).toEqual({ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true });
+    expect(result.props.flags).toEqual({ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true, desktopDownloadEnabled: true });
   });
 });
