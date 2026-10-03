@@ -15,7 +15,7 @@ const translations: Record<string, string> = {
   filter_info: '안내',
   filter_warning: '경고',
   filter_system: '시스템',
-  filter_gate_pending_approval: '게이트 결재 대기',
+  filter_gate_pending_approval: '결재 요청',
   filter_generic: '알림',
   eventMention: '새 멘션',
   eventMessage: '새 메시지',
@@ -38,7 +38,7 @@ describe('notification-display', () => {
 
     expect(getInboxNotificationLabel(t, 'conversation.mention')).toBe('새 멘션');
     expect(getInboxNotificationLabel(t, 'conversation.message')).toBe('새 메시지');
-    expect(getInboxNotificationLabel(t, 'gate.pending_approval')).toBe('게이트 결재 대기');
+    expect(getInboxNotificationLabel(t, 'gate.pending_approval')).toBe('결재 요청');
   });
 
   it('keeps info and warning filter types available for the inbox surface', () => {

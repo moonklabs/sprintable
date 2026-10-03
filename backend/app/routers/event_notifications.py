@@ -20,6 +20,14 @@ router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notificati
 
 # 대화 이벤트 종류(휴먼 알림 정책 분기 대상). 비-대화 이벤트(dispatched 등)는 항상 노출.
 _CONVERSATION_EVENT_TYPES = ("conversation.message_created", "conversation:mention")
+# story #4520 (Yuna 03:57Z · PO) — the approvals inbox's own signals (approval_delivery: a new gate · decided · delegated · tossed).
+# «No new message, a pure SSE signal» there: they redraw an open approvals inbox, and the reconnect backfill rebuilds them from
+# these rows (4505), so the rows stay — but they were never a person's alert line. On the bell they showed as one more line and +1
+# unread with no label (a decision request read twice next to its `gate.pending_approval`). Who must know learns it elsewhere:
+# the approver from that alert and the chat card, the requester from the result reply.
+_APPROVALS_INBOX_SIGNAL_TYPES = (
+    "conversation.gate_created", "conversation.gate_resolved", "conversation.gate_delegated", "conversation.gate_tossed",
+)
 
 
 def _is_hidden_notification(member_id: uuid.UUID):
@@ -30,6 +38,8 @@ def _is_hidden_notification(member_id: uuid.UUID):
        (message_created·mention) 숨김. carve-out·DM보다 우선. 참여/가시성/수신은 불변(알림만).
     2. **spectator**(48dbada0): 그룹 대화의 message_created인데 member가 그 대화에서 **발화한 적
        없음** → 관전 동석 알림이라 숨김. ⇄ **carve-out**(270c87e6 ②): 발화한 적 있으면 노출.
+
+    3. **결재함 신호**(story #4520): `_APPROVALS_INBOX_SIGNAL_TYPES` — 결재함을 새로 그리는 SSE 신호라 사람 알림 줄이 아님.
 
     노출(직접 필요): DM 메시지·@mention(별도 type)·발화한 그룹 대화·dispatched 등 비-대화 이벤트.
     ⚠️ Event/SSE/에이전트 주입 경로 불변 — 휴먼 알림 읽기 단에만 적용.
@@ -63,6 +73,7 @@ def _is_hidden_notification(member_id: uuid.UUID):
     return or_(
         and_(Event.event_type.in_(_CONVERSATION_EVENT_TYPES), muted),         # mute: 대화 전체 무음
         and_(Event.event_type == "conversation.message_created", is_group, ~spoke),  # 미발화 그룹 관전
+        Event.event_type.in_(_APPROVALS_INBOX_SIGNAL_TYPES),                        # story #4520 — 결재함 신호
     )
 
 
