@@ -26,6 +26,9 @@ class Organization(Base):
     external_publish_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     external_publish_paused_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     external_publish_pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4535 — the org's «원격 제어» switch: NULL = off (the default) · set by an owner (services.remote_control)
+    remote_control_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    remote_control_enabled_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

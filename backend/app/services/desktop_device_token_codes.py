@@ -55,6 +55,7 @@ async def create_code(
         )).scalar_one_or_none()
     if setup is None or (setup_id is not None and setup.id != setup_id):
         raise DesktopSetupError("setup_not_found")
+    await _refuse_if_remote_off(db, setup)  # after the key (PO 08:55Z ⓑ): the caller is already that org's device
     code = secrets.token_urlsafe(32)
     expires_at = _now() + CODE_TTL
     db.add(DesktopDeviceTokenCode(setup_id=setup.id, code_hash=_hash(code), code_challenge=challenge, expires_at=expires_at))
@@ -100,8 +101,17 @@ async def peek_code(db: AsyncSession, *, code: str, user_id: uuid.UUID) -> Peeke
     row, setup = await _code_and_setup(db, code, lock=False)
     await _require_admin_of(db, user_id, setup)
     _refuse_unusable(row, setup)
+    await _refuse_if_remote_off(db, setup)
     org_name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
     return Peeked(device_name=setup.device_name, org_name=org_name, expires_at=row.expires_at)
+
+
+async def _refuse_if_remote_off(db: AsyncSession, setup: DesktopSetup) -> None:
+    """story #4535 — the org turned «원격 제어» off (Yuna's «이 조직은 원격 제어를 꺼 두었어요» line)."""
+    from app.services import remote_control
+
+    if not await remote_control.is_enabled(db, setup.org_id):
+        raise DesktopSetupError(remote_control.OFF_CODE)
 
 
 def _refuse_unusable(row: DesktopDeviceTokenCode, setup: DesktopSetup) -> None:
@@ -118,6 +128,7 @@ async def confirm_code(db: AsyncSession, *, code: str, user_id: uuid.UUID) -> uu
     row, setup = await _code_and_setup(db, code, lock=True)
     await _require_admin_of(db, user_id, setup)
     _refuse_unusable(row, setup)
+    await _refuse_if_remote_off(db, setup)
     if row.confirmed_at is not None:
         if row.confirmed_by == user_id:
             return setup.id
@@ -138,6 +149,7 @@ async def exchange_code(db: AsyncSession, *, code: str, verifier: str) -> tuple[
     ):
         raise DesktopSetupError("verifier_mismatch")
     _refuse_unusable(row, setup)
+    await _refuse_if_remote_off(db, setup)
     if row.confirmed_at is None:
         return None
     token = await issue_device_token(db, setup.id)  # revokes the device's earlier token · the agents and keys are untouched

@@ -33,6 +33,14 @@ from tests.test_4529_desktop_relay_realdb import _device, _tok
 pytestmark = pytest.mark.anyio
 
 
+@pytest.fixture(autouse=True)
+async def _remote_control_on(world):
+    """story #4535 — an org starts with «원격 제어» off (the relay refuses everything); these tests are about a device of an
+    org that turned it on."""
+    await _sql(f"UPDATE organizations SET remote_control_enabled_at = now() WHERE id = '{ORG}'")
+    yield
+
+
 def _pkce() -> tuple[str, str]:
     verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     return verifier, base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()

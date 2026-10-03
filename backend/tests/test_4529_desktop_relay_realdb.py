@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import text
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
+    ORG,
     OWNER,
     _addresses,
     _client,
@@ -25,6 +26,14 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 )
 
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+async def _remote_control_on(world):
+    """story #4535 — an org starts with «원격 제어» off (the relay refuses everything); these tests are about a device of an
+    org that turned it on."""
+    await _sql(f"UPDATE organizations SET remote_control_enabled_at = now() WHERE id = '{ORG}'")
+    yield
 
 
 async def _device(c, name="d4529 mac"):

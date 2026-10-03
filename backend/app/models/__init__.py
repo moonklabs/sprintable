@@ -12,6 +12,7 @@ from app.models.oauth_handoff_code import OAuthHandoffCode
 from app.models.desktop_relay import DesktopCommand, DesktopDeviceToken, DesktopDeviceTokenCode, DesktopSession
 from app.models.agent_watch import AgentWatch, DeployServing, GithubPullRequest
 from app.models.desktop_setup import DesktopSetup
+from app.models.remote_control_audit_log import OrgRemoteControlAuditLog
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.chat_command_audit_log import ChatCommandAuditLog
 from app.models.deletion_audit import DeletionAuditLog
@@ -176,6 +177,7 @@ __all__ = [
     "DesktopSetup",
     "DesktopDeviceToken",
     "DesktopDeviceTokenCode",
+    "OrgRemoteControlAuditLog",
     "DesktopSession",
     "DesktopCommand",
     "AgentWatch",
