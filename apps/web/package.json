@@ -84,6 +84,7 @@
     "verify:pasted-secret-bff-route-registered": "tsx scripts/verify-pasted-secret-bff-route-registered.ts",
     "verify:be-proxy-header-passthrough": "tsx scripts/verify-be-proxy-header-passthrough.ts",
     "e2e": "playwright test",
+    "e2e:layout": "playwright test --config playwright.layout.config.ts",
     "e2e:contrast": "playwright test contrast-guard.spec.ts",
     "e2e:card-surface": "playwright test card-surface-guard.spec.ts",
     "e2e:v3-narrow-width": "playwright test v3-narrow-width-overflow.spec.ts",
