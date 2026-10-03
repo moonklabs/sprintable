@@ -23,6 +23,9 @@ export interface PermissionRequest {
   device_reachable: boolean;
   recipient_reason: 'paired' | 'no_paired_phone';
   answerable: boolean;
+  /** story 4532: what the phone signs — its own shell reads them from this list (the web never passes them to the phone) */
+  session_key: string;
+  input_hash: string;
 }
 
 /** The line in the button place — one, in the spec's order: the window passed · the computer gone quiet · no paired phone · the phone. */

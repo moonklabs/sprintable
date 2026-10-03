@@ -146,7 +146,10 @@ async def test_a_paired_recipient_answers_once_and_the_signed_blob_goes_down_uno
         # the approvals badge counts it (Yuna 14:15Z ③ — the count and the list agree)
         badge = await c.get("/api/v2/gates/designated-pending-count", headers=_person(OWNER))
         assert badge.status_code == 200 and badge.json()["count"] == 1, badge.text
-        assert view["summary"] == "npm install --save ••••(가림)" and "input_hash" not in view
+        assert view["summary"] == "npm install --save ••••(가림)"
+        # story 4532 (PO 21:39Z): the two values the phone signs, exactly as the daemon sent them (the raw input still never comes)
+        assert (view["session_key"], view["input_hash"]) == (body["session_key"], body["input_hash"])
+        assert "input" not in view and "detail" not in view
 
         # a phone of mine not paired with that computer: refused here, and the request stays open for the real answer
         wrong = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(unpaired_id), headers=_person(OWNER))
@@ -189,7 +192,8 @@ async def test_the_first_person_in_the_chain_with_a_paired_phone_receives_it(wor
         assert made.status_code == 201 and made.json()["recipient_reason"] == "paired"
         assert (await _sql(fetch=f"SELECT recipient_member_id FROM agent_permission_requests WHERE id = '{made.json()['id']}'"))[0][0] == plain_tm
         assert (await c.get(REQS, headers=_person(OWNER))).json()["requests"] == []  # not sent to anyone else in the chain
-        assert len((await c.get(REQS, headers=_person(PLAIN))).json()["requests"]) == 1
+        [seen] = (await c.get(REQS, headers=_person(PLAIN))).json()["requests"]
+        assert (seen["session_key"], seen["input_hash"]) == ("s-1", "sha256:" + "a" * 64)  # 4532: only its recipient reads them
 
 
 async def test_with_no_paired_phone_in_the_chain_its_head_only_looks(world):
