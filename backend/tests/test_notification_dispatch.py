@@ -58,7 +58,8 @@ def _members_result(rows: list[tuple], project_id=None) -> MagicMock:
     """[(id, user_id), ...] → execute mock result.
 
     project_id: story #1953 — 단일 project_id를 전 행에 부여(단일-프로젝트 unambiguous 폴백
-    추론 테스트용). 기본 None(기존 거동 무회귀 — Event INSERT 스킵)."""
+    추론 테스트용). 기본 None — story #4507 이후 None이어도 source_project_id(또는 참조의 프로젝트)가 있으면
+    사람의 벨 Event는 그 프로젝트로 쓰인다(둘 다 없을 때만 Event INSERT 스킵)."""
     result = MagicMock()
     rows_mock = []
     for mid, uid in rows:
@@ -448,9 +449,15 @@ async def test_dispatch_passes_source_project_id_to_expo_push(mock_session, org_
     members = _members_result([(member_id, user_id)])
     mock_session.execute.side_effect = [settings_r, wh_result, members, _no_webhook_configs_result()]
 
+    # story #4507: with a triggering project, this person (no roster project) now gets the bell Event too, whose activity
+    # extraction is one more query on this ordered mock — not what this test checks (the push's kwargs)
     with _ee_on(), patch(
         "ee.services.expo_push.deliver_expo_push", new=AsyncMock()
-    ) as mock_push:
+    ) as mock_push, patch("app.services.activity_stream.extract_activities_best_effort", new=AsyncMock()), patch(
+        # Qadir 4919: a project not on the person's roster row is used for the bell Event only if they can access it —
+        # this person stands for one who can (the check is a query this ordered mock does not answer)
+        "app.services.project_auth.has_project_access", new=AsyncMock(return_value=True),
+    ):
         await dispatch_notification(
             mock_session, org_id=org_id, event_type="story_assigned",
             target_member_ids=[member_id], title="담당자 지정",
@@ -548,9 +555,15 @@ async def test_dispatch_passes_story_id_and_sprint_id_through_to_expo_push(mock_
     members = _members_result([(member_id, user_id)])
     mock_session.execute.side_effect = [settings_r, wh_result, members, _no_webhook_configs_result()]
 
+    # story #4507: with a triggering project, this person (no roster project) now gets the bell Event too, whose activity
+    # extraction is one more query on this ordered mock — not what this test checks (the push's kwargs)
     with _ee_on(), patch(
         "ee.services.expo_push.deliver_expo_push", new=AsyncMock()
-    ) as mock_push:
+    ) as mock_push, patch("app.services.activity_stream.extract_activities_best_effort", new=AsyncMock()), patch(
+        # story #4507: no triggering project here → the bell Event's project comes from the reference (one lookup on this
+        # ordered mock); the reference is made up, so it resolves to none — as before, no Event
+        "app.services.notification_targets.resolve_reference_targets", new=AsyncMock(return_value={}),
+    ):
         await dispatch_notification(
             mock_session, org_id=org_id, event_type="task_completed",
             target_member_ids=[member_id], title="작업 완료",
