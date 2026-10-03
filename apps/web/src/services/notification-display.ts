@@ -117,10 +117,11 @@ export function getEventTypeCopy(
 /**
  * story #4520 — 벨의 `dispatched` 줄 머리글. 서버 사람 몫 dispatched Event payload는 모든 꼴이
  * `{title, body, event_type}`뿐(summary 0)이라, 벨이 summary만 읽으면 결재 요청 · 댓글 · 상태 변경이
- * 전부 «작업 전달»로 그려졌다(GREEN-2 라이브). /inbox가 이미 쓰는 라벨 한 곳(INBOX_LABEL_KEYS) →
- * 이벤트 카피 → 서버 title 순으로 고른다. `payload.event_type`이 없는 줄(진짜 작업 건넴)은 null → 호출부의
- * 기존 «작업 전달» 그대로. 결재 요청은 «결재 요청 · {이름}»
- * (이름 = `payload.gate_name`, 모르면 «결재 요청»만 — 지어 채우지 않음).
+ * 전부 «작업 전달»로 그려졌다(GREEN-2 라이브). 실어 온 꼴을 /inbox 라벨 한 곳(INBOX_LABEL_KEYS) → 이벤트
+ * 카피(getEventTypeCopy — 로케일 · raw 0 · 모르면 일반 문구) 순으로 읽는다. 서버 `payload.title`은 읽지 않는다
+ * (서버가 고정한 한국어 문장 — en 화면에 한국어 · «게이트» 낱말이 돌아옴, 유나 08:14Z CHANGES). 결재 요청
+ * 두 꼴(단건 · 병렬 결재)은 «결재 요청 · {이름}»(이름 = `payload.gate_name`, 모르면 «결재 요청»만 — 지어
+ * 채우지 않음). `payload.event_type`이 없는 줄(진짜 작업 건넴)은 null → 호출부의 기존 «작업 전달» 그대로.
  */
 export function getDispatchedHeadline(
   t: (key: string) => string,
@@ -129,16 +130,17 @@ export function getDispatchedHeadline(
 ): string | null {
   const inner = dispatchedInnerType(eventType, payload);
   if (!inner) return null;
-  if (inner === 'gate.pending_approval') {
+  if (APPROVAL_REQUEST_KINDS.has(inner)) {
     const name = typeof payload?.['gate_name'] === 'string' ? payload['gate_name'].trim() : '';
-    const label = t(INBOX_LABEL_KEYS[inner]);
+    const label = t('filter_gate_pending_approval');
     return name ? `${label} · ${name}` : label;
   }
-  const key = INBOX_LABEL_KEYS[inner] ?? EVENT_TYPE_COPY_KEYS[inner];
-  if (key) return t(key);
-  const title = typeof payload?.['title'] === 'string' ? payload['title'].trim() : '';
-  return title || null;
+  const key = INBOX_LABEL_KEYS[inner];
+  return key ? t(key) : getEventTypeCopy(t, inner);
 }
+
+// 사람에게 «결재 요청»인 꼴 — 단건 결재(gate.pending_approval) · 병렬 결재의 결재자 몫(gate_approval_requested).
+const APPROVAL_REQUEST_KINDS = new Set(['gate.pending_approval', 'gate_approval_requested']);
 
 /** dispatched 줄이 실어 온 실제 알림 꼴(`payload.event_type`) — 없으면 null(`dispatched` 자체는 그 카피 «작업 전달» 그대로). */
 export function dispatchedInnerType(
