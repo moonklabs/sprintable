@@ -173,8 +173,10 @@ class PairingSnapshot(BaseModel):
 
 async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: PairingSnapshot) -> dict:
     """The device's whole list of QR-pinned phone keys. A key nobody registered in this org is counted, never stored (it can
-    answer nothing here). A pair removed on the server stays removed while the device still lists it (the frame goes again) —
-    unless the device paired it again after the removal (its `paired_at` is later: a new QR pairing)."""
+    answer nothing here). A pair removed on the server stays removed while the device still lists it (the frame goes again);
+    only once a snapshot has dropped it (`removal_acked_at`) does the same key listed again count as a new QR pairing. Never by
+    comparing `paired_at` (the Mac's clock) with `removed_at` (the server's): a Mac clock ahead would revive a pair just removed,
+    while the daemon still holds the key (PO 13:55Z)."""
     fps = [p.phone_key_fingerprint for p in snapshot.pairings]
     if len(set(fps)) != len(fps):
         raise DesktopRelayError(422, "duplicate_pairing", "a phone key appears twice in the snapshot")
@@ -195,10 +197,10 @@ async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: Pair
         row = rows.get(phone.id)
         if row is None:
             db.add(RemoteDevicePairing(id=uuid.uuid4(), remote_device_id=phone.id, setup_id=setup.id, paired_at=p.paired_at, reported_at=now))
-        elif row.removed_at is not None and p.paired_at <= row.removed_at:
+        elif row.removed_at is not None and row.removal_acked_at is None:
             row.reported_at = now  # still on the device: the removal is not done — the stream sends it again
         else:
-            if row.removed_at is not None:  # paired again after the removal
+            if row.removed_at is not None:  # dropped by the device once, now listed again: a new QR pairing
                 row.removed_at = row.removed_by = row.removal_acked_at = None
             row.paired_at, row.reported_at = p.paired_at, now
     for phone_id, row in rows.items():

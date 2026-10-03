@@ -223,8 +223,12 @@ async def test_a_removal_works_at_once_and_goes_down_until_the_device_drops_it(w
 
         frame = 'event: pairing_removed\ndata: {"phone_key_fingerprint": "%s"}' % _fp(der)
         assert frame in (await c.get("/api/v2/desktop/relay/stream", headers=_tok(token))).text
-        await _pair(c, token, der, at=paired_at)  # still on the device (an old pairing): stays removed, the frame goes again
+        await _pair(c, token, der, at=paired_at)  # still on the device: stays removed, the frame goes again
         assert frame in (await c.get("/api/v2/desktop/relay/stream", headers=_tok(token))).text
+        # the Mac's clock a day ahead: its paired_at is later than the removal — still not revived (PO 13:55Z: no clock compare)
+        await _pair(c, token, der, at=datetime.now(timezone.utc) + timedelta(days=1))
+        again = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert again.json()["error"]["code"] == "phone_not_paired"
         assert (await c.get(PHONES, headers=_person(OWNER))).json()["devices"][0]["pairs"] == []
 
         await _pair(c, token)  # the device dropped it: done, no more frames
