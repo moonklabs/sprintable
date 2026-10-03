@@ -118,13 +118,21 @@ def derive_risk_grade(posture: str | None, gate_type: str) -> RiskGrade:
     return "high"
 
 
+# the gate a person's decision request makes (POST /gates/decisions) — its question is the name it is known by
+DECISION_REQUEST_GATE_TYPE = "agent_decision_request"
+GATE_NAME_MAX = 120
+
+
 def _gate_name_payload(gate: Gate) -> dict:
     """story #4520 — the name a person knows the gate by, for the bell line «결재 요청 · {name}»: a decision request's own
-    question (`POST /gates/decisions` puts it in neutral_facts). Other gate kinds keep their name on the work item (a join) —
-    left out, the line then reads «결재 요청» alone, never a made-up name."""
+    question (`POST /gates/decisions` puts it in neutral_facts). Only that kind: neutral_facts is free-form on other gates, so
+    a «question» there is whatever the maker wrote, not a name (Qadir 09:13Z). Other kinds keep their name on the work item
+    (a join) — left out, the line then reads «결재 요청» alone, never a made-up name."""
+    if gate.gate_type != DECISION_REQUEST_GATE_TYPE:
+        return {}
     question = gate.neutral_facts.get("question") if isinstance(gate.neutral_facts, dict) else None
     if isinstance(question, str) and question.strip():
-        return {"gate_name": question.strip()[:120]}
+        return {"gate_name": question.strip()[:GATE_NAME_MAX]}
     return {}
 
 

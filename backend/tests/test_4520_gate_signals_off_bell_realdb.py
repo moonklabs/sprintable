@@ -192,3 +192,30 @@ async def test_a_decision_requests_bell_line_carries_its_name_and_other_gates_no
         assert "gate_name" not in by_gate[str(review_id)]
     finally:
         await engine.dispose()
+
+
+
+async def test_only_a_decision_request_is_named_and_a_long_question_is_cut():
+    """Qadir 09:13Z — neutral_facts is free-form on other gates: a «question» there is not a name, so it is never carried; a
+    decision request's question is carried cut to GATE_NAME_MAX."""
+    from app.services.gate_service import GATE_NAME_MAX, create_gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            _owner, owner_user = await _make_org_owner(s, org.id)
+        review_id, decision_id = uuid.uuid4(), uuid.uuid4()
+        async with Session() as s:
+            await create_gate(s, org.id, uuid.uuid4(), "story", "pr_review", uuid.uuid4(), uuid.uuid4(),
+                              neutral_facts={"question": "anything the maker wrote"}, project_id=project.id, gate_id=review_id)
+            await create_gate(s, org.id, decision_id, "agent_decision", "agent_decision_request", uuid.uuid4(), uuid.uuid4(),
+                              neutral_facts={"question": "가" * (GATE_NAME_MAX + 30)}, project_id=project.id, gate_id=decision_id)
+            await s.commit()
+        rows, _unread = await _bell(Session, org.id, owner_user)
+        by_gate = {r.get("source_entity_id"): (r.get("payload") or {}) for r in rows}
+        assert "gate_name" not in by_gate[str(review_id)]
+        assert by_gate[str(decision_id)]["gate_name"] == "가" * GATE_NAME_MAX
+    finally:
+        await engine.dispose()
