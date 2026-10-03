@@ -211,6 +211,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // 지시 중 오발송이 잦다. 뷰포트가 아니라 입력 capability로 분기(물리 키보드 연결 태블릿은
   // 데스크톱 거동이 자연스러움) — artifact-stage.tsx와 동형 패턴(`(pointer: coarse)` 1회 판정,
   // SSR 안전 lazy initializer, 하이브리드 기기 중간 전환은 희귀 엣지케이스라 리스너 미부착).
+  // story 4510: the blur's delayed close (so a click on a picker row lands first) must not outlive the component — a test that
+  // ended within 150 ms of a blur left it running after the file, where `window` was already gone (CI «window is not defined»)
+  const blurCloseTimer = useRef<number | null>(null);
+  useEffect(() => () => { if (blurCloseTimer.current !== null) window.clearTimeout(blurCloseTimer.current); }, []);
   const [isTouchDevice] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
   // story #2032 AC2/AC3: 대화별 초안 복원(lazy initializer — 마운트 시 1회, 리마운트당 재평가).
   const [text, setText] = useState(() => loadDraft(threadId));
@@ -991,7 +995,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onBlur={() => {
-            window.setTimeout(() => {
+            // story 4510: one pending close at a time, and cleared when the component goes (blurCloseTimer effect above)
+            if (blurCloseTimer.current !== null) window.clearTimeout(blurCloseTimer.current);
+            blurCloseTimer.current = window.setTimeout(() => {
+              blurCloseTimer.current = null;
               setMentionQuery(null);
               setMentionMembers([]);
               entityPicker.close();

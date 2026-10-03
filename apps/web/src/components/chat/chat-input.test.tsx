@@ -757,3 +757,24 @@ describe('ChatInput — files over the cap are said, not dropped in silence (sto
     expect(dropped()).toBeNull();
   });
 });
+
+// story 4510: the textarea's blur closed the pickers on a 150 ms timer that nobody cleared. A test that ended within 150 ms of a
+// blur left it running past the file — CI shard 1 caught «window is not defined» from chat-input.tsx onBlur after
+// chat-view.4444.test.tsx (run 37085485591). The timer now goes with the component.
+describe('ChatInput — the blur timer goes with the component (story 4510)', () => {
+  it('a blur then an unmount leaves no timer behind; a second blur replaces the first', async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />)); });
+      const before = vi.getTimerCount();
+      await act(async () => { textarea().dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
+      await act(async () => { textarea().dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
+      expect(vi.getTimerCount()).toBe(before + 1); // one pending close, not two
+      await act(async () => { root.unmount(); });
+      expect(vi.getTimerCount()).toBe(before); // nothing of ours runs after the component is gone
+      root = createRoot(container); // afterEach unmounts again
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
