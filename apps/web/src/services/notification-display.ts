@@ -51,7 +51,8 @@ export function getInboxNotificationLabel(
   type: string,
 ) {
   // raw type 노출 금지(AC 「모르는 타입이 raw로 새는 클래스」 닫기) — 모르면 일반 라벨로.
-  return t(INBOX_LABEL_KEYS[type] ?? 'filter_generic');
+  const key = INBOX_LABEL_KEYS[type];
+  return key ? t(key) : t('filter_generic');
 }
 
 /**

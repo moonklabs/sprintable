@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }) }));
 const { NotificationBell } = await import('./notification-bell');
@@ -53,9 +54,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function openBell() {
+async function openBell(locale: 'ko' | 'en' = 'ko') {
+  const messages = locale === 'ko' ? koMessages : enMessages;
   await act(async () => {
-    root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><NotificationBell /></NextIntlClientProvider>);
+    root.render(<NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul"><NotificationBell /></NextIntlClientProvider>);
   });
   const bell = container.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
   await act(async () => { bell.click(); });
@@ -89,6 +91,15 @@ describe('NotificationBell — a dispatched line reads the kind it carries (stor
     expect(headlines()).toEqual(['결재 요청 · 4520-GREEN-2', '결재 요청', '새 멘션', '댓글이 달렸어요', '미르코 · 안녕']);
     await tab('스토리');
     expect(headlines()).toEqual(['스토리 상태 변경', '작업 전달']);
+  });
+
+  it('en — «Approval request · {name}» · without a name «Approval request» · a real hand-off «Work handed off» (Yuna 07:40Z table)', async () => {
+    await openBell('en');
+    const lines = headlines();
+    expect(lines[0]).toBe('Approval request · 4520-GREEN-2');
+    expect(lines[1]).toBe('Approval request');
+    expect(lines[5]).toBe('Work handed off');
+    expect(lines.slice(0, 2).some((h) => /gate/i.test(h ?? ''))).toBe(false);
   });
 
   it('the decision request line wears the approvals icon, not ⚡ — ⚡ only on the real hand-off', async () => {
