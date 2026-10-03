@@ -119,6 +119,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 
+# story #4513: what this image is — the commit (cloudbuild --build-arg APP_COMMIT_SHA=${COMMIT_SHA}) and the build time, read by
+# /api/health. The layer uses the build-arg, so a new commit always rebuilds it (never a cached layer's time).
+ARG APP_COMMIT_SHA=unknown
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.build_time && echo "build ${APP_COMMIT_SHA}"
+ENV APP_COMMIT_SHA=${APP_COMMIT_SHA}
+
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME="0.0.0.0"
