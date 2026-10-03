@@ -19,6 +19,7 @@ import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
+    ORG2,
     OUTSIDER,
     OWNER,
     OWNER_TM,
@@ -176,3 +177,18 @@ async def test_03_only_the_keys_owner_in_their_own_session_for_a_computer_they_c
         assert code(await c.post(OFFERS, json=_offer(device, phone_id, public_key), headers=_person(OWNER))) == (404, "setup_not_found")
         assert (await _sql(fetch="SELECT count(*) FROM remote_device_pairing_offers"))[0][0] == 0
         assert plain_tm  # PLAIN is a person of the org (their members row), only not the key's owner
+
+
+async def test_04_a_computer_of_another_org_is_not_there_for_them_even_with_its_id(world):
+    """까디르 4946 (가): the phone key's owner sends an offer to a setup id of another org (remote control on there, the computer
+    heard from) — one answer, 404 setup_not_found, nothing kept. Without «the computer is in the caller's org» this is a 202."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4531d")
+        await _with_session(c, device)
+        phone_id, _ = await _register(c)
+        public_key = await _phone_key(phone_id)
+        await _sql(f"UPDATE organizations SET remote_control_enabled_at = now() WHERE id = '{ORG2}'")
+        await _sql(f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE id = '{device['setup_id']}'")
+        r = await c.post(OFFERS, json=_offer(device, phone_id, public_key), headers=_person(OWNER))
+        assert (r.status_code, r.json()["error"]["code"]) == (404, "setup_not_found"), r.text
+        assert (await _sql(fetch="SELECT count(*) FROM remote_device_pairing_offers"))[0][0] == 0
