@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.build_info import build_info
 from app.core.config import settings
 from app.dependencies.database import get_db
 from app.services import realtime_readiness
@@ -39,9 +40,13 @@ async def health_check(response: Response, db: AsyncSession = Depends(get_db)):
     # 설정값을 실어 사람이 인스턴스 수와 대조할 수 있게만 한다.
     if db_status != "ok":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return {"status": "error", "version": "v2", "db": db_status, "rate_limit_backend": settings.rate_limit_backend}
+        return {"status": "error", "version": "v2", "db": db_status, "rate_limit_backend": settings.rate_limit_backend,
+                **build_info()}
 
-    return {"status": "ok", "version": "v2", "db": db_status, "rate_limit_backend": settings.rate_limit_backend}
+    # story #4513: the running commit · revision · build time (each «unknown» when absent) — a deploy is confirmed serving
+    # by this read, not only by gcloud
+    return {"status": "ok", "version": "v2", "db": db_status, "rate_limit_backend": settings.rate_limit_backend,
+            **build_info()}
 
 
 @router.get("/ready")

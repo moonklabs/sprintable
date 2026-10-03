@@ -544,6 +544,9 @@ steps:
       # 빌드에서만** 심는다 — "진짜 배포 빌드인가"를 NODE_ENV와 분리.
       - --build-arg
       - SPRINTABLE_DEPLOY_BUILD=1
+      # story #4513: the commit this image is — /api/health reports it (built-in substitution, no new _VAR)
+      - --build-arg
+      - APP_COMMIT_SHA=${COMMIT_SHA}
       - .
     env:
       - DOCKER_BUILDKIT=1
@@ -563,6 +566,9 @@ steps:
       - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:latest-${_DEPLOY_ENV}
       - --build-arg
       - BUILDKIT_INLINE_CACHE=1
+      # story #4513: the commit this image is — /api/v2/health reports it (built-in substitution, no new _VAR)
+      - --build-arg
+      - APP_COMMIT_SHA=${COMMIT_SHA}
       - ./backend
     env:
       - DOCKER_BUILDKIT=1

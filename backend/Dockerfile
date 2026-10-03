@@ -46,6 +46,13 @@ RUN useradd --create-home --shell /bin/bash appuser \
 
 ENV PATH="/app/.venv/bin:$PATH"
 
+# story #4513: what this image is — the commit (cloudbuild --build-arg APP_COMMIT_SHA=${COMMIT_SHA}) and the build time. The
+# layer uses the build-arg, so a new commit always rebuilds it (--cache-from never hands back an old time). Read by the
+# health endpoint (app/core/build_info.py); «unknown» when built without the arg.
+ARG APP_COMMIT_SHA=unknown
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.build_time && echo "build ${APP_COMMIT_SHA}"
+ENV APP_COMMIT_SHA=${APP_COMMIT_SHA}
+
 USER appuser
 
 EXPOSE 8000
