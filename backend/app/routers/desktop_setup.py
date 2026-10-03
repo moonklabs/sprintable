@@ -69,8 +69,12 @@ def _error(e: DesktopSetupError) -> HTTPException:
 
 
 def _human_only(auth: AuthContext) -> uuid.UUID:
-    """An agent key never confirms or disconnects a setup (it would make agents and keys for itself)."""
-    if (auth.claims.get("app_metadata") or {}).get("api_key_id"):
+    """A person at a browser, not a key: an agent key never confirms or disconnects a setup (it would make agents and keys for
+    itself), and neither does a person's own API key (hu_live_ — codex 01a10155 T1 · PO 10:59Z: a script holding an admin's key
+    would skip «a person confirms on the web» and take a device token). The same rule set-password already uses."""
+    from app.routers.auth import _requires_interactive_session
+
+    if _requires_interactive_session(auth):
         raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
     return uuid.UUID(str(auth.user_id))
 

@@ -17,6 +17,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     ORG,
     OUTSIDER,
     OWNER,
+    OWNER_TM,
     PLAIN,
     _addresses,
     _client,
@@ -201,3 +202,30 @@ async def test_a_revoked_key_asks_for_nothing_even_past_the_sign_in(world):
         with pytest.raises(DesktopSetupError) as e:
             await create_code(s, api_key_id=str(key_id), setup_id=uuid.UUID(device["setup_id"]), challenge=_pkce()[1])
     assert e.value.code == "setup_not_found"
+
+
+
+async def test_a_persons_own_api_key_is_not_a_person_at_the_browser(world):
+    """codex 01a10155 T1 (PO 10:59Z) — the owner's hu_live_ key is refused where a person must confirm: the token code's peek
+    and confirm, and the setup's own confirmation; the owner's web session still passes."""
+    from app.core.database import async_session_factory
+    from app.repositories.human_api_key import HumanApiKeyRepository
+    from tests.test_4424_desktop_setup_realdb import _code, _ROLES
+
+    async with async_session_factory() as s:
+        _hkey, plaintext = await HumanApiKeyRepository(s).create(member_id=OWNER_TM, name="d4548 script", expires_at=None)
+        await s.commit()
+    person_key = {"Authorization": f"Bearer {plaintext}", "X-Org-Id": str(ORG)}
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4548g")
+        r, _verifier = await _ask(c, device["setup_id"], _key(device))
+        code = r.json()["code"]
+        for path in ("peek", "confirm"):
+            refused = await c.post(f"/api/v2/desktop/device-token-codes/{path}", json={"code": code}, headers=person_key)
+            assert refused.status_code == 403 and refused.json()["error"]["code"] == "person_session_required", path
+        setup_code, _v = await _code(c, "d4424 laptop 4548g")
+        refused = await c.post("/api/v2/desktop/setup-codes/confirm", json={**_ROLES, "code": setup_code}, headers=person_key)
+        assert refused.status_code == 403 and refused.json()["error"]["code"] == "person_session_required"
+        ok = await c.post("/api/v2/desktop/device-token-codes/confirm", json={"code": code}, headers=_person(OWNER))
+        assert ok.status_code == 200  # the web session: as before
+    await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
