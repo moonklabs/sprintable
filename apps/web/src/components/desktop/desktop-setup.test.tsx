@@ -1474,9 +1474,26 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
 describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the last row (Yuna b2d15f85 · PO 00:31Z)', () => {
   const recipeInputs = () => [...container.querySelectorAll('input[name=recipe]')] as HTMLInputElement[];
   // a person's mouse click (detail 1) — `.click()` and the click an arrow key sends both have detail 0 (choose only, no fold)
-  const realClick = async (el: HTMLElement) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })); }); };
+  // a person's mouse click: a press (pointerdown) on it first, then the click (detail 1) — 4504 AC4: the fold follows a press
+  const realClick = async (el: HTMLElement) => { await act(async () => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+  }); };
   const keyChoose = async (el: HTMLInputElement) => { await act(async () => { el.focus(); el.click(); }); }; // as ↑/↓ does
   const chosen = () => container.querySelector('[data-testid=setup-recipe-chosen]') as HTMLElement | null;
+  /** a person's press on a card in the browser's order (not in act — see the AC4 real-browser test) */
+  const label_press = async (label: HTMLElement) => {
+    const input = label.querySelector('input') as HTMLInputElement;
+    label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+    label.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true })); // released on the card
+    label.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, detail: 1 }));
+    label.addEventListener('click', (e) => e.preventDefault(), { once: true, capture: true });
+    label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    await act(async () => { await Promise.resolve(); });
+    if (input.isConnected) await act(async () => { input.click(); });
+  };
 
   it('folded at first: only the chosen recipe, no list, a [바꾸기] on it', async () => {
     stub(() => new Response('{}'));
@@ -1617,6 +1634,47 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     expect(chosen()?.textContent).toContain('조사 한 명'); // …with the card that was pressed
     expect(document.activeElement).toBe(chosen()!.querySelector('button'));
     hasFocus.mockRestore();
+  });
+
+  it('[SID:4504] AC4 real-browser order: a click on another card\'s text (the label) chooses that card — the fold waits for the choice (live 2026-10-03 02:18Z: the card text did not choose, the radio did)', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    await openRecipes();
+    const label = recipeInputs()[1].closest('label') as HTMLLabelElement;
+    // A browser's order for a click on a label's text: its listeners (React's, at the root) → a microtask checkpoint (React
+    // flushes a discrete update there — the list folds) → only then the label's default action (a click on its radio → change).
+    // jsdom runs that default action inside dispatchEvent, before the test's microtasks — the order that kept 4918's test green
+    // while the card did not choose in the app. So the default action is held back here and done after the checkpoint, as a
+    // browser does: preventDefault on the label's click, await a microtask, then the radio's click.
+    const input = recipeInputs()[1];
+    label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+    (document.activeElement as HTMLElement).blur();
+    label.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true })); // released on the card
+    label.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, detail: 1 }));
+    label.addEventListener('click', (e) => e.preventDefault(), { once: true, capture: true });
+    label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    await act(async () => { await Promise.resolve(); }); // the checkpoint: whatever the label's click updated is painted now
+    if (input.isConnected) await act(async () => { input.click(); }); // the default action — only if the radio is still there
+    for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(chosen()?.textContent).toContain('조사 한 명'); // the card that was pressed
+    expect(recipeInputs()).toHaveLength(0); // folded after the choice
+    hasFocus.mockRestore();
+  });
+
+  it('[SID:4504] AC4 a click on the chosen card itself folds without changing; arrow keys still only choose', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await openRecipes();
+    const mine = recipeInputs()[0].closest('label') as HTMLLabelElement; // the chosen one is first
+    await label_press(mine);
+    for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(recipeInputs()).toHaveLength(0);
+    expect(chosen()?.textContent).toContain('마케팅 루프');
+    await openRecipes();
+    await keyChoose(recipeInputs()[1]); // an arrow key: chooses, stays open
+    expect(recipeInputs()).toHaveLength(2);
   });
 
   it('one recipe only: its card, no [바꾸기]', async () => {

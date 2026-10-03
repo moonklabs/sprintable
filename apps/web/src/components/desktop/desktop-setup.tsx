@@ -524,6 +524,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         {pickingRecipe ? (
           <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
             onKeyDown={(e) => {
+              pressInList.current = false; // a key, not a press: an arrow's click only chooses
               if (e.key !== 'Enter' && e.key !== ' ') return;
               e.preventDefault();
               // a screen reader can put focus on a radio without choosing it: Enter/Space there chooses that one (PO 03:41Z)
@@ -533,8 +534,12 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             }}
             onPointerDown={() => {
               pressInList.current = true;
-              // released anywhere (on the card → its click folds; elsewhere → the list stays until focus moves on)
-              window.addEventListener('pointerup', () => { pressInList.current = false; }, { once: true });
+              // story 4504 AC4 (live 2026-10-03): kept until the press's own click has run — a click on a card's text reaches its
+              // radio only as the label's default action, after the event's listeners. Released outside the list: no click to
+              // wait for, cleared at once. Inside: the radio's click uses it and clears it; a key in the list clears it too.
+              window.addEventListener('pointerup', (up) => {
+                if (!(up.target instanceof Node) || !recipeListRef.current?.contains(up.target)) pressInList.current = false;
+              }, { once: true });
             }}
             onBlur={(e) => {
               if (pressInList.current) return; // a press inside the list: its click decides
@@ -543,10 +548,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               foldRecipes(to === null && document.hasFocus());
             }}>
             {recipeOrder.map((id) => recipes.find((x) => x.id === id)).filter((r): r is NonNullable<typeof r> => !!r).map((r) => (
-              // a real click (detail ≥ 1) chooses and folds; the click an arrow key or a label sends to the radio has detail 0
-              <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary"
-                onClick={(e) => { if (e.detail > 0) foldRecipes(true); }}>
-                <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1" />
+              // story 4504 AC4 (live 2026-10-03 02:18Z): a person's click chooses, THEN folds — the fold is on the radio's own click
+              // (after its change), never on the label's: a browser does the label's default action (that radio click) only after
+              // the label's listeners and the update they flushed, so folding there removed the radio before it was chosen. A
+              // press inside the list (pointer) folds; an arrow key's click (no press) only chooses.
+              <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
+                <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1"
+                  onClick={() => { if (pressInList.current) { pressInList.current = false; foldRecipes(true); } }} />
                 <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
                   {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
                   <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
