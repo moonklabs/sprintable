@@ -441,6 +441,16 @@ function DocxBody({ url, label }: { url: string; label: string }) {
  * 개방은 피싱 표면이라 금지 — toss-checkout 선례) fetch로 직접 받아 Blob→객체 URL로 바꿔
  * 그것만 iframe에 건다. DocxBody와 동형 패턴(단일 try/catch+독립 타이머).
  */
+/**
+ * story #4532 AC5 (Kadir · PO 21:46Z): the PDF preview's blob is ALWAYS a PDF. `res.blob()` kept the type the server gave — an
+ * upload's content_type is whatever the uploader sent — so an «x.pdf» that is really HTML became a text/html blob, and the
+ * unsandboxed iframe below ran its scripts in our origin (the HTML preview is sandboxed; this path went around it). Typed as
+ * application/pdf the browser hands it to its PDF viewer, which runs nothing (measured in Chromium 2026-10-03: as-is → the script
+ * ran · typed → none). The iframe cannot take a sandbox: Chromium's PDF viewer does not draw in a sandboxed frame (any sandbox
+ * value → the broken-page icon, measured the same day) — the type is the fix.
+ */
+export const pdfBlob = async (res: Response): Promise<Blob> => new Blob([await res.arrayBuffer()], { type: 'application/pdf' });
+
 function PdfBody({ url, label }: { url: string; label: string }) {
   const t = useTranslations('chats');
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
@@ -473,7 +483,7 @@ function PdfBody({ url, label }: { url: string; label: string }) {
       try {
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(String(res.status));
-        const blob = await res.blob();
+        const blob = await pdfBlob(res); // #4532: never the server's type
         objectUrl = URL.createObjectURL(blob);
         clearTimeout(timeoutId);
         markReady(objectUrl);
@@ -692,7 +702,7 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
         // blob:만 열려 있으므로(PdfBody와 동형) fetch로 직접 받아 Blob→객체 URL로 바꾼다.
         const pdfRes = await fetch(signedUrl, { signal: controller.signal });
         if (!pdfRes.ok) throw new Error(String(pdfRes.status));
-        const blob = await pdfRes.blob();
+        const blob = await pdfBlob(pdfRes); // #4532: the converted file goes into the same unsandboxed iframe
         objectUrl = URL.createObjectURL(blob);
         clearTimeout(timeoutId);
         markReady(objectUrl);
