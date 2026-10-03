@@ -24,6 +24,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
 from app.services import desktop_relay as relay
+from app.services.agent_permissions import PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,8 @@ _STREAMS_PER_DEVICE = 2  # a reconnect may overlap the old connection for a mome
 
 
 def _error(exc: relay.DesktopRelayError) -> JSONResponse:
-    return JSONResponse(status_code=exc.status, content={"data": None, "error": {"code": exc.code, "message": exc.message}, "meta": None})
+    error = {"code": exc.code, "message": exc.message, **({"detail": exc.detail} if exc.detail else {})}
+    return JSONResponse(status_code=exc.status, content={"data": None, "error": error, "meta": None})
 
 
 async def _device(
@@ -87,8 +89,11 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
     deadline = time.monotonic() + _LIFESPAN_SEC + random.uniform(0, _LIFESPAN_JITTER_SEC)
 
     async def generate():
+        from app.services import agent_permissions
+
         last_seq = start_seq
         last_beat = last_check = time.monotonic()
+        removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
         try:
             while True:
                 if await request.is_disconnected():
@@ -110,9 +115,13 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                             yield f"event: {remote_control.OFF_CODE}\ndata: {{}}\n\n"
                             return
                     commands = await relay.commands_to_send(s, setup_id, last_seq)
+                    removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
                     if now - last_beat >= _HEARTBEAT_SEC:
                         await relay.touch_device(s, setup_id)
                     await s.commit()
+                for fp in removals:  # story #4533 — a removal only: no frame adds or changes a phone key on the device
+                    removals_sent.add(fp)
+                    yield f"event: pairing_removed\ndata: {json.dumps({'phone_key_fingerprint': fp})}\n\n"
                 for c in commands:
                     frame = {"command_id": str(c.id), "kind": c.kind, "session_key": c.session_key, "payload": c.payload,
                              "created_at": c.created_at.isoformat() if c.created_at else None}
@@ -193,3 +202,53 @@ async def get_device_sessions(
     if exists is None:
         raise HTTPException(status_code=404, detail={"code": "SETUP_NOT_FOUND", "message": "no such device in this org"})
     return {"sessions": await relay.device_sessions_view(db, setup_id)}
+
+
+# ── story #4533 (B-2) — permission requests up · the device's phone pairs (contract §9 ① · §10 ②) ───────────────────────────
+
+
+@router.post("/relay/permission-requests")
+async def post_permission_request(
+    body: PermissionRequestReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+):
+    from app.services import agent_permissions
+
+    try:
+        row, created = await agent_permissions.report_request(db, setup, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    content = {"id": str(row.id), "state": row.state, "recipient_reason": row.recipient_reason}
+    return JSONResponse(status_code=201 if created else 200, content=content)
+
+
+@router.post("/relay/permission-requests/{request_id}/withdraw")
+async def post_permission_withdraw(
+    request_id: uuid.UUID, body: Withdrawal, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+):
+    from app.services import agent_permissions
+
+    try:
+        row = await agent_permissions.withdraw_request(db, setup, request_id, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"id": str(row.id), "state": row.state}
+
+
+@router.put("/relay/pairings")
+async def put_pairings(body: PairingSnapshot, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    from app.services import agent_permissions
+
+    try:
+        counts = await agent_permissions.replace_pairings(db, setup, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return counts
+

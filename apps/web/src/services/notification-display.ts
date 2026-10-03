@@ -44,6 +44,7 @@ const INBOX_LABEL_KEYS: Record<string, string> = {
   'conversation.mention': 'eventMention',
   'conversation.message': 'eventMessage',
   'gate.pending_approval': 'filter_gate_pending_approval',
+  'agent.permission_request': 'filter_agent_permission_request', // story #4533 — «권한 대기»
 };
 
 export function getInboxNotificationLabel(
@@ -134,6 +135,12 @@ export function getDispatchedHeadline(
     const name = typeof payload?.['gate_name'] === 'string' ? payload['gate_name'].trim() : '';
     const label = t('filter_gate_pending_approval');
     return name ? `${label} · ${name}` : label;
+  }
+  if (inner === 'agent.permission_request') {
+    // story #4533 (명세 B-2 · 폰 알림) — «권한 대기 · {에이전트}»; the server's title is not read (as above)
+    const agent = typeof payload?.['agent_name'] === 'string' ? payload['agent_name'].trim() : '';
+    const label = t('filter_agent_permission_request');
+    return agent ? `${label} · ${agent}` : label;
   }
   const key = INBOX_LABEL_KEYS[inner];
   return key ? t(key) : getEventTypeCopy(t, inner);

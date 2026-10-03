@@ -3824,6 +3824,7 @@
     "filter_invitation": "초대",
     "filter_agent_joined": "에이전트 합류",
     "filter_gate_pending_approval": "결재 요청",
+    "filter_agent_permission_request": "권한 대기",
     "filter_generic": "알림",
     "revoke_agent": "접근 권한 취소",
     "revoke_agent_confirm": "이 에이전트를 비활성화할까요?",
@@ -6815,6 +6816,39 @@
       "turnOff": "끄기",
       "cancel": "취소",
       "failed": "바꾸지 못했어요 — 다시 시도해 주세요"
+    },
+    "remoteDevices": {
+      "title": "원격 기기",
+      "pairedWith": "짝: {device}",
+      "unknownDevice": "이름 모를 컴퓨터",
+      "pairedOn": "{date}",
+      "pairedOnUsed": "{date} · 마지막 사용 {used}",
+      "confirmNumber": "확인 숫자 {number}",
+      "confirmNumberHint": "폰 앱 설정의 확인 숫자와 같으면 그 폰이 맞아요",
+      "remove": "빼기",
+      "cancel": "취소",
+      "confirmRemove": "{phone} ↔ {device} 짝을 뺄까요? 빼면 그 폰에서 이 컴퓨터를 제어할 수 없어요",
+      "removed": "뺐어요 · {phone}",
+      "alreadyRemoved": "이미 빠져 있었어요 · {phone}",
+      "removeFailed": "빼지 못했어요 — 다시 시도해 주세요",
+      "empty": "아직 짝지은 폰이 없어요 — 데스크톱 앱 띠의 «원격 제어 켜짐»에서 [폰 짝짓기]로 짝지어요",
+      "orgOff": "지금 조직({org})은 원격 제어가 꺼져 있어요 — 짝지은 기기로 상태는 보이지만 제어는 안 돼요"
+    }
+  },
+  "agentPermissions": {
+    "groupTitle": "에이전트 권한 요청",
+    "chip": "권한 요청",
+    "chipUnknown": "상태 모름",
+    "waited": "{n}분째 기다림",
+    "role": "{role} 역할로 받은 요청이에요",
+    "maskedNote": "비밀처럼 보이는 값은 가려서 보냈어요",
+    "truncatedNote": "앞 200자만 보여요",
+    "workdir": "작업 폴더 · {path}",
+    "line": {
+      "answerOnPhone": "짝지은 폰에서 답할 수 있어요",
+      "expired": "시간이 지나 여기서는 답할 수 없어요 — 그 컴퓨터의 터미널에서 답해 주세요",
+      "unknown": "그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요",
+      "noPairedPhone": "그 컴퓨터와 짝지은 폰이 없어 여기서는 답할 수 없어요 — 그 컴퓨터의 터미널에서 답해 주세요"
     }
   },
   "recipePreset": {

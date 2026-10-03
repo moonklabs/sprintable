@@ -3824,6 +3824,7 @@
     "filter_invitation": "Invitation",
     "filter_agent_joined": "Agent Joined",
     "filter_gate_pending_approval": "Approval request",
+    "filter_agent_permission_request": "Waiting for permission",
     "filter_generic": "Notification",
     "revoke_agent": "Revoke Access",
     "revoke_agent_confirm": "Deactivate this agent?",
@@ -6815,6 +6816,39 @@
       "turnOff": "Turn off",
       "cancel": "Cancel",
       "failed": "Couldn't change it — please try again"
+    },
+    "remoteDevices": {
+      "title": "Remote devices",
+      "pairedWith": "Paired with {device}",
+      "unknownDevice": "an unnamed computer",
+      "pairedOn": "{date}",
+      "pairedOnUsed": "{date} · last used {used}",
+      "confirmNumber": "Confirmation number {number}",
+      "confirmNumberHint": "If it matches the confirmation number in the phone app's settings, it's that phone",
+      "remove": "Remove",
+      "cancel": "Cancel",
+      "confirmRemove": "Remove the pairing {phone} ↔ {device}? That phone will no longer be able to control this computer",
+      "removed": "Removed · {phone}",
+      "alreadyRemoved": "Already removed · {phone}",
+      "removeFailed": "Couldn't remove it — please try again",
+      "empty": "No paired phone yet — on the desktop app's bar, open «Remote control on» and press [Pair phone]",
+      "orgOff": "Remote control is off for this organization ({org}) — paired devices show the state but can't control anything"
+    }
+  },
+  "agentPermissions": {
+    "groupTitle": "Agent permission requests",
+    "chip": "Permission request",
+    "chipUnknown": "State unknown",
+    "waited": "Waiting {n} min",
+    "role": "Sent to the {role} role",
+    "maskedNote": "Values that look like secrets were masked",
+    "truncatedNote": "Only the first 200 characters are shown",
+    "workdir": "Working folder · {path}",
+    "line": {
+      "answerOnPhone": "You can answer from a paired phone",
+      "expired": "The time has passed, so it can't be answered here — answer in that computer's terminal",
+      "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
+      "noPairedPhone": "No phone is paired with that computer, so it can't be answered here — answer in that computer's terminal"
     }
   },
   "recipePreset": {
