@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { AlertTriangle, Circle, CircleDashed, CircleDot, Loader2, Square, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, Check, Circle, CircleDashed, Loader2, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -21,8 +21,15 @@ interface View {
   pending_permission_request_id: string | null;
 }
 
-const SHAPES: Record<SessionState, LucideIcon> = {
-  starting: Circle, working: Loader2, idle: CircleDot, waiting_permission: AlertTriangle, stopped: Square, unknown: CircleDashed,
+// the desktop bar's own marks and tones (board.ts DISPLAY · Yuna 17:27Z): idle = a filled dot, muted · done = a check, success ·
+// working = primary · waiting for permission = warning · unknown = a dashed ring, muted
+const SHAPES: Record<SessionState, { icon: LucideIcon; tone: string }> = {
+  starting: { icon: Circle, tone: 'text-muted-foreground' },
+  working: { icon: Loader2, tone: 'text-primary' },
+  idle: { icon: Circle, tone: 'text-muted-foreground fill-current' },
+  waiting_permission: { icon: AlertTriangle, tone: 'text-warning' },
+  stopped: { icon: Check, tone: 'text-success' },
+  unknown: { icon: CircleDashed, tone: 'text-muted-foreground' },
 };
 const REREAD_MS = 30_000;
 
@@ -66,7 +73,7 @@ export function AgentSessionStrip({ agentId }: { agentId: string }) {
 function Strip({ view }: { view: View & { state: SessionState } }) {
   const t = useTranslations('chats.agentSession');
   const flatHref = useFlatHref();
-  const Shape = SHAPES[view.state];
+  const { icon: Shape, tone } = SHAPES[view.state];
   const unknown = view.state === 'unknown';
   const label = view.state === 'starting' ? t('state.starting')
     : view.state === 'working' ? t('state.working')
@@ -80,7 +87,7 @@ function Strip({ view }: { view: View & { state: SessionState } }) {
           : 'inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-foreground'}
         data-testid="agent-session-chip"
       >
-        <Shape className={view.state === 'working' ? 'size-3 animate-spin' : 'size-3'} aria-hidden />
+        <Shape className={`${view.state === 'idle' ? 'size-2' : 'size-3'} ${tone}${view.state === 'working' ? ' animate-spin' : ''}`} aria-hidden />
         {label}
       </span>
       {view.device_name ? <span className="text-muted-foreground">{view.device_name}</span> : null}
@@ -92,10 +99,12 @@ function Strip({ view }: { view: View & { state: SessionState } }) {
 function Line({ view, href }: { view: View & { state: SessionState }; href: string }) {
   const t = useTranslations('chats.agentSession');
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
+  if (view.state !== 'working' && view.state !== 'waiting_permission') return null; // idle · starting · stopped: no button place
+  // remote control off wins over both (Yuna 17:27Z ②)
+  if (!view.remote_control) return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOff')}</p>;
   if (view.state === 'waiting_permission') {
+    // the web's inbox card only looks, so not «answer there» — where the request is (Yuna 17:27Z ②)
     return <Link className="w-full text-muted-foreground underline" href={href} data-testid="agent-session-line">{t('line.inbox')}</Link>;
   }
-  if (view.state !== 'working') return null; // idle · starting · stopped: no button place (명세 표)
-  if (!view.remote_control) return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOff')}</p>;
   return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.onPhone')}</p>;
 }

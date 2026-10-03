@@ -49,7 +49,7 @@ describe('AgentSessionStrip (story #4534)', () => {
     ['starting', '시작됨', null],
     ['working', '작업 중', '짝지은 폰에서 멈추거나 지시할 수 있어요'],
     ['idle', '다음 일 기다림', null],
-    ['waiting_permission', '권한 대기', '결재함에서 답할 수 있어요'],
+    ['waiting_permission', '권한 대기', '권한 요청은 결재함에 있어요'],
     ['stopped', '끝', null],
     ['unknown', '상태 모름', '그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요'],
   ])('%s → «%s» and its line, no button', async (state, word, expected) => {
@@ -61,8 +61,13 @@ describe('AgentSessionStrip (story #4534)', () => {
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
-  it('working with remote control off says why; not on a computer draws nothing', async () => {
+  it('remote control off says why — over the permission line too; not on a computer draws nothing', async () => {
     fetchWithAuth.mockResolvedValueOnce(view({ remote_control: false }));
+    await render();
+    expect(line()).toBe('이 조직은 원격 제어를 꺼 두었어요 — 그 컴퓨터에서 직접 해 주세요');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'waiting_permission', remote_control: false }));
     await render();
     expect(line()).toBe('이 조직은 원격 제어를 꺼 두었어요 — 그 컴퓨터에서 직접 해 주세요');
     await act(async () => { root.unmount(); });
@@ -84,7 +89,22 @@ describe('AgentSessionStrip (story #4534)', () => {
     expect(chip()).toBe('상태 모름');
   });
 
+  it('marks and tones are the desktop bar\'s: idle a filled muted dot · done a success check · working primary · waiting warning', async () => {
+    for (const [state, cls] of [['idle', 'fill-current'], ['stopped', 'text-success'], ['working', 'text-primary'], ['waiting_permission', 'text-warning']]) {
+      fetchWithAuth.mockResolvedValueOnce(view({ state }));
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await render();
+      expect(container.querySelector('[data-testid="agent-session-chip"] svg')?.getAttribute('class')).toContain(cls);
+    }
+  });
+
   it('reads in English', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle' }));
+    await render('en');
+    expect(chip()).toBe('Waiting for work');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
     fetchWithAuth.mockResolvedValueOnce(view());
     await render('en');
     expect(chip()).toBe('Working');

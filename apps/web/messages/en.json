@@ -3825,7 +3825,7 @@
     "filter_agent_joined": "Agent Joined",
     "filter_gate_pending_approval": "Approval request",
     "filter_agent_permission_request": "Waiting for permission",
-    "filter_agent_turn_ended": "Waiting for the next task",
+    "filter_agent_turn_ended": "Waiting for work",
     "filter_generic": "Notification",
     "revoke_agent": "Revoke Access",
     "revoke_agent_confirm": "Deactivate this agent?",
@@ -5046,14 +5046,14 @@
       "state": {
         "starting": "Started",
         "working": "Working",
-        "idle": "Waiting for the next task",
+        "idle": "Waiting for work",
         "waiting_permission": "Waiting for permission",
-        "stopped": "Ended",
+        "stopped": "Done",
         "unknown": "State unknown"
       },
       "line": {
         "onPhone": "You can stop or instruct it from a paired phone",
-        "inbox": "You can answer in the approvals inbox",
+        "inbox": "The permission request is in the approvals inbox",
         "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
         "remoteOff": "Remote control is turned off for this organization — do it on that computer"
       }
