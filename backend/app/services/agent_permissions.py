@@ -24,7 +24,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing
+from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
 from app.models.desktop_relay import DesktopDeviceToken, DesktopSession
 from app.models.desktop_setup import DesktopSetup
 from app.services.desktop_relay import SESSION_KEY_PATTERN, UNKNOWN_AFTER, DesktopRelayError, _check_agent
@@ -222,6 +222,84 @@ async def removals_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[str]:
                RemoteDevicePairing.removal_acked_at.is_(None))
         .order_by(RemoteDevicePairing.removed_at)
     )).scalars().all())
+
+
+# ── a pairing offer (story #4531 · contract v1.10 §10 ⑤) ─────────────────────────────────────────────────────────────────────
+
+PAIRING_OFFER_TTL = timedelta(minutes=5)  # the QR's own window — an offer further out is not one the desktop opened
+_MAC = r"^[A-Za-z0-9_-]{43}$"  # HMAC-SHA256 · 32 bytes · base64url, no padding
+
+
+class PairingOffer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    setup_id: uuid.UUID
+    offer_id: uuid.UUID
+    phone_key_id: uuid.UUID
+    expires_at: AwareDatetime
+    mac: str = Field(pattern=_MAC)
+
+
+async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: PairingOffer) -> RemoteDevicePairingOffer:
+    """The phone scanned a desktop's QR: carry its registered key down to that desktop with the MAC the phone made from the QR's
+    secret. The server never sees that secret, so it can neither make nor check the MAC — a key it swapped would not match it on
+    the daemon. Only the key's owner, in their own session, may offer it."""
+    from app.services import remote_control
+
+    phone = (await db.execute(
+        select(RemoteDevice).where(RemoteDevice.id == body.phone_key_id, RemoteDevice.member_id == member_id,
+                                   RemoteDevice.revoked_at.is_(None))
+    )).scalar_one_or_none()
+    if phone is None:
+        raise DesktopRelayError(404, "phone_key_not_found", "no such phone key of yours")
+    # one answer for «not there · another org's · disconnected · not exchanged» (as the device-token code · PO 08:36Z)
+    setup = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.id == body.setup_id, DesktopSetup.org_id == org_id,
+                                   DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
+    )).scalar_one_or_none()
+    if setup is None:
+        raise DesktopRelayError(404, "setup_not_found", "no such computer")
+    if not await remote_control.is_enabled(db, org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
+    now = _now()
+    if not (now < body.expires_at <= now + PAIRING_OFFER_TTL + timedelta(seconds=5)):  # 5 s for the two clocks
+        raise DesktopRelayError(422, "invalid_expiry", "the offer has expired or reaches beyond its window")
+    if setup.id not in await _reachable(db, {setup.id}, now):
+        raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
+    existing = (await db.execute(
+        select(RemoteDevicePairingOffer).where(RemoteDevicePairingOffer.setup_id == setup.id,
+                                               RemoteDevicePairingOffer.offer_id == body.offer_id)
+    )).scalar_one_or_none()
+    if existing is not None:
+        # the same phone sending the same offer again: the same row · another key or MAC for an offer already answered: no
+        if existing.remote_device_id == phone.id and existing.mac == body.mac:
+            return existing
+        raise DesktopRelayError(409, "offer_used", "this pairing code was already answered")
+    row = RemoteDevicePairingOffer(id=uuid.uuid4(), setup_id=setup.id, offer_id=body.offer_id, remote_device_id=phone.id,
+                                   offered_by=member_id, mac=body.mac, expires_at=body.expires_at)
+    db.add(row)
+    try:
+        await db.flush()
+    except IntegrityError:
+        raise DesktopRelayError(409, "offer_used", "this pairing code was already answered") from None
+    _wake_device_after_commit(db, setup.id)
+    return row
+
+
+async def offers_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[dict]:
+    """Offers for this device not yet past their window — sent on every connection until then (the daemon keeps the offers it
+    opened and drops any other). `label` and `expires_at` are outside the MAC: shown, never trusted (the daemon goes by the
+    window of the offer it opened)."""
+    now = _now()
+    rows = (await db.execute(
+        select(RemoteDevicePairingOffer, RemoteDevice)
+        .join(RemoteDevice, RemoteDevice.id == RemoteDevicePairingOffer.remote_device_id)
+        .where(RemoteDevicePairingOffer.setup_id == setup_id, RemoteDevicePairingOffer.expires_at > now,
+               RemoteDevice.revoked_at.is_(None))
+        .order_by(RemoteDevicePairingOffer.created_at)
+    )).all()
+    return [{"offer_id": str(o.offer_id), "phone_key_id": str(d.id), "public_key": d.public_key, "label": d.label,
+             "mac": o.mac, "expires_at": o.expires_at.isoformat()} for o, d in rows]
 
 
 def _wake_device_after_commit(db: AsyncSession, setup_id: uuid.UUID) -> None:

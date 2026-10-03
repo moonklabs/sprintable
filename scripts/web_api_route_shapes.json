@@ -2980,6 +2980,11 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/remote-devices/pairing-offers",
+"kind": "unknown"
+},
+{
 "method": "DELETE",
 "path": "/api/v2/remote-devices/{}/pairs/{}",
 "kind": "unknown"

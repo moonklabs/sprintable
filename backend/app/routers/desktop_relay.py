@@ -94,6 +94,7 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
         last_seq = start_seq
         last_beat = last_check = time.monotonic()
         removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
+        offers_sent: set[str] = set()  # story #4531 — each live pairing offer once per connection, again on the next
         try:
             while True:
                 if await request.is_disconnected():
@@ -116,12 +117,16 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                             return
                     commands = await relay.commands_to_send(s, setup_id, last_seq)
                     removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
+                    offers = [o for o in await agent_permissions.offers_to_send(s, setup_id) if o["offer_id"] not in offers_sent]
                     if now - last_beat >= _HEARTBEAT_SEC:
                         await relay.touch_device(s, setup_id)
                     await s.commit()
                 for fp in removals:  # story #4533 — a removal only: no frame adds or changes a phone key on the device
                     removals_sent.add(fp)
                     yield f"event: pairing_removed\ndata: {json.dumps({'phone_key_fingerprint': fp})}\n\n"
+                for o in offers:  # story #4531 — adds nothing by itself: the daemon pins only an offer it opened, its MAC and a person's [같아요]
+                    offers_sent.add(o["offer_id"])
+                    yield f"event: pairing_offer\ndata: {json.dumps(o)}\n\n"
                 for c in commands:
                     frame = {"command_id": str(c.id), "kind": c.kind, "session_key": c.session_key, "payload": c.payload,
                              "created_at": c.created_at.isoformat() if c.created_at else None}
