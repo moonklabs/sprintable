@@ -104,3 +104,24 @@ async def test_with_no_assignee_a_failing_enrichment_still_rolls_the_creation_ba
         assert await _stories(Session, project_id) == []
     finally:
         await engine.dispose()
+
+
+async def test_a_person_assignees_notification_survives_a_failing_enrichment(monkeypatch):
+    """Qadir 4920: for a person the announcement only flushes its rows (story_assigned notification · activity · webhook); a
+    failing enrichment's rollback used to drop them — 201 and one story, but no notification. They are committed before the
+    enrichments now."""
+    import app.routers.stories as stories_mod
+    from tests.test_4497_assignee_event_on_create_realdb import _assigned_notifications
+
+    async def broken(*_a, **_k):
+        raise RuntimeError("enrichment down")
+
+    monkeypatch.setattr(stories_mod, "_attach_trust_stage", broken)
+    engine, Session, org_id, project_id, owner_id, other_human, _agent = await _seed()
+    try:
+        r = await _create(Session, org_id, project_id, owner_id, assignee_id=str(other_human))
+        assert r.status_code == 201, r.text
+        [story] = await _stories(Session, project_id)
+        assert len(await _assigned_notifications(Session, story.id)) == 1
+    finally:
+        await engine.dispose()

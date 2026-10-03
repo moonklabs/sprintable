@@ -1011,6 +1011,10 @@ async def create_story(
             # is already committed), or the refresh below raises and the created story answers 500 (a retry would make it twice);
             # the rollback expires the story — the refresh right below reloads it
             await session.rollback()
+        # story #4508 (Qadir 4920 · PO 01:07Z): the announcement commits only on its agent branch — for a person it dispatches
+        # and flushes (the story_assigned notification · activity · webhook rows). Commit them here, before the enrichments
+        # below, so a failing enrichment's rollback has nothing of the announcement left to drop.
+        await session.commit()
         # the response reads the story after these commits: reload it first (lint_commit_before_validate · story #2459 — prod hit
         # MissingGreenlet on a model_validate after a commit despite expire_on_commit=False; the transient fields set above stay)
         await session.refresh(story)
