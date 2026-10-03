@@ -775,6 +775,26 @@
 "kind": "object"
 },
 {
+"method": "POST",
+"path": "/api/v2/desktop/device-token-codes",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/device-token-codes/confirm",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/device-token-codes/exchange",
+"kind": "envelope"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/device-token-codes/peek",
+"kind": "object"
+},
+{
 "method": "GET",
 "path": "/api/v2/desktop/recipes",
 "kind": "object"

@@ -153,7 +153,7 @@ function Confirm({ code }: { code: string }) {
     );
   }
   if (view.kind === 'expired' || view.kind === 'spent') {
-    return <Card className="break-keep p-6"><p className="text-sm text-muted-foreground">{t(view.kind)}</p></Card>;
+    return <Card className="break-keep p-6"><p className="text-sm text-muted-foreground">{view.kind === 'expired' ? t('expired') : t('spent')}</p></Card>;
   }
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
