@@ -3,6 +3,8 @@
 A watch fires once, as a `watch.fired` event on the agent's own stream — after a restart the agent gets it first."""
 from __future__ import annotations
 
+from typing import Literal
+
 from mcp.types import TextContent
 
 from ..api_client import client
@@ -11,7 +13,7 @@ from ..schemas import SprintableInput
 
 
 class WatchInput(SprintableInput):
-    condition: str  # github.pr_merged · github.pr_checks_completed · deploy.serving
+    condition: Literal["github.pr_merged", "github.pr_checks_completed", "deploy.serving"]
     target: dict  # {repo, pr} · deploy.serving: {service: "backend", repo, pr} or {service: "backend", commit}
     expires_in_hours: int | None = None  # 1–720 (default 168)
 

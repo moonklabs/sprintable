@@ -282,6 +282,9 @@ def test_list_docs_ids_branch_closed_the_two_hop_known_gap():
 # ── false positive: 실제로는 안전 — org/user-level(project 축 없음)·self-derived·
 #    JWT-project 스코프·인라인/1-hop 가드(v1 정적스캔 미인식). 영구 allowlist(이유 필수). ──
 _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
+    # story #4536 — an agent's watch is the agent's own (agent_watches.agent_member_id = the caller's agent key): the clear
+    # selects by (id, the caller's member id) — another agent's watch is «not found», in the same org and project too.
+    "app.routers.watches:clear_watch": "agent-owned row, selected by the caller's own member id (services.agent_watches.cancel_watch)",
     # story #3786 — dependencies.py의 update/delete는 까심 QA CI FAILURE 원칙(2026-07-08,
     # agents.py::get_agent_connection_artifact/_connection_artifact 선례)에 따라 Header() DI
     # 마커를 라우트 진입점(update_dependency/delete_dependency)에서만 받고, 실 로직(가드 호출

@@ -226,10 +226,7 @@ def test_a_revision_reports_once_on_its_first_outside_request(monkeypatch):
         calls.append(coro.cr_frame.f_locals.get("revision") if coro.cr_frame else None)
         coro.close()
 
-    class _Loop:
-        create_task = staticmethod(fake_task)
-
-    monkeypatch.setattr("asyncio.get_running_loop", lambda: _Loop())
+    monkeypatch.setattr("app.services.pg_pubsub.fire_and_forget", fake_task)
     monkeypatch.setattr(svc, "_reported", False)
     monkeypatch.setenv("APP_COMMIT_SHA", SHA(42))
     monkeypatch.delenv("K_REVISION", raising=False)

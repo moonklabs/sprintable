@@ -477,6 +477,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",
     "sprintable_assign_story_to_sprint", "sprintable_change_retro_phase",
     "sprintable_check_notifications", "sprintable_checkin_sprint", "sprintable_claim_story",
+    "sprintable_watch", "sprintable_unwatch", "sprintable_list_watches",  # story #4536
     "sprintable_close_sprint", "sprintable_create_conversation", "sprintable_create_doc",
     "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
     "sprintable_delete_meeting",

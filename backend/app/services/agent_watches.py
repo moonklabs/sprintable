@@ -352,9 +352,9 @@ def note_request(path: str) -> None:
     if info["commit_sha"] == "unknown" or info["revision"] == "unknown":
         return
     _reported = True
-    import asyncio
+    from app.services.pg_pubsub import fire_and_forget  # a kept reference (no early GC of the task — #1970)
 
-    asyncio.get_running_loop().create_task(_report(info["revision"], info["commit_sha"]))
+    fire_and_forget(_report(info["revision"], info["commit_sha"]))
 
 
 async def _report(revision: str, commit_sha: str) -> None:
