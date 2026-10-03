@@ -155,6 +155,10 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 스코프 키가 이 도구를 403으로 못 본다. vendored 사본과 동기화 필수
     # (sprintable_mcp/toolset.py).
     "sprintable_list_agent_cards",
+    # story #4536 — an agent's own watches (set · clear · list its own, never another's): a self-scope coordination
+    # utility like lock_files, needed by any role (waiting on a merge · a check · a deploy instead of polling GitHub).
+    # vendored 사본과 동기화 필수(sprintable_mcp/toolset.py).
+    "sprintable_watch", "sprintable_unwatch", "sprintable_list_watches",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -477,6 +481,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",
     "sprintable_assign_story_to_sprint", "sprintable_change_retro_phase",
     "sprintable_check_notifications", "sprintable_checkin_sprint", "sprintable_claim_story",
+    "sprintable_watch", "sprintable_unwatch", "sprintable_list_watches",  # story #4536
     "sprintable_close_sprint", "sprintable_create_conversation", "sprintable_create_doc",
     "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
     "sprintable_delete_meeting",

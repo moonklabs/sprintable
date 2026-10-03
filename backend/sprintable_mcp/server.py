@@ -50,6 +50,7 @@ from .tools.channel_posts import (
     get_publication_insights, withdraw_channel_post_draft,
 )
 from .tools.content_rules import GetContentRulesInput, get_content_rules
+from .tools.watches import ListWatchesInput, UnwatchInput, WatchInput, list_watches, unwatch, watch
 from .tools.decisions import RequestDecisionInput, request_decision
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
@@ -1049,6 +1050,23 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_leaderboard_v2",
      "[조직] 보상 리더보드 조회 — 이 프로젝트 순위. period(all · daily · weekly · monthly, 기본 all) · limit(1~100, 기본 50).",
      GetLeaderboardInput, get_leaderboard_v2),
+    # Watches (3) — story #4536: they live on the server, past the session
+    ("sprintable_watch",
+     "[일감] 서버에 감시 하나를 건다 — 세션이 끝나거나 다시 켜져도 살아 있고, 일어나면 이 에이전트 스트림에 "
+     "`watch.fired` 이벤트로 한 번 온다(꺼져 있었으면 다시 붙을 때 첫 일감). condition: "
+     "`github.pr_merged`(target {repo:\"owner/name\", pr}) · `github.pr_checks_completed`(같은 target · 열린 PR) · "
+     "`deploy.serving`(target {service:\"backend\", repo, pr} = 내 PR이 서빙되면 · 또는 {service:\"backend\", commit}). "
+     "서버가 본 적 없는 PR은 422 PR_NOT_SEEN(푸시나 CI가 한 번 돈 뒤 다시) · 병합 없이 닫힌 PR은 422 "
+     "PR_CLOSED_UNMERGED · 이미 일어난 일이면 걸자마자 온다. expires_in_hours 1~720(기본 168). GitHub를 "
+     "폴링하지 말고 이 도구로 기다릴 것.",
+     WatchInput, watch),
+    ("sprintable_unwatch",
+     "[일감] 이 에이전트가 건 감시 하나를 푼다(남의 감시는 404).",
+     UnwatchInput, unwatch),
+    ("sprintable_list_watches",
+     "[일감] 이 에이전트가 건 감시 목록 — 기본은 살아 있는 것만, include_done=true면 불 붙은 것 · 푼 것 · "
+     "만료된 것까지(fired_fact에 일어난 사실).",
+     ListWatchesInput, list_watches),
     # Notifications (3)
     ("sprintable_check_notifications",
      "알림 목록 조회.",

@@ -3540,6 +3540,21 @@
 "kind": "unknown"
 },
 {
+"method": "GET",
+"path": "/api/v2/watches",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/watches",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/watches/{}",
+"kind": "unknown"
+},
+{
 "method": "DELETE",
 "path": "/api/v2/webhooks/config",
 "kind": "unknown"

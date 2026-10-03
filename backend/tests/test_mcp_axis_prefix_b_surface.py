@@ -87,6 +87,8 @@ def test_tool_names_and_param_models_untouched():
     sprintable_get_publication_insights 1종 신설(발행물 1일·7일 인사이트) — 125→126.
     story #3769: sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 126→127.
     story #4430: sprintable_list_user_blocks · sprintable_remove_user_block 2종 신설([조직] 축 — 에이전트
-    자기 차단 목록) — 127→129."""
-    assert len(_TOOL_DEFS) == 129
+    자기 차단 목록) — 127→129.
+    story #4536: sprintable_watch · sprintable_unwatch · sprintable_list_watches 3종 신설([일감] 축 — 서버에 사는
+    감시) — 129→132."""
+    assert len(_TOOL_DEFS) == 132
     assert all(name.startswith("sprintable_") for name in _TOOLS)

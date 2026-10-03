@@ -10,6 +10,7 @@ from app.models.auth_identity import AuthIdentity, AuthMigration, AuthMigrationE
 from app.models.auth_native_bootstrap import AuthNativeBootstrapCode
 from app.models.oauth_handoff_code import OAuthHandoffCode
 from app.models.desktop_relay import DesktopCommand, DesktopDeviceToken, DesktopSession
+from app.models.agent_watch import AgentWatch, DeployServing, GithubPullRequest
 from app.models.desktop_setup import DesktopSetup
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.chat_command_audit_log import ChatCommandAuditLog
@@ -176,6 +177,9 @@ __all__ = [
     "DesktopDeviceToken",
     "DesktopSession",
     "DesktopCommand",
+    "AgentWatch",
+    "GithubPullRequest",
+    "DeployServing",
     "DeviceInstallation",
     "DeviceProofChallenge",
     "ArtifactNode",
