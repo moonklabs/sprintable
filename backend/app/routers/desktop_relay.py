@@ -66,9 +66,14 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
 
     conn_id = str(uuid.uuid4())
     scope = f"desktop:{setup_id}"
-    if await sse_lease.acquire(scope, _STREAMS_PER_DEVICE, conn_id) is False:
-        raise HTTPException(status_code=429, detail={"code": "DEVICE_STREAM_LIMITED", "message": "this device already has its connections"})
     from app.routers.events import _agent_connections
+
+    # Qadir 07:19Z — with the Redis lease off (its default) acquire answers None, not False: the per-device limit then counts
+    # this instance's open streams, as the agent stream does (agent_gateway.py). Read with .get(…, ()) — a refusal never
+    # creates the map key (#2602: a refusal must not make the resource).
+    lease = await sse_lease.acquire(scope, _STREAMS_PER_DEVICE, conn_id)
+    if lease is False or (lease is None and len(_agent_connections.get(relay.wake_key(setup_id), ())) >= _STREAMS_PER_DEVICE):
+        raise HTTPException(status_code=429, detail={"code": "DEVICE_STREAM_LIMITED", "message": "this device already has its connections"})
 
     wakes: asyncio.Queue[dict] = asyncio.Queue(maxsize=50)
     _agent_connections[relay.wake_key(setup_id)].add(wakes)  # the agent stream's wake reaches it (services.desktop_relay)

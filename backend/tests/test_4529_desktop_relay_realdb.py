@@ -239,3 +239,30 @@ async def test_a_command_made_while_the_stream_is_open_arrives_by_the_wake_not_t
         await _enqueue(sid, "stop_session", {"session_key": "s-now"}, "now")
         body = (await stream).text
         assert "event: command" in body and "s-now" in body, body
+
+
+async def test_the_per_device_stream_limit_holds_with_the_redis_lease_off(world, monkeypatch):
+    """Qadir 07:19Z — the lease answers None when Redis leases are off (the default): the third stream of one device is still
+    429, by this instance's own count, and a closed stream frees its place."""
+    import asyncio
+
+    import app.routers.desktop_relay as router_mod
+    from app.services import sse_lease
+
+    async def no_redis(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(sse_lease, "acquire", no_redis)
+    monkeypatch.setattr(router_mod, "_LIFESPAN_SEC", 2)
+    monkeypatch.setattr(router_mod, "_LIFESPAN_JITTER_SEC", 0)
+    async with _client() as c:
+        d = await _device(c)
+        tok = _tok(d["device_token"])
+        first = asyncio.create_task(c.get("/api/v2/desktop/relay/stream", headers=tok))
+        second = asyncio.create_task(c.get("/api/v2/desktop/relay/stream", headers=tok))
+        await asyncio.sleep(0.6)  # both open
+        third = await c.get("/api/v2/desktop/relay/stream", headers=tok)
+        assert third.status_code == 429 and "DEVICE_STREAM_LIMITED" in third.text
+        assert (await first).status_code == 200 and (await second).status_code == 200  # they end at their lifespan
+        again = await c.get("/api/v2/desktop/relay/stream", headers=tok)
+        assert again.status_code == 200  # the places are free again
