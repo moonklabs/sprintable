@@ -140,6 +140,19 @@ async def _refuse_if_seal_replaced(db: AsyncSession, command, gate_id: uuid.UUID
         )
 
 
+async def _refuse_if_cap_reached(db: AsyncSession, command, run) -> None:
+    """story #4517 (PO 02:52Z) — the cap again, read fresh right before the ACTIVE switch. The check at the top of the command
+    reads the run once (no lock; the provider calls hold no transaction), so a capture that reached the cap after it was not seen,
+    and the campaign was switched on past the approved budget. A start or resume only — a pause never stops for the cap."""
+    if command.operation not in (OP_BOOST_START, OP_RESUME):
+        return
+    from app.models.ads_boost_run import AdsBoostRun
+
+    reached = (await db.execute(select(AdsBoostRun.cap_reached_at).where(AdsBoostRun.id == run.id))).scalar_one_or_none()
+    if reached is not None:
+        raise _SealReplacedBeforeCall("spend reached the approved total budget — not switched on again", code=CAP_REACHED_CODE)
+
+
 def _record_created_adset(run, gate, command, *, adset_was_new: bool) -> None:
     """story #4458 (Qadir 4881 · PO 11:24Z) — «what the campaign was created with» is recorded once, the moment the budget-carrying
     ad set first exists — a full create, or a create that failed part-way after the ad set (its partial ids) — with the budget,
@@ -1003,6 +1016,7 @@ async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationC
                 from app.services.external_call_tx import end_transaction_before_external_call
 
                 await _refuse_if_seal_replaced(db, command, gate.id)  # story #4458 — before switching it on
+                await _refuse_if_cap_reached(db, command, run)  # story #4517
                 _refuse_if_created_on_another_budget(run, gate)  # story #4458 — not a campaign made on other values
                 await end_transaction_before_external_call(db)  # story #4404
                 await module.set_campaign_status(
@@ -1048,6 +1062,7 @@ async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationC
                 from app.services.external_call_tx import end_transaction_before_external_call
 
                 await _refuse_if_seal_replaced(db, command, gate.id)  # story #4458 — before switching it back on
+                await _refuse_if_cap_reached(db, command, run)  # story #4517
                 _refuse_if_created_on_another_budget(run, gate)  # story #4458
                 await end_transaction_before_external_call(db)  # story #4404
                 await module.set_campaign_status(
