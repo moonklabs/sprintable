@@ -1,0 +1,347 @@
+"""story #4534 (E-DESKTOP-2 B-3) — a person stops an agent's turn or puts an instruction into it from the phone, and sees the
+agent's session state in its DM header. Contract: doc «E-DESKTOP-2 B-1 — 기기 줄 계약 v1» §11 (02d2cf71 v1.9 · v1.9.1).
+
+Both commands are signed by the phone (the daemon checks — the server never opens the blob) and go down the one
+`enqueue_command` path. Who may press (PO 16:13Z ⓒ): an org owner/admin, the agent's owner, or whoever confirmed the device —
+and the phone must be paired to that device. Who may look (ⓐ): whoever can open the agent's DM (its project). The turn-end
+notice goes once to the person who sent a [지금 지시], judged from reported states only (§11 ④).
+"""
+from __future__ import annotations
+
+import logging
+import uuid
+from datetime import datetime, timezone
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.desktop_relay import DesktopCommand, DesktopSession
+from app.models.desktop_setup import DesktopSetup
+from app.services.desktop_relay import PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError
+
+logger = logging.getLogger(__name__)
+
+TURN_END_EVENT_TYPE = "agent.turn_ended"
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# ── who ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+async def _agent(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID):
+    from app.models.member import Member
+
+    agent = (await db.execute(
+        select(Member).where(Member.id == agent_id, Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if agent is None:
+        raise DesktopRelayError(404, "agent_not_found", "no such agent")
+    return agent
+
+
+async def can_view(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid.UUID) -> bool:
+    """Whoever can open the agent's DM: access to one of the agent's projects (PO 16:13Z ⓐ)."""
+    from app.models.member import AgentProjectProfile
+    from app.services.project_auth import has_project_access
+
+    projects = (await db.execute(select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == agent_id))).scalars().all()
+    for project_id in projects:
+        if await has_project_access(db, user_id, project_id, org_id):
+            return True
+    return False
+
+
+async def org_role(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
+    """The person's role in the organization itself (org_members) — never a project role. For a person's session resolve_member
+    already gives the org role (legacy om.role · anchor members.org_role); this rule reads org_members directly so it does not lean
+    on the resolver's mode: a plain org member who is a project admin does not command, an org admin who is a project member does."""
+    from app.models.project import OrgMember
+
+    return (await db.execute(
+        select(OrgMember.role).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+    )).scalar_one_or_none()
+
+
+def can_command(*, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, agent, setup: DesktopSetup | None) -> bool:
+    """PO 16:13Z ⓒ — an org owner/admin, the agent's owner, or whoever confirmed the device (the phone's pairing is checked on
+    the command itself). One function for the header's `can_command` and the command endpoint, so the two never differ."""
+    if member_role in ("owner", "admin"):
+        return True
+    if agent.owner_member_id is not None and agent.owner_member_id == member_id:
+        return True
+    return setup is not None and setup.confirmed_by is not None and setup.confirmed_by == user_id
+
+
+async def _agent_setups(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> list[DesktopSetup]:
+    rows = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
+    )).scalars().all()
+    return [s for s in rows if any(m.get("member_id") == str(agent_id) and m.get("kind") == "agent" for m in (s.members or []))]
+
+
+# ── ① the DM header ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, org_id: uuid.UUID,
+                       agent_id: uuid.UUID) -> dict:
+    from app.models.agent_permission import AgentPermissionRequest
+    from app.services import remote_control
+    from app.services.agent_permissions import _reachable
+
+    if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
+        raise DesktopRelayError(404, "agent_not_found", "no such agent")
+    agent = await _agent(db, org_id, agent_id)
+    setups = await _agent_setups(db, org_id, agent_id)
+    view = {"setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "state_at": None,
+            "remote_control": await remote_control.is_enabled(db, org_id),
+            "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
+                                       setup=setups[0] if setups else None),
+            "pending_permission_request_id": None}
+    if not setups:
+        return view
+    sessions = (await db.execute(
+        select(DesktopSession).where(DesktopSession.setup_id.in_([s.id for s in setups]), DesktopSession.agent_member_id == agent_id)
+    )).scalars().all()
+    if not sessions:
+        return view
+    # not stopped first, then the latest
+    pick = sorted(sessions, key=lambda r: (r.state != "stopped", r.state_at), reverse=True)[0]
+    setup = next(s for s in setups if s.id == pick.setup_id)
+    now = _now()
+    reachable = pick.setup_id in await _reachable(db, {pick.setup_id}, now)
+    state = pick.state if pick.state == "stopped" or reachable else "unknown"
+    view.update({
+        "setup_id": str(setup.id), "device_name": setup.device_name, "session_key": pick.session_key, "runtime": pick.runtime,
+        "state": state, "state_at": pick.state_at.isoformat(),
+        "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
+    })
+    if state == "waiting_permission":  # the inbox link — only a request sent to this person
+        view["pending_permission_request_id"] = (await db.execute(
+            select(AgentPermissionRequest.id).where(
+                AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.session_key == pick.session_key,
+                AgentPermissionRequest.recipient_member_id == member_id, AgentPermissionRequest.state == "pending",
+                AgentPermissionRequest.expires_at > now,
+            ).order_by(AgentPermissionRequest.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if view["pending_permission_request_id"] is not None:
+            view["pending_permission_request_id"] = str(view["pending_permission_request_id"])
+    return view
+
+
+# ── ② a command ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+class CommandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["stop_session", "send_prompt"]
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+    text: str | None = Field(default=None, min_length=1, max_length=PROMPT_MAX)
+    conversation_id: uuid.UUID | None = None
+    idempotency_key: str = Field(min_length=1, max_length=100)
+    signed: str = Field(min_length=1, max_length=16384)
+    phone_key_id: uuid.UUID
+
+
+async def _participant(db: AsyncSession, conversation_id: uuid.UUID, member_id: uuid.UUID) -> bool:
+    from app.models.conversation import ConversationParticipant
+
+    return (await db.execute(
+        select(ConversationParticipant.id).where(
+            ConversationParticipant.conversation_id == conversation_id, ConversationParticipant.member_id == member_id,
+        )
+    )).first() is not None
+
+
+async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
+                         org_id: uuid.UUID, agent_id: uuid.UUID, body: CommandRequest) -> tuple[DesktopCommand | None, str]:
+    """→ (the command, "queued"), or (None, "already_stopped") for a stop on a session that is not working."""
+    from app.services import remote_control
+    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.desktop_relay import enqueue_command
+
+    if body.kind == "send_prompt" and (body.text is None or body.conversation_id is None):
+        raise DesktopRelayError(422, "invalid_payload", "an instruction needs its text and conversation")
+    if body.kind == "stop_session" and (body.text is not None or body.conversation_id is not None):
+        raise DesktopRelayError(422, "invalid_payload", "a stop carries no text or conversation")
+    agent = await _agent(db, org_id, agent_id)
+    setups = {s.id: s for s in await _agent_setups(db, org_id, agent_id)}
+    session = (await db.execute(
+        select(DesktopSession).where(DesktopSession.setup_id.in_(list(setups) or [uuid.uuid4()]),
+                                     DesktopSession.session_key == body.session_key)
+    )).scalars().first()
+    setup = setups.get(session.setup_id) if session is not None else None
+    if not can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup):
+        raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
+    if session is None or session.agent_member_id != agent_id:  # another agent's session, or none on its devices
+        raise DesktopRelayError(404, "session_not_found", "no such session of this agent")
+    if body.kind == "send_prompt" and not (
+        await _participant(db, body.conversation_id, member_id) and await _participant(db, body.conversation_id, agent_id)
+    ):
+        raise DesktopRelayError(404, "conversation_not_found", "no such conversation with this agent")
+    if not await remote_control.is_enabled(db, org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
+    if setup.id not in await _reachable(db, {setup.id}, _now()):
+        raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
+    if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
+        raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
+    if session.state != "working":
+        if body.kind == "stop_session":
+            return None, "already_stopped"
+        raise DesktopRelayError(409, "session_not_working", "the turn has ended — send it as a message")
+    payload: dict = {"session_key": body.session_key, "signed": body.signed}
+    if body.kind == "send_prompt":
+        payload.update(text=body.text, conversation_id=str(body.conversation_id))
+    cmd = await enqueue_command(
+        db, setup=setup, kind=body.kind, payload=payload, idempotency_key=f"b3:{member_id}:{body.idempotency_key}",
+        requested_by=member_id,
+    )
+    if body.kind == "send_prompt" and cmd.state == "queued" and not await _line_written(db, cmd.id):
+        await _write_prompt_line(db, org_id=org_id, conversation_id=body.conversation_id, sender_id=member_id, agent_id=agent_id,
+                                 text=body.text, command_id=cmd.id)
+    return cmd, cmd.state
+
+
+async def _line_written(db: AsyncSession, command_id: uuid.UUID) -> bool:
+    from app.models.conversation import ConversationMessage
+
+    return (await db.execute(
+        select(ConversationMessage.id).where(ConversationMessage.msg_metadata["remote_prompt"]["command_id"].astext == str(command_id))
+    )).first() is not None
+
+
+async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sender_id, agent_id, text: str, command_id) -> None:
+    """«지시 · 지금 턴에 보냄» + the text, from the person who sent it (명세 B-3). Not dispatched to the agent — it already has
+    the instruction in its turn; a second copy as a message would be a second instruction."""
+    from app.models.conversation import ConversationMessage
+    from app.services.i18n_catalog import t
+    from app.services.org_locale import resolve_org_locale
+
+    locale = await resolve_org_locale(db, org_id)
+    db.add(ConversationMessage(
+        id=uuid.uuid4(), conversation_id=conversation_id, sender_id=sender_id,
+        content=f"{t('desktop_command.prompt_line', locale)}\n{text}", mentioned_ids=[],
+        msg_metadata={"activation": {"audience": [], "kind": "remote_prompt", "expects_response": False},
+                      "remote_prompt": {"command_id": str(command_id), "agent_member_id": str(agent_id)}},
+    ))
+    await db.flush()
+
+
+async def get_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid.UUID, command_id: uuid.UUID) -> dict:
+    row = (await db.execute(
+        select(DesktopCommand, DesktopSetup).join(DesktopSetup, DesktopSetup.id == DesktopCommand.setup_id).where(
+            DesktopCommand.id == command_id, DesktopCommand.requested_by == member_id, DesktopSetup.org_id == org_id,
+            DesktopCommand.kind.in_(("stop_session", "send_prompt")),
+        )
+    )).first()
+    if row is None:
+        raise DesktopRelayError(404, "command_not_found", "no such command of yours")
+    cmd, setup = row
+    session = (await db.execute(
+        select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == cmd.session_key)
+    )).scalar_one_or_none()
+    if session != agent_id:
+        raise DesktopRelayError(404, "command_not_found", "no such command of yours")
+    return {"command_id": str(cmd.id), "kind": cmd.kind, "state": cmd.state, "result_code": cmd.result_code}
+
+
+# ── ④ the turn's end ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+async def on_session_reported(db: AsyncSession, setup: DesktopSetup, session_key: str, state: str, at: datetime) -> None:
+    """Called for every reported state (a single report or a snapshot's line). Reported values only — `unknown` is a reading,
+    never reported (PO 16:13Z ③).
+    - `idle` after a phone's [지금 지시] was done → the sender is told once.
+    - `stopped`, or a stop of that session done → the waiting instructions close without a notice."""
+    open_prompts = select(DesktopCommand).where(
+        DesktopCommand.setup_id == setup.id, DesktopCommand.session_key == session_key, DesktopCommand.kind == "send_prompt",
+        DesktopCommand.state == "done", DesktopCommand.turn_end_notified_at.is_(None),
+    )
+    if state == "stopped":
+        await _close_prompts(db, setup.id, session_key)
+        return
+    if state != "idle":
+        return
+    for cmd in (await db.execute(open_prompts.with_for_update())).scalars().all():
+        if cmd.finished_at is None or at <= cmd.finished_at:
+            continue  # an idle from before the instruction went in
+        cmd.turn_end_notified_at = _now()
+        await _notify_turn_end(db, setup, cmd)
+    await db.flush()
+
+
+async def _close_prompts(db: AsyncSession, setup_id: uuid.UUID, session_key: str) -> None:
+    await db.execute(
+        update(DesktopCommand).where(
+            DesktopCommand.setup_id == setup_id, DesktopCommand.session_key == session_key, DesktopCommand.kind == "send_prompt",
+            DesktopCommand.turn_end_notified_at.is_(None),
+        ).values(turn_end_notified_at=_now())
+    )
+
+
+async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
+    """A stop of the session done: its waiting instructions close without a turn-end notice."""
+    if cmd.kind == "stop_session" and cmd.state == "done" and cmd.session_key:
+        await _close_prompts(db, cmd.setup_id, cmd.session_key)
+
+
+async def _notify_turn_end(db: AsyncSession, setup: DesktopSetup, cmd: DesktopCommand) -> None:
+    from app.models.member import Member
+    from app.services.i18n_catalog import t
+    from app.services.notification_dispatch import dispatch_notification
+    from app.services.org_locale import resolve_org_locale
+
+    agent_id = (await db.execute(
+        select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == cmd.session_key)
+    )).scalar_one_or_none()
+    agent_name = (await db.execute(select(Member.name).where(Member.id == agent_id))).scalar_one_or_none() or "" if agent_id else ""
+    locale = await resolve_org_locale(db, setup.org_id)
+    title = t("desktop_command.turn_end_title", locale, agent=agent_name) if agent_name else t("desktop_command.turn_end_title_bare", locale)
+    await dispatch_notification(
+        db, org_id=setup.org_id, event_type="agent.turn_ended", target_member_ids=[cmd.requested_by],
+        title=title, body=t("desktop_command.turn_end_body", locale),
+        reference_type="conversation", reference_id=cmd.conversation_id, source_project_id=setup.project_id,
+        event={"payload": {"agent_name": agent_name}},
+    )
+
+
+# ── the header's nudge ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+async def session_watchers(db: AsyncSession, agent_ids: set[uuid.UUID]) -> dict[uuid.UUID, set[uuid.UUID]]:
+    """agent → the people in a DM with it (§11 ① — they re-read the header chip on `desktop.session_changed`)."""
+    from app.models.conversation import Conversation, ConversationParticipant
+    from app.models.member import Member
+
+    if not agent_ids:
+        return {}
+    agent_side = select(ConversationParticipant.conversation_id, ConversationParticipant.member_id).join(
+        Conversation, Conversation.id == ConversationParticipant.conversation_id
+    ).where(Conversation.type == "dm", ConversationParticipant.member_id.in_(agent_ids)).subquery()
+    rows = (await db.execute(
+        select(agent_side.c.member_id, ConversationParticipant.member_id)
+        .join(ConversationParticipant, ConversationParticipant.conversation_id == agent_side.c.conversation_id)
+        .join(Member, Member.id == ConversationParticipant.member_id)
+        .where(Member.type == "human")
+    )).all()
+    out: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for agent_id, person in rows:
+        out.setdefault(agent_id, set()).add(person)
+    return out
+
+
+def push_session_changed(watchers: dict[uuid.UUID, set[uuid.UUID]]) -> None:
+    """After the commit: a body-less nudge — the header reads the state again (nothing about the session rides on it)."""
+    from app.routers.events import _push_to_agent
+
+    for agent_id, people in watchers.items():
+        for person in people:
+            try:
+                _push_to_agent(str(person), {"event_type": "desktop.session_changed", "agent_member_id": str(agent_id)})
+            except Exception:  # noqa: BLE001 — a missed nudge waits for the header's 30-second read
+                logger.warning("desktop.session_changed push failed", exc_info=True)

@@ -495,11 +495,7 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
         raise DesktopRelayError(410, "expired", "the permission window has passed")
     # the phone must be this person's and paired to this device now — or the daemon would refuse it (unknown_key) and, the
     # first answer being the only one, a real answer after it could not come (PO 13:21Z): refused here, the request stays pending
-    phone = (await db.execute(
-        select(RemoteDevice).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
-        .where(RemoteDevice.id == body.phone_key_id, RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None),
-               RemoteDevicePairing.setup_id == setup.id, RemoteDevicePairing.removed_at.is_(None))
-    )).scalar_one_or_none()
+    phone = await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id)
     if phone is None:
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
     if setup.id not in await _reachable(db, {setup.id}, now):
@@ -513,6 +509,16 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     phone.last_used_at = now
     await db.flush()
     return row
+
+
+async def paired_phone(db: AsyncSession, *, member_id: uuid.UUID, phone_id: uuid.UUID, setup_id: uuid.UUID) -> RemoteDevice | None:
+    """The person's own phone key, paired with that computer now (not removed) — or None. One check for a permission answer
+    (§9 ③) and a stop/instruction (§11 ②, story #4534)."""
+    return (await db.execute(
+        select(RemoteDevice).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
+        .where(RemoteDevice.id == phone_id, RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None),
+               RemoteDevicePairing.setup_id == setup_id, RemoteDevicePairing.removed_at.is_(None))
+    )).scalar_one_or_none()
 
 
 # ── ④ the daemon's verdict on the answer ────────────────────────────────────────────────────────────────────────────────

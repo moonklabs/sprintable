@@ -99,7 +99,8 @@ def test_manifest_covers_all_30_dispatch_notification_event_types():
     story #2789: agent_decision_withdrawn 신설로 30→31.
     story #2747: doc_draft_discussed_in_chat 신설로 31→32.
     story #4417: ads_boost_spend_unreadable 신설로 32→33.
-    story #4533: agent.permission_request 신설로 33→34."""
+    story #4533: agent.permission_request 신설로 33→34.
+    story #4534: agent.turn_ended 신설로 34→35."""
     expected = {
         "sprint_closed", "task_completed", "story_assigned", "comment.created",
         "artifact.created", "artifact.exported", "artifact.updated", "artifact.canonicalized",
@@ -110,7 +111,7 @@ def test_manifest_covers_all_30_dispatch_notification_event_types():
         "conversation.unsupervised_chain_expired", "doc_approval_resolved",
         "conversation.circuit_breaker_opened", "doc_approval_discussion_requested",
         "agent_decision_resolved", "merge_gate_resolved", "agent_decision_withdrawn",
-        "doc_draft_discussed_in_chat", "ads_boost_spend_unreadable", "agent.permission_request",
+        "doc_draft_discussed_in_chat", "ads_boost_spend_unreadable", "agent.permission_request", "agent.turn_ended",
     }
     actual = {e.app.type for e in DEEPLINK_MANIFEST.entries}
     missing = expected - actual

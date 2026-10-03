@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Bell, BellOff, ChevronLeft, UserPlus, Pencil, Settings } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { AgentSessionStrip } from '@/components/chat/agent-session-strip';
 import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
@@ -371,6 +372,9 @@ export default function ConversationPage() {
             />
           </div>
         ) : (
+          <>
+          {/* story #4534 — a DM with an agent: its session on the computer (look only · the phone stops and instructs) */}
+          {headerAvatarParticipant?.type === 'agent' ? <AgentSessionStrip agentId={headerAvatarParticipant.member_id} /> : null}
           <ChatView
             key={conversation_id}
             threadId={conversation_id}
@@ -384,6 +388,7 @@ export default function ConversationPage() {
             participants={(meta?.participants ?? []).map((p) => ({ ...p, verified: verifiedById[p.member_id] }))}
             initialComposeText={composeText ?? undefined}
           />
+          </>
         )}
       </div>
 

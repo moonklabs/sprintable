@@ -3825,6 +3825,7 @@
     "filter_agent_joined": "Agent Joined",
     "filter_gate_pending_approval": "Approval request",
     "filter_agent_permission_request": "Waiting for permission",
+    "filter_agent_turn_ended": "Waiting for work",
     "filter_generic": "Notification",
     "revoke_agent": "Revoke Access",
     "revoke_agent_confirm": "Deactivate this agent?",
@@ -5041,6 +5042,22 @@
     "authFailureTooltipInvalid": "API key not recognized · {n, plural, one {# failure} other {# failures}} in last 5 min"
   },
   "chats": {
+    "agentSession": {
+      "state": {
+        "starting": "Started",
+        "working": "Working",
+        "idle": "Waiting for work",
+        "waiting_permission": "Waiting for permission",
+        "stopped": "Done",
+        "unknown": "State unknown"
+      },
+      "line": {
+        "onPhone": "You can stop or instruct it from a paired phone",
+        "inbox": "The permission request is in the approvals inbox",
+        "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
+        "remoteOff": "Remote control is turned off for this organization — do it on that computer"
+      }
+    },
     "entityTypeStory": "Story",
     "entityTypeDoc": "Doc",
     "entityTypeEpic": "Epic",
@@ -6808,7 +6825,7 @@
     "remoteControl": {
       "title": "Remote control",
       "body": "Paired phones can stop, instruct, and answer permission requests for this organization's desktop agents.",
-      "allowed": "Allowed: start · instruct · answer permissions · stop",
+      "allowed": "Allowed: instruct · answer permissions · stop",
       "since": "On since {date}",
       "ownerOnlyOn": "Remote control · on — only organization owners can turn it on or off",
       "ownerOnlyOff": "Remote control · off — only organization owners can turn it on or off",

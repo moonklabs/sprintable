@@ -45,6 +45,7 @@ const INBOX_LABEL_KEYS: Record<string, string> = {
   'conversation.message': 'eventMessage',
   'gate.pending_approval': 'filter_gate_pending_approval',
   'agent.permission_request': 'filter_agent_permission_request', // story #4533 — «권한 대기»
+  'agent.turn_ended': 'filter_agent_turn_ended', // story #4534 — «다음 일 기다림»
 };
 
 export function getInboxNotificationLabel(
@@ -135,6 +136,12 @@ export function getDispatchedHeadline(
     const name = typeof payload?.['gate_name'] === 'string' ? payload['gate_name'].trim() : '';
     const label = t('filter_gate_pending_approval');
     return name ? `${label} · ${name}` : label;
+  }
+  if (inner === 'agent.turn_ended') {
+    // story #4534 (명세 B-3 푸시) — «{에이전트} · 다음 일 기다림» (the agent first, as the push title); never «마쳤어요»
+    const agent = typeof payload?.['agent_name'] === 'string' ? payload['agent_name'].trim() : '';
+    const label = t('filter_agent_turn_ended');
+    return agent ? `${agent} · ${label}` : label;
   }
   if (inner === 'agent.permission_request') {
     // story #4533 (명세 B-2 · 폰 알림) — «권한 대기 · {에이전트}»; the server's title is not read (as above)

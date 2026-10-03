@@ -3825,6 +3825,7 @@
     "filter_agent_joined": "에이전트 합류",
     "filter_gate_pending_approval": "결재 요청",
     "filter_agent_permission_request": "권한 대기",
+    "filter_agent_turn_ended": "다음 일 기다림",
     "filter_generic": "알림",
     "revoke_agent": "접근 권한 취소",
     "revoke_agent_confirm": "이 에이전트를 비활성화할까요?",
@@ -5041,6 +5042,22 @@
     "authFailureTooltipInvalid": "API 키 인식 불가 · 최근 5분 {n}회"
   },
   "chats": {
+    "agentSession": {
+      "state": {
+        "starting": "시작됨",
+        "working": "작업 중",
+        "idle": "다음 일 기다림",
+        "waiting_permission": "권한 대기",
+        "stopped": "끝",
+        "unknown": "상태 모름"
+      },
+      "line": {
+        "onPhone": "짝지은 폰에서 멈추거나 지시할 수 있어요",
+        "inbox": "권한 요청은 결재함에 있어요",
+        "unknown": "그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요",
+        "remoteOff": "이 조직은 원격 제어를 꺼 두었어요 — 그 컴퓨터에서 직접 해 주세요"
+      }
+    },
     "entityTypeStory": "스토리",
     "entityTypeDoc": "문서",
     "entityTypeEpic": "에픽",
@@ -6808,7 +6825,7 @@
     "remoteControl": {
       "title": "원격 제어",
       "body": "짝지은 폰에서 이 조직의 데스크톱 에이전트를 멈추고, 지시하고, 권한 요청에 답할 수 있어요.",
-      "allowed": "허용되는 일: 시작 · 지시 · 권한 응답 · 멈춤",
+      "allowed": "허용되는 일: 지시 · 권한 응답 · 멈춤",
       "since": "{date}부터 켜져 있어요",
       "ownerOnlyOn": "원격 제어 · 켜짐 — 조직 소유자만 켜고 끌 수 있어요",
       "ownerOnlyOff": "원격 제어 · 꺼짐 — 조직 소유자만 켜고 끌 수 있어요",

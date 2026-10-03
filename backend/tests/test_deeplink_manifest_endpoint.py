@@ -55,7 +55,8 @@ async def test_deeplink_manifest_endpoint_returns_200_with_schema_version_and_lo
     # story #2747: doc_draft_discussed_in_chat 신설로 40→41.
     # story #4417: ads_boost_spend_unreadable 신설로 41→42.
     # story #4533: agent.permission_request 신설로 42→43.
-    assert isinstance(body["entries"], list) and len(body["entries"]) == 43
+    # story #4534: agent.turn_ended 신설로 43→44.
+    assert isinstance(body["entries"], list) and len(body["entries"]) == 44
 
     # 미르코 point ②: lookup_key = f"{type}:{entity_type}" (구분자 ":") 서빙 시점 파생.
     story_entry = next(

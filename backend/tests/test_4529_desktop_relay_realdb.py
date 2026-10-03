@@ -115,7 +115,7 @@ async def test_an_open_stream_sends_its_commands_then_ends_on_access_revoked(wor
         sid, token = d["setup_id"], d["device_token"]
         agent = d["agents"][0]["member_id"]
         await _enqueue(sid, "start_session", {"agent_member_id": agent, "runtime": "claude"}, "k1")
-        await _enqueue(sid, "stop_session", {"session_key": "s-1"}, "k2")
+        await _enqueue(sid, "stop_session", {"session_key": "s-1", "signed": "sig"}, "k2")
         r = await c.get("/api/v2/desktop/relay/stream", headers=_tok(token))
         assert r.status_code == 200
         body = r.text
@@ -180,15 +180,20 @@ async def test_commands_four_kinds_a_schema_each_one_row_per_key_numbered_per_de
         with pytest.raises(DesktopRelayError) as e:
             await _enqueue(sid, "run_shell", {"session_key": "s"}, "bad-shell")
         assert (e.value.status, e.value.code) == (422, "unknown_command_kind")
-        for kind, payload in (("run_shell", {"cmd": "ls"}), ("send_prompt", {"session_key": "s", "text": "hi", "keys": "x"}),
+        whole = {"conversation_id": str(uuid.uuid4()), "signed": "sig"}  # the rest of a prompt (v1.9) — each case fails for its own reason
+        for kind, payload in (("run_shell", {"cmd": "ls"}), ("send_prompt", {"session_key": "s", "text": "hi", "keys": "x", **whole}),
                               ("start_session", {"agent_member_id": str(uuid.uuid4()), "runtime": "claude"}),
-                              ("send_prompt", {"session_key": "s", "text": "x" * 8001})):
+                              ("send_prompt", {"session_key": "s", "text": "x" * 8001, **whole}),
+                              ("send_prompt", {"session_key": "s", "text": "hi", "conversation_id": whole["conversation_id"]}),
+                              ("stop_session", {"session_key": "s"})):  # story #4534 — unsigned: refused
             with pytest.raises(DesktopRelayError) as e:
                 await _enqueue(sid, kind, payload, f"bad-{kind}")
             assert e.value.status == 422, (kind, payload)
-        first = await _enqueue(sid, "send_prompt", {"session_key": "s", "text": "hi"}, "same")
-        again = await _enqueue(sid, "send_prompt", {"session_key": "s", "text": "other"}, "same")
-        assert again.id == first.id and again.payload == {"session_key": "s", "text": "hi"}
+        conv = str(uuid.uuid4())
+        first = await _enqueue(sid, "send_prompt", {"session_key": "s", "text": "hi", "conversation_id": conv, "signed": "sig"}, "same")
+        again = await _enqueue(sid, "send_prompt", {"session_key": "s", "text": "other", "conversation_id": conv, "signed": "sig"}, "same")
+        # the same key: the first row as it was (the second body is not taken — v1.9 fields carried as sent)
+        assert again.id == first.id and again.payload == {"session_key": "s", "text": "hi", "conversation_id": conv, "signed": "sig"}
         second = await _enqueue(sid, "start_session", {"agent_member_id": agent, "runtime": "codex"}, "k2")
         assert (first.device_seq, second.device_seq) == (1, 2)
 
@@ -216,7 +221,7 @@ async def test_the_db_takes_only_the_listed_kinds_and_states_and_the_code_lists_
 async def test_a_command_result_moves_forward_only_and_never_for_another_device(world):
     async with _client() as c:
         d1, d2 = await _device(c, "mac one"), await _device(c, "mac two")
-        cmd = await _enqueue(d1["setup_id"], "stop_session", {"session_key": "s"}, "k")
+        cmd = await _enqueue(d1["setup_id"], "stop_session", {"session_key": "s", "signed": "sig"}, "k")
         url = f"/api/v2/desktop/relay/commands/{cmd.id}/result"
         assert (await c.post(url, json={"state": "acked"}, headers=_tok(d2["device_token"]))).status_code == 404
         assert (await c.post(url, json={"state": "acked"}, headers=_tok(d1["device_token"]))).status_code == 200
@@ -245,7 +250,7 @@ async def test_a_command_made_while_the_stream_is_open_arrives_by_the_wake_not_t
         sid, token = d["setup_id"], d["device_token"]
         stream = asyncio.create_task(c.get("/api/v2/desktop/relay/stream", headers=_tok(token)))
         await asyncio.sleep(0.8)  # the stream has read once and waits
-        await _enqueue(sid, "stop_session", {"session_key": "s-now"}, "now")
+        await _enqueue(sid, "stop_session", {"session_key": "s-now", "signed": "sig"}, "now")
         body = (await stream).text
         assert "event: command" in body and "s-now" in body, body
 

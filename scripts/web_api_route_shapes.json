@@ -285,6 +285,21 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/agents/{}/desktop-commands",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/desktop-commands/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/desktop-session",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/agents/{}/message-policy",
 "kind": "object"
