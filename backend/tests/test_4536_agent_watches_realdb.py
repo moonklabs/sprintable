@@ -52,12 +52,14 @@ async def _fresh_github_and_serving_records():
 @pytest.fixture
 async def owned(world, monkeypatch):
     """ORG owns the «d4536org» repos through its GitHub installation (the webhook's repo-owner rule) — a login no other suite
-    uses, so a row another suite leaves behind never makes the owner match ambiguous; the platform's repo is one of them here."""
+    uses, so a row another suite leaves behind never makes the owner match ambiguous; the platform's repo is REPO here."""
     import app.services.agent_watches as svc
 
     await _sql(f"INSERT INTO github_installation (id, org_id, installation_id, account_login) "
                f"VALUES (gen_random_uuid(), '{ORG}', 4536001, 'd4536org')")
-    monkeypatch.setattr(svc, "SERVICE_REPOS", {"backend": "d4536org/sprintable"})
+    monkeypatch.setattr(svc, "SERVICE_REPOS", {"backend": REPO})
+    # ORG has had the platform repo's webhooks (one open PR on record) — what lets it watch that repo's deploys
+    await _sql(f"INSERT INTO github_pull_requests (id, org_id, repo, number, state) VALUES (gen_random_uuid(), '{ORG}', '{REPO}', 1, 'open')")
     yield
 
 
@@ -311,3 +313,43 @@ async def test_an_agent_keeps_a_bounded_number_of_live_watches(owned):
             await create_watch(s, org_id=ORG, project_id=PROJ, agent_member_id=agent,
                                body=WatchCreate(condition="deploy.serving", target={"service": "backend", "commit": "abcdef1"}))
     assert (e.value.status, e.value.code) == (429, "WATCH_LIMIT")
+
+
+
+async def test_a_github_app_orgs_pr_is_watched_and_fires_while_another_org_gets_the_never_seen_answer(world, monkeypatch):
+    """PO 08:10Z — an org joined by the GitHub App (its installation's login is not the repo owner, so the legacy owner match
+    finds nothing): its PR is recorded under its name from the payload's installation, a watch on it is set and fires, and it
+    may watch the deploys of a service built from that repo; another org still gets the never-seen 422."""
+    import app.services.agent_watches as svc
+    from app.core.database import async_session_factory
+    from app.services.agent_watches import WatchCreate, WatchError, create_watch
+
+    repo = "d4536app/inst"
+    await _sql("DELETE FROM github_pull_requests WHERE repo = 'd4536app/inst'",
+               f"INSERT INTO github_installation (id, org_id, installation_id, account_login) "
+               f"VALUES (gen_random_uuid(), '{ORG}', 4536002, 'd4536-elsewhere')")
+    try:
+        def event(action, **pr):
+            return {"action": action, "number": 120, "repository": {"full_name": repo}, "installation": {"id": 4536002},
+                    "pull_request": {"number": 120, "state": "closed" if action == "closed" else "open", "base": {"ref": "develop"},
+                                     "head": {"sha": SHA(7120)}, **pr}}
+
+        async with _client() as c:
+            agent, h = await _agent(c)
+            await _hook(c, "pull_request", event("opened", merged=False))
+            r = await _watch(c, h, "github.pr_merged", {"repo": repo, "pr": 120})
+            assert r.status_code == 201, r.text
+            await _hook(c, "pull_request", event("closed", merged=True, merged_at=_ts(9), merge_commit_sha=SHA(120),
+                                                 merged_by={"login": "po"}))
+            assert [e[0] for e in await _fired_events(agent)] == [r.json()["id"]]
+            monkeypatch.setattr(svc, "SERVICE_REPOS", {"backend": repo})
+            served = await _watch(c, h, "deploy.serving", {"service": "backend", "commit": "abcdef1"})
+            assert served.status_code == 201, served.text
+        async with async_session_factory() as s:
+            with pytest.raises(WatchError) as e:
+                await create_watch(s, org_id=ORG2, project_id=PROJ, agent_member_id=uuid.uuid4(),
+                                   body=WatchCreate(condition="github.pr_merged", target={"repo": repo, "pr": 120}))
+        assert e.value.code == "PR_NOT_SEEN"
+    finally:
+        await _sql("DELETE FROM github_pull_requests WHERE repo = 'd4536app/inst'",
+                   "DELETE FROM github_installation WHERE installation_id = 4536002")

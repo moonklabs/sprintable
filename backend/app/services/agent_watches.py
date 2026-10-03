@@ -107,8 +107,8 @@ def _parse_target(condition: str, target: dict) -> PrTarget | ServingTarget:
 
 
 async def org_of_repo(db: AsyncSession, repo: str) -> uuid.UUID | None:
-    """The org that owns `repo` the way the GitHub webhook resolves it (its legacy repo-owner exactly-one match — the same
-    rule, so a watch and the events it waits on always agree on the org)."""
+    """The legacy webhook's repo-owner exactly-one match — the last step of `_event_org` (an event the handler resolved no org
+    for and that names no app installation)."""
     from app.routers.verdict_capture import _resolve_legacy_org_by_repo_owner
 
     org_id, _reason = await _resolve_legacy_org_by_repo_owner(db, repo)
@@ -119,6 +119,14 @@ async def _pr(db: AsyncSession, org_id: uuid.UUID, repo: str, number: int) -> Gi
     return (await db.execute(select(GithubPullRequest).where(
         GithubPullRequest.org_id == org_id, GithubPullRequest.repo == repo, GithubPullRequest.number == number,
     ))).scalar_one_or_none()
+
+
+async def _org_has_repo(db: AsyncSession, org_id: uuid.UUID, repo: str) -> bool:
+    """The org has had a PR of `repo` recorded under its name — the one source both recording and setting read (PO 08:10Z:
+    a separate «who owns the repo» rule at set time disagreed with the recording one for GitHub App orgs)."""
+    return (await db.execute(select(GithubPullRequest.id).where(
+        GithubPullRequest.org_id == org_id, GithubPullRequest.repo == repo,
+    ).limit(1))).first() is not None
 
 
 async def _merge_of_commit(db: AsyncSession, org_id: uuid.UUID, sha: str) -> GithubPullRequest | None:
@@ -217,12 +225,13 @@ async def create_watch(
     )).scalar_one()
     if live >= MAX_LIVE_WATCHES_PER_AGENT:
         raise WatchError(429, "WATCH_LIMIT", f"an agent keeps at most {MAX_LIVE_WATCHES_PER_AGENT} live watches — clear one first")
-    if isinstance(target, ServingTarget) and await org_of_repo(db, SERVICE_REPOS[target.service]) != org_id:
+    if isinstance(target, ServingTarget) and not await _org_has_repo(db, org_id, SERVICE_REPOS[target.service]):
         raise WatchError(422, "SERVICE_NOT_CONNECTED", "this org does not own the repo that service is built from")
     fire_now: dict | None = None
     if isinstance(target, PrTarget) or target.pr is not None:
-        # a repo the org does not own is answered as a PR never seen — no signal about another org's PRs (PO 06:51Z)
-        pr = await _pr(db, org_id, target.repo, target.pr) if await org_of_repo(db, target.repo) == org_id else None
+        # only the org's own record — another org's PR is answered as a PR never seen, no existence signal (PO 06:51Z); the
+        # record is written under the org the webhook resolved, so setting and recording read one source (PO 08:10Z)
+        pr = await _pr(db, org_id, target.repo, target.pr)
         if pr is None:
             raise WatchError(422, "PR_NOT_SEEN", "the server has not seen this PR yet — try again after a push or a CI run")
         if pr.state == "closed" and pr.merged_at is None:
