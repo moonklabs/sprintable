@@ -600,6 +600,11 @@ async def update_team_member(
         await assert_agent_owner_mutable(id, session, org_id, uuid.UUID(auth.user_id))
     else:
         await _assert_can_manage_human(member, session, org_id, auth, data=data)
+    if member.type == "agent" and "runtime_type" in data and data["runtime_type"] != member.runtime_type:
+        # story #4540 — the run profile's model · effort are the old runtime's names: back to defaults, version moves on
+        from app.services.agent_run_profile import on_runtime_changed
+
+        await on_runtime_changed(session, member_id=id, updated_by=None)
     # AC3-4 2-2: team_members 뷰 — 필드를 앵커 테이블로 라우팅(anchor-only). expire 후 뷰 재조회로 갱신값 반영.
     await repo.apply_anchor_update(member, data)
     session.expire(member)

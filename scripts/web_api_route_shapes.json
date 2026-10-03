@@ -206,6 +206,16 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/agent-run-profile",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-run-profile/options",
+"kind": "unknown"
+},
+{
+"method": "GET",
 "path": "/api/v2/agent-runs",
 "kind": "array"
 },
@@ -263,6 +273,11 @@
 "method": "GET",
 "path": "/api/v2/agents/access-matrix",
 "kind": "array"
+},
+{
+"method": "PUT",
+"path": "/api/v2/agents/run-profile",
+"kind": "unknown"
 },
 {
 "method": "GET",
@@ -327,6 +342,16 @@
 {
 "method": "POST",
 "path": "/api/v2/agents/{}/recruit",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/run-profile",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/agents/{}/run-profile",
 "kind": "unknown"
 },
 {
