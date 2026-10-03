@@ -6831,7 +6831,7 @@
       "removed": "Removed · {phone}",
       "alreadyRemoved": "Already removed · {phone}",
       "removeFailed": "Couldn't remove it — please try again",
-      "empty": "No paired phone yet — in the desktop app, open remote control on the bar and press [Pair phone]",
+      "empty": "No paired phone yet — on the desktop app's bar, open «Remote control on» and press [Pair phone]",
       "orgOff": "Remote control is off for this organization ({org}) — paired devices show the state but can't control anything"
     }
   },

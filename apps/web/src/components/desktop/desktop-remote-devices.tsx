@@ -25,6 +25,18 @@ export function DesktopRemoteDevices() {
   const [phones, setPhones] = useState<Phone[] | null>(null);
   const [asking, setAsking] = useState<string | null>(null); // `${phone}:${setup}` being confirmed
   const [result, setResult] = useState('');
+  // where the focus goes when the in-line confirmation closes (Yuna 15:38Z · as 4935's web confirmation): [취소] → that row's
+  // [빼기] · after asking the server → the result line (the row may be gone). Applied once the buttons are enabled again.
+  const removeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const statusRef = useRef<HTMLParagraphElement>(null);
+  const focusNext = useRef<{ row: string } | 'status' | null>(null);
+  useEffect(() => {
+    const next = focusNext.current;
+    if (asking !== null || next === null) return;
+    focusNext.current = null;
+    if (next === 'status') statusRef.current?.focus();
+    else removeButtons.current.get(next.row)?.focus();
+  }, [asking, result, phones]);
 
   const load = useCallback(async () => {
     try {
@@ -57,6 +69,7 @@ export function DesktopRemoteDevices() {
     } catch {
       setResult(t('removeFailed'));
     } finally {
+      focusNext.current = 'status';
       setAsking(null);
     }
   }, [load, t]);
@@ -77,9 +90,15 @@ export function DesktopRemoteDevices() {
             const key = `${phone.id}:${pair.setup_id}`;
             return (
               <li key={key} className="flex flex-col gap-1 px-4 py-3" data-testid="desktop-remote-device-row">
-                <PairLine phone={phone} pair={pair} onRemove={() => { setResult(''); setAsking(key); }} disabled={asking !== null} />
+                <PairLine
+                  phone={phone} pair={pair} onRemove={() => { setResult(''); setAsking(key); }} disabled={asking !== null}
+                  buttonRef={(el) => { if (el) removeButtons.current.set(key, el); else removeButtons.current.delete(key); }}
+                />
                 {asking === key ? (
-                  <ConfirmRemove phone={phone} pair={pair} onConfirm={() => void remove(phone, pair)} onCancel={() => setAsking(null)} />
+                  <ConfirmRemove
+                    phone={phone} pair={pair} onConfirm={() => void remove(phone, pair)}
+                    onCancel={() => { focusNext.current = { row: key }; setAsking(null); }}
+                  />
                 ) : null}
               </li>
             );
@@ -87,12 +106,14 @@ export function DesktopRemoteDevices() {
         </ul>
         </Card>
       )}
-      <p className="text-xs text-muted-foreground" role="status">{result}</p>
+      <p ref={statusRef} tabIndex={-1} className="text-xs text-muted-foreground outline-none" role="status">{result}</p>
     </section>
   );
 }
 
-function PairLine({ phone, pair, onRemove, disabled }: { phone: Phone; pair: Pair; onRemove: () => void; disabled: boolean }) {
+function PairLine({ phone, pair, onRemove, disabled, buttonRef }: {
+  phone: Phone; pair: Pair; onRemove: () => void; disabled: boolean; buttonRef: (el: HTMLButtonElement | null) => void;
+}) {
   const t = useTranslations('desktop.remoteDevices');
   const format = useFormatter();
   const tz = useViewerTimeZone() ?? 'UTC';
@@ -104,7 +125,7 @@ function PairLine({ phone, pair, onRemove, disabled }: { phone: Phone; pair: Pai
       <span className="text-sm text-muted-foreground">{t('pairedWith', { device: pair.device_name ?? t('unknownDevice') })}</span>
       <span className="text-xs text-muted-foreground">{used ? t('pairedOnUsed', { date, used }) : t('pairedOn', { date })}</span>
       <span className="text-xs text-muted-foreground" title={t('confirmNumberHint')}>{t('confirmNumber', { number: phone.confirm_number })}</span>
-      <Button size="sm" variant="outline" className="ml-auto" disabled={disabled} onClick={onRemove}>{t('remove')}</Button>
+      <Button ref={buttonRef} size="sm" variant="outline" className="ml-auto" disabled={disabled} onClick={onRemove}>{t('remove')}</Button>
     </div>
   );
 }

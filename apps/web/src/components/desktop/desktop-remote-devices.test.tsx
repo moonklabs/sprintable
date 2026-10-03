@@ -94,6 +94,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     const del = fetchWithAuth.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
     expect(del?.[0]).toBe('/api/remote-devices/p1/pairs/s1');
     expect(status()).toBe('뺐어요 · 내 아이폰');
+    expect(document.activeElement).toBe(container.querySelector('[role="status"]')); // the row is gone: the result line
     expect(text()).toContain('아직 짝지은 폰이 없어요');
   });
 
@@ -103,6 +104,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     await act(async () => { button('빼기')[0].click(); });
     await act(async () => { button('취소')[0].click(); });
     expect(text()).not.toContain('짝을 뺄까요');
+    expect(document.activeElement).toBe(button('빼기')[0]); // back to that row's [빼기], not the page
     expect(fetchWithAuth.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
 
     await act(async () => { button('빼기')[0].click(); });
