@@ -13,6 +13,7 @@ from app.models.desktop_relay import DesktopCommand, DesktopDeviceToken, Desktop
 from app.models.agent_watch import AgentWatch, DeployServing, GithubPullRequest
 from app.models.desktop_setup import DesktopSetup
 from app.models.remote_control_audit_log import OrgRemoteControlAuditLog
+from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.chat_command_audit_log import ChatCommandAuditLog
 from app.models.deletion_audit import DeletionAuditLog
@@ -178,6 +179,9 @@ __all__ = [
     "DesktopDeviceToken",
     "DesktopDeviceTokenCode",
     "OrgRemoteControlAuditLog",
+    "AgentPermissionRequest",
+    "RemoteDevice",
+    "RemoteDevicePairing",
     "DesktopSession",
     "DesktopCommand",
     "AgentWatch",
