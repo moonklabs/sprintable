@@ -253,8 +253,10 @@ function NotificationPanel({
     filterTab === 'system' ? t('emptySystem') :
     t('emptyAll');
 
+  // story #4557: a flex item that may shrink (min-h-0 · flex-1) — in the lg+ popover (a flex column capped at 480px) `h-full`
+  // resolved to the content and never shrank, so the list below got no bounded height and did not scroll
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* 헤더 */}
       <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
         <span className="text-sm font-semibold">{t('panelTitle')}</span>
