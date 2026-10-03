@@ -26,7 +26,7 @@ const req = (over: Partial<PermissionRequest> = {}): PermissionRequest => ({
   id: 'r1', request_id: 'q1', setup_id: 's1', device_name: 'SYJ-MacBook-Pro', agent_member_id: 'a1', agent_name: 'Dev', role: '개발',
   tool: 'Bash', summary: 'npm install --save ••••(가림) …', masked: true, truncated: true, workdir: '~/Sprintable/블로그 글',
   created_at: '2026-10-03T13:48:00Z', expires_at: '2026-10-03T14:30:00Z', state: 'pending', answered_by_name: null, decision: null,
-  device_reachable: true, recipient_reason: 'paired', answerable: true, ...over,
+  device_reachable: true, recipient_reason: 'paired', answerable: true, session_key: 's-1', input_hash: 'sha256:' + 'a'.repeat(64), ...over,
 });
 const answer = (requests: PermissionRequest[]) => new Response(JSON.stringify({ requests }), { status: 200 });
 

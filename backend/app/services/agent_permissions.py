@@ -445,6 +445,9 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,
             "answerable": shown == "pending" and s.id in reachable and s.id in paired_setups,
+            # story 4532 (PO 21:39Z · 까디르 1선): the values the phone signs, read by the phone's own shell from here — never handed
+            # over by the web page (a page that passes them could have the phone sign another request of the same tool)
+            "session_key": r.session_key, "input_hash": r.input_hash,
         })
     return out
 
