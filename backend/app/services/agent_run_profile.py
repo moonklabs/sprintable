@@ -34,6 +34,9 @@ _CODEX_COMMON_EFFORTS = ("low", "medium", "high", "xhigh")  # what every Codex m
 
 # runtime → {"models": {name: efforts}, "custom": efforts for a typed-in name or no model (the runtime's default)}.
 # Codex efforts are per model (`codex debug models`); hidden slugs (gpt-reserve · codex-auto-review) are not listed.
+# Listed = a start with it opens the conversation with no question (민 19:32Z · `4540-ac0/model-probe`, turn 0): gpt-5.5 is left out —
+# its TUI stops at «GPT-5.5 retires on October 14, 2026 … Try new model / Use existing model» before any thread starts, so an agent
+# given it would sit there. A typed-in name is still allowed (checked at its first start · 명세 C-5).
 # Bracketed aliases (`opus[1m]`) are left out until «--model takes them» is measured (v1.2).
 CATALOG: dict[str, dict[str, Any]] = {
     "claude-code": {
@@ -49,7 +52,6 @@ CATALOG: dict[str, dict[str, Any]] = {
             "gpt-5.6-sol": _CODEX_SOL_EFFORTS,
             "gpt-5.6-terra": _CODEX_SOL_EFFORTS,
             "gpt-5.6-luna": _CODEX_LUNA_EFFORTS,
-            "gpt-5.5": _CODEX_COMMON_EFFORTS,
         },
         "custom": _CODEX_COMMON_EFFORTS,
     },
