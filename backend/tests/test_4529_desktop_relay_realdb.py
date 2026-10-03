@@ -101,7 +101,6 @@ async def test_an_open_stream_sends_its_commands_then_ends_on_access_revoked(wor
 
     monkeypatch.setattr(router_mod, "_LIFESPAN_SEC", 1)
     monkeypatch.setattr(router_mod, "_LIFESPAN_JITTER_SEC", 0)
-    monkeypatch.setattr(router_mod, "_POLL_SEC", 0.1)
     async with _client() as c:
         d = await _device(c)
         sid, token = d["setup_id"], d["device_token"]
@@ -220,3 +219,23 @@ async def test_a_command_result_moves_forward_only_and_never_for_another_device(
         agent2 = d2["agents"][0]["member_id"]
         r = await c.post("/api/v2/desktop/relay/sessions/s/state", json=_report(agent2, 1), headers=_tok(d1["device_token"]))
         assert r.status_code == 422  # d2's agent is not on d1
+
+
+async def test_a_command_made_while_the_stream_is_open_arrives_by_the_wake_not_the_backstop(world, monkeypatch):
+    """PO 05:43Z — the agent stream's wake: a command committed while the stream waits reaches it at once. The backstop read
+    (30s) is longer than this stream lives (3s): only the wake can deliver it in time."""
+    import asyncio
+
+    import app.routers.desktop_relay as router_mod
+
+    monkeypatch.setattr(router_mod, "_LIFESPAN_SEC", 3)
+    monkeypatch.setattr(router_mod, "_LIFESPAN_JITTER_SEC", 0)
+    monkeypatch.setattr(router_mod, "_BACKSTOP_SEC", 30)
+    async with _client() as c:
+        d = await _device(c)
+        sid, token = d["setup_id"], d["device_token"]
+        stream = asyncio.create_task(c.get("/api/v2/desktop/relay/stream", headers=_tok(token)))
+        await asyncio.sleep(0.8)  # the stream has read once and waits
+        await _enqueue(sid, "stop_session", {"session_key": "s-now"}, "now")
+        body = (await stream).text
+        assert "event: command" in body and "s-now" in body, body

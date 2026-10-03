@@ -10,18 +10,19 @@
 """
 from __future__ import annotations
 
-import asyncio
+import functools
 import hashlib
 import hmac
+import logging
 import secrets
 import uuid
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.desktop_relay import (
     COMMAND_KINDS,
@@ -32,6 +33,8 @@ from app.models.desktop_relay import (
 )
 from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_setup import DesktopSetup
+
+logger = logging.getLogger(__name__)
 
 TOKEN_PREFIX = "sdt_"
 UNKNOWN_AFTER = timedelta(seconds=90)  # PO 05:19Z — three missed 30-second heartbeats
@@ -308,6 +311,7 @@ async def enqueue_command(
     )
     db.add(cmd)
     await db.flush()
+    _schedule_wake_after_commit(db, setup.id, seq)
     return cmd
 
 
@@ -356,11 +360,29 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
     return cmd
 
 
-# ── wake (in-process; other instances find a command by their poll) ─────────────────────────────────────────────────────────
+# ── wake: the agent stream's own (PO 05:43Z) ─────────────────────────────────────────────────────────────────────────────
+# The device stream's queue sits in the agent gateway's connection map under `desktop:<setup_id>` (never an agent's UUID), so
+# `wake_agent` reaches it as it reaches an agent: this instance at once, every other instance through the same backplane
+# (Redis or pg_notify) → its listener → `_push_to_agent`. The wake carries no command — the stream reads them from the DB.
 
-_device_wakers: dict[str, set[asyncio.Event]] = defaultdict(set)
+
+def wake_key(setup_id: uuid.UUID) -> str:
+    return f"desktop:{setup_id}"
 
 
-def wake_device(setup_id: uuid.UUID) -> None:
-    for ev in list(_device_wakers.get(str(setup_id), ())):
-        ev.set()
+def _fire_wake(setup_id: uuid.UUID, seq: int) -> None:
+    from app.routers.agent_gateway import wake_agent
+
+    try:
+        wake_agent(wake_key(setup_id), seq)
+    except Exception:  # noqa: BLE001 — a missed wake waits for the stream's backstop read, never loses the command
+        logger.warning("desktop relay wake failed setup=%s", setup_id, exc_info=True)
+
+
+def _schedule_wake_after_commit(db: AsyncSession, setup_id: uuid.UUID, seq: int) -> None:
+    """After the command's commit only (before it, the stream's read would not see the row)."""
+    if not isinstance(db.sync_session, Session):
+        return
+    from app.services.after_commit import schedule_after_commit
+
+    schedule_after_commit(db, [functools.partial(_fire_wake, setup_id, seq)])

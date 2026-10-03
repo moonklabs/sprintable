@@ -34,7 +34,7 @@ _LIFESPAN_SEC = 300  # closed before Cloud Run's request timeout; the daemon rec
 _LIFESPAN_JITTER_SEC = 30
 _HEARTBEAT_SEC = 30
 _RECHECK_SEC = 30
-_POLL_SEC = 2.0  # another instance's new command is found by this poll (the in-process wake is only a shortcut)
+_BACKSTOP_SEC = 30  # a read even without a wake (a wake lost on the way) — new commands come by the wake (PO 05:43Z)
 _STREAMS_PER_DEVICE = 2  # a reconnect may overlap the old connection for a moment
 
 
@@ -68,8 +68,10 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
     scope = f"desktop:{setup_id}"
     if await sse_lease.acquire(scope, _STREAMS_PER_DEVICE, conn_id) is False:
         raise HTTPException(status_code=429, detail={"code": "DEVICE_STREAM_LIMITED", "message": "this device already has its connections"})
-    wake = asyncio.Event()
-    relay._device_wakers[str(setup_id)].add(wake)
+    from app.routers.events import _agent_connections
+
+    wakes: asyncio.Queue[dict] = asyncio.Queue(maxsize=50)
+    _agent_connections[relay.wake_key(setup_id)].add(wakes)  # the agent stream's wake reaches it (services.desktop_relay)
     deadline = time.monotonic() + _LIFESPAN_SEC + random.uniform(0, _LIFESPAN_JITTER_SEC)
 
     async def generate():
@@ -101,13 +103,15 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                 if now - last_beat >= _HEARTBEAT_SEC:
                     last_beat = now
                     yield "event: heartbeat\ndata: {}\n\n"
-                wake.clear()
+                wait = max(0.05, min(_BACKSTOP_SEC, _HEARTBEAT_SEC - (time.monotonic() - last_beat), deadline - time.monotonic()))
                 try:
-                    await asyncio.wait_for(wake.wait(), timeout=_POLL_SEC)
+                    await asyncio.wait_for(wakes.get(), timeout=wait)
+                    while not wakes.empty():  # several wakes → one read
+                        wakes.get_nowait()
                 except asyncio.TimeoutError:
                     pass
         finally:
-            relay._device_wakers[str(setup_id)].discard(wake)
+            _agent_connections[relay.wake_key(setup_id)].discard(wakes)
             await sse_lease.release(scope, conn_id)
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
