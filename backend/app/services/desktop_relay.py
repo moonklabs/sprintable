@@ -30,6 +30,7 @@ from app.models.desktop_relay import (
     DesktopDeviceToken,
     DesktopSession,
 )
+from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_setup import DesktopSetup
 
 TOKEN_PREFIX = "sdt_"
@@ -130,7 +131,7 @@ class SessionReport(BaseModel):
     agent_member_id: uuid.UUID
     runtime: Literal["claude", "codex"]
     state: Literal["starting", "working", "idle", "waiting_permission", "stopped"]
-    at: datetime
+    at: OffsetDatetime  # a time without its offset is refused (4330)
 
 
 class SessionStateReport(SessionReport):
