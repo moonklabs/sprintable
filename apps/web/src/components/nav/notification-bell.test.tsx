@@ -441,6 +441,25 @@ describe('NotificationBell — story #3074 데스크톱 브리지 notify_show', 
 
     delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
   });
+
+  it('story #4520 — a live decision request notifies with the bell line «결재 요청 · {name}», not «작업 전달»', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    stubBrowserNotification();
+    const notifyShow = vi.fn().mockResolvedValue(true);
+    (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge = { notify_show: notifyShow };
+
+    await openBell();
+    await emitLiveNotification({
+      event_type: 'dispatched', source_entity_type: 'gate', source_entity_id: 'g-1',
+      payload: { title: '결재 대기 중인 게이트가 있어요', event_type: 'gate.pending_approval', gate_name: '4520-GREEN-2' },
+    });
+
+    expect(notifyShow).toHaveBeenCalledWith(expect.objectContaining({ event_type: 'dispatched', body: '결재 요청 · 4520-GREEN-2' }));
+
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
+  });
 });
 
 // story 3466(위생, 유나 5~8회차 4연속 관측) — 「99+」 배지 대비 미달(라이트 3.55·다크

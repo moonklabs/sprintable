@@ -118,6 +118,16 @@ def derive_risk_grade(posture: str | None, gate_type: str) -> RiskGrade:
     return "high"
 
 
+def _gate_name_payload(gate: Gate) -> dict:
+    """story #4520 — the name a person knows the gate by, for the bell line «결재 요청 · {name}»: a decision request's own
+    question (`POST /gates/decisions` puts it in neutral_facts). Other gate kinds keep their name on the work item (a join) —
+    left out, the line then reads «결재 요청» alone, never a made-up name."""
+    question = gate.neutral_facts.get("question") if isinstance(gate.neutral_facts, dict) else None
+    if isinstance(question, str) and question.strip():
+        return {"gate_name": question.strip()[:120]}
+    return {}
+
+
 async def get_org_posture(session: AsyncSession, org_id: uuid.UUID) -> str | None:
     """org_id 단일 값으로 ``OrgGatePolicy.posture`` 직접 조회(org당 1행). row 없으면 None(미설정).
 
@@ -543,7 +553,7 @@ async def _reopen_rejected_gate(
                     # dashboard.ccGateType*)을 렌더 시점에 조합하도록 event.payload에 싣는다
                     # (conversations.py의 sender_name과 동형 — 이 값이 있으면 FE가 title/body
                     # 를 i18n 키로 다시 조합, 없으면(옛 행) 위 title/body 그대로 폴백).
-                    event={"payload": {"gate_type": gate_type}},
+                    event={"payload": {"gate_type": gate_type, **_gate_name_payload(gate)}},
                     reference_type="gate", reference_id=gate.id,
                     source_project_id=project_id,
                     # story #2688: create_gate()의 신규-gate 경로(:475 부근)와 동일 결함 —
@@ -997,7 +1007,7 @@ async def create_gate(
                     title="결재 대기 중인 게이트가 있어요",
                     body=f"{gate_type} 게이트가 승인/거부를 기다리고 있어요.",
                     # story #4316 CHANGES1 — 위 reopen 경로(:456 부근)와 동일 목적.
-                    event={"payload": {"gate_type": gate_type}},
+                    event={"payload": {"gate_type": gate_type, **_gate_name_payload(gate)}},
                     reference_type="gate", reference_id=gate.id,
                     source_project_id=project_id,
                     # story #2688: 동기 개인 webhook 실POST가 create_gate() 호출부(예:

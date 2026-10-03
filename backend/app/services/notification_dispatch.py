@@ -233,6 +233,13 @@ async def _send_personal_webhook_targets(
                 logger.error("AU metering(personal webhook) failed org_id=%s", org_id, exc_info=True)
 
 
+
+def _bell_extras(event: dict | None) -> dict:
+    """What the bell line reads from a person's dispatched Event besides title/body/event_type (story #4520): the gate's name."""
+    name = ((event or {}).get("payload") or {}).get("gate_name")
+    return {"gate_name": name} if isinstance(name, str) and name else {}
+
+
 async def dispatch_notification(
     db: AsyncSession,
     *,
@@ -538,7 +545,8 @@ async def dispatch_notification(
                                     sender_id=None,
                                     recipient_id=member_row.id,
                                     recipient_type="human",
-                                    payload={"title": title, "body": body, "event_type": event_type},
+                                    # story #4520 — the bell names an approval request («결재 요청 · {name}»).
+                                    payload={"title": title, "body": body, "event_type": event_type, **_bell_extras(event)},
                                     status="delivered",
                                     # ⛔이 순간이 "배달 시도 순간"과 같다고 볼 수 있는 건 이 분기가
                                     # 지금 동기라서다 — 바로 다음 줄들이 실제 배달 행위(Notification
