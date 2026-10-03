@@ -5,6 +5,7 @@ Contract: doc «E-DESKTOP-2 B-1 — 기기 줄 계약 v1» §9 ② ③ · §10 �
 - POST   /api/v2/agent-permission-requests/{id}/answer     — the phone's signed decision, carried down as it is
 - POST   /api/v2/remote-devices                            — the phone registers its key (three a person)
 - POST   /api/v2/remote-devices/pairing-offers             — the phone that scanned a desktop QR carries its key there (#4531)
+- GET    /api/v2/remote-devices/pairing-offers/{id}        — that phone reads the desktop's value for the pairing number (v1.11)
 - GET    /api/v2/remote-devices                            — my phones and what each is paired with (`?scope=org`: owner/admin)
 - DELETE /api/v2/remote-devices/{id}/pairs/{setup_id}      — [빼기]: at once here, sent down to the device until it drops it
 
@@ -110,6 +111,22 @@ async def post_pairing_offer(
         return _error(exc)
     await db.commit()
     return JSONResponse(status_code=202, content={"state": "sent"})
+
+
+@router.get("/remote-devices/pairing-offers/{offer_id}")
+async def get_pairing_offer(
+    offer_id: uuid.UUID,
+    setup_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4531 (contract v1.11 §10 ⑤ 4) — the phone that sent the offer reads the desktop's value to show the pairing number."""
+    member = await _person(db, auth, org_id, interactive=True)
+    try:
+        return await agent_permissions.pairing_offer_state(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, setup_id=setup_id, offer_id=offer_id)
+    except DesktopRelayError as exc:
+        return _error(exc)
 
 
 @router.get("/remote-devices")

@@ -24,7 +24,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
 from app.services import desktop_relay as relay
-from app.services.agent_permissions import PairingSnapshot, PermissionRequestReport, Withdrawal
+from app.services.agent_permissions import PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -250,6 +250,20 @@ async def post_permission_withdraw(
         return _error(exc)
     await db.commit()
     return {"id": str(row.id), "state": row.state}
+
+
+@router.post("/relay/pairing-offers/{offer_id}/reveal")
+async def post_pairing_reveal(offer_id: uuid.UUID, body: PairingReveal, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story #4531 (contract v1.11 §10 ⑤ 3) — the daemon's random value for this pairing's number (drawn after the MAC bound the key)."""
+    from app.services import agent_permissions
+
+    try:
+        await agent_permissions.reveal_pairing(db, setup, offer_id, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"state": "revealed"}
 
 
 @router.put("/relay/pairings")

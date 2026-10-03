@@ -39,6 +39,7 @@ _KNOWN = {
     "app/routers/desktop_relay.py::post_permission_request",
     "app/routers/desktop_relay.py::post_permission_withdraw",
     "app/routers/desktop_relay.py::put_pairings",
+    "app/routers/desktop_relay.py::post_pairing_reveal",  # story #4531 — the device token's own pairing offer (setup-scoped, not project-owned)
     # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's
     # setup (an org-level setting, no project entity)
     "app/routers/remote_control.py::get_device_remote_control",

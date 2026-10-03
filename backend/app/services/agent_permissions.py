@@ -236,8 +236,15 @@ class PairingOffer(BaseModel):
     setup_id: uuid.UUID
     offer_id: uuid.UUID
     phone_key_id: uuid.UUID
+    label: str = Field(min_length=1, max_length=64)  # v1.11: inside the MAC
     expires_at: AwareDatetime
     mac: str = Field(pattern=_MAC)
+
+
+class PairingReveal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reveal: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")  # 32 bytes · base64url, no padding
 
 
 async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: PairingOffer) -> RemoteDevicePairingOffer:
@@ -272,11 +279,11 @@ async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.
     )).scalar_one_or_none()
     if existing is not None:
         # the same phone sending the same offer again: the same row · another key or MAC for an offer already answered: no
-        if existing.remote_device_id == phone.id and existing.mac == body.mac:
+        if existing.remote_device_id == phone.id and existing.mac == body.mac and existing.label == body.label:
             return existing
         raise DesktopRelayError(409, "offer_used", "this pairing code was already answered")
     row = RemoteDevicePairingOffer(id=uuid.uuid4(), setup_id=setup.id, offer_id=body.offer_id, remote_device_id=phone.id,
-                                   offered_by=member_id, mac=body.mac, expires_at=body.expires_at)
+                                   offered_by=member_id, label=body.label, mac=body.mac, expires_at=body.expires_at)
     db.add(row)
     try:
         await db.flush()
@@ -298,8 +305,42 @@ async def offers_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[dict]:
                RemoteDevice.revoked_at.is_(None))
         .order_by(RemoteDevicePairingOffer.created_at)
     )).all()
-    return [{"offer_id": str(o.offer_id), "phone_key_id": str(d.id), "public_key": d.public_key, "label": d.label,
+    return [{"offer_id": str(o.offer_id), "phone_key_id": str(d.id), "public_key": d.public_key, "label": o.label,
              "mac": o.mac, "expires_at": o.expires_at.isoformat()} for o, d in rows]
+
+
+async def reveal_pairing(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.UUID, body: PairingReveal) -> None:
+    """v1.11 — the desktop's random value for this pairing's number, drawn after the offer's MAC bound the key; kept for the phone
+    that sent the offer. Once: the same value again is fine, another is refused (the number the person compares must not move)."""
+    row = (await db.execute(
+        select(RemoteDevicePairingOffer).where(RemoteDevicePairingOffer.setup_id == setup.id, RemoteDevicePairingOffer.offer_id == offer_id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if row is None:
+        raise DesktopRelayError(404, "offer_not_found", "no such pairing offer for this device")
+    if row.expires_at <= _now():
+        raise DesktopRelayError(410, "offer_expired", "the pairing offer has expired")
+    if row.reveal is not None:
+        if row.reveal != body.reveal:
+            raise DesktopRelayError(409, "already_revealed", "this pairing offer was revealed with another value")
+        return
+    row.reveal, row.revealed_at = body.reveal, _now()
+    await db.flush()
+
+
+async def pairing_offer_state(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID, offer_id: uuid.UUID) -> dict:
+    """v1.11 — what the phone that sent the offer waits for: the desktop's value (then it shows the same pairing number) · the
+    window over. Only the person who sent it — anyone else gets the same «not found»."""
+    row = (await db.execute(
+        select(RemoteDevicePairingOffer).join(DesktopSetup, DesktopSetup.id == RemoteDevicePairingOffer.setup_id)
+        .where(RemoteDevicePairingOffer.setup_id == setup_id, RemoteDevicePairingOffer.offer_id == offer_id,
+               RemoteDevicePairingOffer.offered_by == member_id, DesktopSetup.org_id == org_id)
+    )).scalar_one_or_none()
+    if row is None:
+        raise DesktopRelayError(404, "offer_not_found", "no such pairing offer of yours")
+    if row.reveal is not None:
+        return {"state": "revealed", "reveal": row.reveal}
+    return {"state": "expired" if row.expires_at <= _now() else "sent", "reveal": None}
 
 
 def _wake_device_after_commit(db: AsyncSession, setup_id: uuid.UUID) -> None:

@@ -43,16 +43,16 @@ def _b64(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
-def _mac(secret: bytes, offer_id: str, phone_id: str, public_key: str, setup_id: str) -> str:
-    """The phone's side (contract §10 ⑤): HMAC-SHA256 over the canonical JSON, keys sorted, no spaces."""
-    body = json.dumps({"offer_id": offer_id, "phone_key_id": phone_id, "public_key": public_key, "setup_id": setup_id, "v": 1},
+def _mac(secret: bytes, offer_id: str, phone_id: str, public_key: str, setup_id: str, label: str = "iPhone") -> str:
+    """The phone's side (contract §10 ⑤ · v1.11): HMAC-SHA256 over the canonical JSON (its name too), keys sorted, no spaces."""
+    body = json.dumps({"label": label, "offer_id": offer_id, "phone_key_id": phone_id, "public_key": public_key, "setup_id": setup_id, "v": 1},
                       sort_keys=True, separators=(",", ":"))
     return _b64(hmac.new(secret, body.encode(), hashlib.sha256).digest())
 
 
 def _offer(device, phone_id, public_key, *, offer_id=None, minutes=5, secret=b"s" * 32, **extra):
     offer_id = offer_id or str(uuid.uuid4())
-    body = {"setup_id": device["setup_id"], "offer_id": offer_id, "phone_key_id": phone_id,
+    body = {"setup_id": device["setup_id"], "offer_id": offer_id, "phone_key_id": phone_id, "label": "iPhone",
             "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(),
             "mac": _mac(secret, offer_id, phone_id, public_key, device["setup_id"])}
     body.update(extra)
@@ -85,13 +85,33 @@ async def test_01_the_owner_carries_the_key_down_as_it_is_and_the_frame_goes_unt
         frames = [json.loads(line[6:]) for block in text.split("\n\n") if block.startswith("event: pairing_offer")
                   for line in block.split("\n") if line.startswith("data: ")]
         # the key, the label and the phone's MAC as they are — the server added nothing of its own, and holds no secret
+        # v1.11: the label is the one the phone sent (inside its MAC), not the server's registry
         assert frames == [{"offer_id": body["offer_id"], "phone_key_id": phone_id, "public_key": public_key, "label": "iPhone",
                            "mac": body["mac"], "expires_at": frames[0]["expires_at"]}]
         assert "pairing_offer" in (await c.get("/api/v2/desktop/relay/stream", headers=_tok(device["device_token"]))).text
 
-        # past its window: no longer sent
+        # v1.11 — the desktop's random value (drawn after the MAC bound the key) goes back to the phone that sent the offer only
+        state = f"{OFFERS}/{body['offer_id']}?setup_id={device['setup_id']}"
+        assert (await c.get(state, headers=_person(OWNER))).json() == {"state": "sent", "reveal": None}
+        reveal = _b64(b"r" * 32)
+        up = f"/api/v2/desktop/relay/pairing-offers/{body['offer_id']}/reveal"
+        assert (await c.post(up, json={"reveal": reveal}, headers=_tok(device["device_token"]))).status_code == 200
+        assert (await c.post(up, json={"reveal": reveal}, headers=_tok(device["device_token"]))).status_code == 200  # the same again
+        other = await c.post(up, json={"reveal": _b64(b"x" * 32)}, headers=_tok(device["device_token"]))
+        assert (other.status_code, other.json()["error"]["code"]) == (409, "already_revealed")  # the number must not move
+        assert (await c.get(state, headers=_person(OWNER))).json() == {"state": "revealed", "reveal": reveal}
+        # someone else of the org · a key, not a person's session: the same «not found» / 403
+        plain_tm = await _plain_member()
+        assert plain_tm and (await c.get(state, headers=_person(PLAIN))).json()["error"]["code"] == "offer_not_found"
+        assert (await c.post(up.replace(body["offer_id"], str(uuid.uuid4())), json={"reveal": reveal}, headers=_tok(device["device_token"]))).json()["error"]["code"] == "offer_not_found"
+        assert (await c.post(up, json={"reveal": "short"}, headers=_tok(device["device_token"]))).status_code == 422
+        assert (await c.post(up, json={"reveal": reveal}, headers=_person(OWNER))).status_code == 401  # a person cannot reveal for a device
+
+        # past its window: no longer sent · the phone reads «expired» only while nothing was revealed (here: still revealed)
         await _sql("UPDATE remote_device_pairing_offers SET expires_at = now() - interval '1 second'")
         assert "pairing_offer" not in (await c.get("/api/v2/desktop/relay/stream", headers=_tok(device["device_token"]))).text
+        late = await c.post(up, json={"reveal": reveal}, headers=_tok(device["device_token"]))
+        assert (late.status_code, late.json()["error"]["code"]) == (410, "offer_expired")
 
 
 async def test_02_one_answer_per_qr_another_key_or_mac_for_the_same_offer_is_refused(world):
@@ -106,6 +126,8 @@ async def test_02_one_answer_per_qr_another_key_or_mac_for_the_same_offer_is_ref
         assert (other.status_code, other.json()["error"]["code"]) == (409, "offer_used")
         swapped_mac = _offer(device, first, await _phone_key(first), offer_id=offer_id, secret=b"x" * 32)
         assert (await c.post(OFFERS, json=swapped_mac, headers=_person(OWNER))).json()["error"]["code"] == "offer_used"
+        renamed = _offer(device, first, await _phone_key(first), offer_id=offer_id) | {"label": "Boss iPhone"}
+        assert (await c.post(OFFERS, json=renamed, headers=_person(OWNER))).json()["error"]["code"] == "offer_used"
 
 
 async def test_03_only_the_keys_owner_in_their_own_session_for_a_computer_they_can_reach(world):
