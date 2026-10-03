@@ -106,3 +106,32 @@ class RemoteDevicePairing(Base):
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     removed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     removal_acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RemoteDevicePairingOffer(Base):
+    """story #4531 (contract 02d2cf71 v1.11 §10 ⑤) — a phone's answer to a desktop's pairing QR, carried down as `pairing_offer`
+    until it expires, and the desktop's random value carried back to that phone. The server holds no secret and checks no MAC: the QR's secret never leaves the desktop and the phone, so a
+    key swapped here fails the daemon's MAC (and the two screens' confirmation number is the second door). Kept only to send it
+    again on the next connection."""
+
+    __tablename__ = "remote_device_pairing_offers"
+    __table_args__ = (UniqueConstraint("setup_id", "offer_id", name="uq_remote_device_pairing_offers_setup_offer"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    setup_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    offer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    remote_device_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("remote_devices.id", ondelete="CASCADE"), nullable=False,
+    )
+    offered_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # v1.11: the name the phone sent (inside its MAC — the server cannot rename the phone a person sees on the desktop)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    mac: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # v1.11: the desktop's random value, drawn after the key was bound — the phone that sent the offer reads it to show the same
+    # pairing number (public: what makes it safe is that it came after the MAC, not that it is hidden)
+    reveal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

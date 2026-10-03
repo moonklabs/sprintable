@@ -860,6 +860,11 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/desktop/relay/pairing-offers/{}/reveal",
+"kind": "unknown"
+},
+{
 "method": "PUT",
 "path": "/api/v2/desktop/relay/pairings",
 "kind": "unknown"
@@ -2977,6 +2982,16 @@
 {
 "method": "POST",
 "path": "/api/v2/remote-devices",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/remote-devices/pairing-offers",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/remote-devices/pairing-offers/{}",
 "kind": "unknown"
 },
 {
