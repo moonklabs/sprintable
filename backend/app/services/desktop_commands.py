@@ -57,9 +57,9 @@ async def can_view(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, a
 
 
 async def org_role(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
-    """The person's role in the organization itself (org_members) — never a project role. resolve_member's role is the project
-    one where the legacy resolver runs (PO 17:28Z): a plain org member who is a project admin must not command, and an org
-    admin who is only a project member must."""
+    """The person's role in the organization itself (org_members) — never a project role. For a person's session resolve_member
+    already gives the org role (legacy om.role · anchor members.org_role); this rule reads org_members directly so it does not lean
+    on the resolver's mode: a plain org member who is a project admin does not command, an org admin who is a project member does."""
     from app.models.project import OrgMember
 
     return (await db.execute(
