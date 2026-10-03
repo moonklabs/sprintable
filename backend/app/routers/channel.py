@@ -29,6 +29,27 @@ router = APIRouter(prefix="/api/v2/channel", tags=["channel", "Organization"])
 
 _FILES_DIR = Path(os.getenv("CHANNEL_FILES_DIR", "/tmp/sprintable_files"))
 
+# story #4532 AC5 (Kadir · PO 21:59Z): an uploaded file keeps its extension, and its type was guessed from it — an «.html» (or
+# «.svg», which carries scripts too) came back as text/html from our origin and ran in whoever opened the link. Only these types
+# are shown in place; everything else is a download (octet-stream + attachment), and nothing is sniffed.
+CHANNEL_INLINE_TYPES = frozenset({
+    "image/png", "image/jpeg", "image/gif", "image/webp",
+    "audio/mpeg", "audio/mp4", "audio/ogg", "audio/wav", "audio/webm",
+    "video/mp4", "video/webm",
+    "application/pdf",
+})
+
+
+def channel_file_headers(name: str) -> tuple[str, dict[str, str]]:
+    """The served type and headers for a stored channel file: an allowed type inline, anything else a download."""
+    guessed, _ = mimetypes.guess_type(name)
+    if guessed in CHANNEL_INLINE_TYPES:
+        return guessed, {"X-Content-Type-Options": "nosniff"}
+    return "application/octet-stream", {
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "attachment",
+    }
+
 
 async def _require_caller(api_key: str | None, token: str | None) -> TeamMember:
     caller = await _authenticate(api_key, token)
@@ -160,5 +181,5 @@ async def channel_files(name: str) -> FileResponse:
     path = _FILES_DIR / name
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Not found")
-    media_type, _ = mimetypes.guess_type(name)
-    return FileResponse(path, media_type=media_type or "application/octet-stream")
+    media_type, headers = channel_file_headers(name)
+    return FileResponse(path, media_type=media_type, headers=headers)
