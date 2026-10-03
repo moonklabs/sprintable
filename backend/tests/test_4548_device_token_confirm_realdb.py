@@ -266,3 +266,57 @@ async def test_the_setup_is_the_keys_own_and_a_given_one_must_match(world):
                              headers={"Authorization": f"Bearer {unbound}"})  # an agent key bound to no setup
         answers = {(x.status_code, x.json()["error"]["code"]) for x in (wrong, loose)}
         assert answers == {(404, "setup_not_found")}
+
+
+async def test_a_wrong_verifier_is_refused_before_the_code_says_whether_it_was_confirmed(world):
+    """Qadir 10:50Z ① (bundled in 4535 · PO): holding the code alone must not tell whether a person confirmed it — the verifier
+    is checked before the «pending» answer, so a wrong one gets 403 even on an unconfirmed code."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4548j")
+        r, _verifier = await _ask(c, device["setup_id"], _key(device))
+        code = r.json()["code"]
+        wrong = await c.post("/api/v2/desktop/device-token-codes/exchange", json={"code": code, "verifier": _pkce()[0]})
+        assert wrong.status_code == 403 and wrong.json()["error"]["code"] == "verifier_mismatch"
+
+
+async def test_two_exchanges_for_one_device_at_once_leave_one_live_token(world, monkeypatch):
+    """Qadir 10:50Z ② (bundled in 4535 · PO): two confirmed codes of one device exchanged at once — the setup row's lock
+    serialises them, so the second revokes the first's token and one live token remains. The race is made certain: each
+    exchange waits (≤1 s) at the token issue for the other; under the lock the other cannot get there."""
+    import asyncio
+
+    import app.services.desktop_relay as relay
+    from app.core.database import async_session_factory
+    from app.services.desktop_device_token_codes import exchange_code
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4548k")
+        pairs = []
+        for _ in range(2):
+            r, verifier = await _ask(c, device["setup_id"], _key(device))
+            code = r.json()["code"]
+            assert (await c.post("/api/v2/desktop/device-token-codes/confirm", json={"code": code}, headers=_person(OWNER))).status_code == 200
+            pairs.append((code, verifier))
+
+    meet = asyncio.Barrier(2)
+    real_issue = relay.issue_device_token
+
+    async def issue_after_meeting(db, setup_id):
+        try:
+            await asyncio.wait_for(meet.wait(), 1.0)
+        except (TimeoutError, asyncio.TimeoutError, asyncio.BrokenBarrierError):
+            pass
+        return await real_issue(db, setup_id)
+
+    monkeypatch.setattr(relay, "issue_device_token", issue_after_meeting)
+
+    async def exchange(code, verifier):
+        async with async_session_factory() as s:
+            done = await exchange_code(s, code=code, verifier=verifier)
+            await s.commit()
+            return done
+
+    results = await asyncio.gather(*(exchange(c_, v_) for c_, v_ in pairs))
+    assert all(r is not None for r in results)
+    live = await _sql(fetch=f"SELECT count(*) FROM desktop_device_tokens WHERE setup_id = '{device['setup_id']}' AND revoked_at IS NULL")
+    assert live[0][0] == 1
