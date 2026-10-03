@@ -32,9 +32,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def create_code(db: AsyncSession, *, api_key_id: str | None, setup_id: uuid.UUID, challenge: str) -> tuple[str, datetime]:
-    """One answer for every refusal (`setup_not_found`): no key · another setup's key · a revoked key · a disconnected or never
-    handed-over setup — a caller learns nothing about a setup it does not hold the key of."""
+async def create_code(
+    db: AsyncSession, *, api_key_id: str | None, setup_id: uuid.UUID | None, challenge: str,
+) -> tuple[str, datetime]:
+    """One answer for every refusal (`setup_not_found`): no key · another setup's key · a revoked key · a key bound to no setup ·
+    a disconnected or never handed-over setup — a caller learns nothing about a setup it does not hold the key of.
+
+    The setup is the key's own (`desktop_setup_id` · PO 11:51Z): an app set up before the relay may not know its setup id (it
+    lived only in the event-token ledger, cleared after 7 days). A setup id given must be that one."""
     from app.models.api_key import ApiKey
 
     if not _CHALLENGE_RE.match(challenge):
@@ -44,11 +49,11 @@ async def create_code(db: AsyncSession, *, api_key_id: str | None, setup_id: uui
     if key_id is not None:
         setup = (await db.execute(
             select(DesktopSetup).join(ApiKey, ApiKey.desktop_setup_id == DesktopSetup.id).where(
-                ApiKey.id == key_id, ApiKey.revoked_at.is_(None), DesktopSetup.id == setup_id,
+                ApiKey.id == key_id, ApiKey.revoked_at.is_(None),
                 DesktopSetup.exchanged_at.is_not(None), DesktopSetup.revoked_at.is_(None),
             )
         )).scalar_one_or_none()
-    if setup is None:
+    if setup is None or (setup_id is not None and setup.id != setup_id):
         raise DesktopSetupError("setup_not_found")
     code = secrets.token_urlsafe(32)
     expires_at = _now() + CODE_TTL
@@ -122,7 +127,7 @@ async def confirm_code(db: AsyncSession, *, code: str, user_id: uuid.UUID) -> uu
     return setup.id
 
 
-async def exchange_code(db: AsyncSession, *, code: str, verifier: str) -> tuple[uuid.UUID, str] | None:
+async def exchange_code(db: AsyncSession, *, code: str, verifier: str) -> tuple[uuid.UUID, str, list[str]] | None:
     """None = not confirmed yet. The verifier is checked before anything else about the code, and a wrong one does not burn
     it (as the setup exchange). The setup row is locked, so two exchanges for one device leave one active token."""
     from app.services.desktop_relay import issue_device_token
@@ -138,4 +143,8 @@ async def exchange_code(db: AsyncSession, *, code: str, verifier: str) -> tuple[
     token = await issue_device_token(db, setup.id)  # revokes the device's earlier token · the agents and keys are untouched
     row.exchanged_at = _now()
     await db.flush()
-    return setup.id, token
+    from app.services.desktop_relay import _setup_agents
+
+    # the setup's agents, told to the daemon (Mirko 11:51Z: an old app may have forgotten which agents the setup holds) — only
+    # told: the relay still judges every reported agent against the setup itself (_check_agent), never against this list
+    return setup.id, token, sorted(str(a) for a in _setup_agents(setup))
