@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 //
 // story #4427 — 웹 설정 페이지: 기본값이 채워진 채 열림 · «시작» 한 번 = confirm 하나 · 실패 갈래 · 코드 없이 온 경우.
+import { loadTailwindCascade } from '@/components/docs/lib/tailwind-cascade.test-helper';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -1675,6 +1676,20 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     await openRecipes();
     await keyChoose(recipeInputs()[1]); // an arrow key: chooses, stays open
     expect(recipeInputs()).toHaveLength(2);
+  });
+
+  // story 4553: in the flex card label the radio was stretched to the card's height (align-items: stretch), so the keyboard focus
+  // ring drew a card-tall capsule around a small circle. Measured on the real compiled Tailwind cascade.
+  it('[SID:4553] the recipe radio keeps its own size in the card (align-self start · no shrink) — its focus ring is a ring', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await openRecipes();
+    const radio = recipeInputs()[0]!;
+    const cascade = await loadTailwindCascade(container, { viewportWidth: 1440 });
+    expect(cascade.unparsable()).toEqual([]);
+    expect(cascade.winner(radio, 'align-self')).toMatch(/self-start/);
+    expect(cascade.winner(radio, 'flex-shrink')).toMatch(/shrink-0/);
+    expect(radio.closest('label')!.className).toMatch(/\bflex\b/); // still a flex row: what made the stretch possible
   });
 
   // story 4516 (live 2026-10-03 · Min ①b): in a browser a press that is not on a radio moves focus off it BEFORE the release (a
