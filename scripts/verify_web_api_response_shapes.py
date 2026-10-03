@@ -232,6 +232,7 @@ HELPERS: dict[str, str] = {
     "components/flow/next-maker-screen.tsx::fetchAllPages": "exempt",          # takes a URL builder
     "components/chat-v3/chat-v3-context-panel.tsx::useWorkItemScopedList": "exempt",  # takes a URL builder + an extractor
     "components/content/publication-retry.tsx::postPublicationRetry": "exempt",       # reads only the status / an error body
+    "components/desktop/desktop-remote-confirm.tsx::post": "raw",  # story #4548 — peek/confirm answer a plain object (errors: the app envelope)
     "lib/db/client.ts::callAuthRoute": "exempt",                   # the auth routes' own envelope (data | error)
 }
 _FN_DEF = re.compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)|(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*(?::[^=]+)?=>")

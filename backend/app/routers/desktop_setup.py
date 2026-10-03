@@ -10,14 +10,16 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rate_limit import hit_person_limits, open_setup_limiter
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
+from app.dependencies.auth import AuthContext, bearer_scheme, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
+from app.services import desktop_device_token_codes as device_codes
 from app.services.desktop_setup import (
     DesktopSetupError,
     RoleChoice,
@@ -47,6 +49,7 @@ _STATUS = {
     "code_expired": 410,
     "code_used": 410,
     "already_confirmed": 409,
+    "setup_disconnected": 409,  # story #4548 — the device was disconnected (its token code can no longer be confirmed or exchanged)
     "roles_invalid": 422,
     "request_invalid": 422,
     "service_unavailable": 503,
@@ -66,8 +69,12 @@ def _error(e: DesktopSetupError) -> HTTPException:
 
 
 def _human_only(auth: AuthContext) -> uuid.UUID:
-    """An agent key never confirms or disconnects a setup (it would make agents and keys for itself)."""
-    if (auth.claims.get("app_metadata") or {}).get("api_key_id"):
+    """A person at a browser, not a key: an agent key never confirms or disconnects a setup (it would make agents and keys for
+    itself), and neither does a person's own API key (hu_live_ — codex 01a10155 T1 · PO 10:59Z: a script holding an admin's key
+    would skip «a person confirms on the web» and take a device token). The same rule set-password already uses."""
+    from app.routers.auth import _requires_interactive_session
+
+    if _requires_interactive_session(auth):
         raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
     return uuid.UUID(str(auth.user_id))
 
@@ -545,3 +552,114 @@ async def delete_setup(
         revoked_keys=done.keys, already_disconnected=done.already, revoked_at=done.revoked_at,
         revoked_by_name=names.get(done.revoked_by),
     )
+
+
+# ── story #4548 — an already set-up device gets its relay token by a person's confirmation (contract 02d2cf71 v1.4 §1.1) ──
+
+
+async def _auth_or_none(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
+    request: Request = None,  # type: ignore[assignment]
+) -> AuthContext | None:
+    """The caller's identity, or None — so «no key» answers like every other refusal of the code (setup_not_found)."""
+    try:
+        return await get_current_user(credentials, x_agent_api_key, None, request)
+    except HTTPException:
+        return None
+
+
+class DeviceTokenCodeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    setup_id: uuid.UUID
+    challenge: str = Field(min_length=43, max_length=43)
+
+
+class DeviceTokenCodeResponse(BaseModel):
+    code: str
+    expires_at: datetime
+
+
+class DeviceTokenCodeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = SETUP_CODE_FIELD
+
+
+class DeviceTokenCodePeek(BaseModel):
+    device_name: str
+    org_name: str | None
+    expires_at: datetime
+
+
+class DeviceTokenCodeConfirmed(BaseModel):
+    setup_id: uuid.UUID
+
+
+class DeviceTokenExchangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = SETUP_CODE_FIELD
+    verifier: str = Field(min_length=43, max_length=128)
+
+
+@router.post("/device-token-codes", status_code=201, response_model=DeviceTokenCodeResponse)
+@open_setup_limiter.limit("10/minute")  # per IP, as the setup code
+async def post_device_token_code(
+    request: Request, response: Response, body: DeviceTokenCodeRequest, db: AsyncSession = Depends(get_db),
+    auth: AuthContext | None = Depends(_auth_or_none),
+):
+    """Asked with the setup's own agent key (PO 08:36Z) — the key asks, it never receives a token."""
+    response.headers["Cache-Control"] = "no-store"
+    api_key_id = ((auth.claims.get("app_metadata") or {}).get("api_key_id")) if auth is not None else None
+    try:
+        code, expires_at = await device_codes.create_code(db, api_key_id=api_key_id, setup_id=body.setup_id, challenge=body.challenge)
+    except DesktopSetupError as e:
+        raise _error(e) from None
+    await db.commit()
+    return DeviceTokenCodeResponse(code=code, expires_at=expires_at)
+
+
+@router.post("/device-token-codes/peek", response_model=DeviceTokenCodePeek)
+async def post_device_token_code_peek(
+    body: DeviceTokenCodeBody, db: AsyncSession = Depends(get_db), auth: AuthContext = Depends(get_current_user),
+):
+    user_id = _human_only(auth)
+    try:
+        peeked = await device_codes.peek_code(db, code=body.code, user_id=user_id)
+    except DesktopSetupError as e:
+        raise _error(e) from None
+    return DeviceTokenCodePeek(device_name=peeked.device_name, org_name=peeked.org_name, expires_at=peeked.expires_at)
+
+
+@router.post("/device-token-codes/confirm", response_model=DeviceTokenCodeConfirmed)
+async def post_device_token_code_confirm(
+    body: DeviceTokenCodeBody, db: AsyncSession = Depends(get_db), auth: AuthContext = Depends(get_current_user),
+):
+    """A person's session, an owner/admin of the device's own org (not the org the web has open)."""
+    user_id = _human_only(auth)
+    try:
+        setup_id = await device_codes.confirm_code(db, code=body.code, user_id=user_id)
+    except DesktopSetupError as e:
+        raise _error(e) from None
+    await db.commit()
+    return DeviceTokenCodeConfirmed(setup_id=setup_id)
+
+
+@router.post("/device-token-codes/exchange")
+@open_setup_limiter.limit("240/minute")  # the app asks every 1.5 s while the person confirms (as the setup exchange)
+async def post_device_token_exchange(request: Request, body: DeviceTokenExchangeRequest, db: AsyncSession = Depends(get_db)):
+    headers = {"Cache-Control": "no-store"}
+    try:
+        done = await device_codes.exchange_code(db, code=body.code, verifier=body.verifier)
+    except DesktopSetupError as e:
+        await db.rollback()
+        err = _error(e)
+        return JSONResponse(status_code=err.status_code, content={"data": None, "error": err.detail, "meta": None}, headers=headers)
+    if done is None:
+        await db.rollback()
+        return JSONResponse(status_code=202, content={"status": "pending"}, headers=headers)
+    await db.commit()
+    setup_id, token = done
+    return JSONResponse(status_code=200, content={"setup_id": str(setup_id), "device_token": token}, headers=headers)

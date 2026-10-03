@@ -6783,6 +6783,25 @@
       "loadFailed": "Couldn't load the list",
       "retry": "Try again",
       "member": "Your organization's admins manage its desktop connections."
+    },
+    "remote": {
+      "loading": "Loading",
+      "noCode": "Open this page from the desktop app with [Turn on for this computer]",
+      "title": "Turn on remote control for this computer?",
+      "head": "{device} · {org}",
+      "body": "Your paired phones will be able to stop, instruct, and answer permission requests for this computer's agents.",
+      "agentsStay": "This computer's agents stay as they are — no new agents are created.",
+      "turnOn": "Turn on",
+      "cancel": "Cancel",
+      "done": "Remote control is on — the desktop app shows «Remote control on». You can close this window.",
+      "expired": "This link has expired — press [Turn on for this computer] in the desktop app again.",
+      "spent": "This link can't be used anymore — press [Turn on for this computer] in the desktop app again",
+      "cantTitle": "Remote control can't be turned on",
+      "notAdmin": "Only this organization's owners and admins can turn on remote control for this computer",
+      "disconnected": "This computer was disconnected in the meantime, so remote control can't be turned on — check «Connected devices» on the web",
+      "devicesAction": "View connected devices",
+      "failed": "Couldn't turn it on — please try again in a moment",
+      "retry": "Try again"
     }
   },
   "recipePreset": {
