@@ -38,10 +38,11 @@ describe('DesktopPage — story #4012 서버 게이트', () => {
     const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
     const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
     const { DesktopRemoteControlCard } = await import('@/components/desktop/desktop-remote-control-card');
+    const { DesktopRemoteDevices } = await import('@/components/desktop/desktop-remote-devices');
     const result = DesktopPage() as { props: { children: Array<{ type: unknown } | null> } };
     expect(redirectMock).not.toHaveBeenCalled();
-    // story #4535 — «원격 제어» between the two (Yuna 09:24Z)
-    expect(result.props.children.filter(Boolean).map((c) => c!.type)).toEqual([DesktopDownloadCard, DesktopRemoteControlCard, DesktopDevices]);
+    // story #4535 — «원격 제어» between the two (Yuna 09:24Z) · story #4533 — «원격 기기» right under the switch
+    expect(result.props.children.filter(Boolean).map((c) => c!.type)).toEqual([DesktopDownloadCard, DesktopRemoteControlCard, DesktopRemoteDevices, DesktopDevices]);
   });
 
   it('DESKTOP_DOWNLOAD_ENABLED=false → /org-briefing으로 redirect(카드 렌더 없음)', async () => {

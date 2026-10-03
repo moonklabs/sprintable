@@ -146,6 +146,16 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/agent-permission-requests",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-permission-requests/{}/answer",
+"kind": "unknown"
+},
+{
+"method": "GET",
 "path": "/api/v2/agent-personas",
 "kind": "unknown"
 },
@@ -807,6 +817,21 @@
 {
 "method": "POST",
 "path": "/api/v2/desktop/relay/commands/{}/result",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/pairings",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/permission-requests",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/permission-requests/{}/withdraw",
 "kind": "unknown"
 },
 {
@@ -2903,6 +2928,21 @@
 "method": "GET",
 "path": "/api/v2/release-notes",
 "kind": "array"
+},
+{
+"method": "GET",
+"path": "/api/v2/remote-devices",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/remote-devices",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/remote-devices/{}/pairs/{}",
+"kind": "unknown"
 },
 {
 "method": "GET",

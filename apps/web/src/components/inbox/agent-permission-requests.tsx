@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { permissionLine, stillShown, waitedMinutes, type PermissionRequest } from '@/lib/agent-permissions';
@@ -72,7 +73,7 @@ function PermissionCard({ request: r, now }: { request: PermissionRequest; now: 
   const line = permissionLine(r);
   const notes = [r.masked ? t('maskedNote') : null, r.truncated ? t('truncatedNote') : null].filter(Boolean);
   return (
-    <article className="flex flex-col gap-1.5 rounded-xl border border-border bg-card px-4 py-3" data-testid="agent-permission-card">
+    <Card className="flex flex-col gap-1.5 px-4 py-3" data-testid="agent-permission-card">
       <div className="flex w-full flex-wrap items-center gap-1.5">
         {line === 'unknown' ? (
           <Badge variant="chip" className="border-dashed text-muted-foreground">{t('chipUnknown')}</Badge>
@@ -97,6 +98,6 @@ function PermissionCard({ request: r, now }: { request: PermissionRequest; now: 
             : line === 'noPairedPhone' ? t('line.noPairedPhone')
               : t('line.answerOnPhone')}
       </p>
-    </article>
+    </Card>
   );
 }

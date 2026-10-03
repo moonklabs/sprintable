@@ -53,6 +53,14 @@ TIMEZONE_DISPLAY_NAMES: dict[str, dict[str, str]] = {
 ## en 문장 = 유나 定(2026-09-10, 카드 코멘트 착지) — 이 레포 404/409/422 detail 관례
 ## (`<Noun> not found`·`<Noun> already exists`·거절 문장형) 실측 대조 근거로 확定됨.
 _CATALOG: dict[str, dict[str, str]] = {
+    # story #4533 — an agent's permission request notice (명세 모음 B-2 «폰 알림»: the agent and the tool only — no command,
+    # no path; a lock screen and a notice history keep them)
+    "agent_permission.notice_title": {"ko": "권한 대기 · {agent}", "en": "Waiting for permission · {agent}"},
+    "agent_permission.notice_title_bare": {"ko": "권한 대기", "en": "Waiting for permission"},
+    "agent_permission.notice_body": {
+        "ko": "{tool} 허용을 기다리고 있어요 — 눌러서 확인해 주세요",
+        "en": "Waiting for you to allow {tool} — tap to check",
+    },
     # story #3786 슬라이스 1 — dependencies.py(8건, 고유 키 5개: "의존성을 찾을 수 없음"이
     # 4개 호출부에서 재사용됨).
     "dependencies.item_not_found": {

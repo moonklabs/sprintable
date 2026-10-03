@@ -355,6 +355,22 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 required_payload=["reference_id"],
             ),
         ),
+        # story #4533 (E-DESKTOP-2 B-2) — an agent waiting at a permission prompt, sent to the person who decides it (and
+        # the phone push every notice takes). The phone app has no card for it yet (4532 makes it — a signed answer): until
+        # then the target-exists rule keeps it on «지금» with the promotion flag, as dispatched:hypothesis. reference_id = the
+        # server's request id (agent_permission_requests.id — the one GET/answer take). project_id: the device's setup may have
+        # none, so not promised.
+        DeepLinkManifestEntry(
+            app=DeepLinkAppFields(
+                type="agent.permission_request", target="now", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
+                return_policy=ReturnPolicy.fallback_now,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=False,
+                required_payload=["reference_id"],
+            ),
+        ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="gate_approval_requested", target="gate_detail", parent_tab=ParentTab.approvals,

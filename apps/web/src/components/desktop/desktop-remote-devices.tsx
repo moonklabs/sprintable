@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -70,7 +71,8 @@ export function DesktopRemoteDevices() {
         <p className="text-xs text-muted-foreground">{t('orgOff', { org: orgName })}</p>
       ) : null}
       {rows.length === 0 ? <p className="text-sm text-muted-foreground">{t('empty')}</p> : (
-        <ul className="flex flex-col divide-y divide-border rounded-lg border border-border">
+        <Card className="p-0">
+        <ul className="flex flex-col divide-y divide-border">
           {rows.map(({ phone, pair }) => {
             const key = `${phone.id}:${pair.setup_id}`;
             return (
@@ -83,6 +85,7 @@ export function DesktopRemoteDevices() {
             );
           })}
         </ul>
+        </Card>
       )}
       <p className="text-xs text-muted-foreground" role="status">{result}</p>
     </section>
