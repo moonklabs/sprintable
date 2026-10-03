@@ -572,7 +572,7 @@ async def _auth_or_none(
 class DeviceTokenCodeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    setup_id: uuid.UUID
+    setup_id: uuid.UUID | None = None  # PO 11:51Z — left out: the key's own setup
     challenge: str = Field(min_length=43, max_length=43)
 
 
@@ -661,5 +661,7 @@ async def post_device_token_exchange(request: Request, body: DeviceTokenExchange
         await db.rollback()
         return JSONResponse(status_code=202, content={"status": "pending"}, headers=headers)
     await db.commit()
-    setup_id, token = done
-    return JSONResponse(status_code=200, content={"setup_id": str(setup_id), "device_token": token}, headers=headers)
+    setup_id, token, agent_ids = done
+    return JSONResponse(
+        status_code=200, content={"setup_id": str(setup_id), "device_token": token, "agent_member_ids": agent_ids}, headers=headers,
+    )

@@ -14,6 +14,7 @@ import uuid
 import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
+    EXISTING,
     ORG,
     OUTSIDER,
     OWNER,
@@ -91,7 +92,9 @@ async def test_a_confirmed_code_gives_the_device_a_new_token_and_leaves_its_agen
         assert done.status_code == 200, done.text
         assert done.headers["cache-control"] == "no-store"
         new = done.json()["device_token"]
-        assert set(done.json()) == {"setup_id", "device_token"} and new.startswith("sdt_") and new != old
+        assert set(done.json()) == {"setup_id", "device_token", "agent_member_ids"} and new.startswith("sdt_") and new != old
+        # the setup's agents, from the server's record (Mirko 11:51Z — an old app may have forgotten them)
+        assert done.json()["agent_member_ids"] == sorted(a["member_id"] for a in device["agents"])
 
         assert await _snapshot_ok(c, new, 1) == 200
         assert await _snapshot_ok(c, old, 2) == 401  # the device's earlier token is revoked
@@ -229,3 +232,29 @@ async def test_a_persons_own_api_key_is_not_a_person_at_the_browser(world):
         ok = await c.post("/api/v2/desktop/device-token-codes/confirm", json={"code": code}, headers=_person(OWNER))
         assert ok.status_code == 200  # the web session: as before
     await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
+
+
+
+async def test_the_setup_is_the_keys_own_and_a_given_one_must_match(world):
+    """PO 11:51Z — an app set up before the relay may not know its setup id: left out, the key's own setup is used; given,
+    it must be that one; a key bound to no setup asks for nothing — every refusal the one setup_not_found."""
+    from app.core.database import async_session_factory
+    from app.repositories.api_key import ApiKeyRepository
+
+    async with _client() as c:
+        mine = await _device(c, name="d4424 mac 4548h")
+        other = await _device(c, name="d4424 mac 4548i")
+        verifier, challenge = _pkce()
+        r = await c.post("/api/v2/desktop/device-token-codes", json={"challenge": challenge}, headers=_key(mine))
+        assert r.status_code == 201, r.text
+        rows = await _sql(fetch=f"SELECT setup_id::text FROM desktop_device_token_codes ORDER BY created_at DESC LIMIT 1")
+        assert rows[0][0] == mine["setup_id"]  # the key's own setup
+
+        wrong, _ = await _ask(c, other["setup_id"], _key(mine))  # a setup id that is not the key's
+        async with async_session_factory() as s:
+            _k, unbound = await ApiKeyRepository(s).create(team_member_id=EXISTING, scope=["core"], expires_at=None)
+            await s.commit()
+        loose = await c.post("/api/v2/desktop/device-token-codes", json={"challenge": challenge},
+                             headers={"Authorization": f"Bearer {unbound}"})  # an agent key bound to no setup
+        answers = {(x.status_code, x.json()["error"]["code"]) for x in (wrong, loose)}
+        assert answers == {(404, "setup_not_found")}
