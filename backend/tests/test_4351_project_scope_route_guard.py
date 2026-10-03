@@ -26,6 +26,14 @@ _ACCESS = re.compile(r"(project_access|accessible|can_access|_scope_filter)")
 
 _KNOWN = {
     "app/routers/account.py::resolve_accounts",
+    # story #4529 — the device relay: a device (an org's desktop setup) authenticated by its own token, never a person or a
+    # project — its stream, session reports and command results are that device's only; the session view is the org's
+    # owners and admins (as the setup's own revoke), not a project read
+    "app/routers/desktop_relay.py::device_stream",
+    "app/routers/desktop_relay.py::get_device_sessions",
+    "app/routers/desktop_relay.py::post_command_result",
+    "app/routers/desktop_relay.py::post_session_state",
+    "app/routers/desktop_relay.py::put_sessions",
     "app/routers/agent_gateway.py::ack_event",
     "app/routers/agent_gateway.py::agent_stream",
     "app/routers/agent_inbox.py::receive_inbox_webhook",

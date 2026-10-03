@@ -786,6 +786,26 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/desktop/relay/commands/{}/result",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/sessions",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/sessions/{}/state",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/relay/stream",
+"kind": "unknown"
+},
+{
+"method": "POST",
 "path": "/api/v2/desktop/setup-codes",
 "kind": "object"
 },
@@ -823,6 +843,11 @@
 "method": "GET",
 "path": "/api/v2/desktop/setups/{}/hands",
 "kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/setups/{}/sessions",
+"kind": "unknown"
 },
 {
 "method": "POST",
