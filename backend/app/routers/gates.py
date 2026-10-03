@@ -1642,8 +1642,13 @@ async def get_designated_pending_count(
     쿼리라, "주 대화 추론"이 틀려도(층2가 best-effort인 이유) 이 뱃지는 항상 정확하다
     (AC1이 이 층에서 닫히는 근거)."""
     resolved = await resolve_member(auth, org_id, session)
+    from app.services.agent_permissions import open_requests_count
+
+    # story #4533 (Yuna 14:15Z ③) — the approvals inbox shows «에이전트 권한 요청» at its top; they count here too, or «결재 5»
+    # would sit over six cards. In the same statement, so the one snapshot watermark covers both.
+    permission_requests = open_requests_count(member_id=resolved.id, org_id=org_id)
     count, snapshot_xmin = (await session.execute(
-        select(func.count(), func.pg_snapshot_xmin(func.pg_current_snapshot())).select_from(Gate).where(
+        select(func.count() + permission_requests, func.pg_snapshot_xmin(func.pg_current_snapshot())).select_from(Gate).where(
             Gate.org_id == org_id,
             Gate.designated_approver_id == resolved.id,
             Gate.status == "pending",

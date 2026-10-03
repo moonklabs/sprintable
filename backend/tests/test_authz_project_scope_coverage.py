@@ -288,6 +288,9 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     # story #4535 — the org's «원격 제어» switch: an org-level setting (organizations row), changed only by that org's owner
     # (resolve_member of the path org · role owner · a person's session)
     "app.routers.remote_control:put_remote_control": "org-level setting, owner of the path org only (routers.remote_control._person_of + role check)",
+    # story #4533 — [빼기] one phone ↔ computer pair: the phone is selected in the caller's org (remote_devices.org_id) and must be
+    # the caller's own phone unless the caller is that org's owner/admin; the pair is that phone's — no project axis
+    "app.routers.agent_permissions:delete_remote_device_pair": "person-owned phone in the caller's org, owner or org owner/admin only (services.agent_permissions.remove_pair)",
     # story #3786 — dependencies.py의 update/delete는 까심 QA CI FAILURE 원칙(2026-07-08,
     # agents.py::get_agent_connection_artifact/_connection_artifact 선례)에 따라 Header() DI
     # 마커를 라우트 진입점(update_dependency/delete_dependency)에서만 받고, 실 로직(가드 호출

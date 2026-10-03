@@ -143,6 +143,9 @@ async def test_a_paired_recipient_answers_once_and_the_signed_blob_goes_down_uno
 
         [view] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
         assert (view["state"], view["answerable"], view["device_reachable"], view["role"]) == ("pending", True, True, "Writer")
+        # the approvals badge counts it (Yuna 14:15Z ③ — the count and the list agree)
+        badge = await c.get("/api/v2/gates/designated-pending-count", headers=_person(OWNER))
+        assert badge.status_code == 200 and badge.json()["count"] == 1, badge.text
         assert view["summary"] == "npm install --save ••••(가림)" and "input_hash" not in view
 
         # a phone of mine not paired with that computer: refused here, and the request stays open for the real answer
@@ -157,6 +160,7 @@ async def test_a_paired_recipient_answers_once_and_the_signed_blob_goes_down_uno
         assert [(k, i) for k, i, _p in cmd] == [("answer_approval", f"perm:{body['request_id']}")]
         assert cmd[0][2] == {"session_key": "s-1", "request_id": body["request_id"], "decision": "allow", "signed": blob}
 
+        assert (await c.get("/api/v2/gates/designated-pending-count", headers=_person(OWNER))).json()["count"] == 0  # answered
         twice = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(paired_id, "deny"), headers=_person(OWNER))
         assert twice.status_code == 409 and twice.json()["error"]["code"] == "already_answered"
         assert twice.json()["error"]["detail"] == {"answered_by_name": "Owner", "decision": "allow"}

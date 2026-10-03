@@ -34,6 +34,11 @@ _KNOWN = {
     "app/routers/desktop_relay.py::post_command_result",
     "app/routers/desktop_relay.py::post_session_state",
     "app/routers/desktop_relay.py::put_sessions",
+    # story #4533 — the same device token: a permission prompt on that device (its own session · its own agent), its withdrawal
+    # and its list of QR-pinned phone keys — the device's own rows, no project entity
+    "app/routers/desktop_relay.py::post_permission_request",
+    "app/routers/desktop_relay.py::post_permission_withdraw",
+    "app/routers/desktop_relay.py::put_pairings",
     # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's
     # setup (an org-level setting, no project entity)
     "app/routers/remote_control.py::get_device_remote_control",

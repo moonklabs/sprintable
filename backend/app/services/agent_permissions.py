@@ -419,6 +419,18 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     return out
 
 
+def open_requests_count(*, member_id, org_id: uuid.UUID):
+    """A scalar subquery: the requests sent to this person still open — pending and inside the window (an expired one is still
+    shown for a while, but waits for no answer). For the approvals badge's one statement (routers.gates)."""
+    return (
+        select(func.count()).select_from(AgentPermissionRequest)
+        .join(DesktopSetup, DesktopSetup.id == AgentPermissionRequest.setup_id)
+        .where(AgentPermissionRequest.recipient_member_id == member_id, AgentPermissionRequest.state == "pending",
+               AgentPermissionRequest.expires_at > func.now(), DesktopSetup.org_id == org_id)
+        .scalar_subquery()
+    )
+
+
 # ── ③ the phone answers ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 
