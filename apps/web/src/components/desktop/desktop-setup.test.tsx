@@ -13,7 +13,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => c
 // the query the router reports (the dashboard shell adds ?p= with a router replace)
 vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next/navigation')>()), useSearchParams: () => sp.value }));
 
-import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -374,7 +374,10 @@ describe('[SID:4427] desktop setup page', () => {
     stub(() => new Response('{}'));
     await mount(<OpenInDesktopApp />);
     expect(text()).toContain('데스크톱 앱에서 열어 주세요');
-    expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('앱 열기');
+    // story 4504 AC2: «take me back to my setup» — the app opens the setup it launched (never a second set of agents by accident)
+    expect((container.querySelector(`a[href="${SETUP_REOPEN_LINK}"]`) as HTMLAnchorElement).textContent).toBe('앱 열기');
+    expect(SETUP_REOPEN_LINK).toBe('ai.sprintable:/desktop/setup?intent=reopen');
+    expect(container.querySelector(`a[href="${SETUP_APP_LINK}"]`)).toBeNull();
   });
 });
 
