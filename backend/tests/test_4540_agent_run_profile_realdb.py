@@ -103,7 +103,7 @@ async def test_02_one_change_is_versioned_once_and_the_daemon_reads_only_its_own
 
 
 @pytest.mark.parametrize("model", [
-    "opus 4", "opus\"", "'opus'", "-opus", "--dangerously-skip-permissions", "opus[1m]", "a=b", "a;b", "a" * 65, "",
+    "opus 4", "opus\"", "'opus'", "-opus", "--dangerously-skip-permissions", "opus[1m]", "a=b", "a;b", "a" * 65, "", "gpt-5\n",  # a trailing newline: `$` alone would let it through (fullmatch)
 ])
 async def test_03_a_typed_in_name_that_could_be_more_than_a_name_is_refused(world, model):
     async with _client() as c:
@@ -191,6 +191,14 @@ async def test_06_many_at_once_only_among_one_runtime_and_all_or_nothing(world):
         denied = await c.put(MANY, json={"agent_ids": [a, b], "effort": "low"}, headers=_person(PLAIN))
         assert denied.status_code == 403
         assert (await _row(a), await _row(b)) == before
+        # rights are checked for EVERY agent before anything is written: PLAIN's own agent first, someone else's after → 403, the
+        # first one is not written either (까디르 4943 ①)
+        await _sql(f"UPDATE members SET owner_member_id = '{plain_tm}' WHERE id = '{a}'")
+        assert (await c.put(_one(a), json={"model": None, "effort": "high"}, headers=_person(PLAIN))).status_code == 200  # a is PLAIN's
+        mine_first = (await _row(a), await _row(b))
+        late = await c.put(MANY, json={"agent_ids": [a, b], "effort": "low"}, headers=_person(PLAIN))
+        assert late.status_code == 403
+        assert (await _row(a), await _row(b)) == mine_first
 
         too_many = await c.put(MANY, json={"agent_ids": [str(uuid.uuid4()) for _ in range(51)]}, headers=_person(OWNER))
         assert _code(too_many) == (422, "invalid_agent_ids")
