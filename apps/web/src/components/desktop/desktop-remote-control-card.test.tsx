@@ -78,6 +78,7 @@ describe('DesktopRemoteControlCard (story #4535)', () => {
     await act(async () => { button('취소').click(); });
     expect(text()).not.toContain('끄면 짝지은');
     expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(sw()); // the confirmation closed — focus back on the switch (Yuna 12:43Z)
 
     await act(async () => { sw()!.click(); });
     fetchWithAuth.mockResolvedValueOnce(ok({ enabled: false, enabled_at: null, can_change: true }));
@@ -85,6 +86,7 @@ describe('DesktopRemoteControlCard (story #4535)', () => {
     await flush();
     expect(fetchWithAuth.mock.calls[1][1]).toEqual(expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: false }) }));
     expect(sw()?.getAttribute('aria-checked')).toBe('false');
+    expect(document.activeElement).toBe(sw());
   });
 
   it('someone else reads the state as it is — on is never said as off — and has no switch', async () => {
@@ -102,11 +104,15 @@ describe('DesktopRemoteControlCard (story #4535)', () => {
   it('a failed change leaves the switch where it was with one line; a 403 turns the card into the owner line', async () => {
     fetchWithAuth.mockResolvedValueOnce(ok({ enabled: false, enabled_at: null, can_change: true }));
     await render();
+    const live = container.querySelector('[role="status"]');
+    expect(live?.textContent).toBe(''); // the status is there before anything fails — only its words change
     fetchWithAuth.mockResolvedValueOnce(status(500));
     await act(async () => { sw()!.click(); });
     await flush();
     expect(sw()?.getAttribute('aria-checked')).toBe('false');
     expect(text()).toContain('바꾸지 못했어요 — 다시 시도해 주세요');
+    expect(container.querySelector('[role="status"]')).toBe(live);
+    expect(live?.textContent).toBe('바꾸지 못했어요 — 다시 시도해 주세요');
 
     fetchWithAuth.mockResolvedValueOnce(status(403));
     await act(async () => { sw()!.click(); });

@@ -158,3 +158,24 @@ async def test_the_token_code_checks_the_key_first_then_the_switch(world):
             assert r.status_code == 409 and r.json()["error"]["code"] == "remote_control_off", path
         x = await c.post("/api/v2/desktop/device-token-codes/exchange", json={"code": code, "verifier": verifier})
         assert x.status_code == 409 and x.json()["error"]["code"] == "remote_control_off"
+
+
+
+async def test_an_owners_own_api_key_does_not_turn_remote_control_on(world):
+    """PO 12:41Z (as 4548 T1) — opening remote control is a person at a browser: the owner's hu_live_ key is 403 on the PUT; the
+    owner's web session still changes it; the read stays open to the org's people."""
+    from app.core.database import async_session_factory
+    from app.repositories.human_api_key import HumanApiKeyRepository
+
+    async with async_session_factory() as s:
+        _hkey, plaintext = await HumanApiKeyRepository(s).create(member_id=OWNER_TM, name="d4535 script", expires_at=None)
+        await s.commit()
+    person_key = {"Authorization": f"Bearer {plaintext}", "X-Org-Id": str(ORG)}
+    try:
+        async with _client() as c:
+            refused = await c.put(URL, json={"enabled": True}, headers=person_key)
+            assert refused.status_code == 403 and refused.json()["error"]["code"] == "person_session_required"
+            assert (await c.get(URL, headers=_person(OWNER))).json()["enabled"] is False
+            assert (await _switch(c, True)).status_code == 200  # the web session
+    finally:
+        await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")

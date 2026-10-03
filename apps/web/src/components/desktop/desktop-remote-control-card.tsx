@@ -14,7 +14,8 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
  * story #4535 AC1 (명세 모음 B-1 ① · 유나 09:24Z 자리 확정) — /desktop의 «데스크톱 앱» 카드와 «연결된 기기» 사이 카드 하나.
  * 조직 «원격 제어»: 기본 꺼짐 · 소유자만 스위치(서버 `can_change`) · 그 밖의 사람은 지금 상태를 그대로 말하는 한 줄 ·
  * 켜져 있으면 «{날짜}부터 켜져 있어요» · 끌 때만 줄 안 확인([취소]가 첫 초점) · 바꾸기 실패 = 스위치 되돌림 + 한 줄 ·
- * 403이면 소유자 줄로(스위치 숨김).
+ * 403이면 소유자 줄로(스위치 숨김). 끄기 확인이 닫히면([끄기] · [취소]) 초점은 스위치로 돌아가고, 실패 줄은 늘 붙어 있는 빈 status에
+ * 글만 채운다(유나 12:43Z — 글을 품은 채 새로 붙는 라이브 영역은 확실히 읽히지 않는다).
  */
 interface State {
   enabled: boolean;
@@ -29,6 +30,14 @@ export function DesktopRemoteControlCard() {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const switchRef = useRef<HTMLButtonElement>(null);
+  const wasAsking = useRef(false);
+
+  // the in-line confirmation closed ([끄기] or [취소]): the focus it held goes back to the switch, not to the page
+  useEffect(() => {
+    if (wasAsking.current && !asking) switchRef.current?.focus();
+    wasAsking.current = asking;
+  }, [asking]);
 
   useEffect(() => {
     if (!orgId) return;
@@ -72,6 +81,7 @@ export function DesktopRemoteControlCard() {
         <h2 className="text-base font-semibold">{t('title')}</h2>
         {state.can_change ? (
           <Switch
+            ref={switchRef}
             checked={state.enabled}
             disabled={busy || asking}
             aria-label={t('title')}
@@ -88,7 +98,7 @@ export function DesktopRemoteControlCard() {
         </p>
       ) : null}
       {asking ? <ConfirmOff busy={busy} onConfirm={() => void change(false)} onCancel={() => setAsking(false)} /> : null}
-      {failed ? <p className="text-xs text-destructive" role="status">{t('failed')}</p> : null}
+      <p className="text-xs text-destructive" role="status">{failed ? t('failed') : ''}</p>
     </Card>
   );
 }

@@ -64,6 +64,12 @@ async def get_remote_control(org_id: uuid.UUID, db: AsyncSession = Depends(get_d
 async def put_remote_control(
     org_id: uuid.UUID, body: RemoteControlChange, db: AsyncSession = Depends(get_db), auth: AuthContext = Depends(get_current_user),
 ):
+    from app.routers.auth import _requires_interactive_session
+
+    # opening remote control is a person at a browser's decision, like 4548's confirmation (PO 12:41Z: an owner's hu_live_
+    # key held by a script or an agent must not turn it on) — an agent key or a person's own API key: 403
+    if _requires_interactive_session(auth):
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
     member = await _person_of(db, auth, org_id)
     if member.role != "owner":
         raise HTTPException(status_code=403, detail={"code": "owner_required", "message": "only an owner of this organization can change it"})
