@@ -20,6 +20,9 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { isDesktopRuntime } from '@/lib/agent-run-profile';
+import { AgentRunProfileBulkDialog } from '@/components/agents/agent-run-profile-bulk-dialog';
+import { CountBadge } from '@/components/ui/count-badge';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { orgRoleLabel } from '@/lib/org-role-label';
 import { memberRowLabels } from '@/lib/member-display';
@@ -137,6 +140,9 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<OrgAgent | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // story #4540 — agents chosen for «실행 설정 바꾸기» (desktop runtimes only · the server judges each)
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   // settings/page.tsx 컨벤션과 동일: plain(비-useCallback) 헬퍼 — mount effect가 이를 호출하는
   // 체인 안에서 setState가 일어나도 react-hooks/set-state-in-effect가 useCallback 체인만큼
@@ -246,9 +252,16 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
               <p className="text-sm text-muted-foreground">{t('orgAgentsDescription')}</p>
             </div>
             {isAdmin ? (
-              <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={onAddAgent}>
-                <Plus className="size-3.5" /> {ta('manageAddAgent')}
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                {chosen.size > 0 ? (
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setBulkOpen(true)}>
+                    {ta('runProfileBulkOpen')} <CountBadge count={chosen.size} />
+                  </Button>
+                ) : null}
+                <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={onAddAgent}>
+                  <Plus className="size-3.5" /> {ta('manageAddAgent')}
+                </Button>
+              </div>
             ) : null}
           </div>
         </SectionCardHeader>
@@ -280,6 +293,19 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
             <div className="space-y-2">
               {agents.map((agent, index) => (
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
+                  {isAdmin && isDesktopRuntime(agent.runtime_type) ? (
+                    <input
+                      type="checkbox"
+                      className="size-4 shrink-0 accent-primary"
+                      checked={chosen.has(agent.id)}
+                      onChange={(e) => setChosen((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(agent.id); else next.delete(agent.id);
+                        return next;
+                      })}
+                      aria-label={ta('runProfileChooseAria', { name: rowLabels.get(agent.id) ?? agent.name })}
+                    />
+                  ) : isAdmin ? <span className="size-4 shrink-0" aria-hidden /> : null}
                   <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <RowName className="font-medium text-foreground hover:underline hover:text-primary" label={rowLabels.get(agent.id)} id={agent.id} />
@@ -347,6 +373,13 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
           )}
         </SectionCardBody>
       </SectionCard>
+
+      <AgentRunProfileBulkDialog
+        agents={agents.filter((a) => chosen.has(a.id))}
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onSaved={() => { void refreshAgents(); setChosen(new Set()); }}
+      />
 
       <Dialog open={!!deactivateTarget} onOpenChange={(o) => { if (!o) setDeactivateTarget(null); }}>
         <DialogContent className="max-w-md">

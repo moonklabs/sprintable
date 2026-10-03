@@ -11,6 +11,8 @@ import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { AgentConnectionSettingsSection } from '@/components/agents/agent-connection-settings-section';
 import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
+import { AgentRunProfileSection } from '@/components/agents/agent-run-profile-section';
+import { isDesktopRuntime } from '@/lib/agent-run-profile';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -577,6 +579,9 @@ export default function AgentDetailPage() {
           </SectionCard>
         );
       })()}
+
+      {/* story #4540 (C-5) — «실행»: the model · effort the desktop app starts this agent with (desktop runtimes only) */}
+      {isDesktopRuntime(agent.runtime_type) ? <AgentRunProfileSection agentId={agent.id} runtimeType={agent.runtime_type ?? null} /> : null}
 
       {/* API Keys */}
       {/* story #3994(«거짓 경고» 클래스, PO CHANGES-1 2026-09-17) — 「시스템 발행」은

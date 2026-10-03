@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -23,6 +24,8 @@ interface OperatorDropdownSelectProps {
   disabled?: boolean;
   className?: string;
   align?: 'start' | 'center' | 'end';
+  /** opt-in: the id of the field's visible name — the trigger is then named «field name + current value» (story #4540) */
+  ariaLabelledBy?: string;
 }
 
 export function OperatorDropdownSelect({
@@ -36,7 +39,9 @@ export function OperatorDropdownSelect({
   disabled = false,
   className,
   align = 'start',
+  ariaLabelledBy,
 }: OperatorDropdownSelectProps) {
+  const triggerId = useId();
   const selectedOption = options.find((o) => o.value === value);
   const displayLabel = selectedOption?.label ?? placeholder;
 
@@ -47,6 +52,7 @@ export function OperatorDropdownSelect({
         render={
           <button
             type="button"
+            {...(ariaLabelledBy ? { id: triggerId, 'aria-labelledby': `${ariaLabelledBy} ${triggerId}` } : {})}
             className={cn(
               'flex w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50',
               !selectedOption && 'text-muted-foreground',
