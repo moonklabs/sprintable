@@ -222,16 +222,25 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
     run.cap_reached_at = now
     await db.commit()
 
-    await _follow_through_cap(db, gate=gate, run=run, now=now)
+    await _follow_through_cap(db, gate=gate, run=run, now=now, newly_reached=True)
     return True
 
 
-async def _follow_through_cap(db: AsyncSession, *, gate: Gate, run, now: datetime) -> None:
+async def _follow_through_cap(db: AsyncSession, *, gate: Gate, run, now: datetime, newly_reached: bool = False) -> None:
     """story #4417 (Qadir 01a0eba4 ② · 01a0ebb1 A) — the cap is reached: until the boost is really paused, a follow-up capture
     stays scheduled (the normal chain stops once `cap_reached_at` is set). Paused → nothing more. A pause in flight
     (pause_pending) → only the follow-up. Otherwise (the pause failed, or its command ended as dead_letter/failed — which now
-    allows a new toggle) → ask again, then the follow-up."""
+    allows a new toggle) → ask again, then the follow-up.
+
+    story #4517 (PO 02:52Z) — the status is read fresh: the capture loaded the run before its spend call (no transaction across
+    it), and a resume can switch the campaign on meanwhile — «paused» from then left a running boost past its cap with no pause
+    and no next capture. And the capture that reaches the cap on a paused run still leaves one follow-up: a resume already out
+    when the cap was recorded (past the worker's own fresh check) is paused within that hour. Later follow-ups on a paused run
+    end there (no chain)."""
+    await db.refresh(run, attribute_names=["status"])
     if run.status == "paused":
+        if newly_reached:
+            await _schedule_capture(db, gate=gate, due_at=now + _BLOCK_FOLLOW_UP)
         return
     if run.status != "pause_pending":
         await _pause_by_scheduler(db, gate=gate, run=run)
