@@ -150,3 +150,51 @@ async def test_the_board_reaches_a_person_granted_through_an_org_member_grant_ro
         assert not_granted not in got and foreign not in got
     finally:
         await engine.dispose()
+
+
+async def test_a_bell_event_goes_only_under_a_project_the_person_can_open():
+    """Qadir 4919: a triggering project the person cannot access would leave a bell item they cannot open (the single read
+    answers 403) — a plain member with no grant gets the inbox Notification only; with a grant, the bell Event too."""
+    from sqlalchemy import text
+
+    engine, Session, w = await _two_orgs()
+    try:
+        outsider, outsider_user = await _person(Session, w.org_a, role="member")
+        granted, granted_user = await _person(Session, w.org_a, role="member")
+        async with Session() as s:
+            await s.execute(text(
+                "INSERT INTO project_access (id, project_id, org_member_id, permission) VALUES (:i, :p, :o, 'granted')"
+            ), {"i": uuid.uuid4(), "p": w.project_a, "o": granted})
+            await s.commit()
+        ref = await _dispatch(Session, w, [outsider, granted], source_project_id=w.project_a)
+        assert await _bell_and_inbox(Session, outsider, outsider_user, ref) == ([], 1)
+        assert await _bell_and_inbox(Session, granted, granted_user, ref) == ([w.project_a], 1)
+    finally:
+        await engine.dispose()
+
+
+async def test_the_board_leaves_out_a_denied_grant_and_a_deleted_member():
+    """The grant branch's own conditions (Qadir 4919): a row that is not 'granted' (denied · revoked) and a member who left
+    (deleted_at) are not recipients — each pinned on its own."""
+    from sqlalchemy import text
+
+    from app.services.project_auth import project_accessible_member_ids
+
+    engine, Session, w = await _two_orgs()
+    try:
+        denied, _ = await _person(Session, w.org_a, role="member")
+        left, _ = await _person(Session, w.org_a, role="member")
+        async with Session() as s:
+            await s.execute(text(
+                "INSERT INTO project_access (id, project_id, org_member_id, permission) VALUES (:i, :p, :o, 'denied')"
+            ), {"i": uuid.uuid4(), "p": w.project_a, "o": denied})
+            await s.execute(text(
+                "INSERT INTO project_access (id, project_id, org_member_id, permission) VALUES (:i, :p, :o, 'granted')"
+            ), {"i": uuid.uuid4(), "p": w.project_a, "o": left})
+            await s.execute(text("UPDATE org_members SET deleted_at = now() WHERE id = :o"), {"o": left})
+            await s.commit()
+        async with Session() as s:
+            got = {uuid.UUID(str(m)) for m in await project_accessible_member_ids(s, w.org_a, w.project_a)}
+        assert denied not in got and left not in got
+    finally:
+        await engine.dispose()

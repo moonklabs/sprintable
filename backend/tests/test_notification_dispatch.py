@@ -453,7 +453,11 @@ async def test_dispatch_passes_source_project_id_to_expo_push(mock_session, org_
     # extraction is one more query on this ordered mock — not what this test checks (the push's kwargs)
     with _ee_on(), patch(
         "ee.services.expo_push.deliver_expo_push", new=AsyncMock()
-    ) as mock_push, patch("app.services.activity_stream.extract_activities_best_effort", new=AsyncMock()):
+    ) as mock_push, patch("app.services.activity_stream.extract_activities_best_effort", new=AsyncMock()), patch(
+        # Qadir 4919: a project not on the person's roster row is used for the bell Event only if they can access it —
+        # this person stands for one who can (the check is a query this ordered mock does not answer)
+        "app.services.project_auth.has_project_access", new=AsyncMock(return_value=True),
+    ):
         await dispatch_notification(
             mock_session, org_id=org_id, event_type="story_assigned",
             target_member_ids=[member_id], title="담당자 지정",

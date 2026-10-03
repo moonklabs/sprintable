@@ -496,6 +496,22 @@ async def dispatch_notification(
                     _human_proj = member_row.project_id or source_project_id
                     if _human_proj is None and member_row.id not in human_event_recorded_for:
                         _human_proj = await _reference_project()
+                    # Qadir 4919: a project that is not the person's own roster row (triggering · reference) is used only if they
+                    # can access it — opening the bell item reads it under its project (event_notifications · 403 otherwise),
+                    # so an inaccessible one would sit in the bell unreadable. Then the inbox Notification only, as with none.
+                    if (
+                        _human_proj is not None and _human_proj != member_row.project_id
+                        and member_row.id not in human_event_recorded_for
+                    ):
+                        from app.services.project_auth import has_project_access
+
+                        _uid = getattr(member_row, "user_id", None)
+                        if _uid is None or not await has_project_access(db, _uid, _human_proj, org_id):
+                            logger.info(
+                                "dispatch_notification: no access to project %s for the bell Event member_id=%s — Notification only",
+                                _human_proj, member_row.id,
+                            )
+                            _human_proj = None
                     if _human_proj is None and member_row.id not in human_event_recorded_for:
                         logger.info(
                             "dispatch_notification: no project for the bell Event member_id=%s event_type=%s — Notification only",
