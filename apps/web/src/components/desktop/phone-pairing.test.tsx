@@ -134,7 +134,7 @@ describe('[4532] phone pairing screen', () => {
     expect(sent.filter((s) => s.type === 'pair.number')).toHaveLength(1); // asked once
     pairs = [{ setup_id: HEAD.setup_id }];
     await tick();
-    expect(line()).toBe('짝지었어요 · SYJ-MacBook-Pro — 이제 이 폰에서 그 컴퓨터의 에이전트에 답할 수 있어요');
+    expect(line()).toBe('짝지었어요 · SYJ-MacBook-Pro — 이제 이 폰에서 그 컴퓨터의 에이전트에 답하고, 멈추거나 지시할 수 있어요');
     expect(buttons()).toEqual(['닫기']);
     const looks = fetchWithAuth.mock.calls.length;
     await tick();
@@ -220,7 +220,7 @@ describe('[4532] phone pairing screen', () => {
     await render();
     await press('QR 찍기');
     await press('짝짓기');
-    expect(line()).toBe('이 계정의 원격 기기가 이미 3대예요 — 데스크톱 앱이나 웹 «내 설정 · 원격 기기»에서 하나를 빼 주세요');
+    expect(line()).toBe('이 계정의 원격 기기가 이미 3대예요 — 컴퓨터의 Sprintable 앱이나 웹 «데스크톱 앱 › 원격 기기»에서 하나를 빼 주세요');
   });
 
   it('a phone with no screen lock → the line + [설정 열기] (the shell opens the settings) + [다시 찍기]', async () => {
