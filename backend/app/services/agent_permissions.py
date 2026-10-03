@@ -323,6 +323,10 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
     )).scalar_one_or_none()
     if session is None:
         raise DesktopRelayError(422, "unknown_session", "no such session on this device")
+    if session != body.agent_member_id:
+        # Qadir · PO 16:17Z — another agent of the same device must not stand in for the session's own: its approval chain
+        # would choose the recipient and its name would go on the bell
+        raise DesktopRelayError(422, "session_agent_mismatch", "the session belongs to another agent of this device")
     recipient, reason = await resolve_recipient(db, setup, body.agent_member_id)
     row = AgentPermissionRequest(
         id=uuid.uuid4(), setup_id=setup.id, request_id=body.request_id, session_key=body.session_key,

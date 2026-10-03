@@ -282,6 +282,10 @@ async def test_the_report_carries_no_raw_input_and_only_this_devices_sessions_an
             (_ask(agent, input_hash="a" * 64), 422),
         ):
             assert (await _post_ask(c, device, bad)).status_code == code
+        # the device's other agent posting for this agent's session (Qadir · PO 16:17Z): refused, not accepted under its name
+        other_agent = next(a["member_id"] for a in device["agents"] if a["member_id"] != agent)
+        mismatch = await _post_ask(c, device, _ask(other_agent))
+        assert (mismatch.status_code, mismatch.json()["error"]["code"]) == (422, "session_agent_mismatch")
         person = await c.post("/api/v2/desktop/relay/permission-requests", json=_ask(agent), headers=_person(OWNER))
         assert person.status_code == 401  # a person's token is no device
         assert (await _sql(fetch="SELECT count(*) FROM agent_permission_requests WHERE setup_id = :s",
