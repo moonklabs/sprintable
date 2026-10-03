@@ -70,7 +70,10 @@ async def test_01_the_pickers_offer_the_measured_table_and_nothing_made_up(world
     claude = {m["name"]: m["efforts"] for m in by["claude-code"]["models"]}
     assert claude == {n: ["low", "medium", "high", "xhigh", "max"] for n in ("fable", "opus", "sonnet")}
     codex = {m["name"]: m["efforts"] for m in by["codex"]["models"]}
-    assert codex["gpt-6-sol"][-1] == "ultra" and "ultra" not in codex["gpt-6-luna"] and "max" not in codex["gpt-5.5"]
+    assert codex["gpt-6-sol"][-1] == "ultra" and "ultra" not in codex["gpt-6-luna"]
+    # only what starts with no question (민 19:32Z model probe): gpt-5.5 stops at a «retires» choice before a thread opens
+    assert set(codex) == {"gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+    assert set(claude) == {"fable", "opus", "sonnet"}
     assert by["codex"]["custom_model_efforts"] == ["low", "medium", "high", "xhigh"]
     names = set(claude) | set(codex)
     assert not any("[" in n for n in names) and not {"gpt-reserve", "codex-auto-review"} & names
