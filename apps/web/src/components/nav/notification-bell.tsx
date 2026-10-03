@@ -9,6 +9,7 @@ import {
   BookOpen,
   CheckCheck,
   FolderKanban,
+  Inbox,
   X,
   Zap,
 } from 'lucide-react';
@@ -22,7 +23,7 @@ import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
-import { getEventTypeCopy } from '@/services/notification-display';
+import { dispatchedInnerType, getDispatchedHeadline, getEventTypeCopy } from '@/services/notification-display';
 import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
 import { useToast } from '@/components/ui/toast';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -35,7 +36,10 @@ const FILTER_TABS: { value: FilterTab; labelKey: 'filterAll' | 'filter_story' | 
   { value: 'system', labelKey: 'filter_system' },
 ];
 
-function getNotificationTab(eventType: string): 'story' | 'system' {
+// story #4520 — dispatched 줄은 실어 온 꼴(payload.event_type)로 가른다(있는 세 탭 안에서만 · 결재 · 댓글 등
+// → «시스템»). 실어 온 꼴이 없는 진짜 «작업 전달»은 그대로 «스토리».
+function getNotificationTab(n: Pick<EventNotification, 'event_type' | 'payload'>): 'story' | 'system' {
+  const eventType = dispatchedInnerType(n.event_type, n.payload) ?? n.event_type;
   if (
     eventType.startsWith('story') ||
     eventType.startsWith('task') ||
@@ -102,7 +106,10 @@ export function getEntityHref(
   }
 }
 
-function getEventIcon(eventType: string) {
+function getEventIcon(n: Pick<EventNotification, 'event_type' | 'payload'>) {
+  // story #4520 — dispatched 줄은 실어 온 꼴로(결재 요청 = 결재함 진입점과 같은 Inbox 아이콘 · ⚡는 진짜 작업 전달만).
+  const eventType = dispatchedInnerType(n.event_type, n.payload) ?? n.event_type;
+  if (eventType.startsWith('gate')) return <Inbox className="size-4" />;
   if (eventType.startsWith('story') || eventType.startsWith('status')) return <FolderKanban className="size-4" />;
   if (eventType === 'dispatched') return <Zap className="size-4" />;
   if (eventType.startsWith('doc')) return <BookOpen className="size-4" />;
@@ -237,7 +244,7 @@ function NotificationPanel({
 
   const filtered = notifications?.filter((n) => {
     if (showUnreadOnly && n.read_at) return false;
-    if (filterTab !== 'all') return getNotificationTab(n.event_type) === filterTab;
+    if (filterTab !== 'all') return getNotificationTab(n) === filterTab;
     return true;
   }) ?? [];
 
@@ -350,7 +357,7 @@ function NotificationPanel({
                         : 'bg-primary/10 text-primary',
                     )}
                   >
-                    {getEventIcon(n.event_type)}
+                    {getEventIcon(n)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p
@@ -359,7 +366,7 @@ function NotificationPanel({
                         !n.read_at && 'font-medium',
                       )}
                     >
-                      {plainSummary(n.payload?.summary, getEventTypeCopy(t, n.event_type))}
+                      {headline(t, n)}
                     </p>
                     {n.payload?.sender_name ? (
                       <p className="truncate text-xs text-muted-foreground">
@@ -400,6 +407,11 @@ function NotificationPanel({
 
 // story #4182 — summary는 서버가 만든 미리보기지만 이미 저장된 옛 행엔 내부 HTML 주석이 남아 있다.
 // 렌더에서도 평문화하고, 비면(주석뿐이던 경우) 이벤트 타입 문구로 폴백한다.
+// 벨 줄 머리글: summary → (dispatched면) 실어 온 꼴의 문구 → 이벤트 종류 폴백(story #4520).
+function headline(t: (key: string) => string, n: Pick<EventNotification, 'event_type' | 'payload'>): string {
+  return plainSummary(n.payload?.summary, getDispatchedHeadline(t, n.event_type, n.payload) ?? getEventTypeCopy(t, n.event_type));
+}
+
 function plainSummary(summary: string | null | undefined, fallback: string): string {
   return (summary ? toPlainPreview(summary) : '') || fallback;
 }
@@ -455,7 +467,7 @@ export function NotificationBell() {
     // story #3074 — 데스크톱 셸(bridge-init.js가 top-frame+정확 origin에서만 window.__sprintableBridge를
     // 노출)이 있으면 그 경로«만» 쓴다 — 중복/포커스 억제는 네이티브 단독 판정이라 document.hidden
     // 조건 없이 항상 부른다. 브리지가 없을 때(일반 브라우저)만 기존 웹 Notification 경로(회귀 0).
-    const summary = plainSummary(incoming.payload?.summary, getEventTypeCopy(t, incoming.event_type));
+    const summary = headline(t, incoming);
     if (hasDesktopNotifyBridge()) {
       const body = incoming.payload?.sender_name ? `${incoming.payload.sender_name} · ${summary}` : summary;
       void notifyViaDesktopBridge({

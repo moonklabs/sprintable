@@ -24,52 +24,35 @@ export const NOTIFICATION_TYPE_ICONS: Record<string, LucideIcon> = {
 
 export const INBOX_FILTER_TYPES = ['', ...NOTIFICATION_TYPES] as const;
 
+// 알림 type → 사람 라벨 키(/inbox 상세 배지 · 벨 dispatched 줄이 같이 쓰는 한 곳 — story #4520).
+// story #4316 CHANGES2(PO 라이브 실측 2026-09-15) — 미상 type이 raw로 찍히던 것(gate.pending_approval ·
+// conversation.mention · message)을 닫은 매핑. eventMention·eventMessage는 getEventTypeCopy와 같은 키.
+const INBOX_LABEL_KEYS: Record<string, string> = {
+  story: 'filter_story',
+  task: 'filter_task',
+  reward: 'filter_reward',
+  info: 'filter_info',
+  warning: 'filter_warning',
+  system: 'filter_system',
+  task_assigned: 'filter_task_assigned',
+  task_completed: 'filter_task_completed',
+  sprint_closed: 'filter_sprint_closed',
+  standup_reminder: 'filter_standup_reminder',
+  story_assigned: 'filter_story_assigned',
+  invitation: 'filter_invitation',
+  agent_joined: 'filter_agent_joined',
+  'conversation.mention': 'eventMention',
+  'conversation.message': 'eventMessage',
+  'gate.pending_approval': 'filter_gate_pending_approval',
+};
+
 export function getInboxNotificationLabel(
   t: (key: string) => string,
   type: string,
 ) {
-  switch (type) {
-    case 'story':
-      return t('filter_story');
-    case 'task':
-      return t('filter_task');
-    case 'reward':
-      return t('filter_reward');
-    case 'info':
-      return t('filter_info');
-    case 'warning':
-      return t('filter_warning');
-    case 'system':
-      return t('filter_system');
-    case 'task_assigned':
-      return t('filter_task_assigned');
-    case 'task_completed':
-      return t('filter_task_completed');
-    case 'sprint_closed':
-      return t('filter_sprint_closed');
-    case 'standup_reminder':
-      return t('filter_standup_reminder');
-    case 'story_assigned':
-      return t('filter_story_assigned');
-    case 'invitation':
-      return t('filter_invitation');
-    case 'agent_joined':
-      return t('filter_agent_joined');
-    // story #4316 CHANGES2(PO 라이브 실측 2026-09-15) — 상세 패널 타입 배지가 미상 type을
-    // raw로 그대로 찍던 것(gate.pending_approval 실측 발견 — conversation.mention·message도
-    // 같은 결함, 이 switch에 매핑이 없었음)을 닫는다. eventMention·eventMessage는
-    // getEventTypeCopy(EVENT_TYPE_COPY_KEYS)가 이미 쓰는 같은 inbox 네임스페이스 키
-    // 재사용(신규 어간 0) — 알림 벨과 배지가 같은 낱말을 쓰게 통일.
-    case 'conversation.mention':
-      return t('eventMention');
-    case 'conversation.message':
-      return t('eventMessage');
-    case 'gate.pending_approval':
-      return t('filter_gate_pending_approval');
-    default:
-      // raw type 노출 금지(AC 「모르는 타입이 raw로 새는 클래스」 닫기) — 일반 라벨로.
-      return t('filter_generic');
-  }
+  // raw type 노출 금지(AC 「모르는 타입이 raw로 새는 클래스」 닫기) — 모르면 일반 라벨로.
+  const key = INBOX_LABEL_KEYS[type];
+  return key ? t(key) : t('filter_generic');
 }
 
 /**
@@ -129,6 +112,44 @@ export function getEventTypeCopy(
   if (eventType.startsWith('conversation') || eventType.startsWith('message'))
     return t('eventMessage');
   return t('eventFallback');
+}
+
+/**
+ * story #4520 — 벨의 `dispatched` 줄 머리글. 서버 사람 몫 dispatched Event payload는 모든 꼴이
+ * `{title, body, event_type}`뿐(summary 0)이라, 벨이 summary만 읽으면 결재 요청 · 댓글 · 상태 변경이
+ * 전부 «작업 전달»로 그려졌다(GREEN-2 라이브). 실어 온 꼴을 /inbox 라벨 한 곳(INBOX_LABEL_KEYS) → 이벤트
+ * 카피(getEventTypeCopy — 로케일 · raw 0 · 모르면 일반 문구) 순으로 읽는다. 서버 `payload.title`은 읽지 않는다
+ * (서버가 고정한 한국어 문장 — en 화면에 한국어 · «게이트» 낱말이 돌아옴, 유나 08:14Z CHANGES). 결재 요청
+ * 두 꼴(단건 · 병렬 결재)은 «결재 요청 · {이름}»(이름 = `payload.gate_name`, 모르면 «결재 요청»만 — 지어
+ * 채우지 않음). `payload.event_type`이 없는 줄(진짜 작업 건넴)은 null → 호출부의 기존 «작업 전달» 그대로.
+ */
+export function getDispatchedHeadline(
+  t: (key: string) => string,
+  eventType: string,
+  payload: Record<string, unknown> | null | undefined,
+): string | null {
+  const inner = dispatchedInnerType(eventType, payload);
+  if (!inner) return null;
+  if (APPROVAL_REQUEST_KINDS.has(inner)) {
+    const name = typeof payload?.['gate_name'] === 'string' ? payload['gate_name'].trim() : '';
+    const label = t('filter_gate_pending_approval');
+    return name ? `${label} · ${name}` : label;
+  }
+  const key = INBOX_LABEL_KEYS[inner];
+  return key ? t(key) : getEventTypeCopy(t, inner);
+}
+
+// 사람에게 «결재 요청»인 꼴 — 단건 결재(gate.pending_approval) · 병렬 결재의 결재자 몫(gate_approval_requested).
+const APPROVAL_REQUEST_KINDS = new Set(['gate.pending_approval', 'gate_approval_requested']);
+
+/** dispatched 줄이 실어 온 실제 알림 꼴(`payload.event_type`) — 없으면 null(`dispatched` 자체는 그 카피 «작업 전달» 그대로). */
+export function dispatchedInnerType(
+  eventType: string,
+  payload: Record<string, unknown> | null | undefined,
+): string | null {
+  if (eventType !== 'dispatched') return null;
+  const inner = payload?.['event_type'];
+  return typeof inner === 'string' && inner ? inner : null;
 }
 
 /**

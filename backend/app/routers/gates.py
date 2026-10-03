@@ -31,6 +31,7 @@ from app.services.github_app import get_installation_token, get_pull_request
 from app.services.merge_verdict_gate import MERGE_GATE_TYPE, reconcile_merge_gate_with_real_evidence
 from app.services.verdict_capture import fetch_status_check_rollup
 from app.services.gate_service import (
+    DECISION_REQUEST_GATE_TYPE,
     GateUndoNotSelfError,
     resolve_work_item_project_ids_batch,
     self_anchored_gate_project_id,
@@ -986,7 +987,7 @@ async def create_decision_request(
         org_id=org_id,
         work_item_id=gate_id,
         work_item_type="agent_decision",
-        gate_type="agent_decision_request",
+        gate_type=DECISION_REQUEST_GATE_TYPE,
         member_id=caller_id,
         role_id=role_id,
         neutral_facts=neutral_facts,
