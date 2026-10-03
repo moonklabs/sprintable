@@ -3121,14 +3121,20 @@ async def send_message_core(
     # 일어나는 건 group conversation에서 기존 비참가자를 멘션하는 경우뿐이다.
     if msg.mentioned_ids:
         mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids
+        # story #4519 — who got their conversation:mention Event (it is their bell item): the notification below then writes
+        # none for them, or one mention showed twice on the bell (and the copy ignored a muted conversation). Set only after
+        # the savepoint held — a rolled-back Event is no bell item.
+        mention_evented: frozenset[uuid.UUID] = frozenset()
         if mention_targets:
             try:
                 async with db.begin_nested():
-                    pending_sse_pushes += await _dispatch_mention_events(
+                    mention_pushes = await _dispatch_mention_events(
                         db, conv, msg, org_id, sender, mention_targets,
                         webhook_covered_ids=webhook_covered_ids,
                         references=msg_references,
                     )
+                pending_sse_pushes += mention_pushes
+                mention_evented = frozenset(uuid.UUID(pid) for pid, _ in mention_pushes)
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
 
@@ -3176,6 +3182,7 @@ async def send_message_core(
                             },
                             # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                             via_outbox=True,
+                            human_event_recorded_for=mention_evented,  # story #4519 — their bell item is the conversation:mention above
                         )
             except Exception:
                 logger.warning(
