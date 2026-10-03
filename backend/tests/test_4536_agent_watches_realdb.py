@@ -34,7 +34,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 
 pytestmark = pytest.mark.anyio
 
-REPO = "moonklabs/d4536"  # owned by ORG through its GitHub installation (account «moonklabs») — the platform repo too
+REPO = "d4536org/d4536"  # owned by ORG through its GitHub installation (account «d4536org» — no other suite's login)
 SECRET = "d4536-webhook-secret"
 SHA = lambda n: hashlib.sha1(f"d4536-{n}".encode()).hexdigest()  # noqa: E731 — distinct even in a 7-char prefix
 
@@ -43,17 +43,21 @@ SHA = lambda n: hashlib.sha1(f"d4536-{n}".encode()).hexdigest()  # noqa: E731 �
 async def _fresh_github_and_serving_records():
     """These two tables are not org-scoped (the world's cleanup does not reach them): each test starts from none of its own."""
     clean = (f"DELETE FROM github_pull_requests WHERE repo = '{REPO}'", "DELETE FROM deploy_servings WHERE revision LIKE 'be-%'",
-             "DELETE FROM github_installation WHERE installation_id = 4536001")
+             "DELETE FROM github_installation WHERE installation_id = 4536001 OR account_login = 'd4536org'")
     await _sql(*clean)
     yield
     await _sql(*clean)
 
 
 @pytest.fixture
-async def owned(world):
-    """ORG owns the «moonklabs» repos through its GitHub installation (the webhook's repo-owner rule)."""
+async def owned(world, monkeypatch):
+    """ORG owns the «d4536org» repos through its GitHub installation (the webhook's repo-owner rule) — a login no other suite
+    uses, so a row another suite leaves behind never makes the owner match ambiguous; the platform's repo is one of them here."""
+    import app.services.agent_watches as svc
+
     await _sql(f"INSERT INTO github_installation (id, org_id, installation_id, account_login) "
-               f"VALUES (gen_random_uuid(), '{ORG}', 4536001, 'moonklabs')")
+               f"VALUES (gen_random_uuid(), '{ORG}', 4536001, 'd4536org')")
+    monkeypatch.setattr(svc, "SERVICE_REPOS", {"backend": "d4536org/sprintable"})
     yield
 
 
