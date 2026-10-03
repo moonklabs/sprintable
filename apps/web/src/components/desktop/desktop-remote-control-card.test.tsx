@@ -57,7 +57,7 @@ describe('DesktopRemoteControlCard (story #4535)', () => {
     await render();
     expect(fetchWithAuth.mock.calls[0][0]).toBe('/api/organizations/org-1/remote-control');
     expect(text()).toContain('원격 제어');
-    expect(text()).toContain('허용되는 일: 시작 · 지시 · 권한 응답 · 멈춤');
+    expect(text()).toContain('허용되는 일: 지시 · 권한 응답 · 멈춤'); // story #4534 — start is a later card (PO 16:14Z)
     expect(sw()?.getAttribute('aria-checked')).toBe('false');
 
     fetchWithAuth.mockResolvedValueOnce(ok({ enabled: true, enabled_at: '2026-10-03T09:00:00Z', can_change: true }));

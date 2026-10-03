@@ -57,6 +57,15 @@ _CATALOG: dict[str, dict[str, str]] = {
     # no path; a lock screen and a notice history keep them)
     "agent_permission.notice_title": {"ko": "권한 대기 · {agent}", "en": "Waiting for permission · {agent}"},
     "agent_permission.notice_title_bare": {"ko": "권한 대기", "en": "Waiting for permission"},
+    # story #4534 — a phone's [지금 지시] line in the conversation and its turn-end notice (명세 B-3: no instruction text,
+    # command or path in the notice; «마쳤어요» is not used — the turn ended, not the work)
+    "desktop_command.prompt_line": {"ko": "지시 · 지금 턴에 보냄", "en": "Instruction · sent into the current turn"},
+    "desktop_command.turn_end_title": {"ko": "{agent} · 다음 일 기다림", "en": "{agent} · waiting for the next task"},
+    "desktop_command.turn_end_title_bare": {"ko": "다음 일 기다림", "en": "Waiting for the next task"},
+    "desktop_command.turn_end_body": {
+        "ko": "하던 일을 멈추고 다음 일을 기다려요 — 눌러서 대화를 확인해 주세요",
+        "en": "It stopped and is waiting for the next task — tap to check the conversation",
+    },
     "agent_permission.notice_body": {
         "ko": "{tool} 허용을 기다리고 있어요 — 눌러서 확인해 주세요",
         "en": "Waiting for you to allow {tool} — tap to check",

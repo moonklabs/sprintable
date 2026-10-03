@@ -186,6 +186,9 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     row.ended_at = report.at if report.state == "stopped" else None
     await touch_device(db, setup.id)
     await db.flush()
+    from app.services.desktop_commands import on_session_reported  # story #4534 — a [지금 지시]'s turn end
+
+    await on_session_reported(db, setup, session_key, report.state, report.at)
     return row
 
 
@@ -217,6 +220,12 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
             row.state, row.state_at, row.ended_at = "stopped", now, now
     await touch_device(db, setup.id)
     await db.flush()
+    from app.services.desktop_commands import on_session_reported  # story #4534 — every line of a snapshot is a report too
+
+    for s in snapshot.sessions:
+        await on_session_reported(db, setup, s.session_key, s.state, s.at)
+    for row in existing.values():
+        await on_session_reported(db, setup, row.session_key, "stopped", now)
     return len(snapshot.sessions)
 
 
@@ -252,6 +261,10 @@ class StartSessionPayload(_Payload):
 class SendPromptPayload(_Payload):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
     text: str = Field(min_length=1, max_length=PROMPT_MAX)
+    # story #4534 (contract v1.9) — the conversation the agent answers in, and the phone's signed blob (its conversation_id
+    # and text hash inside — the daemon wraps «this conversation» from the signed value only); carried as is
+    conversation_id: uuid.UUID
+    signed: str = Field(min_length=1, max_length=16384)
 
 
 class AnswerApprovalPayload(_Payload):
@@ -263,6 +276,7 @@ class AnswerApprovalPayload(_Payload):
 
 class StopSessionPayload(_Payload):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+    signed: str = Field(min_length=1, max_length=16384)  # story #4534 — every command a person makes is signed (contract v1.9.1)
 
 
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
@@ -313,11 +327,16 @@ async def enqueue_command(
     cmd = DesktopCommand(
         id=uuid.uuid4(), setup_id=setup.id, device_seq=seq, kind=kind, session_key=body.get("session_key"), payload=body,
         idempotency_key=idempotency_key, requested_by=requested_by, state="queued",
+        conversation_id=_uuid_or_none(body.get("conversation_id")),
     )
     db.add(cmd)
     await db.flush()
     _schedule_wake_after_commit(db, setup.id, seq)
     return cmd
+
+
+def _uuid_or_none(value) -> uuid.UUID | None:
+    return uuid.UUID(str(value)) if value else None
 
 
 async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int) -> list[DesktopCommand]:
@@ -364,6 +383,10 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         from app.services.agent_permissions import on_answer_result
 
         await on_answer_result(db, setup.id, (cmd.payload or {}).get("request_id"), result.state, result.result_code)
+    if cmd.kind == "stop_session":  # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice)
+        from app.services.desktop_commands import on_command_done
+
+        await on_command_done(db, cmd)
     await touch_device(db, setup.id)
     await db.flush()
     return cmd

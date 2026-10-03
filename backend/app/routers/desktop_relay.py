@@ -146,12 +146,16 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
 
 @router.put("/relay/sessions")
 async def put_sessions(body: relay.SessionSnapshot, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    from app.services import desktop_commands
+
     try:
         n = await relay.replace_sessions(db, setup, body)
+        watchers = await desktop_commands.session_watchers(db, {s.agent_member_id for s in body.sessions})
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
     await db.commit()
+    desktop_commands.push_session_changed(watchers)  # story #4534 — the DM headers read the chip again
     return {"sessions": n}
 
 
@@ -162,12 +166,16 @@ async def post_session_state(
     setup: DesktopSetup = Depends(_device),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.services import desktop_commands
+
     try:
         row = await relay.record_session_state(db, setup, session_key, body)
+        watchers = await desktop_commands.session_watchers(db, {body.agent_member_id})
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
     await db.commit()
+    desktop_commands.push_session_changed(watchers)  # story #4534 — the DM headers read the chip again
     return {"session_key": row.session_key, "state": row.state, "report_seq": row.last_report_seq}
 
 

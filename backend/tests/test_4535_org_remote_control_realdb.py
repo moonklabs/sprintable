@@ -85,7 +85,7 @@ async def test_while_off_the_device_line_is_off_as_a_whole_and_the_token_stays(w
         from app.services.desktop_relay import DesktopRelayError
 
         with pytest.raises(DesktopRelayError) as e:
-            await _enqueue(device["setup_id"], "stop_session", {"session_key": "s-1"}, "k-off")
+            await _enqueue(device["setup_id"], "stop_session", {"session_key": "s-1", "signed": "sig"}, "k-off")
         assert (e.value.status, e.value.code) == (409, "remote_control_off")
         live = await _sql(fetch=f"SELECT count(*) FROM desktop_device_tokens WHERE setup_id = '{device['setup_id']}' AND revoked_at IS NULL")
         assert live[0][0] == 1  # the token is not revoked — turning on again needs no new confirmation
@@ -104,8 +104,8 @@ async def test_turning_off_rejects_the_open_commands_and_turning_on_wakes_each_d
                                   f"WHERE event_type = 'desktop.remote_control' AND source_entity_id = '{sid}' ORDER BY recipient_id"))
         assert [(r[0], r[1], r[2]) for r in woken] == [(a, sid, "true") for a in agents]
 
-        await _enqueue(sid, "stop_session", {"session_key": "s-1"}, "k1")
-        await _enqueue(sid, "stop_session", {"session_key": "s-2"}, "k2")
+        await _enqueue(sid, "stop_session", {"session_key": "s-1", "signed": "sig"}, "k1")
+        await _enqueue(sid, "stop_session", {"session_key": "s-2", "signed": "sig"}, "k2")
         await _sql(f"UPDATE desktop_commands SET state = 'done' WHERE setup_id = '{sid}' AND idempotency_key = 'k2'")
         assert (await _switch(c, False)).status_code == 200
         rows = await _sql(fetch=f"SELECT idempotency_key, state, result_code FROM desktop_commands WHERE setup_id = '{sid}' ORDER BY idempotency_key")
