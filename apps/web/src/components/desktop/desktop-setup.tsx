@@ -30,6 +30,10 @@ import {
  * 링크로만(웹 쪽 preload 0 — 셸이 그 링크를 받아 새 코드로 다시 연다).
  */
 export const SETUP_APP_LINK = 'ai.sprintable:/desktop/setup';
+/** story 4504 AC2 (PO 14:47Z): «앱 열기» on the page that came without values — «take me back to my setup», not «start another».
+ * The app opens the setup it already launched for the same account (a new one for another account); every other button keeps
+ * SETUP_APP_LINK (a new setup), the disconnected card's «앱에서 다시 시작» among them. Only the web knows which button it was. */
+export const SETUP_REOPEN_LINK = `${SETUP_APP_LINK}?intent=reopen`;
 const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
 // each provider's recommended install (no Node.js needed; fixed provider addresses with no version in them — PO 13:10Z from
 // code.claude.com/docs/en/setup and github.com/openai/codex)
@@ -839,7 +843,7 @@ export function OpenInDesktopApp() {
     <Card className="break-keep flex flex-col gap-3 p-6">
       <h1 className="text-lg font-semibold">{t('direct.title')}</h1>
       <p className="text-sm text-muted-foreground">{t('direct.body')}</p>
-      <div><Button asChild><a href={SETUP_APP_LINK}>{t('direct.action')}</a></Button></div>
+      <div><Button asChild><a href={SETUP_REOPEN_LINK}>{t('direct.action')}</a></Button></div>
     </Card>
   );
 }
