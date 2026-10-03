@@ -10,6 +10,11 @@ gets it first when it comes back — the stream's own order). What fires them, w
 
 At set time (PO 06:01Z · 06:02Z): a PR the server has never heard of is refused (PR_NOT_SEEN — one push or CI run makes it
 known), a PR closed without merging too (PR_CLOSED_UNMERGED); a watch whose event already happened fires at once.
+
+Tenancy (PO 06:51Z): PRs are recorded per org (the org the webhook resolved to — app installation, or the legacy repo-owner
+exactly-one match); an agent watches only repos its own org owns that way, and a repo it does not is answered exactly as a PR
+never seen (no signal that another org's PR exists). `deploy.serving` is for orgs that own the service's repo. A capped number
+of live watches per agent.
 """
 from __future__ import annotations
 
@@ -20,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TTL = timedelta(days=7)
 MAX_TTL_HOURS = 720  # 30 days
+# an agent waits on a handful of PRs · checks · deploys at a time; 50 bounds what one event scans and what a runaway loop can
+# pile up (PO 06:51Z)
+MAX_LIVE_WATCHES_PER_AGENT = 50
+SERVICE_REPOS = {"backend": "moonklabs/sprintable"}  # the repo each servable service is built from
 _REPO = r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
 _SHA = r"^[0-9a-fA-F]{7,40}$"
 
@@ -97,18 +106,27 @@ def _parse_target(condition: str, target: dict) -> PrTarget | ServingTarget:
 # ── the server's own record of PRs and servings ──────────────────────────────────────────────────────────────────────────
 
 
-async def _pr(db: AsyncSession, repo: str, number: int) -> GithubPullRequest | None:
-    return (await db.execute(
-        select(GithubPullRequest).where(GithubPullRequest.repo == repo, GithubPullRequest.number == number)
-    )).scalar_one_or_none()
+async def org_of_repo(db: AsyncSession, repo: str) -> uuid.UUID | None:
+    """The org that owns `repo` the way the GitHub webhook resolves it (its legacy repo-owner exactly-one match — the same
+    rule, so a watch and the events it waits on always agree on the org)."""
+    from app.routers.verdict_capture import _resolve_legacy_org_by_repo_owner
+
+    org_id, _reason = await _resolve_legacy_org_by_repo_owner(db, repo)
+    return org_id
 
 
-async def _merge_of_commit(db: AsyncSession, sha: str) -> GithubPullRequest | None:
-    """The recorded merge whose merge commit is `sha` (a 7–40 hex prefix of it)."""
+async def _pr(db: AsyncSession, org_id: uuid.UUID, repo: str, number: int) -> GithubPullRequest | None:
+    return (await db.execute(select(GithubPullRequest).where(
+        GithubPullRequest.org_id == org_id, GithubPullRequest.repo == repo, GithubPullRequest.number == number,
+    ))).scalar_one_or_none()
+
+
+async def _merge_of_commit(db: AsyncSession, org_id: uuid.UUID, sha: str) -> GithubPullRequest | None:
+    """The org's recorded merge whose merge commit is `sha` (a 7–40 hex prefix of it)."""
     sha = sha.lower()
-    rows = (await db.execute(
-        select(GithubPullRequest).where(GithubPullRequest.merge_commit_sha.like(f"{sha}%")).limit(2)
-    )).scalars().all()
+    rows = (await db.execute(select(GithubPullRequest).where(
+        GithubPullRequest.org_id == org_id, GithubPullRequest.merge_commit_sha.like(f"{sha}%"),
+    ).limit(2))).scalars().all()
     return rows[0] if len(rows) == 1 else None
 
 
@@ -118,14 +136,14 @@ async def _latest_serving(db: AsyncSession, service: str) -> DeployServing | Non
     )).scalar_one_or_none()
 
 
-async def _serving_fact(db: AsyncSession, target: ServingTarget, serving: DeployServing) -> dict | None:
-    """The fact when `serving` serves the target, else None (PO 06:00Z rule)."""
+async def _serving_fact(db: AsyncSession, org_id: uuid.UUID, target: ServingTarget, serving: DeployServing) -> dict | None:
+    """The fact when `serving` serves the target, else None (PO 06:00Z rule) — read from the watching org's own record."""
     served = serving.commit_sha.lower()
-    line = await _merge_of_commit(db, served)
+    line = await _merge_of_commit(db, org_id, served)
     base = {"service": serving.service, "revision": serving.revision, "commit": served,
             "served_since": serving.first_request_at.isoformat() if serving.first_request_at else None}
     if target.pr is not None:
-        mine = await _pr(db, target.repo, target.pr)
+        mine = await _pr(db, org_id, target.repo, target.pr)
         if mine is None or mine.merged_at is None or not mine.merge_commit_sha:
             return None
         if mine.merge_commit_sha.lower() == served:
@@ -135,7 +153,7 @@ async def _serving_fact(db: AsyncSession, target: ServingTarget, serving: Deploy
         return None
     if served.startswith(target.commit) or target.commit.startswith(served):
         return {**base, "line": "known" if line else "unknown"}
-    mine = await _merge_of_commit(db, target.commit)
+    mine = await _merge_of_commit(db, org_id, target.commit)
     if mine and line and line.repo == mine.repo and line.base_ref == mine.base_ref and mine.merged_at <= line.merged_at:
         return {**base, "line": "known", "served_merge_pr": line.number}
     return None
@@ -176,8 +194,12 @@ def _live():
     return and_(AgentWatch.status == "active", AgentWatch.expires_at > _now())
 
 
-async def _waiting(db: AsyncSession, condition: str, *, repo: str | None = None, pr: int | None = None) -> list[AgentWatch]:
+async def _waiting(
+    db: AsyncSession, condition: str, *, org_id: uuid.UUID | None = None, repo: str | None = None, pr: int | None = None,
+) -> list[AgentWatch]:
     q = select(AgentWatch).where(AgentWatch.condition == condition, _live())
+    if org_id is not None:
+        q = q.where(AgentWatch.org_id == org_id)
     if repo is not None:
         q = q.where(AgentWatch.target["repo"].astext == repo, AgentWatch.target["pr"].astext == str(pr))
     return list((await db.execute(q.with_for_update(skip_locked=True))).scalars().all())
@@ -190,9 +212,17 @@ async def create_watch(
     db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent_member_id: uuid.UUID, body: WatchCreate,
 ) -> AgentWatch:
     target = _parse_target(body.condition, body.target)
+    live = (await db.execute(
+        select(func.count()).select_from(AgentWatch).where(AgentWatch.agent_member_id == agent_member_id, _live())
+    )).scalar_one()
+    if live >= MAX_LIVE_WATCHES_PER_AGENT:
+        raise WatchError(429, "WATCH_LIMIT", f"an agent keeps at most {MAX_LIVE_WATCHES_PER_AGENT} live watches — clear one first")
+    if isinstance(target, ServingTarget) and await org_of_repo(db, SERVICE_REPOS[target.service]) != org_id:
+        raise WatchError(422, "SERVICE_NOT_CONNECTED", "this org does not own the repo that service is built from")
     fire_now: dict | None = None
     if isinstance(target, PrTarget) or target.pr is not None:
-        pr = await _pr(db, target.repo, target.pr)
+        # a repo the org does not own is answered as a PR never seen — no signal about another org's PRs (PO 06:51Z)
+        pr = await _pr(db, org_id, target.repo, target.pr) if await org_of_repo(db, target.repo) == org_id else None
         if pr is None:
             raise WatchError(422, "PR_NOT_SEEN", "the server has not seen this PR yet — try again after a push or a CI run")
         if pr.state == "closed" and pr.merged_at is None:
@@ -212,7 +242,7 @@ async def create_watch(
     if body.condition == "deploy.serving":
         serving = await _latest_serving(db, target.service)
         if serving is not None:
-            fire_now = await _serving_fact(db, target, serving)
+            fire_now = await _serving_fact(db, org_id, target, serving)
             if fire_now:
                 fire_now["already"] = True
     if fire_now:
@@ -261,10 +291,10 @@ def _ts(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-async def _upsert_pr(db: AsyncSession, repo: str, number: int, *, state: str | None, base_ref: str | None,
+async def _upsert_pr(db: AsyncSession, org_id: uuid.UUID, repo: str, number: int, *, state: str | None, base_ref: str | None,
                      merged_at: datetime | None, merge_commit_sha: str | None) -> None:
     now = _now()
-    values = {"id": uuid.uuid4(), "repo": repo, "number": number, "state": state or "open", "base_ref": base_ref,
+    values = {"id": uuid.uuid4(), "org_id": org_id, "repo": repo, "number": number, "state": state or "open", "base_ref": base_ref,
               "merged_at": merged_at, "merge_commit_sha": merge_commit_sha.lower() if merge_commit_sha else None,
               "first_seen_at": now, "last_seen_at": now}
     update = {"last_seen_at": now}
@@ -274,15 +304,35 @@ async def _upsert_pr(db: AsyncSession, repo: str, number: int, *, state: str | N
                        "merged_at": merged_at if merged_at is not None else t.c.merged_at,
                        "merge_commit_sha": values["merge_commit_sha"] if merged_at is not None else t.c.merge_commit_sha})
     await db.execute(pg_insert(GithubPullRequest).values(**values).on_conflict_do_update(
-        constraint="uq_github_pull_requests_repo_number", set_=update,
+        constraint="uq_github_pull_requests_org_repo_number", set_=update,
     ))
 
 
-async def on_github_event(db: AsyncSession, event: str, payload: dict) -> int:
-    """Called at the end of the webhook handler, in its transaction (after the delivery-id dedup). Returns watches fired."""
+async def _event_org(db: AsyncSession, payload: dict, repo: str, resolved: uuid.UUID | None) -> uuid.UUID | None:
+    """The org the webhook resolved to; else the handler's own rule — an app installation, or the legacy repo-owner match."""
+    if resolved is not None:
+        return resolved
+    installation_id = (payload.get("installation") or {}).get("id")
+    if installation_id:
+        from app.models.github_installation import GithubInstallation
+
+        org = (await db.execute(select(GithubInstallation.org_id).where(
+            GithubInstallation.installation_id == int(installation_id), GithubInstallation.suspended_at.is_(None),
+        ))).scalar_one_or_none()
+        if org is not None:
+            return org
+    return await org_of_repo(db, repo)
+
+
+async def on_github_event(db: AsyncSession, event: str, payload: dict, *, org_id: uuid.UUID | None = None) -> int:
+    """Called at the end of the webhook handler, in its transaction (after the delivery-id dedup) — `org_id` is the org the
+    handler resolved. Records the PR under that org and fires only that org's watches. Returns watches fired."""
     repo = _repo_of(payload)
     if repo is None:
         return 0
+    org_id = await _event_org(db, payload, repo, org_id)
+    if org_id is None:
+        return 0  # no org owns it: nothing recorded, nothing fired
     fired = 0
     if event == "pull_request" and isinstance(payload.get("pull_request"), dict):
         pr = payload["pull_request"]
@@ -290,13 +340,13 @@ async def on_github_event(db: AsyncSession, event: str, payload: dict) -> int:
         if number <= 0:
             return 0
         merged_at = _ts(pr.get("merged_at")) if pr.get("merged") else None
-        await _upsert_pr(db, repo, number, state=pr.get("state") if pr.get("state") in ("open", "closed") else None,
+        await _upsert_pr(db, org_id, repo, number, state=pr.get("state") if pr.get("state") in ("open", "closed") else None,
                          base_ref=(pr.get("base") or {}).get("ref"), merged_at=merged_at,
                          merge_commit_sha=pr.get("merge_commit_sha") if merged_at else None)
         if payload.get("action") == "closed" and merged_at is not None:
             fact = {"merged_at": merged_at.isoformat(), "merge_commit": (pr.get("merge_commit_sha") or "").lower(),
                     "base": (pr.get("base") or {}).get("ref"), "merged_by": ((pr.get("merged_by") or {}).get("login"))}
-            for w in await _waiting(db, "github.pr_merged", repo=repo, pr=number):
+            for w in await _waiting(db, "github.pr_merged", org_id=org_id, repo=repo, pr=number):
                 await _fire(db, w, fact)
                 fired += 1
     elif event == "check_suite" and payload.get("action") == "completed" and isinstance(payload.get("check_suite"), dict):
@@ -305,10 +355,10 @@ async def on_github_event(db: AsyncSession, event: str, payload: dict) -> int:
             number = int(ref.get("number") or 0)
             if number <= 0:
                 continue
-            await _upsert_pr(db, repo, number, state=None, base_ref=None, merged_at=None, merge_commit_sha=None)
+            await _upsert_pr(db, org_id, repo, number, state=None, base_ref=None, merged_at=None, merge_commit_sha=None)
             fact = {"conclusion": suite.get("conclusion"), "head_sha": (suite.get("head_sha") or "").lower(),
                     "app": ((suite.get("app") or {}).get("slug"))}
-            for w in await _waiting(db, "github.pr_checks_completed", repo=repo, pr=number):
+            for w in await _waiting(db, "github.pr_checks_completed", org_id=org_id, repo=repo, pr=number):
                 await _fire(db, w, fact)
                 fired += 1
     return fired
@@ -327,7 +377,7 @@ async def record_serving(db: AsyncSession, *, service: str, revision: str, commi
     for w in await _waiting(db, "deploy.serving"):
         if w.target.get("service") != service:
             continue
-        fact = await _serving_fact(db, ServingTarget.model_validate(w.target), serving)
+        fact = await _serving_fact(db, w.org_id, ServingTarget.model_validate(w.target), serving)
         if fact:
             await _fire(db, w, fact)
             fired += 1

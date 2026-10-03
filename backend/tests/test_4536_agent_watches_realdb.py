@@ -16,7 +16,10 @@ from unittest.mock import patch
 import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
+    ORG,
+    ORG2,
     OWNER,
+    PROJ,
     _addresses,
     _client,
     _code,
@@ -31,7 +34,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 
 pytestmark = pytest.mark.anyio
 
-REPO = "moonklabs/d4536"
+REPO = "moonklabs/d4536"  # owned by ORG through its GitHub installation (account «moonklabs») — the platform repo too
 SECRET = "d4536-webhook-secret"
 SHA = lambda n: hashlib.sha1(f"d4536-{n}".encode()).hexdigest()  # noqa: E731 — distinct even in a 7-char prefix
 
@@ -39,10 +42,19 @@ SHA = lambda n: hashlib.sha1(f"d4536-{n}".encode()).hexdigest()  # noqa: E731 �
 @pytest.fixture(autouse=True)
 async def _fresh_github_and_serving_records():
     """These two tables are not org-scoped (the world's cleanup does not reach them): each test starts from none of its own."""
-    clean = (f"DELETE FROM github_pull_requests WHERE repo = '{REPO}'", "DELETE FROM deploy_servings WHERE revision LIKE 'be-%'")
+    clean = (f"DELETE FROM github_pull_requests WHERE repo = '{REPO}'", "DELETE FROM deploy_servings WHERE revision LIKE 'be-%'",
+             "DELETE FROM github_installation WHERE installation_id = 4536001")
     await _sql(*clean)
     yield
     await _sql(*clean)
+
+
+@pytest.fixture
+async def owned(world):
+    """ORG owns the «moonklabs» repos through its GitHub installation (the webhook's repo-owner rule)."""
+    await _sql(f"INSERT INTO github_installation (id, org_id, installation_id, account_login) "
+               f"VALUES (gen_random_uuid(), '{ORG}', 4536001, 'moonklabs')")
+    yield
 
 
 async def _agent(c, name="d4536 mac"):
@@ -84,7 +96,7 @@ async def _watch(c, h, condition, target, **extra):
     return await c.post("/api/v2/watches", json={"condition": condition, "target": target, **extra}, headers=h)
 
 
-async def test_a_merge_through_the_webhook_fires_the_watch_once_on_the_agents_stream(world):
+async def test_a_merge_through_the_webhook_fires_the_watch_once_on_the_agents_stream(owned):
     async with _client() as c:
         agent, h = await _agent(c)
         await _hook(c, "pull_request", _pr_event(101, "opened"))
@@ -101,7 +113,7 @@ async def test_a_merge_through_the_webhook_fires_the_watch_once_on_the_agents_st
         assert [x["status"] for x in listed] == ["fired"]
 
 
-async def test_set_time_refusals_and_target_shapes(world):
+async def test_set_time_refusals_and_target_shapes(owned):
     async with _client() as c:
         _agent_id, h = await _agent(c)
         r = await _watch(c, h, "github.pr_merged", {"repo": REPO, "pr": 999})
@@ -120,7 +132,7 @@ async def test_set_time_refusals_and_target_shapes(world):
                              headers=_person(OWNER))).status_code == 403  # a person has no watches here
 
 
-async def test_another_agents_watch_is_not_found_and_never_listed(world):
+async def test_another_agents_watch_is_not_found_and_never_listed(owned):
     async with _client() as c:
         _a, ha = await _agent(c, "mac a")
         _b, hb = await _agent(c, "mac b")
@@ -133,7 +145,7 @@ async def test_another_agents_watch_is_not_found_and_never_listed(world):
         assert await _fired_events(_a) == []  # a cleared watch never fires
 
 
-async def test_a_completed_check_suite_fires_the_checks_watch(world):
+async def test_a_completed_check_suite_fires_the_checks_watch(owned):
     async with _client() as c:
         agent, h = await _agent(c)
         await _hook(c, "pull_request", _pr_event(104, "opened"))
@@ -145,7 +157,7 @@ async def test_a_completed_check_suite_fires_the_checks_watch(world):
         assert len(ev) == 1 and ev[0][1]["conclusion"] == "failure"
 
 
-async def test_a_serving_fires_my_pr_by_the_merge_line_and_not_a_later_one(world):
+async def test_a_serving_fires_my_pr_by_the_merge_line_and_not_a_later_one(owned):
     """PO 06:00Z — the served commit is a recorded merge: every earlier merge on that repo · base is served."""
     from app.core.database import async_session_factory
     from app.services.agent_watches import record_serving
@@ -172,7 +184,7 @@ async def test_a_serving_fires_my_pr_by_the_merge_line_and_not_a_later_one(world
         assert [e[0] for e in await _fired_events(agent)] == [w105, w107]
 
 
-async def test_a_commit_not_on_record_matches_only_itself_and_says_the_line_is_unknown(world):
+async def test_a_commit_not_on_record_matches_only_itself_and_says_the_line_is_unknown(owned):
     from app.core.database import async_session_factory
     from app.services.agent_watches import record_serving
 
@@ -186,7 +198,7 @@ async def test_a_commit_not_on_record_matches_only_itself_and_says_the_line_is_u
         assert len(ev) == 1 and ev[0][1]["line"] == "unknown"
 
 
-async def test_a_watch_whose_event_already_happened_fires_when_set(world):
+async def test_a_watch_whose_event_already_happened_fires_when_set(owned):
     from app.core.database import async_session_factory
     from app.services.agent_watches import record_serving
 
@@ -203,7 +215,7 @@ async def test_a_watch_whose_event_already_happened_fires_when_set(world):
         assert {e[1].get("already") for e in await _fired_events(agent)} == {True}
 
 
-async def test_an_expired_watch_never_fires_and_reads_expired(world):
+async def test_an_expired_watch_never_fires_and_reads_expired(owned):
     async with _client() as c:
         agent, h = await _agent(c)
         await _hook(c, "pull_request", _pr_event(109, "opened"))
@@ -238,3 +250,60 @@ def test_a_revision_reports_once_on_its_first_outside_request(monkeypatch):
     svc.note_request("/api/v2/stories")
     svc.note_request("/api/v2/stories")
     assert calls == ["sprintable-backend-dev-00042-abc"]  # once
+
+
+
+async def test_another_orgs_repo_is_answered_exactly_as_a_pr_never_seen(owned):
+    """PO 06:51Z — an org watches only repos it owns; another org's PR gets the same 422 as one never seen (no existence
+    signal), and the platform's deploys are only for orgs that own its repo."""
+    from app.core.database import async_session_factory
+    from app.services.agent_watches import WatchCreate, WatchError, create_watch
+
+    async with _client() as c:
+        await _hook(c, "pull_request", _pr_event(110, "opened"))  # ORG's PR
+    answers = []
+    for pr in (110, 99999):  # ORG's real PR · a PR nobody has
+        async with async_session_factory() as s:
+            with pytest.raises(WatchError) as e:
+                await create_watch(s, org_id=ORG2, project_id=PROJ, agent_member_id=uuid.uuid4(),
+                                   body=WatchCreate(condition="github.pr_merged", target={"repo": REPO, "pr": pr}))
+        answers.append((e.value.status, e.value.code, e.value.message))
+    assert answers[0] == answers[1] and answers[0][1] == "PR_NOT_SEEN"
+    async with async_session_factory() as s:
+        with pytest.raises(WatchError) as e:
+            await create_watch(s, org_id=ORG2, project_id=PROJ, agent_member_id=uuid.uuid4(),
+                               body=WatchCreate(condition="deploy.serving", target={"service": "backend", "commit": "abcdef1"}))
+    assert e.value.code == "SERVICE_NOT_CONNECTED"
+
+
+async def test_an_event_fires_only_its_own_orgs_watches(owned):
+    """A watch row of another org on the same repo · PR (written straight, past the set-time check) never fires on this
+    org's merge."""
+    async with _client() as c:
+        agent, h = await _agent(c)
+        await _hook(c, "pull_request", _pr_event(111, "opened"))
+        mine = (await _watch(c, h, "github.pr_merged", {"repo": REPO, "pr": 111})).json()["id"]
+        stranger = uuid.uuid4()
+        await _sql(f"INSERT INTO agent_watches (id, org_id, project_id, agent_member_id, condition, target, status, expires_at) "
+                   f"VALUES (gen_random_uuid(), '{ORG2}', '{PROJ}', '{stranger}', 'github.pr_merged', "
+                   f"'{{\"repo\": \"{REPO}\", \"pr\": 111}}', 'active', now() + interval '1 day')")
+        await _hook(c, "pull_request", _pr_event(111, "closed", merged=True, merged_at=_ts(5), sha=SHA(111)))
+        assert [e[0] for e in await _fired_events(agent)] == [mine]
+        assert await _fired_events(stranger) == []
+
+
+async def test_an_agent_keeps_a_bounded_number_of_live_watches(owned):
+    from app.core.database import async_session_factory
+    from app.services.agent_watches import MAX_LIVE_WATCHES_PER_AGENT, WatchCreate, WatchError, create_watch
+
+    agent = uuid.uuid4()
+    async with async_session_factory() as s:
+        for i in range(MAX_LIVE_WATCHES_PER_AGENT):
+            await create_watch(s, org_id=ORG, project_id=PROJ, agent_member_id=agent,
+                               body=WatchCreate(condition="deploy.serving", target={"service": "backend", "commit": SHA(5000 + i)[:12]}))
+        await s.commit()
+    async with async_session_factory() as s:
+        with pytest.raises(WatchError) as e:
+            await create_watch(s, org_id=ORG, project_id=PROJ, agent_member_id=agent,
+                               body=WatchCreate(condition="deploy.serving", target={"service": "backend", "commit": "abcdef1"}))
+    assert (e.value.status, e.value.code) == (429, "WATCH_LIMIT")

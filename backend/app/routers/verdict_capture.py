@@ -1040,7 +1040,7 @@ async def github_webhook(
             async with session.begin_nested():
                 from app.services.agent_watches import on_github_event
 
-                await on_github_event(session, event, payload)
+                await on_github_event(session, event, payload, org_id=delivery.org_id)
         except Exception:  # noqa: BLE001
             logger.warning("agent watches: github event not matched delivery=%s event=%s", x_github_delivery, event, exc_info=True)
         delivery.status = status_label

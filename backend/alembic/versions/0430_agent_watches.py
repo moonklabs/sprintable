@@ -2,8 +2,9 @@
 
 - agent_watches: an agent's watch (condition CHECK · target JSONB · status CHECK · expiry) — fired once, delivered to that
   agent's stream as a `watch.fired` Event.
-- github_pull_requests: what the GitHub webhooks have told about a PR (open/closed · merged · merge commit · base) — the
-  server's own record (no GitHub API polling); a watch on a PR the server has never seen is refused at set time.
+- github_pull_requests: what the GitHub webhooks have told an org about a PR (open/closed · merged · merge commit · base) —
+  the server's own record (no GitHub API polling), kept per org (the org the webhook resolved to — PO 06:51Z: an org sees
+  only its own repos' PRs); a watch on a PR its org has never seen is refused at set time.
 - deploy_servings: a backend revision's own report of the commit it serves, made on its first outside request (no new public
   path · no secret · a 0%-traffic revision gets none) — UNIQUE per revision.
 """
@@ -48,6 +49,7 @@ def upgrade() -> None:
     op.create_table(
         "github_pull_requests",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("org_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
         sa.Column("repo", sa.Text(), nullable=False),
         sa.Column("number", sa.Integer(), nullable=False),
         sa.Column("base_ref", sa.Text(), nullable=True),
@@ -56,10 +58,10 @@ def upgrade() -> None:
         sa.Column("merge_commit_sha", sa.Text(), nullable=True),
         sa.Column("first_seen_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("last_seen_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.UniqueConstraint("repo", "number", name="uq_github_pull_requests_repo_number"),
+        sa.UniqueConstraint("org_id", "repo", "number", name="uq_github_pull_requests_org_repo_number"),
         sa.CheckConstraint("state IN ('open', 'closed')", name="ck_github_pull_requests_state"),
     )
-    op.create_index("ix_github_pull_requests_merge_commit", "github_pull_requests", ["merge_commit_sha"])
+    op.create_index("ix_github_pull_requests_org_merge_commit", "github_pull_requests", ["org_id", "merge_commit_sha"])
     op.create_table(
         "deploy_servings",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -74,7 +76,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("deploy_servings")
-    op.drop_index("ix_github_pull_requests_merge_commit", table_name="github_pull_requests")
+    op.drop_index("ix_github_pull_requests_org_merge_commit", table_name="github_pull_requests")
     op.drop_table("github_pull_requests")
     op.drop_index("ix_agent_watches_condition_active", table_name="agent_watches")
     op.drop_index("ix_agent_watches_agent_status", table_name="agent_watches")

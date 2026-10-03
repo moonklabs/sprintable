@@ -44,16 +44,18 @@ class AgentWatch(Base):
 
 
 class GithubPullRequest(Base):
-    """What the webhooks said about a PR — upserted by every pull_request webhook and by a check_suite's PR numbers."""
+    """What the webhooks told an org about a PR — upserted by every pull_request webhook and by a check_suite's PR numbers,
+    under the org the webhook resolved to (PO 06:51Z: an org reads only its own repos' PRs)."""
 
     __tablename__ = "github_pull_requests"
     __table_args__ = (
-        UniqueConstraint("repo", "number", name="uq_github_pull_requests_repo_number"),
+        UniqueConstraint("org_id", "repo", "number", name="uq_github_pull_requests_org_repo_number"),
         CheckConstraint("state IN ('open', 'closed')", name="ck_github_pull_requests_state"),
-        Index("ix_github_pull_requests_merge_commit", "merge_commit_sha"),
+        Index("ix_github_pull_requests_org_merge_commit", "org_id", "merge_commit_sha"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     repo: Mapped[str] = mapped_column(Text, nullable=False)  # «owner/name», lowercase
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     base_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
