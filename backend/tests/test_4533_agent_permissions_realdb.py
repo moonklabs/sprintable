@@ -340,3 +340,40 @@ async def test_the_recipient_gets_one_bell_line_with_the_agent_and_tool_only(wor
         assert "git push" not in str(payload) and "secret-project" not in str(payload)
         listed = await c.get("/api/v2/event-notifications", headers=_person(OWNER))
         assert listed.status_code == 200 and "agent.permission_request" in listed.text, listed.text[:300]
+
+
+async def test_only_the_recipient_with_their_own_paired_phone_answers_and_only_a_phone_owner_or_admin_removes_a_pair(world):
+    """Qadir 4941 df93353 — three checks the code has that no test held:
+    ① someone else with a phone paired to the same computer answers a request sent to another → 404, still pending;
+    ② the recipient answers with another person's paired phone id → 409 phone_not_paired, still pending (the record must
+       not name someone else's phone);
+    ③ a person who is neither the phone's owner nor an org owner/admin removes the pair → 404, the pair stays."""
+    await _plain_member()
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4533j")
+        token, sid = device["device_token"], device["setup_id"]
+        agent = await _with_session(c, device)
+        owner_phone, owner_der = await _register(c)
+        plain_phone, plain_der = await _register(c, PLAIN)
+        await _pair(c, token, owner_der, plain_der)  # both paired with this computer; the chain's first (the owner) receives
+        made = (await _post_ask(c, device, _ask(agent))).json()
+        rid = made["id"]
+
+        def state():
+            return _sql(fetch=f"SELECT state FROM agent_permission_requests WHERE id = '{rid}'")
+
+        other = await c.post(f"{REQS}/{rid}/answer", json=_answer(plain_phone), headers=_person(PLAIN))  # ①
+        assert other.status_code == 404, other.text
+        assert (await state())[0][0] == "pending"
+
+        borrowed = await c.post(f"{REQS}/{rid}/answer", json=_answer(plain_phone), headers=_person(OWNER))  # ②
+        assert (borrowed.status_code, borrowed.json()["error"]["code"]) == (409, "phone_not_paired")
+        assert (await state())[0][0] == "pending"
+
+        taken = await c.delete(f"{PHONES}/{owner_phone}/pairs/{sid}", headers=_person(PLAIN))  # ③ a plain member, not its owner
+        assert taken.status_code == 404, taken.text
+        left = await _sql(fetch=f"SELECT removed_at FROM remote_device_pairings WHERE remote_device_id = '{owner_phone}' AND setup_id = '{sid}'")
+        assert left[0][0] is None
+
+        mine = await c.post(f"{REQS}/{rid}/answer", json=_answer(owner_phone), headers=_person(OWNER))  # the real answer still goes
+        assert mine.status_code == 200
