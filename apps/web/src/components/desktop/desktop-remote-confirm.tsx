@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,8 @@ import { useFlatHref } from '@/hooks/use-flat-href';
  * story #4548 (E-DESKTOP-2 B-1 · 명세 모음 B-1 «②'» · 유나 «4548 서버 코드 ↔ 사람 문구» 표) — 이미 설정한 컴퓨터의 원격 제어를
  * 사람이 켜는 확인 한 장. 데스크톱 앱이 `#code=…`로 연다(계약 02d2cf71 §1.1). 코드는 사람에게 보이지 않고 본문으로만 간다.
  * 머리(컴퓨터 이름 · 조직)는 서버가 켤 수 있는 사람에게만 준다 — `not_org_admin`이면 머리 없이 «켤 수 없어요»만(남의 이름 0).
- * 결과 문단은 모두 `role="status"`(유나 10:26Z): [켜기] 뒤 단추가 사라져 초점이 떨어지니, 화면 읽기에 결과가 소리로 닿게.
+ * 결과 문단은 모두 `role="status"`(유나 10:26Z) · [켜기]를 누른 뒤의 결과면 그 문단으로 초점을 옮긴다(유나 10:28Z: 글을 품은 채
+ * 새로 붙는 라이브 영역은 확실히 읽히지 않고, 단추가 사라지면 초점이 페이지로 떨어진다). 첫 불러오기에는 초점을 옮기지 않는다.
  */
 type View =
   | { kind: 'loading' }
@@ -92,6 +93,7 @@ function Confirm({ code }: { code: string }) {
   const t = useTranslations('desktop.remote');
   const flat = useFlatHref();
   const [view, setView] = useState<View>({ kind: 'loading' });
+  const [pressed, setPressed] = useState(false); // the result came from [켜기] — focus goes to it
 
   const peek = useCallback(async () => {
     setView({ kind: 'loading' });
@@ -110,6 +112,7 @@ function Confirm({ code }: { code: string }) {
   const turnOn = async () => {
     if (view.kind !== 'ready') return;
     setView({ ...view, busy: true });
+    setPressed(true);
     const { ok, body } = await post('/api/desktop/device-token-codes/confirm', code);
     setView(ok ? { kind: 'done' } : viewOf(errorCode(body)));
   };
@@ -135,31 +138,38 @@ function Confirm({ code }: { code: string }) {
     );
   }
   if (view.kind === 'done') {
-    return <Card className="break-keep p-6"><p className="text-sm" role="status">{t('done')}</p></Card>;
+    return <Card className="break-keep p-6"><ResultLine focus={pressed} className="text-sm">{t('done')}</ResultLine></Card>;
   }
   if (view.kind === 'notAdmin') {
     return (
       <Card className="break-keep flex flex-col gap-3 p-6">
         <h1 className="text-lg font-semibold">{t('cantTitle')}</h1>
-        <p className="text-sm text-muted-foreground" role="status">{t('notAdmin')}</p>
+        <ResultLine focus={pressed}>{t('notAdmin')}</ResultLine>
       </Card>
     );
   }
   if (view.kind === 'disconnected') {
     return (
       <Card className="break-keep flex flex-col gap-3 p-6">
-        <p className="text-sm text-muted-foreground" role="status">{t('disconnected')}</p>
+        <ResultLine focus={pressed}>{t('disconnected')}</ResultLine>
         <div><Button variant="outline" asChild><a href={flat('/desktop')}>{t('devicesAction')}</a></Button></div>
       </Card>
     );
   }
   if (view.kind === 'expired' || view.kind === 'spent') {
-    return <Card className="break-keep p-6"><p className="text-sm text-muted-foreground" role="status">{view.kind === 'expired' ? t('expired') : t('spent')}</p></Card>;
+    return <Card className="break-keep p-6"><ResultLine focus={pressed}>{view.kind === 'expired' ? t('expired') : t('spent')}</ResultLine></Card>;
   }
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
-      <p className="text-sm text-muted-foreground" role="status">{t('failed')}</p>
+      <ResultLine focus={pressed}>{t('failed')}</ResultLine>
       <div><Button variant="outline" onClick={() => void peek()}>{t('retry')}</Button></div>
     </Card>
   );
+}
+
+/** A result line: always a status; after a press it takes the focus the vanished button had (Yuna 10:28Z). */
+function ResultLine({ focus, className = 'text-sm text-muted-foreground', children }: { focus: boolean; className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (focus) ref.current?.focus(); }, [focus]);
+  return <p ref={ref} tabIndex={-1} role="status" className={`${className} outline-none`}>{children}</p>;
 }

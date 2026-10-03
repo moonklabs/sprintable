@@ -76,6 +76,8 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     expect(fetchWithAuth.mock.calls.every(([url]) => !String(url).includes(CODE))).toBe(true);
     expect(text()).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.');
     expect(spoken()).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.');
+    expect(document.activeElement?.getAttribute('role')).toBe('status'); // the button is gone — focus is on the result (Yuna 10:28Z)
+    expect(document.activeElement?.textContent).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.');
   });
 
   it('cancel sends nothing and goes to «연결된 기기»', async () => {
@@ -91,6 +93,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     await open(`#code=${CODE}`);
     expect(text()).toBe('원격 제어를 켤 수 없어요이 컴퓨터의 원격 제어는 이 조직의 소유자 · 관리자만 켤 수 있어요');
     expect(spoken()).toBe('이 컴퓨터의 원격 제어는 이 조직의 소유자 · 관리자만 켤 수 있어요');
+    expect(document.activeElement).toBe(document.body); // the first read moves no focus
     expect(container.querySelector('button')).toBeNull();
   });
 
@@ -113,6 +116,8 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
     expect(text()).toContain('그 사이 이 컴퓨터의 연결이 끊겨 원격 제어를 켤 수 없어요');
     expect(spoken()).toContain('그 사이 이 컴퓨터의 연결이 끊겨 원격 제어를 켤 수 없어요');
+    expect(document.activeElement?.getAttribute('role')).toBe('status'); // the result paragraph itself, not the page
+    expect(document.activeElement?.textContent).toContain('그 사이 이 컴퓨터의 연결이 끊겨 원격 제어를 켤 수 없어요');
     expect(container.querySelector('a')?.getAttribute('href')).toBe('/desktop');
   });
 
