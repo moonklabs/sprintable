@@ -4,6 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from './phone-pairing';
 import type { PhoneAnswer } from './phone-bridge';
 
+// the libs call fetchWithAuth (the codebase's one way to the BFF); each case hands its server here
+let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
+vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (url: string, init?: RequestInit) => currentFetch(url, init) }));
+const serverFor = <P,>(phoneCall: P, fetch: (url: string, init?: RequestInit) => Promise<Response>) => { currentFetch = fetch; return { phoneCall }; };
+
 const HEAD: OfferHead = {
   offer_id: '0f3c2a1e-1111-4222-8333-944455556666', setup_id: '12345678-9abc-4def-8123-456789abcdef',
   device_name: 'SYJ-MacBook-Pro', expires_at: '2099-01-01T00:00:00Z',
@@ -38,15 +43,15 @@ describe('[4532] phoneLabel', () => {
 describe('[4532] scanPairQr', () => {
   it('passes the head only on to the screen', async () => {
     const phoneCall = shell({ 'pair.scan': { id: 'x', ok: true, ...HEAD } });
-    await expect(scanPairQr({ phoneCall, fetch: server({}) })).resolves.toEqual({ kind: 'confirm', head: HEAD });
+    await expect(scanPairQr(serverFor(phoneCall, server({})))).resolves.toEqual({ kind: 'confirm', head: HEAD });
   });
   it.each([['cancelled', 'cancelled'], ['expired', 'expired'], ['not_ours', 'notOurs'], ['bad', 'notOurs'], ['failed', 'failed']])(
     'the shell says %s → %s', async (code, kind) => {
-      await expect(scanPairQr({ phoneCall: shell({ 'pair.scan': { id: 'x', ok: false, code } }), fetch: server({}) })).resolves.toEqual({ kind });
+      await expect(scanPairQr(serverFor(shell({ 'pair.scan': { id: 'x', ok: false, code } }), server({})))).resolves.toEqual({ kind });
     });
   it('a head with a missing field → failed', async () => {
     const phoneCall = shell({ 'pair.scan': { id: 'x', ok: true, offer_id: HEAD.offer_id } });
-    await expect(scanPairQr({ phoneCall, fetch: server({}) })).resolves.toEqual({ kind: 'failed' });
+    await expect(scanPairQr(serverFor(phoneCall, server({})))).resolves.toEqual({ kind: 'failed' });
   });
 });
 
@@ -65,7 +70,7 @@ describe('[4532] sendPairOffer', () => {
   it('registers the key, asks the shell for the MAC over the QR setup, and offers it', async () => {
     const phoneCall = okShell();
     const fetch = server(okRoutes());
-    await expect(sendPairOffer(HEAD, 'SM-S938N', { phoneCall, fetch })).resolves.toEqual({ kind: 'sent', phoneKeyId: KEY_ID });
+    await expect(sendPairOffer(HEAD, 'SM-S938N', serverFor(phoneCall, fetch))).resolves.toEqual({ kind: 'sent', phoneKeyId: KEY_ID });
     const posts = fetch.mock.calls.filter(([, i]) => i?.method === 'POST').map(([u, i]) => [u, JSON.parse(i!.body as string)]);
     expect(posts).toEqual([
       ['/api/remote-devices', { label: 'SM-S938N', public_key: 'SPKI' }],
@@ -77,28 +82,28 @@ describe('[4532] sendPairOffer', () => {
   it('this phone already paired with that computer → alreadyPaired, nothing offered', async () => {
     const phoneCall = okShell();
     const fetch = server(okRoutes({ 'GET /api/remote-devices': () => res(200, { devices: [{ id: KEY_ID, pairs: [{ setup_id: HEAD.setup_id }] }] }) }));
-    await expect(sendPairOffer(HEAD, 'x', { phoneCall, fetch })).resolves.toEqual({ kind: 'alreadyPaired' });
+    await expect(sendPairOffer(HEAD, 'x', serverFor(phoneCall, fetch))).resolves.toEqual({ kind: 'alreadyPaired' });
     expect(phoneCall).not.toHaveBeenCalledWith('pair.mac', expect.anything());
   });
 
   it('a phone that cannot confirm says why, before anything is registered', async () => {
     for (const [code, kind] of [['no_screen_lock', 'noScreenLock'], ['biometric_required', 'biometricRequired'], ['failed', 'failed']]) {
       const fetch = server({});
-      await expect(sendPairOffer(HEAD, 'x', { phoneCall: shell({ 'device.key.info': { id: 'x', ok: false, code } }), fetch })).resolves.toEqual({ kind });
+      await expect(sendPairOffer(HEAD, 'x', serverFor(shell({ 'device.key.info': { id: 'x', ok: false, code } }), fetch))).resolves.toEqual({ kind });
       expect(fetch).not.toHaveBeenCalled();
     }
   });
 
   it('the registration refused: three phones already → limit; anything else → failed', async () => {
-    await expect(sendPairOffer(HEAD, 'x', { phoneCall: okShell(), fetch: server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_limit' } }) })) }))
+    await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_limit' } }) })))))
       .resolves.toEqual({ kind: 'limit' });
-    await expect(sendPairOffer(HEAD, 'x', { phoneCall: okShell(), fetch: server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_taken' } }) })) }))
+    await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_taken' } }) })))))
       .resolves.toEqual({ kind: 'failed' });
   });
 
   it('the shell no longer holds the QR (used · passed) → expired', async () => {
     const phoneCall = shell({ 'device.key.info': { id: 'x', ok: true, public_key: 'SPKI' }, 'pair.mac': { id: 'x', ok: false, code: 'no_offer' } });
-    await expect(sendPairOffer(HEAD, 'x', { phoneCall, fetch: server(okRoutes()) })).resolves.toEqual({ kind: 'expired' });
+    await expect(sendPairOffer(HEAD, 'x', serverFor(phoneCall, server(okRoutes())))).resolves.toEqual({ kind: 'expired' });
   });
 
   it.each([
@@ -107,7 +112,7 @@ describe('[4532] sendPairOffer', () => {
     ['person_session_required', 403, 'failed'],
   ])('the offer refused with %s → %s', async (code, status, kind) => {
     const fetch = server(okRoutes({ 'POST /api/remote-devices/pairing-offers': () => res(status as number, { error: { code } }) }));
-    await expect(sendPairOffer(HEAD, 'x', { phoneCall: okShell(), fetch })).resolves.toEqual({ kind });
+    await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), fetch))).resolves.toEqual({ kind });
   });
 });
 
@@ -118,33 +123,33 @@ describe('[4532] checkPairOffer', () => {
 
   it('sent → still waiting (the setup goes along in the query)', async () => {
     const fetch = server({ [offerPath]: () => res(200, { state: 'sent', reveal: null }) });
-    await expect(checkPairOffer(HEAD, KEY_ID, null, { phoneCall: shell({}), fetch })).resolves.toEqual({ kind: 'waiting' });
+    await expect(checkPairOffer(HEAD, KEY_ID, null, serverFor(shell({}), fetch))).resolves.toEqual({ kind: 'waiting' });
     expect(fetch.mock.calls[0]![0]).toBe(`/api/remote-devices/pairing-offers/${HEAD.offer_id}?setup_id=${HEAD.setup_id}`);
   });
 
   it('revealed → the shell computes the number from its own key, once', async () => {
     const phoneCall = shell({ 'pair.number': { id: 'x', ok: true, number: '296 843' } });
     const fetch = server({ [offerPath]: () => res(200, { state: 'revealed', reveal: 'R' }), 'GET /api/remote-devices': notYet });
-    await expect(checkPairOffer(HEAD, KEY_ID, null, { phoneCall, fetch })).resolves.toEqual({ kind: 'number', number: '296 843' });
+    await expect(checkPairOffer(HEAD, KEY_ID, null, serverFor(phoneCall, fetch))).resolves.toEqual({ kind: 'number', number: '296 843' });
     expect(phoneCall).toHaveBeenCalledWith('pair.number', { offer_id: HEAD.offer_id, reveal: 'R' });
     phoneCall.mockClear();
-    await expect(checkPairOffer(HEAD, KEY_ID, '296 843', { phoneCall, fetch })).resolves.toEqual({ kind: 'number', number: '296 843' });
+    await expect(checkPairOffer(HEAD, KEY_ID, '296 843', serverFor(phoneCall, fetch))).resolves.toEqual({ kind: 'number', number: '296 843' });
     expect(phoneCall).not.toHaveBeenCalled();
   });
 
   it('the pair stood on the computer → paired (also when the offer reads expired after)', async () => {
     for (const state of ['revealed', 'expired']) {
       const fetch = server({ [offerPath]: () => res(200, { state, reveal: 'R' }), 'GET /api/remote-devices': stood });
-      await expect(checkPairOffer(HEAD, KEY_ID, '296 843', { phoneCall: shell({}), fetch })).resolves.toEqual({ kind: 'paired' });
+      await expect(checkPairOffer(HEAD, KEY_ID, '296 843', serverFor(shell({}), fetch))).resolves.toEqual({ kind: 'paired' });
     }
   });
 
   it('expired with no pair → notPaired; a broken answer → failed', async () => {
-    await expect(checkPairOffer(HEAD, KEY_ID, null, { phoneCall: shell({}), fetch: server({ [offerPath]: () => res(200, { state: 'expired' }), 'GET /api/remote-devices': notYet }) }))
+    await expect(checkPairOffer(HEAD, KEY_ID, null, serverFor(shell({}), server({ [offerPath]: () => res(200, { state: 'expired' }), 'GET /api/remote-devices': notYet }))))
       .resolves.toEqual({ kind: 'notPaired' });
-    await expect(checkPairOffer(HEAD, KEY_ID, null, { phoneCall: shell({}), fetch: server({ [offerPath]: () => res(404, { error: { code: 'offer_not_found' } }) }) }))
+    await expect(checkPairOffer(HEAD, KEY_ID, null, serverFor(shell({}), server({ [offerPath]: () => res(404, { error: { code: 'offer_not_found' } }) }))))
       .resolves.toEqual({ kind: 'failed' });
-    await expect(checkPairOffer(HEAD, KEY_ID, null, { phoneCall: shell({}), fetch: server({ [offerPath]: () => res(200, { state: 'revealed', reveal: null }), 'GET /api/remote-devices': notYet }) }))
+    await expect(checkPairOffer(HEAD, KEY_ID, null, serverFor(shell({}), server({ [offerPath]: () => res(200, { state: 'revealed', reveal: null }), 'GET /api/remote-devices': notYet }))))
       .resolves.toEqual({ kind: 'failed' });
   });
 });

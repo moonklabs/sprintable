@@ -5,6 +5,7 @@
 // fields to sign, asks the person on the OS prompt and signs; the web then posts the shell's `signed` to the answer route. Every
 // way it ends is one outcome kind — the card turns it into one line (the copy lives in messages `agentPermissions.phone.*`).
 
+import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
 
 export type AnswerOutcome =
@@ -21,9 +22,8 @@ export type AnswerOutcome =
   | { kind: 'failed' }; // anything else — the request is left as it was
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
-type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
-export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps: { phoneCall: Call; fetch: Fetch }): Promise<AnswerOutcome> {
+export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps: { phoneCall: Call }): Promise<AnswerOutcome> {
   const signed = await deps.phoneCall('approval.sign', { id, decision });
   if (!signed.ok) {
     switch (signed.code) {
@@ -40,7 +40,7 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string') return { kind: 'failed' };
   let res: Response;
   try {
-    res = await deps.fetch(`/api/agent-permission-requests/${id}/answer`, {
+    res = await fetchWithAuth(`/api/agent-permission-requests/${id}/answer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decision, signed: signed.signed, phone_key_id: signed.phone_key_id }),

@@ -5,6 +5,7 @@
 // MAC with that secret, and the pairing number from the phone's own key. Each step here is one outcome kind — the screen turns it
 // into the spec's line. No step ever sees the secret or the key bytes.
 
+import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
 
 export interface OfferHead { offer_id: string; setup_id: string; device_name: string; expires_at: string }
@@ -38,8 +39,7 @@ export type WaitOutcome =
   | { kind: 'failed' };
 
 type Call = (type: string, args?: Record<string, unknown>) => Promise<PhoneAnswer>;
-type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
-export interface PairDeps { phoneCall: Call; fetch: Fetch }
+export interface PairDeps { phoneCall: Call }
 
 const json = { 'Content-Type': 'application/json' };
 
@@ -82,9 +82,9 @@ export async function scanPairQr(deps: PairDeps): Promise<ScanOutcome> {
 
 interface Paired { id: string; pairs: Array<{ setup_id: string }> }
 
-async function myPhones(deps: PairDeps): Promise<Paired[] | null> {
+async function myPhones(): Promise<Paired[] | null> {
   try {
-    const res = await deps.fetch('/api/remote-devices');
+    const res = await fetchWithAuth('/api/remote-devices');
     if (!res.ok) return null;
     const body = (await res.json()) as { devices?: Paired[] };
     return Array.isArray(body.devices) ? body.devices : null;
@@ -103,7 +103,7 @@ export async function sendPairOffer(head: OfferHead, label: string, deps: PairDe
   }
   let phoneKeyId: string;
   try {
-    const res = await deps.fetch('/api/remote-devices', { method: 'POST', headers: json, body: JSON.stringify({ label, public_key: key.public_key }) });
+    const res = await fetchWithAuth('/api/remote-devices', { method: 'POST', headers: json, body: JSON.stringify({ label, public_key: key.public_key }) });
     const { code, body } = await read(res);
     if (!res.ok) return code === 'remote_device_limit' ? { kind: 'limit' } : { kind: 'failed' };
     if (typeof body.id !== 'string') return { kind: 'failed' };
@@ -111,13 +111,13 @@ export async function sendPairOffer(head: OfferHead, label: string, deps: PairDe
   } catch {
     return { kind: 'failed' };
   }
-  const phones = await myPhones(deps);
+  const phones = await myPhones();
   if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { kind: 'alreadyPaired' };
 
   const mac = await deps.phoneCall('pair.mac', { offer_id: head.offer_id, phone_key_id: phoneKeyId, label });
   if (!mac.ok || typeof mac.mac !== 'string') return mac.code === 'no_offer' ? { kind: 'expired' } : { kind: 'failed' };
   try {
-    const res = await deps.fetch('/api/remote-devices/pairing-offers', {
+    const res = await fetchWithAuth('/api/remote-devices/pairing-offers', {
       method: 'POST', headers: json,
       body: JSON.stringify({ setup_id: head.setup_id, offer_id: head.offer_id, phone_key_id: phoneKeyId, label, expires_at: head.expires_at, mac: mac.mac }),
     });
@@ -142,7 +142,7 @@ export async function checkPairOffer(head: OfferHead, phoneKeyId: string, known:
   let state = '';
   let reveal: unknown = null;
   try {
-    const res = await deps.fetch(`/api/remote-devices/pairing-offers/${head.offer_id}?setup_id=${encodeURIComponent(head.setup_id)}`);
+    const res = await fetchWithAuth(`/api/remote-devices/pairing-offers/${head.offer_id}?setup_id=${encodeURIComponent(head.setup_id)}`);
     if (!res.ok) return { kind: 'failed' };
     const body = (await res.json()) as { state?: string; reveal?: unknown };
     state = body.state ?? '';
@@ -153,7 +153,7 @@ export async function checkPairOffer(head: OfferHead, phoneKeyId: string, known:
   if (state === 'sent') return { kind: 'waiting' };
   if (state !== 'revealed' && state !== 'expired') return { kind: 'failed' };
   // after the computer took it (or the time ran out) the pair may have stood: the server's list says so
-  const phones = await myPhones(deps);
+  const phones = await myPhones();
   if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { kind: 'paired' };
   if (state === 'expired') return { kind: 'notPaired' };
   if (known) return { kind: 'number', number: known };
