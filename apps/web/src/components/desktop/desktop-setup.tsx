@@ -223,6 +223,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // story 4504 AC4: a press on a card's text moves focus off the radio before the click arrives (a label's text is not
   // focusable) — that blur must not fold the list, or the click lands on nothing and the choice never changes
   const pressInList = useRef(false);
+  /** story 4516: the recipe card (its label) an event's target is in, or null — a click on it reaches its radio. */
+  const recipeCardOf = (t: EventTarget | null) => (t instanceof Element ? t.closest('label') : null);
   // the list's order is fixed when it opens (the chosen one first) — arrow keys change the choice while it is open, and a
   // list that re-sorted on every choice would move under the person's keyboard (Yuna 02:56Z)
   const [recipeOrder, setRecipeOrder] = useState<string[]>([]);
@@ -532,14 +534,22 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               if (el.name === 'recipe' && !el.checked) { const r = recipes.find((x) => x.id === el.value); if (r) pick(r); }
               foldRecipes(true);
             }}
-            onPointerDown={() => {
+            onPointerDown={(down) => {
               pressInList.current = true;
               // story 4504 AC4 (live 2026-10-03): kept until the press's own click has run — a click on a card's text reaches its
-              // radio only as the label's default action, after the event's listeners. Released outside the list: no click to
-              // wait for, cleared at once. Inside: the radio's click uses it and clears it; a key in the list clears it too.
-              window.addEventListener('pointerup', (up) => {
-                if (!(up.target instanceof Node) || !recipeListRef.current?.contains(up.target)) pressInList.current = false;
-              }, { once: true });
+              // radio only as the label's default action, after the event's listeners; the radio's click uses it and clears it,
+              // and a key in the list clears it too. Story 4516: the press ends in one place — the mark stays only when its click
+              // will reach a radio (released on the card it was pressed on); released anywhere else (between cards · on another
+              // card · outside the list) or cancelled (a touch that became a scroll) there is no radio click to wait for, so it
+              // is cleared at once and the next blur folds the list.
+              const card = recipeCardOf(down.target);
+              const release = (up: PointerEvent) => {
+                window.removeEventListener('pointerup', release);
+                window.removeEventListener('pointercancel', release);
+                if (up.type === 'pointercancel' || !card || recipeCardOf(up.target) !== card || !recipeListRef.current?.contains(card)) pressInList.current = false;
+              };
+              window.addEventListener('pointerup', release);
+              window.addEventListener('pointercancel', release);
             }}
             onBlur={(e) => {
               if (pressInList.current) return; // a press inside the list: its click decides

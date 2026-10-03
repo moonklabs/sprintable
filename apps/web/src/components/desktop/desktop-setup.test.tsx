@@ -1677,6 +1677,52 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     expect(recipeInputs()).toHaveLength(2);
   });
 
+  // story 4516: a press that will not end in a radio's click must not leave the «pressing» mark behind — the next blur (a click
+  // elsewhere · Tab) folds the list. Each release is the browser's: pointerup where the pointer is, then (only on the same
+  // element) a click — none of these has a click on a radio, so none is sent.
+  for (const [what, end] of [
+    ['released between cards (the list\'s gap)', (list: HTMLElement) => list.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }))],
+    ['released on another card', (list: HTMLElement) => list.querySelectorAll('label')[0].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }))],
+    ['released outside the list', () => document.body.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }))],
+    ['a cancelled press (a touch that became a scroll)', (list: HTMLElement) => list.querySelectorAll('label')[1].dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, cancelable: true }))],
+  ] as const) {
+    it(`[SID:4516] ${what}: no radio click follows, so the mark is gone — the next blur folds the list, the choice unchanged`, async () => {
+      stub(() => new Response('{}'));
+      await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+      await openRecipes();
+      const list = container.querySelector('[data-testid=setup-recipe-list]') as HTMLElement;
+      const card = recipeInputs()[1].closest('label') as HTMLLabelElement;
+      await act(async () => {
+        card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        end(list);
+      });
+      expect(recipeInputs()).toHaveLength(2); // the release alone folds nothing
+      await act(async () => { (document.activeElement as HTMLElement).blur(); }); // a click elsewhere · Tab out of the window's list
+      expect(recipeInputs()).toHaveLength(0);
+      expect(chosen()?.textContent).toContain('마케팅 루프');
+      hasFocus.mockRestore();
+    });
+  }
+
+  it('[SID:4516] released on the card it was pressed on: the mark waits for that card\'s radio click (a blur in between does not fold)', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    await openRecipes();
+    const card = recipeInputs()[1].closest('label') as HTMLLabelElement;
+    await act(async () => {
+      card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+      card.querySelector('span')!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true })); // on its text
+      (document.activeElement as HTMLElement).blur();
+    });
+    expect(recipeInputs()).toHaveLength(2); // still open: the click on the radio is coming
+    await act(async () => { recipeInputs()[1].click(); });
+    expect(recipeInputs()).toHaveLength(0);
+    expect(chosen()?.textContent).toContain('조사 한 명');
+    hasFocus.mockRestore();
+  });
+
   it('one recipe only: its card, no [바꾸기]', async () => {
     recipesNow = () => new Response(JSON.stringify({ recipes: [RECIPES[1]] }), { status: 200 });
     stub(() => new Response('{}'));
