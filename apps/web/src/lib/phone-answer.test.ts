@@ -3,6 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { answerOnPhone } from './phone-answer';
 import type { PhoneAnswer } from './phone-bridge';
 
+// the libs call fetchWithAuth (the codebase's one way to the BFF); each case hands its server here
+let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
+vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (url: string, init?: RequestInit) => currentFetch(url, init) }));
+const serverFor = <P,>(phoneCall: P, fetch: (url: string, init?: RequestInit) => Promise<Response>) => { currentFetch = fetch; return { phoneCall }; };
+
 const signedOk: PhoneAnswer = { id: 'w1', ok: true, signed: 'SIGNED', phone_key_id: 'k-1' };
 const call = (answer: PhoneAnswer) => vi.fn(async () => answer);
 const reply = (status: number, body?: unknown) =>
@@ -12,7 +17,7 @@ describe('[4532] answerOnPhone', () => {
   it('asks the shell with {id, decision} only, then posts the shell\'s signed to the answer route', async () => {
     const phoneCall = call(signedOk);
     const fetch = reply(200, { ok: true });
-    await expect(answerOnPhone('r-1', 'allow', { phoneCall, fetch })).resolves.toEqual({ kind: 'answered', decision: 'allow' });
+    await expect(answerOnPhone('r-1', 'allow', serverFor(phoneCall, fetch))).resolves.toEqual({ kind: 'answered', decision: 'allow' });
     expect(phoneCall).toHaveBeenCalledWith('approval.sign', { id: 'r-1', decision: 'allow' });
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
@@ -34,19 +39,19 @@ describe('[4532] answerOnPhone', () => {
     ['not_phone_app', 'failed'],
   ])('the shell says %s → %s, and nothing is posted', async (code, kind) => {
     const fetch = reply(200);
-    await expect(answerOnPhone('r-1', 'deny', { phoneCall: call({ id: 'w1', ok: false, code }), fetch })).resolves.toEqual({ kind });
+    await expect(answerOnPhone('r-1', 'deny', serverFor(call({ id: 'w1', ok: false, code }), fetch))).resolves.toEqual({ kind });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it('a shell answer without signed or key id → failed, nothing posted', async () => {
     const fetch = reply(200);
-    await expect(answerOnPhone('r-1', 'allow', { phoneCall: call({ id: 'w1', ok: true, signed: 'S' }), fetch })).resolves.toEqual({ kind: 'failed' });
-    await expect(answerOnPhone('r-1', 'allow', { phoneCall: call({ id: 'w1', ok: true, phone_key_id: 'k' }), fetch })).resolves.toEqual({ kind: 'failed' });
+    await expect(answerOnPhone('r-1', 'allow', serverFor(call({ id: 'w1', ok: true, signed: 'S' }), fetch))).resolves.toEqual({ kind: 'failed' });
+    await expect(answerOnPhone('r-1', 'allow', serverFor(call({ id: 'w1', ok: true, phone_key_id: 'k' }), fetch))).resolves.toEqual({ kind: 'failed' });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it('server refusals map by code', async () => {
-    const run = (status: number, body?: unknown) => answerOnPhone('r-1', 'allow', { phoneCall: call(signedOk), fetch: reply(status, body) });
+    const run = (status: number, body?: unknown) => answerOnPhone('r-1', 'allow', serverFor(call(signedOk), reply(status, body)));
     await expect(run(409, { error: { code: 'phone_not_paired' } })).resolves.toEqual({ kind: 'not_paired' });
     await expect(run(409, { error: { code: 'already_answered' }, detail: { answered_by_name: '선생님', decision: 'deny' } }))
       .resolves.toEqual({ kind: 'answered_by', name: '선생님', decision: 'deny' });
@@ -62,6 +67,6 @@ describe('[4532] answerOnPhone', () => {
 
   it('a network throw → failed (the request is left as it was)', async () => {
     const fetch = vi.fn(async () => { throw new TypeError('network'); });
-    await expect(answerOnPhone('r-1', 'allow', { phoneCall: call(signedOk), fetch })).resolves.toEqual({ kind: 'failed' });
+    await expect(answerOnPhone('r-1', 'allow', serverFor(call(signedOk), fetch))).resolves.toEqual({ kind: 'failed' });
   });
 });

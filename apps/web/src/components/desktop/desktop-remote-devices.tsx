@@ -9,8 +9,8 @@ import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgRemoteControl } from '@/lib/org-remote-control';
-import { useFlatHref } from '@/hooks/use-flat-href';
 import { isPhoneApp } from '@/lib/phone-bridge';
+import { PhonePairEntry } from './phone-pairing';
 
 /**
  * story #4533 AC3 (명세 모음 «B-1 ③ 웹 내 설정 · 원격 기기 — 목록과 [빼기]만») — my phones as pairs, one line per phone ↔ computer:
@@ -104,7 +104,7 @@ export function DesktopRemoteDevices() {
         </ul>
         </Card>
       )}
-      {inPhoneApp ? <PairEntry /> : null}
+      {inPhoneApp ? <PhonePairEntry /> : null}
       <p ref={statusRef} tabIndex={-1} className="text-xs text-muted-foreground outline-none" role="status">{result}</p>
     </section>
   );
@@ -113,12 +113,6 @@ export function DesktopRemoteDevices() {
 const noSubscribe = () => () => {};
 const notOnServer = () => false;
 
-/** story #4532 — only inside the phone app: this phone pairs from here (the shell has the camera and the key). */
-function PairEntry() {
-  const t = useTranslations('phonePairing');
-  const flat = useFlatHref();
-  return <div><Button size="sm" variant="outline" asChild><a href={flat('/desktop/pair')}>{t('entry')}</a></Button></div>;
-}
 
 function PairLine({ phone, pair, onRemove, disabled, buttonRef }: {
   phone: Phone; pair: Pair; onRemove: () => void; disabled: boolean; buttonRef: (el: HTMLButtonElement | null) => void;

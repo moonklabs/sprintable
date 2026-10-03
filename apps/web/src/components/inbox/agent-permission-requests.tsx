@@ -111,7 +111,7 @@ export function AgentPermissionRequests() {
   const answer = async (row: PermissionRequest, decision: 'allow' | 'deny') => {
     const put = (a: Answer) => setAnswers((m) => new Map(m).set(row.id, { row, answer: a }));
     put({ kind: 'sending', decision });
-    put(await answerOnPhone(row.id, decision, { phoneCall, fetch: fetchWithAuth }));
+    put(await answerOnPhone(row.id, decision, { phoneCall }));
   };
 
   if (shown.length === 0) return null; // nothing waiting: the inbox as it was

@@ -5,7 +5,6 @@ import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
@@ -51,7 +50,7 @@ function Pairing() {
   const flat = useFlatHref();
   const [view, setView] = useState<View>({ kind: 'start' });
   const [pressed, setPressed] = useState(false); // a line that follows a press takes the focus (the button is gone)
-  const deps = { phoneCall, fetch: fetchWithAuth };
+  const deps = { phoneCall };
   const known = useRef<string | null>(null);
 
   const scan = async () => {
@@ -78,7 +77,7 @@ function Pairing() {
   const waiting = view.kind === 'checking' || view.kind === 'number' ? view : null;
   const look = useCallback(async (w: { head: OfferHead; phoneKeyId: string }) => {
     if (Date.now() > Date.parse(w.head.expires_at) + POLL_MS * 2) return { kind: 'notPaired' } as const;
-    return checkPairOffer(w.head, w.phoneKeyId, known.current, { phoneCall, fetch: fetchWithAuth });
+    return checkPairOffer(w.head, w.phoneKeyId, known.current, { phoneCall });
   }, []);
   useEffect(() => {
     if (!waiting) return;
@@ -96,6 +95,19 @@ function Pairing() {
   }, [waiting, look]);
 
   const cancel = () => { known.current = null; setView({ kind: 'start' }); };
+  // each refusal's line — one literal key per case (the i18n guards read literal keys)
+  const retryLine = (line: RetryLine): string => {
+    switch (line) {
+      case 'expired': return t('expired');
+      case 'notOurs': return t('notOurs');
+      case 'notPaired': return t('notPaired');
+      case 'unreachable': return t('unreachable');
+      case 'setupNotFound': return t('setupNotFound');
+      case 'offerUsed': return t('offerUsed');
+      case 'registerAgain': return t('registerAgain');
+      case 'failed': return t('failed');
+    }
+  };
   const settings = <Button variant="outline" onClick={() => void phoneCall('app.settings')}>{tp('openSettings')}</Button>;
   const rescan = <Button onClick={() => void scan()}>{t('rescan')}</Button>;
   const close = <Button variant="outline" asChild><a href={flat('/desktop')}>{t('close')}</a></Button>;
@@ -154,8 +166,17 @@ function Pairing() {
         </Shell>
       );
     case 'retry':
-      return <Shell><Line focus={pressed}>{t(view.line)}</Line><Actions>{rescan}</Actions></Shell>;
+      return <Shell><Line focus={pressed}>{retryLine(view.line)}</Line><Actions>{rescan}</Actions></Shell>;
   }
+}
+
+type RetryLine = Extract<View, { kind: 'retry' }>['line'];
+
+/** story #4532 — the entry on «원격 기기», only inside the phone app: this phone pairs from here (the shell has the camera and the key). */
+export function PhonePairEntry() {
+  const t = useTranslations('phonePairing');
+  const flat = useFlatHref();
+  return <div><Button size="sm" variant="outline" asChild><a href={flat('/desktop/pair')}>{t('entry')}</a></Button></div>;
 }
 
 function Shell({ children }: { children: ReactNode }) {
