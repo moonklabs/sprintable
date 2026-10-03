@@ -159,7 +159,7 @@ function Confirm({ code }: { code: string }) {
     );
   }
   if (view.kind === 'remoteOff') {
-    return <Card className="break-keep p-6"><p className="text-sm text-muted-foreground">{t('remoteOff')}</p></Card>;
+    return <Card className="break-keep p-6"><ResultLine focus={pressed}>{t('remoteOff')}</ResultLine></Card>;
   }
   if (view.kind === 'expired' || view.kind === 'spent') {
     return <Card className="break-keep p-6"><ResultLine focus={pressed}>{view.kind === 'expired' ? t('expired') : t('spent')}</ResultLine></Card>;
