@@ -43,9 +43,9 @@ PROMPT_MAX = 8000
 
 
 class DesktopRelayError(Exception):
-    def __init__(self, status: int, code: str, message: str):
+    def __init__(self, status: int, code: str, message: str, *, detail: dict | None = None):
         super().__init__(message)
-        self.status, self.code, self.message = status, code, message
+        self.status, self.code, self.message, self.detail = status, code, message, detail
 
 
 def _hash(token: str) -> str:
@@ -360,6 +360,10 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
     else:
         cmd.acked_at = cmd.acked_at or now
         cmd.finished_at = now
+    if cmd.kind == "answer_approval":  # story #4533 — the daemon's verdict on a phone's signed answer moves the request
+        from app.services.agent_permissions import on_answer_result
+
+        await on_answer_result(db, setup.id, (cmd.payload or {}).get("request_id"), result.state, result.result_code)
     await touch_device(db, setup.id)
     await db.flush()
     return cmd
