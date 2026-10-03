@@ -1034,6 +1034,15 @@ async def github_webhook(
             ungated_check_publish=_ungated_check_publish,
             label_unlabel_publish=_label_unlabel_publish,
         )
+        # story #4536 — the agents' watches (a merge · a check suite): same transaction, after the delivery-id dedup, so a
+        # redelivery never fires twice. In its own savepoint — a watch that fails to fire is logged, never the webhook's undoing.
+        try:
+            async with session.begin_nested():
+                from app.services.agent_watches import on_github_event
+
+                await on_github_event(session, event, payload)
+        except Exception:  # noqa: BLE001
+            logger.warning("agent watches: github event not matched delivery=%s event=%s", x_github_delivery, event, exc_info=True)
         delivery.status = status_label
         # story #2327(재정의): "ignored"의 실제 사유를 delivery 행에도 남긴다 — HTTP 응답
         # 본문에만 있으면 웹훅 호출자(GitHub)만 보고 아무도 회고 측정을 못 한다.
