@@ -105,7 +105,7 @@ function ConfirmOff({ busy, onConfirm, onCancel }: { busy: boolean; onConfirm: (
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { cancelRef.current?.focus(); }, []); // [취소] first (Yuna B-1 ①)
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border p-3" role="group" aria-label={t('confirmOff')}>
+    <div className="flex flex-col gap-2 border-t border-border pt-3" role="group" aria-label={t('confirmOff')}>
       <p className="text-sm">{t('confirmOff')}</p>
       <div className="flex gap-2">
         <Button size="sm" variant="destructive" disabled={busy} onClick={onConfirm}>{t('turnOff')}</Button>
