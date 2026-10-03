@@ -150,7 +150,7 @@ describe('[4532] approvals card inside the phone app', () => {
     installShell();
     await render([req()]);
     expect(buttons()).toEqual(['허용', '거부']);
-    expect(phoneLines()).toEqual(['지문 · 얼굴이 꺼져 있어 화면 잠금(PIN 등)으로 확인해요']);
+    expect(phoneLines()).toEqual(['지문 · 얼굴이 꺼져 있어 화면 잠금으로 확인해요']);
     expect(document.activeElement).toBe(document.body); // a line drawn before any press takes no focus
   });
 
@@ -245,7 +245,7 @@ describe('[4532] approvals card inside the phone app', () => {
     installShell();
     await render([req()], 'en');
     expect(buttons()).toEqual(['Allow', 'Deny']);
-    expect(phoneLines()).toEqual(['No fingerprint or face is set up, so your screen lock (PIN etc.) confirms it']);
+    expect(phoneLines()).toEqual(['No fingerprint or face is set up, so your screen lock confirms it']);
     await press('Allow');
     expect(phoneLines()).toEqual(['Allowed · Bash']);
   });
