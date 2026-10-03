@@ -48,9 +48,10 @@ async def get_desktop_session(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     member = await _person(db, auth, org_id, interactive=False)
+    user_id = uuid.UUID(str(auth.user_id))
     try:
         return await desktop_commands.session_view(
-            db, member_id=uuid.UUID(str(member.id)), member_role=member.role, user_id=uuid.UUID(str(auth.user_id)),
+            db, member_id=uuid.UUID(str(member.id)), member_role=await desktop_commands.org_role(db, org_id, user_id), user_id=user_id,
             org_id=org_id, agent_id=agent_member_id,
         )
     except DesktopRelayError as exc:
@@ -66,9 +67,10 @@ async def post_desktop_command(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     member = await _person(db, auth, org_id, interactive=True)
+    user_id = uuid.UUID(str(auth.user_id))
     try:
         cmd, state = await desktop_commands.create_command(
-            db, member_id=uuid.UUID(str(member.id)), member_role=member.role, user_id=uuid.UUID(str(auth.user_id)),
+            db, member_id=uuid.UUID(str(member.id)), member_role=await desktop_commands.org_role(db, org_id, user_id), user_id=user_id,
             org_id=org_id, agent_id=agent_member_id, body=body,
         )
     except DesktopRelayError as exc:

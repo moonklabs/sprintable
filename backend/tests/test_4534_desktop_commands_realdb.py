@@ -126,6 +126,24 @@ async def test_01_02_03_15_who_may_press_is_one_rule_and_the_phone_must_be_their
         assert len(await _commands(sid)) == 2  # only the two allowed stops
 
 
+async def test_01_owner_admin_is_the_org_role_never_a_project_role(world):
+    """PO 17:28Z — the legacy resolver hands a project role: a plain org member who is a project admin must not command; an
+    org admin who is only a project member must."""
+    plain_tm = await _plain_member()
+    await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission,role) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted','admin')")
+    async with _client() as c:
+        device, agent, _owner_phone, owner_der, _conv = await _world(c, "d4424 mac 4534h")
+        plain_phone, plain_der = await _register(c, PLAIN)
+        await _pair(c, device["device_token"], owner_der, plain_der)
+        refused = await _post(c, agent, _cmd("stop_session", plain_phone), who=PLAIN)  # project admin · org member
+        assert (refused.status_code, refused.json()["error"]["code"]) == (403, "not_allowed_to_command")
+        assert (await c.get(f"/api/v2/agents/{agent}/desktop-session", headers=_person(PLAIN))).json()["can_command"] is False
+        await _sql(f"UPDATE project_access SET role = 'member' WHERE member_id = '{plain_tm}'",
+                   f"UPDATE org_members SET role = 'admin' WHERE org_id = '{ORG}' AND user_id = '{PLAIN}'")
+        assert (await _post(c, agent, _cmd("stop_session", plain_phone), who=PLAIN)).status_code == 201  # org admin · project member
+        assert (await c.get(f"/api/v2/agents/{agent}/desktop-session", headers=_person(PLAIN))).json()["can_command"] is True
+
+
 async def test_04_05_06_13_the_session_the_conversation_and_the_body_are_checked(world):
     from app.core.database import async_session_factory
     from app.repositories.human_api_key import HumanApiKeyRepository

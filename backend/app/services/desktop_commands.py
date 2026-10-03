@@ -56,6 +56,17 @@ async def can_view(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, a
     return False
 
 
+async def org_role(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
+    """The person's role in the organization itself (org_members) — never a project role. resolve_member's role is the project
+    one where the legacy resolver runs (PO 17:28Z): a plain org member who is a project admin must not command, and an org
+    admin who is only a project member must."""
+    from app.models.project import OrgMember
+
+    return (await db.execute(
+        select(OrgMember.role).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+    )).scalar_one_or_none()
+
+
 def can_command(*, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, agent, setup: DesktopSetup | None) -> bool:
     """PO 16:13Z ⓒ — an org owner/admin, the agent's owner, or whoever confirmed the device (the phone's pairing is checked on
     the command itself). One function for the header's `can_command` and the command endpoint, so the two never differ."""
