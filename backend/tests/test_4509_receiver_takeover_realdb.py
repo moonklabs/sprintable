@@ -171,3 +171,19 @@ async def test_a_refused_reconnect_does_not_end_the_stream_it_would_replace(leas
         queue = gw._receiver_streams[(agent, R1)]
         assert queue.empty()  # no superseded signal was sent
         await first.body_iterator.aclose()
+
+
+
+async def test_a_full_old_queue_still_hands_over(lease_path):
+    """Qadir 01a101bf T1 — the old stream's queue full of wakes (a dead connection piling them up — when a hand-over is needed
+    most): the reconnect still gets its stream and the old one still ends superseded."""
+    async with _world() as (gw, auth, agent):
+        first = await gw.agent_stream(request=_Req(R1), auth=auth)
+        old_queue = gw._receiver_streams[(agent, R1)]
+        while not old_queue.full():
+            old_queue.put_nowait({"__wake__": True})
+        second = await gw.agent_stream(request=_Req(R1), auth=auth)  # before: QueueFull → 500
+        assert gw._receiver_streams[(agent, R1)] is not old_queue
+        old = await _drain(first.body_iterator, 10.0)
+        assert old[-1] == "event: superseded\ndata: {}\n\n"
+        await second.body_iterator.aclose()

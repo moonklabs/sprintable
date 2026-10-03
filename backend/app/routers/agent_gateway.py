@@ -242,6 +242,24 @@ RECEIVER_ID_HEADER = "x-sprintable-receiver-id"
 _RECEIVER_ID_RE = re.compile(r"^rcv_[A-Za-z0-9_-]{22}$")
 _receiver_streams: dict[tuple[str, str], asyncio.Queue] = {}
 
+
+def _signal_superseded(queue: asyncio.Queue) -> None:
+    """Tell a handed-over stream to end — the wake path's #2530 shape: a full queue (a dead old stream piling up wakes — the very
+    moment a hand-over is needed) drops its oldest signal to make room; if a racer refills it, this signal is given up (Qadir
+    01a101bf T1: an uncaught QueueFull here was a 500 that kept the lease and the old queue registered)."""
+    signal = {"__superseded__": True}
+    try:
+        queue.put_nowait(signal)
+    except asyncio.QueueFull:
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(signal)
+        except asyncio.QueueFull:
+            pass
+
 # E-INFRA S5: per-API-key(=agent) 동시 스트림 제한 (tier-aware, abuse/fair-use).
 # 한 키가 무제한 스트림을 열어 메모리/큐를 독점하는 것 방지. per-key 카운트 = _agent_connections[agent_id] size.
 # ⚠️ tier 출처: agent 키는 sk_live_(ApiKey 모델)라 dependencies/rate_limit._resolve_tier
@@ -604,7 +622,7 @@ async def agent_stream(
     if _superseded_queue is not None:
         # handed over only now — both limits passed, so a refused reconnect never ends the stream it would replace
         _agent_connections.get(agent_id_str, set()).discard(_superseded_queue)
-        _superseded_queue.put_nowait({"__superseded__": True})
+        _signal_superseded(_superseded_queue)
     _agent_connections[agent_id_str].add(queue)
     if _receiver_id:
         _receiver_streams[(agent_id_str, _receiver_id)] = queue
