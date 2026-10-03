@@ -65,7 +65,7 @@ describe('DesktopRemoteControlCard (story #4535)', () => {
     await flush();
     expect(fetchWithAuth.mock.calls[1]).toEqual(['/api/organizations/org-1/remote-control', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: true }) })]);
     expect(sw()?.getAttribute('aria-checked')).toBe('true');
-    expect(text()).toContain('부터 켜져 있어요');
+    expect(text()).toContain('10월 3일부터 켜져 있어요'); // the device list's form (no year within this year · Yuna 12:53Z)
   });
 
   it('turning off asks in the line first ([취소] focused) and sends nothing until [끄기]', async () => {

@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatLocaleDate } from '@/lib/i18n';
+import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
@@ -104,10 +104,12 @@ export function DesktopRemoteControlCard() {
 }
 
 function EnabledSince({ at }: { at: string }) {
+  // the same date form as «연결된 기기» right below (deviceDateOptions — no year within this year · Yuna 12:53Z)
   const t = useTranslations('desktop.remoteControl');
-  const locale = useLocale();
-  const tz = useViewerTimeZone();
-  return <p className="text-xs text-muted-foreground">{t('since', { date: formatLocaleDate(at, locale, { dateStyle: 'medium' }, tz ?? 'UTC') })}</p>;
+  const format = useFormatter();
+  const tz = useViewerTimeZone() ?? 'UTC';
+  const date = format.dateTime(new Date(at), { ...deviceDateOptions(at, new Date(), tz), timeZone: tz });
+  return <p className="text-xs text-muted-foreground">{t('since', { date })}</p>;
 }
 
 function ConfirmOff({ busy, onConfirm, onCancel }: { busy: boolean; onConfirm: () => void; onCancel: () => void }) {
