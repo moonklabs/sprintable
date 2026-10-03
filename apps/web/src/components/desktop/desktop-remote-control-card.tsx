@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { fetchWithAuth } from '@/lib/db/client';
 import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgRemoteControl, type OrgRemoteControl } from '@/lib/org-remote-control';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
@@ -17,16 +18,13 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
  * 403이면 소유자 줄로(스위치 숨김). 끄기 확인이 닫히면([끄기] · [취소]) 초점은 스위치로 돌아가고, 실패 줄은 늘 붙어 있는 빈 status에
  * 글만 채운다(유나 12:43Z — 글을 품은 채 새로 붙는 라이브 영역은 확실히 읽히지 않는다).
  */
-interface State {
-  enabled: boolean;
-  enabled_at: string | null;
-  can_change: boolean;
-}
+type State = OrgRemoteControl;
 
 export function DesktopRemoteControlCard() {
   const t = useTranslations('desktop.remoteControl');
   const { orgId } = useDashboardContext();
-  const [state, setState] = useState<State | null>(null);
+  // one value with «원격 기기» (story #4535 · PO 18:58Z): a change here is what that part shows, with no reload
+  const [state, setState] = useOrgRemoteControl(orgId);
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -38,16 +36,6 @@ export function DesktopRemoteControlCard() {
     if (wasAsking.current && !asking) switchRef.current?.focus();
     wasAsking.current = asking;
   }, [asking]);
-
-  useEffect(() => {
-    if (!orgId) return;
-    let off = false;
-    void fetchWithAuth(`/api/organizations/${orgId}/remote-control`)
-      .then(async (res) => (res.ok ? ((await res.json()) as { data?: State }).data ?? null : null))
-      .catch(() => null)
-      .then((s) => { if (!off) setState(s); });
-    return () => { off = true; };
-  }, [orgId]);
 
   const change = useCallback(async (enabled: boolean) => {
     if (!orgId || !state) return;
@@ -71,7 +59,7 @@ export function DesktopRemoteControlCard() {
       setBusy(false);
       setAsking(false);
     }
-  }, [orgId, state]);
+  }, [orgId, state, setState]);
 
   if (!state) return null; // not an org person · not loaded: the page goes on without the card
 
