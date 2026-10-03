@@ -51,9 +51,11 @@ async def _device(
         raise HTTPException(status_code=401, detail={"code": "DEVICE_TOKEN_INVALID", "message": "a valid device token is required"})
     from app.services import remote_control
 
-    # story #4535 — the org's «원격 제어» off = the whole device line off (reports too · PO 08:55Z ⓐ); the token stays valid
+    # story #4535 — the org's «원격 제어» off = the whole device line off (reports too · PO 08:55Z ⓐ); the token stays valid.
+    # 409, never 401/403: a daemon reading any 401/403 as «revoked» would drop its token (PO 13:49Z (나) · Qadir) — a 409 it
+    # knocks on again and keeps the token, so turning on reconnects it whatever the deploy order
     if not await remote_control.is_enabled(db, setup.org_id):
-        raise HTTPException(status_code=403, detail={"code": remote_control.OFF_CODE, "message": "remote control is off for this organization"})
+        raise HTTPException(status_code=409, detail={"code": remote_control.OFF_CODE, "message": "remote control is off for this organization"})
     return setup
 
 
@@ -103,9 +105,9 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                             return
                         from app.services import remote_control
 
-                        # story #4535 — turned off: the daemon parks the relay and waits for the wake (no knocking)
+                        # story #4535 — turned off: its own frame, not access_revoked (a revocation drops the token · PO 13:49Z)
                         if not await remote_control.is_enabled(s, org_id):
-                            yield f"event: access_revoked\ndata: {json.dumps({'reason': remote_control.OFF_CODE})}\n\n"
+                            yield f"event: {remote_control.OFF_CODE}\ndata: {{}}\n\n"
                             return
                     commands = await relay.commands_to_send(s, setup_id, last_seq)
                     if now - last_beat >= _HEARTBEAT_SEC:

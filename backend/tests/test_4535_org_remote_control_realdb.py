@@ -1,7 +1,8 @@
 """story #4535 (E-DESKTOP-2 B-4 · AC1) — an organization's «원격 제어» switch. Contract 02d2cf71 §2 (v1.5).
 
 Off by default · only an owner turns it on and off. While off the device line is off as a whole: the relay refuses every call
-(the device token stays valid), an open stream ends with `access_revoked {reason: remote_control_off}`, no command is made, and
+with 409 remote_control_off (the device token stays valid — never 401/403 or access_revoked, which a daemon reads as revoked ·
+PO 13:49Z), an open stream ends with its own `event: remote_control_off`, no command is made, and
 turning it off rejects the devices' open commands. Turning it on wakes each live device through its agents' own streams.
 """
 from __future__ import annotations
@@ -53,6 +54,9 @@ async def test_it_starts_off_and_only_an_owner_changes_it(world):
 
         refused = await _switch(c, True, PLAIN)
         assert refused.status_code == 403 and refused.json()["error"]["code"] == "owner_required"
+        await _sql(f"UPDATE org_members SET role = 'admin' WHERE org_id = '{ORG}' AND user_id = '{PLAIN}'")
+        admin = await _switch(c, True, PLAIN)  # Qadir: an admin is not an owner — only an owner changes it
+        assert admin.status_code == 403 and admin.json()["error"]["code"] == "owner_required"
         assert (await c.put(URL, json={"enabled": True}, headers=key)).status_code == 403
         assert (await c.put(URL, json={"enabled": True, "x": 1}, headers=_person(OWNER))).status_code == 422
         assert (await c.get(URL, headers=_person(OWNER))).json()["enabled"] is False  # nothing changed
@@ -70,8 +74,14 @@ async def test_while_off_the_device_line_is_off_as_a_whole_and_the_token_stays(w
         device = await _device(c, name="d4424 mac 4535b")
         token = device["device_token"]
         off = await _snapshot(c, token, 1)
-        assert off.status_code == 403 and off.json()["error"]["code"] == "remote_control_off"  # reports too (PO 08:55Z ⓐ)
-        assert (await c.get("/api/v2/desktop/relay/stream", headers=_tok(token))).status_code == 403
+        assert off.status_code == 409 and off.json()["error"]["code"] == "remote_control_off"  # reports too (PO 08:55Z ⓐ)
+        # every relay call: 409, never a revocation's 401/403 (a daemon drops its token on those · PO 13:49Z (나))
+        stream = await c.get("/api/v2/desktop/relay/stream", headers=_tok(token))
+        result = await c.post(f"/api/v2/desktop/relay/commands/{uuid.uuid4()}/result", json={"state": "acked"}, headers=_tok(token))
+        state = await c.post("/api/v2/desktop/relay/sessions/s-1/state", headers=_tok(token), json={
+            "report_seq": 1, "agent_member_id": device["agents"][0]["member_id"], "runtime": "claude", "state": "idle",
+            "at": "2026-10-03T05:20:00Z"})
+        assert [(r.status_code, r.json()["error"]["code"]) for r in (stream, result, state)] == [(409, "remote_control_off")] * 3
         from app.services.desktop_relay import DesktopRelayError
 
         with pytest.raises(DesktopRelayError) as e:
@@ -120,7 +130,8 @@ async def test_an_open_stream_ends_with_remote_control_off_when_the_org_turns_it
         monkeypatch.setattr(remote_control, "is_enabled", turned_off_after_connecting)
         r = await c.get("/api/v2/desktop/relay/stream", headers=_tok(device["device_token"]))
         assert r.status_code == 200
-        assert 'event: access_revoked\ndata: {"reason": "remote_control_off"}' in r.text
+        assert "event: remote_control_off\ndata: {}" in r.text
+        assert "access_revoked" not in r.text  # a revocation frame would make the daemon drop its token
 
 
 async def test_the_device_reads_its_orgs_state_with_its_own_agent_key(world):
