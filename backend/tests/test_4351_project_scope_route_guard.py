@@ -34,6 +34,9 @@ _KNOWN = {
     "app/routers/desktop_relay.py::post_command_result",
     "app/routers/desktop_relay.py::post_session_state",
     "app/routers/desktop_relay.py::put_sessions",
+    # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's
+    # setup (an org-level setting, no project entity)
+    "app/routers/remote_control.py::get_device_remote_control",
     "app/routers/agent_gateway.py::ack_event",
     "app/routers/agent_gateway.py::agent_stream",
     "app/routers/agent_inbox.py::receive_inbox_webhook",

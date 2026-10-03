@@ -19,7 +19,7 @@ type View =
   | { kind: 'loading' }
   | { kind: 'ready'; device: string; org: string | null; busy: boolean }
   | { kind: 'done' }
-  | { kind: 'expired' | 'spent' | 'notAdmin' | 'disconnected' | 'failed' };
+  | { kind: 'expired' | 'spent' | 'notAdmin' | 'disconnected' | 'remoteOff' | 'failed' };
 
 const CODE_FIELD = 'code';
 
@@ -41,6 +41,8 @@ function viewOf(code: string | undefined): View {
       return { kind: 'notAdmin' };
     case 'setup_disconnected':
       return { kind: 'disconnected' };
+    case 'remote_control_off': // story #4535 — the org turned «원격 제어» off in the meantime
+      return { kind: 'remoteOff' };
     default:
       return { kind: 'failed' };
   }
@@ -155,6 +157,9 @@ function Confirm({ code }: { code: string }) {
         <div><Button variant="outline" asChild><a href={flat('/desktop')}>{t('devicesAction')}</a></Button></div>
       </Card>
     );
+  }
+  if (view.kind === 'remoteOff') {
+    return <Card className="break-keep p-6"><ResultLine focus={pressed}>{t('remoteOff')}</ResultLine></Card>;
   }
   if (view.kind === 'expired' || view.kind === 'spent') {
     return <Card className="break-keep p-6"><ResultLine focus={pressed}>{view.kind === 'expired' ? t('expired') : t('spent')}</ResultLine></Card>;

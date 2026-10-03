@@ -49,7 +49,8 @@ _STATUS = {
     "code_expired": 410,
     "code_used": 410,
     "already_confirmed": 409,
-    "setup_disconnected": 409,  # story #4548 — the device was disconnected (its token code can no longer be confirmed or exchanged)
+    "setup_disconnected": 409,
+    "remote_control_off": 409,  # story #4535 — the device's org turned «원격 제어» off  # story #4548 — the device was disconnected (its token code can no longer be confirmed or exchanged)
     "roles_invalid": 422,
     "request_invalid": 422,
     "service_unavailable": 503,

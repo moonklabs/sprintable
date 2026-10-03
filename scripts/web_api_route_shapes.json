@@ -825,6 +825,11 @@
 "kind": "unknown"
 },
 {
+"method": "GET",
+"path": "/api/v2/desktop/remote-control",
+"kind": "object"
+},
+{
 "method": "POST",
 "path": "/api/v2/desktop/setup-codes",
 "kind": "object"
@@ -2627,6 +2632,16 @@
 {
 "method": "GET",
 "path": "/api/v2/organizations/{}/publishing-metrics",
+"kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/organizations/{}/remote-control",
+"kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/organizations/{}/remote-control",
 "kind": "object"
 },
 {

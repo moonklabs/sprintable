@@ -285,6 +285,9 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     # story #4536 — an agent's watch is the agent's own (agent_watches.agent_member_id = the caller's agent key): the clear
     # selects by (id, the caller's member id) — another agent's watch is «not found», in the same org and project too.
     "app.routers.watches:clear_watch": "agent-owned row, selected by the caller's own member id (services.agent_watches.cancel_watch)",
+    # story #4535 — the org's «원격 제어» switch: an org-level setting (organizations row), changed only by that org's owner
+    # (resolve_member of the path org · role owner · a person's session)
+    "app.routers.remote_control:put_remote_control": "org-level setting, owner of the path org only (routers.remote_control._person_of + role check)",
     # story #3786 — dependencies.py의 update/delete는 까심 QA CI FAILURE 원칙(2026-07-08,
     # agents.py::get_agent_connection_artifact/_connection_artifact 선례)에 따라 Header() DI
     # 마커를 라우트 진입점(update_dependency/delete_dependency)에서만 받고, 실 로직(가드 호출

@@ -6801,7 +6801,20 @@
       "disconnected": "This computer was disconnected in the meantime, so remote control can't be turned on — check «Connected devices» on the web",
       "devicesAction": "View connected devices",
       "failed": "Couldn't turn it on — please try again in a moment",
-      "retry": "Try again"
+      "retry": "Try again",
+      "remoteOff": "Remote control is turned off for this organization — an owner can turn it on"
+    },
+    "remoteControl": {
+      "title": "Remote control",
+      "body": "Paired phones can stop, instruct, and answer permission requests for this organization's desktop agents.",
+      "allowed": "Allowed: start · instruct · answer permissions · stop",
+      "since": "On since {date}",
+      "ownerOnlyOn": "Remote control · on — only organization owners can turn it on or off",
+      "ownerOnlyOff": "Remote control · off — only organization owners can turn it on or off",
+      "confirmOff": "Turning it off means paired devices can't control this organization's agents right away — pairings stay",
+      "turnOff": "Turn off",
+      "cancel": "Cancel",
+      "failed": "Couldn't change it — please try again"
     }
   },
   "recipePreset": {

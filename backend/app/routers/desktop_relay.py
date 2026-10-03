@@ -49,12 +49,19 @@ async def _device(
     setup = await relay.device_for_token(db, x_desktop_device_token)
     if setup is None:
         raise HTTPException(status_code=401, detail={"code": "DEVICE_TOKEN_INVALID", "message": "a valid device token is required"})
+    from app.services import remote_control
+
+    # story #4535 — the org's «원격 제어» off = the whole device line off (reports too · PO 08:55Z ⓐ); the token stays valid.
+    # 409, never 401/403: a daemon reading any 401/403 as «revoked» would drop its token (PO 13:49Z (나) · Qadir) — a 409 it
+    # knocks on again and keeps the token, so turning on reconnects it whatever the deploy order
+    if not await remote_control.is_enabled(db, setup.org_id):
+        raise HTTPException(status_code=409, detail={"code": remote_control.OFF_CODE, "message": "remote control is off for this organization"})
     return setup
 
 
 @router.get("/relay/stream")
 async def device_stream(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> StreamingResponse:
-    setup_id = setup.id
+    setup_id, org_id = setup.id, setup.org_id
     try:
         start_seq = int(request.headers.get("last-event-id") or 0)
     except ValueError:
@@ -95,6 +102,12 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                         last_check = now
                         if not await relay.device_still_valid(s, setup_id):
                             yield f"event: access_revoked\ndata: {json.dumps({'reason': 'device_disconnected'})}\n\n"
+                            return
+                        from app.services import remote_control
+
+                        # story #4535 — turned off: its own frame, not access_revoked (a revocation drops the token · PO 13:49Z)
+                        if not await remote_control.is_enabled(s, org_id):
+                            yield f"event: {remote_control.OFF_CODE}\ndata: {{}}\n\n"
                             return
                     commands = await relay.commands_to_send(s, setup_id, last_seq)
                     if now - last_beat >= _HEARTBEAT_SEC:

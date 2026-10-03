@@ -289,6 +289,11 @@ async def enqueue_command(
 ) -> DesktopCommand:
     """The one way a command is made (the person-facing endpoints come with B-2 · B-3 · B-4). The same idempotency key again
     returns the first row; the device's next number is taken under its row's lock."""
+    from app.services import remote_control
+
+    # story #4535 — no command is made while the org's «원격 제어» is off (the B-2/B-3 endpoints come through here)
+    if not await remote_control.is_enabled(db, setup.org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     parsed = validate_payload(kind, payload)
     if isinstance(parsed, StartSessionPayload):
         _check_agent(setup, parsed.agent_member_id)
