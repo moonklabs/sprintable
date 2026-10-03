@@ -575,8 +575,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               // (after its change), never on the label's: a browser does the label's default action (that radio click) only after
               // the label's listeners and the update they flushed, so folding there removed the radio before it was chosen. A
               // press inside the list (pointer) folds; an arrow key's click (no press) only chooses.
+              // story 4553: the radio keeps its own size in the flex label (no stretch to the card's height) — its focus ring is a ring,
+              // not a card-tall capsule
               <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
-                <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1"
+                <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1 shrink-0 self-start"
                   onClick={() => { if (pressInList.current) { pressInList.current = false; foldRecipes(true); } }} />
                 <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
                   {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
