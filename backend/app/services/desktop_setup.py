@@ -587,6 +587,8 @@ class Exchanged:
     # story 4470: which org (not only its shown name, which can change and repeat) — the app keeps the agents' default folder
     # per org, so a setup for another org on the same Mac never works in the folder an earlier org's agents used
     org_id: uuid.UUID | None = None
+    # story #4529 — the device's own token for the relay (apart from the agent keys), shown once, in this response
+    device_token: str | None = None
 
 
 async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Exchanged | None:
@@ -641,9 +643,12 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
 
     # the org the desktop is now joined to (Qadir 4825): the app shows it, so a person notices a setup confirmed by another org
     org_name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
+    from app.services.desktop_relay import issue_device_token
+
+    device_token = await issue_device_token(db, setup.id)  # story #4529 — same transaction as the keys: all or nothing
     return Exchanged(
         setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup), org_name=org_name,
-        org_id=setup.org_id,
+        org_id=setup.org_id, device_token=device_token,
     )
 
 
@@ -718,6 +723,9 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
         .values(revoked_at=now).returning(ApiKey.id)
     )).scalars().all()
+    from app.services.desktop_relay import revoke_device_tokens
+
+    await revoke_device_tokens(db, setup.id, now=now)  # story #4529 — the device's relay token goes with its keys
     agent_ids = {
         uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent" and m.get("member_id")
     }

@@ -42,6 +42,8 @@ class DesktopSetup(Base):
     )
     exchanged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     keys_issued: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # story #4529 (alembic 0429) — the last `desktop_commands.device_seq` handed out for this device (the stream's event id)
+    relay_command_seq: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

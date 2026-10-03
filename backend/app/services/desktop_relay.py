@@ -1,0 +1,365 @@
+"""story #4529 (E-DESKTOP-2 B-1) — the device relay's server side. Contract: doc «E-DESKTOP-2 B-1 — 기기 줄 계약 v1» (02d2cf71).
+
+- A device token (`sdt_…`) is issued with the exchange, apart from the agent keys (an agent key never gets one — PO 05:19Z: while
+  agent keys can leak through a CLI environment, minting a remote credential from one would undo the separation), valid on
+  /api/v2/desktop/relay/* only, revoked with the device.
+- The daemon reports its sessions (the only source — the server records, never guesses); `unknown` is shown, never stored, when
+  the device has been silent longer than UNKNOWN_AFTER.
+- Commands: four kinds, a per-kind payload schema with nothing extra, one row per idempotency key, numbered per device, the state
+  moving forward only. The daemon reports a code, never output.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import hmac
+import secrets
+import uuid
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.desktop_relay import (
+    COMMAND_KINDS,
+    COMMAND_STATE_ORDER,
+    DesktopCommand,
+    DesktopDeviceToken,
+    DesktopSession,
+)
+from app.models.desktop_setup import DesktopSetup
+
+TOKEN_PREFIX = "sdt_"
+UNKNOWN_AFTER = timedelta(seconds=90)  # PO 05:19Z — three missed 30-second heartbeats
+SESSION_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+PROMPT_MAX = 8000
+
+
+class DesktopRelayError(Exception):
+    def __init__(self, status: int, code: str, message: str):
+        super().__init__(message)
+        self.status, self.code, self.message = status, code, message
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# ── the device token ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+async def issue_device_token(db: AsyncSession, setup_id: uuid.UUID) -> str:
+    """One active token per device: any earlier one is revoked. The plaintext is returned once (the exchange response)."""
+    now = _now()
+    await db.execute(
+        update(DesktopDeviceToken)
+        .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    db.add(DesktopDeviceToken(id=uuid.uuid4(), setup_id=setup_id, token_hash=_hash(token), issued_at=now))
+    await db.flush()
+    return token
+
+
+async def revoke_device_tokens(db: AsyncSession, setup_id: uuid.UUID, *, now: datetime | None = None) -> int:
+    revoked = (await db.execute(
+        update(DesktopDeviceToken)
+        .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
+        .values(revoked_at=now or _now())
+        .returning(DesktopDeviceToken.id)
+    )).scalars().all()
+    return len(revoked)
+
+
+async def device_for_token(db: AsyncSession, token: str | None) -> DesktopSetup | None:
+    """The device a token belongs to — None for no token, another shape, an unknown or revoked token, or a disconnected device."""
+    if not token or not token.startswith(TOKEN_PREFIX):
+        return None
+    row = (await db.execute(
+        select(DesktopDeviceToken, DesktopSetup)
+        .join(DesktopSetup, DesktopSetup.id == DesktopDeviceToken.setup_id)
+        .where(DesktopDeviceToken.token_hash == _hash(token))
+    )).first()
+    if row is None:
+        return None
+    tok, setup = row
+    if not hmac.compare_digest(tok.token_hash, _hash(token)):
+        return None
+    if tok.revoked_at is not None or setup.revoked_at is not None or setup.exchanged_at is None:
+        return None
+    return setup
+
+
+async def touch_device(db: AsyncSession, setup_id: uuid.UUID) -> None:
+    """The device was heard from now (connect · heartbeat · any report) — what `unknown` is measured from."""
+    await db.execute(
+        update(DesktopDeviceToken)
+        .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
+        .values(last_used_at=_now())
+    )
+
+
+async def device_still_valid(db: AsyncSession, setup_id: uuid.UUID) -> bool:
+    """An open stream asks again: a disconnect (device revoked · its token revoked) ends it."""
+    row = (await db.execute(
+        select(DesktopSetup.revoked_at, func.count(DesktopDeviceToken.id))
+        .select_from(DesktopSetup)
+        .outerjoin(DesktopDeviceToken, (DesktopDeviceToken.setup_id == DesktopSetup.id) & DesktopDeviceToken.revoked_at.is_(None))
+        .where(DesktopSetup.id == setup_id)
+        .group_by(DesktopSetup.revoked_at)
+    )).first()
+    return row is not None and row[0] is None and row[1] > 0
+
+
+# ── sessions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+class SessionReport(BaseModel):
+    """One session's state — nothing else: no terminal bytes, no prompt text, no path, no key (extra fields → 422)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_member_id: uuid.UUID
+    runtime: Literal["claude", "codex"]
+    state: Literal["starting", "working", "idle", "waiting_permission", "stopped"]
+    at: datetime
+
+
+class SessionStateReport(SessionReport):
+    report_seq: int = Field(ge=1)
+
+
+class SnapshotSession(SessionReport):
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+
+
+class SessionSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_seq: int = Field(ge=1)
+    sessions: list[SnapshotSession] = Field(max_length=64)
+
+
+def _setup_agents(setup: DesktopSetup) -> set[uuid.UUID]:
+    return {uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent" and m.get("member_id")}
+
+
+async def _lock_device_seq(db: AsyncSession, setup_id: uuid.UUID) -> int:
+    """The device's latest report_seq, under the device row's lock (two reports at once are ordered, not interleaved)."""
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.id == setup_id).with_for_update())
+    return (await db.execute(
+        select(func.coalesce(func.max(DesktopSession.last_report_seq), 0)).where(DesktopSession.setup_id == setup_id)
+    )).scalar_one()
+
+
+def _check_agent(setup: DesktopSetup, agent_member_id: uuid.UUID) -> None:
+    if agent_member_id not in _setup_agents(setup):
+        raise DesktopRelayError(422, "agent_not_on_device", "the agent is not one this device was set up with")
+
+
+async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_key: str, report: SessionStateReport) -> DesktopSession:
+    """A report older than (or equal to) the device's latest is refused — 409 (a reordered delivery never undoes a newer one)."""
+    _check_agent(setup, report.agent_member_id)
+    latest = await _lock_device_seq(db, setup.id)
+    if report.report_seq <= latest:
+        raise DesktopRelayError(409, "stale_report", f"report_seq {report.report_seq} is not after {latest}")
+    row = (await db.execute(
+        select(DesktopSession).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == session_key)
+    )).scalar_one_or_none()
+    if row is None:
+        row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=session_key)
+        db.add(row)
+    row.agent_member_id, row.runtime, row.state = report.agent_member_id, report.runtime, report.state
+    row.last_report_seq, row.state_at = report.report_seq, report.at
+    row.ended_at = report.at if report.state == "stopped" else None
+    await touch_device(db, setup.id)
+    await db.flush()
+    return row
+
+
+async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: SessionSnapshot) -> int:
+    """The whole list (after a reconnect): the given sessions as reported; a session the device no longer lists is stopped."""
+    for s in snapshot.sessions:
+        _check_agent(setup, s.agent_member_id)
+    keys = [s.session_key for s in snapshot.sessions]
+    if len(set(keys)) != len(keys):
+        raise DesktopRelayError(422, "duplicate_session_key", "a session key appears twice")
+    latest = await _lock_device_seq(db, setup.id)
+    if snapshot.report_seq <= latest:
+        raise DesktopRelayError(409, "stale_report", f"report_seq {snapshot.report_seq} is not after {latest}")
+    now = _now()
+    existing = {r.session_key: r for r in (await db.execute(
+        select(DesktopSession).where(DesktopSession.setup_id == setup.id)
+    )).scalars().all()}
+    for s in snapshot.sessions:
+        row = existing.pop(s.session_key, None)
+        if row is None:
+            row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=s.session_key)
+            db.add(row)
+        row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, s.at
+        row.last_report_seq = snapshot.report_seq
+        row.ended_at = s.at if s.state == "stopped" else None
+    for row in existing.values():
+        row.last_report_seq = snapshot.report_seq
+        if row.state != "stopped":
+            row.state, row.state_at, row.ended_at = "stopped", now, now
+    await touch_device(db, setup.id)
+    await db.flush()
+    return len(snapshot.sessions)
+
+
+async def device_sessions_view(db: AsyncSession, setup_id: uuid.UUID, *, now: datetime | None = None) -> list[dict]:
+    """The sessions as a person sees them: each one's reported state, or `unknown` for all when the device has been silent
+    longer than UNKNOWN_AFTER (never «dead» — the device may come back and send its list)."""
+    now = now or _now()
+    last_heard = (await db.execute(
+        select(func.max(DesktopDeviceToken.last_used_at)).where(DesktopDeviceToken.setup_id == setup_id)
+    )).scalar_one_or_none()
+    silent = last_heard is None or now - last_heard > UNKNOWN_AFTER
+    rows = (await db.execute(
+        select(DesktopSession).where(DesktopSession.setup_id == setup_id).order_by(DesktopSession.created_at)
+    )).scalars().all()
+    return [{
+        "session_key": r.session_key, "agent_member_id": str(r.agent_member_id), "runtime": r.runtime,
+        "state": "unknown" if silent and r.state != "stopped" else r.state, "state_at": r.state_at.isoformat(),
+    } for r in rows]
+
+
+# ── commands ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+class _Payload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class StartSessionPayload(_Payload):
+    agent_member_id: uuid.UUID
+    runtime: Literal["claude", "codex"]
+
+
+class SendPromptPayload(_Payload):
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+    text: str = Field(min_length=1, max_length=PROMPT_MAX)
+
+
+class AnswerApprovalPayload(_Payload):
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+    request_id: str = Field(min_length=1, max_length=128)
+    decision: Literal["allow", "deny"]
+    signed: str = Field(min_length=1, max_length=16384)  # the phone's signed blob, carried as is (B-2) — never made or changed here
+
+
+class StopSessionPayload(_Payload):
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+
+
+PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
+    "start_session": StartSessionPayload,
+    "send_prompt": SendPromptPayload,
+    "answer_approval": AnswerApprovalPayload,
+    "stop_session": StopSessionPayload,
+}
+assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
+
+
+def validate_payload(kind: str, payload: dict) -> _Payload:
+    schema = PAYLOAD_SCHEMAS.get(kind)
+    if schema is None:
+        raise DesktopRelayError(422, "unknown_command_kind", f"{kind!r} is not a command kind")
+    try:
+        return schema.model_validate(payload)
+    except ValidationError as exc:
+        raise DesktopRelayError(422, "invalid_payload", exc.errors(include_url=False, include_input=False)[0]["msg"]) from exc
+
+
+async def enqueue_command(
+    db: AsyncSession, *, setup: DesktopSetup, kind: str, payload: dict, idempotency_key: str, requested_by: uuid.UUID,
+) -> DesktopCommand:
+    """The one way a command is made (the person-facing endpoints come with B-2 · B-3 · B-4). The same idempotency key again
+    returns the first row; the device's next number is taken under its row's lock."""
+    parsed = validate_payload(kind, payload)
+    if isinstance(parsed, StartSessionPayload):
+        _check_agent(setup, parsed.agent_member_id)
+    if not 1 <= len(idempotency_key) <= 128:
+        raise DesktopRelayError(422, "invalid_idempotency_key", "an idempotency key of 1 to 128 characters")
+    existing = (await db.execute(
+        select(DesktopCommand).where(DesktopCommand.setup_id == setup.id, DesktopCommand.idempotency_key == idempotency_key)
+    )).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    seq = (await db.execute(
+        update(DesktopSetup).where(DesktopSetup.id == setup.id)
+        .values(relay_command_seq=DesktopSetup.relay_command_seq + 1)
+        .returning(DesktopSetup.relay_command_seq)
+    )).scalar_one()
+    body = parsed.model_dump(mode="json")
+    cmd = DesktopCommand(
+        id=uuid.uuid4(), setup_id=setup.id, device_seq=seq, kind=kind, session_key=body.get("session_key"), payload=body,
+        idempotency_key=idempotency_key, requested_by=requested_by, state="queued",
+    )
+    db.add(cmd)
+    await db.flush()
+    return cmd
+
+
+async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int) -> list[DesktopCommand]:
+    """The device's commands after `after_seq` not yet acknowledged (at least once: a reconnect from an older id sends them
+    again — the daemon drops a command_id it has seen). Queued ones become delivered."""
+    rows = (await db.execute(
+        select(DesktopCommand)
+        .where(DesktopCommand.setup_id == setup_id, DesktopCommand.device_seq > after_seq,
+               DesktopCommand.state.in_(("queued", "delivered")))
+        .order_by(DesktopCommand.device_seq)
+        .limit(100)
+    )).scalars().all()
+    now = _now()
+    for r in rows:
+        if r.state == "queued":
+            r.state, r.delivered_at = "delivered", now
+    await db.flush()
+    return rows
+
+
+class CommandResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["acked", "done", "failed", "rejected"]
+    result_code: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,64}$")
+
+
+async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_id: uuid.UUID, result: CommandResult) -> DesktopCommand:
+    cmd = (await db.execute(
+        select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == setup.id).with_for_update()
+    )).scalar_one_or_none()
+    if cmd is None:
+        raise DesktopRelayError(404, "command_not_found", "no such command on this device")
+    if COMMAND_STATE_ORDER[result.state] <= COMMAND_STATE_ORDER[cmd.state]:
+        raise DesktopRelayError(409, "state_not_forward", f"{cmd.state} → {result.state} does not move forward")
+    now = _now()
+    cmd.state, cmd.result_code = result.state, result.result_code
+    if result.state == "acked":
+        cmd.acked_at = now
+    else:
+        cmd.acked_at = cmd.acked_at or now
+        cmd.finished_at = now
+    await touch_device(db, setup.id)
+    await db.flush()
+    return cmd
+
+
+# ── wake (in-process; other instances find a command by their poll) ─────────────────────────────────────────────────────────
+
+_device_wakers: dict[str, set[asyncio.Event]] = defaultdict(set)
+
+
+def wake_device(setup_id: uuid.UUID) -> None:
+    for ev in list(_device_wakers.get(str(setup_id), ())):
+        ev.set()
