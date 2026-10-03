@@ -12,6 +12,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
  * story #4548 (E-DESKTOP-2 B-1 · 명세 모음 B-1 «②'» · 유나 «4548 서버 코드 ↔ 사람 문구» 표) — 이미 설정한 컴퓨터의 원격 제어를
  * 사람이 켜는 확인 한 장. 데스크톱 앱이 `#code=…`로 연다(계약 02d2cf71 §1.1). 코드는 사람에게 보이지 않고 본문으로만 간다.
  * 머리(컴퓨터 이름 · 조직)는 서버가 켤 수 있는 사람에게만 준다 — `not_org_admin`이면 머리 없이 «켤 수 없어요»만(남의 이름 0).
+ * 결과 문단은 모두 `role="status"`(유나 10:26Z): [켜기] 뒤 단추가 사라져 초점이 떨어지니, 화면 읽기에 결과가 소리로 닿게.
  */
 type View =
   | { kind: 'loading' }
@@ -140,24 +141,24 @@ function Confirm({ code }: { code: string }) {
     return (
       <Card className="break-keep flex flex-col gap-3 p-6">
         <h1 className="text-lg font-semibold">{t('cantTitle')}</h1>
-        <p className="text-sm text-muted-foreground">{t('notAdmin')}</p>
+        <p className="text-sm text-muted-foreground" role="status">{t('notAdmin')}</p>
       </Card>
     );
   }
   if (view.kind === 'disconnected') {
     return (
       <Card className="break-keep flex flex-col gap-3 p-6">
-        <p className="text-sm text-muted-foreground">{t('disconnected')}</p>
+        <p className="text-sm text-muted-foreground" role="status">{t('disconnected')}</p>
         <div><Button variant="outline" asChild><a href={flat('/desktop')}>{t('devicesAction')}</a></Button></div>
       </Card>
     );
   }
   if (view.kind === 'expired' || view.kind === 'spent') {
-    return <Card className="break-keep p-6"><p className="text-sm text-muted-foreground">{view.kind === 'expired' ? t('expired') : t('spent')}</p></Card>;
+    return <Card className="break-keep p-6"><p className="text-sm text-muted-foreground" role="status">{view.kind === 'expired' ? t('expired') : t('spent')}</p></Card>;
   }
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
-      <p className="text-sm text-muted-foreground">{t('failed')}</p>
+      <p className="text-sm text-muted-foreground" role="status">{t('failed')}</p>
       <div><Button variant="outline" onClick={() => void peek()}>{t('retry')}</Button></div>
     </Card>
   );

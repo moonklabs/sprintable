@@ -49,6 +49,7 @@ async function open(hash: string, locale: 'ko' | 'en' = 'ko') {
   for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
 }
 const text = () => container.textContent ?? '';
+const spoken = () => Array.from(container.querySelectorAll('[role="status"]')).map((e) => e.textContent).join(' | ');
 const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(label))!;
 
 describe('DesktopRemoteConfirm (story #4548)', () => {
@@ -74,6 +75,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     expect(fetchWithAuth.mock.calls[1]).toEqual(['/api/desktop/device-token-codes/confirm', expect.objectContaining({ body: JSON.stringify({ code: CODE }) })]);
     expect(fetchWithAuth.mock.calls.every(([url]) => !String(url).includes(CODE))).toBe(true);
     expect(text()).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.');
+    expect(spoken()).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.');
   });
 
   it('cancel sends nothing and goes to «연결된 기기»', async () => {
@@ -88,6 +90,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     fetchWithAuth.mockResolvedValueOnce(err(403, 'not_org_admin'));
     await open(`#code=${CODE}`);
     expect(text()).toBe('원격 제어를 켤 수 없어요이 컴퓨터의 원격 제어는 이 조직의 소유자 · 관리자만 켤 수 있어요');
+    expect(spoken()).toBe('이 컴퓨터의 원격 제어는 이 조직의 소유자 · 관리자만 켤 수 있어요');
     expect(container.querySelector('button')).toBeNull();
   });
 
@@ -99,6 +102,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     fetchWithAuth.mockResolvedValueOnce(err(status, code));
     await open(`#code=${CODE}`);
     expect(text()).toBe(line);
+    expect(spoken()).toBe(line); // heard by a screen reader too (Yuna 10:26Z)
   });
 
   it('a device disconnected between the peek and the press says so, with the way to «연결된 기기»', async () => {
@@ -108,6 +112,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     await act(async () => { button('켜기').click(); });
     for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
     expect(text()).toContain('그 사이 이 컴퓨터의 연결이 끊겨 원격 제어를 켤 수 없어요');
+    expect(spoken()).toContain('그 사이 이 컴퓨터의 연결이 끊겨 원격 제어를 켤 수 없어요');
     expect(container.querySelector('a')?.getAttribute('href')).toBe('/desktop');
   });
 
@@ -115,6 +120,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     fetchWithAuth.mockRejectedValueOnce(new Error('offline'));
     await open(`#code=${CODE}`);
     expect(text()).toContain('켜지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+    expect(spoken()).toBe('켜지 못했어요 — 잠시 뒤 다시 눌러 주세요');
     fetchWithAuth.mockResolvedValueOnce(json(200, { device_name: 'mac', org_name: 'org', expires_at: 'x' }));
     await act(async () => { button('다시 시도').click(); });
     for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
