@@ -7,6 +7,7 @@ import { ViewerTimeZoneProvider } from '@/components/viewer-time-zone';
 import { ThemeProvider } from '@/components/providers/theme-provider';
 import { ContentPaintedSignal } from '@/components/providers/content-painted-signal';
 import { FetchGateInstaller } from '@/components/providers/fetch-gate-installer';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 import { GoogleAnalytics } from '@/components/google-analytics';
 import { resolveAppUrl } from '@/services/app-url';
 import "./globals.css";
@@ -85,6 +86,7 @@ export default async function RootLayout({
         <link rel="preload" href="/fonts/pretendard-korean-core.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
       </head>
       <body className="h-full">
+        <PhoneBridgeClaim />
         <GoogleAnalytics />
         <FetchGateInstaller />
         <ContentPaintedSignal />

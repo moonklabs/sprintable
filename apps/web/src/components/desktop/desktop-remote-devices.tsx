@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -9,11 +9,14 @@ import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgRemoteControl } from '@/lib/org-remote-control';
+import { isPhoneApp } from '@/lib/phone-bridge';
+import { PhonePairEntry } from './phone-pairing';
 
 /**
  * story #4533 AC3 (명세 모음 «B-1 ③ 웹 내 설정 · 원격 기기 — 목록과 [빼기]만») — my phones as pairs, one line per phone ↔ computer:
  * the phone's name · «짝: {computer}» · when paired · the confirmation number (the same six digits the phone app's «이 폰» shows) ·
  * [빼기] with an in-line confirmation. The web never pairs (the QR is the desktop app's) and never adds a phone.
+ * story #4532 — inside the phone app (its bridge claimed) one more button: [컴퓨터와 짝짓기] → the phone's pairing screen.
  */
 interface Pair { setup_id: string; device_name: string | null; paired_at: string }
 interface Phone { id: string; label: string; confirm_number: string; last_used_at: string | null; pairs: Pair[] }
@@ -25,6 +28,7 @@ export function DesktopRemoteDevices() {
   // the switch card's own value (story #4535 · PO 18:58Z): turned on or off there, the «꺼져 있어요» line follows at once
   const [remoteControl] = useOrgRemoteControl(orgId);
   const remoteControlOn = remoteControl ? remoteControl.enabled : null;
+  const inPhoneApp = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
   const [phones, setPhones] = useState<Phone[] | null>(null);
   const [asking, setAsking] = useState<string | null>(null); // `${phone}:${setup}` being confirmed
   const [result, setResult] = useState('');
@@ -100,10 +104,15 @@ export function DesktopRemoteDevices() {
         </ul>
         </Card>
       )}
+      {inPhoneApp ? <PhonePairEntry /> : null}
       <p ref={statusRef} tabIndex={-1} className="text-xs text-muted-foreground outline-none" role="status">{result}</p>
     </section>
   );
 }
+
+const noSubscribe = () => () => {};
+const notOnServer = () => false;
+
 
 function PairLine({ phone, pair, onRemove, disabled, buttonRef }: {
   phone: Phone; pair: Pair; onRemove: () => void; disabled: boolean; buttonRef: (el: HTMLButtonElement | null) => void;

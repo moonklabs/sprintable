@@ -393,6 +393,11 @@ export const EXEMPT_PAIRS = new Set<string>([
   // the cap line only on a paused card — never on screen together. «총예산» is the same word on purpose (it names that budget).
   // Look again if the paused card ever draws the sealed facts.
   'cage.adsBoostBudgetLabel <-> cage.boostPausedCapReached',
+  // story #4532 (명세 B-2 결과 줄 · Yuna «폰 서명 · 권한 창 문구» ③) — the phone app's result line «거부됨 · {tool}» contains «거부», the
+  // [거부] button. Not the shape this guard is for (#2352/#2365: two counted phrases read as one another): the result line replaces
+  // the buttons — once an answer went through, [허용] · [거부] are not drawn (the only lines drawn next to the buttons are «보내지
+  // 않았어요» and «보내지 못했어요»). Same words as the desktop band on purpose. Look again if a sent answer ever keeps its buttons.
+  'agentPermissions.phone.denied <-> agentPermissions.phone.deny',
   // story #3592(§22-18 정본, 2026-09-07) — 행 액션 접근 이름 재발 가드가 새로 심은
   // aria-label 템플릿 11쌍. 전부 이 가드가 잡으려는 "화면에 «보이는» 두 문구가
   // 헷갈린다"(#2352·#2365) 모양이 아니다 — aria-label은 스크린리더 전용이라 애초에
