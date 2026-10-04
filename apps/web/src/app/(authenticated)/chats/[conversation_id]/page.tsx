@@ -373,8 +373,8 @@ export default function ConversationPage() {
           </div>
         ) : (
           <>
-          {/* story #4534 — a DM with an agent: its session on the computer (look only · the phone stops and instructs) */}
-          {headerAvatarParticipant?.type === 'agent' ? <AgentSessionStrip agentId={headerAvatarParticipant.member_id} /> : null}
+          {/* story #4534 — a DM with an agent: its session on the computer (the web looks · inside the phone app: [멈춤] [지금 지시]) */}
+          {headerAvatarParticipant?.type === 'agent' ? <AgentSessionStrip agentId={headerAvatarParticipant.member_id} conversationId={conversation_id} /> : null}
           <ChatView
             key={conversation_id}
             threadId={conversation_id}
