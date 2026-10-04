@@ -137,15 +137,17 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
     return { kind: 'unknown', pending }; // the post may have reached the server — its answer was lost
   }
   if (!res.ok) {
+    // Kadir 4955 (5981640479): any 5xx may have come after the command was made (the backend's INTERNAL_ERROR envelope · a proxy
+    // timeout · a code or none) — never an end: kept, [결과 확인] follows it with the same key
+    if (res.status >= 500) return { kind: 'unknown', pending };
     const code = await codeOf(res);
-    // a refusal the server named: nothing was made (the same key would have given back the first command — server rule)
+    // a refusal the server named (4xx): nothing was made (the same key would have given back the first command — server rule)
     if (code === 'session_not_working' || code === 'session_not_found') return notWorking();
     if (code === 'device_unreachable') return { kind: 'unreachable' };
     if (code === 'remote_control_off') return { kind: 'remote_off' };
     if (code === 'conversation_not_found') return { kind: 'conversation_not_found' };
     if (code === 'phone_not_paired') return { kind: 'not_paired' };
-    if (code) return { kind: 'failed' };
-    return res.status >= 500 ? { kind: 'unknown', pending } : { kind: 'failed' }; // a 5xx with no word: it may have been made
+    return { kind: 'failed' }; // another 4xx: refused before anything was made
   }
   let made: { command_id?: string; state?: string };
   try { made = (await res.json()) as typeof made; } catch { return { kind: 'unknown', pending }; }

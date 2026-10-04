@@ -136,6 +136,17 @@ describe('[4534] commandOnPhone — the ends', () => {
     }
   });
 
+  it('Kadir 4955 (5981640479): a 5xx WITH a code (the backend\'s INTERNAL_ERROR envelope · a proxy timeout) is unknown too — kept, never failed', async () => {
+    for (const post of [() => json(500, { error: { code: 'INTERNAL_ERROR' } }), () => json(504, { error: { code: 'upstream_timeout' } }), () => json(503, { code: 'unavailable' })] as Array<() => Response>) {
+      const d = deps(signedPrompt);
+      server(post);
+      const out = await commandOnPhone(prompt, d);
+      expect(out.kind).toBe('unknown');
+      expect(out.kind === 'unknown' && out.pending.key).toBe('idem-1');
+      expect(d.sent).toEqual([]);
+    }
+  });
+
   it('[결과 확인] follows THAT command: its id → polls only (no post · no signature) · no id yet → the same key and body again', async () => {
     const known: Pending = { verb: 'send', key: 'idem-1', commandId: CMD, body: { kind: 'send_prompt', session_key: 's-9', signed: 'SIGNED', phone_key_id: 'k-1', text: 'go', conversation_id: CONV } };
     let calls = server(json(201, {}), [json(200, { state: 'done', result_code: 'after_step' })]);
