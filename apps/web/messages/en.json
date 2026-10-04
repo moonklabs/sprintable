@@ -6915,7 +6915,7 @@
       "screenLockConfirms": "No fingerprint or face is set up, so your screen lock confirms it",
       "biometricRequired": "This phone can answer only with a fingerprint — add one in the phone's settings, then press again",
       "noScreenLock": "Answers need a screen lock on this phone — turn one on in the phone's settings",
-      "keyInvalidated": "This phone's fingerprint or face settings changed, so it can't answer from here — pair this phone with the computer again",
+      "keyInvalidated": "This phone's lock settings changed, so it can't answer from here — pair this phone with the computer again",
       "openSettings": "Open settings",
       "pairAgain": "Pair again"
     }
@@ -6931,7 +6931,7 @@
     "confirm": "Pair with this computer? · {device}",
     "checking": "Checking the computer's screen…",
     "numberLead": "Pairing number",
-    "numberHint": "pick this number on the computer",
+    "numberHint": "Pick this number on the computer",
     "paired": "Paired · {device} — this phone can now answer, stop and instruct that computer's agents",
     "expired": "This QR has expired — make a new one on the computer",
     "notOurs": "This isn't a Sprintable pairing QR",

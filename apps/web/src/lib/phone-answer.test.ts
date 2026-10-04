@@ -34,7 +34,7 @@ describe('[4532] answerOnPhone', () => {
     ['expired', 'expired'],
     ['not_pending', 'closed'],
     ['not_answerable', 'closed'],
-    ['not_registered', 'failed'],
+    ['not_registered', 'key_invalidated'], // PO 07:47Z ①: a key the server does not know → pair again (never «press again»)
     ['sign_failed', 'failed'],
     ['not_phone_app', 'failed'],
     ['timeout', 'failed'], // PO 06:07Z ②: no answer within the signing window — the buttons come back

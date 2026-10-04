@@ -30,7 +30,10 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
       case 'cancelled': return { kind: 'cancelled' };
       case 'biometric_required': return { kind: 'biometric_required' };
       case 'no_screen_lock': return { kind: 'no_screen_lock' };
-      case 'key_invalidated': return { kind: 'key_invalidated' };
+      case 'key_invalidated':
+      // PO 07:47Z ①: this phone's key is one the server does not know (it was removed and made again before the shell stopped
+      // making keys on the signing path · or the registration is gone) — the same way out: pair this phone again
+      case 'not_registered': return { kind: 'key_invalidated' };
       case 'expired': return { kind: 'expired' };
       case 'not_pending':
       case 'not_answerable': return { kind: 'closed' };

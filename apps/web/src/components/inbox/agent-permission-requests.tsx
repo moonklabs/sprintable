@@ -225,7 +225,7 @@ function Line({ focus = false, children }: { focus?: boolean; children: ReactNod
   const ref = useRef<HTMLParagraphElement>(null);
   useEffect(() => { if (focus) ref.current?.focus(); }, [focus, children]);
   return (
-    <p ref={ref} tabIndex={-1} role="status" className="text-xs text-muted-foreground outline-none" data-testid="agent-permission-phone-line">
+    <p ref={ref} tabIndex={-1} role="status" className="break-keep text-pretty text-xs text-muted-foreground outline-none" data-testid="agent-permission-phone-line">
       {children}
     </p>
   );

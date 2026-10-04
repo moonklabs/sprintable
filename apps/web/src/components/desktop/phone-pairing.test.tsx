@@ -126,8 +126,14 @@ describe('[4532] phone pairing screen', () => {
     expect(line()).toBe('컴퓨터 화면을 확인하는 중…'); // still «sent»
     offerState = { state: 'revealed', reveal: 'R' };
     await tick();
-    expect(line()).toBe('짝짓기 숫자 · 296 843 — 컴퓨터 화면에서 이 숫자를 골라 주세요');
-    expect(container.querySelector('[data-testid="pairing-number"]')?.textContent).toBe('296 843');
+    // Yuna 07:48Z ②: three lines in the one status — the lead · the number alone · what to do (no «·» / «—» joins)
+    const lineEl = container.querySelector('[data-testid="phone-pairing-line"]')!;
+    const parts = ['pairing-number-lead', 'pairing-number', 'pairing-number-hint'].map((id) => lineEl.querySelector(`[data-testid="${id}"]`));
+    expect(parts.map((p) => p?.textContent)).toEqual(['짝짓기 숫자', '296 843', '컴퓨터 화면에서 이 숫자를 골라 주세요']);
+    expect(parts.every((p) => p?.classList.contains('block'))).toBe(true);
+    expect(line()).toBe('짝짓기 숫자296 843컴퓨터 화면에서 이 숫자를 골라 주세요'); // nothing else in that status
+    // Yuna 07:48Z ①: a Korean line breaks between words, never inside one («주세 / 요»)
+    expect(lineEl.className).toMatch(/\bbreak-keep\b/);
     expect(sent.filter((s) => s.type === 'pair.number')).toEqual([{ type: 'pair.number', args: { offer_id: HEAD.offer_id, reveal: 'R' } }]);
     await tick();
     expect(sent.filter((s) => s.type === 'pair.number')).toHaveLength(1); // asked once
@@ -242,6 +248,7 @@ describe('[4532] phone pairing screen', () => {
     await press('Pair');
     offerState = { state: 'revealed', reveal: 'R' };
     await tick();
-    expect(line()).toBe('Pairing number · 296 843 — pick this number on the computer');
+    expect(['pairing-number-lead', 'pairing-number', 'pairing-number-hint'].map((id) => container.querySelector(`[data-testid="${id}"]`)?.textContent))
+      .toEqual(['Pairing number', '296 843', 'Pick this number on the computer']); // Yuna 07:48Z ②
   });
 });

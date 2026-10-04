@@ -142,9 +142,11 @@ function Pairing() {
     case 'number':
       return (
         <Shell>
+          {/* Yuna 07:48Z ②: three lines in the one status — the lead (small) · the number alone on its line · what to do with it */}
           <Line focus>
-            {t('numberLead')} · <span className="font-mono text-3xl font-semibold tracking-wider text-foreground" data-testid="pairing-number">{view.number}</span>
-            {' — '}{t('numberHint')}
+            <span className="block text-xs" data-testid="pairing-number-lead">{t('numberLead')}</span>
+            <span className="block font-mono text-3xl font-semibold tracking-wider text-foreground" data-testid="pairing-number">{view.number}</span>
+            <span className="block" data-testid="pairing-number-hint">{t('numberHint')}</span>
           </Line>
           <Actions><Button variant="outline" onClick={cancel}>{t('cancel')}</Button></Actions>
         </Shell>
@@ -193,7 +195,7 @@ function Line({ focus = false, strong = false, children }: { focus?: boolean; st
   useEffect(() => { if (focus) ref.current?.focus(); }, [focus]);
   return (
     <p ref={ref} tabIndex={-1} role="status" data-testid="phone-pairing-line"
-      className={`${strong ? 'text-sm font-medium text-foreground' : 'text-sm text-muted-foreground'} outline-none`}>
+      className={`${strong ? 'text-sm font-medium text-foreground' : 'text-sm text-muted-foreground'} break-keep text-pretty outline-none`}>
       {children}
     </p>
   );
