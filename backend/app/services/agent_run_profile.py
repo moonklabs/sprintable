@@ -37,7 +37,7 @@ _CODEX_COMMON_EFFORTS = ("low", "medium", "high", "xhigh")  # what every Codex m
 # Listed = a start with it opens the conversation with no question (민 19:32Z · `4540-ac0/model-probe`, turn 0): gpt-5.5 is left out —
 # its TUI stops at «GPT-5.5 retires on October 14, 2026 … Try new model / Use existing model» before any thread starts, so an agent
 # given it would sit there. A typed-in name is still allowed (checked at its first start · 명세 C-5).
-# Bracketed aliases (`opus[1m]`) are left out until «--model takes them» is measured (v1.2).
+# Bracketed aliases (`opus[1m]`) are not listed — a Claude name may be typed with the «[1m]» tail (CLAUDE_MODEL_NAME below).
 CATALOG: dict[str, dict[str, Any]] = {
     "claude-code": {
         "models": {"fable": _CLAUDE_EFFORTS, "opus": _CLAUDE_EFFORTS, "sonnet": _CLAUDE_EFFORTS},
@@ -59,6 +59,11 @@ CATALOG: dict[str, dict[str, Any]] = {
 
 # a typed-in model name goes on a command line: no space, quote, `=`, `;`, bracket, nor a leading `-` (§2)
 MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")
+# story 4540 (PO 13:10Z · 13:11Z): Claude takes its 1M-context id as the name with a «[1m]» tail (`claude-opus-5-5[1m]` — our launchers'
+# value) · that one tail only, Claude only — Codex never. The same rule is the daemon's (desktop-host run-profile.ts), held to it by
+# the shared vector file tests/fixtures/model-name-vectors.json (same bytes in both repos · its sha256 pinned on both sides)
+CLAUDE_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\[1m\])?$")
+MODEL_NAMES: dict[str, re.Pattern[str]] = {"claude-code": CLAUDE_MODEL_NAME, "codex": MODEL_NAME}
 
 BULK_MAX = 50
 
@@ -87,7 +92,7 @@ def check(runtime: str | None, model: str | None, effort: str | None) -> None:
     the new model doesn't take: 422)."""
     if runtime not in DESKTOP_RUNTIMES:
         raise _reject(422, "runtime_not_desktop")
-    if model is not None and not MODEL_NAME.fullmatch(model):
+    if model is not None and not MODEL_NAMES[runtime].fullmatch(model):
         raise _reject(422, "invalid_model")
     if effort is not None and effort not in allowed_efforts(runtime, model):
         raise _reject(422, "invalid_effort")
@@ -100,9 +105,11 @@ def options() -> dict:
                 "runtime": runtime,
                 "models": [{"name": name, "efforts": list(efforts)} for name, efforts in entry["models"].items()],
                 "custom_model_efforts": list(entry["custom"]),
+                "model_pattern": MODEL_NAMES[runtime].pattern,
             }
             for runtime, entry in CATALOG.items()
         ],
+        # the strictest (no tail) for a client that reads one pattern only — each runtime's own is in its entry
         "model_pattern": MODEL_NAME.pattern,
     }
 

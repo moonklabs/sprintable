@@ -1,0 +1,145 @@
+{
+ "rule": "run profile model name · Claude may end with [1m] · Codex never (story 4540)",
+ "vectors": [
+  {
+   "runtime": "claude",
+   "model": "claude-opus-5-5[1m]",
+   "ok": true
+  },
+  {
+   "runtime": "claude",
+   "model": "claude-opus-5-5",
+   "ok": true
+  },
+  {
+   "runtime": "claude",
+   "model": "opus",
+   "ok": true
+  },
+  {
+   "runtime": "claude",
+   "model": "opus[1m]",
+   "ok": true
+  },
+  {
+   "runtime": "claude",
+   "model": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa[1m]",
+   "ok": true
+  },
+  {
+   "runtime": "claude",
+   "model": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa[1m]",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "claude-opus-5-5[1M]",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "claude-opus-5-5[1m][1m]",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "claude-opus-5-5[2m]",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "x[1m]y",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "[1m]",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "-x[1m]",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "-x",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "claude opus",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "claude-opus-5-5 [1m]",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "a=b",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "a;b",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "a\"b",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "",
+   "ok": false
+  },
+  {
+   "runtime": "codex",
+   "model": "gpt-5.6-luna",
+   "ok": true
+  },
+  {
+   "runtime": "codex",
+   "model": "gpt-5.6-luna[1m]",
+   "ok": false
+  },
+  {
+   "runtime": "codex",
+   "model": "claude-opus-5-5[1m]",
+   "ok": false
+  },
+  {
+   "runtime": "codex",
+   "model": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "ok": true
+  },
+  {
+   "runtime": "codex",
+   "model": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "ok": false
+  },
+  {
+   "runtime": "codex",
+   "model": "-m",
+   "ok": false
+  },
+  {
+   "runtime": "claude",
+   "model": "claude-opus-5-5[1m]\n",
+   "ok": false
+  },
+  {
+   "runtime": "codex",
+   "model": "gpt-5\n",
+   "ok": false
+  }
+ ]
+}

@@ -89,7 +89,7 @@ export function draftBody(draft: RunProfileDraft): { runtime: string; model: str
 /** Whether the draft can be sent: a typed-in name in the server's shape, and something actually chosen. */
 export function draftReady(draft: RunProfileDraft, options: RunProfileOptions): boolean {
   if (draft.runtime === '') return false;
-  if (draft.modelChoice === CUSTOM && !modelNameOk(options, draft.customModel.trim())) return false;
+  if (draft.modelChoice === CUSTOM && !modelNameOk(options, draft.customModel.trim(), draft.runtime)) return false;
   return true;
 }
 
@@ -129,7 +129,7 @@ export function AgentRunProfileFields({ options, draft, onChange, keepAllowed = 
     { value: DEFAULT, label: ta('runProfileEffortDefault') },
     ...efforts.map((e) => ({ value: e, label: ta(EFFORT_LABEL_KEYS[e] ?? 'runProfileEffortDefault') })),
   ];
-  const customBad = draft.modelChoice === CUSTOM && draft.customModel.trim() !== '' && !modelNameOk(options, draft.customModel.trim());
+  const customBad = draft.modelChoice === CUSTOM && draft.customModel.trim() !== '' && !modelNameOk(options, draft.customModel.trim(), runtime);
 
   return (
     <div className="space-y-3">
