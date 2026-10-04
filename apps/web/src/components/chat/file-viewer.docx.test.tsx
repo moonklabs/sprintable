@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import JSZip from 'jszip';
 import { FileViewer } from './file-viewer';
 import koMessages from '../../../messages/ko.json';
 import type { ReadingPanelTarget } from './reading-panel';
@@ -179,5 +180,38 @@ describe('FileViewer docx (story #2788)', () => {
     errorSpy.mockRestore();
     vi.doUnmock('docx-preview');
     vi.resetModules();
+  });
+});
+
+// story #4532 AC5 (Kadir 4950 X ②): the fix bound to DocxBody itself — a document with an HTML part (altChunk) and a javascript:
+// hyperlink, through the real FileViewer → DocxBody → docx-preview. Taking DOCX_RENDER_OPTIONS or neutralizeDocxLinks out of
+// DocxBody turns this RED (an iframe appears · the link keeps its javascript: address).
+async function evilDocx(): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="html" ContentType="text/html"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+  zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  zip.file('word/_rels/document.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rChunk" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk" Target="chunk.html"/><Relationship Id="rLink" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="javascript:alert(1)" TargetMode="External"/><Relationship Id="rWeb" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>');
+  zip.file('word/chunk.html', '<html><body><script>parent.postMessage("RAN","*")</script></body></html>');
+  zip.file('word/document.xml', '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>EVIL_DOCX_TEXT</w:t></w:r></w:p><w:altChunk r:id="rChunk"/><w:p><w:hyperlink r:id="rLink"><w:r><w:t>click me</w:t></w:r></w:hyperlink></w:p><w:p><w:hyperlink r:id="rWeb"><w:r><w:t>a web link</w:t></w:r></w:hyperlink></w:p></w:body></w:document>');
+  return zip.generateAsync({ type: 'uint8array' });
+}
+
+describe('FileViewer docx — embedded HTML and javascript: links (story #4532)', () => {
+  it('DocxBody renders no altChunk frame and leaves no javascript: link address; a web link stays and opens apart', async () => {
+    const bytes = await evilDocx();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === 'https://signed.example/fixture-2788.docx') return new Response(new Uint8Array(bytes), { status: 200 });
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+    mount(<FileViewer target={target} onClose={() => {}} />);
+    await waitFor(() => container.textContent!.includes('EVIL_DOCX_TEXT') || container.textContent!.includes('표시하지 못했어요'));
+    expect(container.textContent).toContain('EVIL_DOCX_TEXT');
+    expect(container.querySelectorAll('iframe').length).toBe(0);
+    const links = [...container.querySelectorAll('a')];
+    const evil = links.find((a) => a.textContent === 'click me');
+    const web = links.find((a) => a.textContent === 'a web link');
+    expect(evil?.getAttribute('href') ?? null).toBeNull();
+    expect(web?.getAttribute('href')).toBe('https://example.com/');
+    expect(web?.getAttribute('target')).toBe('_blank');
   });
 });

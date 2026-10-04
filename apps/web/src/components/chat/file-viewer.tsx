@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { DOCX_RENDER_OPTIONS, neutralizeDocxLinks } from '@/lib/docx-safe';
 import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, X, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
@@ -383,16 +384,13 @@ function DocxBody({ url, label }: { url: string; label: string }) {
         if (settled) return;
         if (!containerRef.current) throw new Error('docx render target unmounted');
         containerRef.current.innerHTML = '';
-        await renderAsync(buf, containerRef.current, undefined, {
-          inWrapper: true,
-          // 인시던트(2026-08-19) — A4 고정폭 페이지가 좁은 패널에서 가로 스크롤로만
-          // 도달 가능해 실사용 판정이 "잘림"이었다(선생님 실클릭 스크린샷). ignoreWidth:true로
-          // docx-preview가 페이지/표 폭을 강제하지 않게 해 컨테이너 폭에 자연히 맞춘다
-          // (fit-width) — WYSIWYG 정확도보다 미리보기 가독성 우선.
-          ignoreWidth: true,
-          ignoreHeight: true,
-          breakPages: true,
-        });
+        // 인시던트(2026-08-19) — A4 고정폭 페이지가 좁은 패널에서 가로 스크롤로만
+        // 도달 가능해 실사용 판정이 "잘림"이었다(선생님 실클릭 스크린샷). ignoreWidth:true로
+        // docx-preview가 페이지/표 폭을 강제하지 않게 해 컨테이너 폭에 자연히 맞춘다
+        // (fit-width) — WYSIWYG 정확도보다 미리보기 가독성 우선. #4532: renderAltChunks off ·
+        // 렌더 뒤 링크 주소 정리(docx-safe.ts — 문서 안 HTML 조각 · javascript: 링크가 우리 출처에서 돌던 길).
+        await renderAsync(buf, containerRef.current, undefined, { ...DOCX_RENDER_OPTIONS });
+        neutralizeDocxLinks(containerRef.current);
         clearTimeout(timeoutId);
         markReady();
       } catch (err) {
