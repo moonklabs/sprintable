@@ -27,6 +27,9 @@ import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
  * the page is open (the list drops answered requests).
  */
 const REFRESH_MS = 15_000;
+// PO 11:23Z ③(나): with nothing shown the list is read again on this slower clock too — the request's notice alone did not reach the
+// phone app's page (dev E2E: an empty list stayed empty until the tab was left and opened again), as the bell polls besides its stream
+const EMPTY_REFRESH_MS = 30_000;
 
 /** How this phone confirms (the shell's `device.auth`) — `null` until known or outside the phone app. */
 type PhoneAuth = 'biometric' | 'screen_lock' | 'biometric_required' | 'no_screen_lock';
@@ -96,7 +99,8 @@ export function AgentPermissionRequests() {
     },
   });
 
-  // read on mount and on each new request's notice, then every 15 s while something is shown; a failed read keeps what was shown
+  // read on mount and on each new request's notice, then every 15 s while something is shown (30 s while nothing is) and whenever the
+  // page is seen again (back to the app); a failed read keeps what was shown
   useEffect(() => {
     let off = false;
     let pending = false;
@@ -110,10 +114,12 @@ export function AgentPermissionRequests() {
       });
     };
     if (readFor.current !== notices) { readFor.current = notices; read(); }
-    const id = waiting ? setInterval(read, REFRESH_MS) : null;
+    const id = setInterval(read, waiting ? REFRESH_MS : EMPTY_REFRESH_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible') read(); };
+    document.addEventListener('visibilitychange', onVisible);
     // a read this run started and its cleanup now drops was never read — the next run reads again (React's development mode runs
     // each effect twice at mount: the first read was dropped and the list stayed empty for good — the iOS · Android dev runs)
-    return () => { off = true; if (pending) readFor.current = -1; if (id) clearInterval(id); };
+    return () => { off = true; if (pending) readFor.current = -1; clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
   }, [waiting, notices]);
 
   const answer = async (row: PermissionRequest, decision: 'allow' | 'deny') => {
