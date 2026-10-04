@@ -10,6 +10,7 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { permissionLine, stillShown, waitedMinutes, type PermissionRequest } from '@/lib/agent-permissions';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
+import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
 
 /**
@@ -214,6 +215,14 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer }: {
         <>
           <Line focus>{a.kind === 'key_invalidated' ? t('phone.keyInvalidated') : t('phone.notRegistered')}</Line>
           <div><Button size="sm" variant="outline" asChild><a href={flat('/desktop/pair')}>{t('phone.pairAgain')}</a></Button></div>
+        </>
+      );
+    // Kadir · PO 09:31Z ②: signed out — one button to sign in again; back here, the request still waits with its buttons
+    case 'signed_out':
+      return (
+        <>
+          <Line focus>{t('phone.signedOut')}</Line>
+          <div><Button size="sm" variant="outline" asChild><a href={buildLoginRedirect(window.location.pathname + window.location.search)}>{t('phone.signInAgain')}</a></Button></div>
         </>
       );
     case 'cancelled': return <>{buttons}<Line focus={pressed}>{t('phone.cancelled')}</Line></>;

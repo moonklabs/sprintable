@@ -6918,7 +6918,9 @@
       "keyInvalidated": "이 폰의 잠금 설정이 바뀌어 이 폰으로는 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요",
       "notRegistered": "이 폰은 이제 등록되어 있지 않아 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요",
       "openSettings": "설정 열기",
-      "pairAgain": "다시 짝짓기"
+      "pairAgain": "다시 짝짓기",
+      "signedOut": "로그인이 풀려 보내지 못했어요 — 요청은 그대로예요. 다시 로그인한 뒤 눌러 주세요",
+      "signInAgain": "다시 로그인"
     }
   },
   "phonePairing": {

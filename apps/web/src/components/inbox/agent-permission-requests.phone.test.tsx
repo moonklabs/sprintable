@@ -180,6 +180,8 @@ describe('[4532] approvals card inside the phone app', () => {
     [{ ok: false, code: 'key_invalidated' }, '이 폰의 잠금 설정이 바뀌어 이 폰으로는 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요', ['다시 짝짓기']],
     // PO 07:47Z ①: the emulator's dead end — a key the server never knew was «보내지 못했어요 — 다시 눌러 주세요» forever
     [{ ok: false, code: 'not_registered' }, '이 폰은 이제 등록되어 있지 않아 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요', ['다시 짝짓기']], // Yuna 07:58Z
+    // Kadir · PO 09:31Z ②: the shell's read had no session — sign in again; the request stays
+    [{ ok: false, code: 'signed_out' }, '로그인이 풀려 보내지 못했어요 — 요청은 그대로예요. 다시 로그인한 뒤 눌러 주세요', ['다시 로그인']],
     [{ ok: false, code: 'biometric_required' }, '이 폰은 지문으로만 답할 수 있어요 — 폰 설정에서 지문을 등록한 뒤 다시 눌러 주세요', ['설정 열기']],
     [{ ok: false, code: 'not_pending' }, '이 요청에는 더 이상 답할 수 없어요', []],
     [{ ok: false, code: 'sign_failed' }, '보내지 못했어요 — 요청은 그대로예요. 다시 눌러 주세요', ['허용', '거부']],
@@ -193,6 +195,16 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(fetchWithAuth.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'POST')).toBe(false);
     // Yuna 07:48Z ①: a Korean line breaks between words, never inside one («주세 / 요» on the phone's width)
     expect(container.querySelector('[data-testid="agent-permission-phone-line"]')!.className).toMatch(/\bbreak-keep\b/);
+  });
+
+  it('signed out: [다시 로그인] goes to the sign-in page and back to this page (the request still waits there)', async () => {
+    signAnswer = { ok: false, code: 'signed_out' };
+    installShell();
+    window.history.pushState({}, '', '/inbox?tab=gates');
+    await render([req()]);
+    await press('허용');
+    const a = [...container.querySelectorAll('a')].find((x) => x.textContent === '다시 로그인');
+    expect(a?.getAttribute('href')).toBe(`/login?next=${encodeURIComponent('/inbox?tab=gates')}&reason=session_expired`);
   });
 
   it('a sign refused for no fingerprint: back from settings able to confirm → the buttons return', async () => {
