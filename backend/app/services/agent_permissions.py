@@ -555,6 +555,7 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     out = []
     for r, s in rows:
         shown = shown_state(r, now)
+        answerable = shown == "pending" and s.id in reachable and s.id in paired_setups
         role = next((m.get("role") for m in (s.members or []) if m.get("member_id") == str(r.agent_member_id)), None)
         out.append({
             "id": str(r.id), "request_id": str(r.request_id), "setup_id": str(s.id), "device_name": s.device_name,
@@ -563,7 +564,12 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,
-            "answerable": shown == "pending" and s.id in reachable and s.id in paired_setups,
+            "answerable": answerable,
+            # story 4532 (PO 21:39Z · 까디르 1선): the values the phone signs, read by the phone's own shell from here — never handed
+            # over by the web page (a page that passes them could have the phone sign another request of the same tool). Only on a
+            # row the person can answer now (까디르 ② · PO 01:40Z): `input_hash` is an unsalted sha256 of the raw input, so a short
+            # secret in it could be matched offline — no row carries it longer than its answer needs. (the keyed hash is second-line)
+            "session_key": r.session_key if answerable else None, "input_hash": r.input_hash if answerable else None,
         })
     return out
 
