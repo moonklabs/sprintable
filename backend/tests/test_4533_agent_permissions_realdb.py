@@ -164,6 +164,8 @@ async def test_a_paired_recipient_answers_once_and_the_signed_blob_goes_down_uno
         assert cmd[0][2] == {"session_key": "s-1", "request_id": body["request_id"], "decision": "allow", "signed": blob}
 
         assert (await c.get("/api/v2/gates/designated-pending-count", headers=_person(OWNER))).json()["count"] == 0  # answered
+        [done] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert (done["state"], done["session_key"], done["input_hash"]) == ("answered", None, None)  # 4532 (까디르 ②): once answered, gone
         twice = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(paired_id, "deny"), headers=_person(OWNER))
         assert twice.status_code == 409 and twice.json()["error"]["code"] == "already_answered"
         assert twice.json()["error"]["detail"] == {"answered_by_name": "Owner", "decision": "allow"}
@@ -205,6 +207,7 @@ async def test_with_no_paired_phone_in_the_chain_its_head_only_looks(world):
         assert made.status_code == 201 and made.json()["recipient_reason"] == "no_paired_phone"
         [view] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]  # ① the human stage: the owner
         assert (view["recipient_reason"], view["answerable"]) == ("no_paired_phone", False)
+        assert (view["session_key"], view["input_hash"]) == (None, None)  # 4532 (까디르 ②): not answerable → the hash is not carried
         refused = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
         assert refused.json()["error"]["code"] == "phone_not_paired"
 
