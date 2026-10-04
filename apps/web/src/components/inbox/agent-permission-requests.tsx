@@ -209,9 +209,10 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer }: {
     case 'biometric_required': return <><Line focus>{t('phone.biometricRequired')}</Line>{settings}</>;
     case 'no_screen_lock': return <><Line focus>{t('phone.noScreenLock')}</Line>{settings}</>;
     case 'key_invalidated':
+    case 'not_registered':
       return (
         <>
-          <Line focus>{t('phone.keyInvalidated')}</Line>
+          <Line focus>{a.kind === 'key_invalidated' ? t('phone.keyInvalidated') : t('phone.notRegistered')}</Line>
           <div><Button size="sm" variant="outline" asChild><a href={flat('/desktop/pair')}>{t('phone.pairAgain')}</a></Button></div>
         </>
       );

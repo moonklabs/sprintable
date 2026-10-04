@@ -179,7 +179,7 @@ describe('[4532] approvals card inside the phone app', () => {
     [{ ok: false, code: 'cancelled' }, '보내지 않았어요 — 요청은 그대로예요', ['허용', '거부']],
     [{ ok: false, code: 'key_invalidated' }, '이 폰의 잠금 설정이 바뀌어 이 폰으로는 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요', ['다시 짝짓기']],
     // PO 07:47Z ①: the emulator's dead end — a key the server never knew was «보내지 못했어요 — 다시 눌러 주세요» forever
-    [{ ok: false, code: 'not_registered' }, '이 폰의 잠금 설정이 바뀌어 이 폰으로는 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요', ['다시 짝짓기']],
+    [{ ok: false, code: 'not_registered' }, '이 폰은 이제 등록되어 있지 않아 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요', ['다시 짝짓기']], // Yuna 07:58Z
     [{ ok: false, code: 'biometric_required' }, '이 폰은 지문으로만 답할 수 있어요 — 폰 설정에서 지문을 등록한 뒤 다시 눌러 주세요', ['설정 열기']],
     [{ ok: false, code: 'not_pending' }, '이 요청에는 더 이상 답할 수 없어요', []],
     [{ ok: false, code: 'sign_failed' }, '보내지 못했어요 — 요청은 그대로예요. 다시 눌러 주세요', ['허용', '거부']],
