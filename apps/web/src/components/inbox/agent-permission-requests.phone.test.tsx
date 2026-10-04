@@ -24,7 +24,7 @@ const req = (over: Partial<PermissionRequest> = {}): PermissionRequest => ({
   id: 'r1', request_id: 'q1', setup_id: 's1', device_name: 'SYJ-MacBook-Pro', agent_member_id: 'a1', agent_name: 'Dev', role: '개발',
   tool: 'Bash', summary: 'npm install', masked: false, truncated: false, workdir: null,
   created_at: new Date(Date.now() - 60_000).toISOString(), expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
-  state: 'pending', answered_by_name: null, decision: null, device_reachable: true, recipient_reason: 'paired', answerable: true, ...over,
+  state: 'pending', answered_by_name: null, decision: null, device_reachable: true, recipient_reason: 'paired', answerable: true, session_key: 's-1', input_hash: `sha256:${'0'.repeat(64)}`, ...over,
 });
 const list = (requests: PermissionRequest[]) => new Response(JSON.stringify({ requests }), { status: 200 });
 
@@ -135,7 +135,7 @@ describe('[4532] approvals card inside the phone app', () => {
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     installShell();
-    await render([req({ answerable: false })]);
+    await render([req({ answerable: false, session_key: null, input_hash: null })]); // a row this phone cannot answer carries no signing fields (4947): no buttons
     expect(buttons()).toEqual([]);
     await act(async () => { root.unmount(); });
     root = createRoot(container);
