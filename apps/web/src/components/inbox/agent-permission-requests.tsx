@@ -182,7 +182,8 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer }: {
   const pressed = a !== null; // a result after a press takes the focus the buttons had
   const buttons = (
     <div className="flex gap-2" data-testid="agent-permission-buttons">
-      <Button size="sm" onClick={() => onAnswer('allow')}>{t('phone.allow')}</Button>
+      {/* the person's one judgement here: both the same weight, as the desktop band (Yuna 4951 · no default pushed) */}
+      <Button size="sm" variant="outline" onClick={() => onAnswer('allow')}>{t('phone.allow')}</Button>
       <Button size="sm" variant="outline" onClick={() => onAnswer('deny')}>{t('phone.deny')}</Button>
     </div>
   );

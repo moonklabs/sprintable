@@ -28,11 +28,11 @@ let sent: Array<{ type: string; args: Record<string, unknown> }> = [];
 let shell: Record<string, Record<string, unknown>>;
 function installShell() {
   window.__sprintablePhone = {
-    claim() {
+    claim(onReply) {
       delete window.__sprintablePhone;
       return (m) => {
         sent.push({ type: m.type, args: m.args });
-        queueMicrotask(() => window.__sprintablePhoneReply?.({ id: m.id, ...(shell[m.type] ?? { ok: false, code: 'bad_request' }) } as never));
+        queueMicrotask(() => onReply({ id: m.id, ...(shell[m.type] ?? { ok: false, code: 'bad_request' }) } as never));
       };
     },
   };
@@ -80,7 +80,6 @@ afterEach(async () => {
   vi.useRealTimers();
   __resetPhoneBridgeForTest();
   delete window.__sprintablePhone;
-  delete window.__sprintablePhoneReply;
 });
 
 const settle = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };

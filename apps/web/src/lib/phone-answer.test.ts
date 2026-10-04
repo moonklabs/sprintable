@@ -37,6 +37,8 @@ describe('[4532] answerOnPhone', () => {
     ['not_registered', 'failed'],
     ['sign_failed', 'failed'],
     ['not_phone_app', 'failed'],
+    ['timeout', 'failed'], // PO 06:07Z ②: no answer within the signing window — the buttons come back
+    ['page_hidden', 'failed'],
   ])('the shell says %s → %s, and nothing is posted', async (code, kind) => {
     const fetch = reply(200);
     await expect(answerOnPhone('r-1', 'deny', serverFor(call({ id: 'w1', ok: false, code }), fetch))).resolves.toEqual({ kind });

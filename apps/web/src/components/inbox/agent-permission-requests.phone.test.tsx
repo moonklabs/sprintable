@@ -33,11 +33,11 @@ let sent: Array<{ type: string; args: Record<string, unknown> }> = [];
 let shellAnswers: (type: string, args: Record<string, unknown>) => Record<string, unknown>;
 function installShell() {
   window.__sprintablePhone = {
-    claim() {
+    claim(onReply) {
       delete window.__sprintablePhone;
       return (m) => {
         sent.push({ type: m.type, args: m.args });
-        queueMicrotask(() => window.__sprintablePhoneReply?.({ id: m.id, ...shellAnswers(m.type, m.args) } as never));
+        queueMicrotask(() => onReply({ id: m.id, ...shellAnswers(m.type, m.args) } as never));
       };
     },
   };
@@ -67,7 +67,6 @@ afterEach(async () => {
   container.remove();
   __resetPhoneBridgeForTest();
   delete window.__sprintablePhone;
-  delete window.__sprintablePhoneReply;
 });
 
 const settle = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
