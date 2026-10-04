@@ -118,6 +118,31 @@ describe('AgentPermissionRequests (story #4533)', () => {
     expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
   });
 
+  // PO 11:23Z ③(나) — dev E2E: with the group empty, a new request did not show on the phone until the tab was opened again (its
+  // notice never reached the page). The empty list is read on its own clock and when the page is seen again.
+  it('nothing shown: a new request is drawn on the 30 s clock — no notice, no tab change', async () => {
+    fetchWithAuth.mockResolvedValueOnce(answer([]));
+    await render();
+    expect(container.innerHTML).toBe('');
+    fetchWithAuth.mockResolvedValueOnce(answer([req()]));
+    await act(async () => { vi.advanceTimersByTime(29_999); });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="agent-permission-requests"]')).not.toBeNull();
+  });
+
+  it('nothing shown: coming back to the page (the app in front again) reads at once', async () => {
+    fetchWithAuth.mockResolvedValueOnce(answer([]));
+    await render();
+    fetchWithAuth.mockResolvedValueOnce(answer([req()]));
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="agent-permission-requests"]')).not.toBeNull();
+  });
+
   it('a new request\'s bell notice reads at once — even with nothing shown — and other notices do not', async () => {
     fetchWithAuth.mockResolvedValueOnce(answer([]));
     await render();
