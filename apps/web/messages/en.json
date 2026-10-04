@@ -4509,6 +4509,7 @@
     "runProfileModelCustom": "Enter a name",
     "runProfileModelCustomHint": "A name not on the list is checked when it starts its first work",
     "runProfileModelCustomShape": "A model name can use only letters, numbers and . _ : / - (up to 64)",
+    "runProfileModelCustomShapeClaude": "A model name can use only letters, numbers and . _ : / -, and may end with [1m] (up to 64)",
     "runProfileEffortDefault": "Default",
     "runProfileEffortLow": "Low",
     "runProfileEffortMedium": "Medium",

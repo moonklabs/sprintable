@@ -98,7 +98,7 @@ export function AgentRunProfileBulkDialog({ agents, open, onOpenChange, onSaved 
               <Button
                 variant="hero"
                 onClick={() => void save()}
-                disabled={saving || !options || nothing || !draftReady(draft, options)}
+                disabled={saving || !options || nothing || !draftReady(draft, options, shared)}
               >
                 {saving ? ta('runProfileSaving') : ta('runProfileBulkApply', { count: agents.length })}
               </Button>
