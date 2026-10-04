@@ -15,6 +15,7 @@ export type AnswerOutcome =
   | { kind: 'biometric_required' } // API 24–29 with no fingerprint enrolled
   | { kind: 'no_screen_lock' } // no screen lock: no key can be made or used
   | { kind: 'key_invalidated' } // the phone's key is gone or unusable (the screen lock was turned off) — pair again
+  | { kind: 'signed_out' } // the shell read with no session (401) — the request stays; after signing in its buttons are back (Yuna · PO 09:31Z)
   | { kind: 'not_registered' } // the server does not know this phone's key (removed under «원격 기기») — pair again (Yuna 07:58Z)
   | { kind: 'not_paired' } // 409 phone_not_paired — the request is still open
   | { kind: 'expired' } // the window passed
@@ -35,6 +36,8 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
       // PO 07:47Z ①: a key the server does not know (its registration was removed · or made again before the shell stopped making
       // keys on the signing path) — pair again, never «press again»; its own line, since the lock may not have changed (Yuna 07:58Z)
       case 'not_registered': return { kind: 'not_registered' };
+      // Kadir · PO 09:31Z ②: the shell's read of the rows was refused for no session — never «already answered» (a dead end)
+      case 'signed_out': return { kind: 'signed_out' };
       case 'expired': return { kind: 'expired' };
       case 'not_pending':
       case 'not_answerable': return { kind: 'closed' };

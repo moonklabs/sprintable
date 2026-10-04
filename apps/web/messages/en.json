@@ -6918,7 +6918,9 @@
       "keyInvalidated": "This phone's lock settings changed, so it can't answer from here — pair this phone with the computer again",
       "notRegistered": "This phone is no longer registered, so it can't answer from here — pair this phone with the computer again",
       "openSettings": "Open settings",
-      "pairAgain": "Pair again"
+      "pairAgain": "Pair again",
+      "signedOut": "You were signed out, so it wasn't sent — the request is still open. Sign in again, then press it",
+      "signInAgain": "Sign in again"
     }
   },
   "phonePairing": {

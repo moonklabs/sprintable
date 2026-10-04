@@ -10,6 +10,7 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { permissionLine, stillShown, waitedMinutes, type PermissionRequest } from '@/lib/agent-permissions';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
+import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
 
 /**
@@ -98,14 +99,21 @@ export function AgentPermissionRequests() {
   // read on mount and on each new request's notice, then every 15 s while something is shown; a failed read keeps what was shown
   useEffect(() => {
     let off = false;
-    const read = () => void readRequests().then((list) => {
-      if (off) return;
-      setRequests((prev) => list ?? prev ?? []);
-      setNow(Date.now());
-    });
+    let pending = false;
+    const read = () => {
+      pending = true;
+      void readRequests().then((list) => {
+        pending = false;
+        if (off) return;
+        setRequests((prev) => list ?? prev ?? []);
+        setNow(Date.now());
+      });
+    };
     if (readFor.current !== notices) { readFor.current = notices; read(); }
     const id = waiting ? setInterval(read, REFRESH_MS) : null;
-    return () => { off = true; if (id) clearInterval(id); };
+    // a read this run started and its cleanup now drops was never read — the next run reads again (React's development mode runs
+    // each effect twice at mount: the first read was dropped and the list stayed empty for good — the iOS · Android dev runs)
+    return () => { off = true; if (pending) readFor.current = -1; if (id) clearInterval(id); };
   }, [waiting, notices]);
 
   const answer = async (row: PermissionRequest, decision: 'allow' | 'deny') => {
@@ -214,6 +222,14 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer }: {
         <>
           <Line focus>{a.kind === 'key_invalidated' ? t('phone.keyInvalidated') : t('phone.notRegistered')}</Line>
           <div><Button size="sm" variant="outline" asChild><a href={flat('/desktop/pair')}>{t('phone.pairAgain')}</a></Button></div>
+        </>
+      );
+    // Kadir · PO 09:31Z ②: signed out — one button to sign in again; back here, the request still waits with its buttons
+    case 'signed_out':
+      return (
+        <>
+          <Line focus>{t('phone.signedOut')}</Line>
+          <div><Button size="sm" variant="outline" asChild><a href={buildLoginRedirect(window.location.pathname + window.location.search)}>{t('phone.signInAgain')}</a></Button></div>
         </>
       );
     case 'cancelled': return <>{buttons}<Line focus={pressed}>{t('phone.cancelled')}</Line></>;

@@ -34,6 +34,7 @@ describe('[4532] answerOnPhone', () => {
     ['expired', 'expired'],
     ['not_pending', 'closed'],
     ['not_answerable', 'closed'],
+    ['signed_out', 'signed_out'], // Kadir · PO 09:31Z ②: no session for the shell's read — its own line, never «already answered»
     ['not_registered', 'not_registered'], // PO 07:47Z ① · Yuna 07:58Z: a key the server does not know → its own line, pair again
     ['sign_failed', 'failed'],
     ['not_phone_app', 'failed'],

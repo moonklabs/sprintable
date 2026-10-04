@@ -4,7 +4,7 @@
 // role line · tool · masked summary with its notes · working folder) and one line where the buttons would be — the phone, the
 // window passed, the computer gone quiet («상태 모름» chip, no waiting time), no paired phone. No button at all on the web.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -137,5 +137,23 @@ describe('AgentPermissionRequests (story #4533)', () => {
     expect(text()).toContain('Agent permission requests · 1');
     expect(text()).toContain('Sent to the Developer role');
     expect(line()).toBe('You can answer from a paired phone');
+  });
+});
+
+describe('[4532] the first read is never dropped for good', () => {
+  it('React\'s development mode (each effect runs, is cleaned up, runs again at mount) still draws the group', async () => {
+    fetchWithAuth.mockImplementation(async () => answer([req()])); // a fresh body per read
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <AgentPermissionRequests />
+          </NextIntlClientProvider>
+        </StrictMode>,
+      );
+    });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    // the first run's read is dropped by its cleanup — the second run reads again (it used to see «already read» and stop)
+    expect(container.querySelector('[data-testid="agent-permission-requests"]')).not.toBeNull();
   });
 });
