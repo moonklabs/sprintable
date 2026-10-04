@@ -5108,7 +5108,7 @@
         "sentNow": "Sent · it went into the current turn",
         "sentAfterStep": "Sent — it goes in as soon as the agent finishes its current step",
         "sentAsMessage": "The turn had ended, so it went in as a message — it's read when its turn comes",
-        "sendUnreachable": "The connection to that computer was lost, so it wasn't sent",
+        "sendUnreachable": "Lost the connection to that computer, so it wasn't sent",
         "conversationNotFound": "Couldn't confirm this conversation, so it wasn't sent — send it again from your conversation with that agent",
         "signInAgain": "Sign in again",
         "pairAgain": "Pair again",
