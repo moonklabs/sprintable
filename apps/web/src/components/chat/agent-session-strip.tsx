@@ -12,7 +12,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
-import { commandOnPhone, type CommandOutcome } from '@/lib/phone-command';
+import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending } from '@/lib/phone-command';
 
 /**
  * story #4534 (명세 모음 B-3 · «상태 칩 ↔ 서버 세션 상태») — the agent's session in its DM: the desktop bar's words and shapes
@@ -91,6 +91,9 @@ function Strip({ view, agentId, conversationId, reread }: { view: View & { state
   const flatHref = useFlatHref();
   const phone = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
   const [result, setResult] = useState<Result | null>(null);
+  // Kadir 4955 · Yuna · PO 13:27Z: a command whose end is not known — [결과 확인] follows it (never a second one). While it is
+  // unknown: an instruction → [지금 지시] becomes [결과 확인] ([멈춤] stays — the safety handle) · a stop → both become [결과 확인]
+  const [pending, setPending] = useState<Pending | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   // what was written stays until it went somewhere (spec B-3: «쓴 글은 남김») — kept as a draft per agent · conversation (#4370)
   const [draft, setDraft, clearDraft] = useFieldDraft({ surface: 'agent-instruct', targetId: `${agentId}:${conversationId}`, field: 'text' });
@@ -99,34 +102,44 @@ function Strip({ view, agentId, conversationId, reread }: { view: View & { state
   const busy = result?.busy === true;
   // the buttons: inside the phone app · while it works · remote control on · a person who may command it (the server's own rule)
   const canAct = phone && view.state === 'working' && view.remote_control && view.can_command !== false;
+  const checkOnly = pending?.verb === 'stop';
   const label = view.state === 'starting' ? t('state.starting')
     : view.state === 'working' ? t('state.working')
       : view.state === 'idle' ? t('state.idle')
         : view.state === 'waiting_permission' ? t('state.waiting_permission')
           : view.state === 'stopped' ? t('state.stopped') : t('state.unknown');
 
-  const run = async (verb: 'stop' | 'send', text?: string) => {
-    setResult({ verb, busy: true });
-    const outcome = await commandOnPhone(
-      verb === 'stop' ? { agentId, kind: 'stop_session' } : { agentId, kind: 'send_prompt', text: text ?? '', conversationId },
-      {
-        phoneCall,
-        newKey: () => crypto.randomUUID(),
-        sendMessage: async (content) => {
-          try {
-            const res = await fetchWithAuth(`/api/conversations/${conversationId}/messages`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }),
-            });
-            return res.ok;
-          } catch {
-            return false;
-          }
-        },
-      },
-    );
+  const deps: CommandDeps = {
+    phoneCall,
+    newKey: () => crypto.randomUUID(),
+    sendMessage: async (content) => {
+      try {
+        const res = await fetchWithAuth(`/api/conversations/${conversationId}/messages`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+  };
+  const settle = (verb: 'stop' | 'send', outcome: CommandOutcome) => {
     if (verb === 'send' && (outcome.kind === 'sent_now' || outcome.kind === 'sent_after_step' || outcome.kind === 'sent_as_message')) clearDraft();
+    setPending(outcome.kind === 'unknown' ? outcome.pending : null);
     setResult({ verb, busy: false, outcome });
     reread();
+  };
+  const run = async (verb: 'stop' | 'send', text?: string) => {
+    setResult({ verb, busy: true });
+    settle(verb, await commandOnPhone(
+      verb === 'stop' ? { agentId, kind: 'stop_session' } : { agentId, kind: 'send_prompt', text: text ?? '', conversationId }, deps,
+    ));
+  };
+  // [결과 확인]: the same command followed again — no signature, no sheet
+  const check = async () => {
+    if (!pending) return;
+    setResult({ verb: pending.verb, busy: true });
+    settle(pending.verb, await checkCommand(agentId, pending, deps));
   };
 
   return (
@@ -142,8 +155,10 @@ function Strip({ view, agentId, conversationId, reread }: { view: View & { state
       {view.device_name ? <span className="text-muted-foreground">{view.device_name}</span> : null}
       {canAct ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void run('stop')}>{t('button.stop')}</Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => setSheetOpen(true)}>{t('button.instruct')}</Button>
+          {checkOnly ? null : <Button size="sm" variant="outline" disabled={busy} onClick={() => void run('stop')}>{t('button.stop')}</Button>}
+          {pending
+            ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
+            : <Button size="sm" variant="outline" disabled={busy} onClick={() => setSheetOpen(true)}>{t('button.instruct')}</Button>}
         </span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} phone={phone} href={flatHref('/inbox?tab=gates')} />}
@@ -198,6 +213,7 @@ function ResultLine({ result }: { result: Result }) {
     case 'sent_after_step': return line(t('command.sentAfterStep'));
     case 'sent_as_message': return line(t('command.sentAsMessage'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
+    case 'unknown': return line(stop ? t('command.stopUnknown') : t('command.sendUnknown'));
     case 'remote_off': return line(t('line.remoteOff'));
     case 'conversation_not_found': return line(t('command.conversationNotFound'));
     case 'cancelled': return line(stop ? t('command.stop.cancelled') : t('command.send.cancelled'));

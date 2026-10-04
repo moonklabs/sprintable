@@ -1,6 +1,6 @@
 // story #4534 — every way a stop or an instruction from the phone app ends maps to one outcome (contract 48616ee0 v0.3 · 02d2cf71 §11 ②).
 import { describe, expect, it, vi } from 'vitest';
-import { commandOnPhone, type CommandDeps } from './phone-command';
+import { checkCommand, commandOnPhone, type CommandDeps, type Pending } from './phone-command';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -113,13 +113,44 @@ describe('[4534] commandOnPhone — the ends', () => {
     expect(d.sent).toEqual([]);
   });
 
-  it('nothing heard in two minutes → unreachable (polls every 1.5 s, 80 times) · a failed read is asked again, not an end', async () => {
-    const waits: number[] = [];
+  it('Kadir 4955: no end in two minutes on the WALL clock → unknown (never «not sent») · nothing sent as a message · a failed read is asked again', async () => {
+    // each poll takes 31 s of wall time (a slow fetch): the two minutes end after 4 polls, not 80
+    let t = 0;
     const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(503), () => json(200, { state: 'delivered' })]);
-    await expect(commandOnPhone(stop, deps(signedStop, { wait: async (ms) => { waits.push(ms); } }))).resolves.toEqual({ kind: 'unreachable' });
-    expect(waits.length).toBe(80);
-    expect(new Set(waits)).toEqual(new Set([1500]));
-    expect(calls.length).toBe(81);
+    const d = deps(signedPrompt, { now: () => t, wait: async (ms) => { t += ms + 29_500; } });
+    const out = await commandOnPhone(prompt, d);
+    expect(out.kind).toBe('unknown');
+    expect(calls.filter((c) => c.init?.method !== 'POST').length).toBe(4);
+    expect(d.sent).toEqual([]);
+    expect(out.kind === 'unknown' && out.pending).toEqual({ verb: 'send', key: 'idem-1', commandId: CMD, body: { kind: 'send_prompt', session_key: 's-9', signed: 'SIGNED', phone_key_id: 'k-1', text: 'ls  then stop', conversation_id: CONV } });
+  });
+
+  it('Kadir 4955: the post\'s answer lost (network · 5xx without a word · no id) → unknown, nothing as a message', async () => {
+    for (const post of [() => { throw new TypeError('network'); }, () => json(502), () => json(201, {})] as Array<() => Response>) {
+      const d = deps(signedPrompt);
+      server(post);
+      const out = await commandOnPhone(prompt, d);
+      expect(out.kind).toBe('unknown');
+      expect(out.kind === 'unknown' && out.pending.commandId).toBeUndefined();
+      expect(d.sent).toEqual([]);
+    }
+  });
+
+  it('[결과 확인] follows THAT command: its id → polls only (no post · no signature) · no id yet → the same key and body again', async () => {
+    const known: Pending = { verb: 'send', key: 'idem-1', commandId: CMD, body: { kind: 'send_prompt', session_key: 's-9', signed: 'SIGNED', phone_key_id: 'k-1', text: 'go', conversation_id: CONV } };
+    let calls = server(json(201, {}), [json(200, { state: 'done', result_code: 'after_step' })]);
+    let d = deps(signedPrompt);
+    await expect(checkCommand(AGENT, known, d)).resolves.toEqual({ kind: 'sent_after_step' });
+    expect(d.phoneCall).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.init?.method === 'POST')).toBe(false);
+    expect(calls[0]!.url).toBe(`/api/agents/${AGENT}/desktop-commands/${CMD}`);
+
+    const unsure: Pending = { ...known, commandId: undefined };
+    calls = server(json(201, { command_id: CMD, state: 'done' }), [json(200, { state: 'done' })]);
+    d = deps(signedPrompt);
+    await expect(checkCommand(AGENT, unsure, d)).resolves.toEqual({ kind: 'sent_now' });
+    expect(d.phoneCall).not.toHaveBeenCalled();
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ ...unsure.body, idempotency_key: 'idem-1' }); // the same key — the server gives back its command
   });
 
   it('rejected or failed for another reason → failed', async () => {

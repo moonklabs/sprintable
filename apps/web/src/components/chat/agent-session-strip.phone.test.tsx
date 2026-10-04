@@ -165,19 +165,69 @@ describe('[4534] the strip inside the phone app', () => {
     expect(JSON.parse(msg.init!.body as string)).toEqual({ content: 'run the tests' });
   });
 
-  it('the computer never answered: «… 보내지 못했어요» and what was written stays in the sheet', async () => {
-    vi.useFakeTimers();
-    server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'delivered' })]);
-    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'keep me' });
-    await render();
+  const typeAndSend = async (text: string) => {
     await press(ko.button.instruct);
     const box = document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement;
-    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'keep me'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, text); box.dispatchEvent(new Event('input', { bubbles: true })); });
     await press(ko.sheet.send);
-    await poll(80);
+  };
+  const posts = () => fetchWithAuth.mock.calls.filter(([u, i]) => String(u).endsWith('/desktop-commands') && (i as RequestInit | undefined)?.method === 'POST');
+
+  it('Kadir 4955: an instruction whose end is not known (two minutes of wall clock) → «… 이미 들어갔을 수 있어요» · [지금 지시] becomes [결과 확인] · [멈춤] stays · nothing as a message', async () => {
+    vi.useFakeTimers();
+    const polls = [res(200, { state: 'delivered' })];
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), polls);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'keep me' });
+    await render();
+    await typeAndSend('keep me');
+    await poll(81);
+    expect(commandLine()?.textContent).toBe(ko.command.sendUnknown);
+    expect(buttons()).toEqual([ko.button.stop, ko.button.checkResult]);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+    // [결과 확인] → the SAME command followed (no signature · no post) → its real end
+    polls.splice(0, 1, res(200, { state: 'done', result_code: 'after_step' }));
+    await press(ko.button.checkResult);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.sentAfterStep);
+    expect(phoneCall).toHaveBeenCalledTimes(1);
+    expect(posts().length).toBe(1);
+    expect(buttons()).toEqual([ko.button.stop, ko.button.instruct]);
+  });
+
+  it('Kadir 4955: a stop whose post answer was lost → «… 이미 멈췄을 수 있어요» · both buttons become [결과 확인] · it posts the same key again → the server\'s command → «멈췄어요»', async () => {
+    vi.useFakeTimers();
+    let lose = true;
+    server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]);
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (lose && url.endsWith('/desktop-commands') && init?.method === 'POST') { lose = false; throw new TypeError('network'); }
+      return base(url, init);
+    });
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' });
+    await render();
+    await press(ko.button.stop);
+    await settle();
+    expect(commandLine()?.textContent).toBe(ko.command.stopUnknown);
+    expect(buttons()).toEqual([ko.button.checkResult]);
+    await press(ko.button.checkResult);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.stopped);
+    expect(phoneCall).toHaveBeenCalledTimes(1);
+    const keys = posts().map(([, i]) => JSON.parse((i as RequestInit).body as string).idempotency_key);
+    expect(keys.length).toBe(2);
+    expect(keys[0]).toBe(keys[1]);
+  });
+
+  it('a refusal before anything was made (409 device_unreachable) stays «… 보내지 못했어요» — known, and the buttons stay', async () => {
+    server(res(409, { error: { code: 'device_unreachable' } }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'x' });
+    await render();
+    await typeAndSend('x');
+    await settle();
     expect(commandLine()?.textContent).toBe(ko.command.sendUnreachable);
+    expect(buttons()).toEqual([ko.button.stop, ko.button.instruct]);
     await press(ko.button.instruct);
-    expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value).toBe('keep me');
+    expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value).toBe('x');
   });
 
   it('refusals keep the button\'s verb and their way out: signed out → [다시 로그인] · key lost → [다시 짝짓기] · no screen lock → [설정 열기]', async () => {

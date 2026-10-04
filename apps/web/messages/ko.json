@@ -5092,7 +5092,8 @@
       },
       "button": {
         "stop": "멈춤",
-        "instruct": "지금 지시"
+        "instruct": "지금 지시",
+        "checkResult": "결과 확인"
       },
       "sheet": {
         "title": "지금 하는 일 중간에 넣어요",
@@ -5104,11 +5105,13 @@
         "sending": "보내는 중…",
         "stopped": "멈췄어요 — 세션은 그대로예요, 다음 지시를 보내면 이어서 해요",
         "alreadyStopped": "이미 멈춰 있었어요",
-        "stopUnreachable": "그 컴퓨터와 연결이 끊겨 멈췄는지 몰라요 — 다시 연결되면 여기서 바뀌어요",
+        "stopUnreachable": "그 컴퓨터와 연결이 끊겨 멈추지 못했어요",
+        "stopUnknown": "멈췄는지 확인하지 못했어요 — 이미 멈췄을 수 있어요",
         "sentNow": "보냈어요 · 지금 턴에 들어갔어요",
         "sentAfterStep": "보냈어요 — 에이전트가 지금 하는 단계를 마치면 바로 들어가요",
         "sentAsMessage": "턴이 끝나 있어 대화로 보냈어요 — 차례가 오면 들어가요",
         "sendUnreachable": "그 컴퓨터와 연결이 끊겨 보내지 못했어요",
+        "sendUnknown": "보냈는지 확인하지 못했어요 — 이미 들어갔을 수 있어요",
         "conversationNotFound": "이 대화를 확인하지 못해 보내지 않았어요 — 그 에이전트와의 대화에서 다시 보내 주세요",
         "signInAgain": "다시 로그인",
         "pairAgain": "다시 짝짓기",

@@ -338,3 +338,34 @@ async def test_23_the_phone_reads_the_names_it_shows_and_a_conversation_only_whe
         r = await _post(c, agent, _cmd("send_prompt", phone, conv=others))
         assert (r.status_code, r.json()["error"]["code"]) == (404, "conversation_not_found")
 
+
+
+async def test_24_the_same_key_again_gets_back_its_command_whatever_the_session_is_now(world):
+    """Kadir 4955 1st line: the phone app's [결과 확인] after an end it could not see posts the same key again — it must get back the
+    command it made, never a 409 «turn ended» (the app would then resend the instruction as a message: in twice) nor a second
+    command. Asked after who may command: another person's key with the same text is theirs alone."""
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4424 mac 4534e")
+        sid = device["setup_id"]
+        prompt = _cmd("send_prompt", phone, conv=conv, text="한 번만 들어가야 해", key="press-1")
+        first = await _post(c, agent, prompt)
+        assert first.status_code == 201, first.text
+        # the turn ends meanwhile (the instruction went in, or not — the app could not see)
+        await _state(c, device, agent, "idle", 2)
+        again = await _post(c, agent, prompt)
+        assert again.status_code == 201, again.text
+        assert again.json()["command_id"] == first.json()["command_id"]
+        assert len(await _commands(sid)) == 1
+        assert len(await _lines(conv)) == 1, "one «지시 · 지금 턴에 보냄» line, never two"
+        # a stop the same way: made while working, asked again when idle → the same command, not «already_stopped»
+        await _state(c, device, agent, "working", 3)
+        stop = _cmd("stop_session", phone, key="press-2")
+        s1 = await _post(c, agent, stop)
+        assert s1.status_code == 201, s1.text
+        await _state(c, device, agent, "idle", 4)
+        s2 = await _post(c, agent, stop)
+        assert (s2.status_code, s2.json().get("command_id")) == (201, s1.json()["command_id"])
+        # a NEW key while idle is still refused (nothing made): the rule for a fresh press is unchanged
+        fresh = await _post(c, agent, _cmd("send_prompt", phone, conv=conv, key="press-3"))
+        assert (fresh.status_code, fresh.json()["error"]["code"]) == (409, "session_not_working")
+        assert len(await _commands(sid)) == 2
