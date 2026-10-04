@@ -5088,7 +5088,55 @@
         "onPhone": "You can stop or instruct it from a paired phone",
         "inbox": "The permission request is in the approvals inbox",
         "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
-        "remoteOff": "Remote control is turned off for this organization — do it on that computer"
+        "remoteOff": "Remote control is turned off for this organization — do it on that computer",
+        "inboxPhone": "You can answer it in Approvals"
+      },
+      "button": {
+        "stop": "Stop",
+        "instruct": "Instruct now",
+        "checkResult": "Check again"
+      },
+      "sheet": {
+        "title": "Add to what the agent is doing now",
+        "note": "The agent reads it partway through its current work — it's told to answer in this conversation",
+        "send": "Send"
+      },
+      "command": {
+        "stopping": "Stopping…",
+        "sending": "Sending…",
+        "stopped": "Stopped — the session is still there; send the next instruction and it carries on",
+        "alreadyStopped": "It had already stopped",
+        "stopUnreachable": "Lost the connection to that computer, so it wasn't stopped",
+        "stopUnknown": "Couldn't confirm whether it stopped — it may already have stopped",
+        "sentNow": "Sent · it went into the current turn",
+        "sentAfterStep": "Sent — it goes in as soon as the agent finishes its current step",
+        "sentAsMessage": "The turn had ended, so it went in as a message — it's read when its turn comes",
+        "sendUnreachable": "Lost the connection to that computer, so it wasn't sent",
+        "sendUnknown": "Couldn't confirm whether it was sent — it may already have gone in",
+        "conversationNotFound": "Couldn't confirm this conversation, so it wasn't sent — send it again from your conversation with that agent",
+        "signInAgain": "Sign in again",
+        "pairAgain": "Pair again",
+        "openSettings": "Open settings",
+        "stop": {
+          "cancelled": "Not stopped",
+          "failed": "Couldn't stop it — press it again",
+          "signedOut": "You were signed out, so it wasn't stopped — sign in again, then press it",
+          "notPaired": "This phone isn't paired with that computer, so it wasn't stopped — use a paired phone or that computer",
+          "keyInvalidated": "This phone's lock settings changed, so it can't stop it from here — pair this phone with the computer again",
+          "notRegistered": "This phone is no longer registered, so it can't stop it from here — pair this phone with the computer again",
+          "biometricRequired": "This phone can stop it only with a fingerprint — add one in the phone's settings, then press again",
+          "noScreenLock": "Stopping needs a screen lock on this phone — turn one on in the phone's settings"
+        },
+        "send": {
+          "cancelled": "Not sent",
+          "failed": "Couldn't send it — press it again",
+          "signedOut": "You were signed out, so it wasn't sent — sign in again, then press it",
+          "notPaired": "This phone isn't paired with that computer, so it wasn't sent — use a paired phone or that computer",
+          "keyInvalidated": "This phone's lock settings changed, so it can't send from here — pair this phone with the computer again",
+          "notRegistered": "This phone is no longer registered, so it can't send from here — pair this phone with the computer again",
+          "biometricRequired": "This phone can send only with a fingerprint — add one in the phone's settings, then press again",
+          "noScreenLock": "Sending needs a screen lock on this phone — turn one on in the phone's settings"
+        }
       }
     },
     "entityTypeStory": "Story",

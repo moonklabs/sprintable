@@ -35,7 +35,7 @@ async function render(locale: 'ko' | 'en' = 'ko') {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <AgentSessionStrip agentId="a-1" />
+        <AgentSessionStrip agentId="a-1" conversationId="c-1" />
       </NextIntlClientProvider>,
     );
   });

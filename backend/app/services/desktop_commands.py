@@ -198,6 +198,15 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
     if session is None or session.agent_member_id != agent_id:  # another agent's session, or none on its devices
         raise DesktopRelayError(404, "session_not_found", "no such session of this agent")
+    # Kadir 4955 1st line: the same press again (the same key — the phone app's [결과 확인] after an end it could not see) gets back
+    # the command it made, whatever the session, the computer or the switch say now — a second command, or the instruction resent
+    # as a message, would put it in twice. Asked after who may command and whose session it is, so a key never reads another's.
+    existing = (await db.execute(
+        select(DesktopCommand).where(DesktopCommand.setup_id == setup.id,
+                                     DesktopCommand.idempotency_key == f"b3:{member_id}:{body.idempotency_key}")
+    )).scalar_one_or_none()
+    if existing is not None:
+        return existing, existing.state
     if body.kind == "send_prompt" and not (
         await _participant(db, body.conversation_id, member_id) and await _participant(db, body.conversation_id, agent_id)
     ):
