@@ -4509,6 +4509,7 @@
     "runProfileModelCustom": "직접 입력",
     "runProfileModelCustomHint": "목록에 없는 이름은 첫 일을 시작할 때 확인돼요",
     "runProfileModelCustomShape": "모델 이름에는 영문 · 숫자 · . _ : / - 만 쓸 수 있어요(64자까지)",
+    "runProfileModelCustomShapeClaude": "모델 이름에는 영문 · 숫자 · . _ : / - 만 쓸 수 있고, 끝에 [1m]을 붙일 수 있어요(64자까지)",
     "runProfileEffortDefault": "기본값",
     "runProfileEffortLow": "낮게",
     "runProfileEffortMedium": "보통",

@@ -14,6 +14,8 @@ export interface RuntimeOptions {
   runtime: DesktopRuntime;
   models: { name: string; efforts: string[] }[];
   custom_model_efforts: string[];
+  /** story 4540: this runtime's own model-name rule (Claude may end with «[1m]») — absent from an older server */
+  model_pattern?: string;
 }
 
 export interface RunProfileOptions {
@@ -57,9 +59,11 @@ export function keepEffortIfTaken(efforts: string[], effort: string | null): str
   return effort !== null && efforts.includes(effort) ? effort : null;
 }
 
-/** A typed-in name in the server's one shape (it goes on a command line) — the server checks again. */
-export function modelNameOk(options: RunProfileOptions, name: string): boolean {
-  return new RegExp(options.model_pattern).test(name);
+/** A typed-in name in the server's shape for that runtime (it goes on a command line) — the server checks again. A runtime not known
+ *  (bulk «그대로 두기») takes the strictest shape, the one with no tail. */
+export function modelNameOk(options: RunProfileOptions, name: string, runtime?: string | null): boolean {
+  const own = runtime ? runtimeOptions(options, runtime)?.model_pattern : undefined;
+  return new RegExp(own ?? options.model_pattern).test(name);
 }
 
 /** Many agents: model · effort only among one runtime (the names differ · 명세 C-5 일괄). */

@@ -86,10 +86,11 @@ export function draftBody(draft: RunProfileDraft): { runtime: string; model: str
   };
 }
 
-/** Whether the draft can be sent: a typed-in name in the server's shape, and something actually chosen. */
-export function draftReady(draft: RunProfileDraft, options: RunProfileOptions): boolean {
+/** Whether the draft can be sent: a typed-in name in the server's shape for the runtime it lands on (the shared one when the
+ *  runtime is kept — the same value the field checks and words its refusal by), and something actually chosen. */
+export function draftReady(draft: RunProfileDraft, options: RunProfileOptions, shared: string | null = null): boolean {
   if (draft.runtime === '') return false;
-  if (draft.modelChoice === CUSTOM && !modelNameOk(options, draft.customModel.trim())) return false;
+  if (draft.modelChoice === CUSTOM && !modelNameOk(options, draft.customModel.trim(), effectiveRuntime(draft, shared))) return false;
   return true;
 }
 
@@ -129,7 +130,7 @@ export function AgentRunProfileFields({ options, draft, onChange, keepAllowed = 
     { value: DEFAULT, label: ta('runProfileEffortDefault') },
     ...efforts.map((e) => ({ value: e, label: ta(EFFORT_LABEL_KEYS[e] ?? 'runProfileEffortDefault') })),
   ];
-  const customBad = draft.modelChoice === CUSTOM && draft.customModel.trim() !== '' && !modelNameOk(options, draft.customModel.trim());
+  const customBad = draft.modelChoice === CUSTOM && draft.customModel.trim() !== '' && !modelNameOk(options, draft.customModel.trim(), runtime);
 
   return (
     <div className="space-y-3">
@@ -166,7 +167,10 @@ export function AgentRunProfileFields({ options, draft, onChange, keepAllowed = 
                     disabled={disabled}
                   />
                   <p className="text-xs text-muted-foreground">
-                    {customBad ? ta('runProfileModelCustomShape') : ta('runProfileModelCustomHint')}
+                    {/* story 4540 (유나 4956): the refusal says what this runtime takes — the same `runtime` the check used (Claude may end with «[1m]») */}
+                    {customBad
+                      ? runtime === 'claude-code' ? ta('runProfileModelCustomShapeClaude') : ta('runProfileModelCustomShape')
+                      : ta('runProfileModelCustomHint')}
                   </p>
                 </>
               ) : null}

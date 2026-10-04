@@ -106,7 +106,7 @@ async def test_02_one_change_is_versioned_once_and_the_daemon_reads_only_its_own
 
 
 @pytest.mark.parametrize("model", [
-    "opus 4", "opus\"", "'opus'", "-opus", "--dangerously-skip-permissions", "opus[1m]", "a=b", "a;b", "a" * 65, "", "gpt-5\n",  # a trailing newline: `$` alone would let it through (fullmatch)
+    "opus 4", "opus\"", "'opus'", "-opus", "--dangerously-skip-permissions", "opus[1M]", "opus[1m][1m]", "opus[2m]", "[1m]", "a=b", "a;b", "a" * 65, "", "gpt-5\n",  # a trailing newline: `$` alone would let it through (fullmatch)
 ])
 async def test_03_a_typed_in_name_that_could_be_more_than_a_name_is_refused(world, model):
     async with _client() as c:
@@ -116,6 +116,20 @@ async def test_03_a_typed_in_name_that_could_be_more_than_a_name_is_refused(worl
         r = await c.put(_one(agent), json={"model": model, "effort": None}, headers=_person(OWNER))
         assert _code(r) == (422, "invalid_model")
         assert await _row(agent) is None
+
+
+async def test_03b_claude_takes_its_1m_id_codex_never(world):
+    # story 4540 (PO 2026-10-04 13:10Z · 13:11Z): `claude-opus-5-5[1m]` is our launchers' value — saved for Claude as typed; Codex refuses it
+    async with _client() as c:
+        device = await _device(c, name=f"d4424 mac 4540b2 {uuid.uuid4().hex[:6]}")
+        claude, codex = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+        await _set_runtime(claude, "claude-code")
+        await _set_runtime(codex, "codex")
+        r = await c.put(_one(claude), json={"model": "claude-opus-5-5[1m]", "effort": "xhigh"}, headers=_person(OWNER))
+        assert r.status_code == 200 and (r.json()["model"], r.json()["effort"]) == ("claude-opus-5-5[1m]", "xhigh")
+        r = await c.put(_one(codex), json={"model": "gpt-5.6-luna[1m]", "effort": None}, headers=_person(OWNER))
+        assert _code(r) == (422, "invalid_model")
+        assert await _row(codex) is None
 
 
 async def test_04_effort_is_judged_per_runtime_and_model_on_the_saved_result(world):

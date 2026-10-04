@@ -10,7 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { effortsFor, keepEffortIfTaken, modelNameOk, saveErrorKey, sharedRuntime, type RunProfileOptions } from '@/lib/agent-run-profile';
-import { CUSTOM, DEFAULT, KEEP, draftBody, draftReady, initialDraft, withModel, withRuntime } from './agent-run-profile-fields';
+import { AgentRunProfileFields, CUSTOM, DEFAULT, KEEP, draftBody, draftReady, initialDraft, withModel, withRuntime } from './agent-run-profile-fields';
 import { AgentRunProfileSection } from './agent-run-profile-section';
 import { AgentRunProfileBulkDialog } from './agent-run-profile-bulk-dialog';
 
@@ -19,11 +19,13 @@ import { AgentRunProfileBulkDialog } from './agent-run-profile-bulk-dialog';
 const E5 = ['low', 'medium', 'high', 'xhigh', 'max'];
 const OPTIONS: RunProfileOptions = {
   runtimes: [
-    { runtime: 'claude-code', models: [{ name: 'opus', efforts: E5 }, { name: 'sonnet', efforts: E5 }], custom_model_efforts: E5 },
+    // story 4540: each runtime's own rule, as the server serves it (backend agent_run_profile.py MODEL_NAMES)
+    { runtime: 'claude-code', models: [{ name: 'opus', efforts: E5 }, { name: 'sonnet', efforts: E5 }], custom_model_efforts: E5, model_pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\\[1m\\])?$' },
     {
       runtime: 'codex',
       models: [{ name: 'gpt-6-sol', efforts: [...E5, 'ultra'] }, { name: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] }],
       custom_model_efforts: ['low', 'medium', 'high', 'xhigh'],
+      model_pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$',
     },
   ],
   model_pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$',
@@ -45,6 +47,16 @@ describe('the table the pickers follow', () => {
   it('a typed-in name is one shape — nothing that could be more than a name', () => {
     for (const bad of ['opus 4', '-opus', 'opus[1m]', 'a=b', 'a;b', '"opus"', 'a'.repeat(65)]) expect(modelNameOk(OPTIONS, bad)).toBe(false);
     expect(modelNameOk(OPTIONS, 'gpt-6.1-sol')).toBe(true);
+  });
+
+  it('[SID:4540] Claude takes its 1M id with the «[1m]» tail · Codex never · an unknown runtime (bulk «그대로 두기») the strictest', () => {
+    expect(modelNameOk(OPTIONS, 'claude-opus-5-5[1m]', 'claude-code')).toBe(true);
+    for (const bad of ['claude-opus-5-5[1M]', 'claude-opus-5-5[1m][1m]', 'x[1m]y', '[1m]', '-x[1m]', `${'a'.repeat(65)}[1m]`]) {
+      expect(modelNameOk(OPTIONS, bad, 'claude-code')).toBe(false);
+    }
+    expect(modelNameOk(OPTIONS, 'gpt-5.6-luna[1m]', 'codex')).toBe(false);
+    expect(modelNameOk(OPTIONS, 'claude-opus-5-5[1m]', null)).toBe(false);
+    expect(modelNameOk(OPTIONS, 'claude-opus-5-5[1m]', 'keep')).toBe(false);
   });
 
   it('many agents share a runtime only when every one has it', () => {
@@ -84,6 +96,48 @@ describe('the draft', () => {
     const d = { runtime: 'codex', modelChoice: CUSTOM, customModel: 'a b', effort: DEFAULT };
     expect(draftReady(d, OPTIONS)).toBe(false);
     expect(draftReady({ ...d, customModel: 'mine' }, OPTIONS)).toBe(true);
+  });
+
+  it('[SID:4540 · 유나 4956] Save and the field judge a typed name on the same runtime — a kept runtime is the shared one', () => {
+    const kept = { runtime: KEEP, modelChoice: CUSTOM, customModel: 'claude-opus-5-5[1m]', effort: KEEP };
+    expect(draftReady(kept, OPTIONS, 'claude-code')).toBe(true);
+    expect(draftReady(kept, OPTIONS, 'codex')).toBe(false);
+    expect(draftReady(kept, OPTIONS, null)).toBe(false);
+  });
+});
+
+describe('the refusal under a typed-in name says what that runtime takes (유나 4956)', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
+  async function refusal(runtime: string, customModel: string, sharedRuntime: string | null = null): Promise<string> {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <AgentRunProfileFields options={OPTIONS} draft={{ runtime, modelChoice: CUSTOM, customModel, effort: DEFAULT }} onChange={() => {}} sharedRuntime={sharedRuntime} keepAllowed={runtime === KEEP} />
+        </NextIntlClientProvider>,
+      );
+    });
+    const input = container.querySelector('input[aria-invalid="true"]');
+    return input ? (input.parentElement?.querySelector('p')?.textContent ?? '') : '';
+  }
+
+  it('Claude refused → the line that names the [1m] tail · Codex refused → the plain line · an accepted name → no refusal', async () => {
+    const claude = koMessages.agents.runProfileModelCustomShapeClaude;
+    const plain = koMessages.agents.runProfileModelCustomShape;
+    expect(await refusal('claude-code', 'claude-opus-5-5[1M]')).toBe(claude);
+    expect(await refusal(KEEP, 'x[2m]', 'claude-code')).toBe(claude);
+    expect(await refusal('codex', 'gpt-5.6-luna[1m]')).toBe(plain);
+    expect(await refusal('claude-code', 'claude-opus-5-5[1m]')).toBe('');
   });
 });
 
