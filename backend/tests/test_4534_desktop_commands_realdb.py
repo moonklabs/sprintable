@@ -309,3 +309,32 @@ async def test_19_a_stop_or_a_stopped_session_closes_the_wait_without_a_notice(w
         await c.post(f"/api/v2/desktop/relay/commands/{stop}/result", json={"state": "done"}, headers=_tok(device["device_token"]))
         await _state(c, device, agent, "idle", 5)  # idle because of the stop
         assert await _turn_end_notices(OWNER_TM) == []
+
+
+async def test_23_the_phone_reads_the_names_it_shows_and_a_conversation_only_when_both_are_in_it(world):
+    """phone contract 48616ee0 v0.3 (Kadir · PO 11:34Z): the sheet and the system prompt show the agent's name and the
+    conversation's name from the server — the conversation only when the person and the agent are both in it (the same rule as
+    a command's conversation_not_found) · neither is signed."""
+    plain_tm = await _plain_member()
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4424 mac 4534n")
+        url = f"/api/v2/agents/{agent}/desktop-session"
+        name = (await _sql(fetch=f"SELECT name FROM members WHERE id = '{agent}'"))[0][0]
+        view = (await c.get(url, headers=_person(OWNER))).json()
+        assert (view["agent_name"], view["conversation"]) == (name, None)  # no conversation asked → none
+        # the DM of the person and the agent: its id · the agent's name (a DM without a title reads as the other one)
+        view = (await c.get(url, params={"conversation_id": conv}, headers=_person(OWNER))).json()
+        assert view["conversation"] == {"id": conv, "name": name}
+        # a titled conversation of both: its title
+        titled = await _dm(OWNER_TM, agent)
+        await _sql(f"UPDATE conversations SET type = 'group', title = '배포 회의' WHERE id = '{titled}'")
+        assert (await c.get(url, params={"conversation_id": titled}, headers=_person(OWNER))).json()["conversation"] == {"id": titled, "name": "배포 회의"}
+        # the person is not in it · the agent is not in it · no such conversation → null (the shell refuses: conversation_not_found)
+        others = await _dm(plain_tm, agent)
+        without_agent = await _dm(OWNER_TM, plain_tm)
+        for cid in (others, without_agent, str(uuid.uuid4())):
+            assert (await c.get(url, params={"conversation_id": cid}, headers=_person(OWNER))).json()["conversation"] is None, cid
+        # and a command into a conversation the view names null is refused the same way (one rule)
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=others))
+        assert (r.status_code, r.json()["error"]["code"]) == (404, "conversation_not_found")
+
