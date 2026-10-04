@@ -87,8 +87,23 @@ async def _agent_setups(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID
 # ── ① the DM header ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
+async def _conversation_named(db: AsyncSession, conversation_id: uuid.UUID, *, member_id: uuid.UUID, agent) -> dict | None:
+    """story #4534 (phone contract 48616ee0 v0.3 · Kadir): the conversation an instruction would answer in — only when the person
+    and the agent are both in it (the same rule as create_command's conversation_not_found) · its name as the DM header shows it
+    (a title, else the agent's name for a DM). The phone's shell shows it before it signs; it is never part of what is signed."""
+    from app.models.conversation import Conversation
+
+    if not (await _participant(db, conversation_id, member_id) and await _participant(db, conversation_id, agent.id)):
+        return None
+    conv = (await db.execute(select(Conversation).where(Conversation.id == conversation_id))).scalar_one_or_none()
+    if conv is None:
+        return None
+    name = conv.title or (agent.name if conv.type == "dm" else None)
+    return {"id": str(conv.id), "name": name}
+
+
 async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, org_id: uuid.UUID,
-                       agent_id: uuid.UUID) -> dict:
+                       agent_id: uuid.UUID, conversation_id: uuid.UUID | None = None) -> dict:
     from app.models.agent_permission import AgentPermissionRequest
     from app.services import remote_control
     from app.services.agent_permissions import _reachable
@@ -97,7 +112,10 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         raise DesktopRelayError(404, "agent_not_found", "no such agent")
     agent = await _agent(db, org_id, agent_id)
     setups = await _agent_setups(db, org_id, agent_id)
-    view = {"setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "state_at": None,
+    # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
+    view = {"agent_name": agent.name,
+            "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "state_at": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),

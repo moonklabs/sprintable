@@ -43,6 +43,7 @@ async def _person(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, *, int
 @router.get("/{agent_member_id}/desktop-session")
 async def get_desktop_session(
     agent_member_id: uuid.UUID,
+    conversation_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
@@ -52,7 +53,7 @@ async def get_desktop_session(
     try:
         return await desktop_commands.session_view(
             db, member_id=uuid.UUID(str(member.id)), member_role=await desktop_commands.org_role(db, org_id, user_id), user_id=user_id,
-            org_id=org_id, agent_id=agent_member_id,
+            org_id=org_id, agent_id=agent_member_id, conversation_id=conversation_id,
         )
     except DesktopRelayError as exc:
         return _error(exc)
