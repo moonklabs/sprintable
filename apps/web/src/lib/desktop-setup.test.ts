@@ -420,11 +420,12 @@ describe('[SID:4494] old= — a runtime installed only below its floor', () => {
 
 
 describe('[SID:4565] existing agents in the rows', () => {
-  const dan: AttachableAgent = { id: 'a-dan', name: '댄', runtime: 'claude', live_keys: 1, last_used_at: null };
-  const mini: AttachableAgent = { id: 'a-mini', name: '미니', runtime: 'codex', live_keys: 0, last_used_at: null };
+  const dan: AttachableAgent = { id: 'a-dan', name: '댄', runtime: 'claude', live_keys: 1, last_used_at: null, in_project: true };
+  const mini: AttachableAgent = { id: 'a-mini', name: '미니', runtime: 'codex', live_keys: 0, last_used_at: null, in_project: true };
+  const out: AttachableAgent = { id: 'a-out', name: '바깥', runtime: 'claude', live_keys: 0, last_used_at: null, in_project: false };
 
   it('agent · either rows take the existing agents whose runtime is here (after the new ones, before «나»); a human row does not', () => {
-    const rows = withAttachable(setupRoleRows(recipe, ['claude']), [dan, mini], ['claude']);
+    const rows = withAttachable(setupRoleRows(recipe, ['claude']), [dan, mini, out], ['claude']); // out: not in the project — never a choice
     const keys = (role: string) => rows.find((r) => r.role === role)!.choices.map(ownerKey);
     expect(keys('조사')).toEqual(['claude', 'agent:a-dan']); // mini: codex is not on this computer
     expect(keys('작성')).toEqual(['claude', 'agent:a-dan', 'me']);

@@ -648,9 +648,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                             const key = `agent:${a.id}`;
                             const elsewhere = rows.some((o) => o.role !== r.role && o.owner.kind === 'existing' && o.owner.agentId === a.id);
                             const missing = !runtimes.includes(a.runtime);
-                            const label = missing ? t('existingRuntimeMissing', { name: a.name, runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
-                              : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
-                            return <option key={key} value={key} disabled={missing || elsewhere}>{label}</option>;
+                            // PO 04:37Z: not in this project yet — what the person does first, said in the list (the server refuses it too)
+                            const label = !a.in_project ? t('existingNotInProject', { name: a.name })
+                              : missing ? t('existingRuntimeMissing', { name: a.name, runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
+                                : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
+                            return <option key={key} value={key} disabled={!a.in_project || missing || elsewhere}>{label}</option>;
                           })}
                         </optgroup>
                         {r.choices.some((c) => c.kind === 'me') ? (

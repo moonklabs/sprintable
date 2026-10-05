@@ -59,12 +59,13 @@ export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime
 
 /** story #4565 — `GET /api/v2/desktop/setup/agents` row: an agent the setup may attach (this org · this project · a desktop
  * runtime), its live key count (any → moving it cuts its current connection) and when one was last used. No key value. */
-export interface AttachableAgent { id: string; name: string; runtime: DesktopRuntime; live_keys: number; last_used_at: string | null }
+/** `in_project` false (PO 04:37Z): the person has to add it to the project first — shown turned off with why, never chosen. */
+export interface AttachableAgent { id: string; name: string; runtime: DesktopRuntime; live_keys: number; last_used_at: string | null; in_project: boolean }
 
 /** The «이미 있는 에이전트» choices of a row (agent · either rows only): every attachable agent whose runtime is on this computer.
  * The page draws the others (runtime not here · picked for another row) as disabled options with why. */
 export function existingChoices(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): RowOwner[] {
-  return attachable.filter((a) => runtimes.includes(a.runtime)).map((a) => ({ kind: 'existing', agentId: a.id, name: a.name, runtime: a.runtime }));
+  return attachable.filter((a) => a.in_project && runtimes.includes(a.runtime)).map((a) => ({ kind: 'existing', agentId: a.id, name: a.name, runtime: a.runtime }));
 }
 
 /** The rows with the attachable agents added to each agent · either row's choices (after the new runtimes, before «나»). An

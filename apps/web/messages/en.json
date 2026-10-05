@@ -6703,6 +6703,7 @@
       "ownerGroupPerson": "Person",
       "existingPickedElsewhere": "{name} · picked for another role",
       "existingRuntimeMissing": "{name} · {runtime} isn't on this computer",
+      "existingNotInProject": "{name} · not in this project yet — add it to the project first",
       "movedWarning": "Once the app on this computer takes it over, this agent's current connection is cut — if it was working somewhere else, it stops there",
       "lastConnected": "Last connected · {time}",
       "toolNote": "Agents work in Sprintable without asking, and ask each time before changing files, running commands, or using other tools on this computer.",

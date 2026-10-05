@@ -72,8 +72,8 @@ class DesktopSetupError(Exception):
     """A closed code: request_invalid · service_unavailable · code_not_found · code_expired · code_used · code_not_confirmed_yet · verifier_mismatch ·
     already_confirmed · not_org_admin · recipe_not_found · roles_invalid · recipe_too_large · no_agent_role · human_stage_needs_member ·
     setup_not_found · has_organization · pending_invites (story 4427 (나): the new-organization path) · project_required (story 4496:
-    no project chosen while the organization has projects) · agent_not_found · agent_not_desktop_runtime · agent_not_in_project
-    (story 4565: an existing agent to attach)."""
+    no project chosen while the organization has projects) · agent_not_found · agent_not_in_project (story 4565: an existing agent
+    to attach)."""
 
     def __init__(self, code: str, detail: str | None = None):
         super().__init__(detail or code)
@@ -440,8 +440,8 @@ async def confirm_setup_first_project(
 async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID) -> str:
     """story #4565 — the runtime (claude · codex) of an agent the confirming person may attach, or a closed code. An id that
     is not an active agent of THIS org is `agent_not_found` (another org's agent and no agent at all read the same — whether it
-    exists elsewhere never shows); a runtime the desktop cannot run → `agent_not_desktop_runtime`; not yet in the setup's
-    project → `agent_not_in_project` (the person adds it to the project first — the setup never widens an agent's access)."""
+    exists elsewhere never shows), and so does one on a runtime the desktop cannot run (Qadir lens · the card); not yet in the
+    setup's project → `agent_not_in_project` (the person adds it to the project first — the setup never widens an agent's access)."""
     from app.models.member import Member
     from app.services.project_auth import project_accessible_member_ids
 
@@ -452,7 +452,7 @@ async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id
         raise DesktopSetupError("agent_not_found")
     runtime = {v: k for k, v in RUNTIME_TYPES.items()}.get(row.runtime_type or "")
     if runtime is None:
-        raise DesktopSetupError("agent_not_desktop_runtime")
+        raise DesktopSetupError("agent_not_found")  # Qadir lens (card): another runtime reads the same as no agent
     if agent_id not in await project_accessible_member_ids(db, org_id, project_id):
         raise DesktopSetupError("agent_not_in_project")
     return runtime
@@ -688,7 +688,8 @@ async def _rotate_existing_agent(db: AsyncSession, *, setup: DesktopSetup, membe
 
 async def list_attachable_agents(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID) -> list[dict]:
     """story #4565 — the agents the confirming person may attach to a computer for this project (the web's «이미 있는 에이전트»
-    group): this org's active agents on a desktop runtime that already have this project, each with its runtime, how many
+    group): this org's active agents on a desktop runtime, each with its runtime, whether it already has this project (not
+    yet → the page shows it turned off with why — the confirmation refuses it with agent_not_in_project · PO 04:37Z), how many
     live keys it has (any → the page says the move cuts its current connection) and when one was last used. Never a key value.
     The same person as a confirmation: an owner or admin of the org who can open the project."""
     from app.models.member import Member
@@ -705,7 +706,7 @@ async def list_attachable_agents(db: AsyncSession, *, user_id: uuid.UUID, org_id
             Member.runtime_type.in_(list(runtime_of)),
         ).order_by(Member.name, Member.id)
     )).all()
-    agents = [r for r in rows if r.id in in_project]
+    agents = list(rows)  # PO 04:37Z: the ones outside the project come too (the page turns them off and says why)
     keys = {
         r.team_member_id: (r.live, r.last_used_at)
         for r in (await db.execute(
@@ -719,6 +720,7 @@ async def list_attachable_agents(db: AsyncSession, *, user_id: uuid.UUID, org_id
         {
             "id": str(a.id), "name": a.name or "", "runtime": runtime_of[a.runtime_type],
             "live_keys": keys.get(a.id, (0, None))[0], "last_used_at": keys.get(a.id, (0, None))[1],
+            "in_project": a.id in in_project,
         }
         for a in agents
     ]

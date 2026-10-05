@@ -389,10 +389,12 @@ describe('[SID:4565] existing agents moved to this computer', () => {
   const DAN = 'a1111111-0000-4000-8000-000000000001';
   const MINI = 'a1111111-0000-4000-8000-000000000002';
   const GONE = 'a1111111-0000-4000-8000-000000000003';
+  const OUT = 'a1111111-0000-4000-8000-000000000004';
   const AGENTS = [
-    { id: DAN, name: '댄 어윈', runtime: 'claude', live_keys: 1, last_used_at: new Date(Date.now() - 5 * 60_000).toISOString() },
-    { id: MINI, name: '미니', runtime: 'codex', live_keys: 2, last_used_at: null },
-    { id: GONE, name: '고요', runtime: 'claude', live_keys: 0, last_used_at: null },
+    { id: DAN, name: '댄 어윈', runtime: 'claude', live_keys: 1, last_used_at: new Date(Date.now() - 5 * 60_000).toISOString(), in_project: true },
+    { id: MINI, name: '미니', runtime: 'codex', live_keys: 2, last_used_at: null, in_project: true },
+    { id: GONE, name: '고요', runtime: 'claude', live_keys: 0, last_used_at: null, in_project: true },
+    { id: OUT, name: '바깥', runtime: 'claude', live_keys: 0, last_used_at: null, in_project: false },
   ];
   const selectOf = (role: string) => container.querySelector(`select[aria-label^="${role}"]`) as HTMLSelectElement;
   const choose = async (role: string, value: string) => {
@@ -418,6 +420,9 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([...selectOf('작성').querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['새로 만들기', '이미 있는 에이전트', '사람']); // either row
     const mini = optionText(research, `agent:${MINI}`)!;
     expect([mini.disabled, mini.textContent]).toEqual([true, '미니 · Codex가 이 컴퓨터에 없어요']);
+    // PO 04:37Z: not in the project yet — turned off, and what to do first
+    const out = optionText(research, `agent:${OUT}`)!;
+    expect([out.disabled, out.textContent]).toEqual([true, '바깥 · 이 프로젝트에 아직 없어요 — 먼저 프로젝트에 넣어 주세요']);
     await choose('조사', `agent:${DAN}`);
     const elsewhere = optionText(selectOf('작성'), `agent:${DAN}`)!;
     expect([elsewhere.disabled, elsewhere.textContent]).toEqual([true, '댄 어윈 · 다른 역할에 골랐어요']);

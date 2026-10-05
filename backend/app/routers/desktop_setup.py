@@ -63,10 +63,9 @@ _STATUS = {
     "pending_invites": 409,
     # story 4496: no project chosen, and the organization has projects — the web picks one of them (none is made)
     "project_required": 409,
-    # story #4565: an existing agent to attach — not an active agent of this org (another org's reads the same) · a runtime the
-    # desktop cannot run · not yet in the setup's project
+    # story #4565: an existing agent to attach — not an active agent of this org on a desktop runtime (another org's, none, a
+    # person, an inactive one, another runtime: all read the same) · not yet in the setup's project
     "agent_not_found": 404,
-    "agent_not_desktop_runtime": 422,
     "agent_not_in_project": 422,
 }
 
@@ -417,6 +416,7 @@ class AttachableAgent(BaseModel):
     runtime: Literal["claude", "codex"]
     live_keys: int
     last_used_at: datetime | None = None
+    in_project: bool
 
 
 class AttachableAgentsResponse(BaseModel):

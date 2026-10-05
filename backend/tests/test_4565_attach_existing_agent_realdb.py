@@ -20,6 +20,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures us
     ORG,
     ORG2,
     OWNER,
+    OWNER_TM,
     PLAIN,
     PROJ,
     RECIPE,
@@ -41,6 +42,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures us
 OTHER_ORG_AGENT = uuid.UUID("d4565000-0000-0000-0000-000000000001")
 NO_RUNTIME = uuid.UUID("d4565000-0000-0000-0000-000000000002")
 NOT_IN_PROJECT = uuid.UUID("d4565000-0000-0000-0000-000000000003")
+INACTIVE = uuid.UUID("d4565000-0000-0000-0000-000000000004")
 
 
 def _attach(agent_id: uuid.UUID = EXISTING, role: str = "Writer") -> dict:
@@ -73,7 +75,8 @@ async def attachable(world):
         f"INSERT INTO members (id,org_id,user_id,type,name,is_active,runtime_type) VALUES "
         f"('{OTHER_ORG_AGENT}','{ORG2}',NULL,'agent','Elsewhere',true,'claude-code'),"
         f"('{NO_RUNTIME}','{ORG}',NULL,'agent','NoRuntime',true,NULL),"
-        f"('{NOT_IN_PROJECT}','{ORG}',NULL,'agent','Outside',true,'codex')",
+        f"('{NOT_IN_PROJECT}','{ORG}',NULL,'agent','Outside',true,'codex'),"
+        f"('{INACTIVE}','{ORG}',NULL,'agent','Stopped',false,'claude-code')",
         f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{NO_RUNTIME}','granted')",
     )
     yield
@@ -113,7 +116,7 @@ async def test_refusals_read_the_same_for_another_org_and_nothing(attachable):
         code, _ = await _code(c, "d4424 refusals")
         for agent_id, want in (
             (OTHER_ORG_AGENT, (404, "agent_not_found")), (uuid.uuid4(), (404, "agent_not_found")),
-            (NO_RUNTIME, (422, "agent_not_desktop_runtime")), (NOT_IN_PROJECT, (422, "agent_not_in_project")),
+            (NO_RUNTIME, (404, "agent_not_found")), (OWNER_TM, (404, "agent_not_found")), (INACTIVE, (404, "agent_not_found")), (NOT_IN_PROJECT, (422, "agent_not_in_project")),
         ):
             r = await _confirm(c, code, body=_attach(agent_id))
             assert (r.status_code, r.json()["error"]["code"]) == want, (agent_id, r.text)
@@ -191,7 +194,9 @@ async def test_the_candidates_list(attachable):
         r = await c.get(f"/api/v2/desktop/setup/agents?project_id={PROJ}", headers=_person(OWNER))
         assert r.status_code == 200, r.text
         rows = {a["id"]: a for a in r.json()["agents"]}
-        assert set(rows) == {str(EXISTING)}  # not another org's · not one without a desktop runtime · not one outside the project
+        # not another org's · not one without a desktop runtime · not an inactive one; one outside the project comes, marked
+        assert set(rows) == {str(EXISTING), str(NOT_IN_PROJECT)}
+        assert (rows[str(NOT_IN_PROJECT)]["in_project"], rows[str(EXISTING)]["in_project"]) == (False, True)
         e = rows[str(EXISTING)]
         assert (e["name"], e["runtime"], e["live_keys"]) == ("Existing", "claude", 2)
         assert e["last_used_at"] is not None
@@ -361,3 +366,21 @@ async def test_the_one_lock_order_agents_then_setups_by_id(attachable):
             event.remove(engine.sync_engine, "before_cursor_execute", watch)
     assert exchange_locks == ["members ordered", "desktop_setups ordered"], exchange_locks
     assert disconnect_locks == ["members ordered", "desktop_setups ordered"], disconnect_locks
+
+
+@pytest.mark.anyio
+async def test_the_same_id_from_another_org_is_agent_not_found(attachable):
+    """PO 04:37Z — «not in this project» is said only inside the agent's own org: the same id asked from another org reads as
+    no agent at all (whether it exists there never shows)."""
+    from app.core.database import async_session_factory
+    from app.services.desktop_setup import DesktopSetupError, _attachable_runtime
+
+    async with async_session_factory() as db:
+        for agent in (EXISTING, NOT_IN_PROJECT):
+            with pytest.raises(DesktopSetupError) as e:
+                await _attachable_runtime(db, org_id=ORG2, project_id=PROJ, agent_id=agent)
+            assert e.value.code == "agent_not_found", agent
+        # and inside its own org the outside one says what to do
+        with pytest.raises(DesktopSetupError) as e:
+            await _attachable_runtime(db, org_id=ORG, project_id=PROJ, agent_id=NOT_IN_PROJECT)
+        assert e.value.code == "agent_not_in_project"
