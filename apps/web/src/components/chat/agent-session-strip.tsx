@@ -125,8 +125,12 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   const { icon: Shape, tone } = claudeLimit ? { icon: AlertTriangle, tone: 'text-warning' } : SHAPES[view.state];
   const unknown = view.state === 'unknown' || view.state === 'unrecognized';
   const busy = result?.busy === true;
-  // the buttons: inside the phone app · while it works · remote control on · a person who may command it (the server's own rule)
-  const canAct = phone && view.state === 'working' && view.remote_control && view.can_command !== false;
+  // the buttons: inside the phone app · remote control on · a person who may command it (the server's own rule).
+  // [멈춤] while it works AND while it waits on a permission (Kadir 325 · PO 04:34Z: the daemon takes a stop then too — a person
+  // must be able to stop an agent that is asking); [지금 지시] only while it works (it goes into a running turn)
+  const mayCommand = phone && view.remote_control && view.can_command !== false;
+  const canStop = mayCommand && (view.state === 'working' || view.state === 'waiting_permission');
+  const canInstruct = mayCommand && view.state === 'working';
   const checkOnly = pending?.verb === 'stop';
   const label = claudeLimit ? t('state.usage_limit')
     : view.state === 'starting' ? t('state.starting')
@@ -182,12 +186,12 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
         {label}
       </span>
       {view.device_name ? <span className="text-muted-foreground">{view.device_name}</span> : null}
-      {canAct ? (
+      {canStop ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
           {checkOnly ? null : <Button size="sm" variant="outline" disabled={busy} onClick={() => void run('stop')}>{t('button.stop')}</Button>}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
-            : <Button size="sm" variant="outline" disabled={busy} onClick={() => setSheetOpen(true)}>{t('button.instruct')}</Button>}
+            : canInstruct ? <Button size="sm" variant="outline" disabled={busy} onClick={() => setSheetOpen(true)}>{t('button.instruct')}</Button> : null}
         </span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
