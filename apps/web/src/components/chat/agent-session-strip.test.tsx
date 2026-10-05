@@ -164,6 +164,10 @@ describe('AgentSessionStrip — a word it does not know', () => {
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'sleeping', activity: 'dreaming' }));
     await render();
     expect(chip()).toBe('상태 모름');
+    // Yuna 05:41Z: the page does not know the word — never the «computer lost» line
+    expect(line()).toBe('이 페이지가 아직 모르는 상태예요 — 새로 고치면 보일 수 있어요');
+    expect(line()).not.toContain('연결이 끊겨');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
   });
   it('a server from before (state only, no activity) reads as it did', async () => {
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'working' }));

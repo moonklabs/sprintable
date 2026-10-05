@@ -23,7 +23,9 @@ import { limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-lim
  */
 // story #4534 (relay contract v1.12 · Yuna 03:04Z · 03:06Z): the board's own words — asked in the terminal · an error · paused at a
 // usage limit — never shown as «다음 일 기다림»; a usage limit carries its why (`limit`)
-type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'waiting_input' | 'error' | 'paused_limit' | 'stopped' | 'unknown';
+type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'waiting_input' | 'error' | 'paused_limit' | 'stopped' | 'unknown'
+  // story #4534 (Yuna 05:41Z): a word this page does not know — not the server's `unknown` (= the computer lost): its own line
+  | 'unrecognized';
 interface View {
   device_name: string | null;
   // story #4534 (Kadir 4960 · PO 05:36Z): `state` = the five words a reader from before knows · `activity` = the board's own word
@@ -47,15 +49,17 @@ const SHAPES: Record<SessionState, { icon: LucideIcon; tone: string }> = {
   paused_limit: { icon: Circle, tone: 'text-muted-foreground fill-current' },
   stopped: { icon: Check, tone: 'text-success' },
   unknown: { icon: CircleDashed, tone: 'text-muted-foreground' },
+  unrecognized: { icon: CircleDashed, tone: 'text-muted-foreground' },
 };
 const REREAD_MS = 30_000;
 
 /** story #4534 (Kadir 4960 · PO 05:36Z): the board's own word when the server sends one (`activity`), else the five-word `state`;
- *  a word this page does not know falls back to the five-word `state` (then «상태 모름») — never a crash (a server newer than this bundle) */
+ *  a word this page does not know falls back to the five-word `state`, then to «unrecognized» (its own line — never the «computer lost»
+ *  line) — never a crash (a server newer than this bundle) */
 function shownState(view: View): SessionState {
-  const known = (w: string | null | undefined): w is SessionState => !!w && Object.hasOwn(SHAPES, w);
+  const known = (w: string | null | undefined): w is SessionState => !!w && w !== 'unrecognized' && Object.hasOwn(SHAPES, w);
   if (known(view.activity)) return view.activity;
-  return known(view.state) ? view.state : 'unknown';
+  return known(view.state) ? view.state : 'unrecognized';
 }
 /** the daemon's cut (contracts/send-prompt-vectors.json text_max · UTF-16 units — a string's length) */
 const INSTRUCTION_MAX = 8000;
@@ -119,7 +123,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // Claude at a usage limit (it may continue by itself, or ask in its terminal) wears the board's «사용 한도» look (Yuna 08:46Z)
   const claudeLimit = view.state === 'waiting_input' && !!view.limit?.self_resume;
   const { icon: Shape, tone } = claudeLimit ? { icon: AlertTriangle, tone: 'text-warning' } : SHAPES[view.state];
-  const unknown = view.state === 'unknown';
+  const unknown = view.state === 'unknown' || view.state === 'unrecognized';
   const busy = result?.busy === true;
   // the buttons: inside the phone app · while it works · remote control on · a person who may command it (the server's own rule)
   const canAct = phone && view.state === 'working' && view.remote_control && view.can_command !== false;
@@ -256,6 +260,7 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
   const t = useTranslations('chats.agentSession');
   const locale = useLocale();
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
+  if (view.state === 'unrecognized') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.unrecognized')}</p>;
   // story #4534 (Yuna 03:04Z): what to do is «on that computer» — its own line whatever remote control says; no buttons; whether a
   // time has passed is this page's clock
   const rest = limitLine(view.state, view.limit ?? null, now);

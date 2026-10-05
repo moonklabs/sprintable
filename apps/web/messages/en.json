@@ -5103,7 +5103,8 @@
         "limitUnknown": "Hit its usage limit — check in that computer's terminal how it can go on",
         "limitErrorNoTime": "Hit its usage limit and stopped — that computer's terminal shows when it resets",
         "limitErrorAhead": "Hit its usage limit — resets {time}",
-        "limitErrorPassed": "The limit has reset — start it again on that computer"
+        "limitErrorPassed": "The limit has reset — start it again on that computer",
+        "unrecognized": "This page doesn't know this state yet — reloading may show it"
       },
       "button": {
         "stop": "Stop",
