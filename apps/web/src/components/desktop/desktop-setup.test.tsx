@@ -422,7 +422,7 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([mini.disabled, mini.textContent]).toEqual([true, '미니 · Codex가 이 컴퓨터에 없어요']);
     // PO 04:37Z: not in the project yet — turned off, and what to do first
     const out = optionText(research, `agent:${OUT}`)!;
-    expect([out.disabled, out.textContent]).toEqual([true, '바깥 · 이 프로젝트에 아직 없어요 — 먼저 프로젝트에 넣어 주세요']);
+    expect([out.disabled, out.textContent]).toEqual([true, '바깥 · 이 프로젝트에 아직 없어요 — 먼저 프로젝트에 추가해 주세요']);
     await choose('조사', `agent:${DAN}`);
     const elsewhere = optionText(selectOf('작성'), `agent:${DAN}`)!;
     expect([elsewhere.disabled, elsewhere.textContent]).toEqual([true, '댄 어윈 · 다른 역할에 골랐어요']);
