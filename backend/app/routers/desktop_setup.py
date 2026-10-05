@@ -23,6 +23,7 @@ from app.services import desktop_device_token_codes as device_codes
 from app.services.desktop_setup import (
     DesktopSetupError,
     RoleChoice,
+    list_attachable_agents,
     confirm_setup,
     confirm_setup_first_project,
     confirm_setup_new_org,
@@ -62,6 +63,11 @@ _STATUS = {
     "pending_invites": 409,
     # story 4496: no project chosen, and the organization has projects — the web picks one of them (none is made)
     "project_required": 409,
+    # story #4565: an existing agent to attach — not an active agent of this org (another org's reads the same) · a runtime the
+    # desktop cannot run · not yet in the setup's project
+    "agent_not_found": 404,
+    "agent_not_desktop_runtime": 422,
+    "agent_not_in_project": 422,
 }
 
 
@@ -112,7 +118,7 @@ ROLES_FIELD_CAP = 500
 
 class RoleIn(BaseModel):
     """One setup row: `{role, runtime}` — a new agent on that runtime — or `{role, owner: "me"}` — the person confirming holds
-    it (an either row only · Qadir 4834 · PO 05:21Z ⒜). Exactly one of the two.
+    it (an either row only · Qadir 4834 · PO 05:21Z ⒜) — or `{role, agent_id}` — an existing agent (story #4565). Exactly one.
 
     PO 06:04Z — the schema only caps sizes against abuse (generous); every rule a person can break — exactly one of runtime /
     owner, a known runtime, a repeated role, the product's limits — is judged by bind_setup_roles with a closed code
@@ -121,6 +127,8 @@ class RoleIn(BaseModel):
     role: str = Field(max_length=ROLE_FIELD_CAP)  # a recipe role (stage_metadata[stage].role), not a stage
     runtime: str | None = Field(default=None, max_length=32)
     owner: str | None = Field(default=None, max_length=32)
+    # story #4565: `{role, agent_id}` — an agent the organization already has, attached to this computer for the role
+    agent_id: str | None = Field(default=None, max_length=64)
 
 
 # Qadir 4825 (PO 09:45Z) — the setup code travels in bodies only, never in a URL: a path is written to the access log and the
@@ -184,7 +192,7 @@ async def post_confirm(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     user_id = _human_only(auth)
-    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner) for r in body.roles]
+    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id) for r in body.roles]
     made_project: uuid.UUID | None = None
     try:
         if body.project_id is None and not body.project_name:
@@ -273,7 +281,7 @@ async def post_confirm_new_org(
     try:
         setup_id, members, work_item_id, org_id, project_id = await confirm_setup_new_org(
             db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, recipe_id=body.recipe_id,
-            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
             background_tasks=background_tasks,
         )
     except DesktopSetupError as e:
@@ -403,6 +411,37 @@ async def get_setup_recipes_for_new_org(
     return SetupRecipesResponse(recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=None)])
 
 
+class AttachableAgent(BaseModel):
+    id: uuid.UUID
+    name: str
+    runtime: Literal["claude", "codex"]
+    live_keys: int
+    last_used_at: datetime | None = None
+
+
+class AttachableAgentsResponse(BaseModel):
+    agents: list[AttachableAgent]
+
+
+@router.get("/setup/agents", response_model=AttachableAgentsResponse)
+async def get_attachable_agents(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4565 — the existing agents the setup page may offer for a role («이미 있는 에이전트»): this org's, in this project,
+    on a desktop runtime — with how many live keys each has (the page's «the move cuts its current connection» line). A
+    person who is an owner or admin of the org only, as for the confirmation."""
+    user_id = _human_only(auth)
+    try:
+        return AttachableAgentsResponse(
+            agents=[AttachableAgent(**a) for a in await list_attachable_agents(db, user_id=user_id, org_id=org_id, project_id=project_id)],
+        )
+    except DesktopSetupError as e:
+        raise _error(e) from None
+
+
 @router.get("/setups", response_model=SetupListResponse)
 async def get_setups(
     db: AsyncSession = Depends(get_db),
@@ -443,7 +482,7 @@ class AgentStartFailed(BaseModel):
     `reason`/`code` are closed sets (onboarding_funnel START_FAILED_*) — the web words them; None = not one it knows."""
     member_id: str
     at: datetime
-    reason: Literal["runtime_missing", "credentials_refused", "start_refused", "key_unreadable", "first_not_ready"] | None = None
+    reason: Literal["runtime_missing", "credentials_refused", "start_refused", "key_unreadable", "first_not_ready", "workdir_needed"] | None = None
     code: Literal[
         "session_limit", "credentials_missing", "profile_invalid", "unknown_profile", "adapter_prepare_failed", "spawn_failed",
         "not_connected", "bad_reply", "ended", "timeout",

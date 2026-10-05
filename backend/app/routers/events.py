@@ -43,9 +43,16 @@ from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
 from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck
 from app.services.org_locale import resolve_org_locale
 from app.services.i18n_catalog import t
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
+
+
+def _access_revoked_frame(reason: str) -> str:
+    """story #4565 — the same frame /agent/stream ends with when its key is no longer allowed."""
+    return f"event: access_revoked\ndata: {json.dumps({'reason': reason})}\n\n"
+
 
 router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
 
@@ -484,6 +491,12 @@ async def agent_event_stream(
     # "시작할 때 이미 끝날 시각을 갖고 태어나게"). monotonic — 벽시계 조정에 영향 안 받음.
     _lifespan_deadline = time.monotonic() + _SSE_LIFESPAN_SEC + random.uniform(0, _SSE_LIFESPAN_JITTER_SEC)
 
+    # story #4565 (Qadir ①): an agent key revoked after this stream opened (a setup moved the agent to another computer · a
+    # device disconnected) ends it — rechecked on each heartbeat and before more content goes out. Only an agent key's stream
+    # (a person's JWT session has no key to revoke here).
+    _key_id = auth.claims.get("app_metadata", {}).get("api_key_id")
+    _access = AccessRecheck(_key_id, resolved_member_id, agent_only=False) if _key_id else None
+
     async def generate():
         # story #3026(실사고, PO 확定 2026-08-24) — 이 연결이 실제로 클라에 내보낸(yield
         # 성공한) A계열(eid 有) event_id 집합. **연결-로컬**이다(다른 연결과 공유 안 함) —
@@ -609,6 +622,9 @@ async def agent_event_stream(
                 )
 
                 for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
+                    if _access is not None and (_why := await _access.due(RECHECK_BEFORE_SEND_SEC)):
+                        yield _access_revoked_frame(_why)
+                        return
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
                     batch_data = [_backfill_frame_data(evt) for evt in batch]  # story #4505: the live frame's shape
                     # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
@@ -681,8 +697,14 @@ async def agent_event_stream(
                             yield "event: heartbeat\ndata: {}\n\n"
                             if await request.is_disconnected():
                                 break
+                            if _access is not None and (_why := await _access.due(_SSE_HEARTBEAT_TIMEOUT)):
+                                yield _access_revoked_frame(_why)
+                                return
                             continue
                         event_data = get_task.result()
+                        if _access is not None and (_why := await _access.due(RECHECK_BEFORE_SEND_SEC)):
+                            yield _access_revoked_frame(_why)
+                            return
                         event_type = event_data.get("event_type", "message")
                         # story #3026 — dedup 판단은 이 연결이 이미 보냈는지(연결-로컬
                         # `_sent_event_ids`)만 본다. ⚠️예전엔 여기서 `Event.status`(DB, org

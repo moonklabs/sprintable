@@ -476,19 +476,10 @@ async def _stream_access_revoked(api_key_id: object, agent_id: uuid.UUID) -> str
 
 
 async def _stream_access_revoked_db(key_uuid: uuid.UUID, agent_id: uuid.UUID) -> str | None:
-    from app.models.api_key import ApiKey
+    # story #4565: the one check every long-lived connection uses (services/stream_access.py) — the key, then the active agent
+    from app.services.stream_access import key_access_revoked_db
 
-    async with async_session_factory() as db:
-        key = (await db.execute(select(ApiKey.revoked_at, ApiKey.expires_at).where(ApiKey.id == key_uuid))).first()
-        if key is None or key.revoked_at is not None or (key.expires_at is not None and key.expires_at <= datetime.now(timezone.utc)):
-            return "key_revoked"
-        # the same lookup the connect check makes (TeamMember · active agent · any projection row)
-        still = (await db.execute(
-            select(TeamMember.id).where(TeamMember.id == agent_id, TeamMember.type == "agent", TeamMember.is_active.is_(True)).limit(1)
-        )).scalar_one_or_none()
-        if still is None:
-            return "agent_inactive"
-    return None
+    return await key_access_revoked_db(key_uuid, agent_id, agent_only=True)
 
 
 @router.get("/stream")

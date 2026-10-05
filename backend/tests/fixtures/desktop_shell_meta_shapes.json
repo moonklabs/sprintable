@@ -56,7 +56,8 @@
         "first_not_ready",
         "key_unreadable",
         "runtime_missing",
-        "start_refused"
+        "start_refused",
+        "workdir_needed"
       ],
       "required": true
     },

@@ -54,7 +54,34 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)) };
 }
 
-export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime };
+/** `existing` (story #4565): an agent the organization already has, moved to this computer for the row (no new member). */
+export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime } | { kind: 'existing'; agentId: string; name: string; runtime: DesktopRuntime };
+
+/** story #4565 — `GET /api/v2/desktop/setup/agents` row: an agent the setup may attach (this org · this project · a desktop
+ * runtime), its live key count (any → moving it cuts its current connection) and when one was last used. No key value. */
+export interface AttachableAgent { id: string; name: string; runtime: DesktopRuntime; live_keys: number; last_used_at: string | null }
+
+/** The «이미 있는 에이전트» choices of a row (agent · either rows only): every attachable agent whose runtime is on this computer.
+ * The page draws the others (runtime not here · picked for another row) as disabled options with why. */
+export function existingChoices(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): RowOwner[] {
+  return attachable.filter((a) => runtimes.includes(a.runtime)).map((a) => ({ kind: 'existing', agentId: a.id, name: a.name, runtime: a.runtime }));
+}
+
+/** The rows with the attachable agents added to each agent · either row's choices (after the new runtimes, before «나»). An
+ * owner that is no longer among them (the list changed) goes back to the row's first choice. */
+export function withAttachable(rows: readonly SetupRoleRow[], attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): SetupRoleRow[] {
+  const extra = existingChoices(attachable, runtimes);
+  return rows.map((r) => {
+    if (r.actor === 'human') return r;
+    const base = r.choices.filter((c) => c.kind !== 'existing');
+    const choices = r.actor === 'either' ? [...base.filter((c) => c.kind === 'agent'), ...extra, ...base.filter((c) => c.kind === 'me')] : [...base, ...extra];
+    const owner = r.owner.kind === 'existing' && !choices.some((c) => c.kind === 'existing' && c.agentId === (r.owner as { agentId: string }).agentId) ? choices[0] ?? r.owner : r.owner;
+    return { ...r, choices, owner };
+  });
+}
+
+/** The select's value for an owner (one value per choice). */
+export function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.kind === 'existing' ? `agent:${o.agentId}` : o.runtime; }
 
 export interface SetupRoleRow {
   role: string;
@@ -123,13 +150,18 @@ export function withDefaultRecipeFirst<T extends Pick<SetupRecipe, 'key' | 'org_
 
 export function needsAnAgent(rows: readonly SetupRoleRow[]): boolean {
   // no row bound to an agent — agent rows with nothing found, or either rows all set to «나» (PO 05:21Z ⒜ · the server
-  // refuses the same with no_agent_role: this setup exists to start agents on this device)
-  return !rows.some((r) => r.owner.kind === 'agent');
+  // refuses the same with no_agent_role: this setup exists to start agents on this device). A moved agent counts (4565).
+  return !rows.some((r) => r.owner.kind === 'agent' || r.owner.kind === 'existing');
 }
 
-/** «에이전트 N개» — 에이전트가 맡는 줄 수(= 새로 만들 에이전트 수). */
+/** «에이전트 N개» — 새로 만들 에이전트 수(새 런타임을 고른 줄). 옮겨 오는 이미 있는 에이전트는 셈하지 않는다(4565). */
 export function agentRowCount(rows: readonly SetupRoleRow[]): number {
   return rows.filter((r) => r.owner.kind === 'agent').length;
+}
+
+/** story #4565 — 이 컴퓨터로 옮겨 오는 이미 있는 에이전트 수. */
+export function movedRowCount(rows: readonly SetupRoleRow[]): number {
+  return rows.filter((r) => r.owner.kind === 'existing').length;
 }
 
 /** 주소의 `#`가 설정 값(code=…)을 싣고 있으면 지운다 — 다른 `#`(문서 안 앵커 등)는 건드리지 않는다. */
@@ -154,9 +186,9 @@ export interface ConfirmBody {
   project_id: string;
   recipe_id: string;
   /** 에이전트 단위 = 역할(PO 08:31Z · 4825 CHANGES): 한 역할이 여러 stage를 맡아도 에이전트 하나. */
-  /** `{role, runtime}` = a new agent · `{role, owner: 'me'}` = the person confirming holds an either row (PO 05:21Z ⒜). Human
-   * rows are not sent (the server binds them to the person). */
-  roles: ({ role: string; runtime: DesktopRuntime } | { role: string; owner: 'me' })[];
+  /** `{role, runtime}` = a new agent · `{role, owner: 'me'}` = the person confirming holds an either row (PO 05:21Z ⒜) ·
+   * `{role, agent_id}` = an existing agent moved to this computer (4565). Human rows are not sent (the server binds them). */
+  roles: ({ role: string; runtime: DesktopRuntime } | { role: string; owner: 'me' } | { role: string; agent_id: string })[];
   workdir_hint: string;
 }
 
@@ -175,7 +207,9 @@ export function confirmBody(code: string, rows: readonly SetupRoleRow[], project
     project_id: projectId,
     recipe_id: recipeId,
     roles: rows.flatMap<ConfirmBody['roles'][number]>((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime }]
-      : r.actor === 'either' ? [{ role: r.role, owner: 'me' as const }] : [])),
+      // story #4565: an existing agent moved to this computer — its id; the server checks it is this org's and takes its runtime
+      : r.owner.kind === 'existing' ? [{ role: r.role, agent_id: r.owner.agentId }]
+        : r.actor === 'either' ? [{ role: r.role, owner: 'me' as const }] : [])),
     workdir_hint: workdirHint.trim(),
   };
 }
@@ -280,7 +314,7 @@ export interface SetupStatus {
   };
 }
 
-export type StartFailedReason = 'runtime_missing' | 'credentials_refused' | 'start_refused' | 'key_unreadable' | 'first_not_ready';
+export type StartFailedReason = 'runtime_missing' | 'credentials_refused' | 'start_refused' | 'key_unreadable' | 'first_not_ready' | 'workdir_needed';
 export interface AgentStartFailure {
   member_id: string; at: string; reason: StartFailedReason | null; code: string | null; runtime: DesktopRuntime | null;
   limit: number | null; first_member_id: string | null;
@@ -288,11 +322,13 @@ export interface AgentStartFailure {
 
 /** story 4452 (Yuna 04:41Z · 04:43Z) — which line of the reason table a failure gets: by the next thing to do, not by code. */
 export type StartFailedLine = 'runtimeMissing' | 'runtimeDidNotStart' | 'credentials' | 'keyUnreadable' | 'firstNotReady'
-  | 'sessionLimit' | 'notConnected' | 'unknown';
+  | 'sessionLimit' | 'notConnected' | 'workdirNeeded' | 'unknown';
 export function startFailedLine(reason: StartFailedReason | null, code: string | null): StartFailedLine {
   if (reason === 'runtime_missing') return 'runtimeMissing';
   if (reason === 'key_unreadable') return 'keyUnreadable';
   if (reason === 'first_not_ready') return 'firstNotReady';
+  // story #4565: an agent moved from elsewhere waits until its working folder is picked in the app
+  if (reason === 'workdir_needed') return 'workdirNeeded';
   if (reason === 'credentials_refused') return 'credentials';
   if (reason === 'start_refused') {
     if (code === 'session_limit') return 'sessionLimit';

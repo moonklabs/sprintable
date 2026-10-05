@@ -5,6 +5,7 @@ import { NOT_CONNECTED_AFTER_HANDOVER_MS,
   agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, parseOldRuntimes, setupRoleRows, workdirInputOk,
   setupProgress, listableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
   setupPollDelayMs, SETUP_STATUS_POLL_MS, SETUP_STATUS_SLOW_POLL_MS,
+  movedRowCount, ownerKey, startFailedLine, withAttachable, type AttachableAgent,
 } from './desktop-setup';
 
 const CODE = 'A'.repeat(20) + '_-' + 'b'.repeat(21); // 43
@@ -414,5 +415,36 @@ describe('[SID:4494] old= — a runtime installed only below its floor', () => {
   it('the reload fragment keeps it', () => {
     const q = { code: `${'A'.repeat(20)}_-${'b'.repeat(21)}`, runtimes: ['claude'] as ('claude' | 'codex')[], setupId: 's-1', blocked: [] as ('claude' | 'codex')[], old: [{ runtime: 'codex' as const, version: '0.153.4', min: '0.156.1' }] };
     expect(parseSetupFragment(setupFragment(q))).toEqual(q);
+  });
+});
+
+
+describe('[SID:4565] existing agents in the rows', () => {
+  const dan: AttachableAgent = { id: 'a-dan', name: '댄', runtime: 'claude', live_keys: 1, last_used_at: null };
+  const mini: AttachableAgent = { id: 'a-mini', name: '미니', runtime: 'codex', live_keys: 0, last_used_at: null };
+
+  it('agent · either rows take the existing agents whose runtime is here (after the new ones, before «나»); a human row does not', () => {
+    const rows = withAttachable(setupRoleRows(recipe, ['claude']), [dan, mini], ['claude']);
+    const keys = (role: string) => rows.find((r) => r.role === role)!.choices.map(ownerKey);
+    expect(keys('조사')).toEqual(['claude', 'agent:a-dan']); // mini: codex is not on this computer
+    expect(keys('작성')).toEqual(['claude', 'agent:a-dan', 'me']);
+    expect(keys('연출')).toEqual(['me']);
+  });
+
+  it('counts new and moved apart · a moved agent alone is enough to start · the body carries its id, never a runtime', () => {
+    const rows = withAttachable(setupRoleRows(recipe, ['claude']), [dan], ['claude'])
+      .map((r) => (r.role === '조사' ? { ...r, owner: r.choices.find((c) => c.kind === 'existing')! } : r.role === '작성' ? { ...r, owner: { kind: 'me' as const } } : r));
+    expect([agentRowCount(rows), movedRowCount(rows), needsAnAgent(rows)]).toEqual([0, 1, false]);
+    expect(confirmBody(CODE, rows, 'p-1', 'rec-1', '~/x').roles).toEqual([{ role: '조사', agent_id: 'a-dan' }, { role: '작성', owner: 'me' }]);
+  });
+
+  it('an owner no longer in the list goes back to the row\'s first choice', () => {
+    const picked = withAttachable(setupRoleRows(recipe, ['claude']), [dan], ['claude'])
+      .map((r) => (r.role === '조사' ? { ...r, owner: r.choices.find((c) => c.kind === 'existing')! } : r));
+    expect(ownerKey(withAttachable(picked, [], ['claude']).find((r) => r.role === '조사')!.owner)).toBe('claude');
+  });
+
+  it('the progress line for an agent waiting for its working folder', () => {
+    expect(startFailedLine('workdir_needed', null)).toBe('workdirNeeded');
   });
 });

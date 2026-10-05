@@ -21,7 +21,8 @@ import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zon
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
   agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
-  type DesktopRuntime, type RowOwner, type SetupRecipe, type SetupRoleRow, withDefaultRecipeFirst } from '@/lib/desktop-setup';
+  type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst } from '@/lib/desktop-setup';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 
 /**
  * story #4427(E-DESKTOP P2) — 웹 설정 페이지. 데스크톱 앱이 이 페이지를 설정 코드 + 찾은 에이전트 목록과 함께 연다.
@@ -172,8 +173,6 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] };
 
-function ownerKey(o: RowOwner): string { return o.kind === 'me' ? 'me' : o.runtime; }
-
 export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [] }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[] }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
@@ -211,6 +210,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [recipes, setRecipes] = useState<SetupRecipe[]>([]);
   const [recipeId, setRecipeId] = useState<string>('');
   const [rows, setRows] = useState<SetupRoleRow[]>([]);
+  // story #4565: this org's existing agents the setup may move to this computer (owner/admin · this project) — none: no group
+  const [attachable, setAttachable] = useState<AttachableAgent[]>([]);
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
   const [pickingRecipe, setPickingRecipe] = useState(false); // 4446: the recipe list is folded to the chosen one until [바꾸기]
@@ -329,9 +330,26 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadTick, orgMode.kind]);
 
+  // story #4565 — the «이미 있는 에이전트» group: read once the project is known (a new organization has none to move)
+  useEffect(() => {
+    if (orgMode.kind !== 'has-org' || !chosenProject || !isAdmin) { setAttachable([]); return; }
+    let off = false;
+    fetchWithAuth(`/api/desktop/setup/agents?project_id=${encodeURIComponent(chosenProject)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { agents?: AttachableAgent[]; data?: { agents?: AttachableAgent[] } } | null) => {
+        if (off) return;
+        const list = body?.agents ?? body?.data?.agents ?? [];
+        setAttachable(list);
+        setRows((rs) => withAttachable(rs, list, runtimes));
+      })
+      .catch(() => { if (!off) setAttachable([]); }); // the group is left out — «새로 만들기» still works
+    return () => { off = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgMode.kind, chosenProject, isAdmin]);
+
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
-    setRows(setupRoleRows(r, runtimes));
+    setRows(withAttachable(setupRoleRows(r, runtimes), attachable, runtimes));
     setWorkdir(defaultWorkdirHint(presetName(r, tPreset)));
     setEditingDir(false);
   }
@@ -341,6 +359,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const humanRoles = useMemo(() => rows.filter((r) => r.owner.kind === 'me').map((r) => stageRoleLabel(r.role, tOrg)), [rows, tOrg]);
   const humanList = humanRoles.join(' · ');
   const agents = agentRowCount(rows);
+  const moved = movedRowCount(rows);
 
   async function start() {
     if (!recipe || (!newOrg && !firstProject && !chosenProject)) return;
@@ -600,20 +619,51 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         ))}
         <ul className="mt-2 flex flex-col divide-y rounded-md border">
           {rows.map((r) => (
-            <li key={r.role} className="flex items-center justify-between gap-3 p-3">
+            <li key={r.role} className="p-3">
+              <div className="flex items-center justify-between gap-3">
               <span className="min-w-0 break-keep">
                 <span className="block text-sm font-medium">{roleName(r.role)}</span>
                 <span className="block text-xs text-muted-foreground">{r.actor === 'human' ? t('whoHuman') : r.actor === 'either' ? t('whoEither') : t('whoAgent')}</span>
               </span>
               {r.choices.length === 1
-                ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: myName }) : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
+                ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: myName }) : r.owner.kind === 'existing' ? r.owner.name : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
                 : (
                   <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="max-w-[55%] shrink-0 rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
                     value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
-                    {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: myName }) : RUNTIME_LABEL[c.runtime]}</option>)}
-                    {claudeBlocked && r.actor !== 'human' ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
+                    {attachable.length === 0 ? (
+                      <>
+                        {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: myName }) : c.kind === 'existing' ? c.name : RUNTIME_LABEL[c.runtime]}</option>)}
+                        {claudeBlocked && r.actor !== 'human' ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
+                      </>
+                    ) : (
+                      // story #4565 (Yuna 02:32Z ①): one select, three groups — new · existing agents · person
+                      <>
+                        <optgroup label={t('ownerGroupNew')}>
+                          {r.choices.filter((c) => c.kind === 'agent').map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'agent' ? RUNTIME_LABEL[c.runtime] : ''}</option>)}
+                          {claudeBlocked ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
+                        </optgroup>
+                        <optgroup label={t('ownerGroupExisting')}>
+                          {attachable.map((a) => {
+                            const key = `agent:${a.id}`;
+                            const elsewhere = rows.some((o) => o.role !== r.role && o.owner.kind === 'existing' && o.owner.agentId === a.id);
+                            const missing = !runtimes.includes(a.runtime);
+                            const label = missing ? t('existingRuntimeMissing', { name: a.name, runtime: RUNTIME_LABEL[a.runtime] })
+                              : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
+                            return <option key={key} value={key} disabled={missing || elsewhere}>{label}</option>;
+                          })}
+                        </optgroup>
+                        {r.choices.some((c) => c.kind === 'me') ? (
+                          <optgroup label={t('ownerGroupPerson')}>
+                            <option value="me">{t('me', { name: myName })}</option>
+                          </optgroup>
+                        ) : null}
+                      </>
+                    )}
                   </select>
                 )}
+              </div>
+              {/* story #4565 (Yuna 02:32Z ② · 02:39Z): an existing agent with a live key — what moving it does, then when it was last seen */}
+              {r.owner.kind === 'existing' ? <MovedAgentNote agent={attachable.find((a) => r.owner.kind === 'existing' && a.id === r.owner.agentId)} /> : null}
             </li>
           ))}
         </ul>
@@ -649,13 +699,37 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           {noAgentRow ? t('noAgentRow')
             // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
             : needsProjectPick ? t('projectPick.reason')
-            : humanRoles.length > 0 ? t('startNoteWithMe', { n: agents, roles: humanList, josa: pickEunNeunJosa(humanList) }) : t('startNote', { n: agents })}
+            : startNote(t, agents, moved, humanList, humanRoles.length > 0)}
         </p>
         {rateLine ? <p className="text-xs text-muted-foreground" data-testid="setup-rate-limited">{rateLine}</p>
           : view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
       </footer>
     </Card>
   );
+}
+
+/** story #4565 (Yuna 02:32Z ② · 02:39Z): under a row moved from elsewhere — only when it has a live key: what the move does
+ * (in the body's colour: it is a result to read), then when one of its keys was last used (muted · none known → no line). */
+function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
+  const t = useTranslations('desktop.setup');
+  const locale = useLocale();
+  const viewerTz = useViewerTimeZone();
+  if (!agent || agent.live_keys < 1) return null;
+  const when = agent.last_used_at ? formatViewerRelativeTime(agent.last_used_at, locale, viewerTz) : '';
+  return (
+    <div className="mt-1 flex flex-col gap-0.5" data-testid="setup-moved-note">
+      <p className="text-xs text-foreground">{t('movedWarning')}</p>
+      {when ? <p className="text-xs text-muted-foreground">{t('lastConnected', { time: when })}</p> : null}
+    </div>
+  );
+}
+
+/** «시작» 아래 줄(4565 · Yuna 02:32Z ①): «만들고»는 새로 만드는 것만 세고, 옮겨 오는 것은 «옮겨»로 · 사람 역할이 있으면 꼬리. */
+function startNote(t: ReturnType<typeof useTranslations<'desktop.setup'>>, made: number, moved: number, humanList: string, withMe: boolean): string {
+  const me = withMe ? { roles: humanList, josa: pickEunNeunJosa(humanList) } : null;
+  if (moved === 0) return me ? t('startNoteWithMe', { n: made, ...me }) : t('startNote', { n: made });
+  if (made === 0) return me ? t('startNoteMovedWithMe', { m: moved, ...me }) : t('startNoteMoved', { m: moved });
+  return me ? t('startNoteMadeMovedWithMe', { n: made, m: moved, ...me }) : t('startNoteMadeMoved', { n: made, m: moved });
 }
 
 /** story 4494 (Yuna 10:11Z ⓐ): the no-agent card's place and shape — one title and body per runtime that is only below its floor ·
