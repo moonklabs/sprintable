@@ -182,3 +182,28 @@ describe('[4532] the first read is never dropped for good', () => {
     expect(container.querySelector('[data-testid="agent-permission-requests"]')).not.toBeNull();
   });
 });
+
+// story 4542 (PO 02:04Z · Yuna 02:05Z): the card names the tool by the server's one rule (its row's tool_name in this language) —
+// never the machine value of a known tool; a row from an older server (no tool_name) shows the value as it is; the computer once
+describe('[SID:4542] the tool by its name · the computer once', () => {
+  const tool = () => container.querySelector('[data-testid="agent-permission-tool"]')?.textContent;
+  it('a Codex row: «명령 실행» (en «Run command»), never «commandExecution»', async () => {
+    for (const locale of ['ko', 'en'] as const) {
+      fetchWithAuth.mockResolvedValue(answer([req({ runtime: 'codex', tool: 'commandExecution', tool_name: { ko: '명\u2060령 실\u2060행', en: 'Run command' } })]));
+      await render(locale);
+      expect(tool()).toBe(locale === 'ko' ? '명\u2060령 실\u2060행' : 'Run command');
+      expect(container.textContent).not.toContain('commandExecution');
+    }
+  });
+  it('a row from an older server (no tool_name): the value as it is', async () => {
+    fetchWithAuth.mockResolvedValue(answer([req({ tool: 'Bash' })]));
+    await render();
+    expect(tool()).toBe('Bash');
+  });
+  it('the computer once — only when the agent\'s name ends in exactly « · {computer}»', async () => {
+    fetchWithAuth.mockResolvedValue(answer([req({ agent_name: 'Agent · SYJ-MacBook-Pro' }), req({ id: 'r2', request_id: 'q2', agent_name: 'Agent · OtherMac' })]));
+    await render();
+    const heads = [...container.querySelectorAll('[data-testid="agent-permission-card"] p.text-sm')].map((p) => p.textContent);
+    expect(heads).toEqual(['Agent · SYJ-MacBook-Pro', 'Agent · OtherMac · SYJ-MacBook-Pro']);
+  });
+});

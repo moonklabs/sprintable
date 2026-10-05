@@ -11,6 +11,10 @@ export interface PermissionRequest {
   agent_name: string | null;
   role: string | null;
   tool: string;
+  /** story 4542: the server's name for the tool by the one rule (backend app/services/tool-names.json) — what this card shows; a row
+   *  from an older server has none (the value is shown as it is) */
+  runtime?: string;
+  tool_name?: { ko: string; en: string };
   summary: string;
   masked: boolean;
   truncated: boolean;
@@ -48,4 +52,20 @@ export function stillShown(r: PermissionRequest, now: number): boolean {
 /** «{n}분째 기다림» — whole minutes since the request came; not shown while the computer's state is unknown (명세 B-2). */
 export function waitedMinutes(r: PermissionRequest, now: number): number {
   return Math.max(0, Math.floor((now - Date.parse(r.created_at)) / 60000));
+}
+
+/** story 4542: the tool as this card names it — the server's name in this language, else the value as it is (never guessed here) */
+export function shownToolName(r: Pick<PermissionRequest, 'tool' | 'tool_name'>, locale: string): string {
+  const n = r.tool_name;
+  return (n && (locale === 'en' ? n.en : n.ko)) || r.tool;
+}
+
+/** story 4542 (Yuna · Kadir ④): «{agent} · {computer}» — the computer not again when the agent's name already ends in exactly
+ *  « · {computer}» (the same rule as the phone's sheet and the push) */
+export function agentOnDevice(agent: string | null | undefined, device: string | null | undefined): string {
+  const a = (agent ?? '').trim();
+  const d = (device ?? '').trim();
+  if (!d) return a;
+  if (!a) return d;
+  return a.endsWith(` · ${d}`) ? a : `${a} · ${d}`;
 }

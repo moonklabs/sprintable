@@ -28,6 +28,7 @@ from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, Re
 from app.models.desktop_relay import DesktopDeviceToken, DesktopSession
 from app.models.desktop_setup import DesktopSetup
 from app.services.desktop_relay import SESSION_KEY_PATTERN, UNKNOWN_AFTER, DesktopRelayError, _check_agent
+from app.services.tool_names import shown_tool
 
 logger = logging.getLogger(__name__)
 
@@ -478,10 +479,14 @@ async def _send_permission_notice(db: AsyncSession, setup: DesktopSetup, row: Ag
     # bell builds its own line from the type)
     locale = await resolve_org_locale(db, setup.org_id)
     agent_name = (await db.execute(select(Member.name).where(Member.id == row.agent_member_id))).scalar_one_or_none() or ""
-    title = t("agent_permission.notice_title", locale, agent=agent_name) if agent_name else t("agent_permission.notice_title_bare", locale)
+    # story 4542: the computer once (its exact tail only) · the tool by the one naming rule (app/services/tool-names.json)
+    from app.services.tool_names import agent_on_device
+
+    who = agent_on_device(agent_name, setup.device_name) if agent_name else ""
+    title = t("agent_permission.notice_title", locale, agent=who) if who else t("agent_permission.notice_title_bare", locale)
     await dispatch_notification(
         db, org_id=setup.org_id, event_type="agent.permission_request", target_member_ids=[recipient],
-        title=title, body=t("agent_permission.notice_body", locale, tool=row.tool),
+        title=title, body=t("agent_permission.notice_body", locale, tool=shown_tool(row.runtime, row.tool, locale)),
         reference_type="agent_permission_request", reference_id=row.id, source_project_id=setup.project_id,
         event={"payload": {"agent_name": agent_name}},
     )
@@ -560,7 +565,11 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
         out.append({
             "id": str(r.id), "request_id": str(r.request_id), "setup_id": str(s.id), "device_name": s.device_name,
             "agent_member_id": str(r.agent_member_id), "agent_name": names.get(r.agent_member_id), "role": role,
-            "tool": r.tool, "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
+            # story 4542: the name a person reads (web card) by the one rule, from the row's own runtime + tool — the phone's signing
+            # sheet never shows it (it names the tool from the value it signs)
+            "runtime": r.runtime, "tool": r.tool,
+            "tool_name": {lang: shown_tool(r.runtime, r.tool, lang) for lang in ("ko", "en")},
+            "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,

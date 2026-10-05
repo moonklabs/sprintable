@@ -1,0 +1,247 @@
+{
+  "_": "[SID:4542] the one definition of a tool's name a person reads (PO 2026-10-05 01:59Z · 02:04Z · Yuna 02:05Z · Kadir 02:04Z). Same bytes in sprintable-mobile contracts/tool-names.json (in the phone's own bundle) and sprintable backend/app/services/tool-names.json; both repos pin its sha256. Every vector: removing U+200B/U+2060 from *_wrapped gives the plain name, and the tool must match ^[A-Za-z0-9_.:-]{1,128}$ before it is named on a signing sheet (Kadir 02:07Z). Rules: (1) mcp__{server}__{tool} (any runtime) → the `mcp` words; (2) runtime claude → its own name as is; (3) other runtimes → table[runtime].names[tool] by exact own key, else table[runtime].other with {value} = the tool (a runtime not in the table: no names, codex's «other» wording); keys never matched by prototype or case. Wrap (display only, never signed): U+200B after _ - . / : (when a non-space follows) and between [a-z0-9] and [A-Z]; U+2060 between two Hangul syllables and between a Hangul syllable and an adjacent non-space non-Hangul character; nothing next to an existing U+200B/U+2060.",
+  "mcp": {
+    "ko": "{server}의 {tool}",
+    "en": "{tool} from {server}"
+  },
+  "table": {
+    "codex": {
+      "names": {
+        "commandExecution": {
+          "ko": "명령 실행",
+          "en": "Run command"
+        },
+        "fileChange": {
+          "ko": "파일 변경",
+          "en": "Change files"
+        },
+        "permissions": {
+          "ko": "권한 변경",
+          "en": "Change permissions"
+        }
+      },
+      "other": {
+        "ko": "작업⁠({value})",
+        "en": "Action ({value})"
+      }
+    }
+  },
+  "vectors": [
+    {
+      "runtime": "codex",
+      "tool": "commandExecution",
+      "ko": "명령 실행",
+      "en": "Run command",
+      "ko_wrapped": "명⁠령 실⁠행",
+      "en_wrapped": "Run command"
+    },
+    {
+      "runtime": "codex",
+      "tool": "fileChange",
+      "ko": "파일 변경",
+      "en": "Change files",
+      "ko_wrapped": "파⁠일 변⁠경",
+      "en_wrapped": "Change files"
+    },
+    {
+      "runtime": "codex",
+      "tool": "permissions",
+      "ko": "권한 변경",
+      "en": "Change permissions",
+      "ko_wrapped": "권⁠한 변⁠경",
+      "en_wrapped": "Change permissions"
+    },
+    {
+      "runtime": "codex",
+      "tool": "somethingNew",
+      "ko": "작업⁠(somethingNew)",
+      "en": "Action (somethingNew)",
+      "ko_wrapped": "작⁠업⁠(something​New)",
+      "en_wrapped": "Action (something​New)"
+    },
+    {
+      "runtime": "codex",
+      "tool": "__proto__",
+      "ko": "작업⁠(__proto__)",
+      "en": "Action (__proto__)",
+      "ko_wrapped": "작⁠업⁠(_​_​proto_​_​)",
+      "en_wrapped": "Action (_​_​proto_​_​)"
+    },
+    {
+      "runtime": "codex",
+      "tool": "constructor",
+      "ko": "작업⁠(constructor)",
+      "en": "Action (constructor)",
+      "ko_wrapped": "작⁠업⁠(constructor)",
+      "en_wrapped": "Action (constructor)"
+    },
+    {
+      "runtime": "codex",
+      "tool": "commandexecution",
+      "ko": "작업⁠(commandexecution)",
+      "en": "Action (commandexecution)",
+      "ko_wrapped": "작⁠업⁠(commandexecution)",
+      "en_wrapped": "Action (commandexecution)"
+    },
+    {
+      "runtime": "codex",
+      "tool": "mcp__github__create_issue",
+      "ko": "github의 create_issue",
+      "en": "create_issue from github",
+      "ko_wrapped": "github⁠의 create_​issue",
+      "en_wrapped": "create_​issue from github"
+    },
+    {
+      "runtime": "codex",
+      "tool": "mcp__weird",
+      "ko": "작업⁠(mcp__weird)",
+      "en": "Action (mcp__weird)",
+      "ko_wrapped": "작⁠업⁠(mcp_​_​weird)",
+      "en_wrapped": "Action (mcp_​_​weird)"
+    },
+    {
+      "runtime": "codex",
+      "tool": "apply.patch/v2:run",
+      "ko": "작업⁠(apply.patch/v2:run)",
+      "en": "Action (apply.patch/v2:run)",
+      "ko_wrapped": "작⁠업⁠(apply.​patch/​v2:​run)",
+      "en_wrapped": "Action (apply.​patch/​v2:​run)"
+    },
+    {
+      "runtime": "claude",
+      "tool": "Bash",
+      "ko": "Bash",
+      "en": "Bash",
+      "ko_wrapped": "Bash",
+      "en_wrapped": "Bash"
+    },
+    {
+      "runtime": "claude",
+      "tool": "NotebookEdit",
+      "ko": "NotebookEdit",
+      "en": "NotebookEdit",
+      "ko_wrapped": "Notebook​Edit",
+      "en_wrapped": "Notebook​Edit"
+    },
+    {
+      "runtime": "claude",
+      "tool": "constructor",
+      "ko": "constructor",
+      "en": "constructor",
+      "ko_wrapped": "constructor",
+      "en_wrapped": "constructor"
+    },
+    {
+      "runtime": "claude",
+      "tool": "commandExecution",
+      "ko": "commandExecution",
+      "en": "commandExecution",
+      "ko_wrapped": "command​Execution",
+      "en_wrapped": "command​Execution"
+    },
+    {
+      "runtime": "claude",
+      "tool": "mcp__github__create_issue",
+      "ko": "github의 create_issue",
+      "en": "create_issue from github",
+      "ko_wrapped": "github⁠의 create_​issue",
+      "en_wrapped": "create_​issue from github"
+    },
+    {
+      "runtime": "claude",
+      "tool": "mcp__sprintable-desktop__list_stories",
+      "ko": "sprintable-desktop의 list_stories",
+      "en": "list_stories from sprintable-desktop",
+      "ko_wrapped": "sprintable-​desktop⁠의 list_​stories",
+      "en_wrapped": "list_​stories from sprintable-​desktop"
+    },
+    {
+      "runtime": "claude",
+      "tool": "mcp__weird",
+      "ko": "mcp__weird",
+      "en": "mcp__weird",
+      "ko_wrapped": "mcp_​_​weird",
+      "en_wrapped": "mcp_​_​weird"
+    },
+    {
+      "runtime": "claude",
+      "tool": "mcp__a__b__c",
+      "ko": "a의 b__c",
+      "en": "b__c from a",
+      "ko_wrapped": "a⁠의 b_​_​c",
+      "en_wrapped": "b_​_​c from a"
+    },
+    {
+      "runtime": "claude",
+      "tool": "mcp____x",
+      "ko": "mcp____x",
+      "en": "mcp____x",
+      "ko_wrapped": "mcp_​_​_​_​x",
+      "en_wrapped": "mcp_​_​_​_​x"
+    },
+    {
+      "runtime": "claude",
+      "tool": "mcp__a__",
+      "ko": "mcp__a__",
+      "en": "mcp__a__",
+      "ko_wrapped": "mcp_​_​a_​_",
+      "en_wrapped": "mcp_​_​a_​_"
+    },
+    {
+      "runtime": "claude",
+      "tool": "mcp_a__b",
+      "ko": "mcp_a__b",
+      "en": "mcp_a__b",
+      "ko_wrapped": "mcp_​a_​_​b",
+      "en_wrapped": "mcp_​a_​_​b"
+    },
+    {
+      "runtime": "codex",
+      "tool": "Bash",
+      "ko": "작업⁠(Bash)",
+      "en": "Action (Bash)",
+      "ko_wrapped": "작⁠업⁠(Bash)",
+      "en_wrapped": "Action (Bash)"
+    },
+    {
+      "runtime": "codex",
+      "tool": "bash",
+      "ko": "작업⁠(bash)",
+      "en": "Action (bash)",
+      "ko_wrapped": "작⁠업⁠(bash)",
+      "en_wrapped": "Action (bash)"
+    },
+    {
+      "runtime": "claude",
+      "tool": "bash",
+      "ko": "bash",
+      "en": "bash",
+      "ko_wrapped": "bash",
+      "en_wrapped": "bash"
+    },
+    {
+      "runtime": "codex",
+      "tool": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "ko": "작업⁠(xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)",
+      "en": "Action (xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)",
+      "ko_wrapped": "작⁠업⁠(xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)",
+      "en_wrapped": "Action (xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)"
+    },
+    {
+      "runtime": "hermes",
+      "tool": "commandExecution",
+      "ko": "작업⁠(commandExecution)",
+      "en": "Action (commandExecution)",
+      "ko_wrapped": "작⁠업⁠(command​Execution)",
+      "en_wrapped": "Action (command​Execution)"
+    },
+    {
+      "runtime": "hermes",
+      "tool": "foo",
+      "ko": "작업⁠(foo)",
+      "en": "Action (foo)",
+      "ko_wrapped": "작⁠업⁠(foo)",
+      "en_wrapped": "Action (foo)"
+    }
+  ]
+}
