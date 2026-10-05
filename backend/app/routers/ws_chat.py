@@ -25,6 +25,7 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.services.member_resolver import resolve_member_display_name
+from app.services.pg_pubsub import fire_and_forget
 from app.services.stream_access import AccessRecheck
 
 logger = logging.getLogger(__name__)
@@ -255,7 +256,8 @@ async def ws_chat_hub(
     # a device disconnected) ends the socket — checked before each message it sends is kept, and on a timer while it listens
     key_id = await _api_key_id(api_key)
     access = AccessRecheck(key_id, caller.id, agent_only=False) if key_id else None
-    watcher = asyncio.create_task(_close_when_revoked(websocket, access)) if access else None
+    # held by pg_pubsub's own set (never collected early) and kept here to cancel when the socket ends
+    watcher = fire_and_forget(_close_when_revoked(websocket, access)) if access else None
     try:
         # story #4418 (Qadir 01a0eb42) — inside the try: if either fails, the `finally` below takes the socket out of the room
         # (before, a failure here left it registered).
