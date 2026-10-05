@@ -398,4 +398,6 @@ async def test_25_the_line_follows_the_daemons_answer_refused_writes_none_after_
         assert r.status_code == 200, r.text
         [(sender, content)] = await _lines(conv)
         assert str(sender) == str(OWNER_TM) and "단계 뒤에 들어갈 지시" in content and "거절될 지시" not in content
+        # Yuna 03:49Z: after_step is its own line — not «지금 턴에 보냄» (it has not gone in yet)
+        assert content.startswith("지시 · 하던 단계 뒤에 넣음") and "지금 턴에 보냄" not in content
 

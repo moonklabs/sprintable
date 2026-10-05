@@ -242,7 +242,8 @@ async def _line_written(db: AsyncSession, command_id: uuid.UUID) -> bool:
     )).first() is not None
 
 
-async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sender_id, agent_id, text: str, command_id) -> None:
+async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sender_id, agent_id, text: str, command_id,
+                             after_step: bool = False) -> None:
     """«지시 · 지금 턴에 보냄» + the text, from the person who sent it (명세 B-3). Not dispatched to the agent — it already has
     the instruction in its turn; a second copy as a message would be a second instruction."""
     from app.models.conversation import ConversationMessage
@@ -252,7 +253,8 @@ async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sende
     locale = await resolve_org_locale(db, org_id)
     db.add(ConversationMessage(
         id=uuid.uuid4(), conversation_id=conversation_id, sender_id=sender_id,
-        content=f"{t('desktop_command.prompt_line', locale)}\n{text}", mentioned_ids=[],
+        content=f"{t('desktop_command.prompt_line_after_step' if after_step else 'desktop_command.prompt_line', locale)}\n{text}",
+        mentioned_ids=[],
         msg_metadata={"activation": {"audience": [], "kind": "remote_prompt", "expects_response": False},
                       "remote_prompt": {"command_id": str(command_id), "agent_member_id": str(agent_id)}},
     ))
@@ -313,8 +315,9 @@ async def _close_prompts(db: AsyncSession, setup_id: uuid.UUID, session_key: str
 
 async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
     """A stop of the session done: its waiting instructions close without a turn-end notice.
-    An instruction done (it went into the turn — now or after the step): its one line in the conversation. Refused or failed: no line —
-    the phone sends the words as a message instead, and that message is the record."""
+    An instruction done: its one line in the conversation — «sent into the current turn», or after_step «queued after the step in
+    progress» (Yuna 03:49Z: it has not gone in yet). Refused or failed: no line — the phone sends the words as a message instead
+    (sent_as_message), and that message is the record."""
     if cmd.kind == "stop_session" and cmd.state == "done" and cmd.session_key:
         await _close_prompts(db, cmd.setup_id, cmd.session_key)
     if cmd.kind == "send_prompt" and cmd.state == "done" and not await _line_written(db, cmd.id):
@@ -326,7 +329,8 @@ async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
         )).scalar_one_or_none()
         if setup is not None and agent_id is not None and payload.get("conversation_id") and payload.get("text") is not None:
             await _write_prompt_line(db, org_id=setup.org_id, conversation_id=uuid.UUID(str(payload["conversation_id"])),
-                                     sender_id=cmd.requested_by, agent_id=agent_id, text=payload["text"], command_id=cmd.id)
+                                     sender_id=cmd.requested_by, agent_id=agent_id, text=payload["text"], command_id=cmd.id,
+                                     after_step=cmd.result_code == "after_step")
 
 
 async def _notify_turn_end(db: AsyncSession, setup: DesktopSetup, cmd: DesktopCommand) -> None:
