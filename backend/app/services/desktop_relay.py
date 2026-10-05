@@ -383,7 +383,8 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         from app.services.agent_permissions import on_answer_result
 
         await on_answer_result(db, setup.id, (cmd.payload or {}).get("request_id"), result.state, result.result_code)
-    if cmd.kind == "stop_session":  # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice)
+    # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice); an instruction done writes its line
+    if cmd.kind in ("stop_session", "send_prompt"):
         from app.services.desktop_commands import on_command_done
 
         await on_command_done(db, cmd)

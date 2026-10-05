@@ -216,14 +216,20 @@ async def test_10_11_12_the_instruction_goes_down_as_sent_with_one_line_and_keys
         assert payload == {"session_key": "s-1", "signed": body["signed"], "text": "테스트도 같이 돌려 줘", "conversation_id": conv}
         # 10 — the key is the person's: b3:{member}:{key}
         assert idem == f"b3:{OWNER_TM}:same-key"
-        # 12 — one line in the conversation, from the person who sent it
+        # 12 — the conversation's line waits for the daemon (phone run 4 · PO 03:30Z ②): none while queued, one when it went in,
+        # from the person who sent it — and a result again (a late duplicate) writes no second
+        assert await _lines(conv) == []
+        cid0 = r.json()["command_id"]
+        done = await c.post(f"/api/v2/desktop/relay/commands/{cid0}/result", json={"state": "done"}, headers=_tok(device["device_token"]))
+        assert done.status_code == 200, done.text
         [(sender, content)] = await _lines(conv)
         assert str(sender) == str(OWNER_TM) and content.startswith("지시 · 지금 턴에 보냄") and "테스트도 같이 돌려 줘" in content
+        assert len(await _lines(conv)) == 1
 
         # the result line: the presser only
         cid = r.json()["command_id"]
         mine = await c.get(f"/api/v2/agents/{agent}/desktop-commands/{cid}", headers=_person(OWNER))
-        assert mine.json()["state"] == "queued"
+        assert mine.json()["state"] == "done"
         await _grant(plain_tm)
         assert (await c.get(f"/api/v2/agents/{agent}/desktop-commands/{cid}", headers=_person(PLAIN))).status_code == 404
 
@@ -356,7 +362,7 @@ async def test_24_the_same_key_again_gets_back_its_command_whatever_the_session_
         assert again.status_code == 201, again.text
         assert again.json()["command_id"] == first.json()["command_id"]
         assert len(await _commands(sid)) == 1
-        assert len(await _lines(conv)) == 1, "one «지시 · 지금 턴에 보냄» line, never two"
+        assert await _lines(conv) == [], "no «지시 · 지금 턴에 보냄» line before the daemon says it went in, and never two"
         # a stop the same way: made while working, asked again when idle → the same command, not «already_stopped»
         await _state(c, device, agent, "working", 3)
         stop = _cmd("stop_session", phone, key="press-2")
@@ -369,3 +375,29 @@ async def test_24_the_same_key_again_gets_back_its_command_whatever_the_session_
         fresh = await _post(c, agent, _cmd("send_prompt", phone, conv=conv, key="press-3"))
         assert (fresh.status_code, fresh.json()["error"]["code"]) == (409, "session_not_working")
         assert len(await _commands(sid)) == 2
+
+
+async def test_25_the_line_follows_the_daemons_answer_refused_writes_none_after_step_writes_one(world):
+    """Phone run 4 (03:28Z): a tool open past the daemon's 20 s wait → `rejected · session_not_working` → the phone sends the words as a
+    message. The line written at the press stood next to that message: one instruction read as two. Now: refused or failed → no line
+    (the phone's message is the record); done — now or `after_step` — → its one line."""
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4424 mac 4534g")
+        tok = _tok(device["device_token"])
+        refused = (await _post(c, agent, _cmd("send_prompt", phone, conv=conv, text="거절될 지시", key="r-1"))).json()["command_id"]
+        r = await c.post(f"/api/v2/desktop/relay/commands/{refused}/result",
+                         json={"state": "rejected", "result_code": "session_not_working"}, headers=tok)
+        assert r.status_code == 200, r.text
+        failed = (await _post(c, agent, _cmd("send_prompt", phone, conv=conv, text="실패한 지시", key="r-2"))).json()["command_id"]
+        assert (await c.post(f"/api/v2/desktop/relay/commands/{failed}/result", json={"state": "failed"}, headers=tok)).status_code == 200
+        assert await _lines(conv) == []
+        later = (await _post(c, agent, _cmd("send_prompt", phone, conv=conv, text="단계 뒤에 들어갈 지시", key="r-3"))).json()["command_id"]
+        assert (await c.post(f"/api/v2/desktop/relay/commands/{later}/result", json={"state": "acked"}, headers=tok)).status_code == 200
+        assert await _lines(conv) == []  # acked is not «went in»
+        r = await c.post(f"/api/v2/desktop/relay/commands/{later}/result", json={"state": "done", "result_code": "after_step"}, headers=tok)
+        assert r.status_code == 200, r.text
+        [(sender, content)] = await _lines(conv)
+        assert str(sender) == str(OWNER_TM) and "단계 뒤에 들어갈 지시" in content and "거절될 지시" not in content
+        # Yuna 03:49Z: after_step is its own line — not «지금 턴에 보냄» (it has not gone in yet)
+        assert content.startswith("지시 · 하던 단계 뒤에 넣음") and "지금 턴에 보냄" not in content
+
