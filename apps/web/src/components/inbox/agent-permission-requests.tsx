@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { permissionLine, stillShown, waitedMinutes, type PermissionRequest } from '@/lib/agent-permissions';
+import { agentOnDevice, permissionLine, shownToolName, stillShown, waitedMinutes, type PermissionRequest } from '@/lib/agent-permissions';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
@@ -148,6 +148,8 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
   onAnswer: (decision: 'allow' | 'deny') => void;
 }) {
   const t = useTranslations('agentPermissions');
+  const locale = useLocale();
+  const tool = shownToolName(r, locale); // story 4542: the server's name by the one rule (never the machine value from a known table)
   const line = permissionLine(r);
   const notes = [r.masked ? t('maskedNote') : null, r.truncated ? t('truncatedNote') : null].filter(Boolean);
   // the phone app answers here; everything else keeps the one read-only line
@@ -164,16 +166,16 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
           <span className="text-[11px] text-muted-foreground">{t('waited', { n: waitedMinutes(r, now) })}</span>
         )}
       </div>
-      <p className="text-sm text-foreground">{[r.agent_name, r.device_name].filter(Boolean).join(' · ')}</p>
+      <p className="text-sm text-foreground">{agentOnDevice(r.agent_name, r.device_name)}</p>
       {r.role ? <p className="text-xs text-muted-foreground">{t('role', { role: r.role })}</p> : null}
-      <p className="font-mono text-xs text-foreground">{r.tool}</p>
+      <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
       <div className="rounded-md bg-muted/50 px-2 py-1.5">
         <p className="break-all font-mono text-xs text-foreground">{r.summary}</p>
         {notes.length > 0 ? <p className="mt-0.5 text-[11px] text-muted-foreground">{notes.join(' · ')}</p> : null}
       </div>
       {r.workdir ? <p className="text-[11px] text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
       {answersHere ? (
-        <PhoneAnswerPlace tool={r.tool} auth={auth} answer={answer} onAnswer={onAnswer} />
+        <PhoneAnswerPlace tool={tool} auth={auth} answer={answer} onAnswer={onAnswer} />
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">
           {line === 'expired' ? t('line.expired')

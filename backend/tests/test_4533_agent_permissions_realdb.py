@@ -29,6 +29,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     world,
 )
 from tests.test_4529_desktop_relay_realdb import _device, _tok
+from app.services.tool_names import agent_on_device
 
 pytestmark = pytest.mark.anyio
 
@@ -147,6 +148,8 @@ async def test_a_paired_recipient_answers_once_and_the_signed_blob_goes_down_uno
         badge = await c.get("/api/v2/gates/designated-pending-count", headers=_person(OWNER))
         assert badge.status_code == 200 and badge.json()["count"] == 1, badge.text
         assert view["summary"] == "npm install --save ••••(가림)"
+        # story 4542: the web card's name by the one rule from the row's own runtime + tool (Claude's own: as it is)
+        assert (view["runtime"], view["tool"], view["tool_name"]) == ("claude", "Bash", {"ko": "Bash", "en": "Bash"})
         # story 4532 (PO 21:39Z): the two values the phone signs, exactly as the daemon sent them (the raw input still never comes)
         assert (view["session_key"], view["input_hash"]) == (body["session_key"], body["input_hash"])
         assert "input" not in view and "detail" not in view
@@ -346,7 +349,9 @@ async def test_the_recipient_gets_one_bell_line_with_the_agent_and_tool_only(wor
         mine, theirs = await bell(OWNER_TM), await bell(plain_tm)
         assert len(mine) == 1 and theirs == []
         payload = mine[0][0]
-        assert payload["agent_name"] and payload["title"] == f"권한 대기 · {payload['agent_name']}"
+        # story 4542: «{agent} · {computer}» with the computer once · the tool by the one naming rule (Claude's own: as it is)
+        assert payload["agent_name"] and payload["title"] == f"권한 대기 · {agent_on_device(payload['agent_name'], 'd4424 mac 4533i')}"
+        assert payload["title"].count("d4424 mac 4533i") == 1
         assert payload["body"] == "Bash 허용을 기다리고 있어요 — 눌러서 확인해 주세요"
         assert "git push" not in str(payload) and "secret-project" not in str(payload)
         listed = await c.get("/api/v2/event-notifications", headers=_person(OWNER))
