@@ -398,6 +398,13 @@ export const EXEMPT_PAIRS = new Set<string>([
   // the buttons — once an answer went through, [허용] · [거부] are not drawn (the only lines drawn next to the buttons are «보내지
   // 않았어요» and «보내지 못했어요»). Same words as the desktop band on purpose. Look again if a sent answer ever keeps its buttons.
   'agentPermissions.phone.denied <-> agentPermissions.phone.deny',
+  // story #4534 (relay contract v1.12 · Yuna 04:41Z) — the DM strip's «사용 한도» chip and two lines that begin «사용 한도에 걸려 멈췄어요
+  // — {time}…» ({time} = a time). Not the shape this guard is for (#2352/#2365: two counted phrases read as one another): they are
+  // never drawn together — the «사용 한도» chip stands only for waiting_input + self_resume (Claude), `paused` only under the
+  // paused_limit chip («한도로 쉬는 중»), `limitErrorAhead` only under the error chip («오류») (limitLine · agent-session-limit.ts).
+  // Look again if limitLine ever gives one of those lines to a waiting_input row.
+  'chats.agentSession.line.paused <-> chats.agentSession.state.usage_limit',
+  'chats.agentSession.line.limitErrorAhead <-> chats.agentSession.state.usage_limit',
   // story #3592(§22-18 정본, 2026-09-07) — 행 액션 접근 이름 재발 가드가 새로 심은
   // aria-label 템플릿 11쌍. 전부 이 가드가 잡으려는 "화면에 «보이는» 두 문구가
   // 헷갈린다"(#2352·#2365) 모양이 아니다 — aria-label은 스크린리더 전용이라 애초에
