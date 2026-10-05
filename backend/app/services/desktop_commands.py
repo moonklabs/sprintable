@@ -228,9 +228,9 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         db, setup=setup, kind=body.kind, payload=payload, idempotency_key=f"b3:{member_id}:{body.idempotency_key}",
         requested_by=member_id,
     )
-    if body.kind == "send_prompt" and cmd.state == "queued" and not await _line_written(db, cmd.id):
-        await _write_prompt_line(db, org_id=org_id, conversation_id=body.conversation_id, sender_id=member_id, agent_id=agent_id,
-                                 text=body.text, command_id=cmd.id)
+    # the conversation's «지시 · 지금 턴에 보냄» line is written when the daemon says the instruction went in (on_command_done), not
+    # here — written at the press, it stood in the DM for an instruction the turn then refused (a tool open past the daemon's wait),
+    # next to the phone's message sent instead: one instruction read as two (phone run 4 · PO 03:30Z ②)
     return cmd, cmd.state
 
 
@@ -312,9 +312,21 @@ async def _close_prompts(db: AsyncSession, setup_id: uuid.UUID, session_key: str
 
 
 async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
-    """A stop of the session done: its waiting instructions close without a turn-end notice."""
+    """A stop of the session done: its waiting instructions close without a turn-end notice.
+    An instruction done (it went into the turn — now or after the step): its one line in the conversation. Refused or failed: no line —
+    the phone sends the words as a message instead, and that message is the record."""
     if cmd.kind == "stop_session" and cmd.state == "done" and cmd.session_key:
         await _close_prompts(db, cmd.setup_id, cmd.session_key)
+    if cmd.kind == "send_prompt" and cmd.state == "done" and not await _line_written(db, cmd.id):
+        payload = cmd.payload or {}
+        setup = await db.get(DesktopSetup, cmd.setup_id)
+        agent_id = (await db.execute(
+            select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == cmd.setup_id,
+                                                         DesktopSession.session_key == cmd.session_key)
+        )).scalar_one_or_none()
+        if setup is not None and agent_id is not None and payload.get("conversation_id") and payload.get("text") is not None:
+            await _write_prompt_line(db, org_id=setup.org_id, conversation_id=uuid.UUID(str(payload["conversation_id"])),
+                                     sender_id=cmd.requested_by, agent_id=agent_id, text=payload["text"], command_id=cmd.id)
 
 
 async def _notify_turn_end(db: AsyncSession, setup: DesktopSetup, cmd: DesktopCommand) -> None:
