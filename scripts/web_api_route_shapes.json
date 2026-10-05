@@ -921,6 +921,11 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/desktop/setup/agents",
+"kind": "object"
+},
+{
+"method": "GET",
 "path": "/api/v2/desktop/setups",
 "kind": "object"
 },
