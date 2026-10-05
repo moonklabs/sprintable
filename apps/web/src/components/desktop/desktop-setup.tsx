@@ -336,9 +336,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     let off = false;
     fetchWithAuth(`/api/desktop/setup/agents?project_id=${encodeURIComponent(chosenProject)}`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((body: { agents?: AttachableAgent[]; data?: { agents?: AttachableAgent[] } } | null) => {
+      .then((body: { agents?: AttachableAgent[] } | null) => {
         if (off) return;
-        const list = body?.agents ?? body?.data?.agents ?? [];
+        // the contract's one shape ({agents}) — anything else draws no group (never guessed from another field)
+        const list = Array.isArray(body?.agents) ? body.agents : [];
         setAttachable(list);
         setRows((rs) => withAttachable(rs, list, runtimes));
       })
