@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
-import { pickEunNeunJosa, pickEuroJosa } from '@/lib/korean-particle';
+import { pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -647,7 +647,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                             const key = `agent:${a.id}`;
                             const elsewhere = rows.some((o) => o.role !== r.role && o.owner.kind === 'existing' && o.owner.agentId === a.id);
                             const missing = !runtimes.includes(a.runtime);
-                            const label = missing ? t('existingRuntimeMissing', { name: a.name, runtime: RUNTIME_LABEL[a.runtime] })
+                            const label = missing ? t('existingRuntimeMissing', { name: a.name, runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
                               : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
                             return <option key={key} value={key} disabled={missing || elsewhere}>{label}</option>;
                           })}

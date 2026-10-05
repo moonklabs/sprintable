@@ -6702,7 +6702,7 @@
       "ownerGroupExisting": "이미 있는 에이전트",
       "ownerGroupPerson": "사람",
       "existingPickedElsewhere": "{name} · 다른 역할에 골랐어요",
-      "existingRuntimeMissing": "{name} · {runtime}가 이 컴퓨터에 없어요",
+      "existingRuntimeMissing": "{name} · {runtime}{iGa} 이 컴퓨터에 없어요",
       "movedWarning": "이 컴퓨터의 앱이 받아 가면 이 에이전트의 지금 연결이 끊겨요 — 다른 곳에서 일하고 있었다면 거기서는 멈춰요",
       "lastConnected": "마지막 연결 · {time}",
       "toolNote": "에이전트는 Sprintable 안의 일은 묻지 않고 하고, 이 컴퓨터의 파일을 바꾸거나 명령을 실행하거나 다른 도구를 쓸 땐 그때마다 물어봐요.",
