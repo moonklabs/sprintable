@@ -401,3 +401,17 @@ async def test_25_the_line_follows_the_daemons_answer_refused_writes_none_after_
         # Yuna 03:49Z: after_step is its own line — not «지금 턴에 보냄» (it has not gone in yet)
         assert content.startswith("지시 · 하던 단계 뒤에 넣음") and "지금 턴에 보냄" not in content
 
+
+async def test_26_a_stop_while_it_asks_a_person_is_taken_an_instruction_is_not(world):
+    """Kadir 325 · PO 04:34Z: an agent waiting on a permission can be stopped from the phone (the daemon stops it then too);
+    an instruction still goes only into a running turn."""
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4424 mac 4534h")
+        sid = device["setup_id"]
+        await _state(c, device, agent, "waiting_permission", 2)
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv, key="w-1"))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "session_not_working")
+        r = await _post(c, agent, _cmd("stop_session", phone, key="w-2"))
+        assert r.status_code == 201, r.text
+        [(kind, _payload, _by, _idem, state)] = await _commands(sid)
+        assert (kind, state) == ("stop_session", "queued")

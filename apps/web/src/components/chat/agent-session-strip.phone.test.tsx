@@ -110,6 +110,23 @@ describe('[4534] the strip inside the phone app', () => {
     server(res(201, {}));
     await render();
     expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent).toBe(ko.line.inboxPhone);
+    // Kadir 325 · PO 04:34Z: an agent that asks can still be stopped from the phone — [멈춤] shows, [지금 지시] does not (it goes
+    // into a running turn only)
+    expect(buttons()).toEqual([ko.button.stop]);
+  });
+
+  it('waiting for permission, [멈춤] signs a stop the same way (agent only) and posts it', async () => {
+    vi.useFakeTimers();
+    sessionView = { ...sessionView, state: 'waiting_permission' };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' });
+    await render();
+    await press(ko.button.stop);
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', { agent_member_id: AGENT, kind: 'stop_session' });
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.stopped);
+    const post = calls.find((c) => c.init?.method === 'POST')!;
+    expect(JSON.parse(post.init!.body as string)).toMatchObject({ kind: 'stop_session', session_key: 's-9', signed: 'S' });
   });
 
   it('[멈춤]: the shell signs a stop (agent only) → posted → followed to «멈췄어요 …», the line takes focus', async () => {
