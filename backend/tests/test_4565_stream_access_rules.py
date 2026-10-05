@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from app.services import stream_access as sa
 
@@ -44,7 +44,8 @@ async def test_a_key_id_that_is_not_a_uuid_closes_without_asking_the_db(key_id):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("error", [OperationalError("SELECT 1", {}, Exception("server closed the connection")), TimeoutError("pool")])
+# Qadir 4963 ③: the base class itself and TimeoutError each (a subclass alone would let «OperationalError only» pass)
+@pytest.mark.parametrize("error", [SQLAlchemyError("db down"), OperationalError("SELECT 1", {}, Exception("server closed the connection")), TimeoutError("pool")])
 async def test_a_db_error_or_timeout_skips_that_one_check_with_a_log_line(error, caplog):
     caplog.set_level(logging.WARNING, logger="app.services.stream_access")
     failing = AsyncMock(side_effect=error)
@@ -88,7 +89,7 @@ def _verdict(kind: str):
     async def step(key_uuid, member_id, *, agent_only=True):
         if kind == "revoked":
             return "key_revoked"
-        raise OperationalError("SELECT 1", {}, Exception("db down"))
+        raise SQLAlchemyError("db down")
     return step
 
 
@@ -123,10 +124,12 @@ async def test_events_stream_acts_on_the_verdict(kind, caplog):
              patch.object(ev, "_SSE_HEARTBEAT_TIMEOUT", 0.02), patch("app.services.sse_lease.refresh", AsyncMock()):
             resp = await ev.agent_event_stream(request=_Request(), member_id=None, auth=auth, org_id=uuid.uuid4(), since_timestamp=None, last_event_id=None)
             agen = resp.body_iterator
+            ended = False
             for _ in range(6):
                 try:
                     frames.append(await asyncio.wait_for(agen.__anext__(), 2))
                 except StopAsyncIteration:
+                    ended = True
                     break
             await agen.aclose()
     finally:
@@ -136,9 +139,37 @@ async def test_events_stream_acts_on_the_verdict(kind, caplog):
     revoked = [f for f in frames if f.startswith("event: access_revoked")]
     if kind == "revoked":
         assert revoked and json.loads(revoked[0].split("data: ", 1)[1]) == {"reason": "key_revoked"}, frames
+        # Qadir 4963 ②: the stream ENDS there — nothing after it
+        assert ended and frames[-1] is revoked[0], frames
     else:
         assert not revoked and sum("heartbeat" in f for f in frames) >= 3, frames  # it went on
         assert any("stream access recheck failed" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_a2a_route_hands_the_callers_key_to_the_stream_check():
+    """Qadir 4963 ①: through the route (a2a_rpc) — the caller's key id reaches the stream's recheck; a route that dropped it
+    would stream on (here the recheck says revoked, so the stream must end with the error frame)."""
+    import app.routers.a2a as a2a
+
+    task_id = str(uuid.uuid4())
+    sent = {"task": {"id": task_id, "contextId": "c", "status": {"state": "working"}}}
+
+    def poll_factory():
+        raise AssertionError("streamed on past the recheck — the route did not hand the caller's key over")
+
+    auth = MagicMock()
+    auth.claims = {"app_metadata": {"api_key_id": str(uuid.uuid4())}}
+    body = a2a.JsonRpcRequest(jsonrpc="2.0", id=1, method="SendStreamingMessage", params={})
+    with patch.object(a2a, "_get_agent_member", AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4()))), \
+         patch.object(a2a, "_handle_send_message", AsyncMock(return_value=sent)), patch.object(a2a, "RECHECK_BEFORE_SEND_SEC", 0), \
+         patch.object(a2a, "async_session_factory", poll_factory), patch.object(sa, "key_access_revoked_db", _verdict("revoked")):
+        resp = await a2a.a2a_rpc(_Request(), uuid.uuid4(), body, org_id=uuid.uuid4(), auth=auth, session=AsyncMock())
+        agen = resp.body_iterator
+        assert task_id in await agen.__anext__()
+        assert "access revoked: key_revoked" in await agen.__anext__()
+        with pytest.raises(StopAsyncIteration):
+            await agen.__anext__()
 
 
 @pytest.mark.anyio
