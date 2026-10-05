@@ -54,6 +54,9 @@ jobs:
     timeout-minutes: 3
     outputs:
       backend_relevant: ${{ steps.scope.outputs.backend_relevant }}
+      # story 4566: whether the destructive-schema shards start at all (FE-only changes count only the FE files destructive
+      # tests read · infra/destructive-fe-deps.txt) — for a PR (base...head) and for a push (before..after) alike
+      destructive_relevant: ${{ steps.scope.outputs.destructive_relevant }}
       gateway_relevant: ${{ steps.scope.outputs.gateway_relevant }}
       # story #4152(CI·결정성) — backend/tests/*.py 변경분만 공백 구분 단일 줄로(테스트
       # 파일 경로는 `_FILE_RE`(shard_destructive_tests.py)가 이미 `tests/[a-zA-Z0-9_]+\.py`
@@ -106,6 +109,12 @@ jobs:
               echo "backend_mixed_test_files_changed=$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '3p')" >> "$GITHUB_OUTPUT"
               echo "push 이벤트 — 백엔드·gateway 전량 실행 · 가드 변경 파일은 push 범위 ${PUSH_BEFORE_SHA}..${PUSH_AFTER_SHA}로 판정:"
               printf '%s\n' "${CLASSIFY_OUTPUT}"
+              # story 4566: the destructive shards judge the push range too (a merge of FE-only work does not start them)
+              set +e
+              FE_DEPS_FILE=infra/destructive-fe-deps.txt bash backend/scripts/check_backend_relevant_diff.sh "${PUSH_BEFORE_SHA}" "${PUSH_AFTER_SHA}"
+              D_RC=$?
+              set -e
+              if [ "${D_RC}" -eq 1 ]; then echo "destructive_relevant=false" >> "$GITHUB_OUTPUT"; else echo "destructive_relevant=true" >> "$GITHUB_OUTPUT"; fi
               exit 0
             fi
             # story #4152 — diff 정보 자체가 없다 → __ALL__ 센티널.
@@ -113,6 +122,7 @@ jobs:
             # story #4163 — diff 정보 자체가 없으니 narrowing 재료(변경 app 모듈)도 없다.
             echo "backend_app_files_changed=" >> "$GITHUB_OUTPUT"
             echo "backend_mixed_test_files_changed=" >> "$GITHUB_OUTPUT"
+            echo "destructive_relevant=true" >> "$GITHUB_OUTPUT"
             echo "PR 컨텍스트 아님(push 이벤트 등) — fail-closed로 백엔드·gateway 전량 실행."
             exit 0
           fi
@@ -151,6 +161,15 @@ jobs:
           else
             echo "backend_relevant=false" >> "$GITHUB_OUTPUT"
           fi
+
+          # story 4566: the destructive shards' own relevance — FE-only changes count only infra/destructive-fe-deps.txt; any
+          # other change (migrations · models · tests · CI files · other backend) is relevant exactly as above. Only an
+          # explicit «irrelevant» (exit 1) skips; anything else is relevant (fail-closed).
+          set +e
+          FE_DEPS_FILE=infra/destructive-fe-deps.txt bash backend/scripts/check_backend_relevant_diff.sh "${BASE_SHA}" "${HEAD_SHA}"
+          D_RC=$?
+          set -e
+          if [ "${D_RC}" -eq 1 ]; then echo "destructive_relevant=false" >> "$GITHUB_OUTPUT"; else echo "destructive_relevant=true" >> "$GITHUB_OUTPUT"; fi
 
           # story #3273(CI사각) — support-gateway는 backend와 반대 방향 필터가 안전하다.
           # backend는 packages/ 등 넓은 코드베이스에 걸쳐 있어 "안전 확定" allowlist(스킵 대상)를
@@ -920,6 +939,10 @@ jobs:
       - name: Check every destructive_schema test file is registered in shard-weights.json
         working-directory: backend
         run: python3 scripts/lint_destructive_schema_weights_registered.py
+      # story 4566: the FE files destructive tests read are exactly infra/destructive-fe-deps.txt (the shards' FE-only relevance)
+      - name: Check the FE paths destructive tests read are exactly infra/destructive-fe-deps.txt
+        working-directory: backend
+        run: python3 scripts/lint_destructive_fe_deps_listed.py
 
   # story a05da51b(2026-09-02, story #3330/PR#3711 CI flake 후속) — destructive_schema
   # 마커 파일이 publish_registry_event/publish_preset_event/transition_gate/send_message
@@ -1179,7 +1202,10 @@ jobs:
     # 전부에서 12샤드 중 최소 11개가 cancel-in-progress 신호(새 head push) 이후로도
     # 6~17분을 더 돌아 자연 완주(concl=success, cancelled 아님) — 이게 「옛 run이
     # 안 죽는다」 사고의 본체다. alembic-fresh-db와 동일 처방(!cancelled()).
-    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    # story 4566: not relevant → the 12 shard jobs do not start at all (skipped — no runner, no minutes). «Backend pytest»
+    # reads that skip as passed only when destructive_relevant is «false»; a failed relevance job leaves it empty → the shards
+    # run (fail-closed), as before.
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base != null) && needs.detect-changed-scope.outputs.destructive_relevant != 'false' }}
     runs-on: ubuntu-latest
     # story #3383 AC3/AC4(2026-09-03 실측, PR CI run 33750476433, 템플릿 DB 적용 후):
     # 4샤드 9m31s·10m8s·9m21s·8m58s — 최대 10m8s·편차 1m10s(AC3 기준 12분/3분 이내 통과).
@@ -1767,7 +1793,7 @@ jobs:
       # 드리프트가 클 타임아웃 상황에 가드가 침묵하는 사각지대). 이제 이 잡의 첫
       # 스텝들이라 Require의 결과와 무관하게 항상 돈다.
       - name: Download shard durations (story #3558)
-        if: github.event.action != 'edited' || github.event.changes.base != null
+        if: (github.event.action != 'edited' || github.event.changes.base != null) && needs.detect-changed-scope.outputs.destructive_relevant != 'false'
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -1782,7 +1808,7 @@ jobs:
       # key가 없으면 GH가 접두 매치 중 최신을 준다) — save 쪽은 항상 실행(if: always(),
       # 이 잡이 실패해도 스트릭은 이어져야 다음 run이 이어 셀 수 있다).
       - name: Restore weights-drift streak state (story #3642)
-        if: github.event.action != 'edited' || github.event.changes.base != null
+        if: (github.event.action != 'edited' || github.event.changes.base != null) && needs.detect-changed-scope.outputs.destructive_relevant != 'false'
         id: drift-cache-restore
         uses: actions/cache/restore@v4
         with:
@@ -1804,12 +1830,12 @@ jobs:
       # "Export shard count" 스텝, matrix.shard에서 유일하게 파생)로 교체 — #3393이
       # shard-index/--shard-count 축에 적용한 것과 동일 원칙을 이 축에도 적용한다.
       - name: Audit shard durations vs weights.json (story #3558+#3642+#3653+#3678+#4007)
-        if: github.event.action != 'edited' || github.event.changes.base != null
+        if: (github.event.action != 'edited' || github.event.changes.base != null) && needs.detect-changed-scope.outputs.destructive_relevant != 'false'
         working-directory: backend
         run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}" --shard-count ${{ needs.backend-test-destructive.outputs.shard_count }} --shard-result "${{ needs.backend-test-destructive.result }}" --backend-relevant "${{ needs.detect-changed-scope.outputs.backend_relevant }}"
 
       - name: Save weights-drift streak state (story #3642)
-        if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
+        if: (always() && (github.event.action != 'edited' || github.event.changes.base != null)) && needs.detect-changed-scope.outputs.destructive_relevant != 'false'
         uses: actions/cache/save@v4
         with:
           path: /tmp/weights-drift-streak.json
@@ -1822,7 +1848,8 @@ jobs:
         # 바로 그 클래스를 다른 자리에서 재도입하는 것). 그 skip이 내 의도적 조건과
         # 일치할 때만 이 Require도 같이 안 돈다 — 그 밖의 모든 non-success(진짜 실패·
         # cascade-skip 등)는 그대로 잡는다.
-        if: needs.backend-test-destructive.result != 'success' && (github.event.action != 'edited' || github.event.changes.base != null)
+        # story 4566: a skip is a pass only when the relevance job said «not relevant» — a skip for any other reason still fails
+        if: needs.backend-test-destructive.result != 'success' && !(needs.backend-test-destructive.result == 'skipped' && needs.detect-changed-scope.outputs.destructive_relevant == 'false') && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
           echo "backend-test-destructive result=${{ needs.backend-test-destructive.result }} — destructive-schema 94개의 유일한 실행처가 실패했거나 안 돎"
           # story #3541(페드루 PO 確定) — GitHub Actions는 timeout-minutes로 죽인 잡과
