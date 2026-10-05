@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopCommand, DesktopSession
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError
+from app.services.desktop_relay import PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError, legacy_state, limit_view
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
     view = {"agent_name": agent.name,
             "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
-            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "state_at": None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
@@ -135,7 +135,11 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     state = pick.state if pick.state == "stopped" or reachable else "unknown"
     view.update({
         "setup_id": str(setup.id), "device_name": setup.device_name, "session_key": pick.session_key, "runtime": pick.runtime,
-        "state": state, "state_at": pick.state_at.isoformat(),
+        # story #4534 (Kadir 4960 · PO 05:36Z): `state` stays one of the five (an older web never meets a word it does not know) ·
+        # `activity` = the board's own word (eight) for the new web
+        "state": legacy_state(state), "activity": state, "state_at": pick.state_at.isoformat(),
+        # story #4534 (contract v1.12): a usage limit's why — only while the row is a limit word and the device is heard
+        "limit": limit_view(pick) if state == pick.state else None,
         "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
     })
     if state == "waiting_permission":  # the inbox link — only a request sent to this person
@@ -282,10 +286,14 @@ async def get_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UU
 # ── ④ the turn's end ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
+# story #4534: the words a turn ends in (a [지금 지시]'s sender is told once)
+TURN_ENDED_STATES = ("idle", "waiting_input", "error", "paused_limit")
+
+
 async def on_session_reported(db: AsyncSession, setup: DesktopSetup, session_key: str, state: str, at: datetime) -> None:
     """Called for every reported state (a single report or a snapshot's line). Reported values only — `unknown` is a reading,
     never reported (PO 16:13Z ③).
-    - `idle` after a phone's [지금 지시] was done → the sender is told once.
+    - a resting word (`idle` · `waiting_input` · `error` · `paused_limit`) after a phone's [지금 지시] was done → the sender is told once.
     - `stopped`, or a stop of that session done → the waiting instructions close without a notice."""
     open_prompts = select(DesktopCommand).where(
         DesktopCommand.setup_id == setup.id, DesktopCommand.session_key == session_key, DesktopCommand.kind == "send_prompt",
@@ -294,7 +302,9 @@ async def on_session_reported(db: AsyncSession, setup: DesktopSetup, session_key
     if state == "stopped":
         await _close_prompts(db, setup.id, session_key)
         return
-    if state != "idle":
+    # story #4534 (contract v1.12): the turn ended in any of the resting words — before, the daemon folded waiting_input · error ·
+    # paused_limit into idle, so the sender was told then too; still told now that they arrive as themselves
+    if state not in TURN_ENDED_STATES:
         return
     for cmd in (await db.execute(open_prompts.with_for_update())).scalars().all():
         if cmd.finished_at is None or at <= cmd.finished_at:
@@ -333,21 +343,40 @@ async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
                                      after_step=cmd.result_code == "after_step")
 
 
+def _turn_end_kind(row: DesktopSession | None) -> tuple[str | None, str | None]:
+    """(title kind, body kind) for the state a turn ended in — (None, None) = idle's own words."""
+    if row is None or row.state == "idle":
+        return None, None
+    if row.state == "waiting_input":
+        return ("usage_limit", "usage_limit") if row.limit_self_resume else ("waiting_input", "waiting_input")
+    if row.state == "paused_limit":
+        return "paused_limit", "paused_limit"
+    if row.state == "error":
+        return "error", ("error_limit" if row.limited else "error")
+    return None, None
+
+
 async def _notify_turn_end(db: AsyncSession, setup: DesktopSetup, cmd: DesktopCommand) -> None:
     from app.models.member import Member
     from app.services.i18n_catalog import t
     from app.services.notification_dispatch import dispatch_notification
     from app.services.org_locale import resolve_org_locale
 
-    agent_id = (await db.execute(
-        select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == cmd.session_key)
+    row = (await db.execute(
+        select(DesktopSession).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == cmd.session_key)
     )).scalar_one_or_none()
+    agent_id = row.agent_member_id if row else None
     agent_name = (await db.execute(select(Member.name).where(Member.id == agent_id))).scalar_one_or_none() or "" if agent_id else ""
     locale = await resolve_org_locale(db, setup.org_id)
-    title = t("desktop_command.turn_end_title", locale, agent=agent_name) if agent_name else t("desktop_command.turn_end_title_bare", locale)
+    # story #4534 (Yuna 04:05Z): the words of the state the turn ended in (idle keeps its own)
+    title_kind, body_kind = _turn_end_kind(row)
+    title_key = "desktop_command.turn_end_title" + (f".{title_kind}" if title_kind else "")
+    bare_key = "desktop_command.turn_end_title_bare" + (f".{title_kind}" if title_kind else "")
+    body_key = "desktop_command.turn_end_body" + (f".{body_kind}" if body_kind else "")
+    title = t(title_key, locale, agent=agent_name) if agent_name else t(bare_key, locale)
     await dispatch_notification(
         db, org_id=setup.org_id, event_type="agent.turn_ended", target_member_ids=[cmd.requested_by],
-        title=title, body=t("desktop_command.turn_end_body", locale),
+        title=title, body=t(body_key, locale),
         reference_type="conversation", reference_id=cmd.conversation_id, source_project_id=setup.project_id,
         event={"payload": {"agent_name": agent_name}},
     )

@@ -111,3 +111,67 @@ describe('AgentSessionStrip (story #4534)', () => {
     expect(line()).toBe('You can stop or instruct it from a paired phone');
   });
 });
+
+// story #4534 (relay contract v1.12 · Yuna 03:04Z · 03:06Z): the board's own words reach the web — never «다음 일 기다림» for an agent
+// asked in its terminal, stopped with an error, or paused at a usage limit; their lines stand whatever remote control says; no button
+describe('AgentSessionStrip — the board\'s own words (story #4534 · contract v1.12)', () => {
+  const later = new Date(Date.now() + 3 * 3600_000).toISOString();
+  const earlier = new Date(Date.now() - 3600_000).toISOString();
+  it.each([
+    [{ state: 'idle', activity: 'waiting_input' }, '입력 대기', '그 컴퓨터의 터미널에서 답을 기다리고 있어요 — 그 컴퓨터에서 답해 주세요', 'text-foreground'],
+    [{ state: 'idle', activity: 'error' }, '오류', '에이전트가 오류로 멈췄어요 — 까닭은 그 컴퓨터의 데스크톱 앱에서 볼 수 있어요', 'text-destructive'],
+    [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'maybe' } }, '사용 한도', '사용 한도에 걸렸어요 — 그 컴퓨터의 터미널에 고르는 창이 떠 있으면 거기서 골라 주세요. 창이 없으면 한도가 풀릴 때 스스로 이어서 해요', 'text-warning'],
+    [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'no' } }, '사용 한도', '사용 한도에 걸렸어요 — 스스로 이어 가지 않아요. 한도가 풀린 뒤 그 컴퓨터의 터미널에서 다시 보내 주세요', 'text-warning'],
+    [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'unknown' } }, '사용 한도', '사용 한도에 걸렸어요 — 그 컴퓨터의 터미널에서 어떻게 이어 갈지 확인해 주세요', 'text-warning'],
+    [{ state: 'idle', activity: 'error', limit: {} }, '오류', '사용 한도에 걸려 멈췄어요 — 풀리는 시각은 그 컴퓨터의 터미널에서 볼 수 있어요', 'text-destructive'],
+    [{ state: 'idle', activity: 'error', limit: { at: earlier } }, '오류', '한도가 풀렸어요 — 그 컴퓨터에서 다시 시작해 주세요', 'text-destructive'],
+  ])('%j → «%s» and its line', async (over, word, expected, tone) => {
+    fetchWithAuth.mockResolvedValueOnce(view({ ...over, remote_control: false }));
+    await render();
+    expect(chip()).toBe(word);
+    expect(line()).toBe(expected);
+    expect(container.querySelector('[data-testid="agent-session-chip"] svg')?.getAttribute('class')).toContain(tone);
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+  it('paused at a usage limit: a quiet dot and when it continues (this page\'s clock) · again · a limit still ahead on an error', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', activity: 'paused_limit', limit: { at: later, again: false } }));
+    await render();
+    expect(chip()).toBe('한도로 쉬는 중');
+    expect(line()).toMatch(/^사용 한도에 걸려 멈췄어요 — .+에 이어서 해요$/);
+    expect(container.querySelector('[data-testid="agent-session-chip"] svg')?.getAttribute('class')).toContain('fill-current');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', activity: 'paused_limit', limit: { at: later, again: true } }));
+    await render('en');
+    expect(chip()).toBe('Paused at usage limit');
+    expect(line()).toMatch(/^Still at the limit — continues again .+$/);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', activity: 'error', limit: { at: later } }));
+    await render();
+    expect(line()).toMatch(/^사용 한도에 걸려 멈췄어요 — .+에 풀려요$/);
+  });
+});
+
+// story #4534 (Kadir 4960 · PO 05:36Z): a word this page does not know never breaks it — a server newer than this bundle
+describe('AgentSessionStrip — a word it does not know', () => {
+  it('an unknown activity falls back to the five-word state · an unknown state to «상태 모름» — no crash', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', activity: 'dreaming' }));
+    await render();
+    expect(chip()).toBe('다음 일 기다림');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'sleeping', activity: 'dreaming' }));
+    await render();
+    expect(chip()).toBe('상태 모름');
+    // Yuna 05:41Z: the page does not know the word — never the «computer lost» line
+    expect(line()).toBe('이 페이지가 아직 모르는 상태예요 — 새로 고치면 보일 수 있어요');
+    expect(line()).not.toContain('연결이 끊겨');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+  it('a server from before (state only, no activity) reads as it did', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working' }));
+    await render();
+    expect(chip()).toBe('작업 중');
+  });
+});

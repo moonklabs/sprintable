@@ -5082,14 +5082,29 @@
         "idle": "Waiting for work",
         "waiting_permission": "Waiting for permission",
         "stopped": "Done",
-        "unknown": "State unknown"
+        "unknown": "State unknown",
+        "waiting_input": "Waiting for input",
+        "error": "Error",
+        "paused_limit": "Paused at usage limit",
+        "usage_limit": "Usage limit"
       },
       "line": {
         "onPhone": "You can stop or instruct it from a paired phone",
         "inbox": "The permission request is in the approvals inbox",
         "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
         "remoteOff": "Remote control is turned off for this organization — do it on that computer",
-        "inboxPhone": "You can answer it in Approvals"
+        "inboxPhone": "You can answer it in Approvals",
+        "waitingInput": "It's waiting for an answer in that computer's terminal — answer it there",
+        "error": "The agent stopped with an error — the reason is in the desktop app on that computer",
+        "paused": "Hit its usage limit — continues {time}",
+        "pausedAgain": "Still at the limit — continues again {time}",
+        "limitMaybe": "Hit its usage limit — if a choice is open in that computer's terminal, pick one there. If not, it continues by itself when the limit resets",
+        "limitNo": "Hit its usage limit — it won't continue by itself. Send it again in that computer's terminal once the limit resets",
+        "limitUnknown": "Hit its usage limit — check in that computer's terminal how it can go on",
+        "limitErrorNoTime": "Hit its usage limit and stopped — that computer's terminal shows when it resets",
+        "limitErrorAhead": "Hit its usage limit — resets {time}",
+        "limitErrorPassed": "The limit has reset — start it again on that computer",
+        "unrecognized": "This page doesn't know this state yet — reloading may show it"
       },
       "button": {
         "stop": "Stop",
