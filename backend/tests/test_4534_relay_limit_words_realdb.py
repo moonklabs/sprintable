@@ -159,3 +159,53 @@ async def test_an_older_reader_never_meets_a_word_it_does_not_know(world):
             assert v["state"] in five and v["activity"] == word, v
             [row] = (await c.get(f"/api/v2/desktop/setups/{d['setup_id']}/sessions", headers=_person(OWNER))).json()["sessions"]
             assert row["state"] in five and row["activity"] == word, row
+
+
+async def test_instruct_now_is_each_reports_own_and_is_not_said_for_a_device_not_heard(world):
+    """story #4534 (0438 · PO 06:30Z · Kadir 06:31Z (c)): whether [지금 지시] can go into the turn — each report sets it (a report
+    without it clears it), a snapshot sets it, a session the snapshot drops loses it, and a device not heard says nothing."""
+    async with _client() as c:
+        d = await _device(c, name="d4534 instruct now")
+        token, agent, sid = d["device_token"], d["agents"][0]["member_id"], d["setup_id"]
+
+        async def both():
+            v = await _view(c, agent)
+            [row] = (await c.get(f"/api/v2/desktop/setups/{sid}/sessions", headers=_person(OWNER))).json()["sessions"]
+            return v["instruct_now"], row["instruct_now"]
+
+        assert (await c.post(STATE, json=_report(agent, 1, "working", instruct_now=True), headers=_tok(token))).status_code == 200
+        assert await both() == (True, True)
+        assert (await c.post(STATE, json=_report(agent, 2, "working", instruct_now=False), headers=_tok(token))).status_code == 200
+        assert await both() == (False, False)
+        assert (await c.post(STATE, json=_report(agent, 3, "working"), headers=_tok(token))).status_code == 200
+        assert await both() == (None, None), "a daemon from before (no field) — the web hides the button"
+        for bad in ("yes", 1, "true"):
+            assert (await c.post(STATE, json=_report(agent, 4, "working", instruct_now=bad), headers=_tok(token))).status_code == 422, bad
+        assert (await c.post(STATE, json=_report(agent, 5, "working", instruct_now=True), headers=_tok(token))).status_code == 200
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() - interval '5 minutes' WHERE setup_id = '{sid}'")
+        assert await both() == (None, None), "a device not heard: not said (the button stays hidden)"
+
+        snap = {"report_seq": 6, "sessions": [{"session_key": "s-1", "agent_member_id": agent, "runtime": "codex", "state": "working",
+                                               "at": _now().isoformat(), "instruct_now": True}]}
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap, headers=_tok(token))).status_code == 200
+        assert await both() == (True, True)
+        assert (await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 7, "sessions": []}, headers=_tok(token))).status_code == 200
+        rows = await _sql(fetch=f"SELECT state, instruct_now FROM desktop_sessions WHERE setup_id = '{sid}'")
+        assert [tuple(r) for r in rows] == [("stopped", None)]
+
+
+@pytest.mark.parametrize(("text", "status"), [
+    ("가" * 400, 201), ("가" * 401, 422),
+    ("😀" * 400, 201),  # code points: one emoji is one (two UTF-16 units in the browser — the sheet counts [...text] too)
+    ("😀" * 401, 422),
+])
+async def test_an_instruction_into_the_turn_is_400_code_points_at_most(world, text, status):
+    """story #4534 (Kadir 06:21Z ④ · Yuna 06:29Z ②): the sheet stops a longer one before it is signed — the server refuses it again."""
+    from tests.test_4534_desktop_commands_realdb import _cmd, _post
+
+    async with _client() as c:
+        _device_, agent, phone, _der, conv = await _world(c, f"d4534 400 {len(text)} {text[0]}")
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv, text=text))
+        assert r.status_code == status, r.text
+        if status == 422:
+            assert r.json()["error"]["code"] == "instruct_too_long"

@@ -31,6 +31,9 @@ interface View {
   // story #4534 (Kadir 4960 · PO 05:36Z): `state` = the five words a reader from before knows · `activity` = the board's own word
   state: SessionState | null;
   activity?: string | null;
+  // story #4534 (0438 · PO 06:30Z): the daemon says whether an instruction can go into this session's turn — [지금 지시] only when
+  // true (a daemon from before says nothing → hidden: its «지금 턴» was not so). It hides a button; the daemon decides again.
+  instruct_now?: boolean | null;
   limit?: SessionLimit | null;
   remote_control: boolean;
   can_command?: boolean;
@@ -63,6 +66,10 @@ function shownState(view: View): SessionState {
 }
 /** the daemon's cut (contracts/send-prompt-vectors.json text_max · UTF-16 units — a string's length) */
 const INSTRUCTION_MAX = 8000;
+/** story #4534 (Kadir 06:21Z ④ · Yuna 06:29Z ②): an instruction into the turn — code points, as the shell · the daemon · the server
+ *  count; the sheet shows the count and stops a longer one before it is signed (never cut — the person would not know) */
+export const INSTRUCT_NOW_MAX = 400;
+const codePoints = (text: string) => [...text].length;
 
 const noSubscribe = () => () => {};
 const notOnServer = () => false;
@@ -130,8 +137,11 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // must be able to stop an agent that is asking); [지금 지시] only while it works (it goes into a running turn)
   const mayCommand = phone && view.remote_control && view.can_command !== false;
   const canStop = mayCommand && (view.state === 'working' || view.state === 'waiting_permission');
-  const canInstruct = mayCommand && view.state === 'working';
+  // story #4534 (PO 06:30Z · 07:00Z): and only when the daemon says it can put it into the turn (instruct_now) — all three, or none
+  const canInstruct = mayCommand && view.state === 'working' && view.instruct_now === true;
   const checkOnly = pending?.verb === 'stop';
+  const count = codePoints(draft);
+  const tooLong = count > INSTRUCT_NOW_MAX;
   const label = claudeLimit ? t('state.usage_limit')
     : view.state === 'starting' ? t('state.starting')
       : view.state === 'working' ? t('state.working')
@@ -157,7 +167,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
     },
   };
   const settle = (verb: 'stop' | 'send', outcome: CommandOutcome) => {
-    if (verb === 'send' && (outcome.kind === 'sent_now' || outcome.kind === 'sent_after_step' || outcome.kind === 'sent_as_message')) clearDraft();
+    if (verb === 'send' && (outcome.kind === 'sent_now' || outcome.kind === 'sent_after_step' || outcome.kind === 'sent_as_message' || outcome.kind === 'sent_as_message_not_now')) clearDraft();
     setPending(outcome.kind === 'unknown' ? outcome.pending : null);
     setResult({ verb, busy: false, outcome });
     reread();
@@ -209,9 +219,15 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
             onChange={(e) => setDraft(e.target.value)}
             data-testid="agent-instruct-text"
           />
+          <div className="flex items-start gap-2 text-xs">
+            {tooLong ? <p className="break-keep text-destructive" data-testid="agent-instruct-too-long">{t('sheet.tooLong')}</p> : null}
+            <span className={`ml-auto shrink-0 ${tooLong ? 'text-destructive' : 'text-muted-foreground'}`} data-testid="agent-instruct-count">
+              {t('sheet.count', { n: count, max: INSTRUCT_NOW_MAX })}
+            </span>
+          </div>
           <DialogFooter>
             <Button
-              disabled={!draft.trim() || busy}
+              disabled={!draft.trim() || busy || tooLong}
               onClick={() => { const text = draft; setSheetOpen(false); void run('send', text); }}
             >
               {t('sheet.send')}
@@ -245,6 +261,8 @@ function ResultLine({ result }: { result: Result }) {
     case 'sent_now': return line(t('command.sentNow'));
     case 'sent_after_step': return line(t('command.sentAfterStep'));
     case 'sent_as_message': return line(t('command.sentAsMessage'));
+    case 'sent_as_message_not_now': return line(t('command.sentAsMessageNotNow'));
+    case 'too_long': return line(t('sheet.tooLong'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
     case 'unknown': return line(stop ? t('command.stopUnknown') : t('command.sendUnknown'));
     case 'remote_off': return line(t('line.remoteOff'));
@@ -285,6 +303,8 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
     // the web's inbox card only looks, so not «answer there» — where the request is (Yuna 17:27Z ②); the phone app's card answers
     return <Link className="w-full text-muted-foreground underline" href={href} data-testid="agent-session-line">{phone ? t('line.inboxPhone') : t('line.inbox')}</Link>;
   }
+  // story #4534 (Yuna 06:30Z): [멈춤] only, and why there is no [지금 지시] — a person used to it on another agent would not know
+  if (phone && view.instruct_now === false) return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.instructNotNow')}</p>;
   // inside the phone app the buttons stand in the line's place
   return phone ? null : <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.onPhone')}</p>;
 }

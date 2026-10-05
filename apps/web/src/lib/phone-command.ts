@@ -19,6 +19,8 @@ export type CommandOutcome =
   | { kind: 'sent_now' } // the instruction went into the turn
   | { kind: 'sent_after_step' } // pasted — it goes in as soon as the step the agent is on ends (PO 10:20Z · Yuna)
   | { kind: 'sent_as_message' } // the turn had ended — sent as a message instead (it goes in when its turn comes)
+  | { kind: 'sent_as_message_not_now' } // this session could not take it into the turn (the daemon said so) — sent as a message instead
+  | { kind: 'too_long' } // over 400 code points — the sheet stops it first; the server refuses it again
   | { kind: 'unreachable' } // the server refused before making it (409 device_unreachable) — certainly not sent
   | { kind: 'unknown'; pending: Pending } // it may have gone (the post's answer was lost · no end in two minutes) — follow it, never redo it
   | { kind: 'remote_off' } // the organization turned remote control off
@@ -144,6 +146,7 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
     // a refusal the server named (4xx): nothing was made (the same key would have given back the first command — server rule)
     if (code === 'session_not_working' || code === 'session_not_found') return notWorking();
     if (code === 'device_unreachable') return { kind: 'unreachable' };
+    if (code === 'instruct_too_long') return { kind: 'too_long' };
     if (code === 'remote_control_off') return { kind: 'remote_off' };
     if (code === 'conversation_not_found') return { kind: 'conversation_not_found' };
     if (code === 'phone_not_paired') return { kind: 'not_paired' };
@@ -179,6 +182,12 @@ async function follow(agentId: string, pending: Pending, deps: CommandDeps): Pro
       if (!prompt) return { kind: 'already_stopped' };
       const text = typeof pending.body.text === 'string' ? pending.body.text : '';
       return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
+    }
+    // story #4534 (PO 06:20Z · Kadir 06:31Z (a)): the daemon could not put it into this session's turn (refused before anything was
+    // pasted) — it goes in as a message, never dropped; its own line says why
+    if (prompt && r.state === 'rejected' && r.result_code === 'instruct_not_now') {
+      const text = typeof pending.body.text === 'string' ? pending.body.text : '';
+      return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message_not_now' } : { kind: 'failed' };
     }
     if (r.state === 'rejected' || r.state === 'failed') return { kind: 'failed' };
   }
