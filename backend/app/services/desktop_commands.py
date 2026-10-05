@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopCommand, DesktopSession
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError, limit_view
+from app.services.desktop_relay import PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError, legacy_state, limit_view
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
     view = {"agent_name": agent.name,
             "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
-            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "state_at": None, "limit": None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
@@ -135,7 +135,9 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     state = pick.state if pick.state == "stopped" or reachable else "unknown"
     view.update({
         "setup_id": str(setup.id), "device_name": setup.device_name, "session_key": pick.session_key, "runtime": pick.runtime,
-        "state": state, "state_at": pick.state_at.isoformat(),
+        # story #4534 (Kadir 4960 · PO 05:36Z): `state` stays one of the five (an older web never meets a word it does not know) ·
+        # `activity` = the board's own word (eight) for the new web
+        "state": legacy_state(state), "activity": state, "state_at": pick.state_at.isoformat(),
         # story #4534 (contract v1.12): a usage limit's why — only while the row is a limit word and the device is heard
         "limit": limit_view(pick) if state == pick.state else None,
         "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),

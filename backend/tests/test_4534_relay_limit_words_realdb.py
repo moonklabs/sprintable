@@ -67,14 +67,15 @@ async def test_each_new_word_is_kept_as_itself_and_a_limit_with_its_why(world):
             return await c.post(STATE, json=_report(agent, seq, state, **extra), headers=_tok(token))
 
         assert (await post("waiting_input")).status_code == 200
-        assert (await _view(c, agent))[["state", "limit"][0]] == "waiting_input"
+        v = await _view(c, agent)
+        assert (v["state"], v["activity"]) == ("idle", "waiting_input"), "state stays one of the five · the word goes in activity"
         assert (await post("error")).status_code == 200
         v = await _view(c, agent)
-        assert (v["state"], v["limit"]) == ("error", None), "an error that is not a limit carries no limit"
+        assert (v["state"], v["activity"], v["limit"]) == ("idle", "error", None), "an error that is not a limit carries no limit"
         # Codex continuing at a known time — paused, with when and «again»
         assert (await post("paused_limit", limit={"at": at.isoformat(), "again": True})).status_code == 200
         v = await _view(c, agent)
-        assert v["state"] == "paused_limit" and datetime.fromisoformat(v["limit"]["at"]) == at and v["limit"]["again"] is True
+        assert (v["state"], v["activity"]) == ("idle", "paused_limit") and datetime.fromisoformat(v["limit"]["at"]) == at and v["limit"]["again"] is True
         # Claude that may continue by itself
         assert (await post("waiting_input", limit={"self_resume": "maybe"})).status_code == 200
         assert (await _view(c, agent))["limit"] == {"self_resume": "maybe"}
@@ -84,14 +85,14 @@ async def test_each_new_word_is_kept_as_itself_and_a_limit_with_its_why(world):
         # the limit is over: a report without one clears it
         assert (await post("working")).status_code == 200
         v = await _view(c, agent)
-        assert (v["state"], v["limit"]) == ("working", None)
+        assert (v["state"], v["activity"], v["limit"]) == ("working", "working", None)
         rows = await _sql(fetch=f"SELECT limited, limit_at, limit_again, limit_self_resume FROM desktop_sessions WHERE setup_id = '{d['setup_id']}'")
         assert [tuple(r) for r in rows] == [(None, None, None, None)]
         # the device's own list carries it too
         assert (await post("paused_limit", limit={"at": at.isoformat(), "again": False})).status_code == 200
         listed = await c.get(f"/api/v2/desktop/setups/{d['setup_id']}/sessions", headers=_person(OWNER))
         [s] = listed.json()["sessions"]
-        assert s["state"] == "paused_limit" and s["limit"]["again"] is False
+        assert (s["state"], s["activity"]) == ("idle", "paused_limit") and s["limit"]["again"] is False
 
 
 async def test_a_limit_on_any_other_word_an_extra_field_or_an_unknown_self_resume_is_refused(world):
@@ -142,3 +143,19 @@ async def test_a_turn_that_ends_in_a_resting_word_tells_the_sender_once_in_that_
         assert payload["title"] == f"{payload['agent_name']} · {word}"
         assert payload["body"] == body
         assert "그 PR 머리도" not in str(payload)
+
+
+async def test_an_older_reader_never_meets_a_word_it_does_not_know(world):
+    """Kadir 4960 · PO 05:36Z — a web bundle from before reads `state` with the five words only (it would throw on another): every
+    new word reaches both reads as one of the five in `state`, the word itself in `activity`."""
+    five = {"starting", "working", "idle", "waiting_permission", "stopped", "unknown"}
+    async with _client() as c:
+        d = await _device(c, name="d4534 limit old reader")
+        token, agent = d["device_token"], d["agents"][0]["member_id"]
+        for seq, (word, extra) in enumerate([("waiting_input", {}), ("error", {}), ("paused_limit", {"limit": {"at": _now().isoformat()}}),
+                                             ("waiting_input", {"limit": {"self_resume": "maybe"}}), ("error", {"limit": {}})], start=1):
+            assert (await c.post(STATE, json=_report(agent, seq, word, **extra), headers=_tok(token))).status_code == 200
+            v = await _view(c, agent)
+            assert v["state"] in five and v["activity"] == word, v
+            [row] = (await c.get(f"/api/v2/desktop/setups/{d['setup_id']}/sessions", headers=_person(OWNER))).json()["sessions"]
+            assert row["state"] in five and row["activity"] == word, row

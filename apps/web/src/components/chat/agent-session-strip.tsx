@@ -26,7 +26,9 @@ import { limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-lim
 type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'waiting_input' | 'error' | 'paused_limit' | 'stopped' | 'unknown';
 interface View {
   device_name: string | null;
+  // story #4534 (Kadir 4960 · PO 05:36Z): `state` = the five words a reader from before knows · `activity` = the board's own word
   state: SessionState | null;
+  activity?: string | null;
   limit?: SessionLimit | null;
   remote_control: boolean;
   can_command?: boolean;
@@ -47,6 +49,14 @@ const SHAPES: Record<SessionState, { icon: LucideIcon; tone: string }> = {
   unknown: { icon: CircleDashed, tone: 'text-muted-foreground' },
 };
 const REREAD_MS = 30_000;
+
+/** story #4534 (Kadir 4960 · PO 05:36Z): the board's own word when the server sends one (`activity`), else the five-word `state`;
+ *  a word this page does not know falls back to the five-word `state` (then «상태 모름») — never a crash (a server newer than this bundle) */
+function shownState(view: View): SessionState {
+  const known = (w: string | null | undefined): w is SessionState => !!w && Object.hasOwn(SHAPES, w);
+  if (known(view.activity)) return view.activity;
+  return known(view.state) ? view.state : 'unknown';
+}
 /** the daemon's cut (contracts/send-prompt-vectors.json text_max · UTF-16 units — a string's length) */
 const INSTRUCTION_MAX = 8000;
 
@@ -89,7 +99,7 @@ export function AgentSessionStrip({ agentId, conversationId }: { agentId: string
   }, [agentId, nudges]);
 
   if (!view?.state) return null; // not on a computer · no session: the DM as it was
-  return <Strip view={view as View & { state: SessionState }} readAt={readAt} agentId={agentId} conversationId={conversationId} reread={() => setNudges((n) => n + 1)} />;
+  return <Strip view={{ ...view, state: shownState(view) }} readAt={readAt} agentId={agentId} conversationId={conversationId} reread={() => setNudges((n) => n + 1)} />;
 }
 
 /** what the strip's line says after a press: on its way, or how it ended (stop · instruction keep their own verbs — Yuna 12:47Z) */

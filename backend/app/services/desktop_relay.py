@@ -198,6 +198,16 @@ def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
     row.limit_self_resume = limit.self_resume if limit else None
 
 
+# story #4534 (Kadir 4960 · PO 05:36Z): a reader built for the five words (a web bundle from before · a tab left open · the phone's web
+# view) must never meet a word it does not know — `state` stays one of the five (the new words fold to idle, as the daemon used to
+# send them) and the board's own word goes in `activity` beside it, read by the new web only.
+LEGACY_STATE = {"waiting_input": "idle", "error": "idle", "paused_limit": "idle"}
+
+
+def legacy_state(state: str) -> str:
+    return LEGACY_STATE.get(state, state)
+
+
 def limit_view(row: DesktopSession) -> dict | None:
     """story #4534: a row's limit as a reader sees it (only what is set) — None when the row carries none."""
     if not row.limited:
@@ -288,8 +298,10 @@ async def device_sessions_view(db: AsyncSession, setup_id: uuid.UUID, *, now: da
     )).scalars().all()
     return [{
         "session_key": r.session_key, "agent_member_id": str(r.agent_member_id), "runtime": r.runtime,
-        "state": "unknown" if silent and r.state != "stopped" else r.state, "state_at": r.state_at.isoformat(),
-        **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),  # story #4534
+        "state": "unknown" if silent and r.state != "stopped" else legacy_state(r.state), "state_at": r.state_at.isoformat(),
+        # story #4534: the board's own word (eight) and a usage limit's why — for the new web only
+        "activity": "unknown" if silent and r.state != "stopped" else r.state,
+        **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),
     } for r in rows]
 
 
