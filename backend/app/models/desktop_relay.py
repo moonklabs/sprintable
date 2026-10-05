@@ -6,7 +6,7 @@ two together (one changed alone → RED)."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,7 +16,11 @@ COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_sessio
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
-SESSION_STATES = ("starting", "working", "idle", "waiting_permission", "stopped")
+# story #4534 (0437 · contract v1.12): the board's own words — asked in the terminal · an error · paused at a usage limit
+SESSION_STATES = ("starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "stopped")
+# the words a usage limit comes with (the only rows that may carry its why) · Claude's «may continue by itself»
+SESSION_LIMIT_STATES = ("waiting_input", "error", "paused_limit")
+SESSION_SELF_RESUME = ("maybe", "no", "unknown")
 SESSION_RUNTIMES = ("claude", "codex")
 
 
@@ -49,6 +53,7 @@ class DesktopSession(Base):
         UniqueConstraint("setup_id", "session_key", name="uq_desktop_sessions_setup_key"),
         CheckConstraint(_in("state", SESSION_STATES), name="ck_desktop_sessions_state"),
         CheckConstraint(_in("runtime", SESSION_RUNTIMES), name="ck_desktop_sessions_runtime"),
+        CheckConstraint(f"limit_self_resume IS NULL OR {_in('limit_self_resume', SESSION_SELF_RESUME)}", name="ck_desktop_sessions_limit_self_resume"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -63,6 +68,11 @@ class DesktopSession(Base):
     state_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4534 (0437): a usage limit's why — on a limit word only (services.desktop_relay)
+    limited: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    limit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    limit_again: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    limit_self_resume: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class DesktopCommand(Base):

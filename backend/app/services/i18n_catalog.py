@@ -68,6 +68,33 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "하던 일을 멈추고 다음 일을 기다려요 — 눌러서 대화를 확인해 주세요",
         "en": "It stopped and is waiting for the next task — tap to check the conversation",
     },
+    # story #4534 (Yuna 04:05Z): the turn ended in the board's own word — the title is that state's chip word (one table), the body
+    # what is true there (an error · a usage limit are not «waiting for work»); no instruction text, command or path (B-3)
+    "desktop_command.turn_end_title.waiting_input": {"ko": "{agent} · 입력 대기", "en": "{agent} · Waiting for input"},
+    "desktop_command.turn_end_title.usage_limit": {"ko": "{agent} · 사용 한도", "en": "{agent} · Usage limit"},
+    "desktop_command.turn_end_title.paused_limit": {"ko": "{agent} · 한도로 쉬는 중", "en": "{agent} · Paused at usage limit"},
+    "desktop_command.turn_end_title.error": {"ko": "{agent} · 오류", "en": "{agent} · Error"},
+    "desktop_command.turn_end_title_bare.waiting_input": {"ko": "입력 대기", "en": "Waiting for input"},
+    "desktop_command.turn_end_title_bare.usage_limit": {"ko": "사용 한도", "en": "Usage limit"},
+    "desktop_command.turn_end_title_bare.paused_limit": {"ko": "한도로 쉬는 중", "en": "Paused at usage limit"},
+    "desktop_command.turn_end_title_bare.error": {"ko": "오류", "en": "Error"},
+    "desktop_command.turn_end_body.waiting_input": {
+        "ko": "그 컴퓨터의 터미널에서 답을 기다리고 있어요 — 눌러서 대화를 확인해 주세요",
+        "en": "It's waiting for an answer in that computer's terminal — tap to check the conversation",
+    },
+    "desktop_command.turn_end_body.usage_limit": {
+        "ko": "사용 한도에 걸렸어요 — 눌러서 어떻게 이어 갈지 확인해 주세요", "en": "Hit its usage limit — tap to see how it can go on",
+    },
+    "desktop_command.turn_end_body.paused_limit": {
+        "ko": "사용 한도에 걸려 멈췄어요 — 한도가 풀리면 스스로 이어서 해요", "en": "Hit its usage limit — it continues by itself when the limit resets",
+    },
+    "desktop_command.turn_end_body.error_limit": {
+        "ko": "사용 한도에 걸려 멈췄어요 — 눌러서 확인해 주세요", "en": "Hit its usage limit and stopped — tap to check",
+    },
+    "desktop_command.turn_end_body.error": {
+        "ko": "에이전트가 오류로 멈췄어요 — 까닭은 그 컴퓨터의 데스크톱 앱에서 볼 수 있어요",
+        "en": "The agent stopped with an error — the reason is in the desktop app on that computer",
+    },
     "agent_permission.notice_body": {
         "ko": "{tool} 허용을 기다리고 있어요 — 눌러서 확인해 주세요",
         "en": "Waiting for you to allow {tool} — tap to check",

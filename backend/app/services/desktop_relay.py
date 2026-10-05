@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -30,6 +30,7 @@ from app.models.desktop_relay import (
     DesktopCommand,
     DesktopDeviceToken,
     DesktopSession,
+    SESSION_LIMIT_STATES,
 )
 from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_setup import DesktopSetup
@@ -126,6 +127,17 @@ async def device_still_valid(db: AsyncSession, setup_id: uuid.UUID) -> bool:
 # ── sessions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
+class SessionLimit(BaseModel):
+    """story #4534 (contract v1.12): why a session waits when that is a usage limit — `at` when it resets / continues · `again` it
+    hit the limit again after continuing · `self_resume` whether Claude may continue by itself (its login)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    at: OffsetDatetime | None = None
+    again: bool | None = None
+    self_resume: Literal["maybe", "no", "unknown"] | None = None
+
+
 class SessionReport(BaseModel):
     """One session's state — nothing else: no terminal bytes, no prompt text, no path, no key (extra fields → 422)."""
 
@@ -133,8 +145,17 @@ class SessionReport(BaseModel):
 
     agent_member_id: uuid.UUID
     runtime: Literal["claude", "codex"]
-    state: Literal["starting", "working", "idle", "waiting_permission", "stopped"]
+    # story #4534 (0437 · contract v1.12): the board's own words — never folded into «idle» (asked in the terminal · an error ·
+    # paused at a usage limit)
+    state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "stopped"]
     at: OffsetDatetime  # a time without its offset is refused (4330)
+    limit: SessionLimit | None = None
+
+    @model_validator(mode="after")
+    def _limit_on_a_limit_word_only(self) -> "SessionReport":
+        if self.limit is not None and self.state not in SESSION_LIMIT_STATES:
+            raise ValueError("limit is carried with waiting_input · error · paused_limit only")
+        return self
 
 
 class SessionStateReport(SessionReport):
@@ -169,6 +190,28 @@ def _check_agent(setup: DesktopSetup, agent_member_id: uuid.UUID) -> None:
         raise DesktopRelayError(422, "agent_not_on_device", "the agent is not one this device was set up with")
 
 
+def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
+    """story #4534: the row's limit is the report's — a report without one clears it (the limit is over)."""
+    row.limited = True if limit else None
+    row.limit_at = limit.at if limit else None
+    row.limit_again = limit.again if limit else None
+    row.limit_self_resume = limit.self_resume if limit else None
+
+
+def limit_view(row: DesktopSession) -> dict | None:
+    """story #4534: a row's limit as a reader sees it (only what is set) — None when the row carries none."""
+    if not row.limited:
+        return None
+    out: dict = {}
+    if row.limit_at is not None:
+        out["at"] = row.limit_at.isoformat()
+    if row.limit_again is not None:
+        out["again"] = row.limit_again
+    if row.limit_self_resume is not None:
+        out["self_resume"] = row.limit_self_resume
+    return out
+
+
 async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_key: str, report: SessionStateReport) -> DesktopSession:
     """A report older than (or equal to) the device's latest is refused — 409 (a reordered delivery never undoes a newer one)."""
     _check_agent(setup, report.agent_member_id)
@@ -184,6 +227,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     row.agent_member_id, row.runtime, row.state = report.agent_member_id, report.runtime, report.state
     row.last_report_seq, row.state_at = report.report_seq, report.at
     row.ended_at = report.at if report.state == "stopped" else None
+    _set_limit(row, report.limit)
     await touch_device(db, setup.id)
     await db.flush()
     from app.services.desktop_commands import on_session_reported  # story #4534 — a [지금 지시]'s turn end
@@ -214,10 +258,12 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, s.at
         row.last_report_seq = snapshot.report_seq
         row.ended_at = s.at if s.state == "stopped" else None
+        _set_limit(row, s.limit)
     for row in existing.values():
         row.last_report_seq = snapshot.report_seq
         if row.state != "stopped":
             row.state, row.state_at, row.ended_at = "stopped", now, now
+            _set_limit(row, None)
     await touch_device(db, setup.id)
     await db.flush()
     from app.services.desktop_commands import on_session_reported  # story #4534 — every line of a snapshot is a report too
@@ -243,6 +289,7 @@ async def device_sessions_view(db: AsyncSession, setup_id: uuid.UUID, *, now: da
     return [{
         "session_key": r.session_key, "agent_member_id": str(r.agent_member_id), "runtime": r.runtime,
         "state": "unknown" if silent and r.state != "stopped" else r.state, "state_at": r.state_at.isoformat(),
+        **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),  # story #4534
     } for r in rows]
 
 

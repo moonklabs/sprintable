@@ -111,3 +111,44 @@ describe('AgentSessionStrip (story #4534)', () => {
     expect(line()).toBe('You can stop or instruct it from a paired phone');
   });
 });
+
+// story #4534 (relay contract v1.12 · Yuna 03:04Z · 03:06Z): the board's own words reach the web — never «다음 일 기다림» for an agent
+// asked in its terminal, stopped with an error, or paused at a usage limit; their lines stand whatever remote control says; no button
+describe('AgentSessionStrip — the board\'s own words (story #4534 · contract v1.12)', () => {
+  const later = new Date(Date.now() + 3 * 3600_000).toISOString();
+  const earlier = new Date(Date.now() - 3600_000).toISOString();
+  it.each([
+    [{ state: 'waiting_input' }, '입력 대기', '그 컴퓨터의 터미널에서 답을 기다리고 있어요 — 그 컴퓨터에서 답해 주세요', 'text-foreground'],
+    [{ state: 'error' }, '오류', '에이전트가 오류로 멈췄어요 — 까닭은 그 컴퓨터의 데스크톱 앱에서 볼 수 있어요', 'text-destructive'],
+    [{ state: 'waiting_input', limit: { self_resume: 'maybe' } }, '사용 한도', '사용 한도에 걸렸어요 — 그 컴퓨터의 터미널에 고르는 창이 떠 있으면 거기서 골라 주세요. 창이 없으면 한도가 풀릴 때 스스로 이어서 해요', 'text-warning'],
+    [{ state: 'waiting_input', limit: { self_resume: 'no' } }, '사용 한도', '사용 한도에 걸렸어요 — 스스로 이어 가지 않아요. 한도가 풀린 뒤 그 컴퓨터의 터미널에서 다시 보내 주세요', 'text-warning'],
+    [{ state: 'waiting_input', limit: { self_resume: 'unknown' } }, '사용 한도', '사용 한도에 걸렸어요 — 그 컴퓨터의 터미널에서 어떻게 이어 갈지 확인해 주세요', 'text-warning'],
+    [{ state: 'error', limit: {} }, '오류', '사용 한도에 걸려 멈췄어요 — 풀리는 시각은 그 컴퓨터의 터미널에서 볼 수 있어요', 'text-destructive'],
+    [{ state: 'error', limit: { at: earlier } }, '오류', '한도가 풀렸어요 — 그 컴퓨터에서 다시 시작해 주세요', 'text-destructive'],
+  ])('%j → «%s» and its line', async (over, word, expected, tone) => {
+    fetchWithAuth.mockResolvedValueOnce(view({ ...over, remote_control: false }));
+    await render();
+    expect(chip()).toBe(word);
+    expect(line()).toBe(expected);
+    expect(container.querySelector('[data-testid="agent-session-chip"] svg')?.getAttribute('class')).toContain(tone);
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+  it('paused at a usage limit: a quiet dot and when it continues (this page\'s clock) · again · a limit still ahead on an error', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'paused_limit', limit: { at: later, again: false } }));
+    await render();
+    expect(chip()).toBe('한도로 쉬는 중');
+    expect(line()).toMatch(/^사용 한도에 걸려 멈췄어요 — .+에 이어서 해요$/);
+    expect(container.querySelector('[data-testid="agent-session-chip"] svg')?.getAttribute('class')).toContain('fill-current');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'paused_limit', limit: { at: later, again: true } }));
+    await render('en');
+    expect(chip()).toBe('Paused at usage limit');
+    expect(line()).toMatch(/^Still at the limit — continues again .+$/);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'error', limit: { at: later } }));
+    await render();
+    expect(line()).toMatch(/^사용 한도에 걸려 멈췄어요 — .+에 풀려요$/);
+  });
+});
