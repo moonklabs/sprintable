@@ -36,6 +36,8 @@ let root: Root;
 let calls: { url: string; body?: unknown }[];
 /** What GET /api/desktop/recipes answers now (tests change it: empty · failing · a list). */
 let recipesNow: () => Response = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
+/** story #4565 — what GET /api/desktop/setup/agents answers now (none by default: the page as before). */
+let agentsNow: () => Response = () => new Response('{}', { status: 404 });
 /** What GET /api/desktop/setups/{id} answers now (the progress tests change it between polls). */
 let statusNow: () => unknown = () => ({});
 
@@ -45,6 +47,7 @@ function stub(confirm: () => Response | Promise<Response>) {
     const url = String(input);
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.endsWith('/api/desktop/recipes')) return recipesNow();
+    if (url.includes('/api/desktop/setup/agents')) return agentsNow();
     if (url.includes('/api/desktop/setup-codes/')) return confirm();
     if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
     return new Response('{}', { status: 404 });
@@ -73,7 +76,7 @@ const openRecipes = async () => {
   if (b) await act(async () => { b.click(); });
 };
 
-beforeEach(() => { recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 }); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { agentsNow = () => new Response('{}', { status: 404 }); recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 }); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 const events = () => calls.filter((c) => c.url.endsWith('/api/onboarding/events')).map((c) => c.body as { event: string; session_id: string });
 
@@ -379,6 +382,86 @@ describe('[SID:4427] desktop setup page', () => {
     expect((container.querySelector(`a[href="${SETUP_REOPEN_LINK}"]`) as HTMLAnchorElement).textContent).toBe('앱 열기');
     expect(SETUP_REOPEN_LINK).toBe('ai.sprintable:/desktop/setup?intent=reopen');
     expect(container.querySelector(`a[href="${SETUP_APP_LINK}"]`)).toBeNull();
+  });
+});
+
+describe('[SID:4565] existing agents moved to this computer', () => {
+  const DAN = 'a1111111-0000-4000-8000-000000000001';
+  const MINI = 'a1111111-0000-4000-8000-000000000002';
+  const GONE = 'a1111111-0000-4000-8000-000000000003';
+  const OUT = 'a1111111-0000-4000-8000-000000000004';
+  const AGENTS = [
+    { id: DAN, name: '댄 어윈', runtime: 'claude', live_keys: 1, last_used_at: new Date(Date.now() - 5 * 60_000).toISOString(), in_project: true },
+    { id: MINI, name: '미니', runtime: 'codex', live_keys: 2, last_used_at: null, in_project: true },
+    { id: GONE, name: '고요', runtime: 'claude', live_keys: 0, last_used_at: null, in_project: true },
+    { id: OUT, name: '바깥', runtime: 'claude', live_keys: 0, last_used_at: null, in_project: false },
+  ];
+  const selectOf = (role: string) => container.querySelector(`select[aria-label^="${role}"]`) as HTMLSelectElement;
+  const choose = async (role: string, value: string) => {
+    const sel = selectOf(role);
+    await act(async () => { sel.value = value; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+  };
+  const optionText = (sel: HTMLSelectElement, value: string) => [...sel.options].find((o) => o.value === value);
+
+  it('none to move → the select as before (no groups) and nothing else changes', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: [] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(container.querySelectorAll('optgroup')).toHaveLength(0);
+    expect(calls.some((c) => c.url.includes('/api/desktop/setup/agents?project_id=p-1'))).toBe(true);
+  });
+
+  it('three groups in one select · a runtime not here or an agent picked for another role is a turned-off option with why', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const research = selectOf('조사');
+    expect([...research.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['새로 만들기', '이미 있는 에이전트']); // agent row: no person
+    expect([...selectOf('작성').querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['새로 만들기', '이미 있는 에이전트', '사람']); // either row
+    const mini = optionText(research, `agent:${MINI}`)!;
+    expect([mini.disabled, mini.textContent]).toEqual([true, '미니 · Codex가 이 컴퓨터에 없어요']);
+    // PO 04:37Z: not in the project yet — turned off, and what to do first
+    const out = optionText(research, `agent:${OUT}`)!;
+    expect([out.disabled, out.textContent]).toEqual([true, '바깥 · 이 프로젝트에 아직 없어요 — 먼저 프로젝트에 추가해 주세요']);
+    await choose('조사', `agent:${DAN}`);
+    const elsewhere = optionText(selectOf('작성'), `agent:${DAN}`)!;
+    expect([elsewhere.disabled, elsewhere.textContent]).toEqual([true, '댄 어윈 · 다른 역할에 골랐어요']);
+  });
+
+  it('a moved agent with a live key: what the move does, when it was last seen · the start line counts new and moved apart · the body sends its id', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    await choose('조사', `agent:${DAN}`);
+    const note = container.querySelector('[data-testid=setup-moved-note]') as HTMLElement;
+    expect([...note.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      '이 컴퓨터의 앱이 받아 가면 이 에이전트의 지금 연결이 끊겨요 — 다른 곳에서 일하고 있었다면 거기서는 멈춰요', '마지막 연결 · 5분 전',
+    ]);
+    expect(note.querySelector('p')!.className).toContain('text-foreground'); // a result to read — not muted
+    const row = container.querySelector('[data-testid=setup-start-row]') as HTMLElement;
+    expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 1개를 새로 만들고 1개를 이 컴퓨터로 옮겨 첫 일감을 맡겨요 · 연출은 내가 맡아요');
+    await choose('작성', `agent:${MINI}`);
+    expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 2개를 이 컴퓨터로 옮겨 첫 일감을 맡겨요 · 연출은 내가 맡아요');
+    expect(container.querySelectorAll('[data-testid=setup-moved-note]')).toHaveLength(2); // MINI: a live key, no last-used line
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const post = calls.find((c) => c.url.includes('/api/desktop/setup-codes/confirm'))!;
+    expect((post.body as { roles: unknown[] }).roles).toEqual([{ role: '조사', agent_id: DAN }, { role: '작성', agent_id: MINI }]);
+  });
+
+  it('no live key → no line under it (nothing would be cut)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await choose('조사', `agent:${GONE}`);
+    expect(container.querySelector('[data-testid=setup-moved-note]')).toBeNull();
+  });
+
+  it('not an owner or admin → the list is not asked for', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />, 'member');
+    expect(calls.some((c) => c.url.includes('/api/desktop/setup/agents'))).toBe(false);
   });
 });
 

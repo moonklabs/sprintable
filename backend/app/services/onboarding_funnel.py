@@ -66,7 +66,7 @@ EXIT_CODE_RANGE = range(-(2**31), 2**31)
 # story #4452 — why the shell could not start an agent: its reason, and for a refusal the daemon's closed code (desktop-protocol:
 # adapter_prepare_failed · spawn_failed split out of profile_invalid so the reason is the real one) or the first agent's wait
 # (ended · timeout). The web words each one (Yuna 04:41Z); free text is never sent.
-START_FAILED_REASONS = frozenset({"runtime_missing", "credentials_refused", "start_refused", "key_unreadable", "first_not_ready"})
+START_FAILED_REASONS = frozenset({"runtime_missing", "credentials_refused", "start_refused", "key_unreadable", "first_not_ready", "workdir_needed"})  # 4565: an attached agent waits for its folder
 START_FAILED_CODES = frozenset({
     "session_limit", "credentials_missing", "profile_invalid", "unknown_profile", "adapter_prepare_failed", "spawn_failed",
     "not_connected", "bad_reply", "ended", "timeout",

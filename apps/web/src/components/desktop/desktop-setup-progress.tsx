@@ -178,6 +178,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
               : f.line === 'keyUnreadable' ? t('startFailed.keyUnreadable')
               : f.line === 'firstNotReady' ? firstNotReadyLine(f.firstRole)
               : f.line === 'notConnected' ? t('startFailed.notConnected')
+              : f.line === 'workdirNeeded' ? t('startFailed.workdirNeeded')
               : t('startFailed.unknown');
             return (
               <div key={f.memberId} data-testid="setup-agent-start-failed-row" data-line={f.line}>

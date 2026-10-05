@@ -83,13 +83,16 @@ async def test_browser_lifespan_cap_triggers_finite_reconnect_and_cleanup():
 
     auth_ctx = MagicMock()
     auth_ctx.user_id = str(member_id)
-    auth_ctx.claims = {"app_metadata": {"api_key_id": "test-key", "org_id": str(org)}}
+    # story #4565: a real agent key session carries its key's DB id (a UUID — dependencies/auth.py:271); the open-stream key
+    # recheck (services/stream_access.py · not this test's subject) is held at «allowed» below
+    auth_ctx.claims = {"app_metadata": {"api_key_id": str(uuid.uuid4()), "org_id": str(org)}}
 
     count_before = ev_module._sse_connection_count
     saw_lifespan_event = False
     elapsed = None
     try:
-        with patch("app.core.database.async_session_factory", _factory):
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch("app.services.stream_access.key_access_revoked", AsyncMock(return_value=None)):
             # 수명상한 체크는 while 루프 top에서 heartbeat-tick 주기로만 재평가된다(매
             # asyncio.wait(timeout=heartbeat)를 다 기다려야 다음 체크로 넘어감) — 그래서
             # 하트비트도 함께 짧게 잡아야 짧은 수명상한이 실제로 빠르게 감지된다(프로덕션은
@@ -148,12 +151,15 @@ async def test_browser_lifespan_cap_does_not_fire_under_normal_duration():
 
     auth_ctx = MagicMock()
     auth_ctx.user_id = str(member_id)
-    auth_ctx.claims = {"app_metadata": {"api_key_id": "test-key", "org_id": str(org)}}
+    # story #4565: a real agent key session carries its key's DB id (a UUID — dependencies/auth.py:271); the open-stream key
+    # recheck (services/stream_access.py · not this test's subject) is held at «allowed» below
+    auth_ctx.claims = {"app_metadata": {"api_key_id": str(uuid.uuid4()), "org_id": str(org)}}
 
     count_before = ev_module._sse_connection_count
     chunks: list[str] = []
     try:
-        with patch("app.core.database.async_session_factory", _factory):
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch("app.services.stream_access.key_access_revoked", AsyncMock(return_value=None)):
             with patch.object(ev_module, "_SSE_HEARTBEAT_TIMEOUT", 0.05), \
                  patch.object(ev_module, "_SSE_LIFESPAN_SEC", 600.0), \
                  patch.object(ev_module, "_SSE_LIFESPAN_JITTER_SEC", 0.0):

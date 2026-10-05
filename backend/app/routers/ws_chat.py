@@ -4,6 +4,7 @@ WS /ws/chat/{agent_id}: 에이전트별 room 관리 + 브로드캐스트 + conve
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -24,6 +25,8 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.services.member_resolver import resolve_member_display_name
+from app.services.pg_pubsub import fire_and_forget
+from app.services.stream_access import AccessRecheck
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ws-chat", "Organization"])
@@ -103,6 +106,28 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
             return _CallerIdentity(id=om.id, org_id=om.org_id) if om is not None else None
 
     return None
+
+
+# story #4565 (Qadir ①) — how often an open socket with an agent key is rechecked even while it only listens (a socket that
+# never sends must still drop once its key is revoked); module-level so a test can shorten it
+_WS_ACCESS_RECHECK_SEC: float = 5.0
+
+
+async def _api_key_id(api_key: str | None) -> uuid.UUID | None:
+    """The id of the agent key this socket connected with (None for a JWT) — the recheck follows that one key."""
+    if not (api_key and api_key.startswith("sk_live_")):
+        return None
+    async with async_session_factory() as db:
+        return (await db.execute(select(ApiKey.id).where(ApiKey.key_hash == hash_token(api_key)))).scalar_one_or_none()
+
+
+async def _close_when_revoked(websocket: WebSocket, access: AccessRecheck) -> None:
+    """Watch an open socket: once its key is no longer allowed, close it (4001) — it then neither sends nor hears."""
+    while True:
+        await asyncio.sleep(_WS_ACCESS_RECHECK_SEC)
+        if await access.due(0):
+            await websocket.close(code=4001, reason="access_revoked")
+            return
 
 
 async def _get_or_create_conversation(
@@ -227,6 +252,12 @@ async def ws_chat_hub(
         _rooms[room_key].discard(websocket)
         return
 
+    # story #4565 (Qadir ①): an agent key revoked after this socket opened (its agent moved to another computer by a setup ·
+    # a device disconnected) ends the socket — checked before each message it sends is kept, and on a timer while it listens
+    key_id = await _api_key_id(api_key)
+    access = AccessRecheck(key_id, caller.id, agent_only=False) if key_id else None
+    # held by pg_pubsub's own set (never collected early) and kept here to cancel when the socket ends
+    watcher = fire_and_forget(_close_when_revoked(websocket, access)) if access else None
     try:
         # story #4418 (Qadir 01a0eb42) — inside the try: if either fails, the `finally` below takes the socket out of the room
         # (before, a failure here left it registered).
@@ -247,6 +278,9 @@ async def ws_chat_hub(
                 content = raw.strip()
             if not content:
                 continue
+            if access is not None and await access.due(0):
+                await websocket.close(code=4001, reason="access_revoked")
+                return  # nothing kept from a key that is no longer allowed
 
             # conversation_messages 영속화
             async with async_session_factory() as db:
@@ -284,6 +318,8 @@ async def ws_chat_hub(
     except WebSocketDisconnect:
         logger.info("ws_chat: disconnected agent_id=%s caller=%s", agent_id, caller.id)
     finally:
+        if watcher is not None:
+            watcher.cancel()
         _rooms[room_key].discard(websocket)
         if not _rooms[room_key]:
             _rooms.pop(room_key, None)
