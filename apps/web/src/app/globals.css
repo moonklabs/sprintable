@@ -1079,12 +1079,18 @@
    커스텀 프로퍼티만 세워 유틸리티와 다툴 실제 CSS 프로퍼티가 0이므로(위 `.dashboard-shell-
    root` 기존 블록과 같은 이유) @layer 안에 있어도 결과는 완전히 같다 — #4127 그룹 D
    (`[data-sidebar="menu-button"][data-popup-open]` 예방적 이관)와 같은 길을 그대로 따른다. */
+/* story #4534 — lg 이상에서 SidebarInset(main)은 inset 사이드바 옆에서 사방 --shell-inset만큼 떨어진다
+   (components/ui/sidebar.tsx `lg:peer-data-[variant=inset]:m-(--shell-inset)`). 앵커가 위아래 두 몫을 빼지
+   않으면 오른쪽 스크롤러가 그만큼 넘쳐(1440·1024 실측 16px) 열자마자 내려가고, 채팅 머리의 띠 첫 줄이
+   TopBar 밑으로 잘렸다. 간격은 이 변수 하나가 정하고 margin과 앵커가 같이 읽는다. 아래 기본값 = lg 이상 ·
+   lg 미만은 margin이 없어 미디어 쿼리 값이 inset을 안 센다. */
 @layer components {
   .dashboard-shell-root {
-    --shell-chrome-h: 3rem;
+    --shell-inset: 0.5rem;
+    --shell-chrome-h: calc(3rem + 2 * var(--shell-inset));
   }
   .dashboard-shell-root[data-topbar-hidden] {
-    --shell-chrome-h: 0rem;
+    --shell-chrome-h: calc(2 * var(--shell-inset));
   }
   @media (max-width: 1023px) {
     .dashboard-shell-root {
