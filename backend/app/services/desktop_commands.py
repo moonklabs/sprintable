@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopCommand, DesktopSession
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError, legacy_state, limit_view
+from app.services.desktop_relay import INSTRUCT_NOW_MAX, PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError, legacy_state, limit_view
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
     view = {"agent_name": agent.name,
             "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
-            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "instruct_now": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
@@ -140,6 +140,8 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         "state": legacy_state(state), "activity": state, "state_at": pick.state_at.isoformat(),
         # story #4534 (contract v1.12): a usage limit's why — only while the row is a limit word and the device is heard
         "limit": limit_view(pick) if state == pick.state else None,
+        # story #4534 (PO 06:30Z · Kadir 06:31Z): whether [지금 지시] can go into its turn — only while the device is heard
+        "instruct_now": pick.instruct_now if state == pick.state else None,
         "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
     })
     if state == "waiting_permission":  # the inbox link — only a request sent to this person
@@ -189,6 +191,8 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
 
     if body.kind == "send_prompt" and (body.text is None or body.conversation_id is None):
         raise DesktopRelayError(422, "invalid_payload", "an instruction needs its text and conversation")
+    if body.kind == "send_prompt" and len(body.text) > INSTRUCT_NOW_MAX:  # code points (Kadir 06:21Z ④) — the sheet stops it first
+        raise DesktopRelayError(422, "instruct_too_long", f"an instruction into the turn is {INSTRUCT_NOW_MAX} characters at most")
     if body.kind == "stop_session" and (body.text is not None or body.conversation_id is not None):
         raise DesktopRelayError(422, "invalid_payload", "a stop carries no text or conversation")
     agent = await _agent(db, org_id, agent_id)

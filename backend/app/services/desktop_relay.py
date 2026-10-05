@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -41,6 +41,9 @@ TOKEN_PREFIX = "sdt_"
 UNKNOWN_AFTER = timedelta(seconds=90)  # PO 05:19Z — three missed 30-second heartbeats
 SESSION_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 PROMPT_MAX = 8000
+# story #4534 (Kadir 06:21Z ④ · Yuna 06:29Z ②): an instruction into the running turn — code points, the same count on the phone's
+# sheet, the web's sheet, the daemon and here (one line pasted at once stays under the CLI's fold — 800 measured, not folded)
+INSTRUCT_NOW_MAX = 400
 
 
 class DesktopRelayError(Exception):
@@ -150,6 +153,9 @@ class SessionReport(BaseModel):
     state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "stopped"]
     at: OffsetDatetime  # a time without its offset is refused (4330)
     limit: SessionLimit | None = None
+    # story #4534 (0438 · PO 06:30Z): whether this session can take an instruction into the running turn — read by the daemon once
+    # when the session starts. It only hides [지금 지시] on the web; the daemon decides again when an instruction comes (Kadir 06:31Z)
+    instruct_now: StrictBool | None = None  # a boolean only — never «yes» · 1 read as true
 
     @model_validator(mode="after")
     def _limit_on_a_limit_word_only(self) -> "SessionReport":
@@ -238,6 +244,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     row.last_report_seq, row.state_at = report.report_seq, report.at
     row.ended_at = report.at if report.state == "stopped" else None
     _set_limit(row, report.limit)
+    row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
     await touch_device(db, setup.id)
     await db.flush()
     from app.services.desktop_commands import on_session_reported  # story #4534 — a [지금 지시]'s turn end
@@ -269,11 +276,13 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         row.last_report_seq = snapshot.report_seq
         row.ended_at = s.at if s.state == "stopped" else None
         _set_limit(row, s.limit)
+        row.instruct_now = s.instruct_now
     for row in existing.values():
         row.last_report_seq = snapshot.report_seq
         if row.state != "stopped":
             row.state, row.state_at, row.ended_at = "stopped", now, now
             _set_limit(row, None)
+            row.instruct_now = None
     await touch_device(db, setup.id)
     await db.flush()
     from app.services.desktop_commands import on_session_reported  # story #4534 — every line of a snapshot is a report too
@@ -302,6 +311,8 @@ async def device_sessions_view(db: AsyncSession, setup_id: uuid.UUID, *, now: da
         # story #4534: the board's own word (eight) and a usage limit's why — for the new web only
         "activity": "unknown" if silent and r.state != "stopped" else r.state,
         **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),
+        # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))
+        "instruct_now": None if silent else r.instruct_now,
     } for r in rows]
 
 

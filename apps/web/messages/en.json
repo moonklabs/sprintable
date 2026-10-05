@@ -5104,7 +5104,8 @@
         "limitErrorNoTime": "Hit its usage limit and stopped — that computer's terminal shows when it resets",
         "limitErrorAhead": "Hit its usage limit — resets {time}",
         "limitErrorPassed": "The limit has reset — start it again on that computer",
-        "unrecognized": "This page doesn't know this state yet — reloading may show it"
+        "unrecognized": "This page doesn't know this state yet — reloading may show it",
+        "instructNotNow": "Instructions can't go into this agent's current turn — send it in this conversation and it's read when its turn comes"
       },
       "button": {
         "stop": "Stop",
@@ -5114,7 +5115,9 @@
       "sheet": {
         "title": "Add to what the agent is doing now",
         "note": "The agent reads it partway through its current work — it's told to answer in this conversation",
-        "send": "Send"
+        "send": "Send",
+        "count": "{n} / {max}",
+        "tooLong": "Over 400 characters it can't go into the current turn — shorten it or send it in the conversation"
       },
       "command": {
         "stopping": "Stopping…",
@@ -5151,7 +5154,8 @@
           "notRegistered": "This phone is no longer registered, so it can't send from here — pair this phone with the computer again",
           "biometricRequired": "This phone can send only with a fingerprint — add one in the phone's settings, then press again",
           "noScreenLock": "Sending needs a screen lock on this phone — turn one on in the phone's settings"
-        }
+        },
+        "sentAsMessageNotNow": "It couldn't go into the current turn, so it went in as a message — it's read when its turn comes"
       }
     },
     "entityTypeStory": "Story",

@@ -50,7 +50,7 @@ beforeEach(() => {
   phone = true;
   phoneCall.mockReset();
   fetchWithAuth.mockReset();
-  sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null };
+  sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(async () => { vi.useRealTimers(); await act(async () => { root.unmount(); }); container.remove(); document.body.innerHTML = ''; });
@@ -101,7 +101,7 @@ describe('[4534] the strip inside the phone app', () => {
       await render();
       expect(buttons()).toEqual([]);
       expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? null).toBe(line);
-      sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null };
+      sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
     }
   });
 
@@ -281,5 +281,86 @@ describe('[4534] the strip inside the phone app', () => {
     await render('en');
     expect(buttons()).toEqual(['Stop', 'Instruct now']);
     expect(enMessages.chats.agentSession.sheet.title).toBe('Add to what the agent is doing now');
+  });
+});
+
+// story #4534 (PO 06:20Z · 06:30Z · 06:31Z · Yuna 06:29Z · 06:30Z · Kadir 06:21Z ④ · 06:31Z): whether an instruction can go into this
+// session's turn — the daemon says (it reads it once at the session's start); the button only when it says so; a longer one stopped
+// on the sheet before it is signed; the daemon's «not now» → a message, said as such
+describe('[4534] [지금 지시] only when the daemon can put it into the turn', () => {
+  const type = async (text: string) => {
+    const box = document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, text); box.dispatchEvent(new Event('input', { bubbles: true })); });
+  };
+  const line = () => container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? null;
+
+  it('false → [멈춤] only, and the line says why · null (a daemon from before) → [멈춤] only, no line · true → both', async () => {
+    server(res(201, {}));
+    for (const [instruct_now, want, why] of [
+      [false, [ko.button.stop], ko.line.instructNotNow],
+      [null, [ko.button.stop], null],
+      [undefined, [ko.button.stop], null],
+      [true, [ko.button.stop, ko.button.instruct], null],
+    ] as const) {
+      sessionView = { ...sessionView, instruct_now };
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await render();
+      expect(buttons()).toEqual(want);
+      expect(line()).toBe(why);
+    }
+  });
+
+  it('waiting on a permission with instruct_now true → [멈춤] only (web PR 4962 stops then too) · [지금 지시] goes into a running turn only (PO 07:00Z)', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, state: 'waiting_permission', instruct_now: true };
+    await render();
+    expect(buttons()).toEqual([ko.button.stop]);
+  });
+
+  it('the sheet counts code points «{n} / 400자» · over 400 → the count in red, its line, [보내기] off — the text is never cut', async () => {
+    server(res(201, {}));
+    await render();
+    await press(ko.button.instruct);
+    const count = () => document.querySelector('[data-testid="agent-instruct-count"]');
+    const send = () => [...document.querySelectorAll('button')].find((b) => b.textContent === ko.sheet.send) as HTMLButtonElement;
+    expect(count()?.textContent).toBe('0 / 400자');
+    await type('😀'.repeat(400)); // 800 UTF-16 units — 400 code points: allowed
+    expect(count()?.textContent).toBe('400 / 400자');
+    expect(count()?.className).toContain('text-muted-foreground');
+    expect(document.querySelector('[data-testid="agent-instruct-too-long"]')).toBeNull();
+    expect(send().disabled).toBe(false);
+    await type('가'.repeat(401));
+    expect(count()?.textContent).toBe('401 / 400자');
+    expect(count()?.className).toContain('text-destructive');
+    expect(document.querySelector('[data-testid="agent-instruct-too-long"]')?.textContent).toBe(ko.sheet.tooLong);
+    expect(send().disabled).toBe(true);
+    expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value).toHaveLength(401);
+    expect(phoneCall).not.toHaveBeenCalled();
+  });
+
+  it('the daemon could not put it into the turn (instruct_not_now) → it goes in as a message, with its own line', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'instruct_not_now' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run the tests' });
+    await render();
+    await press(ko.button.instruct);
+    await type('run the tests');
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.sentAsMessageNotNow);
+    const msg = calls.find((c) => c.url === `/api/conversations/${CONV}/messages`)!;
+    expect(JSON.parse(msg.init!.body as string)).toEqual({ content: 'run the tests' });
+  });
+
+  it('the server refuses a longer one (instruct_too_long) → the sheet\'s line, nothing as a message', async () => {
+    const calls = server(res(422, { error: { code: 'instruct_too_long' } }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run the tests' });
+    await render();
+    await press(ko.button.instruct);
+    await type('run the tests');
+    await press(ko.sheet.send);
+    expect(commandLine()?.textContent).toBe(ko.sheet.tooLong);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
   });
 });

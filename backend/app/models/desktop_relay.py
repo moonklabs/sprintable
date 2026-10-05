@@ -73,6 +73,8 @@ class DesktopSession(Base):
     limit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     limit_again: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     limit_self_resume: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4534 (0438): whether the session can take an instruction into the running turn — hides [지금 지시] when not (only)
+    instruct_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
 class DesktopCommand(Base):
