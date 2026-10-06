@@ -161,11 +161,16 @@ async def read_for_person(db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.
 
 
 async def read_for_daemon(db: AsyncSession, *, member: Member) -> dict:
-    """The agent's own profile, read with its own key right before a start (§4) — never another agent's."""
+    """The agent's own profile, read with its own key right before a start (§4) — never another agent's.
+
+    story #4570: also its own `name` — the desktop app names the agent's board row with it at every start, so an agent attached
+    to the app (#4565) shows as itself and not as its recipe row's role, and a rename reaches the app at the next start.
+    """
     if member.runtime_type not in DESKTOP_RUNTIMES:
         raise _reject(409, "runtime_not_desktop")
     profile = await _profile(db, member.id)
     return {
+        "name": member.name or "",
         "runtime": DESKTOP_RUNTIMES[member.runtime_type],
         "model": profile.model if profile else None,
         "effort": profile.effort if profile else None,
