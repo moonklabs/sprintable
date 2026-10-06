@@ -711,26 +711,46 @@ async def agent_stream(
                 _last_access_check = time.monotonic()
                 return await _stream_access_revoked(_stream_key_id, agent_id)
 
+            # story #4569 — set when a batch's access recheck failed (the closing line already went out): the stream ends
+            _batches_revoked = False
+
+            async def _send_batches(after_seq: int, is_backfill: bool):
+                """Every row after `after_seq`, batch after batch, until a batch comes back short — the newest row goes out on
+                this one connect / wake. Before, one batch went out and the next waited for the next wake, so an agent with a
+                long backlog (4543 r2: 2,399 rows) heard a new DM hours late. A batch is still at most `_BACKFILL_LIMIT` rows in
+                seq order; each batch rechecks access first (PO 14:35Z ②); `floor` keeps a seq from going out twice in this
+                pass. The cursor is still the client's ack only."""
+                nonlocal _batches_revoked
+                floor = after_seq
+                while True:
+                    async with async_session_factory() as db:
+                        rows = await _fetch_events(db, agent_id, floor, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
+                    if not rows:
+                        return
+                    _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
+                    if _revoked:
+                        _batches_revoked = True
+                        yield _access_revoked_frame(_revoked)
+                        return
+                    for row in rows:
+                        gseq = row.recipient_seq or 0
+                        if gseq > floor:
+                            data = _row_to_payload(row)
+                            _sse = json.dumps({**data, "is_backfill": is_backfill})
+                            # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
+                            yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
+                            floor = gseq
+                    if len(rows) < _BACKFILL_LIMIT:
+                        return
+
             yield "event: heartbeat\ndata: {}\n\n"
 
             # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
-            async with async_session_factory() as db:
-                rows = await _fetch_events(db, agent_id, start_seq, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
-
-            # PO 14:35Z ② — the backfill is a batch too (it runs once the first heartbeat is read, which can be later)
-            if rows:
-                _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
-                if _revoked:
-                    yield _access_revoked_frame(_revoked)
-                    return
-            backfill_floor = start_seq  # ì´ë² ë°±í ë´ ì¤ë³µ ë°©ì§
-            for row in rows:
-                data = _row_to_payload(row)
-                gseq = row.recipient_seq or 0
-                if gseq > backfill_floor:  # ì¤ë³µ ë°©ì§
-                    _sse = json.dumps({**data, "is_backfill": True})
-                    yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
-                    backfill_floor = gseq
+            # PO 14:35Z ② — the backfill is batches too (it runs once the first heartbeat is read, which can be later)
+            async for _frame in _send_batches(start_seq, is_backfill=True):
+                yield _frame
+            if _batches_revoked:
+                return
 
             # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
             # 49fed0a1 AC1: 연결 유지 중 presence를 주기적으로 online 갱신. wake가 잦으면 timeout
@@ -826,23 +846,12 @@ async def agent_stream(
                                 select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
                             )).scalar_one_or_none()
                             scan_from = max(start_seq, cur.acked_seq if cur else 0)
-                            new_rows = await _fetch_events(db, agent_id, scan_from, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
 
-                        # PO 14:35Z ② — a batch goes out only if access still holds (rechecked if the last check is 5 s old)
-                        if new_rows:
-                            _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
-                            if _revoked:
-                                yield _access_revoked_frame(_revoked)
-                                return
-                        wake_floor = scan_from  # ì´ë² wake ë´ ì¤ë³µ ë°©ì§
-                        for row in new_rows:
-                            gseq = row.recipient_seq or 0
-                            if gseq > wake_floor:
-                                data = _row_to_payload(row)
-                                _sse = json.dumps({**data, "is_backfill": False})
-                                # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
-                                yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
-                                wake_floor = gseq
+                        # PO 14:35Z ② — batches go out only while access holds (rechecked if the last check is 5 s old)
+                        async for _frame in _send_batches(scan_from, is_backfill=False):
+                            yield _frame
+                        if _batches_revoked:
+                            return
                     else:
                         # ë ê±°ì ì§ì  push (AGENT_GATEWAY_V2 ë¯¸ì ì© ê²½ë¡)
                         # story #2143(2026-07-23) root-fix: this branch used to fabricate
