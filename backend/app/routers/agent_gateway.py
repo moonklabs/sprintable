@@ -713,6 +713,11 @@ async def agent_stream(
 
             # story #4569 — set when a batch's access recheck failed (the closing line already went out): the stream ends
             _batches_revoked = False
+            # story #4569 (PO 01:14Z) — the seqs this connection has sent and the client has not acked yet. A wake still rescans
+            # from acked_seq (late commits are caught that way), but a pass sends the whole tail now, so a wake that comes before
+            # the ack catches up would send that tail again (measured: 2,400 rows + 3 quick wakes, no ack → 9,620 frames for 2,405
+            # seqs). A seq in here is skipped; one not in here (a late commit) still goes out. Trimmed to > acked on every wake.
+            _sent_unacked: set[int] = set()
 
             async def _send_batches(after_seq: int, is_backfill: bool):
                 """Every row after `after_seq`, batch after batch, until a batch comes back short — the newest row goes out on
@@ -734,12 +739,15 @@ async def agent_stream(
                         return
                     for row in rows:
                         gseq = row.recipient_seq or 0
-                        if gseq > floor:
+                        if gseq <= floor:
+                            continue
+                        floor = gseq
+                        if gseq not in _sent_unacked:
+                            _sent_unacked.add(gseq)
                             data = _row_to_payload(row)
                             _sse = json.dumps({**data, "is_backfill": is_backfill})
                             # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
                             yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
-                            floor = gseq
                     if len(rows) < _BACKFILL_LIMIT:
                         return
 
@@ -846,6 +854,7 @@ async def agent_stream(
                                 select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
                             )).scalar_one_or_none()
                             scan_from = max(start_seq, cur.acked_seq if cur else 0)
+                        _sent_unacked.difference_update({s for s in _sent_unacked if s <= scan_from})
 
                         # PO 14:35Z ② — batches go out only while access holds (rechecked if the last check is 5 s old)
                         async for _frame in _send_batches(scan_from, is_backfill=False):
