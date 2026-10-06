@@ -143,6 +143,9 @@ export function AgentPermissionRequests() {
   );
 }
 
+/** story 4580: the daemon's value for Claude's sandbox network question (sprintable-mobile desktop-host · tool-names.json) */
+const SANDBOX_NET_TOOL = 'SandboxNetwork';
+
 function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
   request: PermissionRequest; now: number; phone: boolean; auth: PhoneAuth | null; answer: Answer | null;
   onAnswer: (decision: 'allow' | 'deny') => void;
@@ -170,7 +173,12 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
       {r.role ? <p className="text-xs text-muted-foreground">{t('role', { role: r.role })}</p> : null}
       <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
       <div className="rounded-md bg-muted/50 px-2 py-1.5">
-        <p className="break-all font-mono text-xs text-foreground">{r.summary}</p>
+        {/* story 4580 (Yuna 08:51Z): Claude's sandbox network question — its host is a name, not a command: one body-font line */}
+        {r.tool === SANDBOX_NET_TOOL && r.runtime === 'claude' ? (
+          <p className="break-all text-xs text-foreground" data-testid="agent-permission-net">{t('netConnect', { host: r.summary })}</p>
+        ) : (
+          <p className="break-all font-mono text-xs text-foreground">{r.summary}</p>
+        )}
         {notes.length > 0 ? <p className="mt-0.5 text-[11px] text-muted-foreground">{notes.join(' · ')}</p> : null}
       </div>
       {r.workdir ? <p className="text-[11px] text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}

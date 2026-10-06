@@ -7001,6 +7001,7 @@
   "agentPermissions": {
     "groupTitle": "Agent permission requests",
     "chip": "Permission request",
+    "netConnect": "Wants to connect to {host}",
     "chipUnknown": "State unknown",
     "waited": "Waiting {n} min",
     "role": "Sent to the {role} role",

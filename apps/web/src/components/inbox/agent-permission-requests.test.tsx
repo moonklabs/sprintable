@@ -206,4 +206,24 @@ describe('[SID:4542] the tool by its name · the computer once', () => {
     const heads = [...container.querySelectorAll('[data-testid="agent-permission-card"] p.text-sm')].map((p) => p.textContent);
     expect(heads).toEqual(['Agent · SYJ-MacBook-Pro', 'Agent · OtherMac · SYJ-MacBook-Pro']);
   });
+  // story 4580 (Yuna 08:51Z): Claude's sandbox network question — «네트워크 연결» (the server's name) · «{host}에 연결하려고 해요» in the
+  // body font, never the host in a command box; the same value from another runtime is not it
+  it('[4580] a network connection: «gitlab.com에 연결하려고 해요» (en «Wants to connect to gitlab.com») · not monospace', async () => {
+    const net = () => container.querySelector('[data-testid="agent-permission-net"]');
+    for (const locale of ['ko', 'en'] as const) {
+      fetchWithAuth.mockResolvedValue(answer([req({ runtime: 'claude', tool: 'SandboxNetwork', summary: 'gitlab.com', tool_name: { ko: '네\u2060트\u2060워\u2060크 연\u2060결', en: 'Network connection' } })]));
+      await render(locale);
+      expect(net()?.textContent).toBe(locale === 'ko' ? 'gitlab.com에 연결하려고 해요' : 'Wants to connect to gitlab.com');
+      expect(net()?.className).not.toContain('font-mono');
+      expect([...container.querySelectorAll('.font-mono')].map((e) => e.textContent)).not.toContain('gitlab.com');
+      expect(tool()).toBe(locale === 'ko' ? '네\u2060트\u2060워\u2060크 연\u2060결' : 'Network connection');
+    }
+  });
+  it('[4580] the same value from another runtime is not it: its summary stays in the command box', async () => {
+    const net = () => container.querySelector('[data-testid="agent-permission-net"]');
+    fetchWithAuth.mockResolvedValue(answer([req({ runtime: 'codex', tool: 'SandboxNetwork', summary: 'gitlab.com' })]));
+    await render();
+    expect(net()).toBeNull();
+    expect([...container.querySelectorAll('p.font-mono')].map((e) => e.textContent)).toContain('gitlab.com');
+  });
 });
