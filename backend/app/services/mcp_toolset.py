@@ -574,6 +574,19 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_get_publication_insights",
     # 콘텐츠 규칙 읽기(story #3769) — "content_rule" 키워드로 "content" 그룹.
     "sprintable_get_content_rules",
+    # 채널 · 사이트 글(story #4581) — 이름의 "channel_post" · "site_post" · "channel_connection"이 _GROUP_KEYWORDS
+    # "content"에 걸린다(새 키워드 0).
+    "sprintable_create_channel_post_draft",
+    "sprintable_submit_channel_post_draft",
+    "sprintable_get_channel_post_publication",
+    "sprintable_list_channel_connections",
+    "sprintable_get_my_channel_connection_status",
+    "sprintable_attach_channel_post_image",
+    "sprintable_get_channel_post_video_upload_url",
+    "sprintable_confirm_channel_post_video",
+    "sprintable_create_site_post_draft",
+    "sprintable_submit_site_post_draft",
+    "sprintable_get_site_post_publication",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.

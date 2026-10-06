@@ -8,6 +8,8 @@ tools/decisions.py 등 참고). `client.org_id`는 매 요청 헤더에 실리�
 경로 조립에도 직접 쓸 수 있다(SprintableClient.request 참고, URL은 그대로 f-string)."""
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from mcp.types import TextContent
 
 from ..api_client import as_list, client
@@ -149,5 +151,147 @@ async def get_publication_insights(args: GetPublicationInsightsInput) -> list[Te
             "delta_unavailable_reason": reason,
             "superseded_snapshots": superseded_count,
         })
+    except Exception as exc:
+        return err(exc)
+
+
+# story #4581(E-DESKTOP-2 · 1선, 페드루 PO 判定 2026-10-06 08:59Z) — 런처의 sprintable-channel
+# 플러그인에만 있던 채널 글 도구를 호스티드 MCP로 올린다. 데스크톱 앱 세션은 이 서버를
+# `sprintable-desktop`으로 대리해 쓰므로(브리지), 여기 올리면 앱으로 옮긴 에이전트도 같은
+# 도구를 갖고 런처 쪽도 한 출처가 된다. 판정 로직은 0 — 플러그인(0.9.20 connectors/
+# channel-posts.ts · channel-connection-status.ts)이 부르던 같은 REST를 같은 body로 부르고,
+# 거절(조직 · 권한 · 연결 상태 · 길이 · 게이트)은 BE가 낸 그대로 err()로 돌려준다.
+# 영상은 「올림 주소 → 바이트 PUT → 확인」 두 단계만(호스티드 프로세스는 에이전트의 로컬
+# 파일을 못 읽는다 — 플러그인의 원격 런타임용 두 단계 도구와 같은 모양).
+
+
+class CreateChannelPostDraftInput(SprintableInput):
+    work_item_id: str
+    connection_id: str
+    text: str
+    link_url: str | None = None
+    hook_key: str | None = None
+
+
+async def create_channel_post_draft(args: CreateChannelPostDraftInput) -> list[TextContent]:
+    """작업(work item) 하나에 붙는 채널 글 초안을 만들거나(첫 호출) 새 버전으로 고친다(다시 부름)."""
+    try:
+        result = await client.post(
+            f"/api/v2/organizations/{client.org_id}/channel-posts/drafts",
+            json={"work_item_id": args.work_item_id, "connection_id": args.connection_id, "text": args.text,
+                  "link_url": args.link_url, "hook_key": args.hook_key},
+        )
+        return ok(result)
+    except Exception as exc:
+        return err(exc)
+
+
+class SubmitChannelPostDraftInput(SprintableInput):
+    draft_id: str
+    version_id: str | None = None
+
+
+async def submit_channel_post_draft(args: SubmitChannelPostDraftInput) -> list[TextContent]:
+    """초안 버전(생략=최신)을 external_publish 게이트에 올려 사람 승인을 받는다 — 발행은 승인 뒤 서버가 한다."""
+    try:
+        result = await client.post(
+            f"/api/v2/organizations/{client.org_id}/channel-posts/drafts/{args.draft_id}/submit",
+            json={"version_id": args.version_id},
+        )
+        return ok(result)
+    except Exception as exc:
+        return err(exc)
+
+
+class GetChannelPostPublicationInput(SprintableInput):
+    draft_id: str
+
+
+async def get_channel_post_publication(args: GetChannelPostPublicationInput) -> list[TextContent]:
+    """채널 글 초안 하나 — 상태 · 발행 결과(퍼머링크 등)를 서버가 준 그대로."""
+    try:
+        result = await client.get(f"/api/v2/organizations/{client.org_id}/channel-posts/drafts/{args.draft_id}")
+        return ok(result)
+    except Exception as exc:
+        return err(exc)
+
+
+class ListChannelConnectionsInput(SprintableInput):
+    pass
+
+
+async def list_channel_connections(args: ListChannelConnectionsInput) -> list[TextContent]:
+    """이 조직의 채널 연결 중 에이전트가 쓸 수 있는 것(id · 채널 · 계정 이름 · 상태) — 자격 값은 없다."""
+    try:
+        result = await client.get(f"/api/v2/organizations/{client.org_id}/channel-connections/agent-visible")
+        return ok(as_list(result))
+    except Exception as exc:
+        return err(exc)
+
+
+class GetMyChannelConnectionStatusInput(SprintableInput):
+    work_item_type: str
+    work_item_id: str
+
+
+async def get_my_channel_connection_status(args: GetMyChannelConnectionStatusInput) -> list[TextContent]:
+    """작업이 지금 선 레시피 단계에 묶인 채널 연결의 상태(needs_reauth 등) — 발행 전에 한 번."""
+    try:
+        result = await client.get(
+            f"/api/v2/events/work-items/{quote(args.work_item_type, safe='')}/{quote(args.work_item_id, safe='')}/channel-connection",
+        )
+        return ok(result)
+    except Exception as exc:
+        return err(exc)
+
+
+class AttachChannelPostImageInput(SprintableInput):
+    draft_id: str
+    image_base64: str
+    content_type: str
+
+
+async def attach_channel_post_image(args: AttachChannelPostImageInput) -> list[TextContent]:
+    """초안에 이미지 하나(base64)를 붙인다 — 새 초안 버전이 생긴다."""
+    try:
+        result = await client.post(
+            f"/api/v2/organizations/{client.org_id}/channel-posts/drafts/{args.draft_id}/assets/import-image",
+            json={"image_base64": args.image_base64, "content_type": args.content_type},
+        )
+        return ok(result)
+    except Exception as exc:
+        return err(exc)
+
+
+class GetChannelPostVideoUploadUrlInput(SprintableInput):
+    draft_id: str
+    content_type: str
+
+
+async def get_channel_post_video_upload_url(args: GetChannelPostVideoUploadUrlInput) -> list[TextContent]:
+    """영상 1/2단계 — 서명된 올림 주소를 받는다(그 주소로 바이트를 PUT한 뒤 confirm)."""
+    try:
+        result = await client.post(
+            f"/api/v2/organizations/{client.org_id}/channel-posts/drafts/{args.draft_id}/assets/video/upload-url",
+            json={"content_type": args.content_type},
+        )
+        return ok(result)
+    except Exception as exc:
+        return err(exc)
+
+
+class ConfirmChannelPostVideoInput(SprintableInput):
+    draft_id: str
+    object_path: str
+
+
+async def confirm_channel_post_video(args: ConfirmChannelPostVideoInput) -> list[TextContent]:
+    """영상 2/2단계 — 올린 객체를 초안에 붙인다(새 초안 버전)."""
+    try:
+        result = await client.post(
+            f"/api/v2/organizations/{client.org_id}/channel-posts/drafts/{args.draft_id}/assets/video/confirm",
+            json={"object_path": args.object_path},
+        )
+        return ok(result)
     except Exception as exc:
         return err(exc)
