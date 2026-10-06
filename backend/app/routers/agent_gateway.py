@@ -713,75 +713,14 @@ async def agent_stream(
 
             # story #4569 — set when a batch's access recheck failed (the closing line already went out): the stream ends
             _batches_revoked = False
-            # story #4569 (PO 01:14Z) — the seqs this connection has sent and the client has not acked yet. A wake still rescans
-            # from acked_seq (late commits are caught that way), but a pass sends the whole tail now, so a wake that comes before
-            # the ack catches up would send that tail again (measured: 2,400 rows + 3 quick wakes, no ack → 9,620 frames for 2,405
-            # seqs). A seq in here is skipped; one not in here (a late commit) still goes out. Trimmed to > acked on every wake.
-            _sent_unacked: set[int] = set()
-
-            async def _send_batches(after_seq: int, is_backfill: bool):
-                """Every row after `after_seq`, batch after batch, until a batch comes back short — the newest row goes out on
-                this one connect / wake. Before, one batch went out and the next waited for the next wake, so an agent with a
-                long backlog (4543 r2: 2,399 rows) heard a new DM hours late. A batch is still at most `_BACKFILL_LIMIT` rows in
-                seq order; each batch rechecks access first (PO 14:35Z ②); `floor` keeps a seq from going out twice in this
-                pass. The cursor is still the client's ack only."""
-                nonlocal _batches_revoked
-                floor = after_seq
-                while True:
-                    async with async_session_factory() as db:
-                        rows = await _fetch_events(db, agent_id, floor, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
-                    if not rows:
-                        return
-                    _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
-                    if _revoked:
-                        _batches_revoked = True
-                        yield _access_revoked_frame(_revoked)
-                        return
-                    for row in rows:
-                        gseq = row.recipient_seq or 0
-                        if gseq <= floor:
-                            continue
-                        floor = gseq
-                        if gseq not in _sent_unacked:
-                            _sent_unacked.add(gseq)
-                            data = _row_to_payload(row)
-                            _sse = json.dumps({**data, "is_backfill": is_backfill})
-                            # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
-                            yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
-                    if len(rows) < _BACKFILL_LIMIT:
-                        return
-
-            yield "event: heartbeat\ndata: {}\n\n"
-
-            # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
-            # PO 14:35Z ② — the backfill is batches too (it runs once the first heartbeat is read, which can be later)
-            async for _frame in _send_batches(start_seq, is_backfill=True):
-                yield _frame
-            if _batches_revoked:
-                return
-
-            # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
-            # 49fed0a1 AC1: 연결 유지 중 presence를 주기적으로 online 갱신. wake가 잦으면 timeout
-            # heartbeat가 안 떠도(매번 wait_for가 일찍 반환) last_seen이 stale → 거짓 offline 되므로,
-            # 매 iteration 경과를 체크해 _PRESENCE_TICK_INTERVAL마다 throttle write(busy/idle 무관 갱신 보장).
+            # the presence tick's clock (49fed0a1 AC1) — starts before the connect backfill, which can be long now (#4569)
             last_presence_tick = datetime.now(timezone.utc)
 
-            # story c4c72eb1(E-ARCH GCE 이전) PR-A: events.py와 동형 shutdown-aware 종료.
-            while not await request.is_disconnected():
-                # story #4434 (Qadir 4847 ④) — once per heartbeat period (time-based, so a busy stream is checked too, but not
-                # per event): the key revoked or the agent stopped since connecting → one closing line, then the stream ends
-                # (the finally below does the usual cleanup). A reconnect is refused at connect time as before.
-                _revoked = await _recheck_if_older_than(_SSE_HEARTBEAT)
-                if _revoked:
-                    yield _access_revoked_frame(_revoked)
-                    return
-                # story #2128 ①본체: 좀비가 스스로 늘릴 수 없는 유일한 축 — disconnect 감지
-                # 여부와 완전히 무관하게 발동. "완료로 위장" 안 함 — 특별취급 없이 기존
-                # finally: 하나로 그대로 흘러간다(정상종료·이상종료·수명초과 전부 같은 정리
-                # 경로 — presence offline 강등·세션row 삭제 포함, #2161 CAS 원칙의 적용).
-                if time.monotonic() >= _lifespan_deadline:
-                    yield "event: lifespan_reconnect\ndata: {}\n\n"
-                    return
+            async def _presence_tick_if_due() -> None:
+                """The connection's presence / lease tick when it is due (_PRESENCE_TICK_INTERVAL). The outer loop calls it each turn;
+                story #4569 (PO 01:28Z · Qadir ④) — `_send_batches` calls it between batches too, so a long catch-up to a slow reader
+                (a desktop daemon fsyncs + acks each frame: 2,400 × ~40 ms ≈ 96 s) never outlasts the presence / lease TTL (90 s)."""
+                nonlocal last_presence_tick, _heartbeat_armed, _heartbeat_last_observed
                 _now = datetime.now(timezone.utc)
                 if (_now - last_presence_tick).total_seconds() >= _PRESENCE_TICK_INTERVAL:
                     from app.core.config import settings as _settings
@@ -824,6 +763,77 @@ async def agent_stream(
                         if _owns_receiver_slot():
                             await sse_lease.refresh(f"perkey:{agent_id_str}", _pk_member)
                     last_presence_tick = _now
+
+            # story #4569 (PO 01:14Z) — the seqs this connection has sent and the client has not acked yet. A wake still rescans
+            # from acked_seq (late commits are caught that way), but a pass sends the whole tail now, so a wake that comes before
+            # the ack catches up would send that tail again (measured: 2,400 rows + 3 quick wakes, no ack → 9,620 frames for 2,405
+            # seqs). A seq in here is skipped; one not in here (a late commit) still goes out. Trimmed to > acked on every wake.
+            _sent_unacked: set[int] = set()
+
+            async def _send_batches(after_seq: int, is_backfill: bool):
+                """Every row after `after_seq`, batch after batch, until a batch comes back short — the newest row goes out on
+                this one connect / wake. Before, one batch went out and the next waited for the next wake, so an agent with a
+                long backlog (4543 r2: 2,399 rows) heard a new DM hours late. A batch is still at most `_BACKFILL_LIMIT` rows in
+                seq order; each batch rechecks access first (PO 14:35Z ②); `floor` keeps a seq from going out twice in this
+                pass. The cursor is still the client's ack only."""
+                nonlocal _batches_revoked
+                floor = after_seq
+                while True:
+                    async with async_session_factory() as db:
+                        rows = await _fetch_events(db, agent_id, floor, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
+                    if not rows:
+                        return
+                    _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
+                    if _revoked:
+                        _batches_revoked = True
+                        yield _access_revoked_frame(_revoked)
+                        return
+                    for row in rows:
+                        gseq = row.recipient_seq or 0
+                        if gseq <= floor:
+                            continue
+                        floor = gseq
+                        if gseq not in _sent_unacked:
+                            _sent_unacked.add(gseq)
+                            data = _row_to_payload(row)
+                            _sse = json.dumps({**data, "is_backfill": is_backfill})
+                            # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
+                            yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
+                    await _presence_tick_if_due()  # between batches too (PO 01:28Z) — a long catch-up keeps presence / lease fresh
+                    if len(rows) < _BACKFILL_LIMIT:
+                        return
+
+            yield "event: heartbeat\ndata: {}\n\n"
+
+            # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
+            # PO 14:35Z ② — the backfill is batches too (it runs once the first heartbeat is read, which can be later)
+            async for _frame in _send_batches(start_seq, is_backfill=True):
+                yield _frame
+            if _batches_revoked:
+                return
+
+            # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
+            # 49fed0a1 AC1: 연결 유지 중 presence를 주기적으로 online 갱신. wake가 잦으면 timeout
+            # heartbeat가 안 떠도(매번 wait_for가 일찍 반환) last_seen이 stale → 거짓 offline 되므로,
+            # 매 iteration 경과를 체크해 _PRESENCE_TICK_INTERVAL마다 throttle write(busy/idle 무관 갱신 보장).
+
+            # story c4c72eb1(E-ARCH GCE 이전) PR-A: events.py와 동형 shutdown-aware 종료.
+            while not await request.is_disconnected():
+                # story #4434 (Qadir 4847 ④) — once per heartbeat period (time-based, so a busy stream is checked too, but not
+                # per event): the key revoked or the agent stopped since connecting → one closing line, then the stream ends
+                # (the finally below does the usual cleanup). A reconnect is refused at connect time as before.
+                _revoked = await _recheck_if_older_than(_SSE_HEARTBEAT)
+                if _revoked:
+                    yield _access_revoked_frame(_revoked)
+                    return
+                # story #2128 ①본체: 좀비가 스스로 늘릴 수 없는 유일한 축 — disconnect 감지
+                # 여부와 완전히 무관하게 발동. "완료로 위장" 안 함 — 특별취급 없이 기존
+                # finally: 하나로 그대로 흘러간다(정상종료·이상종료·수명초과 전부 같은 정리
+                # 경로 — presence offline 강등·세션row 삭제 포함, #2161 CAS 원칙의 적용).
+                if time.monotonic() >= _lifespan_deadline:
+                    yield "event: lifespan_reconnect\ndata: {}\n\n"
+                    return
+                await _presence_tick_if_due()
                 get_task = asyncio.create_task(queue.get())
                 shutdown_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
                 try:

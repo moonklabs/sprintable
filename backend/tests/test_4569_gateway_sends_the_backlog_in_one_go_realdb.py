@@ -311,3 +311,42 @@ async def test_a_new_connection_starts_again_from_the_ack(world, monkeypatch):
             shutdown_module.reset_shutdown_event()
     for frames in passes:
         _assert_all_went_out_once_in_order(frames, message_seq)
+
+
+async def test_a_long_catch_up_to_a_slow_reader_keeps_presence_and_lease_fresh(world, monkeypatch):
+    """PO 01:28Z · Qadir ④ — a pass runs to the end before the outer loop turns, and a desktop daemon reads one frame at a time
+    (fsync + ack each: 2,400 × ~40 ms ≈ 96 s > the 90 s presence / lease TTL). The connection's tick (presence + lease refresh) runs
+    between batches too. Here the tick is due every 0.5 s and the reader takes 2 ms a frame (2,401 frames ≥ 4.8 s): the lease is
+    refreshed several times while the pass is still going (without the between-batch tick: not once — the outer loop is not
+    reached until the pass ends)."""
+    import app.routers.agent_gateway as ag
+    from app.core import shutdown as shutdown_module
+    from app.services import sse_lease
+
+    _quiet_stream_side_effects(monkeypatch)
+    monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 30.0)
+    monkeypatch.setattr(ag, "_PRESENCE_TICK_INTERVAL", 0.5)
+    async with _client() as c:
+        _setup_id, agent_id, agen = await _open_setup_stream(c, "d4569 slow reader")
+        try:
+            assert "event: heartbeat" in await agen.__anext__()
+            pending = asyncio.ensure_future(agen.__anext__())
+            for _ in range(20):
+                await asyncio.sleep(0.2)
+                if not pending.done():
+                    break
+                pending = asyncio.ensure_future(agen.__anext__())
+            assert not pending.done()
+            message_seq = await _put_backlog_and_a_message(agent_id)
+            refreshes_before = sse_lease.refresh.await_count
+            frames = [await pending]
+            while "4569 the new message" not in frames[-1]:
+                await asyncio.sleep(0.002)  # the slow reader
+                frames.append(await agen.__anext__())
+            refreshes_during = sse_lease.refresh.await_count - refreshes_before
+        finally:
+            await agen.aclose()
+            ag._agent_connections.clear()
+            shutdown_module.reset_shutdown_event()
+    assert _seq(frames[-1]) == message_seq
+    assert refreshes_during >= 3, f"the lease is refreshed while a long pass goes on: {refreshes_during} refreshes in {len(frames)} frames"
