@@ -269,11 +269,24 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     await read();
     const steps = [...container.querySelectorAll('li[data-state]')] as HTMLElement[];
     expect(steps.map((s) => [s.dataset.state, s.dataset.paused ?? ''])).toEqual([['done', ''], ['running', 'true']]);
+    // Yuna 05:22Z: no «ready» pair for an agent that stopped or could not start (here: both → no line under ①)
+    expect(steps[0].textContent).toBe('에이전트를 준비했어요');
     expect(text()).toContain('까디르 QA를 시작하지 못했어요');
     expect(text()).toContain('댄 어윈이 멈췄어요');
     const n = calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(calls.length).toBe(n); // settled: no more reading
+  });
+
+  it('one connected, one could not start → ① lists only the connected one · the failed one in its own block', async () => {
+    statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }],
+      agents_start_failed: [{ member_id: 'm-kad', at: '2026-10-06T04:41:00Z', reason: 'runtime_missing', code: null, runtime: 'codex', limit: null, first_member_id: null }] });
+    stub(() => new Response('{}'));
+    await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+    await read();
+    const steps = [...container.querySelectorAll('li[data-state]')] as HTMLElement[];
+    expect(steps[0].textContent).toBe('에이전트를 준비했어요댄 어윈 · Claude Code');
+    expect(text()).toContain('까디르 QA를 시작하지 못했어요');
   });
 
   it('a recipe setup (setup_kind recipe · or none from an older server) keeps the three steps', async () => {
