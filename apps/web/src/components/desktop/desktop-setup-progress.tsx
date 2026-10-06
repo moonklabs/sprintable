@@ -268,7 +268,8 @@ function MoveProgressBody({ move, onRetry, todayHref }: { move: MoveProgress; on
         </Step>
         {/* Yuna 05:20Z: in a move what is left after ① is the connection — «… 아직 준비하고 있어요» is ②'s line, never under ①'s check */}
         <Step state={connectShown} paused={move.connectPaused} label={connectShown === 'done' ? t('move.stepConnectDone') : connectShown === 'waiting' ? t('move.stepConnectWaiting') : t('move.stepConnectRunning')}
-          detail={move.stillPreparing.length ? (() => { const g = group(move.stillPreparing); return t('stillPreparingBare', { roles: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })() : null}
+          // Yuna 05:39Z: ②'s own word — «아직 연결하고 있어요», never «준비» for a name ① just called ready
+          detail={move.stillPreparing.length ? (() => { const g = group(move.stillPreparing); return t('move.stillConnecting', { names: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })() : null}
           detailTestId={move.stillPreparing.length ? 'setup-still-preparing' : undefined} />
       </ol>
       {move.startFailed.length > 0 ? (

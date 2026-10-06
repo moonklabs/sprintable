@@ -664,7 +664,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             })}
           </ul>
           )}
-          <p className="mt-2 text-xs text-muted-foreground">{t('move.folderNote')}</p>
+          {/* Yuna 05:39Z: with nothing to move the folder line says nothing true */}
+          {anyMovable ? <p className="mt-2 text-xs text-muted-foreground">{t('move.folderNote')}</p> : null}
         </section>
       ) : (
         <>

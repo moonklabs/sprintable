@@ -109,6 +109,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(container.querySelector('[data-testid=setup-move-empty]')).toBeNull();
     expect(startRowLine()).toBe('옮길 수 있는 에이전트가 없어요');
     expect(button('옮기기')!.disabled).toBe(true);
+    expect(text()).not.toContain('작업 폴더는 옮긴 뒤');
   });
 
   it('a runtime not found here → that row off with why («{runtime}이 이 컴퓨터에 없어요»)', async () => {
@@ -218,6 +219,7 @@ describe('[SID:4576] the move refused', () => {
     expect(button('시작')).toBeUndefined();
     expect(button('옮기기')!.disabled).toBe(true);
     expect(startRowLine()).toBe('옮길 수 있는 에이전트가 없어요');
+    expect(text()).not.toContain('작업 폴더는 옮긴 뒤'); // Yuna 05:39Z: no folder line when nothing can move
   });
 
   it('Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out and comes back is not ticked by itself', async () => {
@@ -289,7 +291,7 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     expect(text()).toContain('이제 이 컴퓨터에서 일해요 — 다음 일감은 평소처럼 받아요');
   });
 
-  it('one connected, one still on its way → ① done with the pairs · ② running with «{이름}은 아직 준비하고 있어요» · the leaving line', async () => {
+  it('one connected, one still on its way → ① done with the pairs · ② running with «{이름}은 아직 연결하고 있어요» · the leaving line', async () => {
     statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }] });
     stub(() => new Response('{}'));
     await mount(<SetupProgressView setupId="s-1" recipeName="" />);
@@ -297,7 +299,7 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     // Yuna 05:20Z: ① is done (the app took them over, «{이름} · {런타임}»); the agent still on its way is ②'s line
     const steps = [...container.querySelectorAll('li[data-state]')] as HTMLElement[];
     expect(steps[0].textContent).toBe('에이전트를 준비했어요댄 어윈 · Claude Code, 까디르 QA · Codex');
-    expect(steps[1].querySelector('[data-testid=setup-still-preparing]')?.textContent).toBe('까디르 QA는 아직 준비하고 있어요');
+    expect(steps[1].querySelector('[data-testid=setup-still-preparing]')?.textContent).toBe('까디르 QA는 아직 연결하고 있어요'); // Yuna 05:39Z: ②'s word
     expect(steps[0].querySelector('[data-testid=setup-still-preparing]')).toBeNull();
     expect(text()).toContain('Sprintable에 연결하고 있어요');
     expect(text()).toContain('떠나도 옮기기는 이 컴퓨터에서 이어져요.');

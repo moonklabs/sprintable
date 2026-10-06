@@ -6903,6 +6903,7 @@
         "stepConnectRunning": "Connecting to Sprintable",
         "stepConnectWaiting": "Connects to Sprintable",
         "stepConnectDone": "Connected to Sprintable",
+        "stillConnecting": "{count, plural, one {{names} is still connecting} other {{names} are still connecting}}",
         "doneNote": "They work on this computer now — new work reaches them as usual",
         "runningNote": "If you leave, the move carries on on this computer.",
         "failureNotAdminTitle": "You need to be an organization admin to move agents",

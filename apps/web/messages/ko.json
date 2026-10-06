@@ -6903,6 +6903,7 @@
         "stepConnectRunning": "Sprintable에 연결하고 있어요",
         "stepConnectWaiting": "Sprintable에 연결해요",
         "stepConnectDone": "Sprintable에 연결했어요",
+        "stillConnecting": "{names}{josa} 아직 연결하고 있어요",
         "doneNote": "이제 이 컴퓨터에서 일해요 — 다음 일감은 평소처럼 받아요",
         "runningNote": "떠나도 옮기기는 이 컴퓨터에서 이어져요.",
         "failureNotAdminTitle": "에이전트를 옮기려면 조직 관리자여야 해요",
