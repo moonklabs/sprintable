@@ -13,7 +13,7 @@ import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
-import { endsWithAgentWord, forgetActiveSetup, rememberActiveSetup, setupPollDelayMs, setupProgress, stepsShown, SETUP_STATUS_POLL_MS, type DesktopRuntime, type SetupStatus, type StepShown } from '@/lib/desktop-setup';
+import { endsWithAgentWord, forgetActiveSetup, moveProgress, rememberActiveSetup, setupPollDelayMs, setupProgress, stepsShown, SETUP_STATUS_POLL_MS, type DesktopRuntime, type MoveProgress, type SetupStatus, type StepShown } from '@/lib/desktop-setup';
 import { Failure, ToolsNotConnected } from './desktop-setup';
 
 /**
@@ -47,7 +47,9 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
       if (n < reads.current.shown) return; // a newer answer is already on the page
       reads.current.shown = n;
       // «설정 진행 중» 표시(문서 열림 셈 · AC2): 흐름이 끝나면 지우고, 아니면 읽을 때마다 새로 적는다(PO 13:00Z)
-      if (s.signals.first_result_at || s.signals.blocked || s.state === 'not_handed_over' || s.state === 'disconnected') forgetActiveSetup();
+      // story #4576: a move has no first result — its flow ends when every agent is settled
+      if (s.signals.first_result_at || s.signals.blocked || s.state === 'not_handed_over' || s.state === 'disconnected'
+        || (s.setup_kind === 'move' && moveProgress(s, Date.now(), null).settled)) forgetActiveSetup();
       else rememberActiveSetup(setupId);
       const at = Date.now();
       setSnap((prev) => ({ status: s, at, handedOverSeenAt: prev?.handedOverSeenAt ?? (s.state === 'handed_over' ? at : null) }));
@@ -56,11 +58,13 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
 
   const status = snap?.status ?? null;
   const progress = snap ? setupProgress(snap.status, snap.at, snap.handedOverSeenAt) : null;
+  // story #4576: a move («이미 있는 에이전트 옮기기») has its own two steps — the server says which (setup_kind)
+  const move = snap && snap.status.setup_kind === 'move' ? moveProgress(snap.status, snap.at, snap.handedOverSeenAt) : null;
   // story 4464 — keep reading until every agent is in (PO 12:04Z: also while a block waits for the person — once they act and the
   // agent connects, the block goes); after 2 minutes of such waiting, every 10 s instead of 2
-  const done = !!progress && progress.settled;
+  const done = move ? move.settled : !!progress && progress.settled;
   useEffect(() => { stopped.current = done; }, [done]);
-  const delay = progress && status ? setupPollDelayMs(progress, status.signals.first_result_at, snap!.at) : SETUP_STATUS_POLL_MS;
+  const delay = progress && status && !move ? setupPollDelayMs(progress, status.signals.first_result_at, snap!.at) : SETUP_STATUS_POLL_MS;
 
   useEffect(() => {
     if (!setupId) return;
@@ -80,6 +84,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   // story 4498 (PO 10:50Z · Yuna 10:51Z): a disconnected setup ends here — whatever the steps had reached before (a result
   // shown before the disconnect is not drawn as «done»: nothing continues), and opened again by its address the same card
   if (progress.disconnected) return <Failure failure="disconnected" todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} />;
+  if (move) return <MoveProgressBody move={move} onRetry={() => void poll()} todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} />;
   if (progress.blocked) return <Failure failure="managed" />;
   if (progress.expired) return <Failure failure="expired" />;
   // the folder-trust question is Claude Code's (Codex does not ask it) — Yuna v24 · PO 11:19Z
@@ -227,6 +232,85 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
           <Button asChild variant="outline"><a href={todayHref}>{t('goToday')}</a></Button>
         </div>
         <p className="text-xs text-muted-foreground">{t('wayOutNote')}</p>
+      </footer>
+    </Card>
+  );
+}
+
+/**
+ * story #4576 (Yuna «② 옮긴 뒤 진행 표시»): a move's two steps — no first task, no result, no [결과 보기]. Agents by their own names
+ * (always the `…Bare` forms: name + particle). A moved agent waiting for its folder is ①'s note (as the trust note), not a failure.
+ */
+function MoveProgressBody({ move, onRetry, todayHref }: { move: MoveProgress; onRetry: () => void; todayHref: string }) {
+  const t = useTranslations('desktop.setup');
+  const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
+  if (move.blocked) return <Failure failure="managed" />;
+  if (move.expired) return <Failure failure="expired" />;
+  const group = (names: string[]) => ({ text: names.join(' · '), last: names.at(-1) ?? '', count: names.length });
+  const done = move.connected === 'done';
+  const [readyShown, connectShown] = move.shown;
+  return (
+    <Card className="break-keep flex flex-col gap-4 p-6" data-testid="setup-move-progress">
+      <header>
+        <p className="text-xs text-muted-foreground">{t('eyebrow')} · {t('move.eyebrowTail')}</p>
+        <h1 className="text-lg font-semibold">{done ? t('move.titleDone') : t('move.titleRunning')}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p>
+      </header>
+      <ol className="flex flex-col gap-3" aria-live="polite">
+        <Step state={readyShown} paused={move.folderWait.length > 0} label={move.ready === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
+          detail={move.pairs.length ? move.pairs.map((p) => `${p.name} · ${RUNTIME[p.runtime]}`).join(', ')
+            : move.stillPreparing.length ? (() => { const g = group(move.stillPreparing); return t('stillPreparingBare', { roles: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })()
+              : null}
+          detailTestId={move.stillPreparing.length ? 'setup-still-preparing' : undefined}>
+          {move.folderWait.length ? (
+            <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-move-folder-wait">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              {(() => { const g = group(move.folderWait); return t('move.folderWait', { names: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })()}
+            </span>
+          ) : null}
+        </Step>
+        <Step state={connectShown} label={connectShown === 'done' ? t('move.stepConnectDone') : connectShown === 'waiting' ? t('move.stepConnectWaiting') : t('move.stepConnectRunning')} detail={null} />
+      </ol>
+      {move.startFailed.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-start-failed">
+          {move.startFailed.map((f) => {
+            const runtime = f.runtime ? RUNTIME[f.runtime] : null;
+            const rt = runtime ? { runtime, eulReul: pickEulReulJosa(runtime), iGa: pickIGaJosa(runtime) } : null;
+            const line = f.line === 'sessionLimit' ? (f.limit ? t('startFailed.sessionLimit', { n: f.limit }) : t('startFailed.sessionLimitNoN'))
+              : f.line === 'runtimeMissing' ? (rt ? t('startFailed.runtimeMissing', rt) : t('startFailed.unknown'))
+              : f.line === 'runtimeDidNotStart' ? (rt ? t('startFailed.runtimeDidNotStart', rt) : t('startFailed.unknown'))
+              : f.line === 'credentials' ? t('startFailed.credentials')
+              : f.line === 'keyUnreadable' ? t('startFailed.keyUnreadable')
+              : f.line === 'notConnected' ? t('startFailed.notConnected')
+              : t('startFailed.unknown');
+            return (
+              <div key={f.memberId} data-testid="setup-agent-start-failed-row" data-line={f.line}>
+                <p>{t('startFailed.titleBare', { role: f.name, josa: pickEulReulJosa(f.name) })}</p>
+                <p className="text-muted-foreground">{line}</p>
+              </div>
+            );
+          })}
+          <p className="text-muted-foreground">{t('startFailed.where')}</p>
+        </div>
+      ) : null}
+      {move.stopped ? (
+        <div className="flex flex-col gap-1 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-stopped">
+          <p>{(() => { const g = group(move.stopped.names); return t('stoppedBare', { roles: g.text, josa: pickIGaJosa(g.last), count: g.count }); })()}</p>
+          {move.stopped.claude ? <p>{t('stoppedTrust')}</p> : null}
+        </div>
+      ) : null}
+      {move.notConnected ? (
+        <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-not-connected">
+          <p>{t('notConnected.blockTitleBare', { roles: move.notConnected.names.join(' · ') })}</p>
+          <p className="text-muted-foreground">{t(move.notConnected.claude ? 'notConnected.bodyClaude' : 'notConnected.bodyOther')}</p>
+          <div><Button variant="outline" size="sm" onClick={onRetry}>{t('notConnected.action')}</Button></div>
+        </div>
+      ) : null}
+      <footer className="flex flex-col gap-1">
+        <div className="flex flex-wrap gap-2" data-testid="setup-way-out">
+          <Button asChild><a href={todayHref}>{t('goToday')}</a></Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{done ? t('move.doneNote') : t('move.runningNote')}</p>
       </footer>
     </Card>
   );
