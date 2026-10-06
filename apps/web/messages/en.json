@@ -6894,6 +6894,8 @@
         "start": "Move",
         "startNote": "Moves {m, plural, one {# agent} other {# agents}} to this computer",
         "noneChosen": "Choose at least one agent to move",
+        "listEmpty": "There are no agents to move — only this organization's agents that work with Claude Code or Codex can be moved. To start with new agents, choose «Start from a recipe» above.",
+        "noneMovable": "No agents can be moved",
         "eyebrowTail": "Move agents",
         "titleRunning": "Moving agents",
         "titleDone": "Agents moved",

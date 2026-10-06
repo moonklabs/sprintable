@@ -558,6 +558,7 @@ export function moveProgress(s: SetupStatus, now: number, handedOverSeenAt: numb
   const past = (Number.isFinite(input) && now - input >= NOT_CONNECTED_AFTER_INPUT_MS)
     || (handedOverSeenAt !== null && now - handedOverSeenAt >= NOT_CONNECTED_AFTER_HANDOVER_MS);
   const late = handedOver && ready === 'done' && pending.length > 0 && past ? pending : [];
+  const lateIds = new Set(late);
   const runtimeOf = (id: string) => agents.find((m) => m.member_id === id)?.runtime ?? null;
   const startFailed: MoveProgress['startFailed'] = [];
   for (const id of ids) {
@@ -566,10 +567,12 @@ export function moveProgress(s: SetupStatus, now: number, handedOverSeenAt: numb
   }
   const end = !!s.signals.blocked || s.state === 'not_handed_over' || s.state === 'disconnected';
   return {
-    settled: end || (handedOver && ids.length > 0 && ids.every((id) => connected.has(id) || failedIds.has(id) || stoppedIds.has(id))),
+    // Kadir 4969 ② · the recipe's 4464 rule: an agent past the threshold that never connected (its «연결되지 않았어요» block shows)
+    // counts as settled — the reading ends instead of spinning forever
+    settled: end || (handedOver && ids.length > 0 && ids.every((id) => connected.has(id) || failedIds.has(id) || stoppedIds.has(id) || lateIds.has(id))),
     ready, connected: connectedStep,
     shown: [ready, ready === 'done' ? connectedStep : 'waiting'],
-    connectPaused: connectedStep !== 'done' && handedOver && ready === 'done' && pending.length === 0,
+    connectPaused: connectedStep !== 'done' && handedOver && ready === 'done' && pending.every((id) => lateIds.has(id)),
     // Yuna 05:22Z: an agent that could not start or stopped is not «ready» — its own block says so; never both side by side
     pairs: ready === 'done' ? ids.filter((id) => !failedIds.has(id) && !stoppedIds.has(id)).map((id) => ({ name: nameOf(id), runtime: runtimeOf(id) })).filter((p): p is { name: string; runtime: DesktopRuntime } => !!p.runtime) : [],
     stillPreparing: ready === 'done' && connectedStep !== 'done' ? pending.filter((id) => !late.includes(id)).map(nameOf) : [],

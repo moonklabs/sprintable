@@ -6894,6 +6894,8 @@
         "start": "옮기기",
         "startNote": "에이전트 {m}개를 이 컴퓨터로 옮겨요",
         "noneChosen": "옮길 에이전트를 하나 이상 골라 주세요",
+        "listEmpty": "옮길 수 있는 에이전트가 없어요 — Claude Code나 Codex로 일하는 이 조직의 에이전트만 옮길 수 있어요. 새 에이전트로 시작하려면 위에서 «레시피로 시작»을 골라 주세요.",
+        "noneMovable": "옮길 수 있는 에이전트가 없어요",
         "eyebrowTail": "에이전트 옮기기",
         "titleRunning": "에이전트를 옮기고 있어요",
         "titleDone": "에이전트를 옮겼어요",

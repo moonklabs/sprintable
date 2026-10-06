@@ -373,6 +373,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         // the contract's one shape ({agents}) — anything else draws no group (never guessed from another field)
         const list = Array.isArray(body?.agents) ? body.agents : [];
         setAttachable(list);
+        // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
+        setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
         setRows((rs) => withAttachable(rs, list, runtimes));
       })
       .catch(() => { if (!off) setAttachable([]); }); // the group is left out — «새로 만들기» still works
@@ -390,10 +392,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const recipe = recipes.find((r) => r.id === recipeId);
   // story #4576 (Yuna): the two ways show only with an organization and at least one agent it could move — a way that cannot be
   // chosen is not shown (an app that cannot move is the exception: the way shows, turned off, with why and what to do)
-  const showKinds = orgMode.kind === 'has-org' && attachable.length > 0;
+  // Kadir 4969 ①: once a person chose «옮기기», the way stays even when the list comes back empty (reload · another project) — the
+  // page never falls through to the recipe page with a recipe already chosen (one press would confirm a recipe)
+  const showKinds = orgMode.kind === 'has-org' && (attachable.length > 0 || setupKind === 'move');
   const moveMode = showKinds && canMove && setupKind === 'move';
   const movable = useMemo(() => moveListOrder(attachable, runtimes), [attachable, runtimes]);
   const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && movableState(a, runtimes) === 'ok'));
+  const anyMovable = movable.some((a) => movableState(a, runtimes) === 'ok');
   const roleName = (role: string) => stageRoleLabel(role, tOrg);
   const humanRoles = useMemo(() => rows.filter((r) => r.owner.kind === 'me').map((r) => stageRoleLabel(r.role, tOrg)), [rows, tOrg]);
   const humanList = humanRoles.join(' · ');
@@ -628,6 +633,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         <section aria-labelledby="setup-move-list" data-testid="setup-move-list">
           <h2 id="setup-move-list" className="text-sm font-medium">{t('move.listTitle')}</h2>
           <p className="text-xs text-muted-foreground">{t('found', { list: runtimes.map((r) => RUNTIME_LABEL[r]).join(' · ') || '—' })}</p>
+          {movable.length === 0 ? (
+            // Yuna 05:28Z: no agent of this organization to move at all — in the list's place, the same bordered box
+            <p className="mt-2 rounded-md border p-3 text-sm text-muted-foreground" data-testid="setup-move-empty">{t('move.listEmpty')}</p>
+          ) : (
           <ul className="mt-2 flex flex-col divide-y rounded-md border">
             {movable.map((a) => {
               const state = movableState(a, runtimes);
@@ -654,6 +663,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               );
             })}
           </ul>
+          )}
           <p className="mt-2 text-xs text-muted-foreground">{t('move.folderNote')}</p>
         </section>
       ) : (
@@ -837,7 +847,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{moveMode ? t('move.start') : t('start')}
         </Button>
         <p className="text-xs text-muted-foreground">
-          {moveMode ? (needsProjectPick ? t('projectPick.reason') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
+          {moveMode ? (needsProjectPick ? t('projectPick.reason') : !anyMovable ? t('move.noneMovable') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
             : noAgentRow ? t('noAgentRow')
             // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
             : needsProjectPick ? t('projectPick.reason')

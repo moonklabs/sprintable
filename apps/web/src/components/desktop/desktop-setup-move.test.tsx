@@ -14,7 +14,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => c
 
 import { DesktopSetup } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
-import { moveConfirmBody, moveListOrder, parseSetupQuery, setupFragment, parseSetupFragment, type AttachableAgent } from '@/lib/desktop-setup';
+import { moveConfirmBody, moveListOrder, moveProgress, parseSetupQuery, setupFragment, parseSetupFragment, NOT_CONNECTED_AFTER_HANDOVER_MS, type AttachableAgent, type SetupStatus } from '@/lib/desktop-setup';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -99,6 +99,16 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(button('옮기기')!.disabled).toBe(true);
     expect(startRowLine()).toBe('옮길 에이전트를 하나 이상 골라 주세요');
     expect(button('시작')).toBeUndefined();
+  });
+
+  it('only rows that cannot move → the start line says none can be moved (each row keeps its why)', async () => {
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await chooseMove();
+    expect(container.querySelector('[data-testid=setup-move-empty]')).toBeNull();
+    expect(startRowLine()).toBe('옮길 수 있는 에이전트가 없어요');
+    expect(button('옮기기')!.disabled).toBe(true);
   });
 
   it('a runtime not found here → that row off with why («{runtime}이 이 컴퓨터에 없어요»)', async () => {
@@ -193,6 +203,38 @@ describe('[SID:4576] the move refused', () => {
       expect(text()).not.toContain('레시피가 달라졌어요');
       expect(text()).toContain(koMessages.desktop.setup.genericError);
     }
+  });
+
+  it('Kadir 4969 ①: the list comes back empty after «달라졌어요» → still the move way (empty box · [옮기기] off · «옮길 수 있는 에이전트가 없어요») — never the recipe page with a recipe chosen', async () => {
+    stub(refuse(404, 'agent_not_found'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await pressMove();
+    agentsNow = () => new Response(JSON.stringify({ agents: [] }), { status: 200 });
+    await act(async () => { button('목록 다시 불러오기')!.click(); });
+    await settle();
+    expect(container.querySelector('[data-testid=setup-move-empty]')?.textContent).toBe(koMessages.desktop.setup.move.listEmpty);
+    expect((container.querySelector('input[name=setup-kind][value=move]') as HTMLInputElement).checked).toBe(true);
+    expect(container.querySelector('[data-testid=setup-recipe-chosen]')).toBeNull();
+    expect(button('시작')).toBeUndefined();
+    expect(button('옮기기')!.disabled).toBe(true);
+    expect(startRowLine()).toBe('옮길 수 있는 에이전트가 없어요');
+  });
+
+  it('Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out and comes back is not ticked by itself', async () => {
+    stub(refuse(404, 'agent_not_found'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await pressMove(); // ticks 댄 어윈 → refused
+    agentsNow = () => new Response(JSON.stringify({ agents: [KADIR] }), { status: 200 });
+    await act(async () => { button('목록 다시 불러오기')!.click(); });
+    await settle();
+    await tick('까디르 QA');
+    await act(async () => { button('옮기기')!.click(); });
+    await settle(); // refused again
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAN, KADIR] }), { status: 200 });
+    await act(async () => { button('목록 다시 불러오기')!.click(); });
+    await settle();
+    const dan = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
+    expect((dan.querySelector('input') as HTMLInputElement).checked).toBe(false);
   });
 
   it('offline → the offline card with the move\'s body («고른 에이전트는 그대로») · «다시 시도» sends the same move again', async () => {
@@ -296,6 +338,21 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     await read();
     expect(container.querySelector('[data-testid=setup-move-progress]')).toBeNull();
     expect(text()).toContain('결과 보기');
+  });
+});
+
+describe('[SID:4576] moveProgress — the late not-connected agent (Kadir 4969 ② · the recipe\'s 4464 rule)', () => {
+  const status = (): SetupStatus => ({ state: 'handed_over', recipe_name: null, work_item_id: null, setup_kind: 'move',
+    members: [{ stage: null, role: null, member_id: 'm-dan', kind: 'agent', runtime: 'claude', name: 'Dan' }],
+    signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null } });
+  it('before the threshold: still reading, ② spinning · past it: the block shows, ② still, the reading ends', () => {
+    const t0 = Date.parse('2026-10-06T05:00:00Z');
+    const early = moveProgress(status(), t0 + 60_000, t0);
+    expect([early.settled, early.connectPaused, early.notConnected]).toEqual([false, false, null]);
+    for (const m of [NOT_CONNECTED_AFTER_HANDOVER_MS, 10 * 60_000, 600 * 60_000]) {
+      const late = moveProgress(status(), t0 + m, t0);
+      expect([late.settled, late.connectPaused, late.notConnected?.names]).toEqual([true, true, ['Dan']]);
+    }
   });
 });
 
