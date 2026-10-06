@@ -105,6 +105,24 @@ async def test_02_one_change_is_versioned_once_and_the_daemon_reads_only_its_own
         assert (await c.get(OWN, headers=_person(OWNER))).status_code == 403  # a person is not a daemon
 
 
+async def test_02b_the_daemon_reads_its_own_name_and_a_rename_at_the_next_read(world):
+    """story #4570: the app names the board row with the agent's own name at every start — never another agent's, and a
+    rename (the 07-31 crew rename) shows at the next read, with no new setup."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4570")
+        agent, other = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+        await _sql(f"UPDATE members SET name = 'Dan Irwin 4570' WHERE id = '{agent}'")
+        await _sql(f"UPDATE members SET name = 'Other 4570' WHERE id = '{other}'")
+
+        own = await c.get(OWN, headers=_key(device))
+        assert own.status_code == 200, own.text
+        assert own.json()["name"] == "Dan Irwin 4570"
+        assert (await c.get(OWN, headers=_key(device, 1))).json()["name"] == "Other 4570"
+
+        await _sql(f"UPDATE members SET name = 'Dan Irwin renamed' WHERE id = '{agent}'")
+        assert (await c.get(OWN, headers=_key(device))).json()["name"] == "Dan Irwin renamed"
+
+
 @pytest.mark.parametrize("model", [
     "opus 4", "opus\"", "'opus'", "-opus", "--dangerously-skip-permissions", "opus[1M]", "opus[1m][1m]", "opus[2m]", "[1m]", "a=b", "a;b", "a" * 65, "", "gpt-5\n",  # a trailing newline: `$` alone would let it through (fullmatch)
 ])
