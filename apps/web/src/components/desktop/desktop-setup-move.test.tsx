@@ -42,8 +42,9 @@ function stub(confirm: () => Response | Promise<Response>) {
     return new Response('{}', { status: 404 });
   }));
 }
-async function mount(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
-  ctx.mockReturnValue({ projectId: 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
+async function mount(node: React.ReactNode, locale: 'ko' | 'en' = 'ko', several = false) {
+  ctx.mockReturnValue({ projectId: several ? undefined : 'p-1', currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }],
+    projectMemberships: several ? [{ projectId: 'p-1', projectName: 'A', orgId: 'o-1' }, { projectId: 'p-2', projectName: 'B', orgId: 'o-1' }] : [] });
   await act(async () => { root.render(<NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>); });
   for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
 }
@@ -163,6 +164,32 @@ describe('[SID:4576] the two ways · the move list', () => {
     await tick('댄 어윈');
     expect(startRowLine()).toBe('Moves 1 agent to this computer');
     expect(button('Move')).toBeDefined();
+  });
+});
+
+describe('[SID:4576] Kadir 4969 (2선) — no switching mid-start · no old ticks into a new project', () => {
+  it('while a start is on its way both ways are locked (an offline retry repeats what was sent)', async () => {
+    stub(() => new Promise<Response>(() => undefined)); // the confirm never answers: «시작 중»
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await act(async () => { button('시작')!.click(); });
+    await settle();
+    const radios = [...container.querySelectorAll('input[name=setup-kind]')] as HTMLInputElement[];
+    expect(radios.map((r) => r.disabled)).toEqual([true, true]);
+  });
+
+  it('changing the project unticks at once — the old project\'s ticks never go with the new project id', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />, 'ko', true);
+    const pick = () => container.querySelector('[data-testid=setup-project-pick] select') as HTMLSelectElement;
+    const choose = async (v: string) => { await act(async () => { const el = pick(); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(el, v); el.dispatchEvent(new Event('change', { bubbles: true })); }); await settle(); };
+    await choose('p-1');
+    await chooseMove();
+    await tick('댄 어윈');
+    expect(startRowLine()).toBe('에이전트 1개를 이 컴퓨터로 옮겨요');
+    await choose('p-2'); // the same agents come back for B
+    const dan = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
+    expect((dan.querySelector('input') as HTMLInputElement).checked).toBe(false);
+    expect(startRowLine()).toBe('옮길 에이전트를 하나 이상 골라 주세요');
   });
 });
 

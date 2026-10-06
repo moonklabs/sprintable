@@ -558,12 +558,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           <h2 id="setup-kind" className="text-sm font-medium">{t('move.kindLabel')}</h2>
           <div role="radiogroup" aria-labelledby="setup-kind" className="mt-2 flex flex-col gap-2">
             <label className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
-              <input type="radio" name="setup-kind" value="recipe" checked={!moveMode} onChange={() => setSetupKind('recipe')} className="mt-1 shrink-0 self-start" />
+              {/* Kadir 4969 (2선): no switching while a start is on its way — an offline [다시 시도] must repeat what was sent */}
+              <input type="radio" name="setup-kind" value="recipe" checked={!moveMode} disabled={view.kind === 'starting'} onChange={() => setSetupKind('recipe')} className="mt-1 shrink-0 self-start" />
               <span><span className="block text-sm font-medium">{t('move.kindRecipe')}</span>
                 <span className="block text-xs text-muted-foreground">{t('move.kindRecipeDesc')}</span></span>
             </label>
             <label className={`flex gap-3 rounded-md border p-3 has-[:checked]:border-primary ${canMove ? 'cursor-pointer' : 'cursor-not-allowed'}`} data-testid="setup-kind-move" data-disabled={canMove ? undefined : 'true'}>
-              <input type="radio" name="setup-kind" value="move" checked={moveMode} disabled={!canMove} onChange={() => setSetupKind('move')} className="mt-1 shrink-0 self-start" />
+              <input type="radio" name="setup-kind" value="move" checked={moveMode} disabled={!canMove || view.kind === 'starting'} onChange={() => setSetupKind('move')} className="mt-1 shrink-0 self-start" />
               <span><span className={`block text-sm font-medium ${canMove ? '' : 'text-muted-foreground'}`}>{t('move.kindMove')}</span>
                 <span className="block text-xs text-muted-foreground" data-testid={canMove ? undefined : 'setup-kind-move-why'}>{canMove ? t('move.kindMoveDesc') : t('move.kindMoveOldApp')}</span></span>
             </label>
@@ -620,7 +621,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       {orgMode.kind === 'has-org' && !projectId && orgProjects.length > 1 ? (
         <label className="flex flex-col gap-1 text-sm font-medium" data-testid="setup-project-pick">{t('projectPick.label')}
           <select className="rounded-md border bg-background px-2 py-1 text-base font-normal lg:text-sm" value={pickedProject}
-            onChange={(e) => setPickedProject(e.target.value)}>
+            // Kadir 4969 (2선): the old project's ticks never ride to the new one — cleared before its list comes
+            onChange={(e) => { setMoving([]); setPickedProject(e.target.value); }}>
             <option value="" disabled>{t('projectPick.placeholder')}</option>
             {orgProjects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}
           </select>
