@@ -350,3 +350,48 @@ async def test_a_long_catch_up_to_a_slow_reader_keeps_presence_and_lease_fresh(w
             shutdown_module.reset_shutdown_event()
     assert _seq(frames[-1]) == message_seq
     assert refreshes_during >= 3, f"the lease is refreshed while a long pass goes on: {refreshes_during} refreshes in {len(frames)} frames"
+
+
+async def test_a_long_catch_up_never_keeps_the_stream_past_its_lifespan(world, monkeypatch):
+    """PO 01:49Z · Qadir ⑤ (#2128 lifespan) — the lifespan is measured between batches too: a catch-up to a slow reader that runs
+    past it ends with lifespan_reconnect before the rest goes out, and the next connection goes on from the ack (nothing lost).
+    Lifespan 1 s (no jitter) · reader 2 ms a frame · 2,401 frames (≥ 4.8 s)."""
+    import app.routers.agent_gateway as ag
+    from app.core import shutdown as shutdown_module
+    from app.dependencies.auth import AuthContext
+
+    _quiet_stream_side_effects(monkeypatch)
+    monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 30.0)
+    async with _client() as c:
+        _setup_id, agent_id, agen = await _open_setup_stream(c, "d4569 lifespan")
+        await agen.aclose()
+        ag._agent_connections.clear()
+        message_seq = await _put_backlog_and_a_message(agent_id)
+        key_id = (await _sql(fetch=f"SELECT id FROM agent_api_keys WHERE team_member_id='{agent_id}' AND revoked_at IS NULL"))[0][0]
+        auth = AuthContext(user_id=agent_id, email=None, claims={"app_metadata": {"api_key_id": str(key_id), "org_id": str(ORG)}})
+        try:
+            monkeypatch.setattr(ag, "_AGENT_SSE_LIFESPAN_SEC", 1.0)
+            monkeypatch.setattr(ag, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0)
+            agen = (await ag.agent_stream(_StreamRequest(), auth=auth)).body_iterator
+            short: list[str] = []
+            try:
+                assert "event: heartbeat" in await agen.__anext__()
+                async for frame in agen:
+                    short.append(frame)
+                    await asyncio.sleep(0.002)  # the slow reader
+            finally:
+                await agen.aclose()
+                ag._agent_connections.clear()
+            monkeypatch.setattr(ag, "_AGENT_SSE_LIFESPAN_SEC", 300.0)
+            agen = (await ag.agent_stream(_StreamRequest(), auth=auth)).body_iterator
+            try:
+                assert "event: heartbeat" in await agen.__anext__()
+                again = await _read_until_idle(agen)
+            finally:
+                await agen.aclose()
+                ag._agent_connections.clear()
+        finally:
+            shutdown_module.reset_shutdown_event()
+    assert short and short[-1].startswith("event: lifespan_reconnect"), f"the pass ends at the lifespan: {short[-1][:60] if short else None}"
+    assert "4569 the new message" not in "".join(short), "the pass stopped before the end of the backlog"
+    _assert_all_went_out_once_in_order(again, message_seq)  # nothing acked → the next connection sends all after the ack

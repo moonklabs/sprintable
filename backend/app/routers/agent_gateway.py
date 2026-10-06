@@ -711,8 +711,9 @@ async def agent_stream(
                 _last_access_check = time.monotonic()
                 return await _stream_access_revoked(_stream_key_id, agent_id)
 
-            # story #4569 — set when a batch's access recheck failed (the closing line already went out): the stream ends
-            _batches_revoked = False
+            # story #4569 — set when a pass ended the stream (access gone, or its lifespan ran out mid-pass): its closing line
+            # already went out, the stream ends
+            _batches_ended = False
             # the presence tick's clock (49fed0a1 AC1) — starts before the connect backfill, which can be long now (#4569)
             last_presence_tick = datetime.now(timezone.utc)
 
@@ -776,7 +777,7 @@ async def agent_stream(
                 long backlog (4543 r2: 2,399 rows) heard a new DM hours late. A batch is still at most `_BACKFILL_LIMIT` rows in
                 seq order; each batch rechecks access first (PO 14:35Z ②); `floor` keeps a seq from going out twice in this
                 pass. The cursor is still the client's ack only."""
-                nonlocal _batches_revoked
+                nonlocal _batches_ended
                 floor = after_seq
                 while True:
                     async with async_session_factory() as db:
@@ -785,7 +786,7 @@ async def agent_stream(
                         return
                     _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
                     if _revoked:
-                        _batches_revoked = True
+                        _batches_ended = True
                         yield _access_revoked_frame(_revoked)
                         return
                     for row in rows:
@@ -802,6 +803,12 @@ async def agent_stream(
                     await _presence_tick_if_due()  # between batches too (PO 01:28Z) — a long catch-up keeps presence / lease fresh
                     if len(rows) < _BACKFILL_LIMIT:
                         return
+                    # #2128 — the lifespan is measured between batches too (PO 01:49Z · Qadir ⑤): a long catch-up to a slow reader never keeps
+                    # the stream past it; the client connects again and goes on from its ack
+                    if time.monotonic() >= _lifespan_deadline:
+                        _batches_ended = True
+                        yield "event: lifespan_reconnect\ndata: {}\n\n"
+                        return
 
             yield "event: heartbeat\ndata: {}\n\n"
 
@@ -809,7 +816,7 @@ async def agent_stream(
             # PO 14:35Z ② — the backfill is batches too (it runs once the first heartbeat is read, which can be later)
             async for _frame in _send_batches(start_seq, is_backfill=True):
                 yield _frame
-            if _batches_revoked:
+            if _batches_ended:
                 return
 
             # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
@@ -869,7 +876,7 @@ async def agent_stream(
                         # PO 14:35Z ② — batches go out only while access holds (rechecked if the last check is 5 s old)
                         async for _frame in _send_batches(scan_from, is_backfill=False):
                             yield _frame
-                        if _batches_revoked:
+                        if _batches_ended:
                             return
                     else:
                         # ë ê±°ì ì§ì  push (AGENT_GATEWAY_V2 ë¯¸ì ì© ê²½ë¡)
