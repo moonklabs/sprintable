@@ -41,6 +41,14 @@ router = APIRouter(prefix="/api/v2/agent", tags=["agent-gateway", "Organization"
 _SSE_HEARTBEAT: float = float(os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
 _BACKFILL_LIMIT: int = int(os.getenv("AGENT_GATEWAY_BACKFILL_LIMIT", "100"))
 
+
+class _SentUnacked(set):
+    """story #4569 — one connection's sent-but-not-acked seqs (see `_send_batches`). `trim(acked)` drops what the client has acked: a
+    wake never rescans below the ack, so those are only memory — its size stays the number not acked yet."""
+
+    def trim(self, acked: int) -> None:
+        self.difference_update([s for s in self if s <= acked])
+
 # 49fed0a1 P1: presence를 실제 SSE 연결에 배선 — online/offline 진실화.
 # SSE dial-out 에이전트(Hermes 등)는 MCP heartbeat를 호출하지 않으므로 연결 lifecycle에서
 # presence(last_seen_at/agent_status)를 직접 갱신해야 "연결 중 online·끊으면 offline"이 진실해진다.
@@ -769,7 +777,7 @@ async def agent_stream(
             # from acked_seq (late commits are caught that way), but a pass sends the whole tail now, so a wake that comes before
             # the ack catches up would send that tail again (measured: 2,400 rows + 3 quick wakes, no ack → 9,620 frames for 2,405
             # seqs). A seq in here is skipped; one not in here (a late commit) still goes out. Trimmed to > acked on every wake.
-            _sent_unacked: set[int] = set()
+            _sent_unacked = _SentUnacked()
 
             async def _send_batches(after_seq: int, is_backfill: bool):
                 """Every row after `after_seq`, batch after batch, until a batch comes back short — the newest row goes out on
@@ -871,7 +879,7 @@ async def agent_stream(
                                 select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
                             )).scalar_one_or_none()
                             scan_from = max(start_seq, cur.acked_seq if cur else 0)
-                        _sent_unacked.difference_update({s for s in _sent_unacked if s <= scan_from})
+                        _sent_unacked.trim(scan_from)
 
                         # PO 14:35Z ② — batches go out only while access holds (rechecked if the last check is 5 s old)
                         async for _frame in _send_batches(scan_from, is_backfill=False):

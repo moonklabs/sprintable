@@ -280,13 +280,27 @@ async def test_a_late_commit_below_what_went_out_still_goes_out(world, monkeypat
     assert sent_second == [hole], f"only the late row goes out, once: {sent_second[:5]}"
 
 
+async def _ack(auth, seq: int) -> None:
+    """The client's ack through the real handler (POST /api/v2/agent/events/ack), as a daemon sends it."""
+    import app.routers.agent_gateway as ag
+    from app.core.database import async_session_factory
+
+    async with async_session_factory() as db:
+        await ag.ack_event(ag.AckRequest(seq=seq), db=db, auth=auth)
+
+
+async def _agent_auth(agent_id: str):
+    from app.dependencies.auth import AuthContext
+
+    key_id = (await _sql(fetch=f"SELECT id FROM agent_api_keys WHERE team_member_id='{agent_id}' AND revoked_at IS NULL"))[0][0]
+    return AuthContext(user_id=agent_id, email=None, claims={"app_metadata": {"api_key_id": str(key_id), "org_id": str(ORG)}})
+
+
 async def test_a_new_connection_starts_again_from_the_ack(world, monkeypatch):
-    """The «already sent» set is per connection: a client that dropped before acking gets everything after its ack again on the
-    next connection (at-least-once — the ack is the only cursor). 2,400 + 1 go out unacked, the stream ends, the same key connects
-    again → all 2,401 again."""
+    """The «already sent» set is per connection and the ack is the only cursor: 2,400 + 1 go out, the client acks part of them (the
+    real ack handler), the stream ends, the same key connects again → exactly everything after the ack, once, in order."""
     import app.routers.agent_gateway as ag
     from app.core import shutdown as shutdown_module
-    from app.dependencies.auth import AuthContext
 
     _quiet_stream_side_effects(monkeypatch)
     monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 30.0)
@@ -295,11 +309,11 @@ async def test_a_new_connection_starts_again_from_the_ack(world, monkeypatch):
         await agen.aclose()
         ag._agent_connections.clear()
         message_seq = await _put_backlog_and_a_message(agent_id)
-        key_id = (await _sql(fetch=f"SELECT id FROM agent_api_keys WHERE team_member_id='{agent_id}' AND revoked_at IS NULL"))[0][0]
-        auth = AuthContext(user_id=agent_id, email=None, claims={"app_metadata": {"api_key_id": str(key_id), "org_id": str(ORG)}})
+        auth = await _agent_auth(agent_id)
+        acked = message_seq - 1_000
         passes = []
         try:
-            for _ in range(2):
+            for i in range(2):
                 agen = (await ag.agent_stream(_StreamRequest(), auth=auth)).body_iterator
                 try:
                     assert "event: heartbeat" in await agen.__anext__()
@@ -307,10 +321,83 @@ async def test_a_new_connection_starts_again_from_the_ack(world, monkeypatch):
                 finally:
                     await agen.aclose()
                     ag._agent_connections.clear()
+                if i == 0:
+                    await _ack(auth, acked)
         finally:
             shutdown_module.reset_shutdown_event()
-    for frames in passes:
-        _assert_all_went_out_once_in_order(frames, message_seq)
+    _assert_all_went_out_once_in_order(passes[0], message_seq)
+    again = [s for s in (_seq(f) for f in passes[1]) if s is not None]
+    assert again == list(range(acked + 1, message_seq + 1)), f"from the ack on, once, in order: {again[:3]} … {again[-3:]}"
+
+
+async def test_an_ack_on_the_same_connection_trims_what_it_keeps_and_a_late_commit_still_goes_out(world, monkeypatch):
+    """Qadir 02:06Z ① — on a wake the sent-but-not-acked set drops what the client acked (its size stays the not-acked count), and a
+    late commit above the ack still goes out once. Seqs top+1..top+100 and top+102..top+250 go out (a hole at top+101), the client
+    acks top+100 (the real handler), the hole is filled, one wake → only the hole goes out, and the set holds nothing ≤ the ack."""
+    import app.routers.agent_gateway as ag
+    from app.core import shutdown as shutdown_module
+
+    made: list = []
+
+    class _Spy(ag._SentUnacked):
+        def __init__(self, *a):
+            super().__init__(*a)
+            made.append(self)
+
+    _quiet_stream_side_effects(monkeypatch)
+    monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 30.0)
+    monkeypatch.setattr(ag, "_SentUnacked", _Spy)
+    async with _client() as c:
+        _setup_id, agent_id, agen = await _open_setup_stream(c, "d4569 ack trims")
+        auth = await _agent_auth(agent_id)
+        pending = None
+        try:
+            assert "event: heartbeat" in await agen.__anext__()
+            pending = asyncio.ensure_future(agen.__anext__())
+            for _ in range(20):
+                await asyncio.sleep(0.2)
+                if not pending.done():
+                    break
+                pending = asyncio.ensure_future(agen.__anext__())
+            assert not pending.done()
+            top = (await _sql(fetch=f"SELECT last_seq FROM agent_event_seqs WHERE recipient_id='{agent_id}'"))[0][0]
+            hole = top + 101
+            rows = "SELECT gen_random_uuid(), '{p}', '{o}', 'onboarding.connection_test', '{a}', 'agent', '{{\"kind\": \"connection_test\"}}'::jsonb, 'pending', s FROM generate_series({lo}, {hi}) AS s"
+            await _sql(
+                f"UPDATE agent_event_seqs SET last_seq = {top + 250} WHERE recipient_id='{agent_id}'",
+                "INSERT INTO events (id, project_id, org_id, event_type, recipient_id, recipient_type, payload, status, recipient_seq) "
+                + rows.format(p=PROJ, o=ORG, a=agent_id, lo=top + 1, hi=top + 100),
+                "INSERT INTO events (id, project_id, org_id, event_type, recipient_id, recipient_type, payload, status, recipient_seq) "
+                + rows.format(p=PROJ, o=ORG, a=agent_id, lo=top + 102, hi=top + 250),
+            )
+            ag.wake_agent(agent_id, top + 250)
+            first, pending = await _frames_until_idle(agen, pending)
+            assert pending is not None, "the stream is still open"
+            await _ack(auth, top + 100)
+            await _sql(
+                f"""INSERT INTO events (id, project_id, org_id, event_type, recipient_id, recipient_type, payload, status, recipient_seq)
+                    VALUES (gen_random_uuid(), '{PROJ}', '{ORG}', 'conversation.message_created', '{agent_id}', 'agent',
+                            '{{"content": "4569 late after ack"}}'::jsonb, 'pending', {hole})""",
+            )
+            ag.wake_agent(agent_id, hole)
+            second, pending = await _frames_until_idle(agen, pending)
+            assert pending is not None, "the stream is still open"
+            kept = set(made[-1])
+        finally:
+            if pending is not None and not pending.done():
+                pending.cancel()  # the stream takes the cancel as its end
+                try:
+                    await pending
+                except (asyncio.CancelledError, StopAsyncIteration):
+                    pass
+            await agen.aclose()
+            ag._agent_connections.clear()
+            shutdown_module.reset_shutdown_event()
+    sent_first = [s for s in (_seq(f) for f in first) if s is not None]
+    assert sent_first[-1] == top + 250 and hole not in sent_first
+    assert [s for s in (_seq(f) for f in second) if s is not None] == [hole], "only the late row, once"
+    assert not any(s <= top + 100 for s in kept), f"what the client acked is dropped: {sorted(s for s in kept if s <= top + 100)[:5]}"
+    assert kept == set(range(top + 101, top + 251)), "the set holds exactly what went out and is not acked yet"
 
 
 async def test_a_long_catch_up_to_a_slow_reader_keeps_presence_and_lease_fresh(world, monkeypatch):
@@ -358,7 +445,6 @@ async def test_a_long_catch_up_never_keeps_the_stream_past_its_lifespan(world, m
     Lifespan 1 s (no jitter) · reader 2 ms a frame · 2,401 frames (≥ 4.8 s)."""
     import app.routers.agent_gateway as ag
     from app.core import shutdown as shutdown_module
-    from app.dependencies.auth import AuthContext
 
     _quiet_stream_side_effects(monkeypatch)
     monkeypatch.setattr(ag, "_SSE_HEARTBEAT", 30.0)
@@ -367,8 +453,7 @@ async def test_a_long_catch_up_never_keeps_the_stream_past_its_lifespan(world, m
         await agen.aclose()
         ag._agent_connections.clear()
         message_seq = await _put_backlog_and_a_message(agent_id)
-        key_id = (await _sql(fetch=f"SELECT id FROM agent_api_keys WHERE team_member_id='{agent_id}' AND revoked_at IS NULL"))[0][0]
-        auth = AuthContext(user_id=agent_id, email=None, claims={"app_metadata": {"api_key_id": str(key_id), "org_id": str(ORG)}})
+        auth = await _agent_auth(agent_id)
         try:
             monkeypatch.setattr(ag, "_AGENT_SSE_LIFESPAN_SEC", 1.0)
             monkeypatch.setattr(ag, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0)
