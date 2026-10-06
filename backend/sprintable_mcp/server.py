@@ -46,8 +46,16 @@ from .tools.a2a import (
     LinkGateToTaskInput, ListAgentCardsInput, link_gate_to_task, list_agent_cards,
 )
 from .tools.channel_posts import (
-    GetPublicationInsightsInput, WithdrawChannelPostDraftInput,
-    get_publication_insights, withdraw_channel_post_draft,
+    AttachChannelPostImageInput, ConfirmChannelPostVideoInput, CreateChannelPostDraftInput,
+    GetChannelPostPublicationInput, GetChannelPostVideoUploadUrlInput, GetMyChannelConnectionStatusInput,
+    GetPublicationInsightsInput, ListChannelConnectionsInput, SubmitChannelPostDraftInput, WithdrawChannelPostDraftInput,
+    attach_channel_post_image, confirm_channel_post_video, create_channel_post_draft, get_channel_post_publication,
+    get_channel_post_video_upload_url, get_my_channel_connection_status, get_publication_insights,
+    list_channel_connections, submit_channel_post_draft, withdraw_channel_post_draft,
+)
+from .tools.site_posts import (
+    CreateSitePostDraftInput, GetSitePostPublicationInput, SubmitSitePostDraftInput,
+    create_site_post_draft, get_site_post_publication, submit_site_post_draft,
 )
 from .tools.content_rules import GetContentRulesInput, get_content_rules
 from .tools.watches import ListWatchesInput, UnwatchInput, WatchInput, list_watches, unwatch, watch
@@ -1132,6 +1140,48 @@ _TOOL_DEFS: list[tuple] = [
      "게이트는 사유 「작성자가 폐기」로 rejected 종결, 이미 발행된 초안은 409(발행 취소는 "
      "별도 unpublish 경로). 이미 폐기된 초안 재호출은 멱등.",
      WithdrawChannelPostDraftInput, withdraw_channel_post_draft),
+    # 채널 · 사이트 글 도구 — story #4581(2026-10-06): 런처의 sprintable-channel 플러그인에만 있던 것을
+    # 호스티드로(앱 세션은 sprintable-desktop 대리로 같은 도구를 얻는다). 발행 자체는 없다 — 초안 · 게이트
+    # 상신 · 결과 읽기까지(실 발행은 사람 승인 뒤 서버 몫).
+    ("sprintable_create_channel_post_draft",
+     "[일감] 작업(work_item_id)에 붙는 채널 글 초안을 만들거나(첫 호출) 새 버전으로 고친다(같은 작업 · "
+     "연결로 다시 부름). connection_id는 sprintable_list_channel_connections에서. 연결이 비활성이면 409 "
+     "CHANNEL_CONNECTION_NOT_ACTIVE · 글이 채널 한도를 넘으면 422 CHANNEL_TEXT_TOO_LONG(그대로 돌려줌).",
+     CreateChannelPostDraftInput, create_channel_post_draft),
+    ("sprintable_submit_channel_post_draft",
+     "[일감] 채널 글 초안 버전(version_id 생략=최신)을 external_publish 게이트에 올려 사람 승인을 받는다 — "
+     "승인 뒤 발행은 서버가 한다. 승인 역할 없음 · 다른 초안이 게이트를 쥠 · 콘텐츠 규칙 위반은 BE 거절 그대로.",
+     SubmitChannelPostDraftInput, submit_channel_post_draft),
+    ("sprintable_get_channel_post_publication",
+     "[일감] 채널 글 초안 하나 — 상태 · 버전 · 발행 결과(퍼머링크 등)를 서버가 준 그대로 읽는다.",
+     GetChannelPostPublicationInput, get_channel_post_publication),
+    ("sprintable_list_channel_connections",
+     "[일감] 이 조직의 채널 연결 중 에이전트가 쓸 수 있는 것(id · 채널 · 계정 이름 · 상태). 자격 값은 없다.",
+     ListChannelConnectionsInput, list_channel_connections),
+    ("sprintable_get_my_channel_connection_status",
+     "[일감] 작업(work_item_type · work_item_id)이 지금 선 레시피 단계에 묶인 채널 연결의 상태(needs_reauth "
+     "등) — 발행 단계에서 한 번. needs_reauth면 발행하지 말고 사람에게 재연결을 부탁할 것.",
+     GetMyChannelConnectionStatusInput, get_my_channel_connection_status),
+    ("sprintable_attach_channel_post_image",
+     "[일감] 채널 글 초안에 이미지 하나(image_base64 · content_type)를 붙인다 — 새 초안 버전이 생긴다.",
+     AttachChannelPostImageInput, attach_channel_post_image),
+    ("sprintable_get_channel_post_video_upload_url",
+     "[일감] 채널 글 초안 영상 1/2단계 — 서명된 올림 주소(upload_url · object_path · 필요한 PUT 헤더)를 받는다. "
+     "그 주소로 영상 바이트를 PUT한 뒤 sprintable_confirm_channel_post_video.",
+     GetChannelPostVideoUploadUrlInput, get_channel_post_video_upload_url),
+    ("sprintable_confirm_channel_post_video",
+     "[일감] 채널 글 초안 영상 2/2단계 — 올린 객체(object_path)를 초안에 붙인다(새 초안 버전).",
+     ConfirmChannelPostVideoInput, confirm_channel_post_video),
+    ("sprintable_create_site_post_draft",
+     "[일감] 작업에 붙는 사이트 글(블로그) 초안을 만들거나 새 버전으로 고친다(title · slug · lang · summary · "
+     "body_md 필수 · tags · media_manifest 선택). campaign_id · connection_id는 준 것만 싣는다(안 주면 이전 값 유지).",
+     CreateSitePostDraftInput, create_site_post_draft),
+    ("sprintable_submit_site_post_draft",
+     "[일감] 사이트 글 초안 버전(version_id 생략=최신)을 external_publish 게이트에 올린다 — 승인 뒤 발행은 서버 몫.",
+     SubmitSitePostDraftInput, submit_site_post_draft),
+    ("sprintable_get_site_post_publication",
+     "[일감] 사이트 글 초안의 발행 결과(호스티드 사이트 발행 정보)를 서버가 준 그대로 읽는다.",
+     GetSitePostPublicationInput, get_site_post_publication),
     # 발행물 1일·7일 인사이트 — story #3651(2026-09-07). 블루프린트 §7 Phase 2 AC
     # 「1일·7일 성과를 비교해 후속 스토리를 만든다」의 에이전트 몫(스토리 생성 자체는
     # 기존 sprintable_add_story).

@@ -128,6 +128,18 @@ EXPECTED_TOOLS = {
     # 콘텐츠 규칙 읽기 (1) — story #3769: content_rules.py docstring이 약속한 「에이전트가
     # GET으로 읽는」 길의 MCP 표면(BE 신설 0, 기존 GET 둘 병합).
     "sprintable_get_content_rules",
+    # 채널 · 사이트 글 (11) — story #4581: 런처 플러그인에만 있던 초안 · 상신 · 결과 · 연결 · 첨부 도구를 호스티드로.
+    "sprintable_create_channel_post_draft",
+    "sprintable_submit_channel_post_draft",
+    "sprintable_get_channel_post_publication",
+    "sprintable_list_channel_connections",
+    "sprintable_get_my_channel_connection_status",
+    "sprintable_attach_channel_post_image",
+    "sprintable_get_channel_post_video_upload_url",
+    "sprintable_confirm_channel_post_video",
+    "sprintable_create_site_post_draft",
+    "sprintable_submit_site_post_draft",
+    "sprintable_get_site_post_publication",
     # smoke
     "ping",
 }
@@ -159,7 +171,7 @@ def test_total_tool_count():
     # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127. story #3769:
     # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128. story #4430:
     # sprintable_list_user_blocks · sprintable_remove_user_block 2종 신설(에이전트 자기 차단 목록) — 128→130.
-    assert len(_TOOLS) == 133  # story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    assert len(_TOOLS) == 144  # story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():

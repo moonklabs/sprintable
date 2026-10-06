@@ -30,6 +30,8 @@ INPUT_OVERRIDES: dict[str, dict[str, typing.Any]] = {
     # attachments는 {content_base64, name, content_type} 구조 검증 + 별도 업로드 경로 — 대조 대상(본문 필드)과 무관
     "sprintable_update_doc": {"attachments": None},
     "sprintable_send_chat_message": {"attachments": None},
+    # story #4581: media_manifest is a list of objects the server validates (site_posts.py) — an empty list stands for it · lang has min_length 2
+    "sprintable_create_site_post_draft": {"media_manifest": [], "lang": "ko"},
     # image_base64 · image_path 중 정확히 하나
     "sprintable_import_image_artifact": {"image_path": None, "image_base64": "iVBORw0KGgo="},
     # type 거름은 서버 미지원이라 도구가 스스로 막는다(조용한 전체 읽음 처리 방지 — 이 가드와 같은 취지의 선례)

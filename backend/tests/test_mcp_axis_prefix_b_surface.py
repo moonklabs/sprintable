@@ -89,6 +89,6 @@ def test_tool_names_and_param_models_untouched():
     story #4430: sprintable_list_user_blocks · sprintable_remove_user_block 2종 신설([조직] 축 — 에이전트
     자기 차단 목록) — 127→129.
     story #4536: sprintable_watch · sprintable_unwatch · sprintable_list_watches 3종 신설([일감] 축 — 서버에 사는
-    감시) — 129→132."""
-    assert len(_TOOL_DEFS) == 132
+    감시) — 129→132. story #4581: 채널 · 사이트 글 11종 — 132→143."""
+    assert len(_TOOL_DEFS) == 143
     assert all(name.startswith("sprintable_") for name in _TOOLS)

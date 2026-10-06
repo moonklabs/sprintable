@@ -59,7 +59,7 @@ export const TEMP_TOOLSET_CATALOG: ToolsetCatalog = {
     { key: 'events', is_core: false, is_destructive: false, tools: ['sprintable_publish_event', 'sprintable_list_event_definitions'] },
     // story #3631 — mcp_toolset.py에 "content" 그룹 신설(콘텐츠/채널 도구, #3614
     // sprintable_withdraw_channel_post_draft가 첫 멤버). 위 #2661과 동일 이유로 여기도 반영.
-    { key: 'content', is_core: false, is_destructive: false, tools: ['sprintable_withdraw_channel_post_draft'] },
+    { key: 'content', is_core: false, is_destructive: false, tools: ['sprintable_withdraw_channel_post_draft', 'sprintable_create_channel_post_draft', 'sprintable_submit_channel_post_draft', 'sprintable_get_channel_post_publication', 'sprintable_list_channel_connections', 'sprintable_get_my_channel_connection_status', 'sprintable_attach_channel_post_image', 'sprintable_get_channel_post_video_upload_url', 'sprintable_confirm_channel_post_video', 'sprintable_create_site_post_draft', 'sprintable_submit_site_post_draft', 'sprintable_get_site_post_publication'] },
     { key: 'admin', is_core: false, is_destructive: true, tools: ['sprintable_delete_sprint', 'sprintable_close_sprint', 'sprintable_give_reward', 'sprintable_upsert_webhook_config', 'sprintable_activate_sprint'] },
   ],
 };
