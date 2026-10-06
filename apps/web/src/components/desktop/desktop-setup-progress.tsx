@@ -258,10 +258,7 @@ function MoveProgressBody({ move, onRetry, todayHref }: { move: MoveProgress; on
       </header>
       <ol className="flex flex-col gap-3" aria-live="polite">
         <Step state={readyShown} paused={move.folderWait.length > 0} label={move.ready === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
-          detail={move.pairs.length ? move.pairs.map((p) => `${p.name} · ${RUNTIME[p.runtime]}`).join(', ')
-            : move.stillPreparing.length ? (() => { const g = group(move.stillPreparing); return t('stillPreparingBare', { roles: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })()
-              : null}
-          detailTestId={move.stillPreparing.length ? 'setup-still-preparing' : undefined}>
+          detail={move.pairs.length ? move.pairs.map((p) => `${p.name} · ${RUNTIME[p.runtime]}`).join(', ') : null}>
           {move.folderWait.length ? (
             <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-move-folder-wait">
               <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -269,7 +266,10 @@ function MoveProgressBody({ move, onRetry, todayHref }: { move: MoveProgress; on
             </span>
           ) : null}
         </Step>
-        <Step state={connectShown} paused={move.connectPaused} label={connectShown === 'done' ? t('move.stepConnectDone') : connectShown === 'waiting' ? t('move.stepConnectWaiting') : t('move.stepConnectRunning')} detail={null} />
+        {/* Yuna 05:20Z: in a move what is left after ① is the connection — «… 아직 준비하고 있어요» is ②'s line, never under ①'s check */}
+        <Step state={connectShown} paused={move.connectPaused} label={connectShown === 'done' ? t('move.stepConnectDone') : connectShown === 'waiting' ? t('move.stepConnectWaiting') : t('move.stepConnectRunning')}
+          detail={move.stillPreparing.length ? (() => { const g = group(move.stillPreparing); return t('stillPreparingBare', { roles: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })() : null}
+          detailTestId={move.stillPreparing.length ? 'setup-still-preparing' : undefined} />
       </ol>
       {move.startFailed.length > 0 ? (
         <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-start-failed">

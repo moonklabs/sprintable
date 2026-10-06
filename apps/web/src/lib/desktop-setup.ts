@@ -527,9 +527,9 @@ export interface MoveProgress {
   shown: [StepShown, StepShown];
   /** ② still: no agent left that could still connect (each stopped or could not start) — a spinner would say «just wait» */
   connectPaused: boolean;
-  /** ① done and every agent connected: «{이름} · {런타임}, …» */
+  /** ① done (the app took every agent over): «{이름} · {런타임}, …» — the judgment table's B4 */
   pairs: { name: string; runtime: DesktopRuntime }[];
-  /** ① done, ② not: the agents not connected yet (not failed · not stopped · not past the threshold) */
+  /** ① done, ② not: the agents not connected yet (not failed · not stopped · not past the threshold) — ②'s own line (Yuna 05:20Z) */
   stillPreparing: string[];
   folderWait: string[];
   startFailed: { memberId: string; name: string; runtime: DesktopRuntime | null; line: StartFailedLine; limit: number | null }[];
@@ -570,7 +570,7 @@ export function moveProgress(s: SetupStatus, now: number, handedOverSeenAt: numb
     ready, connected: connectedStep,
     shown: [ready, ready === 'done' ? connectedStep : 'waiting'],
     connectPaused: connectedStep !== 'done' && handedOver && ready === 'done' && pending.length === 0,
-    pairs: connectedStep === 'done' ? ids.map((id) => ({ name: nameOf(id), runtime: runtimeOf(id) })).filter((p): p is { name: string; runtime: DesktopRuntime } => !!p.runtime) : [],
+    pairs: ready === 'done' ? ids.map((id) => ({ name: nameOf(id), runtime: runtimeOf(id) })).filter((p): p is { name: string; runtime: DesktopRuntime } => !!p.runtime) : [],
     stillPreparing: ready === 'done' && connectedStep !== 'done' ? pending.filter((id) => !late.includes(id)).map(nameOf) : [],
     folderWait: ids.filter((id) => waitIds.has(id)).map(nameOf),
     startFailed,
