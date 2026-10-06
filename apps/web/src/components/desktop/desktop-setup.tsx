@@ -632,20 +632,24 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             {movable.map((a) => {
               const state = movableState(a, runtimes);
               const on = state === 'ok' && moving.includes(a.id);
+              // move.rowNotInProject says the same as the select's existingNotInProject (4565) without the name — change one, change both
+              // (kept two keys: the en select line starts lower-case after «{name} · »)
               const second = state === 'not-in-project' ? t('move.rowNotInProject')
                 : state === 'runtime-missing' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
                   : t('onThisComputer', { runtime: RUNTIME_LABEL[a.runtime] });
               return (
                 <li key={a.id} className="p-3" data-testid="setup-move-row" data-state={state}>
-                  <label className={`flex gap-3 ${state === 'ok' ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                    <input type="checkbox" checked={on} disabled={state !== 'ok'} onChange={(e) => toggleMove(a.id, e.target.checked)} className="mt-1 shrink-0 self-start" />
-                    <span className="min-w-0 break-keep">
-                      <span className={`block text-sm font-medium ${state === 'ok' ? '' : 'text-muted-foreground'}`}>{a.name}</span>
-                      <span className="block text-xs text-muted-foreground">{second}</span>
-                    </span>
-                  </label>
-                  {/* the 4565 note under a ticked row only (same place, same words) — before the tick nothing is said */}
-                  {on ? <div className="pl-7"><MovedAgentNote agent={a} /></div> : null}
+                  <div className="flex gap-3">
+                    <input type="checkbox" id={`setup-move-${a.id}`} checked={on} disabled={state !== 'ok'} onChange={(e) => toggleMove(a.id, e.target.checked)} className="mt-1 shrink-0 self-start" />
+                    <div className="min-w-0 break-keep">
+                      <label htmlFor={`setup-move-${a.id}`} className={`block ${state === 'ok' ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <span className={`block text-sm font-medium ${state === 'ok' ? '' : 'text-muted-foreground'}`}>{a.name}</span>
+                        <span className="block text-xs text-muted-foreground">{second}</span>
+                      </label>
+                      {/* the 4565 note under a ticked row only (same place, same words — under the name's column) */}
+                      {on ? <MovedAgentNote agent={a} /> : null}
+                    </div>
+                  </div>
                 </li>
               );
             })}
@@ -778,7 +782,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                               const elsewhere = rows.some((o) => o.role !== r.role && o.owner.kind === 'existing' && o.owner.agentId === a.id);
                               const missing = !runtimes.includes(a.runtime);
                               // PO 04:37Z: not in this project yet — what the person does first, said in the list (the server refuses it too)
-                              const label = !a.in_project ? t('existingNotInProject', { name: a.name })
+                              // existingNotInProject = move.rowNotInProject with «{name} · » before it (4576) — change one, change both
+                            const label = !a.in_project ? t('existingNotInProject', { name: a.name })
                                 // story #4576: the reason is the move list's own line (one text, never two that overlap) after «{name} · »
                                 : missing ? `${a.name} · ${t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })}`
                                   : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;

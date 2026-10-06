@@ -257,6 +257,21 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     expect(text()).toContain('떠나도 옮기기는 이 컴퓨터에서 이어져요.');
   });
 
+  it('every agent left stopped or not started → ② still (no spinner) and the reading settles', async () => {
+    statusNow = () => base({ agents_ended: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z', runtime: 'claude', exit_code: 1, restarted_at: null }],
+      agents_start_failed: [{ member_id: 'm-kad', at: '2026-10-06T04:41:00Z', reason: 'runtime_missing', code: null, runtime: 'codex', limit: null, first_member_id: null }] });
+    stub(() => new Response('{}'));
+    await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+    await read();
+    const steps = [...container.querySelectorAll('li[data-state]')] as HTMLElement[];
+    expect(steps.map((s) => [s.dataset.state, s.dataset.paused ?? ''])).toEqual([['done', ''], ['running', 'true']]);
+    expect(text()).toContain('까디르 QA를 시작하지 못했어요');
+    expect(text()).toContain('댄 어윈이 멈췄어요');
+    const n = calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(calls.length).toBe(n); // settled: no more reading
+  });
+
   it('a recipe setup (setup_kind recipe · or none from an older server) keeps the three steps', async () => {
     statusNow = () => ({ ...base({}), setup_kind: undefined, recipe_name: '조사 한 명', members: [{ stage: 'research', role: '조사', member_id: 'm-1', kind: 'agent', runtime: 'claude' }] });
     stub(() => new Response('{}'));

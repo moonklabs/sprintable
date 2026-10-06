@@ -269,7 +269,7 @@ function MoveProgressBody({ move, onRetry, todayHref }: { move: MoveProgress; on
             </span>
           ) : null}
         </Step>
-        <Step state={connectShown} label={connectShown === 'done' ? t('move.stepConnectDone') : connectShown === 'waiting' ? t('move.stepConnectWaiting') : t('move.stepConnectRunning')} detail={null} />
+        <Step state={connectShown} paused={move.connectPaused} label={connectShown === 'done' ? t('move.stepConnectDone') : connectShown === 'waiting' ? t('move.stepConnectWaiting') : t('move.stepConnectRunning')} detail={null} />
       </ol>
       {move.startFailed.length > 0 ? (
         <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-start-failed">
