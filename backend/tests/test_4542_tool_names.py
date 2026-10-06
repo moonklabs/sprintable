@@ -16,7 +16,7 @@ def _strip(s: str) -> str:
 
 
 def test_the_shared_file_is_the_one_pinned_in_both_repos():
-    assert hashlib.sha256(RAW).hexdigest() == "e99dd40bacdfde9c897aa35da4afa69b8b006bf56aa69ef0fb1a8310cc742e77"
+    assert hashlib.sha256(RAW).hexdigest() == "abc9a6fdfb644dedf2cb49d5089df5910e4ed03857418e45e6c9a8084d6427eb"
 
 
 def test_every_vector_names_and_wraps_as_the_board_and_the_phone_do():
@@ -40,3 +40,21 @@ def test_the_computer_once_only_on_its_exact_tail():
     assert agent_on_device("Agent · SYJ-MacBook-Pro", "MacBook-Pro") == "Agent · SYJ-MacBook-Pro · MacBook-Pro"
     assert agent_on_device("Agent", "SYJ-MacBook-Pro") == "Agent · SYJ-MacBook-Pro"
     assert agent_on_device("Agent", None) == "Agent"
+
+
+def test_4580_the_daemons_sandbox_network_value_is_named_and_the_push_carries_no_host():
+    """[SID:4580] Claude's sandbox network question (no tool of its own) — the daemon sends `SandboxNetwork`: named «네트워크 연결» /
+    "Network connection" for runtime claude only (by exact key); every other claude name stays as Claude shows it; the push body is
+    built from the name alone (Yuna 08:51Z: no host on a lock screen)."""
+    from app.services.i18n_catalog import t
+    from app.services.tool_names import shown_tool
+
+    assert tool_name("claude", "SandboxNetwork", "ko") == "네트워크 연결"
+    assert tool_name("claude", "SandboxNetwork", "en") == "Network connection"
+    for other in ("Bash", "sandboxnetwork", "SandboxNetwork ", "__proto__", "names", "constructor"):
+        assert tool_name("claude", other, "ko") == other
+    assert tool_name("codex", "SandboxNetwork", "ko") == "작업⁠(SandboxNetwork)"  # a claude-only value
+    assert tool_name(None, "SandboxNetwork", "ko") == "SandboxNetwork"  # a runtime not known: as it is
+    body = t("agent_permission.notice_body", "ko", tool=shown_tool("claude", "SandboxNetwork", "ko"))
+    assert _strip(body) == "네트워크 연결 허용을 기다리고 있어요 — 눌러서 확인해 주세요"
+    assert _strip(t("agent_permission.notice_body", "en", tool=shown_tool("claude", "SandboxNetwork", "en"))) == "Waiting for you to allow Network connection — tap to check"

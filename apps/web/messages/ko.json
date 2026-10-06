@@ -7001,6 +7001,7 @@
   "agentPermissions": {
     "groupTitle": "에이전트 권한 요청",
     "chip": "권한 요청",
+    "netConnect": "{host}에 연결하려고 해요",
     "chipUnknown": "상태 모름",
     "waited": "{n}분째 기다림",
     "role": "{role} 역할로 받은 요청이에요",
