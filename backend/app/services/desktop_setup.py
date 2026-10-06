@@ -89,7 +89,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: str) -> tuple[str, datetime, uuid.UUID, str]:
+# story #4576 — what an app may say it can take when it asks for a code; anything else it names is left out (a newer app's word
+# this server does not know yet is no error)
+KNOWN_CAPABILITIES = ("move",)
+
+
+async def create_setup_code(
+    db: AsyncSession, *, challenge: str, device_name: str, capabilities: list[str] | None = None,
+) -> tuple[str, datetime, uuid.UUID, str]:
     if not _CHALLENGE_RE.match(challenge):
         raise DesktopSetupError("request_invalid", "challenge must be base64url(sha256(verifier)) without padding")
     name = device_name.strip()[:80]
@@ -104,6 +111,7 @@ async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: st
     setup = DesktopSetup(
         code_hash=_hash(code), code_challenge=challenge, device_name=name, expires_at=expires_at,
         event_token_hash=_hash(event_token),
+        capabilities=[c for c in KNOWN_CAPABILITIES if c in (capabilities or [])] or None,
     )
     db.add(setup)
     await db.flush()
@@ -111,6 +119,19 @@ async def create_setup_code(db: AsyncSession, *, challenge: str, device_name: st
     # the setup id is not a secret (nothing can be done with it without an admin session); the app passes it to the web page
     # so steps before the confirmation (a sign-in) can be keyed by it (PO 08:31Z)
     return code, expires_at, setup.id, event_token
+
+
+async def is_move_setup(db: AsyncSession, setup_id) -> bool:
+    """story #4576 (PO 04:24Z) — a confirmed move (no recipe): nothing is handed to its agents as a first task, so the app's
+    «first task handed» step is refused for it. A malformed or unknown id is no move."""
+    try:
+        sid = uuid.UUID(str(setup_id))
+    except (TypeError, ValueError):
+        return False
+    row = (await db.execute(
+        select(DesktopSetup.confirmed_at, DesktopSetup.event_definition_key).where(DesktopSetup.id == sid)
+    )).first()
+    return row is not None and row.confirmed_at is not None and not row.event_definition_key
 
 
 async def verify_setup_event(
@@ -458,6 +479,106 @@ async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id
     return runtime
 
 
+def _confirmed_again(setup: DesktopSetup, user_id: uuid.UUID, org_id: uuid.UUID) -> bool:
+    """PO 11:48Z — the same person confirming the same setup again gets it as it is (200): after a confirmation whose commit
+    went through but whose answer did not (a 500 from a hook after the commit), pressing again must not look like a failure.
+    Nothing is made or re-applied (a different body changes nothing). Anyone else is still refused."""
+    return setup.confirmed_at is not None and setup.confirmed_by == user_id and setup.org_id == org_id and setup.revoked_at is None
+
+
+async def _check_confirmable(
+    db: AsyncSession, setup: DesktopSetup, *, user_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID,
+) -> None:
+    """The code's state and the confirming person's right — the same for a recipe setup and a move (story #4576)."""
+    from app.services.project_auth import is_org_owner_or_admin, require_project_access
+
+    if setup.revoked_at is not None or setup.exchanged_at is not None:
+        raise DesktopSetupError("code_used")
+    if _now() >= setup.expires_at:
+        raise DesktopSetupError("code_expired")
+    if setup.confirmed_at is not None:
+        raise DesktopSetupError("already_confirmed")
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise DesktopSetupError("not_org_admin")
+    await require_project_access(db, user_id, project_id, org_id, not_found_detail="Project not found")
+
+
+def setup_kind(setup: DesktopSetup) -> str | None:
+    """story #4576 — which kind of setup this is (the web's progress: a move has two steps, ready → Sprintable connected, and no
+    first task or result · the app attaches a move's agents with no recipe role or stages): «move» = confirmed with no recipe ·
+    «recipe» = confirmed with one · None before a confirmation."""
+    if setup.confirmed_at is None:
+        return None
+    return "recipe" if setup.event_definition_key else "move"
+
+
+async def confirm_move_setup(
+    db: AsyncSession,
+    *,
+    code: str,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    roles: list[RoleChoice],
+    workdir_hint: str | None = None,
+) -> tuple[uuid.UUID, list[dict], None]:
+    """story #4576 (PO 04:11Z) — «옮기기»: agents the organization already has move to this computer. No recipe: the confirmation
+    is the device and its keys only — no recipe-stage binding is written (a recipe confirmation upserts the project's one row per
+    stage, so moving agents one by one under the same recipe routed every earlier agent's stage work to the last one), no story
+    is made and nothing is published. Every row must be an existing agent (`move_needs_existing_agents` otherwise), checked as
+    an attached one (#4565 — this org · active · a desktop runtime · already in the project); the same agent once; at most
+    SETUP_MAX_ROLES. Its keys rotate at the exchange, as for any attached agent (4565 AC2). Returns (setup_id, members, None);
+    never commits."""
+    from app.models.member import Member
+    from app.services.onboarding_funnel import emit_onboarding_event
+
+    setup = await _setup_by_code(db, code)
+    if _confirmed_again(setup, user_id, org_id):
+        return setup.id, list(setup.members or []), None
+    await _check_confirmable(db, setup, user_id=user_id, org_id=org_id, project_id=project_id)
+    # PO 04:24Z — an app from before this cannot take a move's exchange (its agents carry no recipe role or stages): only a code
+    # whose app said it can
+    if "move" not in (setup.capabilities or []):
+        raise DesktopSetupError("app_cannot_move")
+
+    if not roles:
+        raise DesktopSetupError("move_needs_existing_agents", "no agent chosen")
+    if len(roles) > SETUP_MAX_ROLES:
+        raise DesktopSetupError("recipe_too_large", f"{len(roles)} agents (at most {SETUP_MAX_ROLES})")
+    agent_ids: list[uuid.UUID] = []
+    for r in roles:
+        if r.runtime is not None or r.owner is not None or not r.agent_id:
+            raise DesktopSetupError("move_needs_existing_agents", "every row of a move is an agent the organization already has")
+        try:
+            agent_id = uuid.UUID(str(r.agent_id))
+        except ValueError:
+            raise DesktopSetupError("roles_invalid", "agent id") from None
+        if agent_id in agent_ids:
+            raise DesktopSetupError("roles_invalid", "the same agent twice")
+        agent_ids.append(agent_id)
+
+    members: list[dict] = []
+    for agent_id in agent_ids:
+        runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+        name = (await db.execute(select(Member.name).where(Member.id == agent_id))).scalar_one_or_none() or ""
+        # PO 04:24Z — a move's agent is its id, its runtime and its own name: no recipe role, no stages
+        members.append({"member_id": str(agent_id), "kind": "agent", "runtime": runtime, "existing": True, "name": " ".join(name.split())[:120]})
+
+    setup.org_id = org_id
+    setup.project_id = project_id
+    setup.event_definition_key = None
+    setup.confirmed_by = user_id
+    setup.confirmed_at = _now()
+    setup.members = members
+    setup.workdir_hint = workdir_hint
+    await db.flush()
+    await emit_onboarding_event(
+        db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
+        meta={"flow": "desktop_move", "human_hand": True, "agents": len(members)},
+    )
+    return setup.id, members, None
+
+
 async def confirm_setup(
     db: AsyncSession,
     *,
@@ -477,27 +598,13 @@ async def confirm_setup(
     from app.repositories.team_member import TeamMemberRepository
     from app.services.member_resolver import resolve_member
     from app.services.org_agent import create_org_level_agent
-    from app.services.project_auth import is_org_owner_or_admin, require_project_access
+    from app.services.project_auth import require_project_access
     from app.services.recipe_role_bindings import upsert_role_binding
 
     setup = await _setup_by_code(db, code)
-    # PO 11:48Z — the same person confirming the same setup again gets it as it is (200): after a confirmation whose commit
-    # went through but whose answer did not (a 500 from a hook after the commit), pressing again must not look like a failure.
-    # Nothing is made or re-applied (a different body changes nothing). Anyone else is still refused.
-    if (
-        setup.confirmed_at is not None and setup.confirmed_by == user_id and setup.org_id == org_id and setup.revoked_at is None
-    ):
+    if _confirmed_again(setup, user_id, org_id):
         return setup.id, list(setup.members or []), setup.work_item_id
-    if setup.revoked_at is not None or setup.exchanged_at is not None:
-        raise DesktopSetupError("code_used")
-    if _now() >= setup.expires_at:
-        raise DesktopSetupError("code_expired")
-    if setup.confirmed_at is not None:
-        raise DesktopSetupError("already_confirmed")
-
-    if not await is_org_owner_or_admin(db, user_id, org_id):
-        raise DesktopSetupError("not_org_admin")
-    await require_project_access(db, user_id, project_id, org_id, not_found_detail="Project not found")
+    await _check_confirmable(db, setup, user_id=user_id, org_id=org_id, project_id=project_id)
 
     definition = (await db.execute(
         select(EventDefinition).where(
@@ -636,6 +743,8 @@ class Exchanged:
     org_id: uuid.UUID | None = None
     # story #4529 — the device's own token for the relay (apart from the agent keys), shown once, in this response
     device_token: str | None = None
+    # story #4576 — «move» · «recipe»
+    setup_kind: str | None = None
 
 
 async def _lock_in_order(db: AsyncSession, *, member_ids: set[uuid.UUID], setup_ids: set[uuid.UUID]) -> dict[uuid.UUID, DesktopSetup]:
@@ -767,8 +876,14 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
 
     # one key per agent (a role's agent appears once per stage in `members`)
     per_agent: dict[str, dict] = {}
+    kind = setup_kind(setup)
     for m in setup.members or []:
         if m["kind"] != "agent":
+            continue
+        if kind == "move":
+            # story #4576 (PO 04:24Z): a move's agent — its id and runtime (its name is added with its new key below); no recipe
+            # role or stages, there is no recipe
+            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "existing": True})
             continue
         entry = per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "role": m.get("role") or m["stage"], "stages": [], "runtime": m["runtime"]})
         if m.get("existing"):
@@ -805,7 +920,7 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
     device_token = await issue_device_token(db, setup.id)  # story #4529 — same transaction as the keys: all or nothing
     return Exchanged(
         setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup), org_name=org_name,
-        org_id=setup.org_id, device_token=device_token,
+        org_id=setup.org_id, device_token=device_token, setup_kind=kind,
     )
 
 
@@ -944,7 +1059,8 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         "confirmed_by_name": names.get(r.confirmed_by), "revoked_by_name": names.get(r.revoked_by),
         "exchanged_at": r.exchanged_at, "revoked_at": r.revoked_at, "keys_issued": r.keys_issued,
         "active_keys": active.get(r.id, 0),
-        "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime")} for m in (r.members or [])],
+        "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime", "name")} for m in (r.members or [])],
+        "setup_kind": setup_kind(r),  # story #4576
     } for r in rows]
 
 
@@ -1110,7 +1226,9 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         "recipe_name": recipe["name"] if recipe else None,
         "recipe": recipe,
         "work_item_id": str(setup.work_item_id) if setup.work_item_id else None,
-        "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime")} for m in (setup.members or [])],
+        "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime", "name")} for m in (setup.members or [])],
+        # story #4576: «move» (no recipe · device and keys only) or «recipe»
+        "setup_kind": setup_kind(setup),
         "signals": {
             "tools_connected": [{"member_id": k, "at": v} for k, v in tools.items()],
             "first_task_handed_at": handed[1] if handed else None,

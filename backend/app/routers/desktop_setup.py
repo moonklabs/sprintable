@@ -24,6 +24,7 @@ from app.services.desktop_setup import (
     DesktopSetupError,
     RoleChoice,
     list_attachable_agents,
+    confirm_move_setup,
     confirm_setup,
     confirm_setup_first_project,
     confirm_setup_new_org,
@@ -67,6 +68,10 @@ _STATUS = {
     # person, an inactive one, another runtime: all read the same) · not yet in the setup's project
     "agent_not_found": 404,
     "agent_not_in_project": 422,
+    # story #4576: a move (no recipe) takes only agents the organization already has — a new-agent or «me» row is refused
+    "move_needs_existing_agents": 422,
+    # story #4576 (PO 04:24Z): the app that made the code did not say it can take a move (an app from before) — update the app
+    "app_cannot_move": 409,
 }
 
 
@@ -88,6 +93,9 @@ def _human_only(auth: AuthContext) -> uuid.UUID:
 class SetupCodeRequest(BaseModel):
     challenge: str = Field(min_length=43, max_length=43)
     device_name: str = Field(min_length=1, max_length=200)
+    # story #4576 (PO 04:24Z): what this app can take — «move» (a move's exchange: agents with no recipe role or stages). Words
+    # this server does not know are left out; an app from before sends none (the web then offers no «옮기기»)
+    capabilities: list[str] | None = Field(default=None, max_length=8)
 
 
 class SetupCodeResponse(BaseModel):
@@ -103,7 +111,9 @@ class SetupCodeResponse(BaseModel):
 async def post_setup_code(request: Request, response: Response, body: SetupCodeRequest, db: AsyncSession = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
     try:
-        code, expires_at, setup_id, event_token = await create_setup_code(db, challenge=body.challenge, device_name=body.device_name)
+        code, expires_at, setup_id, event_token = await create_setup_code(
+            db, challenge=body.challenge, device_name=body.device_name, capabilities=[c[:32] for c in (body.capabilities or [])],
+        )
     except DesktopSetupError as e:
         raise _error(e) from None
     await db.commit()
@@ -141,7 +151,9 @@ class ConfirmRequest(BaseModel):
     # story 4496: left out → the setup makes the organization's first project (`project_name`) — only when it has none
     project_id: uuid.UUID | None = None
     project_name: str | None = Field(default=None, min_length=1, max_length=100)
-    recipe_id: uuid.UUID
+    # story #4576: left out → a move («옮기기»): every row is `{role, agent_id}` of an agent the organization already has, and the
+    # confirmation is the device and its keys only (no recipe-stage binding · no story · no publish); needs project_id
+    recipe_id: uuid.UUID | None = None
     roles: list[RoleIn] = Field(max_length=ROLES_FIELD_CAP)  # abuse cap only — the product limit is recipe_too_large
     # the folder chosen on the web, handed back as is in the exchange (≤200 · no control characters); the desktop app judges
     # the path itself (under home · no `..`), the server does not
@@ -168,21 +180,23 @@ class ConfirmRequest(BaseModel):
 
 
 class ConfirmedMember(BaseModel):
-    stage: str
-    role: str
+    stage: str | None = None  # story #4576: a move's agents have no stage or recipe role
+    role: str | None = None
     member_id: str
     kind: Literal["agent", "human"]
+    name: str | None = None  # story #4576: a move's agents carry their own name (no recipe role to call them by)
 
 
 class ConfirmResponse(BaseModel):
     setup_id: uuid.UUID
     members: list[ConfirmedMember]
-    work_item_id: uuid.UUID  # the story the recipe's first stage was published on
+    # the story the recipe's first stage was published on — none for a move (story #4576: nothing is published)
+    work_item_id: uuid.UUID | None = None
     # story 4496: the organization's first project, when this confirmation made it (the web makes it the tab's project)
     project_id: uuid.UUID | None = None
 
 
-@router.post("/setup-codes/confirm", response_model=ConfirmResponse)
+@router.post("/setup-codes/confirm", response_model=ConfirmResponse, response_model_exclude_unset=True)
 async def post_confirm(
     body: ConfirmRequest,
     background_tasks: BackgroundTasks,
@@ -196,7 +210,15 @@ async def post_confirm(
     try:
         if body.project_id is None and not body.project_name:
             raise DesktopSetupError("request_invalid", "project_id or project_name is required")
-        if body.project_id is None:
+        if body.recipe_id is None:
+            # story #4576: a move — the agents it takes are already in a project, so it never makes the first one
+            if body.project_id is None:
+                raise DesktopSetupError("request_invalid", "a move needs project_id")
+            setup_id, members, work_item_id = await confirm_move_setup(
+                db, code=body.code, user_id=user_id, org_id=org_id, project_id=body.project_id, roles=roles,
+                workdir_hint=body.workdir_hint,
+            )
+        elif body.project_id is None:
             # story 4496 (PO 09:32Z (가)): no project chosen — the first project is made with the setup when the organization has
             # none (the server counts; the web's list is not trusted for it), else 409 project_required
             setup_id, members, work_item_id, made_project = await confirm_setup_first_project(
@@ -215,7 +237,7 @@ async def post_confirm(
     await db.commit()
     return ConfirmResponse(
         setup_id=setup_id, work_item_id=work_item_id, project_id=made_project,
-        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members],
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind", "name") if k in m}) for m in members],
     )
 
 
@@ -266,7 +288,7 @@ class ConfirmNewOrgResponse(ConfirmResponse):
     project_id: uuid.UUID
 
 
-@router.post("/setup-codes/confirm-new-org", response_model=ConfirmNewOrgResponse)
+@router.post("/setup-codes/confirm-new-org", response_model=ConfirmNewOrgResponse, response_model_exclude_unset=True)
 async def post_confirm_new_org(
     body: ConfirmNewOrgRequest,
     background_tasks: BackgroundTasks,
@@ -289,7 +311,7 @@ async def post_confirm_new_org(
     await db.commit()
     return ConfirmNewOrgResponse(
         setup_id=setup_id, work_item_id=work_item_id, org_id=org_id, project_id=project_id,
-        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind")}) for m in members],
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind", "name") if k in m}) for m in members],
     )
 
 
@@ -321,7 +343,10 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
         status_code=200,
         content={
             "setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url,
-            "workdir_hint": done.workdir_hint, "recipe_name": done.recipe_name, "org_name": done.org_name,
+            "workdir_hint": done.workdir_hint, "org_name": done.org_name,
+            # story #4576 (PO 04:24Z): a move has no recipe — no recipe_name at all; «setup_kind» says which (an older app ignores it)
+            **({} if done.setup_kind == "move" else {"recipe_name": done.recipe_name}),
+            "setup_kind": done.setup_kind,
             # story 4470: the org's id (an added field — an older app ignores it)
             "org_id": str(done.org_id) if done.org_id else None,
             # story #4529 — the device token for /api/v2/desktop/relay/* (shown once · an older app ignores it)
@@ -332,11 +357,12 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
 
 
 class SetupMember(BaseModel):
-    stage: str
+    stage: str | None = None  # story #4576: none for a move's agent
     role: str | None = None
     member_id: str
     kind: Literal["agent", "human"]
     runtime: Literal["claude", "codex"] | None = None
+    name: str | None = None  # story #4576: a move's agent, by its own name
 
 
 class SetupItem(BaseModel):
@@ -354,6 +380,7 @@ class SetupItem(BaseModel):
     keys_issued: int
     active_keys: int
     members: list[SetupMember]
+    setup_kind: Literal["move", "recipe"] | None = None  # story #4576 — None before a confirmation
 
 
 class SetupListResponse(BaseModel):
@@ -518,6 +545,8 @@ class SetupStatusResponse(BaseModel):
     recipe: SetupStatusRecipe | None = None
     work_item_id: str | None
     members: list[SetupMember]
+    # story #4576: «move» = no recipe, device and keys only (the web shows two steps · no first task or result) · «recipe»
+    setup_kind: Literal["move", "recipe"] | None = None
     signals: SetupSignals
 
 
