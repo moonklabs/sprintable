@@ -53,6 +53,7 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "lint_no_bind_param_cast.py",                 # story #4407 AC5 — CI lint 게이트(app/ee/alembic 문자열 SQL의 `:name::type` 정적 AST 스캔, DB 접속 0)
     "lint_org_today_direct_call.py",              # story #3674 — CI lint 게이트(app/**/*.py 정적
                                                    # 정규식 스캔, 운영 DB 무접속).
+    "lint_destructive_fe_deps_listed.py",          # story 4566 — CI lint 게이트(destructive 시험이 읽는 FE 경로 ↔ infra 목록 대조, 운영 DB 무접속)
     "lint_destructive_schema_weights_registered.py",  # story 23bf1913 — CI lint 게이트(pytest
                                                    # --collect-only + infra/destructive-schema-shard-
                                                    # weights.json 정적 대조, Postgres·운영 DB 무접속 —

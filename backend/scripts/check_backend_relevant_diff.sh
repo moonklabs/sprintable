@@ -53,8 +53,17 @@ if [ -n "${NON_SAFE}" ] || [ -z "${CHANGED}" ]; then
     exit 0
 fi
 
-FE_DEPS="$(python3 "${SCRIPT_DIR}/extract_fe_paths_referenced_by_backend_tests.py" backend/tests)"
-FE_DEPS_RC=$?
+# story 4566: FE_DEPS_FILE (a list file, one path per line · `#` comments) replaces the extracted list — the destructive-schema
+# shards use infra/destructive-fe-deps.txt (the FE files destructive tests read · kept exact by lint_destructive_fe_deps_listed.py).
+# A missing or empty file is the same fail-closed «relevant» as a failed extraction.
+if [ -n "${FE_DEPS_FILE:-}" ]; then
+    FE_DEPS="$(grep -v '^#' "${FE_DEPS_FILE}" 2>/dev/null | sed '/^[[:space:]]*$/d')"
+    FE_DEPS_RC=$?
+    [ -f "${FE_DEPS_FILE}" ] || FE_DEPS_RC=1
+else
+    FE_DEPS="$(python3 "${SCRIPT_DIR}/extract_fe_paths_referenced_by_backend_tests.py" backend/tests)"
+    FE_DEPS_RC=$?
+fi
 if [ "${FE_DEPS_RC}" -ne 0 ] || [ -z "${FE_DEPS}" ]; then
     echo "check_backend_relevant_diff: FE 경로 추출 실패/0건(rc=${FE_DEPS_RC}) — fail-closed 관련(exit 0)" >&2
     exit 0

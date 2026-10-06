@@ -1,0 +1,8 @@
+# story 4566 — the FE files destructive_schema tests actually read (paths from the repo root, one per line).
+# The destructive-schema shards treat an FE-only change as relevant only when it touches one of these (the rest of
+# backend-test keeps its own, wider list from extract_fe_paths_referenced_by_backend_tests.py).
+# Kept exact by backend/scripts/lint_destructive_fe_deps_listed.py: a destructive test that starts reading an FE path
+# not here — or a path here that no destructive test reads any more — fails CI.
+apps/web/messages/en.json
+apps/web/messages/ko.json
+apps/web/src/components/cage/newsletter-send-status.tsx
