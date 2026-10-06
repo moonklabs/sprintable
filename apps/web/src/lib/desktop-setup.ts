@@ -18,7 +18,10 @@ export type DesktopRuntime = (typeof DESKTOP_RUNTIMES)[number];
 const CODE_RE = /^[A-Za-z0-9_-]{43}$/;
 
 /** `setup` = 설정 id(setup-codes 201) — 이 흐름의 이벤트 session_id. 모양이 틀리면 없음으로. */
-export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null; /** 찾았지만 이 컴퓨터에서 도구를 못 붙이는 것(⑥ · 회사 관리 MCP) — runtimes의 부분집합. */ blocked: DesktopRuntime[]; /** story 4494: 이 컴퓨터에 깔렸지만 바닥보다 낮은 판뿐인 런타임(쓸 수 없음) — runtimes에 없는 것만. */ old?: OldRuntime[] }
+export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null; /** 찾았지만 이 컴퓨터에서 도구를 못 붙이는 것(⑥ · 회사 관리 MCP) — runtimes의 부분집합. */ blocked: DesktopRuntime[]; /** story 4494: 이 컴퓨터에 깔렸지만 바닥보다 낮은 판뿐인 런타임(쓸 수 없음) — runtimes에 없는 것만. */ old?: OldRuntime[];
+  /** story #4576 (PO 04:24Z): the app said `caps=move` — it can take a move's exchange (agents with no recipe role). Absent = an app
+   *  from before: the page offers «옮기기» turned off with why. Only present when true (the parsed shape stays as before otherwise). */
+  canMove?: true }
 
 /** story 4494 (PO 10:00Z (a)): the app's `old=codex:0.153.4:0.156.1` — a runtime installed only below its floor (its version · the
  * lowest that works). The page says «버전이 낮아» for it instead of «찾지 못했어요». */
@@ -51,7 +54,8 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const setup = params.get('setup') ?? '';
   const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r));
   const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)) };
+  const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}) };
 }
 
 /** `existing` (story #4565): an agent the organization already has, moved to this computer for the row (no new member). */
@@ -215,6 +219,25 @@ export function confirmBody(code: string, rows: readonly SetupRoleRow[], project
   };
 }
 
+/** story #4576 — «이미 있는 에이전트 옮기기»: no recipe (the server takes that as a move — device and keys only: no recipe-stage
+ * binding · no story · no publish). Every row is an agent the organization already has; a move has no recipe role, so the row's
+ * `role` is a fixed word the server does not read. No folder: each agent's working folder is chosen in the app after the move. */
+export interface MoveConfirmBody { code: string; project_id: string; roles: { role: string; agent_id: string }[] }
+export const MOVE_ROW_ROLE = 'move';
+export function moveConfirmBody(code: string, projectId: string, agentIds: readonly string[]): MoveConfirmBody {
+  return { code, project_id: projectId, roles: [...new Set(agentIds)].map((agent_id) => ({ role: MOVE_ROW_ROLE, agent_id })) };
+}
+
+/** story #4576 — whether an attachable agent can be moved from this computer now: in this project and its runtime found here. */
+export type MovableState = 'ok' | 'not-in-project' | 'runtime-missing';
+export function movableState(a: AttachableAgent, runtimes: readonly DesktopRuntime[]): MovableState {
+  return !a.in_project ? 'not-in-project' : !runtimes.includes(a.runtime) ? 'runtime-missing' : 'ok';
+}
+/** the move list's order (Yuna): the movable ones first, the rest after — each group in the server's order. */
+export function moveListOrder(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): AttachableAgent[] {
+  return [...attachable.filter((a) => movableState(a, runtimes) === 'ok'), ...attachable.filter((a) => movableState(a, runtimes) !== 'ok')];
+}
+
 /** (나) confirm-new-org's body (design doc 9a4cb445): the usual fields without a project, plus the new organization's and first
  * project's names. No organization or project id — the server only uses the ones it makes (extra=forbid). */
 export interface NewOrgConfirmBody extends Omit<ConfirmBody, 'project_id'> { org_name: string; project_name: string }
@@ -235,6 +258,7 @@ export function setupFragment(q: SetupQuery): string {
   if (q.setupId) p.set('setup', q.setupId);
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
   if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
+  if (q.canMove) p.set('caps', 'move');
   return `#${p.toString().replace(/%2C/g, ',')}`;
 }
 
@@ -295,7 +319,11 @@ export interface SetupStatus {
   /** The setup's recipe (org_id null = a platform preset) — named by its translation, as the recipe list names it (PO 10:39Z ①). */
   recipe?: { key: string; name: string | null; org_id: string | null } | null;
   work_item_id: string | null;
-  members: { stage: string; role: string | null; member_id: string; kind: 'agent' | 'human'; runtime: DesktopRuntime | null }[];
+  /** story #4576: a move's members have no stage or role — their own `name` instead */
+  members: { stage: string | null; role: string | null; member_id: string; kind: 'agent' | 'human'; runtime: DesktopRuntime | null; name?: string | null }[];
+  /** story #4576: «move» = no recipe (device and keys only — two steps on the page, no first task or result) · «recipe» · null before
+   *  the confirmation (an older server sends none: the recipe page as before) */
+  setup_kind?: 'move' | 'recipe' | null;
   signals: {
     tools_connected: { member_id: string; at: string }[];
     first_task_handed_at: string | null;
@@ -483,6 +511,78 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     // an agent past the threshold is said once, by the ⑦ block — never also «아직 준비하고 있어요» (PO 10:05Z)
     stillPreparing: ready === 'done' || handed !== 'done' || notConnected ? [] : stillPreparingRoles(agents, connected, stopped).filter((r) => !startFailed.some((f) => f.role === r)),
     startFailed,
+  };
+}
+
+/**
+ * story #4576 — a move's progress (Yuna «② 옮긴 뒤 진행 표시»): two steps, no first task or result. ① = the app took the agents
+ * over and every one has its folder (a moved agent waits for its working folder — the normal flow, not a failure: its own note
+ * under ①); ② = every chosen agent connected to Sprintable (`signals.tools_connected`). Agents are named by their own names. The
+ * reading ends when every agent is settled: connected, could not start (not the folder wait) or stopped.
+ */
+export interface MoveProgress {
+  settled: boolean;
+  ready: StepState;
+  connected: StepState;
+  shown: [StepShown, StepShown];
+  /** ② still: no agent left that could still connect (each stopped or could not start) — a spinner would say «just wait» */
+  connectPaused: boolean;
+  /** ① done (the app took every agent over): «{이름} · {런타임}, …» for the agents not failed · not stopped (none → no line) — B4 */
+  pairs: { name: string; runtime: DesktopRuntime }[];
+  /** ① done, ② not: the agents not connected yet (not failed · not stopped · not past the threshold) — ②'s own line (Yuna 05:20Z) */
+  stillPreparing: string[];
+  folderWait: string[];
+  startFailed: { memberId: string; name: string; runtime: DesktopRuntime | null; line: StartFailedLine; limit: number | null }[];
+  stopped: { names: string[]; claude: boolean } | null;
+  notConnected: { names: string[]; claude: boolean } | null;
+  blocked: boolean;
+  expired: boolean;
+  disconnected: boolean;
+}
+
+export function moveProgress(s: SetupStatus, now: number, handedOverSeenAt: number | null): MoveProgress {
+  const agents = s.members.filter((m) => m.kind === 'agent').map((m) => ({ ...m, name: m.name?.trim() || m.role?.trim() || '' }));
+  const ids = [...new Set(agents.map((m) => m.member_id))];
+  const nameOf = (id: string) => agents.find((m) => m.member_id === id)?.name ?? '';
+  const connected = new Set(s.signals.tools_connected.map((c) => c.member_id));
+  const handedOver = s.state === 'handed_over';
+  const failedRows = (s.signals.agents_start_failed ?? []).filter((f) => !connected.has(f.member_id));
+  const waitIds = new Set(failedRows.filter((f) => f.reason === 'workdir_needed').map((f) => f.member_id));
+  const failedIds = new Set(failedRows.filter((f) => f.reason !== 'workdir_needed').map((f) => f.member_id));
+  const stoppedIds = new Set([...stoppedMemberIds(s)].filter((id) => !connected.has(id)));
+  const ready: StepState = handedOver && waitIds.size === 0 ? 'done' : 'running';
+  const allIn = ids.length > 0 && ids.every((id) => connected.has(id));
+  const connectedStep: StepState = ready === 'done' && allIn ? 'done' : 'running';
+  const pending = ids.filter((id) => !connected.has(id) && !waitIds.has(id) && !failedIds.has(id) && !stoppedIds.has(id));
+  const input = s.signals.first_screen_human_input_at ? Date.parse(s.signals.first_screen_human_input_at) : NaN;
+  const past = (Number.isFinite(input) && now - input >= NOT_CONNECTED_AFTER_INPUT_MS)
+    || (handedOverSeenAt !== null && now - handedOverSeenAt >= NOT_CONNECTED_AFTER_HANDOVER_MS);
+  const late = handedOver && ready === 'done' && pending.length > 0 && past ? pending : [];
+  const lateIds = new Set(late);
+  const runtimeOf = (id: string) => agents.find((m) => m.member_id === id)?.runtime ?? null;
+  const startFailed: MoveProgress['startFailed'] = [];
+  for (const id of ids) {
+    const f = failedRows.find((r) => r.member_id === id && r.reason !== 'workdir_needed');
+    if (f) startFailed.push({ memberId: id, name: nameOf(id), runtime: f.runtime ?? runtimeOf(id), line: startFailedLine(f.reason, f.code), limit: typeof f.limit === 'number' && f.limit > 0 ? f.limit : null });
+  }
+  const end = !!s.signals.blocked || s.state === 'not_handed_over' || s.state === 'disconnected';
+  return {
+    // Kadir 4969 ② · the recipe's 4464 rule: an agent past the threshold that never connected (its «연결되지 않았어요» block shows)
+    // counts as settled — the reading ends instead of spinning forever
+    settled: end || (handedOver && ids.length > 0 && ids.every((id) => connected.has(id) || failedIds.has(id) || stoppedIds.has(id) || lateIds.has(id))),
+    ready, connected: connectedStep,
+    shown: [ready, ready === 'done' ? connectedStep : 'waiting'],
+    connectPaused: connectedStep !== 'done' && handedOver && ready === 'done' && pending.every((id) => lateIds.has(id)),
+    // Yuna 05:22Z: an agent that could not start or stopped is not «ready» — its own block says so; never both side by side
+    pairs: ready === 'done' ? ids.filter((id) => !failedIds.has(id) && !stoppedIds.has(id)).map((id) => ({ name: nameOf(id), runtime: runtimeOf(id) })).filter((p): p is { name: string; runtime: DesktopRuntime } => !!p.runtime) : [],
+    stillPreparing: ready === 'done' && connectedStep !== 'done' ? pending.filter((id) => !late.includes(id)).map(nameOf) : [],
+    folderWait: ids.filter((id) => waitIds.has(id)).map(nameOf),
+    startFailed,
+    stopped: stoppedIds.size ? { names: ids.filter((id) => stoppedIds.has(id)).map(nameOf), claude: ids.some((id) => stoppedIds.has(id) && runtimeOf(id) === 'claude') } : null,
+    notConnected: late.length ? { names: late.map(nameOf), claude: late.some((id) => runtimeOf(id) === 'claude') } : null,
+    blocked: !!s.signals.blocked,
+    expired: s.state === 'not_handed_over',
+    disconnected: s.state === 'disconnected',
   };
 }
 

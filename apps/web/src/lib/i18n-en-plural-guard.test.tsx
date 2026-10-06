@@ -27,6 +27,8 @@ const ALLOWED_BARE_COUNT: Record<string, string> = {
   'desktop.setup.stillPreparing': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4433)',
   'desktop.setup.stopped': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4433)',
   'desktop.setup.notConnected.blockTitle': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4452)',
+  'desktop.setup.move.stillConnecting': '{names}는 에이전트 이름 묶음(수가 아님) — «is»는 동사(복수 낱말 아님) · 단·복수는 감싼 {count, plural}이 가름(story 4576 · 유나 문구)',
+  'desktop.setup.move.folderWait': '{names}는 에이전트 이름 묶음(수가 아님) — «starts»는 3인칭 단수 동사(복수 낱말 아님) · 단·복수는 감싼 {count, plural}이 가름(story 4576 · 유나 문구)',
   'content.channelPostsImageAnimatedUnsupported': '{frameCount}는 애니메이션 프레임 수(늘 2 이상) · 모르면 빈 문자열이라 plural 불가',
 };
 

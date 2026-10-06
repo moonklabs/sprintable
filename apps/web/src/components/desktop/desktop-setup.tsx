@@ -21,7 +21,8 @@ import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zon
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
   agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
-  type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst } from '@/lib/desktop-setup';
+  type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst,
+  moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 
 /**
@@ -40,7 +41,9 @@ const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', c
 // code.claude.com/docs/en/setup and github.com/openai/codex)
 const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
-export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed' | 'has-org' | 'disconnected';
+export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed' | 'has-org' | 'disconnected'
+  // story #4576 — the move's own refusals (Yuna «② 확인이 거절될 때»)
+  | 'move-not-admin' | 'move-changed' | 'move-offline';
 
 /** 실패 화면 문구 키 — `Record<string, string>` 리터럴 표(키 가드가 이 모양의 값을 «읽힘»으로 센다). */
 const FAILURE_KEY: Record<string, string> = {
@@ -58,7 +61,30 @@ const FAILURE_KEY: Record<string, string> = {
   'has-org.title': 'failure.has-org.title', 'has-org.body': 'failure.has-org.body', 'has-org.action': 'failure.has-org.action',
   // story 4498 (Yuna 10:51Z): the button is the expired card's «앱에서 다시 시작» — the same way back, the same words
   'disconnected.title': 'failure.disconnected.title', 'disconnected.body': 'failure.disconnected.body', 'disconnected.action': 'failure.expired.action',
+  // story #4576 (Yuna «② 확인이 거절될 때»): the not-admin card's button stays its «다시 확인» · the offline card keeps its title and button
+  'move-not-admin.title': 'move.failureNotAdminTitle', 'move-not-admin.body': 'move.failureNotAdminBody', 'move-not-admin.action': 'failure.not-admin.action',
+  'move-changed.title': 'move.failureChangedTitle', 'move-changed.body': 'move.failureChangedBody', 'move-changed.action': 'move.failureChangedAction',
+  'move-offline.title': 'failure.offline.title', 'move-offline.body': 'move.failureOfflineBody', 'move-offline.action': 'failure.offline.action',
 };
+
+/** story #4576 — a move's confirm refusals (closed list · Mirko 04:31Z): the ones with their own card; every other code (a new-agent
+ * or «me» row · the same agent twice · an app that cannot move — this page never sends those) → null, the one-line generic text. */
+export function moveFailureForCode(code: string | undefined): SetupFailure | null {
+  switch (code) {
+    case 'not_org_admin':
+    case 'person_session_required':
+      return 'move-not-admin';
+    // chosen, then stopped · removed · moved to another organization (404), or taken out of the project (422): the list again
+    case 'agent_not_found':
+    case 'agent_not_in_project':
+      return 'move-changed';
+    case 'code_expired':
+    case 'code_used':
+      return 'expired';
+    default:
+      return null;
+  }
+}
 
 /** confirm 오류 코드(4424 닫힌 목록) → 실패 화면. 목록 밖 코드는 null(화면이 지어내지 않는다 — 한 줄 일반 문구). */
 export function failureForCode(code: string | undefined, resource?: string): SetupFailure | null {
@@ -173,7 +199,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] };
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [] }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[] }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -249,6 +275,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   }, [pickingRecipe]);
   const [view, setView] = useState<View>({ kind: 'loading' });
   const [rateLine, setRateLine] = useState<string | null>(null);
+  // story #4576 — «레시피로 시작» (default: moving stops the agent wherever it worked, so only when a person chooses it) or
+  // «이미 있는 에이전트 옮기기»; the agents ticked for the move (none by default — the same reason)
+  const [setupKind, setSetupKind] = useState<'recipe' | 'move'>('recipe');
+  const [moving, setMoving] = useState<string[]>([]);
 
   // 로그인이 필요했던 설정이면 한 번(4426 · 사람 손 셈) — 설정 id가 없으면 이 흐름에 묶을 수 없어 보내지 않는다
   useEffect(() => {
@@ -330,6 +360,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadTick, orgMode.kind]);
 
+  // story #4576: «목록 다시 불러오기» after a move was refused because the agents changed reads them again
+  const [attachableTick, setAttachableTick] = useState(0);
   // story #4565 — the «이미 있는 에이전트» group: read once the project is known (a new organization has none to move)
   useEffect(() => {
     if (orgMode.kind !== 'has-org' || !chosenProject || !isAdmin) { setAttachable([]); return; }
@@ -341,12 +373,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         // the contract's one shape ({agents}) — anything else draws no group (never guessed from another field)
         const list = Array.isArray(body?.agents) ? body.agents : [];
         setAttachable(list);
+        // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
+        setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
         setRows((rs) => withAttachable(rs, list, runtimes));
       })
       .catch(() => { if (!off) setAttachable([]); }); // the group is left out — «새로 만들기» still works
     return () => { off = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgMode.kind, chosenProject, isAdmin]);
+  }, [orgMode.kind, chosenProject, isAdmin, attachableTick]);
 
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
@@ -356,6 +390,15 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   }
 
   const recipe = recipes.find((r) => r.id === recipeId);
+  // story #4576 (Yuna): the two ways show only with an organization and at least one agent it could move — a way that cannot be
+  // chosen is not shown (an app that cannot move is the exception: the way shows, turned off, with why and what to do)
+  // Kadir 4969 ①: once a person chose «옮기기», the way stays even when the list comes back empty (reload · another project) — the
+  // page never falls through to the recipe page with a recipe already chosen (one press would confirm a recipe)
+  const showKinds = orgMode.kind === 'has-org' && (attachable.length > 0 || setupKind === 'move');
+  const moveMode = showKinds && canMove && setupKind === 'move';
+  const movable = useMemo(() => moveListOrder(attachable, runtimes), [attachable, runtimes]);
+  const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && movableState(a, runtimes) === 'ok'));
+  const anyMovable = movable.some((a) => movableState(a, runtimes) === 'ok');
   const roleName = (role: string) => stageRoleLabel(role, tOrg);
   const humanRoles = useMemo(() => rows.filter((r) => r.owner.kind === 'me').map((r) => stageRoleLabel(r.role, tOrg)), [rows, tOrg]);
   const humanList = humanRoles.join(' · ');
@@ -426,6 +469,38 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     }
   }
 
+  async function moveStart() {
+    if (!chosenProject || moveChosen.length === 0) return;
+    setRateLine(null);
+    setView({ kind: 'starting' });
+    try {
+      const res = await fetchWithAuth('/api/desktop/setup-codes/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(moveConfirmBody(code, chosenProject, moveChosen)),
+      });
+      if (res.ok) {
+        // the tab had no project: the one moved into becomes the tab's, as a recipe start does (story 4496)
+        if (!projectId && !(await joinNewOrg({ project_id: chosenProject }))) { setView({ kind: 'done-reload' }); return; }
+        setView({ kind: 'started' });
+        return;
+      }
+      const body = await res.json().catch(() => null);
+      const error = body?.error as { code?: string } | undefined;
+      if (res.status === 429 || error?.code === 'RATE_LIMITED') {
+        const secs = Number(res.headers.get('Retry-After'));
+        const time = !Number.isFinite(secs) || secs <= 0 ? t('rateLimitedMoment')
+          : secs < 60 ? t('rateLimitedSeconds', { n: Math.ceil(secs) }) : t('rateLimitedMinutes', { n: Math.ceil(secs / 60) });
+        setRateLine(t('rateLimited', { time }));
+        setView({ kind: 'choose' });
+        return;
+      }
+      const failure = moveFailureForCode(error?.code);
+      setView(failure ? { kind: 'failed', failure, retry: failure === 'move-changed' ? 'load' : undefined } : { kind: 'error' });
+    } catch {
+      setView({ kind: 'failed', failure: 'move-offline', retry: 'confirm' });
+    }
+  }
+
   if (orgMode.kind === 'invited') return <InvitedCard invites={orgMode.invites} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (newOrg && verifyGate.kind === 'reading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
@@ -433,13 +508,16 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
-    const onRetry = view.retry === 'load' ? reload : view.failure === 'offline' ? () => void start() : undefined;
+    // «목록 다시 불러오기» (move-changed): the agents are read again — the ticks that are no longer movable fall off by themselves
+    const onRetry = view.failure === 'move-changed' ? () => { setAttachableTick((n) => n + 1); reload(); }
+      : view.retry === 'load' ? reload
+      : view.failure === 'offline' ? () => void start() : view.failure === 'move-offline' ? () => void moveStart() : undefined;
     // «이미 조직이 있어요» [다시 불러오기]: reload with the setup values put back into the fragment — they are only in memory now
     // (the page took them off the address), and a bare reload showed «데스크톱 앱에서 열어 주세요» (4429 ②)
     const onReloadPage = view.failure === 'has-org'
       // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
       ? () => {
-        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old }));
+        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}) }));
         window.location.reload();
       }
       : undefined;
@@ -460,14 +538,39 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const noAgentRow = needsAnAgent(rows);
   const namesOk = firstProject ? !!projectName.trim() : !newOrg || (!!orgName.trim() && !!projectName.trim());
   const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose';
+  const canMoveStart = !!chosenProject && moveChosen.length > 0 && view.kind === 'choose';
+  const toggleMove = (id: string, on: boolean) => setMoving((ms) => (on ? [...new Set([...ms, id])] : ms.filter((m) => m !== id)));
 
   return (
     <Card className="break-keep flex flex-col gap-6 p-6">
       <header>
         <p className="text-xs text-muted-foreground">{t('eyebrow')}</p>
         <h1 className="text-lg font-semibold">{t('title')}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t('lead')}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{moveMode ? t('move.lead') : t('lead')}</p>
       </header>
+
+      {/* story #4576 (Yuna «4576 셋업 첫 고르기»): two ways, one radio group, cards shaped like the recipe cards — below the head,
+          above the project pick. «옮기기» turned off (radio off · name muted · why in its description's place) when the app that
+          opened this page did not say it can take a move (`caps=move`): hiding it would send the person to ①'s «이미 있는 에이전트»
+          — the recipe applied again, the very path this card fixes */}
+      {showKinds ? (
+        <section aria-labelledby="setup-kind" data-testid="setup-kind">
+          <h2 id="setup-kind" className="text-sm font-medium">{t('move.kindLabel')}</h2>
+          <div role="radiogroup" aria-labelledby="setup-kind" className="mt-2 flex flex-col gap-2">
+            <label className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
+              {/* Kadir 4969 (2선): no switching while a start is on its way — an offline [다시 시도] must repeat what was sent */}
+              <input type="radio" name="setup-kind" value="recipe" checked={!moveMode} disabled={view.kind === 'starting'} onChange={() => setSetupKind('recipe')} className="mt-1 shrink-0 self-start" />
+              <span><span className="block text-sm font-medium">{t('move.kindRecipe')}</span>
+                <span className="block text-xs text-muted-foreground">{t('move.kindRecipeDesc')}</span></span>
+            </label>
+            <label className={`flex gap-3 rounded-md border p-3 has-[:checked]:border-primary ${canMove ? 'cursor-pointer' : 'cursor-not-allowed'}`} data-testid="setup-kind-move" data-disabled={canMove ? undefined : 'true'}>
+              <input type="radio" name="setup-kind" value="move" checked={moveMode} disabled={!canMove || view.kind === 'starting'} onChange={() => setSetupKind('move')} className="mt-1 shrink-0 self-start" />
+              <span><span className={`block text-sm font-medium ${canMove ? '' : 'text-muted-foreground'}`}>{t('move.kindMove')}</span>
+                <span className="block text-xs text-muted-foreground" data-testid={canMove ? undefined : 'setup-kind-move-why'}>{canMove ? t('move.kindMoveDesc') : t('move.kindMoveOldApp')}</span></span>
+            </label>
+          </div>
+        </section>
+      ) : null}
 
       {newOrg ? (
         <section aria-label={tNewOrg('orgLabel')} data-testid="setup-new-org">
@@ -518,174 +621,222 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       {orgMode.kind === 'has-org' && !projectId && orgProjects.length > 1 ? (
         <label className="flex flex-col gap-1 text-sm font-medium" data-testid="setup-project-pick">{t('projectPick.label')}
           <select className="rounded-md border bg-background px-2 py-1 text-base font-normal lg:text-sm" value={pickedProject}
-            onChange={(e) => setPickedProject(e.target.value)}>
+            // Kadir 4969 (2선): the old project's ticks never ride to the new one — cleared before its list comes
+            onChange={(e) => { setMoving([]); setPickedProject(e.target.value); }}>
             <option value="" disabled>{t('projectPick.placeholder')}</option>
             {orgProjects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}
           </select>
         </label>
       ) : null}
 
-      {/* the chosen recipe as one card + [바꾸기] — the list of every recipe pushed «시작» more than a screen below, and a
-          person who did not scroll saw no agent start (4446 · Yuna b2d15f85 ① · PO 00:31Z). [바꾸기] opens the list below the
-          card (the chosen one first) and stays there while it is open; picking one folds it again. One recipe only: no [바꾸기]. */}
-      <section aria-labelledby="setup-recipe">
-        <h2 id="setup-recipe" className="text-sm font-medium">{t('recipe')}</h2>
-        {recipe ? (
-          <div className="mt-2 flex items-start justify-between gap-3 rounded-md border p-3" data-testid="setup-recipe-chosen">
-            {/* while the list is open the card is the current value in one line — the list below is where one chooses, and
-                the primary border is only on the checked radio there (Yuna 03:53Z: one place says «chosen») */}
-            <span className="min-w-0"><span className="block text-sm font-medium">{presetName(recipe, tPreset)}</span>
-              {!pickingRecipe && presetDescription(recipe, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(recipe, tPreset)}</span> : null}
-              {!pickingRecipe ? <RecipeRolesLine recipe={recipe} runtimes={runtimes} /> : null}</span>
-            {recipes.length > 1 ? (
-              <Button ref={recipeChangeRef} variant="ghost" size="sm" aria-label={t('changeRecipeAria')} aria-expanded={pickingRecipe} aria-controls="setup-recipe-list"
-                onClick={() => (pickingRecipe ? foldRecipes(true) : openRecipes())}>{t('change')}</Button>
-            ) : null}
-          </div>
-        ) : null}
-        {pickingRecipe ? (
-          <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
-            onKeyDown={(e) => {
-              pressInList.current = false; // a key, not a press: an arrow's click only chooses
-              if (e.key !== 'Enter' && e.key !== ' ') return;
-              e.preventDefault();
-              // a screen reader can put focus on a radio without choosing it: Enter/Space there chooses that one (PO 03:41Z)
-              const el = e.target as HTMLInputElement;
-              if (el.name === 'recipe' && !el.checked) { const r = recipes.find((x) => x.id === el.value); if (r) pick(r); }
-              foldRecipes(true);
-            }}
-            onPointerDown={(down) => {
-              pressInList.current = true;
-              // story 4504 AC4 (live 2026-10-03): kept until the press's own click has run — a click on a card's text reaches its
-              // radio only as the label's default action, after the event's listeners; the radio's click uses it and clears it,
-              // and a key in the list clears it too. Story 4516: the press ends in one place — the mark stays only when its click
-              // will reach a radio (released on the card it was pressed on); released anywhere else (between cards · on another
-              // card · outside the list) or cancelled (a touch that became a scroll) there is no radio click to wait for, so it
-              // is cleared at once.
-              // Story 4516 (live 2026-10-03 · Min ①b): clearing alone is not enough — the press itself took focus off the radio (a
-              // press between cards lands on the list, which takes no focus → body) and that blur was held for this press's click,
-              // which will not come. With focus already out of the list no later blur can fold it, so the held blur is settled here:
-              // released inside the list (or cancelled) → focus back on the chosen radio — pressing empty space chooses nothing and
-              // folds nothing, and the next click outside or Tab folds it as usual; released outside the list → folded now, as a
-              // click outside does.
-              const card = recipeCardOf(down.target);
-              const release = (up: PointerEvent) => {
-                window.removeEventListener('pointerup', release);
-                window.removeEventListener('pointercancel', release);
-                const list = recipeListRef.current;
-                if (up.type !== 'pointercancel' && card && recipeCardOf(up.target) === card && list?.contains(card)) return; // its radio click comes
-                pressInList.current = false;
-                if (!list || list.contains(document.activeElement)) return; // focus still in the list: its next blur folds as usual
-                if (up.type === 'pointercancel' || (up.target instanceof Node && list.contains(up.target))) {
-                  // without scrolling: after a cancelled touch the person was scrolling the list — never pull it back (PO 06:26Z)
-                  list.querySelector<HTMLInputElement>('input[name=recipe]:checked')?.focus({ preventScroll: true });
-                } else foldRecipes(document.hasFocus());
-              };
-              window.addEventListener('pointerup', release);
-              window.addEventListener('pointercancel', release);
-            }}
-            onBlur={(e) => {
-              if (pressInList.current) return; // a press inside the list: its click decides
-              const to = e.relatedTarget as Node | null;
-              if (e.currentTarget.contains(to) || to === recipeChangeRef.current) return; // [바꾸기]'s own click folds it
-              foldRecipes(to === null && document.hasFocus());
-            }}>
-            {recipeOrder.map((id) => recipes.find((x) => x.id === id)).filter((r): r is NonNullable<typeof r> => !!r).map((r) => (
-              // story 4504 AC4 (live 2026-10-03 02:18Z): a person's click chooses, THEN folds — the fold is on the radio's own click
-              // (after its change), never on the label's: a browser does the label's default action (that radio click) only after
-              // the label's listeners and the update they flushed, so folding there removed the radio before it was chosen. A
-              // press inside the list (pointer) folds; an arrow key's click (no press) only chooses.
-              // story 4553: the radio keeps its own size in the flex label (no stretch to the card's height) — its focus ring is a ring,
-              // not a card-tall capsule
-              <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
-                <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1 shrink-0 self-start"
-                  onClick={() => { if (pressInList.current) { pressInList.current = false; foldRecipes(true); } }} />
-                <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
-                  {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
-                  <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
-              </label>
-            ))}
-          </div>
-        ) : null}
-      </section>
-
-      <section aria-labelledby="setup-roles">
-        <h2 id="setup-roles" className="text-sm font-medium">{t('rolesTitle')}</h2>
-        <p className="text-xs text-muted-foreground">{t('found', { list: runtimes.map((r) => RUNTIME_LABEL[r]).join(' · ') || '—' })}</p>
-        {/* story 4494 (Yuna 10:11Z ⓑ): another runtime was found, this one is only below its floor — why it is not offered */}
-        {old.map((o) => (
-          <p key={o.runtime} className="text-xs text-muted-foreground" data-testid="setup-too-old-skipped">
-            {t('tooOld.skipped', { runtime: RUNTIME_LABEL[o.runtime], josa: pickEunNeunJosa(RUNTIME_LABEL[o.runtime]), version: o.version, min: o.min })}
-          </p>
-        ))}
-        <ul className="mt-2 flex flex-col divide-y rounded-md border">
-          {rows.map((r) => (
-            <li key={r.role} className="p-3">
-              <div className="flex items-center justify-between gap-3">
-              <span className="min-w-0 break-keep">
-                <span className="block text-sm font-medium">{roleName(r.role)}</span>
-                <span className="block text-xs text-muted-foreground">{r.actor === 'human' ? t('whoHuman') : r.actor === 'either' ? t('whoEither') : t('whoAgent')}</span>
-              </span>
-              {r.choices.length === 1
-                ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: myName }) : r.owner.kind === 'existing' ? r.owner.name : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
-                : (
-                  <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="max-w-[55%] shrink-0 rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
-                    value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
-                    {attachable.length === 0 ? (
-                      <>
-                        {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: myName }) : c.kind === 'existing' ? c.name : RUNTIME_LABEL[c.runtime]}</option>)}
-                        {claudeBlocked && r.actor !== 'human' ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
-                      </>
-                    ) : (
-                      // story #4565 (Yuna 02:32Z ①): one select, three groups — new · existing agents · person
-                      <>
-                        <optgroup label={t('ownerGroupNew')}>
-                          {r.choices.filter((c) => c.kind === 'agent').map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'agent' ? RUNTIME_LABEL[c.runtime] : ''}</option>)}
-                          {claudeBlocked ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
-                        </optgroup>
-                        <optgroup label={t('ownerGroupExisting')}>
-                          {attachable.map((a) => {
-                            const key = `agent:${a.id}`;
-                            const elsewhere = rows.some((o) => o.role !== r.role && o.owner.kind === 'existing' && o.owner.agentId === a.id);
-                            const missing = !runtimes.includes(a.runtime);
-                            // PO 04:37Z: not in this project yet — what the person does first, said in the list (the server refuses it too)
-                            const label = !a.in_project ? t('existingNotInProject', { name: a.name })
-                              : missing ? t('existingRuntimeMissing', { name: a.name, runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
-                                : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
-                            return <option key={key} value={key} disabled={!a.in_project || missing || elsewhere}>{label}</option>;
-                          })}
-                        </optgroup>
-                        {r.choices.some((c) => c.kind === 'me') ? (
-                          <optgroup label={t('ownerGroupPerson')}>
-                            <option value="me">{t('me', { name: myName })}</option>
-                          </optgroup>
-                        ) : null}
-                      </>
-                    )}
-                  </select>
-                )}
-              </div>
-              {/* story #4565 (Yuna 02:32Z ② · 02:39Z): an existing agent with a live key — what moving it does, then when it was last seen */}
-              {r.owner.kind === 'existing' ? <MovedAgentNote agent={attachable.find((a) => r.owner.kind === 'existing' && a.id === r.owner.agentId)} /> : null}
-            </li>
-          ))}
-        </ul>
-        {claudeBlocked && runtimes.length > 0 ? <p className="mt-2 text-xs text-muted-foreground" data-testid="setup-blocked-note">{t('blockedClaudeNote')}</p> : null}
-        <p className="mt-2 text-xs text-muted-foreground">{t('humanNote')}</p>
-      </section>
-
-      <section aria-labelledby="setup-folder">
-        <h2 id="setup-folder" className="text-sm font-medium">{t('folder')}</h2>
-        {editingDir
-          ? <Input aria-labelledby="setup-folder" className="mt-2 font-mono" value={workdir} onChange={(e) => setWorkdir(e.target.value)} />
-          : (
-            <div className="mt-2 flex items-center justify-between gap-3 rounded-md border p-3">
-              <code className="min-w-0 truncate text-sm">{workdir}</code>
-              <Button variant="ghost" size="sm" aria-label={t('changeFolderAria')} onClick={() => setEditingDir(true)}>{t('change')}</Button>
-            </div>
+      {moveMode ? (
+        // story #4576 ②: no recipe, roles or folder — one «옮길 에이전트» list (a tick each · several) · the found line kept under its
+        // title (why a row cannot be ticked) · the movable ones first · none ticked by default
+        <section aria-labelledby="setup-move-list" data-testid="setup-move-list">
+          <h2 id="setup-move-list" className="text-sm font-medium">{t('move.listTitle')}</h2>
+          <p className="text-xs text-muted-foreground">{t('found', { list: runtimes.map((r) => RUNTIME_LABEL[r]).join(' · ') || '—' })}</p>
+          {movable.length === 0 ? (
+            // Yuna 05:28Z: no agent of this organization to move at all — in the list's place, the same bordered box
+            <p className="mt-2 rounded-md border p-3 text-sm text-muted-foreground" data-testid="setup-move-empty">{t('move.listEmpty')}</p>
+          ) : (
+          <ul className="mt-2 flex flex-col divide-y rounded-md border">
+            {movable.map((a) => {
+              const state = movableState(a, runtimes);
+              const on = state === 'ok' && moving.includes(a.id);
+              // move.rowNotInProject says the same as the select's existingNotInProject (4565) without the name — change one, change both
+              // (kept two keys: the en select line starts lower-case after «{name} · »)
+              const second = state === 'not-in-project' ? t('move.rowNotInProject')
+                : state === 'runtime-missing' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
+                  : t('onThisComputer', { runtime: RUNTIME_LABEL[a.runtime] });
+              return (
+                <li key={a.id} className="p-3" data-testid="setup-move-row" data-state={state}>
+                  <div className="flex gap-3">
+                    <input type="checkbox" id={`setup-move-${a.id}`} checked={on} disabled={state !== 'ok'} onChange={(e) => toggleMove(a.id, e.target.checked)} className="mt-1 shrink-0 self-start" />
+                    <div className="min-w-0 break-keep">
+                      <label htmlFor={`setup-move-${a.id}`} className={`block ${state === 'ok' ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <span className={`block text-sm font-medium ${state === 'ok' ? '' : 'text-muted-foreground'}`}>{a.name}</span>
+                        <span className="block text-xs text-muted-foreground">{second}</span>
+                      </label>
+                      {/* the 4565 note under a ticked row only (same place, same words — under the name's column) */}
+                      {on ? <MovedAgentNote agent={a} /> : null}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
           )}
-        {!workdirInputOk(workdir) ? <p className="mt-1 text-xs text-muted-foreground">{t('folderHint')}</p> : null}
-      </section>
+          {/* Yuna 05:39Z: with nothing to move the folder line says nothing true */}
+          {anyMovable ? <p className="mt-2 text-xs text-muted-foreground">{t('move.folderNote')}</p> : null}
+        </section>
+      ) : (
+        <>
+      {/* the chosen recipe as one card + [바꾸기] — the list of every recipe pushed «시작» more than a screen below, and a
+            person who did not scroll saw no agent start (4446 · Yuna b2d15f85 ① · PO 00:31Z). [바꾸기] opens the list below the
+            card (the chosen one first) and stays there while it is open; picking one folds it again. One recipe only: no [바꾸기]. */}
+        <section aria-labelledby="setup-recipe">
+          <h2 id="setup-recipe" className="text-sm font-medium">{t('recipe')}</h2>
+          {recipe ? (
+            <div className="mt-2 flex items-start justify-between gap-3 rounded-md border p-3" data-testid="setup-recipe-chosen">
+              {/* while the list is open the card is the current value in one line — the list below is where one chooses, and
+                  the primary border is only on the checked radio there (Yuna 03:53Z: one place says «chosen») */}
+              <span className="min-w-0"><span className="block text-sm font-medium">{presetName(recipe, tPreset)}</span>
+                {!pickingRecipe && presetDescription(recipe, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(recipe, tPreset)}</span> : null}
+                {!pickingRecipe ? <RecipeRolesLine recipe={recipe} runtimes={runtimes} /> : null}</span>
+              {recipes.length > 1 ? (
+                <Button ref={recipeChangeRef} variant="ghost" size="sm" aria-label={t('changeRecipeAria')} aria-expanded={pickingRecipe} aria-controls="setup-recipe-list"
+                  onClick={() => (pickingRecipe ? foldRecipes(true) : openRecipes())}>{t('change')}</Button>
+              ) : null}
+            </div>
+          ) : null}
+          {pickingRecipe ? (
+            <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
+              onKeyDown={(e) => {
+                pressInList.current = false; // a key, not a press: an arrow's click only chooses
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                // a screen reader can put focus on a radio without choosing it: Enter/Space there chooses that one (PO 03:41Z)
+                const el = e.target as HTMLInputElement;
+                if (el.name === 'recipe' && !el.checked) { const r = recipes.find((x) => x.id === el.value); if (r) pick(r); }
+                foldRecipes(true);
+              }}
+              onPointerDown={(down) => {
+                pressInList.current = true;
+                // story 4504 AC4 (live 2026-10-03): kept until the press's own click has run — a click on a card's text reaches its
+                // radio only as the label's default action, after the event's listeners; the radio's click uses it and clears it,
+                // and a key in the list clears it too. Story 4516: the press ends in one place — the mark stays only when its click
+                // will reach a radio (released on the card it was pressed on); released anywhere else (between cards · on another
+                // card · outside the list) or cancelled (a touch that became a scroll) there is no radio click to wait for, so it
+                // is cleared at once.
+                // Story 4516 (live 2026-10-03 · Min ①b): clearing alone is not enough — the press itself took focus off the radio (a
+                // press between cards lands on the list, which takes no focus → body) and that blur was held for this press's click,
+                // which will not come. With focus already out of the list no later blur can fold it, so the held blur is settled here:
+                // released inside the list (or cancelled) → focus back on the chosen radio — pressing empty space chooses nothing and
+                // folds nothing, and the next click outside or Tab folds it as usual; released outside the list → folded now, as a
+                // click outside does.
+                const card = recipeCardOf(down.target);
+                const release = (up: PointerEvent) => {
+                  window.removeEventListener('pointerup', release);
+                  window.removeEventListener('pointercancel', release);
+                  const list = recipeListRef.current;
+                  if (up.type !== 'pointercancel' && card && recipeCardOf(up.target) === card && list?.contains(card)) return; // its radio click comes
+                  pressInList.current = false;
+                  if (!list || list.contains(document.activeElement)) return; // focus still in the list: its next blur folds as usual
+                  if (up.type === 'pointercancel' || (up.target instanceof Node && list.contains(up.target))) {
+                    // without scrolling: after a cancelled touch the person was scrolling the list — never pull it back (PO 06:26Z)
+                    list.querySelector<HTMLInputElement>('input[name=recipe]:checked')?.focus({ preventScroll: true });
+                  } else foldRecipes(document.hasFocus());
+                };
+                window.addEventListener('pointerup', release);
+                window.addEventListener('pointercancel', release);
+              }}
+              onBlur={(e) => {
+                if (pressInList.current) return; // a press inside the list: its click decides
+                const to = e.relatedTarget as Node | null;
+                if (e.currentTarget.contains(to) || to === recipeChangeRef.current) return; // [바꾸기]'s own click folds it
+                foldRecipes(to === null && document.hasFocus());
+              }}>
+              {recipeOrder.map((id) => recipes.find((x) => x.id === id)).filter((r): r is NonNullable<typeof r> => !!r).map((r) => (
+                // story 4504 AC4 (live 2026-10-03 02:18Z): a person's click chooses, THEN folds — the fold is on the radio's own click
+                // (after its change), never on the label's: a browser does the label's default action (that radio click) only after
+                // the label's listeners and the update they flushed, so folding there removed the radio before it was chosen. A
+                // press inside the list (pointer) folds; an arrow key's click (no press) only chooses.
+                // story 4553: the radio keeps its own size in the flex label (no stretch to the card's height) — its focus ring is a ring,
+                // not a card-tall capsule
+                <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
+                  <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1 shrink-0 self-start"
+                    onClick={() => { if (pressInList.current) { pressInList.current = false; foldRecipes(true); } }} />
+                  <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
+                    {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
+                    <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
+                </label>
+              ))}
+            </div>
+          ) : null}
+        </section>
+  
+        <section aria-labelledby="setup-roles">
+          <h2 id="setup-roles" className="text-sm font-medium">{t('rolesTitle')}</h2>
+          <p className="text-xs text-muted-foreground">{t('found', { list: runtimes.map((r) => RUNTIME_LABEL[r]).join(' · ') || '—' })}</p>
+          {/* story 4494 (Yuna 10:11Z ⓑ): another runtime was found, this one is only below its floor — why it is not offered */}
+          {old.map((o) => (
+            <p key={o.runtime} className="text-xs text-muted-foreground" data-testid="setup-too-old-skipped">
+              {t('tooOld.skipped', { runtime: RUNTIME_LABEL[o.runtime], josa: pickEunNeunJosa(RUNTIME_LABEL[o.runtime]), version: o.version, min: o.min })}
+            </p>
+          ))}
+          <ul className="mt-2 flex flex-col divide-y rounded-md border">
+            {rows.map((r) => (
+              <li key={r.role} className="p-3">
+                <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0 break-keep">
+                  <span className="block text-sm font-medium">{roleName(r.role)}</span>
+                  <span className="block text-xs text-muted-foreground">{r.actor === 'human' ? t('whoHuman') : r.actor === 'either' ? t('whoEither') : t('whoAgent')}</span>
+                </span>
+                {r.choices.length === 1
+                  ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: myName }) : r.owner.kind === 'existing' ? r.owner.name : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
+                  : (
+                    <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="max-w-[55%] shrink-0 rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
+                      value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
+                      {attachable.length === 0 ? (
+                        <>
+                          {r.choices.map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'me' ? t('me', { name: myName }) : c.kind === 'existing' ? c.name : RUNTIME_LABEL[c.runtime]}</option>)}
+                          {claudeBlocked && r.actor !== 'human' ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
+                        </>
+                      ) : (
+                        // story #4565 (Yuna 02:32Z ①): one select, three groups — new · existing agents · person
+                        <>
+                          <optgroup label={t('ownerGroupNew')}>
+                            {r.choices.filter((c) => c.kind === 'agent').map((c) => <option key={ownerKey(c)} value={ownerKey(c)}>{c.kind === 'agent' ? RUNTIME_LABEL[c.runtime] : ''}</option>)}
+                            {claudeBlocked ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
+                          </optgroup>
+                          <optgroup label={t('ownerGroupExisting')}>
+                            {attachable.map((a) => {
+                              const key = `agent:${a.id}`;
+                              const elsewhere = rows.some((o) => o.role !== r.role && o.owner.kind === 'existing' && o.owner.agentId === a.id);
+                              const missing = !runtimes.includes(a.runtime);
+                              // PO 04:37Z: not in this project yet — what the person does first, said in the list (the server refuses it too)
+                              // existingNotInProject = move.rowNotInProject with «{name} · » before it (4576) — change one, change both
+                            const label = !a.in_project ? t('existingNotInProject', { name: a.name })
+                                // story #4576: the reason is the move list's own line (one text, never two that overlap) after «{name} · »
+                                : missing ? `${a.name} · ${t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })}`
+                                  : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
+                              return <option key={key} value={key} disabled={!a.in_project || missing || elsewhere}>{label}</option>;
+                            })}
+                          </optgroup>
+                          {r.choices.some((c) => c.kind === 'me') ? (
+                            <optgroup label={t('ownerGroupPerson')}>
+                              <option value="me">{t('me', { name: myName })}</option>
+                            </optgroup>
+                          ) : null}
+                        </>
+                      )}
+                    </select>
+                  )}
+                </div>
+                {/* story #4565 (Yuna 02:32Z ② · 02:39Z): an existing agent with a live key — what moving it does, then when it was last seen */}
+                {r.owner.kind === 'existing' ? <MovedAgentNote agent={attachable.find((a) => r.owner.kind === 'existing' && a.id === r.owner.agentId)} /> : null}
+              </li>
+            ))}
+          </ul>
+          {claudeBlocked && runtimes.length > 0 ? <p className="mt-2 text-xs text-muted-foreground" data-testid="setup-blocked-note">{t('blockedClaudeNote')}</p> : null}
+          <p className="mt-2 text-xs text-muted-foreground">{t('humanNote')}</p>
+        </section>
+  
+        <section aria-labelledby="setup-folder">
+          <h2 id="setup-folder" className="text-sm font-medium">{t('folder')}</h2>
+          {editingDir
+            ? <Input aria-labelledby="setup-folder" className="mt-2 font-mono" value={workdir} onChange={(e) => setWorkdir(e.target.value)} />
+            : (
+              <div className="mt-2 flex items-center justify-between gap-3 rounded-md border p-3">
+                <code className="min-w-0 truncate text-sm">{workdir}</code>
+                <Button variant="ghost" size="sm" aria-label={t('changeFolderAria')} onClick={() => setEditingDir(true)}>{t('change')}</Button>
+              </div>
+            )}
+          {!workdirInputOk(workdir) ? <p className="mt-1 text-xs text-muted-foreground">{t('folderHint')}</p> : null}
+        </section>
+  
+        </>
+      )}
 
       {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
           commands · other tools still ask each time — at the end of the flow, just above the start row (4446) */}
@@ -695,11 +846,12 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           the window for a new organization, the app shell's main area for an existing one — on the card's own background, a thin
           line above. Spans the card's padding so it reads as the card's last row. */}
       <footer className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 pt-3 pb-6" data-testid="setup-start-row">
-        <Button onClick={() => void start()} disabled={!canStart}>
-          {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{t('start')}
+        <Button onClick={() => void (moveMode ? moveStart() : start())} disabled={moveMode ? !canMoveStart : !canStart}>
+          {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{moveMode ? t('move.start') : t('start')}
         </Button>
         <p className="text-xs text-muted-foreground">
-          {noAgentRow ? t('noAgentRow')
+          {moveMode ? (needsProjectPick ? t('projectPick.reason') : !anyMovable ? t('move.noneMovable') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
+            : noAgentRow ? t('noAgentRow')
             // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
             : needsProjectPick ? t('projectPick.reason')
             : startNote(t, agents, moved, humanList, humanRoles.length > 0)}
@@ -781,8 +933,8 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onRel
             {appButton(t(key('action')))}
             {todayHref ? <Button asChild variant="outline"><a href={todayHref}>{t('goToday')}</a></Button> : null}
           </>
-          : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline' || failure === 'recipes-changed') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
-          : failure === 'not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={onReloadPage ?? (() => window.location.reload())}>{t(key('action'))}</Button>
+          : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline' || failure === 'recipes-changed' || failure === 'move-changed' || failure === 'move-offline') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
+          : failure === 'not-admin' || failure === 'move-not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={onReloadPage ?? (() => window.location.reload())}>{t(key('action'))}</Button>
           : failure === 'recipe-too-big' && onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
@@ -943,7 +1095,7 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   }, [id]);
   if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
-  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */
