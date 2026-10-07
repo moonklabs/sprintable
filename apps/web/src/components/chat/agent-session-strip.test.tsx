@@ -127,10 +127,10 @@ describe('AgentSessionStrip — the board\'s own words (story #4534 · contract 
     [{ state: 'idle', activity: 'error', limit: { at: earlier } }, '오류', '한도가 풀렸어요 — 그 컴퓨터에서 다시 시작해 주세요', 'text-destructive'],
     // story #4599 (contract v1.13 · Yuna ①): held by a macOS window — a reader from before sees `working`; this page sees the word; the
     // folder named only when the daemon read it (macOS's own «데스크탑» · «네트워크 볼륨을» without «폴더»)
-    [{ state: 'working', activity: 'waiting_system' }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
-    [{ state: 'working', activity: 'waiting_system', system: { folder: 'desktop' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 데스크탑 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
-    [{ state: 'working', activity: 'waiting_system', system: { folder: 'network_volume' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 네트워크 볼륨을 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
-    [{ state: 'working', activity: 'waiting_system', system: { folder: null } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    [{ state: 'working', activity: 'waiting_system' }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    [{ state: 'working', activity: 'waiting_system', system: { folder: 'desktop' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 데스크탑 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    [{ state: 'working', activity: 'waiting_system', system: { folder: 'network_volume' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 네트워크 볼륨을 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    [{ state: 'working', activity: 'waiting_system', system: { folder: null } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
   ])('%j → «%s» and its line', async (over, word, expected, tone) => {
     fetchWithAuth.mockResolvedValueOnce(view({ ...over, remote_control: false }));
     await render();

@@ -115,12 +115,75 @@ describe('[4534] the strip inside the phone app', () => {
     expect(buttons()).toEqual([ko.button.stop]);
   });
 
-  it('story #4599 (Yuna ①): held by a macOS window — its own line (the folder when read), no button at all ([멈춤] would not work there)', async () => {
+  it('story #4599 (Yuna ① · PO 14:25Z): held by a macOS window — the phone line («여기서 [세션 끝내기]») and one button, [세션 끝내기] ([멈춤] would not work there)', async () => {
     sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'documents' } };
     server(res(201, {}));
     await render();
-    expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent).toBe(ko.line.waitingSystemFolder.replace('{folder}', ko.folder.documents));
+    expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent).toBe(ko.line.waitingSystemFolderPhone.replace('{folder}', ko.folder.documents));
+    expect(buttons()).toEqual([ko.button.endSession]);
+  });
+
+  it('story #4599: a browser, or a phone that may not command, gets no button and the line that says where the handles are (the phone · the desktop app)', async () => {
+    server(res(201, {}));
+    for (const [over, isPhone] of [[{}, false], [{ can_command: false }, true], [{ remote_control: false }, true]] as const) {
+      phone = isPhone;
+      sessionView = { ...sessionView, ...over, state: 'working', activity: 'waiting_system', system: { folder: null } };
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await render();
+      expect(buttons()).toEqual([]);
+      expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent).toBe(ko.line.waitingSystem);
+    }
+  });
+
+  it('story #4599: [세션 끝내기] → the confirm dialog (title · body · [취소] focused first) → [취소] signs nothing', async () => {
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system' };
+    server(res(201, {}));
+    await render();
+    await press(ko.button.endSession);
+    expect(document.body.textContent).toContain(ko.endDialog.title);
+    expect(document.body.textContent).toContain(ko.endDialog.body);
+    const cancel = [...document.querySelectorAll('button')].find((b) => b.textContent === ko.endDialog.cancel)!;
+    expect(document.activeElement).toBe(cancel);
+    await press(ko.endDialog.cancel);
+    expect(document.body.textContent).not.toContain(ko.endDialog.title);
+    expect(phoneCall).not.toHaveBeenCalled();
+    expect(buttons()).toEqual([ko.button.endSession]);
+  });
+
+  it('story #4599: confirmed → the shell signs `end_session` → posted with the kind the shell returned → done → no line of its own, the state is read again', async () => {
+    vi.useFakeTimers();
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'desktop' } };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S-END', phone_key_id: 'k-1', session_key: 's-9', kind: 'end_session' });
+    await render();
+    await press(ko.button.endSession);
+    const confirm = document.querySelector('[data-testid="agent-end-confirm"]') as HTMLButtonElement;
+    await act(async () => { confirm.click(); });
+    await settle();
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', { agent_member_id: AGENT, kind: 'end_session' });
+    expect(commandLine()?.textContent).toBe(ko.command.stopping); // the stop's «on its way» line — no words of its own (Yuna ①)
+    const reads = () => calls.filter((c) => c.url.endsWith('/desktop-session')).length;
+    const before = reads();
+    sessionView = { ...sessionView, state: 'stopped', activity: 'stopped', system: null };
+    await poll(1);
+    expect(commandLine()).toBeNull();
+    expect(reads()).toBeGreaterThan(before);
+    expect(container.querySelector('[data-testid="agent-session-chip"]')?.textContent).toBe(ko.state.stopped);
     expect(buttons()).toEqual([]);
+    const post = calls.find((c) => c.init?.method === 'POST')!;
+    expect(JSON.parse(post.init!.body as string)).toMatchObject({ kind: 'end_session', session_key: 's-9', signed: 'S-END', phone_key_id: 'k-1' });
+    expect(JSON.parse(post.init!.body as string)).not.toHaveProperty('text');
+  });
+
+  it('story #4599 (PO 14:18Z): [멈춤] pressed just before the window came up — the server\'s closed reason → its own line, nothing as a message', async () => {
+    const calls = server(res(409, { error: { code: 'system_wait_end_only' } }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' });
+    await render();
+    await press(ko.button.stop);
+    await settle();
+    expect(commandLine()?.textContent).toBe(ko.command.stopSystemWait);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
   });
 
   it('waiting for permission, [멈춤] signs a stop the same way (agent only) and posts it', async () => {

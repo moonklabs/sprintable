@@ -2,8 +2,9 @@
 Contract: doc «E-DESKTOP-2 B-1 — 기기 줄 계약 v1» §11 (02d2cf71 v1.9 · v1.9.1).
 
 - GET  /api/v2/agents/{agent_member_id}/desktop-session                  — whoever can open the agent's DM (else 404)
-- POST /api/v2/agents/{agent_member_id}/desktop-commands                 — the phone: stop_session | send_prompt (a person's own
-  session — an API key or an agent key 403; who may press and the phone's pairing are checked in services.desktop_commands)
+- POST /api/v2/agents/{agent_member_id}/desktop-commands                 — the phone: stop_session | send_prompt | end_session (a
+  person's own session — an API key or an agent key 403; who may press and the phone's pairing are checked in
+  services.desktop_commands; story #4599: end_session = the whole session ended, the handle on a turn a macOS window holds)
 - GET  /api/v2/agents/{agent_member_id}/desktop-commands/{command_id}    — the result line, for the person who pressed only
 """
 from __future__ import annotations

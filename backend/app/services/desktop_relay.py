@@ -385,11 +385,20 @@ class StopSessionPayload(_Payload):
     signed: str = Field(min_length=1, max_length=16384)  # story #4534 — every command a person makes is signed (contract v1.9.1)
 
 
+class EndSessionPayload(_Payload):
+    """story #4599 (contract v1.13.2 · PO 14:08Z): the whole session ended — the stop's shape, its own kind (the phone signs
+    `kind: end_session`, so what was signed is what happens; the daemon never turns a stop into this)."""
+
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+    signed: str = Field(min_length=1, max_length=16384)
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
     "answer_approval": AnswerApprovalPayload,
     "stop_session": StopSessionPayload,
+    "end_session": EndSessionPayload,
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -493,8 +502,9 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         # story #4580 (Kadir 02:08Z): the stage the command answered — a late result of the first answer never moves the second
         stage = "confirm" if (cmd.payload or {}).get("stage") == "confirm" else "ask"
         await on_answer_result(db, setup.id, (cmd.payload or {}).get("request_id"), result.state, result.result_code, stage=stage)
-    # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice); an instruction done writes its line
-    if cmd.kind in ("stop_session", "send_prompt"):
+    # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice); an instruction done writes its line;
+    # story #4599 — an end of the session done closes them the same way
+    if cmd.kind in ("stop_session", "send_prompt", "end_session"):
         from app.services.desktop_commands import on_command_done
 
         await on_command_done(db, cmd)

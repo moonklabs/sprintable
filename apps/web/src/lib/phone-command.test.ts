@@ -62,6 +62,28 @@ describe('[4534] commandOnPhone — what the web asks and posts', () => {
     expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ kind: 'stop_session', idempotency_key: 'idem-1', session_key: 's-9', signed: 'SIGNED-S', phone_key_id: 'k-1' });
   });
 
+  // story #4599 (contract v1.13.2 · PO 14:08Z · 14:25Z · Min 387): an end of the whole session — its own kind, signed as such
+  it('an end: the shell gets agent · kind end_session; the post carries the kind the shell signed (never a stop) · done → ended', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
+    const d = deps({ ...signedStop, kind: 'end_session' });
+    await expect(commandOnPhone({ agentId: AGENT, kind: 'end_session' }, d)).resolves.toEqual({ kind: 'ended' });
+    expect(d.phoneCall).toHaveBeenCalledWith('command.sign', { agent_member_id: AGENT, kind: 'end_session' });
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ kind: 'end_session', idempotency_key: 'idem-1', session_key: 's-9', signed: 'SIGNED-S', phone_key_id: 'k-1' });
+    // a shell from before says no kind → the kind that was asked
+    const calls2 = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
+    await expect(commandOnPhone({ agentId: AGENT, kind: 'end_session' }, deps(signedStop))).resolves.toEqual({ kind: 'ended' });
+    expect(JSON.parse(calls2[0]!.init!.body as string).kind).toBe('end_session');
+  });
+
+  it('a stop refused because a macOS window holds the turn (409 system_wait_end_only · or the daemon\'s rejected with the same word) → its own outcome, nothing as a message', async () => {
+    const d = deps(signedStop);
+    server(json(409, { error: { code: 'system_wait_end_only' } }));
+    await expect(commandOnPhone(stop, d)).resolves.toEqual({ kind: 'system_wait_end_only' });
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'delivered' }), json(200, { state: 'rejected', result_code: 'system_wait_end_only' })]);
+    await expect(commandOnPhone(stop, d)).resolves.toEqual({ kind: 'system_wait_end_only' });
+    expect(d.sent).toEqual([]);
+  });
+
   it('a shell answer missing what must be posted → failed, nothing posted', async () => {
     for (const a of [{ ...signedPrompt, session_key: undefined }, { ...signedPrompt, text: undefined }, { ...signedPrompt, signed: undefined }]) {
       const calls = server(json(201, {}));

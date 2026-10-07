@@ -1,7 +1,8 @@
 """story #4599 (relay contract v1.13 · alembic 0442 · PO 2026-10-07 12:27Z) — a turn held by a macOS window reaches the phone and the web:
 the daemon reports `waiting_system`; a reader from before sees `working` (the turn is still a turn), the new web sees the word in
-`activity`; a phone's [멈춤] is still taken (the one handle on a frozen turn) · an instruction is not · no turn-end notice comes of it
-(it is not a resting word) · no usage limit rides on it."""
+`activity`; a phone's [멈춤] is refused with its own closed reason (`system_wait_end_only` — the session is frozen, not stopped) · an
+instruction is not taken · the one handle is a signed `end_session` (0443 · contract v1.13.2) · no turn-end notice comes of it (it is
+not a resting word) · no usage limit rides on it."""
 from __future__ import annotations
 
 import re
@@ -105,10 +106,12 @@ async def test_03_a_limit_on_the_word_is_refused(world):
         assert r.status_code == 422, r.text
 
 
-async def test_04_neither_a_phone_stop_nor_an_instruction_takes_a_command_and_no_turn_end_notice_comes_of_it(world):
-    """PO 12:40Z ④: a stop is never turned into an end of the session behind the person's back — an Esc cannot reach a process held
-    in openat, so the phone and the web hide [멈춤] on a held turn and say [끝내기] (the desktop app's); a stop that still arrives takes
-    no command (the «already_stopped» answer, as for any non-working word). An instruction goes only into a running turn. A held turn
+async def test_04_a_phone_stop_on_a_held_turn_is_refused_with_its_own_reason_an_instruction_too_and_no_turn_end_notice_comes_of_it(world):
+    """PO 12:40Z ④ · 14:18Z: a stop is never turned into an end of the session behind the person's back — an Esc cannot reach a
+    process held in openat — and the session is not «stopped» either: it is frozen in that window. So a stop that arrives (the phone
+    hides [멈춤] there; this is the race of a press just before the window) is refused with the closed reason `system_wait_end_only`
+    (the daemon's word too — Mirko 385) · no command · NOT the «already_stopped» answer (a false answer to the phone · the web · an MCP
+    caller — mutant: the old line alone gives 200 already_stopped → RED). An instruction goes only into a running turn. A held turn
     is not a turn that ended."""
     async with _client() as c:
         device, agent, phone, _der, conv = await _world(c, "d4424 mac 4599c")
@@ -121,13 +124,65 @@ async def test_04_neither_a_phone_stop_nor_an_instruction_takes_a_command_and_no
         r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv, key="w-1"))
         assert (r.status_code, r.json()["error"]["code"]) == (409, "session_not_working")
         r = await _post(c, agent, _cmd("stop_session", phone, key="w-2"))
-        assert (r.status_code, r.json()) == (200, {"state": "already_stopped"}), r.text
+        assert r.status_code == 409, r.text
+        assert r.json()["error"]["code"] == "system_wait_end_only", r.text
+        assert "already_stopped" not in r.text
         kinds = [(k, s) for k, _p, _b, _i, s in await _commands(sid)]
         assert ("stop_session", "queued") not in kinds, "no stop command goes down onto a held turn"
+        # the same key again: still the refusal (nothing was made to give back)
+        r = await _post(c, agent, _cmd("stop_session", phone, key="w-2"))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "system_wait_end_only")
         # the window answered: the turn runs on, and a stop is taken as before
         await _state(c, device, agent, "working", 4)
         r = await _post(c, agent, _cmd("stop_session", phone, key="w-3"))
         assert r.status_code == 201, r.text
+
+
+async def test_06_an_end_of_the_session_is_its_own_signed_kind_taken_on_a_held_turn_and_on_any_turn_not_stopped(world):
+    """PO 14:08Z (Min's question): the one handle on a held turn is a new kind `end_session` — always ends · what the phone signed is
+    what happens (never a stop re-read as an end). Carried like a stop (`{session_key, signed}` · no text · no conversation); the same
+    key = the same command; the presser reads it; done → that session's waiting instructions close without a turn-end notice; on a
+    session that has stopped → 200 already_stopped (nothing to end); on a running turn too (always ends). 0443 holds the kind."""
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4424 mac 4599d")
+        sid = device["setup_id"]
+        await _sent_and_done(c, device, agent, phone, conv, key="e-0")  # an instruction in — its sender would be told at the turn's end
+        await _state(c, device, agent, WORD, 3)
+        r = await _post(c, agent, _cmd("end_session", phone, key="e-x", conversation_id=conv))  # an end carries no conversation (nor text)
+        assert r.status_code == 422, r.text
+        r = await _post(c, agent, _cmd("end_session", phone, key="e-1"))
+        assert r.status_code == 201, r.text
+        cid = r.json()["command_id"]
+        [(kind, payload, by, idem, state)] = [row for row in await _commands(sid) if row[0] == "end_session"]
+        assert (kind, state, str(by), idem) == ("end_session", "queued", str(OWNER_TM), f"b3:{OWNER_TM}:e-1")
+        assert payload == {"session_key": "s-1", "signed": "eyJ2IjoxfQ.signed-by-the-phone"}, "the stop's shape — the signed blob as is"
+        r = await _post(c, agent, _cmd("end_session", phone, key="e-1"))
+        assert r.json()["command_id"] == cid, "the same key gives back the same command"
+        assert len([row for row in await _commands(sid) if row[0] == "end_session"]) == 1
+        r = await c.get(f"/api/v2/agents/{agent}/desktop-commands/{cid}", headers=_person(OWNER))
+        assert (r.status_code, r.json()["kind"], r.json()["state"]) == (200, "end_session", "queued"), r.text
+        # the daemon ended it (SIGHUP → SIGKILL · Mirko 385): done → the waiting instruction closes, no turn-end notice of it
+        before = len(await _turn_end_notices(OWNER_TM))
+        done = await c.post(f"/api/v2/desktop/relay/commands/{cid}/result", json={"state": "done"}, headers=_tok(device["device_token"]))
+        assert done.status_code == 200, done.text
+        rows = await _sql(fetch=f"SELECT turn_end_notified_at IS NOT NULL FROM desktop_commands WHERE setup_id = '{sid}' AND kind = 'send_prompt'")
+        assert [tuple(r) for r in rows] == [(True,)], "closed by the end — the sender is not told of a turn that was ended for them"
+        await _state(c, device, agent, "stopped", 4)
+        assert len(await _turn_end_notices(OWNER_TM)) == before
+        # nothing to end on a session that has stopped
+        r = await _post(c, agent, _cmd("end_session", phone, key="e-2"))
+        assert (r.status_code, r.json()) == (200, {"state": "already_stopped"}), r.text
+        # a running turn: ended too (always ends — the phone shows the button on the held turn only, the server does not second-guess the signature)
+        await _state(c, device, agent, "working", 5)
+        r = await _post(c, agent, _cmd("end_session", phone, key="e-3"))
+        assert r.status_code == 201, r.text
+    from app.core.database import async_session_factory
+    from app.models.desktop_relay import COMMAND_KINDS
+
+    async with async_session_factory() as s:
+        (d,) = (await s.execute(text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_desktop_commands_kind'"))).scalars().all()
+    assert set(re.findall(r"'([a-z_]+)'", d)) == set(COMMAND_KINDS) and "end_session" in COMMAND_KINDS
 
 
 async def test_05_the_windows_folder_rides_with_the_word_only_a_closed_list_and_clears_with_the_next_word(world):

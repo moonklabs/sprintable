@@ -12,7 +12,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session")
+# story #4599 (0443 · contract v1.13.2 · PO 14:08Z): `end_session` — a person's signed end of the whole session (the one handle on
+# a turn held by a macOS window, where a stop cannot reach); always ends, what was signed is what happens
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
@@ -86,7 +88,7 @@ class DesktopSession(Base):
 
 
 class DesktopCommand(Base):
-    """A command sent down to a device: four kinds only (DB CHECK + COMMAND_KINDS), one row per idempotency key, numbered per
+    """A command sent down to a device: five kinds only (DB CHECK + COMMAND_KINDS), one row per idempotency key, numbered per
     device for the stream (`device_seq`), its state moving forward only. The daemon reports a code, never output."""
 
     __tablename__ = "desktop_commands"

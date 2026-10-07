@@ -165,7 +165,9 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
 class CommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["stop_session", "send_prompt"]
+    # story #4599 (contract v1.13.2 · PO 14:08Z): `end_session` — the whole session ended, from the phone's [세션 끝내기] (the one handle
+    # on a turn a macOS window holds); the shell signs that kind, so what was signed is what happens
+    kind: Literal["stop_session", "send_prompt", "end_session"]
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
     text: str | None = Field(default=None, min_length=1, max_length=PROMPT_MAX)
     conversation_id: uuid.UUID | None = None
@@ -186,7 +188,9 @@ async def _participant(db: AsyncSession, conversation_id: uuid.UUID, member_id: 
 
 async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
                          org_id: uuid.UUID, agent_id: uuid.UUID, body: CommandRequest) -> tuple[DesktopCommand | None, str]:
-    """→ (the command, "queued"), or (None, "already_stopped") for a stop on a session that is not working."""
+    """→ (the command, "queued"), or (None, "already_stopped") for a stop on a session that is not working (an end on one that has
+    stopped). A stop on a turn a macOS window holds is refused with its own closed reason (409 `system_wait_end_only`) — never an
+    «already stopped», never an end of the session behind the person's back (story #4599 · PO 12:40Z ④ · 14:18Z)."""
     from app.services import remote_control
     from app.services.agent_permissions import _reachable, paired_phone
     from app.services.desktop_relay import enqueue_command
@@ -195,8 +199,8 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         raise DesktopRelayError(422, "invalid_payload", "an instruction needs its text and conversation")
     if body.kind == "send_prompt" and len(body.text) > INSTRUCT_NOW_MAX:  # code points (Kadir 06:21Z ④) — the sheet stops it first
         raise DesktopRelayError(422, "instruct_too_long", f"an instruction into the turn is {INSTRUCT_NOW_MAX} characters at most")
-    if body.kind == "stop_session" and (body.text is not None or body.conversation_id is not None):
-        raise DesktopRelayError(422, "invalid_payload", "a stop carries no text or conversation")
+    if body.kind in ("stop_session", "end_session") and (body.text is not None or body.conversation_id is not None):
+        raise DesktopRelayError(422, "invalid_payload", "a stop or an end carries no text or conversation")
     agent = await _agent(db, org_id, agent_id)
     setups = {s.id: s for s in await _agent_setups(db, org_id, agent_id)}
     session = (await db.execute(
@@ -227,11 +231,18 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
     if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
+    # story #4599 (PO 12:40Z ④ · 14:18Z): a stop while a macOS window holds the turn is refused with its own closed reason — the
+    # session is not stopped, it is frozen in that window (an Esc cannot reach it), and a stop is never turned into an end of the
+    # session behind the person's back. Asked BEFORE the «not working» line below: that line would answer «already_stopped», a false
+    # answer to the phone · the web · an MCP caller. The phone shows no [멈춤] there (only [세션 끝내기] → end_session); this is the race
+    # of a press just before the window came up. The daemon refuses with the same word (Mirko 385).
+    if body.kind == "stop_session" and session.state == "waiting_system":
+        raise DesktopRelayError(409, SYSTEM_WAIT_END_ONLY, "a macOS window holds this turn — only an end of the session goes through")
     # a stop while it works or while it waits on a person's permission (Kadir 325 · PO 04:34Z — the daemon stops it then too); an
-    # instruction only into a running turn. story #4599 (PO 12:40Z ④): NOT while a macOS window holds its turn — an Esc cannot reach
-    # it and a stop is never turned into an end of the session behind the person's back; the phone and the web hide [멈춤] there and
-    # say [끝내기] (the desktop app's), so a stop that still arrives takes no command
+    # instruction only into a running turn; an end of the session whenever it has not stopped (PO 14:08Z: always ends)
     if body.kind == "stop_session" and session.state not in ("working", "waiting_permission"):
+        return None, "already_stopped"
+    if body.kind == "end_session" and session.state == "stopped":
         return None, "already_stopped"
     if body.kind == "send_prompt" and session.state != "working":
         raise DesktopRelayError(409, "session_not_working", "the turn has ended — send it as a message")
@@ -279,7 +290,7 @@ async def get_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UU
     row = (await db.execute(
         select(DesktopCommand, DesktopSetup).join(DesktopSetup, DesktopSetup.id == DesktopCommand.setup_id).where(
             DesktopCommand.id == command_id, DesktopCommand.requested_by == member_id, DesktopSetup.org_id == org_id,
-            DesktopCommand.kind.in_(("stop_session", "send_prompt")),
+            DesktopCommand.kind.in_(("stop_session", "send_prompt", "end_session")),
         )
     )).first()
     if row is None:
@@ -298,6 +309,8 @@ async def get_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UU
 
 # story #4534: the words a turn ends in (a [지금 지시]'s sender is told once)
 TURN_ENDED_STATES = ("idle", "waiting_input", "error", "paused_limit")
+# story #4599 (PO 14:18Z): the closed reason a stop gets on a turn a macOS window holds — the server's and the daemon's one word
+SYSTEM_WAIT_END_ONLY = "system_wait_end_only"
 
 
 async def on_session_reported(db: AsyncSession, setup: DesktopSetup, session_key: str, state: str, at: datetime) -> None:
@@ -338,7 +351,7 @@ async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
     An instruction done: its one line in the conversation — «sent into the current turn», or after_step «queued after the step in
     progress» (Yuna 03:49Z: it has not gone in yet). Refused or failed: no line — the phone sends the words as a message instead
     (sent_as_message), and that message is the record."""
-    if cmd.kind == "stop_session" and cmd.state == "done" and cmd.session_key:
+    if cmd.kind in ("stop_session", "end_session") and cmd.state == "done" and cmd.session_key:
         await _close_prompts(db, cmd.setup_id, cmd.session_key)
     if cmd.kind == "send_prompt" and cmd.state == "done" and not await _line_written(db, cmd.id):
         payload = cmd.payload or {}

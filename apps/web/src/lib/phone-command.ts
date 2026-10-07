@@ -32,14 +32,20 @@ export type CommandOutcome =
   | { kind: 'key_invalidated' }
   | { kind: 'not_registered' }
   | { kind: 'signed_out' }
+  // story #4599 (contract v1.13.2 · PO 14:08Z · 14:18Z): the whole session ended (end_session done) — no line of its own, the strip shows
+  // the ended state · a stop refused because a macOS window holds the turn (the server's or the daemon's closed reason) — only an end goes
+  | { kind: 'ended' }
+  | { kind: 'system_wait_end_only' }
   | { kind: 'failed' };
 
 export type CommandInput =
   | { agentId: string; kind: 'stop_session' }
+  | { agentId: string; kind: 'end_session' } // story #4599: [세션 끝내기] — the shell signs this kind, so what was signed is what happens
   | { agentId: string; kind: 'send_prompt'; text: string; conversationId: string };
 
+export type Verb = 'stop' | 'send' | 'end';
 /** a command the web posted (or tried to): what [결과 확인] follows again — the same key and body, its id once known */
-export interface Pending { verb: 'stop' | 'send'; key: string; body: Record<string, unknown>; commandId?: string }
+export interface Pending { verb: Verb; key: string; body: Record<string, unknown>; commandId?: string }
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
 export interface CommandDeps {
@@ -90,7 +96,7 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
 
   const signed = await deps.phoneCall('command.sign', prompt
     ? { agent_member_id: input.agentId, kind: 'send_prompt', text: input.text, conversation_id: input.conversationId }
-    : { agent_member_id: input.agentId, kind: 'stop_session' });
+    : { agent_member_id: input.agentId, kind: input.kind });
   if (!signed.ok) {
     const code = signed.code ?? '';
     if (code === 'not_working' || code === 'no_session') return notWorking(prompt ? input.text : '');
@@ -102,10 +108,12 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
   if (prompt && text === undefined) return { kind: 'failed' };
 
   const pending: Pending = {
-    verb: prompt ? 'send' : 'stop',
+    verb: prompt ? 'send' : input.kind === 'end_session' ? 'end' : 'stop',
     key: deps.newKey(),
     body: {
-      kind: input.kind,
+      // story #4599 (PO 14:25Z · Min 387): the kind the shell signed is the kind posted — an end is never posted as a stop, nor the
+      // other way (the daemon checks the signed kind against the command's); a shell from before says none → what was asked
+      kind: typeof signed.kind === 'string' ? signed.kind : input.kind,
       session_key: signed.session_key,
       signed: signed.signed,
       phone_key_id: signed.phone_key_id,
@@ -146,6 +154,8 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
     // a refusal the server named (4xx): nothing was made (the same key would have given back the first command — server rule)
     if (code === 'session_not_working' || code === 'session_not_found') return notWorking();
     if (code === 'device_unreachable') return { kind: 'unreachable' };
+    // story #4599 (PO 14:18Z): a macOS window holds the turn — the stop was refused before anything was made; only an end goes
+    if (code === 'system_wait_end_only') return { kind: 'system_wait_end_only' };
     if (code === 'instruct_too_long') return { kind: 'too_long' };
     if (code === 'remote_control_off') return { kind: 'remote_off' };
     if (code === 'conversation_not_found') return { kind: 'conversation_not_found' };
@@ -176,7 +186,9 @@ async function follow(agentId: string, pending: Pending, deps: CommandDeps): Pro
     } catch {
       continue;
     }
-    if (r.state === 'done') return prompt ? { kind: r.result_code === 'after_step' ? 'sent_after_step' : 'sent_now' } : { kind: 'stopped' };
+    if (r.state === 'done') return prompt ? { kind: r.result_code === 'after_step' ? 'sent_after_step' : 'sent_now' } : pending.verb === 'end' ? { kind: 'ended' } : { kind: 'stopped' };
+    // story #4599 (Mirko 385): the daemon found a macOS window holding the turn when the stop reached it — the same closed reason
+    if (r.state === 'rejected' && r.result_code === 'system_wait_end_only') return { kind: 'system_wait_end_only' };
     // the daemon found the turn ended: it never put it in — the instruction becomes a message (nothing went in twice)
     if (r.state === 'rejected' && r.result_code === 'session_not_working') {
       if (!prompt) return { kind: 'already_stopped' };
