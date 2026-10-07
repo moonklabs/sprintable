@@ -10,7 +10,8 @@
  * on its own background is ≥ 4.5, measured on the shot's pixels · arriving at `/desktop#remote-control`, the owner's switch holds the
  * focus with a ring that shows in pixels, and the switch stays off.
  *
- * Rules (the list's): the target is on screen · two animation frames after the change · `mouse.move(0, 0)` before each shot · no cap
+ * Rules (the list's): the target is on screen · two animation frames after the change (and, for a pixel comparison, the element's
+ * transitions finished — story #4600) · `mouse.move(0, 0)` before each shot · no cap
  * on the class candidates · names `4583-web-{#}-{scene}-{owner|member}-{L|D}-{width}.png`. Files go to CAPTURE_OUT when set, else
  * this test's output folder (with `contrast.json`).
  */
@@ -122,6 +123,14 @@ async function open(page: Page, o: { kind: Kind; width: number; theme: 'L' | 'D'
 }
 
 const frames = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1)))));
+// story #4600 (Yuna): a pixel equality test must wait for the element's transitions to finish, not just two frames — the shadcn
+// Switch has `transition-all` (150 ms) on its ring, so two frames after focus/blur read a mid-transition blend and the L-390 cell
+// went red or green by timing (4980 1ba85a88a red · the same job rerun green). Every running animation on the element and its
+// subtree, then two frames so the final state is painted.
+const settled = async (page: Page, el: Locator) => {
+  await el.evaluate((node) => Promise.all(node.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined))));
+  await frames(page);
+};
 const outDir = () => { const d = process.env['CAPTURE_OUT'] || test.info().outputDir; mkdirSync(d, { recursive: true }); return d; };
 async function shot(page: Page, target: Locator, name: string) {
   await target.scrollIntoViewIfNeeded();
@@ -355,11 +364,22 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     expect(box.y >= 0 && box.y + box.height <= (page.viewportSize()!.height + 1), 'the card is in view').toBe(true);
     const s = (await sw.boundingBox())!;
     const clip = { x: Math.max(0, s.x - 6), y: Math.max(0, s.y - 6), width: s.width + 12, height: s.height + 12 };
+    await settled(page, sw); // story #4600: the ring's 150 ms transition has ended — the focused shot is the final ring, not a blend
     const focused = await page.screenshot({ clip });
     await page.screenshot({ path: path.join(outDir(), `4583-web-5c-arrive-owner-${tag}.png`) });
-    await sw.evaluate((el) => (el as HTMLElement).blur());
-    await frames(page);
+    // story #4600: a bare `blur()` is undone by the card's arrival hold — `holdArrivalFocus` puts the focus back on the switch for
+    // 1.5 s whenever it falls to the page — so the ring came straight back and the «blurred» shot was another mid-transition blend
+    // (equal to the focused blend now and then: the L-390 red). Move the focus to another element instead: by the hold's own rule
+    // the mark comes off and the hold ends, and the ring's transition out can finish before the shot.
+    await page.evaluate(() => {
+      const away = document.createElement('button');
+      away.id = '__away'; away.textContent = 'away'; away.style.position = 'fixed'; away.style.left = '-9999px'; away.style.top = '0';
+      document.body.appendChild(away); away.focus();
+    });
+    await expect(sw).not.toBeFocused();
+    await settled(page, sw);
     const blurred = await page.screenshot({ clip });
+    await page.evaluate(() => document.getElementById('__away')?.remove());
     expect(focused.equals(blurred), 'the focus ring shows in pixels').toBe(false);
 
     await open(page, { kind: 'card-far', width, theme, hash: '#remote-control', api: org({ owner: false }) });
