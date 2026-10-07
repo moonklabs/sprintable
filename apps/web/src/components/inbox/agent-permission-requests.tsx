@@ -12,6 +12,7 @@ import { agentOnDevice, permissionLine, shownToolName, stillShown, waitedMinutes
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
+import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 
 /**
  * story #4533 (E-DESKTOP-2 B-2 · 명세 모음 «B-2 폰 권한 요청 카드(웹은 읽기 전용)») — the approvals inbox's top group «에이전트 권한
@@ -74,6 +75,7 @@ async function readRequests(): Promise<PermissionRequest[] | null> {
 
 export function AgentPermissionRequests() {
   const t = useTranslations('agentPermissions');
+  const remoteOff = useRemoteOff(); // story #4583: why none come — only while off and with a connected computer
   const [requests, setRequests] = useState<PermissionRequest[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const phone = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
@@ -128,9 +130,23 @@ export function AgentPermissionRequests() {
     put(await answerOnPhone(row.id, decision, { phoneCall }));
   };
 
-  if (shown.length === 0) return null; // nothing waiting: the inbox as it was
+  // story #4583 (Yuna copy.md row 4): while remote control is off no request reaches the server, so the list is empty without a word —
+  // one muted line says why, above the list (web and the phone's approvals list are this component). Only with a connected computer:
+  // an org that never connected one gets no line (it would be noise).
+  const offLine = remoteOff && remoteOff.connectedComputers > 0 ? (
+    <div className="mb-4 flex flex-col gap-1" data-testid="agent-permission-remote-off">
+      <p className="break-keep text-sm text-muted-foreground">
+        {remoteOff.owner ? t('remoteOffOwner') : t('remoteOffOthers', remoteOff.names)}
+      </p>
+      {remoteOff.owner ? <RemoteControlLink /> : null}
+    </div>
+  ) : null;
+
+  if (shown.length === 0) return offLine; // nothing waiting: the inbox as it was (+ the off line)
 
   return (
+    <>
+    {offLine}
     <section className="mb-4 space-y-2" aria-labelledby="agent-permission-requests-title" data-testid="agent-permission-requests">
       <h2 id="agent-permission-requests-title" className="text-xs font-semibold text-muted-foreground">
         {t('groupTitle')} · {shown.length}
@@ -140,6 +156,7 @@ export function AgentPermissionRequests() {
           onAnswer={(decision) => void answer(r, decision)} />
       ))}
     </section>
+    </>
   );
 }
 

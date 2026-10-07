@@ -5098,7 +5098,6 @@
         "onPhone": "You can stop or instruct it from a paired phone",
         "inbox": "The permission request is in the approvals inbox",
         "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
-        "remoteOff": "Remote control is turned off for this organization — do it on that computer",
         "inboxPhone": "You can answer it in Approvals",
         "waitingInput": "It's waiting for an answer in that computer's terminal — answer it there",
         "error": "The agent stopped with an error — the reason is in the desktop app on that computer",
@@ -5111,7 +5110,9 @@
         "limitErrorAhead": "Hit its usage limit — resets {time}",
         "limitErrorPassed": "The limit has reset — start it again on that computer",
         "unrecognized": "This page doesn't know this state yet — reloading may show it",
-        "instructNotNow": "Instructions can't go into this agent's current turn — send it in this conversation and it's read when its turn comes"
+        "instructNotNow": "Instructions can't go into this agent's current turn — send it in this conversation and it's read when its turn comes",
+        "remoteOffOwner": "Remote control is off, so you can't stop or instruct from a phone",
+        "remoteOffOthers": "Remote control is off, so no one can stop or instruct from a phone — an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on"
       },
       "button": {
         "stop": "Stop",
@@ -6972,19 +6973,21 @@
       "devicesAction": "View connected devices",
       "failed": "Couldn't turn it on — please try again in a moment",
       "retry": "Try again",
-      "remoteOff": "Remote control is turned off for this organization — an owner can turn it on"
+      "remoteOffOwner": "Remote control is off for this organization, so this computer can't be turned on — turn on the organization's remote control first",
+      "remoteOffOthers": "Remote control is off for this organization, so this computer can't be turned on — you can try again once an organization owner{hasOwners, select, yes { ({owners})} other {}} turns it on"
     },
     "remoteControl": {
       "title": "Remote control",
       "body": "Paired phones can stop, instruct, and answer permission requests for this organization's desktop agents.",
       "allowed": "Allowed: instruct · answer permissions · stop",
       "since": "On since {date}",
-      "ownerOnlyOn": "Remote control · on — only organization owners can turn it on or off",
-      "ownerOnlyOff": "Remote control · off — only organization owners can turn it on or off",
+      "ownerOnlyOn": "Remote control · on — only an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on or off",
+      "ownerOnlyOff": "Remote control · off — only an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on or off",
       "confirmOff": "Turning it off means paired devices can't control this organization's agents right away — pairings stay",
       "turnOff": "Turn off",
       "cancel": "Cancel",
-      "failed": "Couldn't change it — please try again"
+      "failed": "Couldn't change it — please try again",
+      "offEffect": "While it's off, permission requests don't reach phones, and no one can stop or instruct from a phone"
     },
     "remoteDevices": {
       "title": "Remote devices",
@@ -7054,7 +7057,9 @@
       "pairAgain": "Pair again",
       "signedOut": "You were signed out, so it wasn't sent — the request is still open. Sign in again, then press it",
       "signInAgain": "Sign in again"
-    }
+    },
+    "remoteOffOwner": "Remote control is off, so desktop agents' permission requests don't come here",
+    "remoteOffOthers": "Remote control is off, so desktop agents' permission requests don't come here — an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on"
   },
   "phonePairing": {
     "start": "Pair with a computer — scan the QR that appears when you press [Pair a phone] in the computer's Sprintable app",
@@ -7073,14 +7078,15 @@
     "notOurs": "This isn't a Sprintable pairing QR",
     "alreadyPaired": "Already paired with this computer",
     "notPaired": "Couldn't pair — make a new QR on the computer and scan again",
-    "remoteOff": "Remote control is turned off for this organization — an owner can turn it on",
     "unreachable": "Can't reach that computer right now — check that its Sprintable app is open, then scan again",
     "setupNotFound": "Couldn't find this QR's computer — check that it belongs to the same organization",
     "offerUsed": "This QR has already been used — make a new one on the computer and scan again",
     "registerAgain": "This phone needs to be registered again — press [Scan again] to start with registration",
     "limit": "This account already has 3 remote devices — remove one in the computer's Sprintable app or on the web under «Desktop app › Remote devices»",
     "failed": "Couldn't send the pairing — please scan again",
-    "notInApp": "Open this screen in the Sprintable app on your phone"
+    "notInApp": "Open this screen in the Sprintable app on your phone",
+    "remoteOffOwner": "Remote control is off, so this phone can't be paired — turn it on to answer, stop and instruct agents from this phone",
+    "remoteOffOthers": "Remote control is off, so this phone can't be paired — you can try again once an organization owner{hasOwners, select, yes { ({owners})} other {}} turns it on"
   },
   "recipePreset": {
     "blogArticleName": "Blog post",
@@ -7204,5 +7210,9 @@
     "resendFailed": "We couldn't send the email — please try again in a moment.",
     "resendLimited": "You can send this up to three times an hour — please try again a little later.",
     "otherAddress": "Sign up with a different email"
+  },
+  "remoteControlOff": {
+    "goTo": "Go to remote control",
+    "ownersMore": "{n, plural, one {{first} and # other} other {{first} and # others}}"
   }
 }

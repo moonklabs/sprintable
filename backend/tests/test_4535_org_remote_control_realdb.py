@@ -45,7 +45,9 @@ async def test_it_starts_off_and_only_an_owner_changes_it(world):
         device = await _device(c, name="d4424 mac 4535a")
         key = {"Authorization": f"Bearer {device['agents'][0]['api_key']}"}
         owner = await c.get(URL, headers=_person(OWNER))
-        assert owner.status_code == 200 and owner.json() == {"enabled": False, "enabled_at": None, "can_change": True}
+        assert owner.status_code == 200 and owner.json() == {  # story #4583: + owner_names · connected_computers
+            "enabled": False, "enabled_at": None, "can_change": True, "owner_names": ["Owner"], "connected_computers": 1,
+        }
         plain = await c.get(URL, headers=_person(PLAIN))
         assert plain.status_code == 200 and plain.json()["can_change"] is False
         outsider = await c.get(URL, headers=_person(OUTSIDER))  # not of this org: refused, and nothing of it shown
@@ -138,9 +140,9 @@ async def test_the_device_reads_its_orgs_state_with_its_own_agent_key(world):
     async with _client() as c:
         device = await _device(c, name="d4424 mac 4535e")
         key = {"Authorization": f"Bearer {device['agents'][0]['api_key']}"}
-        assert (await c.get("/api/v2/desktop/remote-control", headers=key)).json() == {"enabled": False}
+        assert (await c.get("/api/v2/desktop/remote-control", headers=key)).json() == {"enabled": False, "owner_names": ["Owner"]}
         await _switch(c, True)
-        assert (await c.get("/api/v2/desktop/remote-control", headers=key)).json() == {"enabled": True}
+        assert (await c.get("/api/v2/desktop/remote-control", headers=key)).json() == {"enabled": True, "owner_names": ["Owner"]}
         assert (await c.get("/api/v2/desktop/remote-control", headers=_person(OWNER))).status_code == 404  # not a device's key
 
 

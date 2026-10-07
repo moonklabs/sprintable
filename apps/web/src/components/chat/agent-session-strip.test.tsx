@@ -64,12 +64,12 @@ describe('AgentSessionStrip (story #4534)', () => {
   it('remote control off says why — over the permission line too; not on a computer draws nothing', async () => {
     fetchWithAuth.mockResolvedValueOnce(view({ remote_control: false }));
     await render();
-    expect(line()).toBe('이 조직은 원격 제어를 꺼 두었어요 — 그 컴퓨터에서 직접 해 주세요');
+    expect(line()).toBe('원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요 — 조직 소유자가 켤 수 있어요'); // story #4583 (no org read here: no names)
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'waiting_permission', remote_control: false }));
     await render();
-    expect(line()).toBe('이 조직은 원격 제어를 꺼 두었어요 — 그 컴퓨터에서 직접 해 주세요');
+    expect(line()).toBe('원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요 — 조직 소유자가 켤 수 있어요'); // story #4583 (no org read here: no names)
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     fetchWithAuth.mockResolvedValueOnce(view({ state: null }));

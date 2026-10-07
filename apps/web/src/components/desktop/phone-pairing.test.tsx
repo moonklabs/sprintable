@@ -197,7 +197,7 @@ describe('[4532] phone pairing screen', () => {
     [404, 'setup_not_found', '이 QR의 컴퓨터를 찾지 못했어요 — 같은 조직의 컴퓨터인지 확인해 주세요', ['다시 찍기']],
     [404, 'phone_key_not_found', '이 폰을 다시 등록해야 해요 — [다시 찍기]를 누르면 등록부터 해요', ['다시 찍기']],
     [422, 'invalid_expiry', '이 QR은 시간이 지났어요 — 컴퓨터에서 새 QR을 만들어 주세요', ['다시 찍기']],
-    [409, 'remote_control_off', '이 조직은 원격 제어를 꺼 두었어요 — 조직 소유자가 켜면 다시 할 수 있어요', ['닫기']],
+    [409, 'remote_control_off', '원격 제어가 꺼져 있어 짝지을 수 없어요 — 조직 소유자가 켜면 다시 할 수 있어요', ['닫기']], // story #4583 (no org read here: no names)
   ])('the offer refused %i %s → its line', async (status, code, expected, left) => {
     offerPost = () => res(status, { error: { code } });
     installShell();
