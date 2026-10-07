@@ -67,13 +67,13 @@ describe('GateSignatureApproval 서명 사유 초안(story #4370)', () => {
     await mount(gate());
     await type('변경 요청 사유');
     approveResult = () => undefined;
-    await act(async () => { btn(cage.sigRequestChanges).click(); });
+    await act(async () => { btn(cage.sigReject).click(); });
     await settle();
     await unmountLayer();
     await mount(gate());
     expect(field()!.value).toBe('변경 요청 사유');
     approveResult = async () => true;
-    await act(async () => { btn(cage.sigRequestChanges).click(); });
+    await act(async () => { btn(cage.sigReject).click(); });
     await settle();
     await unmountLayer();
     await mount(gate());
@@ -84,7 +84,7 @@ describe('GateSignatureApproval 서명 사유 초안(story #4370)', () => {
     await mount(gate());
     await type('보낼 사유');
     approveResult = async () => false;
-    await act(async () => { btn(cage.sigRequestChanges).click(); });
+    await act(async () => { btn(cage.sigReject).click(); });
     await settle();
     await unmountLayer();
     await mount(gate());

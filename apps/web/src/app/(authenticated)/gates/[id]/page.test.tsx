@@ -64,7 +64,7 @@ function gate(overrides: Partial<GateItem>): GateItem {
     neutral_facts: null,
     requires_human: true,
     // usesSignatureFlow(riskLevel!=='low')는 'unknown'/'high'에서 GateSignatureApproval(다른
-    // 버튼 라벨·sigApproveAndSign/sigRequestChanges)로 분기한다 — can_approve 게이팅 자체를
+    // 버튼 라벨·sigApproveAndSign/sigReject)로 분기한다 — can_approve 게이팅 자체를
     // 테스트하는 이 스위트는 그 분기 디테일과 무관하므로 'low'로 고정해 단순 버튼 경로를 탄다.
     risk_grade: 'low',
     created_at: new Date().toISOString(),
@@ -1334,6 +1334,68 @@ describe('GateDetailPage — 저위험 «변경 요청» 패널의 «취소»는
     expect(reason()).toBeNull();
     await act(async () => { btn(cage.gateReject).click(); });
     expect(reason()!.value).toBe('');
+  });
+});
+
+// story #4558(유나 AC0 정본 · PO 2026-10-07) — 게이트 화면에서: 저위험 [반려]로 들어간 패널은 반려 전용([반려](주) · [취소]) ·
+// 고위험 패널은 [반려] · [승인하고 서명](주) · [보류(논의 필요)] · 눈썹은 gate_type 묶음(판단 요청 → «에이전트 질문 · 판단을 기다려요»).
+describe('GateDetailPage — 결정 패널 낱말 하나 «반려» · 눈썹 세 묶음(story #4558)', () => {
+  const cage = koMessages.cage as unknown as Record<string, string>;
+  const claim = (koMessages.proofCapsule as { claim: Record<string, string> }).claim;
+  const labels = () => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).map((b) => b.textContent?.trim());
+  const btn = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === label)!;
+  const eyebrow = () => container.querySelector('[data-testid="proof-capsule-claim-label"]')?.textContent;
+
+  it('저위험: [반려] 진입 → 패널에 «반려»(주 · destructive) · «취소»만 — «승인하고 서명» 0 · «보류» 0 · «변경 요청» 0', async () => {
+    await mount(gate({ can_approve: true }));
+    await act(async () => { btn(cage.gateReject).click(); });
+    const col = container.querySelector('[data-testid="gate-detail-action-column"]')!;
+    const colLabels = Array.from(col.querySelectorAll<HTMLButtonElement>('button')).map((b) => b.textContent?.trim()).filter(Boolean);
+    expect(colLabels).toEqual([cage.sigReject, cage.cancel]);
+    expect(cage.sigReject).toBe('반려');
+    expect(col.textContent).not.toContain(cage.sigApproveAndSign);
+    expect(col.textContent).not.toContain(cage.gateDiscussSubmit);
+    expect(col.textContent).not.toContain('변경 요청');
+    expect(col.querySelector<HTMLButtonElement>('[data-testid="gate-sig-reject"]')!.className).toContain('bg-destructive');
+  });
+
+  it('고위험: 패널에 «반려» · «승인하고 서명» · «보류(논의 필요)» — «변경 요청» 0 · «취소» 0', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'high' }));
+    expect(labels()).toEqual(expect.arrayContaining([cage.sigReject, cage.sigApproveAndSign, cage.gateDiscussSubmit]));
+    expect(container.textContent).not.toContain('변경 요청');
+    expect(labels()).not.toContain(cage.cancel);
+    // 고위험 패널의 주 단추는 «승인하고 서명»(bg-primary) · 반려는 주 단추가 아니다
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="gate-sig-reject"]')!.className).not.toContain('bg-primary');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="gate-sig-reject"]')!.className).not.toContain('bg-destructive');
+  });
+
+  it('눈썹: 판단 요청(agent_decision_request) → «에이전트 질문 · 판단을 기다려요» — «완료했다고 말해요» 0', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'agent_decision_request' }));
+    expect(eyebrow()).toBe(claim.decisionRequestLabel);
+    expect(container.textContent).not.toContain(claim.label);
+  });
+
+  it('눈썹: 완료 주장(qa) → 기본 «에이전트 주장 · 완료했다고 말해요»', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'qa' }));
+    expect(eyebrow()).toBe(claim.label);
+  });
+
+  it('눈썹: 진행 승인(deploy) → «진행 승인 · 이대로 진행할지 결정해요» · external_publish는 «발행 승인 · …» 그대로', async () => {
+    await mount(gate({ can_approve: true, gate_type: 'deploy' }));
+    expect(eyebrow()).toBe(claim.goAheadLabel);
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await mount(gate({ can_approve: true, gate_type: 'external_publish' }));
+    expect(eyebrow()).toBe(claim.publishApprovalLabel);
+  });
+
+  it('눈썹: 맵 밖 종류(merge_gate 픽스처 기본값)는 «완료» 단정 없이 진행 승인 글', async () => {
+    await mount(gate({ can_approve: true }));
+    expect(eyebrow()).toBe(claim.goAheadLabel);
+    expect(container.textContent).not.toContain(claim.label);
   });
 });
 

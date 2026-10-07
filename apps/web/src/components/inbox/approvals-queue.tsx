@@ -7,7 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CheckCircle, ChevronDown, ChevronUp, Pencil, XCircle } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
@@ -817,10 +817,11 @@ export function ApprovalsQueue() {
                   className="order-1 h-8 flex-1 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 sm:order-1 sm:flex-none"
                   disabled={disabled}
                   onClick={rejectOnClick}
-                  aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('sigRequestChanges') })}
+                  aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('sigReject') })}
                 >
-                  <Pencil className="size-3.5" />
-                  {t('sigRequestChanges')}
+                  {/* story #4558 — 줄 단추도 같은 낱말 «반려»(키 sigReject · 옛 «변경 요청») · 연필(«고쳐 달라»)이 아니라 XCircle. */}
+                  <XCircle className="size-3.5" />
+                  {t('sigReject')}
                 </Button>
                 {/* story #2631(PO 결정③) — 「보류(논의 필요)」는 결재함 전 게이트 타입 단일 표면. */}
                 <Button

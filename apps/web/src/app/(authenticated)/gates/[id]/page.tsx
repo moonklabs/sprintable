@@ -19,7 +19,7 @@ import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-butt
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isDecisionGate, deriveDecisionFacts, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { buildGateTransitionBody } from '@/lib/gate-decision-payload';
-import { gateTypeLabel } from '@/lib/gate-type-label';
+import { gateClaimLabel, gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { gateStatusLabel } from '@/lib/gate-status-label';
@@ -641,10 +641,13 @@ export default function GateDetailPage() {
                   onApprove={(reason) => transition('approved', reason, true)}
                   onReject={(reason) => transition('rejected', reason)}
                   onDiscuss={(reason) => discuss(reason)}
-                  // story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래 근거열람+사유 요구가 없는 등급) —
+                  // story #3334 — 저위험 게이트는 [반려] 클릭으로만 이 패널에 들어온다(원래 근거열람+사유 요구가 없는 등급) —
                   // 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈 길. 고위험(isSigFlowGate)은 이 패널이 유일한 경로라 취소 없음.
                   // story #4370 — 취소는 컴포넌트 안에서 사유 초안도 지운다.
                   onCancel={!isSigFlowGate ? () => setRejectPanelOpen(false) : undefined}
+                  // story #4558(유나 정본 §1) — [반려]로 들어온 저위험 패널은 반려 전용([반려](주) · [취소]) — 들어온 이름과 패널이
+                  // 약속하는 일이 같다. 고위험은 이 패널이 유일한 길이라 세 단추 그대로(«변경 요청» → «반려»만).
+                  mode={isSigFlowGate ? 'decide' : 'reject'}
                 />
               </div>
             );
@@ -747,7 +750,9 @@ export default function GateDetailPage() {
                 claim={decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
                 // story #4336(PO 03:55Z · 유나 낱말 04:47Z) — 외부 발행 게이트는 «에이전트가 완료했다고 말함»이 아니라 발행 승인 요청이다(사람이
                 // 상신하기도 함 · 승인된 뒤에도 참인 문장) → 눈썹을 «발행 승인 · 이대로 발행할지 결정해요»로.
-                claimLabel={gate.gate_type === 'external_publish' ? tProof('claim.publishApprovalLabel') : undefined}
+                // story #4558(유나 정본 §2) — 그 가름을 gate_type → 세 묶음(완료 주장 · 판단 요청 · 진행 승인) 표 한 곳(gate-type-label.ts)으로:
+                // 판단 요청 게이트에 «완료했다고 말해요»가 뜨던 것을 «에이전트 질문 · 판단을 기다려요»로 · 맵 밖 종류는 «완료» 단정 없이 진행 승인 쪽.
+                claimLabel={gateClaimLabel(tProof, gate.gate_type)}
                 className="max-w-none"
                 footer={
                   showActionColumn ? (

@@ -372,6 +372,8 @@
     "claim": {
       "label": "Claim · Agent says done",
       "publishApprovalLabel": "Publish approval · Decide whether to publish as is",
+      "decisionRequestLabel": "Agent question · Waiting for your decision",
+      "goAheadLabel": "Go-ahead · Decide whether to proceed as is",
       "executor": "By {name}",
       "now": "Now: <b>{now}</b>",
       "running": "Running"
@@ -5959,7 +5961,7 @@
     "sigReasonLabel": "Decision reason",
     "sigReasonPlaceholder": "Enter a reason to record with this decision",
     "sigConsequenceNote": "Approving records your signature",
-    "sigRequestChanges": "Request changes",
+    "sigReject": "Reject",
     "sigApproveAndSign": "Approve & sign",
     "sigApproveAndSignNewsletterSend": "Approve send & sign",
     "sigApproveAndSignCampaign": "Approve campaign & sign",

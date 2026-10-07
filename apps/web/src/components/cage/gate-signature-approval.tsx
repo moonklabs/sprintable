@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { CheckCircle, Pencil } from 'lucide-react';
+import { CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GateEvidence } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
@@ -27,6 +27,7 @@ export function GateSignatureApproval({
   onDiscuss,
   compact = false,
   onCancel,
+  mode = 'decide',
 }: {
   gate: GateItem;
   resolving: boolean;
@@ -50,8 +51,14 @@ export function GateSignatureApproval({
   /** story #4370(까디르 P3) — 보이는 «취소»(저위험 게이트의 «변경 요청» 패널에서 원탭 승인 화면으로 되돌아가기). 사유 초안을 지우고
    * 부른다(유나 규칙: 버림은 보이는 «취소»로만). 없으면 버튼을 안 그린다(고위험은 이 패널이 유일한 길이라 취소 없음). */
   onCancel?: () => void;
+  /** story #4558(유나 AC0 정본 · PO 2026-10-07) — 들어온 까닭. `decide` = 고위험 서명 흐름(이 패널이 유일한 길):
+   * [반려](outline) · [승인하고 서명](주) · [보류(논의 필요)]. `reject` = 저위험 화면의 [반려]로 들어온 사람: 반려 전용 —
+   * [반려](주 · destructive) · [취소]뿐. «승인하고 서명»·«보류»·«승인은 내 서명으로 기록돼요»는 두지 않는다(승인은 원래
+   * 화면에 있고, [반려]로 들어온 사람에게 다른 일을 주 단추로 주지 않는다). 근거 확인 체크 · 사유 칸은 두 모드 같다. */
+  mode?: 'decide' | 'reject';
 }) {
   const t = useTranslations('cage');
+  const rejectOnly = mode === 'reject';
   // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) — 이
   // 버튼이 사람이 실제로 누르는 primary(고위험 게이트는 이 서명 플로우가 뜬다,
   // gates/[id]/page.tsx의 평문 버튼은 저위험 전용) — 처음 처방이 평문 버튼에만
@@ -125,27 +132,34 @@ export function GateSignatureApproval({
       ) : null}
 
       <div className="flex flex-col gap-2">
-        <p className="text-center text-[11px] text-muted-foreground">{t('sigConsequenceNote')}</p>
-        <div className={compact ? 'flex flex-col gap-2' : 'flex gap-2'}>
+        {/* story #4558 — «승인은 내 서명으로 기록돼요»는 승인이 있는 패널에만(반려 전용 패널엔 승인이 없다). */}
+        {rejectOnly ? null : <p className="text-center text-[11px] text-muted-foreground">{t('sigConsequenceNote')}</p>}
+        <div className={compact || rejectOnly ? 'flex flex-col gap-2' : 'flex gap-2'}>
+          {/* story #4558(유나 정본 §0) — 이 일의 이름은 «반려» 하나: 진입 [반려] → 이 단추 «반려» → 결과 «반려됨». 예전 «변경 요청»은
+              결정 패널 한 곳에만 있던 낱말이라 판단 요청(바꿀 결과물이 없는 게이트)에 맞지 않았고, 연필 아이콘은 «고쳐 달라»의 뜻이라
+              결과 red 계열과 같은 XCircle로. 반려 전용 모드에선 이 단추가 주 단추(destructive). */}
           <Button
-            variant="outline"
-            className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-1 gap-1.5'}
+            variant={rejectOnly ? 'destructive' : 'outline'}
+            className={compact || rejectOnly ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-1 gap-1.5'}
             disabled={!canReject}
             onClick={() => act(onReject)}
+            data-testid="gate-sig-reject"
           >
-            <Pencil className="size-4" />
-            {t('sigRequestChanges')}
+            <XCircle className="size-4" />
+            {t('sigReject')}
           </Button>
-          <Button
-            className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-[1.4] gap-1.5'}
-            disabled={!canSign}
-            onClick={() => act(onApprove)}
-          >
-            <CheckCircle className="size-4" />
-            {resolving ? '...' : t(approveAndSignLabelKey)}
-          </Button>
+          {rejectOnly ? null : (
+            <Button
+              className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-[1.4] gap-1.5'}
+              disabled={!canSign}
+              onClick={() => act(onApprove)}
+            >
+              <CheckCircle className="size-4" />
+              {resolving ? '...' : t(approveAndSignLabelKey)}
+            </Button>
+          )}
         </div>
-        {onDiscuss ? (
+        {onDiscuss && !rejectOnly ? (
           <Button
             type="button"
             variant="ghost"
