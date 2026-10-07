@@ -367,9 +367,19 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     await settled(page, sw); // story #4600: the ring's 150 ms transition has ended — the focused shot is the final ring, not a blend
     const focused = await page.screenshot({ clip });
     await page.screenshot({ path: path.join(outDir(), `4583-web-5c-arrive-owner-${tag}.png`) });
-    await sw.evaluate((el) => (el as HTMLElement).blur());
-    await settled(page, sw); // story #4600: and the ring has fully gone before the blurred shot
+    // story #4600: a bare `blur()` is undone by the card's arrival hold — `holdArrivalFocus` puts the focus back on the switch for
+    // 1.5 s whenever it falls to the page — so the ring came straight back and the «blurred» shot was another mid-transition blend
+    // (equal to the focused blend now and then: the L-390 red). Move the focus to another element instead: by the hold's own rule
+    // the mark comes off and the hold ends, and the ring's transition out can finish before the shot.
+    await page.evaluate(() => {
+      const away = document.createElement('button');
+      away.id = '__away'; away.textContent = 'away'; away.style.position = 'fixed'; away.style.left = '-9999px'; away.style.top = '0';
+      document.body.appendChild(away); away.focus();
+    });
+    await expect(sw).not.toBeFocused();
+    await settled(page, sw);
     const blurred = await page.screenshot({ clip });
+    await page.evaluate(() => document.getElementById('__away')?.remove());
     expect(focused.equals(blurred), 'the focus ring shows in pixels').toBe(false);
 
     await open(page, { kind: 'card-far', width, theme, hash: '#remote-control', api: org({ owner: false }) });
