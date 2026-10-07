@@ -311,6 +311,8 @@ function ResultLine({ result }: { result: Result }) {
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
     // story #4599 (Yuna ① · PO 14:18Z): a [멈춤] pressed just before the macOS window came up — refused, only [세션 끝내기] works now
     case 'system_wait_end_only': return line(t('command.stopSystemWait'));
+    // story #4599 (Yuna · PO 19:47Z): [세션 끝내기] found the window already answered on that Mac — nothing was ended, it works again
+    case 'not_held': return line(t('command.endNotHeld'));
     case 'ended': return null; // never kept (settle clears it — the ended state is the line)
     case 'unknown': return line(stop ? t('command.stopUnknown') : t('command.sendUnknown'));
     // story #4583 (Yuna copy.md row 3): the same words as the strip's line — the owner gets the way to the switch

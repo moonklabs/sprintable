@@ -36,6 +36,9 @@ export type CommandOutcome =
   // the ended state · a stop refused because a macOS window holds the turn (the server's or the daemon's closed reason) — only an end goes
   | { kind: 'ended' }
   | { kind: 'system_wait_end_only' }
+  // story #4599 (Yuna · PO 19:47Z): [세션 끝내기] signed nothing — the window was answered on that Mac first, the session works again
+  // (the shell's `not_held`). Never «failed»: «다시 눌러 주세요» would press [멈춤], the button there now, and stop a working turn
+  | { kind: 'not_held' }
   | { kind: 'failed' };
 
 export type CommandInput =
@@ -75,6 +78,7 @@ const KEY_REFUSALS: Record<string, PlainOutcome['kind']> = {
   signed_out: 'signed_out',
   remote_control_off: 'remote_off',
   conversation_not_found: 'conversation_not_found',
+  not_held: 'not_held', // story #4599: an end refused by the shell — no longer held by a macOS window (phoneCalls.js)
 };
 
 async function codeOf(res: Response): Promise<string> {
