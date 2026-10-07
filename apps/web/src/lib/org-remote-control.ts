@@ -38,7 +38,13 @@ function publish(e: Entry, value: OrgRemoteControl | null): void {
 
 /** the last one left: drop it — unless a read is still out (it drops it when it lands) */
 function release(orgId: string, e: Entry): void {
-  if (e.listeners.size === 0 && !e.reading && entries.get(orgId) === e) entries.delete(orgId);
+  const unused = () => e.listeners.size === 0 && !e.reading && entries.get(orgId) === e;
+  if (!unused()) return;
+  // story #4583 (AC6 · the 결재함 link → /desktop): one place leaving and the next one arriving happen in the same commit, the
+  // leaving cleanup first — dropping at once made the arriving card start from nothing (no switch → read again → a new switch),
+  // which threw away the focus the link's arrival had just put there. Drop on the next microtask, if still nobody listens: a real
+  // leave still drops it (the next visit reads again), a hand-over keeps it.
+  queueMicrotask(() => { if (unused()) entries.delete(orgId); });
 }
 
 function read(orgId: string): void {

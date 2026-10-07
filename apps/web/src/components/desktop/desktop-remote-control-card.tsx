@@ -85,12 +85,14 @@ export function DesktopRemoteControlCard() {
   const ownerNames = { owners, hasOwners: owners ? 'yes' : 'no' };
 
   return (
-    <Card ref={cardRef} id={REMOTE_CONTROL_ANCHOR} tabIndex={-1} className="break-keep flex scroll-mt-24 flex-col gap-2 p-6 focus:outline-none" data-testid="desktop-remote-control">
+    <Card ref={cardRef} id={REMOTE_CONTROL_ANCHOR} tabIndex={-1} className="break-keep flex scroll-mt-24 flex-col gap-2 p-6 focus:outline-none data-[arrived]:border-ring data-[arrived]:ring-3 data-[arrived]:ring-ring" data-testid="desktop-remote-control">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold">{t('title')}</h2>
         {state.can_change ? (
           <Switch
             ref={switchRef}
+            // story #4583 (Yuna 4974): the arrival ring — the same tokens as the Switch's own focus-visible ring
+            className="data-[arrived]:border-ring data-[arrived]:ring-3 data-[arrived]:ring-ring"
             checked={state.enabled}
             disabled={busy || asking}
             aria-label={t('title')}

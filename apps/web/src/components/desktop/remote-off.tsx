@@ -28,6 +28,12 @@ export function markArrival(): void {
   arrivalAt = Date.now();
 }
 
+/** the link's click: only a plain primary click navigates here — a new tab / window (modifier · middle button) leaves no mark (Yuna 4974) */
+function markPlainClick(e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; button: number; defaultPrevented: boolean }): void {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0 || e.defaultPrevented) return;
+  markArrival();
+}
+
 /** true once, within ARRIVAL_MS of a link press — and clears it */
 export function takeArrival(): boolean {
   const fresh = arrivalAt > 0 && Date.now() - arrivalAt < ARRIVAL_MS;
@@ -35,33 +41,45 @@ export function takeArrival(): boolean {
   return fresh;
 }
 
+export const ARRIVED_ATTR = 'data-arrived';
+
 /**
- * Focus `target` and, for HOLD_MS, put it back if the focus falls to the page (body) or onto `card` itself without the person
- * acting (a key or a pointer press ends the hold — then any move is theirs). Returns the cleanup.
+ * Focus `target`, mark it `data-arrived` (its ring is drawn from that mark — `:focus-visible` is the browser's guess and is false
+ * after a pointer press, which is how the link is usually pressed · Yuna 4974), and for `holdMs` put the focus back if it falls
+ * to the page (body) or onto `card` itself without the person acting.
+ * The mark comes off at the person's first key or pointer press (from then on the browser's own ring rules), or when the focus
+ * leaves after the hold — never only because the hold's time ran out (the ring vanishing while the focus stays would be a change
+ * on screen). Returns the cleanup.
  */
 export function holdArrivalFocus(target: HTMLElement, card: HTMLElement | null, holdMs = 1500): () => void {
+  target.setAttribute(ARRIVED_ATTR, '');
   target.focus();
-  let done = false;
-  const stop = () => {
-    done = true;
-    target.removeEventListener('focusout', onOut);
-    document.removeEventListener('keydown', stop, true);
-    document.removeEventListener('pointerdown', stop, true);
-    clearTimeout(timer);
-  };
+  let holding = true;
+  let ended = false;
+  const unmark = () => target.removeAttribute(ARRIVED_ATTR);
+  const byPerson = () => { unmark(); end(); };
   const onOut = () => {
     // the new focus is known only after the event — look once it has landed
     setTimeout(() => {
-      if (done) return;
+      if (ended) return;
       const now = document.activeElement;
-      if (now === null || now === document.body || (card !== null && now === card && card !== target)) target.focus();
+      const lost = now === null || now === document.body || (card !== null && now === card && card !== target);
+      if (holding && lost) { target.focus(); return; }
+      if (now !== target) { unmark(); end(); } // the focus went elsewhere after the hold
     }, 0);
   };
+  const end = () => {
+    ended = true;
+    target.removeEventListener('focusout', onOut);
+    document.removeEventListener('keydown', byPerson, true);
+    document.removeEventListener('pointerdown', byPerson, true);
+    clearTimeout(timer);
+  };
   target.addEventListener('focusout', onOut);
-  document.addEventListener('keydown', stop, true);
-  document.addEventListener('pointerdown', stop, true);
-  const timer = setTimeout(stop, holdMs);
-  return stop;
+  document.addEventListener('keydown', byPerson, true);
+  document.addEventListener('pointerdown', byPerson, true);
+  const timer = setTimeout(() => { holding = false; }, holdMs);
+  return () => { unmark(); end(); };
 }
 
 export interface RemoteOff {
@@ -99,7 +117,7 @@ export function RemoteControlLink({ variant = 'link' }: { variant?: 'link' | 'bu
   const flat = useFlatHref();
   const href = `${flat('/desktop')}#${REMOTE_CONTROL_ANCHOR}`;
   if (variant === 'button') {
-    return <Button asChild><Link href={href} onClick={markArrival} data-testid="remote-off-link">{t('goTo')}</Link></Button>;
+    return <Button asChild><Link href={href} onClick={markPlainClick} data-testid="remote-off-link">{t('goTo')}</Link></Button>;
   }
-  return <Link href={href} onClick={markArrival} className="text-sm underline" data-testid="remote-off-link">{t('goTo')}</Link>;
+  return <Link href={href} onClick={markPlainClick} className="text-sm underline" data-testid="remote-off-link">{t('goTo')}</Link>;
 }
