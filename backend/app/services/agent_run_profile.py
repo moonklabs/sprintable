@@ -206,15 +206,68 @@ async def read_for_daemon(db: AsyncSession, *, member: Member) -> dict:
     }
 
 
+RUN_PROFILE_EVENT = "desktop.run_profile"
+
+
+async def _event_project(db: AsyncSession, member: Member) -> uuid.UUID | None:
+    """The project the trigger event is filed under. The agent stream filters by recipient and org only (agent_gateway
+    `_visible_events`), so any project of the agent's reaches it; this picks the same one the other desktop events use:
+    a live desktop setup that holds this agent (`desktop.remote_control`'s `setup.project_id` · `remote_control._live_devices`),
+    else the agent's lowest granted project (`agent_inbox`'s default). None when it has neither — no event (events.project_id
+    is required), and the daemon's 10-min check still picks the change up."""
+    from app.models.desktop_setup import DesktopSetup
+    from app.models.team import TeamMember
+    from app.services.desktop_relay import _setup_agents
+    from app.services.remote_control import _live_devices
+
+    for setup in (await db.execute(
+        select(DesktopSetup).where(*_live_devices(member.org_id)).order_by(DesktopSetup.created_at, DesktopSetup.id)
+    )).scalars().all():
+        if member.id in _setup_agents(setup):
+            return setup.project_id
+    return (await db.execute(
+        select(TeamMember.project_id).where(
+            TeamMember.id == member.id, TeamMember.type == "agent", TeamMember.is_active.is_(True),
+        ).order_by(TeamMember.project_id).limit(1)
+    )).scalar_one_or_none()
+
+
+async def _emit_run_profile(db: AsyncSession, *, member_id: uuid.UUID, version: int) -> None:
+    """story #4580 (C) · contract `4580/run-profile-event-contract.md`: one `desktop.run_profile` Event down the agent's own
+    stream when its run profile's version moved — a trigger only: the payload is exactly {event_type, agent_id, version}
+    (no hosts · no model · no effort); the daemon re-reads the profile with its own key. Same Event shape and order as
+    `remote_control._wake_devices` (flush → recipient seq), in the caller's transaction (a rolled-back change sends nothing)."""
+    from app.models.event import Event
+    from app.services.event_seq import assign_recipient_seq
+
+    member = (await db.execute(select(Member).where(Member.id == member_id))).scalar_one_or_none()
+    if member is None or member.type != "agent":
+        return
+    project_id = await _event_project(db, member)
+    if project_id is None:
+        return
+    event = Event(
+        project_id=project_id, org_id=member.org_id, event_type=RUN_PROFILE_EVENT,
+        source_entity_type="agent_run_profile", source_entity_id=member.id,
+        recipient_id=member.id, recipient_type="agent",
+        payload={"event_type": RUN_PROFILE_EVENT, "agent_id": str(member.id), "version": int(version)},
+        status="pending",
+    )
+    db.add(event)
+    await db.flush()
+    await assign_recipient_seq(db, event)
+
+
 async def _bump(db: AsyncSession, *, member_id: uuid.UUID, updated_by: uuid.UUID | None) -> None:
     """story #4580: the version moves on with the model and effort kept (a row made now keeps the defaults) — so the daemon's
-    «running ≠ saved» check (§4) sees a change in the allowed hosts too."""
+    «running ≠ saved» check (§4) sees a change in the allowed hosts too · (C) and the daemon hears it at once."""
     now = datetime.now(timezone.utc)
     stmt = pg_insert(AgentRunProfile).values(member_id=member_id, model=None, effort=None, version=1, updated_by=updated_by, updated_at=now)
-    await db.execute(stmt.on_conflict_do_update(
+    version = (await db.execute(stmt.on_conflict_do_update(
         index_elements=[AgentRunProfile.member_id],
         set_={"version": AgentRunProfile.version + 1, "updated_by": updated_by, "updated_at": now},
-    ))
+    ).returning(AgentRunProfile.version))).scalar_one()
+    await _emit_run_profile(db, member_id=member_id, version=version)
 
 
 async def remove_allowed_host(
@@ -242,13 +295,14 @@ async def _save(
     stmt = pg_insert(AgentRunProfile).values(
         member_id=member_id, model=model, effort=effort, version=1, updated_by=updated_by, updated_at=now,
     )
-    await db.execute(stmt.on_conflict_do_update(
+    version = (await db.execute(stmt.on_conflict_do_update(
         index_elements=[AgentRunProfile.member_id],
         set_={
             "model": model, "effort": effort, "version": AgentRunProfile.version + 1,
             "updated_by": updated_by, "updated_at": now,
         },
-    ))
+    ).returning(AgentRunProfile.version))).scalar_one()
+    await _emit_run_profile(db, member_id=member_id, version=version)  # story #4580 (C)
 
 
 async def on_runtime_changed(db: AsyncSession, *, member_id: uuid.UUID, updated_by: uuid.UUID | None) -> None:
