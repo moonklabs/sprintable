@@ -12,15 +12,22 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session")
+# story #4599 (0443 · contract v1.13.2 · PO 14:08Z): `end_session` — a person's signed end of the whole session (the one handle on
+# a turn held by a macOS window, where a stop cannot reach); always ends, what was signed is what happens
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
 # story #4534 (0437 · contract v1.12): the board's own words — asked in the terminal · an error · paused at a usage limit
-SESSION_STATES = ("starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "stopped")
+# story #4599 (0442 · contract v1.13): `waiting_system` — the turn is held by a macOS window on that computer (a folder-access
+# question the person at the Mac must answer); a working word to a reader from before (legacy_state), never a resting one
+SESSION_STATES = ("starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "waiting_system", "stopped")
 # the words a usage limit comes with (the only rows that may carry its why) · Claude's «may continue by itself»
 SESSION_LIMIT_STATES = ("waiting_input", "error", "paused_limit")
 SESSION_SELF_RESUME = ("maybe", "no", "unknown")
+# story #4599 (0442 · contract v1.13 · Kadir lens ③): the folder a macOS window asks about — a closed list, carried with
+# `waiting_system` only (the daemon read it from tccd's service name; a window seen by owner only carries none)
+SESSION_SYSTEM_FOLDERS = ("documents", "desktop", "downloads", "network_volume", "icloud")
 SESSION_RUNTIMES = ("claude", "codex")
 
 
@@ -54,6 +61,7 @@ class DesktopSession(Base):
         CheckConstraint(_in("state", SESSION_STATES), name="ck_desktop_sessions_state"),
         CheckConstraint(_in("runtime", SESSION_RUNTIMES), name="ck_desktop_sessions_runtime"),
         CheckConstraint(f"limit_self_resume IS NULL OR {_in('limit_self_resume', SESSION_SELF_RESUME)}", name="ck_desktop_sessions_limit_self_resume"),
+        CheckConstraint(f"system_folder IS NULL OR {_in('system_folder', SESSION_SYSTEM_FOLDERS)}", name="ck_desktop_sessions_system_folder"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -69,6 +77,8 @@ class DesktopSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # story #4534 (0437): a usage limit's why — on a limit word only (services.desktop_relay)
+    # story #4599: the folder the macOS window asks about (waiting_system only · a closed list · never a path)
+    system_folder: Mapped[str | None] = mapped_column(Text, nullable=True)
     limited: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     limit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     limit_again: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -78,7 +88,7 @@ class DesktopSession(Base):
 
 
 class DesktopCommand(Base):
-    """A command sent down to a device: four kinds only (DB CHECK + COMMAND_KINDS), one row per idempotency key, numbered per
+    """A command sent down to a device: five kinds only (DB CHECK + COMMAND_KINDS), one row per idempotency key, numbered per
     device for the stream (`device_seq`), its state moving forward only. The daemon reports a code, never output."""
 
     __tablename__ = "desktop_commands"

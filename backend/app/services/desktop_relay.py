@@ -141,6 +141,15 @@ class SessionLimit(BaseModel):
     self_resume: Literal["maybe", "no", "unknown"] | None = None
 
 
+class SystemHold(BaseModel):
+    """story #4599 (contract v1.13 · Kadir lens ③): why a `waiting_system` turn waits — the folder the macOS window asks about, when
+    the daemon read it (tccd's service name → a closed list); absent when the window was seen by its owner alone. Never a path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    folder: Literal["documents", "desktop", "downloads", "network_volume", "icloud"] | None = None
+
+
 class SessionReport(BaseModel):
     """One session's state — nothing else: no terminal bytes, no prompt text, no path, no key (extra fields → 422)."""
 
@@ -150,9 +159,12 @@ class SessionReport(BaseModel):
     runtime: Literal["claude", "codex"]
     # story #4534 (0437 · contract v1.12): the board's own words — never folded into «idle» (asked in the terminal · an error ·
     # paused at a usage limit)
-    state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "stopped"]
+    # story #4599 (0442 · contract v1.13): `waiting_system` — held by a macOS window on that computer (no limit rides on it)
+    state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "waiting_system", "stopped"]
     at: OffsetDatetime  # a time without its offset is refused (4330)
     limit: SessionLimit | None = None
+    # story #4599: the window's folder — with `waiting_system` only (the validator below)
+    system: SystemHold | None = None
     # story #4534 (0438 · PO 06:30Z): whether this session can take an instruction into the running turn — read by the daemon once
     # when the session starts. It only hides [지금 지시] on the web; the daemon decides again when an instruction comes (Kadir 06:31Z)
     instruct_now: StrictBool | None = None  # a boolean only — never «yes» · 1 read as true
@@ -161,6 +173,8 @@ class SessionReport(BaseModel):
     def _limit_on_a_limit_word_only(self) -> "SessionReport":
         if self.limit is not None and self.state not in SESSION_LIMIT_STATES:
             raise ValueError("limit is carried with waiting_input · error · paused_limit only")
+        if self.system is not None and self.state != "waiting_system":
+            raise ValueError("system is carried with waiting_system only")
         return self
 
 
@@ -204,10 +218,23 @@ def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
     row.limit_self_resume = limit.self_resume if limit else None
 
 
+def _set_system(row: DesktopSession, report: SessionReport) -> None:
+    """story #4599: the window's folder is the report's — any other word (the hold is over) clears it."""
+    row.system_folder = report.system.folder if report.state == "waiting_system" and report.system else None
+
+
+def system_view(row: DesktopSession) -> dict | None:
+    """story #4599: a `waiting_system` row's why as a reader sees it — `{folder}` (null when not read); None on any other word."""
+    if row.state != "waiting_system":
+        return None
+    return {"folder": row.system_folder}
+
+
 # story #4534 (Kadir 4960 · PO 05:36Z): a reader built for the five words (a web bundle from before · a tab left open · the phone's web
 # view) must never meet a word it does not know — `state` stays one of the five (the new words fold to idle, as the daemon used to
 # send them) and the board's own word goes in `activity` beside it, read by the new web only.
-LEGACY_STATE = {"waiting_input": "idle", "error": "idle", "paused_limit": "idle"}
+# story #4599: a turn held by a macOS window is still a turn — a reader from before sees it working (what the daemon sent before)
+LEGACY_STATE = {"waiting_input": "idle", "error": "idle", "paused_limit": "idle", "waiting_system": "working"}
 
 
 def legacy_state(state: str) -> str:
@@ -244,6 +271,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     row.last_report_seq, row.state_at = report.report_seq, report.at
     row.ended_at = report.at if report.state == "stopped" else None
     _set_limit(row, report.limit)
+    _set_system(row, report)  # story #4599
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
     await touch_device(db, setup.id)
     await db.flush()
@@ -276,12 +304,14 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         row.last_report_seq = snapshot.report_seq
         row.ended_at = s.at if s.state == "stopped" else None
         _set_limit(row, s.limit)
+        _set_system(row, s)  # story #4599
         row.instruct_now = s.instruct_now
     for row in existing.values():
         row.last_report_seq = snapshot.report_seq
         if row.state != "stopped":
             row.state, row.state_at, row.ended_at = "stopped", now, now
             _set_limit(row, None)
+            row.system_folder = None  # story #4599: a dropped session holds no window
             row.instruct_now = None
     await touch_device(db, setup.id)
     await db.flush()
@@ -311,6 +341,8 @@ async def device_sessions_view(db: AsyncSession, setup_id: uuid.UUID, *, now: da
         # story #4534: the board's own word (eight) and a usage limit's why — for the new web only
         "activity": "unknown" if silent and r.state != "stopped" else r.state,
         **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),
+        # story #4599: a held turn's why (the window's folder) — for the new web only, and only while the device is heard
+        **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
         # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))
         "instruct_now": None if silent else r.instruct_now,
     } for r in rows]
@@ -353,11 +385,20 @@ class StopSessionPayload(_Payload):
     signed: str = Field(min_length=1, max_length=16384)  # story #4534 — every command a person makes is signed (contract v1.9.1)
 
 
+class EndSessionPayload(_Payload):
+    """story #4599 (contract v1.13.2 · PO 14:08Z): the whole session ended — the stop's shape, its own kind (the phone signs
+    `kind: end_session`, so what was signed is what happens; the daemon never turns a stop into this)."""
+
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+    signed: str = Field(min_length=1, max_length=16384)
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
     "answer_approval": AnswerApprovalPayload,
     "stop_session": StopSessionPayload,
+    "end_session": EndSessionPayload,
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -461,8 +502,9 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         # story #4580 (Kadir 02:08Z): the stage the command answered — a late result of the first answer never moves the second
         stage = "confirm" if (cmd.payload or {}).get("stage") == "confirm" else "ask"
         await on_answer_result(db, setup.id, (cmd.payload or {}).get("request_id"), result.state, result.result_code, stage=stage)
-    # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice); an instruction done writes its line
-    if cmd.kind in ("stop_session", "send_prompt"):
+    # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice); an instruction done writes its line;
+    # story #4599 — an end of the session done closes them the same way
+    if cmd.kind in ("stop_session", "send_prompt", "end_session"):
         from app.services.desktop_commands import on_command_done
 
         await on_command_done(db, cmd)

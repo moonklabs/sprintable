@@ -13,7 +13,7 @@ import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
-import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending } from '@/lib/phone-command';
+import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
 import { limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
 
 /**
@@ -25,6 +25,11 @@ import { limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-lim
 // story #4534 (relay contract v1.12 · Yuna 03:04Z · 03:06Z): the board's own words — asked in the terminal · an error · paused at a
 // usage limit — never shown as «다음 일 기다림»; a usage limit carries its why (`limit`)
 type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'waiting_input' | 'error' | 'paused_limit' | 'stopped' | 'unknown'
+  // story #4599 (relay contract v1.13.2 · Yuna 12:4xZ ① · PO 14:25Z): the turn is held by a macOS window on that computer (a
+  // folder-access question only the person at the Mac can answer) — «macOS 창 대기», its own line naming the folder when the daemon
+  // read it; inside the phone app one button, [세션 끝내기] (a signed end_session — [멈춤] would not work: Esc · SIGTERM are ignored
+  // there); a browser has no key to sign with, so no button — its line says where the handles are
+  | 'waiting_system'
   // story #4534 (Yuna 05:41Z): a word this page does not know — not the server's `unknown` (= the computer lost): its own line
   | 'unrecognized';
 interface View {
@@ -36,6 +41,8 @@ interface View {
   // true (a daemon from before says nothing → hidden: its «지금 턴» was not so). It hides a button; the daemon decides again.
   instruct_now?: boolean | null;
   limit?: SessionLimit | null;
+  // story #4599: a held turn's why — the folder the macOS window asks about, when the daemon read it (a closed list; null = not read)
+  system?: { folder?: SystemFolder | null } | null;
   remote_control: boolean;
   can_command?: boolean;
   pending_permission_request_id: string | null;
@@ -51,10 +58,14 @@ const SHAPES: Record<SessionState, { icon: LucideIcon; tone: string }> = {
   waiting_input: { icon: CircleDot, tone: 'text-foreground' },
   error: { icon: SquareX, tone: 'text-destructive' },
   paused_limit: { icon: Circle, tone: 'text-muted-foreground fill-current' },
+  waiting_system: { icon: AlertTriangle, tone: 'text-warning' }, // Yuna ①: the «권한 대기» look (a person's hand needed), its own word
   stopped: { icon: Check, tone: 'text-success' },
   unknown: { icon: CircleDashed, tone: 'text-muted-foreground' },
   unrecognized: { icon: CircleDashed, tone: 'text-muted-foreground' },
 };
+// story #4599 (Yuna ① · macOS's own Korean window spelling): the folder the window asks about (a closed list from the server)
+type SystemFolder = 'documents' | 'desktop' | 'downloads' | 'network_volume' | 'icloud';
+const SYSTEM_FOLDERS: ReadonlySet<string> = new Set<SystemFolder>(['documents', 'desktop', 'downloads', 'network_volume', 'icloud']);
 const REREAD_MS = 30_000;
 
 /** story #4534 (Kadir 4960 · PO 05:36Z): the board's own word when the server sends one (`activity`), else the five-word `state`;
@@ -114,8 +125,9 @@ export function AgentSessionStrip({ agentId, conversationId }: { agentId: string
   return <Strip view={{ ...view, state: shownState(view) }} readAt={readAt} agentId={agentId} conversationId={conversationId} reread={() => setNudges((n) => n + 1)} />;
 }
 
-/** what the strip's line says after a press: on its way, or how it ended (stop · instruction keep their own verbs — Yuna 12:47Z) */
-type Result = { verb: 'stop' | 'send'; busy: true } | { verb: 'stop' | 'send'; busy: false; outcome: CommandOutcome };
+/** what the strip's line says after a press: on its way, or how it ended (stop · instruction keep their own verbs — Yuna 12:47Z; an
+ *  end of the session borrows the stop's lines — Yuna ①: no new words of its own, an end that went through shows the ended state) */
+type Result = { verb: Verb; busy: true } | { verb: Verb; busy: false; outcome: CommandOutcome };
 
 function Strip({ view, readAt, agentId, conversationId, reread }: { view: View & { state: SessionState }; readAt: number; agentId: string; conversationId: string; reread: () => void }) {
   const t = useTranslations('chats.agentSession');
@@ -126,6 +138,10 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // unknown: an instruction → [지금 지시] becomes [결과 확인] ([멈춤] stays — the safety handle) · a stop → both become [결과 확인]
   const [pending, setPending] = useState<Pending | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // story #4599 (Yuna ① · PO 14:25Z): [세션 끝내기] asks once — it cannot be undone (the destructive weight of 4580's second card); the
+  // first focus is [취소]
+  const [endOpen, setEndOpen] = useState(false);
+  const endCancelRef = useRef<HTMLButtonElement>(null);
   // what was written stays until it went somewhere (spec B-3: «쓴 글은 남김») — kept as a draft per agent · conversation (#4370)
   const [draft, setDraft, clearDraft] = useFieldDraft({ surface: 'agent-instruct', targetId: `${agentId}:${conversationId}`, field: 'text' });
   // Claude at a usage limit (it may continue by itself, or ask in its terminal) wears the board's «사용 한도» look (Yuna 08:46Z)
@@ -137,7 +153,11 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // [멈춤] while it works AND while it waits on a permission (Kadir 325 · PO 04:34Z: the daemon takes a stop then too — a person
   // must be able to stop an agent that is asking); [지금 지시] only while it works (it goes into a running turn)
   const mayCommand = phone && view.remote_control && view.can_command !== false;
+  // story #4599 (Yuna ①): not while a macOS window holds its turn — [멈춤] would not work there (Esc · SIGTERM ignored)
   const canStop = mayCommand && (view.state === 'working' || view.state === 'waiting_permission');
+  // story #4599 (PO 14:25Z · Yuna ①): on a held turn, [세션 끝내기] alone — inside the phone app only (the shell signs `end_session` — a
+  // browser has no device key, and no unsigned command path is opened: the 4534 rule); the server refuses a stop there (system_wait_end_only)
+  const canEnd = mayCommand && view.state === 'waiting_system';
   // story #4534 (PO 06:30Z · 07:00Z): and only when the daemon says it can put it into the turn (instruct_now) — all three, or none
   const canInstruct = mayCommand && view.state === 'working' && view.instruct_now === true;
   const checkOnly = pending?.verb === 'stop';
@@ -151,7 +171,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
             : view.state === 'waiting_input' ? t('state.waiting_input')
               : view.state === 'error' ? t('state.error')
                 : view.state === 'paused_limit' ? t('state.paused_limit')
-                  : view.state === 'stopped' ? t('state.stopped') : t('state.unknown');
+                  : view.state === 'waiting_system' ? t('state.waiting_system')
+                    : view.state === 'stopped' ? t('state.stopped') : t('state.unknown');
 
   const deps: CommandDeps = {
     phoneCall,
@@ -167,16 +188,19 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       }
     },
   };
-  const settle = (verb: 'stop' | 'send', outcome: CommandOutcome) => {
+  const settle = (verb: Verb, outcome: CommandOutcome) => {
     if (verb === 'send' && (outcome.kind === 'sent_now' || outcome.kind === 'sent_after_step' || outcome.kind === 'sent_as_message' || outcome.kind === 'sent_as_message_not_now')) clearDraft();
     setPending(outcome.kind === 'unknown' ? outcome.pending : null);
-    setResult({ verb, busy: false, outcome });
+    // story #4599 (Yuna ①): an end that went through has no line of its own — the strip shows the ended state the server reports next
+    setResult(outcome.kind === 'ended' ? null : { verb, busy: false, outcome });
     reread();
   };
-  const run = async (verb: 'stop' | 'send', text?: string) => {
+  const run = async (verb: Verb, text?: string) => {
     setResult({ verb, busy: true });
     settle(verb, await commandOnPhone(
-      verb === 'stop' ? { agentId, kind: 'stop_session' } : { agentId, kind: 'send_prompt', text: text ?? '', conversationId }, deps,
+      verb === 'stop' ? { agentId, kind: 'stop_session' }
+        : verb === 'end' ? { agentId, kind: 'end_session' }
+          : { agentId, kind: 'send_prompt', text: text ?? '', conversationId }, deps,
     ));
   };
   // [결과 확인]: the same command followed again — no signature, no sheet
@@ -204,8 +228,26 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
             : canInstruct ? <Button size="sm" variant="outline" disabled={busy} onClick={() => setSheetOpen(true)}>{t('button.instruct')}</Button> : null}
         </span>
+      ) : canEnd ? (
+        <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
+          {pending
+            ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
+            : <Button size="sm" variant="outline" disabled={busy} onClick={() => setEndOpen(true)}>{t('button.endSession')}</Button>}
+        </span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
+      <Dialog open={endOpen} onOpenChange={setEndOpen}>
+        <DialogContent showCloseButton={false} initialFocus={endCancelRef}>
+          <DialogHeader>
+            <DialogTitle>{t('endDialog.title')}</DialogTitle>
+            <DialogDescription className="break-keep">{t('endDialog.body')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button ref={endCancelRef} variant="outline" onClick={() => setEndOpen(false)}>{t('endDialog.cancel')}</Button>
+            <Button variant="destructive" disabled={busy} onClick={() => { setEndOpen(false); void run('end'); }} data-testid="agent-end-confirm">{t('endDialog.confirm')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
         <DialogContent>
           <DialogHeader>
@@ -252,7 +294,7 @@ function ResultLine({ result }: { result: Result }) {
       {action}
     </div>
   );
-  const stop = result.verb === 'stop';
+  const stop = result.verb !== 'send'; // an end borrows the stop's lines (Yuna ①: no words of its own)
   if (result.busy) return line(stop ? t('command.stopping') : t('command.sending'));
   const signIn = <Button size="sm" variant="outline" asChild><a href={buildLoginRedirect(window.location.pathname + window.location.search)}>{t('command.signInAgain')}</a></Button>;
   const pairAgain = <Button size="sm" variant="outline" asChild><a href={flatHref('/desktop/pair')}>{t('command.pairAgain')}</a></Button>;
@@ -266,6 +308,9 @@ function ResultLine({ result }: { result: Result }) {
     case 'sent_as_message_not_now': return line(t('command.sentAsMessageNotNow'));
     case 'too_long': return line(t('sheet.tooLong'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
+    // story #4599 (Yuna ① · PO 14:18Z): a [멈춤] pressed just before the macOS window came up — refused, only [세션 끝내기] works now
+    case 'system_wait_end_only': return line(t('command.stopSystemWait'));
+    case 'ended': return null; // never kept (settle clears it — the ended state is the line)
     case 'unknown': return line(stop ? t('command.stopUnknown') : t('command.sendUnknown'));
     // story #4583 (Yuna copy.md row 3): the same words as the strip's line — the owner gets the way to the switch
     case 'remote_off': return remoteOff?.owner
@@ -289,6 +334,22 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
   const remoteOff = useRemoteOff(); // story #4583: who can turn it on (the org's value · the session's own flag decides whether to say it)
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
   if (view.state === 'unrecognized') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.unrecognized')}</p>;
+  // story #4599 (Yuna ① · PO 14:25Z): held by a macOS window — what to do is on that computer's screen, whatever remote control says;
+  // the folder named only when the daemon read it (a wrong folder name is worse than none). Inside the phone app, where [세션 끝내기]
+  // stands, the line ends «여기서 [세션 끝내기]»; a browser (or a phone that may not command) says where the handles are — the phone, the
+  // desktop app's [끝내기] (the `inbox`/`inboxPhone` pair's shape)
+  if (view.state === 'waiting_system') {
+    const f = view.system?.folder;
+    // the folder's words, with their particle — «{folder} 쓸지» (each key read by its own literal call: the dead-key guard's axis A)
+    const folder = !f || !SYSTEM_FOLDERS.has(f) ? null
+      : f === 'documents' ? t('folder.documents') : f === 'desktop' ? t('folder.desktop') : f === 'downloads' ? t('folder.downloads')
+        : f === 'network_volume' ? t('folder.network_volume') : t('folder.icloud');
+    const onPhone = phone && view.remote_control && view.can_command !== false;
+    const text = folder
+      ? (onPhone ? t('line.waitingSystemFolderPhone', { folder }) : t('line.waitingSystemFolder', { folder }))
+      : (onPhone ? t('line.waitingSystemPhone') : t('line.waitingSystem'));
+    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{text}</p>;
+  }
   // story #4534 (Yuna 03:04Z): what to do is «on that computer» — its own line whatever remote control says; no buttons; whether a
   // time has passed is this page's clock
   const rest = limitLine(view.state, view.limit ?? null, now);

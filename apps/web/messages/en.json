@@ -5100,10 +5100,22 @@
         "waiting_input": "Waiting for input",
         "error": "Error",
         "paused_limit": "Paused at usage limit",
-        "usage_limit": "Usage limit"
+        "usage_limit": "Usage limit",
+        "waiting_system": "Waiting on a macOS prompt"
+      },
+      "folder": {
+        "documents": "the Documents folder",
+        "desktop": "the Desktop folder",
+        "downloads": "the Downloads folder",
+        "network_volume": "the network volume",
+        "icloud": "iCloud Drive"
       },
       "line": {
         "onPhone": "You can stop or instruct it from a paired phone",
+        "waitingSystem": "macOS is asking on that computer's screen whether to use a folder — it can't be answered here. Answer the prompt at that computer, press [End session] on your phone, or [End] in the desktop app",
+        "waitingSystemFolder": "macOS is asking on that computer's screen whether to use {folder} — it can't be answered here. Answer the prompt at that computer, press [End session] on your phone, or [End] in the desktop app",
+        "waitingSystemPhone": "macOS is asking on that computer's screen whether to use a folder — it can't be answered here. Answer the prompt at that computer, or press [End session] here",
+        "waitingSystemFolderPhone": "macOS is asking on that computer's screen whether to use {folder} — it can't be answered here. Answer the prompt at that computer, or press [End session] here",
         "inbox": "The permission request is in the approvals inbox",
         "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
         "inboxPhone": "You can answer it in Approvals",
@@ -5125,7 +5137,14 @@
       "button": {
         "stop": "Stop",
         "instruct": "Instruct now",
-        "checkResult": "Check again"
+        "checkResult": "Check again",
+        "endSession": "End session"
+      },
+      "endDialog": {
+        "title": "End this session?",
+        "body": "The current turn stops and the session closes. To put this agent back to work, start it again in the desktop app. Unlike [Stop], this can't be undone.",
+        "confirm": "End session",
+        "cancel": "Cancel"
       },
       "sheet": {
         "title": "Add to what the agent is doing now",
@@ -5140,6 +5159,7 @@
         "stopped": "Stopped — the session is still there; send the next instruction and it carries on",
         "alreadyStopped": "It had already stopped",
         "stopUnreachable": "Lost the connection to that computer, so it wasn't stopped",
+        "stopSystemWait": "macOS is asking on that computer's screen whether to use a folder, so it couldn't be stopped — only [End session] works right now. Answer the prompt at that computer and the agent carries on",
         "stopUnknown": "Couldn't confirm whether it stopped — it may already have stopped",
         "sentNow": "Sent · it went into the current turn",
         "sentAfterStep": "Sent — it goes in as soon as the agent finishes its current step",
