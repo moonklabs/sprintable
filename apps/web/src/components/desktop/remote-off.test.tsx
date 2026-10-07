@@ -18,7 +18,7 @@ vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (p: string) => p })
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: string; children: unknown }) => <a href={href} {...rest}>{children as never}</a> }));
 vi.mock('@/hooks/use-sse-notifications', () => ({ useSseNotifications: () => {} }));
 vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => 'Asia/Seoul' }));
-const { formatOwners } = await import('./remote-off');
+const { formatOwners, markArrival, holdArrivalFocus } = await import('./remote-off');
 const { AgentPermissionRequests } = await import('@/components/inbox/agent-permission-requests');
 const { DesktopRemoteControlCard } = await import('./desktop-remote-control-card');
 const { AgentSessionStrip } = await import('@/components/chat/agent-session-strip');
@@ -177,6 +177,126 @@ describe('/desktop card (Yuna 5a · 5b · the anchor)', () => {
     Element.prototype.scrollIntoView = vi.fn();
     await render(<DesktopRemoteControlCard />);
     expect(document.activeElement).toBe(q('desktop-remote-control'));
+  });
+});
+
+// AC6 live (run 13 · 07:07Z): the layout test opened `/desktop#remote-control` fresh, and that path focused the switch — the real
+// path is a press on the link = a client navigation, where the switch ended unfocused (activeElement = body). These model that
+// path: Next's scroll handler moving the focus after the card's effect, and the card mounting before the `#` is on the address.
+describe('arrival by an in-app link press (client navigation)', () => {
+  const tick = () => act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+  const sw = () => container.querySelector<HTMLElement>('[data-slot="switch"]');
+
+  it('Next 16 blurs the focus on a later commit → the switch takes it back', async () => {
+    org = { ...OFF, can_change: true };
+    window.history.replaceState(null, '', '/desktop#remote-control');
+    Element.prototype.scrollIntoView = vi.fn();
+    await render(<DesktopRemoteControlCard />);
+    expect(document.activeElement).toBe(sw());
+    await act(async () => { (document.activeElement as HTMLElement).blur(); }); // InnerScrollHandlerNew: activeElement.blur()
+    await tick();
+    expect(document.activeElement).toBe(sw());
+    expect(sw()?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('the older handler focuses the hash target (the card) → the switch takes it back', async () => {
+    org = { ...OFF, can_change: true };
+    window.history.replaceState(null, '', '/desktop#remote-control');
+    Element.prototype.scrollIntoView = vi.fn();
+    await render(<DesktopRemoteControlCard />);
+    await act(async () => { q('desktop-remote-control')?.focus(); }); // InnerScrollAndFocusHandlerOld: domNode.focus()
+    await tick();
+    expect(document.activeElement).toBe(sw());
+  });
+
+  it('the link press marks the arrival — the card mounting before the # is on the address still lands on the switch', async () => {
+    org = { ...OFF, can_change: true };
+    Element.prototype.scrollIntoView = vi.fn();
+    await render(<AgentPermissionRequests />);
+    // like Next's Link: our onClick runs first, the navigation (preventDefault) after — so the preventer sits on document, after React's root
+    await act(async () => { document.addEventListener('click', (e) => e.preventDefault(), { once: true }); link()!.click(); });
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    window.history.replaceState(null, '', '/desktop'); // no `#` yet
+    await render(<DesktopRemoteControlCard />);
+    expect(document.activeElement).toBe(sw());
+  });
+
+  it('the person acts first (a key) — the hold ends and their move stands', async () => {
+    org = { ...OFF, can_change: true };
+    window.history.replaceState(null, '', '/desktop#remote-control');
+    Element.prototype.scrollIntoView = vi.fn();
+    await render(<DesktopRemoteControlCard />);
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' })); (document.activeElement as HTMLElement).blur(); });
+    await tick();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('the switch is marked data-arrived (its ring does not rest on :focus-visible) and the person\'s first key takes the mark off', async () => {
+    org = { ...OFF, can_change: true };
+    window.history.replaceState(null, '', '/desktop#remote-control');
+    Element.prototype.scrollIntoView = vi.fn();
+    await render(<DesktopRemoteControlCard />);
+    expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+    expect(sw()?.className).toContain('data-[arrived]:ring-3');
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' })); });
+    expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+  });
+
+  it('the mark stays while the focus stays after the hold ends, and comes off when the focus leaves', async () => {
+    const a = document.createElement('button'); const b = document.createElement('button');
+    container.append(a, b);
+    holdArrivalFocus(a, null, 10);
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(document.activeElement).toBe(a);
+    expect(a.hasAttribute('data-arrived')).toBe(true); // the time running out alone changes nothing on screen
+    await act(async () => { b.focus(); });
+    await tick();
+    expect(a.hasAttribute('data-arrived')).toBe(false);
+    expect(document.activeElement).toBe(b); // after the hold, a move stands
+  });
+
+  it('a modifier click on the link (new tab) leaves no mark', async () => {
+    org = { ...OFF, can_change: true };
+    Element.prototype.scrollIntoView = vi.fn();
+    await render(<AgentPermissionRequests />);
+    await act(async () => {
+      document.addEventListener('click', (e) => e.preventDefault(), { once: true });
+      link()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }));
+    });
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    window.history.replaceState(null, '', '/desktop');
+    await render(<DesktopRemoteControlCard />);
+    expect(document.activeElement).not.toBe(sw());
+  });
+
+  it('the 결재함 → card hand-over in one commit keeps the org value: no empty card in between, the switch keeps the arrival', async () => {
+    // run 13 layout trace (07:3xZ): the leaving inbox's cleanup dropped the shared value before the card subscribed → the card drew
+    // nothing, read again and drew a NEW switch — the arrival focus and mark were on the old one
+    org = { ...OFF, can_change: true };
+    Element.prototype.scrollIntoView = vi.fn();
+    await render(<AgentPermissionRequests />);
+    window.history.replaceState(null, '', '/desktop#remote-control');
+    await render(<DesktopRemoteControlCard />); // the same root: one commit swaps them (a route change)
+    await tick();
+    expect(document.activeElement).toBe(sw());
+    expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+    const reads = fetchWithAuth.mock.calls.filter(([u]) => String(u).endsWith('/remote-control')).length;
+    expect(reads, 'the org value is read once — handed over, not dropped and read again').toBe(1);
+  });
+
+  it('a mark older than 5 s does nothing (a press that opened elsewhere)', async () => {
+    org = { ...OFF, can_change: true };
+    Element.prototype.scrollIntoView = vi.fn();
+    const now = Date.now();
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    markArrival();
+    spy.mockReturnValue(now + 6000);
+    window.history.replaceState(null, '', '/desktop');
+    await render(<DesktopRemoteControlCard />);
+    spy.mockRestore();
+    expect(document.activeElement).not.toBe(sw());
   });
 });
 

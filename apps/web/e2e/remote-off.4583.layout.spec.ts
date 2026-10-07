@@ -39,7 +39,8 @@ const STUBS: Record<string, string> = {
   '@/lib/phone-answer': 'export async function answerOnPhone(id, decision) { return { kind: "answered", decision }; }',
   '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1' }; }",
   '@/components/viewer-time-zone': "export function useViewerTimeZone() { return 'Asia/Seoul'; }",
-  'next/link': "import React from 'react'; export default function Link({ href, children, ...rest }) { return React.createElement('a', { href, ...rest }, children); }",
+  // a client navigation like Next's: the link's own onClick first, then (unless prevented) no page load — the harness swaps the view
+  'next/link': "import React from 'react'; export default function Link({ href, children, onClick, ...rest }) { return React.createElement('a', { href, ...rest, onClick: (e) => { onClick && onClick(e); if (!e.defaultPrevented && window.__clientNav) { e.preventDefault(); window.__clientNav(href); } } }, children); }",
 };
 const STUB_FILTER = /^(@\/lib\/db\/client|@\/hooks\/use-sse-notifications|@\/hooks\/use-flat-href|@\/lib\/phone-bridge|@\/lib\/phone-answer|@\/app\/dashboard\/dashboard-shell|@\/components\/viewer-time-zone|next\/link)$/;
 
@@ -61,8 +62,13 @@ async function build() {
         const pick = (kind) => kind === 'pair' ? h(PhonePairing) : kind === 'remote' ? h(DesktopRemoteConfirm)
           : kind === 'strip' ? h(AgentSessionStrip, { agentId: 'a1', conversationId: 'c1' }) : kind === 'inbox' ? h(AgentPermissionRequests)
           : kind === 'card-far' ? h(React.Fragment, null, h('div', { style: { height: 1600 } }), h(DesktopRemoteControlCard)) : h(DesktopRemoteControlCard);
-        window.__mount = (kind, locale) => createRoot(document.getElementById('root')).render(
-          h(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' }, pick(kind)));`,
+        window.__mount = (kind, locale) => {
+          const root = createRoot(document.getElementById('root'));
+          const wrap = (k) => h(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' }, pick(k));
+          // story #4583 (Yuna 4974): the link → card path as an in-app navigation (no reload) — pushState, then the card
+          window.__clientNav = (href) => { history.pushState(null, '', href); root.render(wrap('card-far')); };
+          root.render(wrap(kind));
+        };`,
       resolveDir: WEB, loader: 'tsx',
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
@@ -363,6 +369,30 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     const b2 = (await card.boundingBox())!;
     expect(b2.y >= 0 && b2.y + b2.height <= (page.viewportSize()!.height + 1), 'the card is in view').toBe(true);
     await page.screenshot({ path: path.join(outDir(), `4583-web-5d-arrive-member-${tag}.png`) });
+  });
+}
+
+// Yuna 4974: a mouse press on the 결재함 link → the card in an in-app navigation — :focus-visible is false after a pointer press,
+// so the ring must come from data-arrived (the same tokens). Measured as the switch's computed box-shadow, not as activeElement.
+for (const theme of ['L', 'D'] as const) {
+  test(`[4583] ⑤e arrival by a mouse press on the link (in-app) · the ring shows · ${theme} · 1440`, async ({ page }) => {
+    await open(page, { kind: 'inbox', width: 1440, theme, api: inboxApi({ owner: true }) });
+    const link = page.getByTestId('remote-off-link');
+    const box = (await link.boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const sw = page.getByTestId('desktop-remote-control').locator('[data-slot="switch"]');
+    await sw.waitFor();
+    await expect(sw).toBeFocused();
+    await expect(sw).toHaveAttribute('aria-checked', 'false');
+    await expect(sw).toHaveAttribute('data-arrived', '');
+    expect(await sw.evaluate((el) => el.matches(':focus-visible')), 'the browser does not call it focus-visible after a pointer press').toBe(false);
+    const ring = await sw.evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(ring, 'the arrival ring is drawn').not.toBe('none');
+    await page.mouse.move(0, 0);
+    await frames(page);
+    await page.screenshot({ path: path.join(outDir(), `4583-web-5e-arrive-by-mouse-owner-${theme}-1440.png`) });
+    await page.keyboard.press('Shift'); // the person acts → the mark comes off (the browser's own rules from here)
+    await expect(sw).not.toHaveAttribute('data-arrived', '');
   });
 }
 
