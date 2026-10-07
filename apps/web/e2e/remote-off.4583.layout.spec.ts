@@ -355,9 +355,16 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     expect(box.y >= 0 && box.y + box.height <= (page.viewportSize()!.height + 1), 'the card is in view').toBe(true);
     const s = (await sw.boundingBox())!;
     const clip = { x: Math.max(0, s.x - 6), y: Math.max(0, s.y - 6), width: s.width + 12, height: s.height + 12 };
+    // story #4598 (Yuna 14:10Z · 4980 CI, L-390 only): the Switch's ring is a `transition-all` box-shadow (150 ms) and `frames()` waits
+    // two rAFs — a capture inside the transition compared equal to the next. Each capture waits for the element's animations to
+    // finish first: focused = ring at 100 %, blurred = ring at 0 %, deterministic.
+    const settled = () => sw.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+    await settled();
+    await frames(page);
     const focused = await page.screenshot({ clip });
     await page.screenshot({ path: path.join(outDir(), `4583-web-5c-arrive-owner-${tag}.png`) });
     await sw.evaluate((el) => (el as HTMLElement).blur());
+    await settled();
     await frames(page);
     const blurred = await page.screenshot({ clip });
     expect(focused.equals(blurred), 'the focus ring shows in pixels').toBe(false);
