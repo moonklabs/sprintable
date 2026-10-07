@@ -11,10 +11,11 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,20 @@ _HEARTBEAT_SEC = 30
 _RECHECK_SEC = 30
 _BACKSTOP_SEC = 30  # a read even without a wake (a wake lost on the way) — new commands come by the wake (PO 05:43Z)
 _STREAMS_PER_DEVICE = 2  # a reconnect may overlap the old connection for a moment
+
+
+_LAST_EVENT_ID_RE = re.compile(r"^\d{1,20}$")
+
+
+def _start_seq(header: str | None, *, latest: int) -> int:
+    """story #4554 ②: the cursor the stream resumes from — 0 when none is given, 400 `invalid_last_event_id` when it is not a
+    non-negative integer, and never past the device's latest command number."""
+    if header is None or header.strip() == "":
+        return 0
+    value = header.strip()
+    if not _LAST_EVENT_ID_RE.match(value):
+        raise HTTPException(status_code=400, detail={"code": "invalid_last_event_id", "message": "Last-Event-ID must be a non-negative integer"})
+    return min(int(value), latest)
 
 
 def _error(exc: relay.DesktopRelayError) -> JSONResponse:
@@ -64,10 +79,11 @@ async def _device(
 @router.get("/relay/stream")
 async def device_stream(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> StreamingResponse:
     setup_id, org_id = setup.id, setup.org_id
-    try:
-        start_seq = int(request.headers.get("last-event-id") or 0)
-    except ValueError:
-        start_seq = 0
+    # story #4554 ② (PO 11:45Z) — `Last-Event-ID` is a device_seq this device was given: not a number (letters · a sign · empty
+    # after trimming) → 400 before the stream opens (the daemon drops its cursor and reconnects); a number past the device's
+    # latest (or past int32) → «from after the latest»: nothing is sent again (before: a bad cursor meant «from the start» — every
+    # unacked command, an approval among them, went down again — or a DB error ended the stream with an empty 200).
+    start_seq = _start_seq(request.headers.get("last-event-id"), latest=int(setup.relay_command_seq or 0))
     await relay.touch_device(db, setup_id)
     await db.commit()
 
@@ -137,13 +153,20 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                     yield "event: heartbeat\ndata: {}\n\n"
                 wait = max(0.05, min(_BACKSTOP_SEC, _HEARTBEAT_SEC - (time.monotonic() - last_beat), deadline - time.monotonic()))
                 try:
-                    await asyncio.wait_for(wakes.get(), timeout=wait)
+                    woke = [await asyncio.wait_for(wakes.get(), timeout=wait)]
                     while not wakes.empty():  # several wakes → one read
-                        wakes.get_nowait()
+                        woke.append(wakes.get_nowait())
+                    # story #4554 ④: the disconnect's own signal — recheck now, not at the next 30-second check
+                    if any(isinstance(w, dict) and w.get(relay.DISCONNECTED_CODE) for w in woke):
+                        last_check = float("-inf")
                 except asyncio.TimeoutError:
                     pass
         finally:
+            # story #4554 ⑤ (agent_gateway.py's own shape): the last stream of this device takes its key with it — an empty set
+            # per device that ever connected is not left in the map for the instance's lifetime
             _agent_connections[relay.wake_key(setup_id)].discard(wakes)
+            if not _agent_connections[relay.wake_key(setup_id)]:
+                _agent_connections.pop(relay.wake_key(setup_id), None)
             await sse_lease.release(scope, conn_id)
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -200,11 +223,13 @@ async def post_command_result(
 @router.get("/setups/{setup_id}/sessions")
 async def get_device_sessions(
     setup_id: uuid.UUID,
+    limit: int = Query(default=relay.SESSIONS_PAGE_DEFAULT, ge=1, le=relay.SESSIONS_PAGE_MAX),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
-    """A person's view of a device's sessions (owner/admin, as the «연결된 기기» section) — `unknown` when the device is silent."""
+    """A person's view of a device's sessions (owner/admin, as the «연결된 기기» section) — `unknown` when the device is silent.
+    story #4554 ①: live first, newest first, `limit` of them (default 50 · at most 200)."""
     from app.services.project_auth import is_org_owner_or_admin
 
     if not await is_org_owner_or_admin(db, uuid.UUID(auth.user_id), org_id):
@@ -214,7 +239,7 @@ async def get_device_sessions(
     )).scalar_one_or_none()
     if exists is None:
         raise HTTPException(status_code=404, detail={"code": "SETUP_NOT_FOUND", "message": "no such device in this org"})
-    return {"sessions": await relay.device_sessions_view(db, setup_id)}
+    return {"sessions": await relay.device_sessions_view(db, setup_id, limit=limit)}
 
 
 # ── story #4533 (B-2) — permission requests up · the device's phone pairs (contract §9 ① · §10 ②) ───────────────────────────

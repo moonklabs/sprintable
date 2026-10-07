@@ -40,6 +40,13 @@ logger = logging.getLogger(__name__)
 TOKEN_PREFIX = "sdt_"
 UNKNOWN_AFTER = timedelta(seconds=90)  # PO 05:19Z — three missed 30-second heartbeats
 SESSION_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+# story #4554 (PO 11:45Z) — the relay's edges, each a named number:
+INT32_MAX = 2_147_483_647  # `desktop_sessions.last_report_seq` · `desktop_commands.device_seq` are int4 — a report past it → 422, never 500
+SESSION_ROWS_PER_DEVICE = 200  # the most recent rows a device keeps (live and ended) — a new key past it drops the oldest ended row first
+ENDED_SESSION_RETENTION = timedelta(days=7)  # an ended session is kept this long, then goes with the next report
+SESSIONS_PAGE_DEFAULT = 50  # a person's read of a device's sessions: live first, newest first — `limit` (default · max)
+SESSIONS_PAGE_MAX = 200
+DISCONNECTED_CODE = "device_disconnected"  # the open commands of a disconnected device · the stream's access_revoked reason
 PROMPT_MAX = 8000
 # story #4534 (Kadir 06:21Z ④ · Yuna 06:29Z ②): an instruction into the running turn — code points, the same count on the phone's
 # sheet, the web's sheet, the daemon and here (one line pasted at once stays under the CLI's fold — 800 measured, not folded)
@@ -73,6 +80,9 @@ async def issue_device_token(db: AsyncSession, setup_id: uuid.UUID) -> str:
     )
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     db.add(DesktopDeviceToken(id=uuid.uuid4(), setup_id=setup_id, token_hash=_hash(token), issued_at=now))
+    # story #4554 ③ (PO 11:45Z): a new token = a daemon that may start counting from 1 again (a reinstall · §1.1) — the device's
+    # report baseline goes back to 0 with it, so its first report is not refused as stale for ever
+    await db.execute(update(DesktopSession).where(DesktopSession.setup_id == setup_id).values(last_report_seq=0))
     await db.flush()
     return token
 
@@ -260,16 +270,55 @@ def limit_view(row: DesktopSession) -> dict | None:
     return out
 
 
+def _check_seq_range(seq: int) -> None:
+    """story #4554 ③: the columns are int4 — a number past them is refused as a number (422), not met as a DB error (500)."""
+    if seq > INT32_MAX:
+        raise DesktopRelayError(422, "report_seq_out_of_range", f"report_seq must be at most {INT32_MAX}")
+
+
+async def _prune_expired(db: AsyncSession, setup_id: uuid.UUID, *, now: datetime) -> None:
+    """story #4554 ① (PO 11:45Z): an ended session is kept ENDED_SESSION_RETENTION, then goes with the device's next report (no
+    sweep job — the write path cleans its own device, under the device row's lock)."""
+    from sqlalchemy import delete
+
+    await db.execute(delete(DesktopSession).where(
+        DesktopSession.setup_id == setup_id, DesktopSession.state == "stopped", DesktopSession.ended_at.is_not(None),
+        DesktopSession.ended_at < now - ENDED_SESSION_RETENTION,
+    ))
+
+
+async def _make_room(db: AsyncSession, setup_id: uuid.UUID, *, new_rows: int) -> None:
+    """story #4554 ①: if `new_rows` more rows would take the device past SESSION_ROWS_PER_DEVICE, the oldest ended rows go first;
+    live rows are never dropped — when they alone fill the device, a new key is refused (422 `too_many_sessions`, nothing written)."""
+    from sqlalchemy import delete
+
+    total = (await db.execute(select(func.count()).select_from(DesktopSession).where(DesktopSession.setup_id == setup_id))).scalar_one()
+    over = total + new_rows - SESSION_ROWS_PER_DEVICE
+    if over <= 0:
+        return
+    oldest_ended = (await db.execute(
+        select(DesktopSession.id).where(DesktopSession.setup_id == setup_id, DesktopSession.state == "stopped")
+        .order_by(DesktopSession.ended_at.asc().nulls_first(), DesktopSession.created_at.asc()).limit(over)
+    )).scalars().all()
+    if oldest_ended:
+        await db.execute(delete(DesktopSession).where(DesktopSession.id.in_(oldest_ended)))
+    if len(oldest_ended) < over:
+        raise DesktopRelayError(422, "too_many_sessions", f"a device keeps at most {SESSION_ROWS_PER_DEVICE} sessions")
+
+
 async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_key: str, report: SessionStateReport) -> DesktopSession:
     """A report older than (or equal to) the device's latest is refused — 409 (a reordered delivery never undoes a newer one)."""
     _check_agent(setup, report.agent_member_id)
+    _check_seq_range(report.report_seq)
     latest = await _lock_device_seq(db, setup.id)
     if report.report_seq <= latest:
         raise DesktopRelayError(409, "stale_report", f"report_seq {report.report_seq} is not after {latest}")
+    await _prune_expired(db, setup.id, now=_now())  # story #4554 ①
     row = (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == session_key)
     )).scalar_one_or_none()
     if row is None:
+        await _make_room(db, setup.id, new_rows=1)  # story #4554 ①
         row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=session_key)
         db.add(row)
     row.agent_member_id, row.runtime, row.state = report.agent_member_id, report.runtime, report.state
@@ -287,19 +336,26 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
 
 
 async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: SessionSnapshot) -> int:
-    """The whole list (after a reconnect): the given sessions as reported; a session the device no longer lists is stopped."""
+    """The whole list (after a reconnect): the given sessions as reported; a session the device no longer lists is stopped.
+
+    story #4554 ③ (PO 11:45Z): a snapshot is the daemon's whole truth, so it **resets the device's report baseline** — a lower
+    `report_seq` is taken and becomes the new baseline (a daemon whose state file went back to 0 is not refused for ever); the
+    single-state report keeps its strict «after the latest» rule."""
     for s in snapshot.sessions:
         _check_agent(setup, s.agent_member_id)
+    _check_seq_range(snapshot.report_seq)
     keys = [s.session_key for s in snapshot.sessions]
     if len(set(keys)) != len(keys):
         raise DesktopRelayError(422, "duplicate_session_key", "a session key appears twice")
-    latest = await _lock_device_seq(db, setup.id)
-    if snapshot.report_seq <= latest:
-        raise DesktopRelayError(409, "stale_report", f"report_seq {snapshot.report_seq} is not after {latest}")
+    await _lock_device_seq(db, setup.id)  # the device row's lock — two reports at once are ordered
     now = _now()
+    await _prune_expired(db, setup.id, now=now)  # story #4554 ①
     existing = {r.session_key: r for r in (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup.id)
     )).scalars().all()}
+    await _make_room(db, setup.id, new_rows=sum(1 for s in snapshot.sessions if s.session_key not in existing))  # story #4554 ①
+    kept = set((await db.execute(select(DesktopSession.id).where(DesktopSession.setup_id == setup.id))).scalars().all())
+    existing = {k: r for k, r in existing.items() if r.id in kept}  # an ended row _make_room dropped is not written again
     for s in snapshot.sessions:
         row = existing.pop(s.session_key, None)
         if row is None:
@@ -329,16 +385,24 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     return len(snapshot.sessions)
 
 
-async def device_sessions_view(db: AsyncSession, setup_id: uuid.UUID, *, now: datetime | None = None) -> list[dict]:
+async def device_sessions_view(
+    db: AsyncSession, setup_id: uuid.UUID, *, now: datetime | None = None, limit: int = SESSIONS_PAGE_DEFAULT,
+) -> list[dict]:
     """The sessions as a person sees them: each one's reported state, or `unknown` for all when the device has been silent
-    longer than UNKNOWN_AFTER (never «dead» — the device may come back and send its list)."""
+    longer than UNKNOWN_AFTER (never «dead» — the device may come back and send its list).
+
+    story #4554 ④: «heard from» counts the device's live token only — a disconnected device (its token revoked) is silent at once,
+    not for the 90 seconds its last heartbeat would have covered. ①: live rows first, newest first, `limit` of them."""
     now = now or _now()
     last_heard = (await db.execute(
-        select(func.max(DesktopDeviceToken.last_used_at)).where(DesktopDeviceToken.setup_id == setup_id)
+        select(func.max(DesktopDeviceToken.last_used_at))
+        .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
     )).scalar_one_or_none()
     silent = last_heard is None or now - last_heard > UNKNOWN_AFTER
     rows = (await db.execute(
-        select(DesktopSession).where(DesktopSession.setup_id == setup_id).order_by(DesktopSession.created_at)
+        select(DesktopSession).where(DesktopSession.setup_id == setup_id)
+        .order_by((DesktopSession.state == "stopped").asc(), DesktopSession.state_at.desc(), DesktopSession.created_at.desc())
+        .limit(max(1, min(limit, SESSIONS_PAGE_MAX)))
     )).scalars().all()
     return [{
         "session_key": r.session_key, "agent_member_id": str(r.agent_member_id), "runtime": r.runtime,
@@ -526,6 +590,40 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
 
 def wake_key(setup_id: uuid.UUID) -> str:
     return f"desktop:{setup_id}"
+
+
+async def reject_open_commands(db: AsyncSession, *, setup_id: uuid.UUID, result_code: str) -> int:
+    """story #4554 ④ (PO 11:45Z · the same shape as remote_control.set_enabled's off): a disconnected device's open commands
+    (`queued` · `delivered`) end as `rejected` with the reason — nothing waits for a device that will not come back."""
+    now = _now()
+    rejected = (await db.execute(
+        update(DesktopCommand)
+        .where(DesktopCommand.setup_id == setup_id, DesktopCommand.state.in_(("queued", "delivered")))
+        .values(state="rejected", result_code=result_code, finished_at=now)
+        .returning(DesktopCommand.id)
+    )).scalars().all()
+    return len(rejected)
+
+
+def _fire_disconnected(setup_id: uuid.UUID) -> None:
+    """story #4554 ④: the device's open stream is told now — it rechecks and ends with `access_revoked` at once, not at its next
+    30-second check. Carried like a wake (this instance at once · other instances through the same backplane); the stream reads the
+    mark, never the payload's words."""
+    from app.routers.events import _push_to_agent
+
+    try:
+        _push_to_agent(wake_key(setup_id), {"__wake__": True, "seq": 0, DISCONNECTED_CODE: True})
+    except Exception:  # noqa: BLE001 — the stream's 30-second recheck still ends it
+        logger.warning("desktop relay disconnect signal failed setup=%s", setup_id, exc_info=True)
+
+
+def schedule_disconnected_after_commit(db: AsyncSession, setup_id: uuid.UUID) -> None:
+    """After the disconnect's commit only (before it, the stream's recheck would still find the device valid)."""
+    if not isinstance(db.sync_session, Session):
+        return
+    from app.services.after_commit import schedule_after_commit
+
+    schedule_after_commit(db, [functools.partial(_fire_disconnected, setup_id)])
 
 
 def _fire_wake(setup_id: uuid.UUID, seq: int) -> None:
