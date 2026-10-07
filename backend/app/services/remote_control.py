@@ -12,10 +12,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.desktop_relay import DesktopCommand
 from app.models.desktop_setup import DesktopSetup
 from app.models.organization import Organization
 
@@ -107,16 +106,15 @@ async def set_enabled(db: AsyncSession, *, org: Organization, actor_id: uuid.UUI
     now = _now()
     org.remote_control_enabled_at, org.remote_control_enabled_by = (now, actor_id) if enabled else (None, None)
     db.add(OrgRemoteControlAuditLog(org_id=org.id, actor_id=actor_id, enabled=enabled))
-    setups = select(DesktopSetup.id).where(DesktopSetup.org_id == org.id)
     if not enabled:
-        rejected = (await db.execute(
-            update(DesktopCommand)
-            .where(DesktopCommand.setup_id.in_(setups), DesktopCommand.state.in_(("queued", "delivered")))
-            .values(state="rejected", result_code=OFF_CODE, finished_at=now)
-            .returning(DesktopCommand.id)
-        )).scalars().all()
+        # story #4554 ④ · Kadir 4981 ②: one path with the disconnect's — an answer_approval among the open commands moves its
+        # permission request to rejected too (the approver's phone must not read «answered» for an answer that never went down)
+        from app.services.desktop_relay import reject_open_commands
+
+        setup_ids = list((await db.execute(select(DesktopSetup.id).where(DesktopSetup.org_id == org.id))).scalars().all())
+        rejected = await reject_open_commands(db, setup_ids=setup_ids, result_code=OFF_CODE)
         await db.flush()
-        return len(rejected)
+        return rejected
     return await _wake_devices(db, org.id)
 
 

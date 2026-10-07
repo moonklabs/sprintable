@@ -5,10 +5,12 @@
    (50 · ≤200).
 ② Last-Event-ID: not a number → 400 invalid_last_event_id before the stream opens · past the latest or past int32 → from after the
    latest (nothing sent again · no DB error).
-③ report_seq past int32 → 422 report_seq_out_of_range (never 500) · a snapshot resets the baseline (a lower seq is taken and becomes
-   the new baseline) · a new device token resets it to 0 · the single-state report keeps «after the latest».
+③ report_seq past int32 → 422 report_seq_out_of_range (never 500) · a snapshot obeys «after the latest» like a single report (Kadir
+   4981 ①: a late snapshot never undoes newer state) · the 409 names the latest (the daemon takes latest + 1) · a new device token
+   resets the baseline to 0.
 ④ a disconnected device: its live token is what «heard from» counts (unknown at once) · its open commands end rejected
-   device_disconnected · its open stream ends with access_revoked now, not at the 30-second check.
+   device_disconnected — an answer_approval's permission request with them (Kadir 4981 ②: never a false «answered») · its open
+   stream ends with access_revoked now, not at the 30-second check. Remote control off takes the same path.
 ⑤ the last stream of a device takes its queue-map key with it.
 Measured before (AC0 probe): 300 keys → 300 rows · '-7' resent everything · '99999999999' → empty 200 + DataError · 2147483648 → 500
 then 409 for ever · DELETE then view = working · key left with an empty set.
@@ -33,6 +35,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     world,
 )
 from tests.test_4529_desktop_relay_realdb import _device, _enqueue, _remote_control_on, _tok  # noqa: F401
+from tests.test_4533_agent_permissions_realdb import _answer, _ask, _pair, _post_ask, _register  # noqa: F401
 
 pytestmark = pytest.mark.anyio
 
@@ -112,22 +115,45 @@ async def test_03_report_seq_past_int32_is_422_a_snapshot_resets_the_baseline_a_
         assert _code(await c.put(SNAP, json=_snap(agent, 2_147_483_648, ["s-1"]), headers=_tok(token))) == (422, "report_seq_out_of_range")
         assert await _rows(sid) == []
         assert (await c.post(url, json=_state(agent, 2_147_483_647), headers=_tok(token))).status_code == 200  # the edge itself is a number
-        # the single-state report keeps «after the latest»
-        assert _code(await c.post(url, json=_state(agent, 5), headers=_tok(token))) == (409, "stale_report")
-        # a snapshot is the daemon's whole truth: a lower number is taken and becomes the baseline (a state file that went back to 0)
+        # the single-state report keeps «after the latest» — and the refusal names the latest (the daemon takes latest + 1)
+        late = await c.post(url, json=_state(agent, 5), headers=_tok(token))
+        assert _code(late) == (409, "stale_report") and late.json()["error"]["detail"] == {"latest": 2_147_483_647}, late.text
+        # Kadir 4981 ①: a snapshot obeys the same rule — a lower number is refused the same way, nothing written (mutant: the old
+        # «a snapshot resets the baseline» line → 200 and rows at 1 → RED)
         snap = await c.put(SNAP, json=_snap(agent, 1, ["s-1", "s-2"]), headers=_tok(token))
-        assert snap.status_code == 200, snap.text
-        assert await _rows(sid) == [("s-1", "working", 1), ("s-2", "working", 1)]
-        assert (await c.post(url, json=_state(agent, 2, "idle"), headers=_tok(token))).status_code == 200  # delta after the snapshot
-        assert _code(await c.post(url, json=_state(agent, 1), headers=_tok(token))) == (409, "stale_report")
-        assert _code(await c.post(url, json=_state(agent, 2), headers=_tok(token))) == (409, "stale_report")
-        # a new device token (a reinstall · §1.1): the baseline goes to 0 with it — the first report from 1 is taken
+        assert _code(snap) == (409, "stale_report") and snap.json()["error"]["detail"] == {"latest": 2_147_483_647}, snap.text
+        assert await _rows(sid) == [("s-1", "working", 2_147_483_647)]
+        # a new device token (a reinstall · §1.1 — the state file and the token live in one folder, §12): the baseline goes to 0
+        # with it — the first report from 1 is taken, and the snapshot that follows is a delta on it
         async with async_session_factory() as s:
             setup = await s.get(__import__("app.models.desktop_setup", fromlist=["DesktopSetup"]).DesktopSetup, uuid.UUID(sid))
             new_token = await relay.issue_device_token(s, setup.id)
             await s.commit()
-        assert [r[2] for r in await _rows(sid)] == [0, 0]
+        assert [r[2] for r in await _rows(sid)] == [0]
         assert (await c.post(url, json=_state(agent, 1, "working"), headers=_tok(new_token))).status_code == 200
+        assert (await c.put(SNAP, json=_snap(agent, 2, ["s-1", "s-2"]), headers=_tok(new_token))).status_code == 200
+        assert await _rows(sid) == [("s-1", "working", 2), ("s-2", "working", 2)]
+
+
+async def test_03b_a_late_snapshot_never_undoes_a_newer_report(world):
+    """Kadir 4981 ① (codex probe, real DB): report seq 10 working → report seq 11 idle → a delayed snapshot seq 9 working (an HTTP
+    retry of an older PUT · two daemon processes over a restart) — before this fix it was stored and shown as working at 9 and a
+    seq 10 report was then taken again. Now: 409 stale_report naming 11 · the row stays idle at 11 · seq 10 is still refused · the
+    daemon's next snapshot at 12 is taken."""
+    async with _client() as c:
+        d = await _device(c, name="d4554 late snap")
+        sid, token, agent = d["setup_id"], d["device_token"], d["agents"][0]["member_id"]
+        url = "/api/v2/desktop/relay/sessions/s-1/state"
+        assert (await c.post(url, json=_state(agent, 10, "working"), headers=_tok(token))).status_code == 200
+        assert (await c.post(url, json=_state(agent, 11, "idle"), headers=_tok(token))).status_code == 200
+        late = await c.put(SNAP, json=_snap(agent, 9, ["s-1"]), headers=_tok(token))
+        assert _code(late) == (409, "stale_report") and late.json()["error"]["detail"] == {"latest": 11}, late.text
+        assert await _rows(sid) == [("s-1", "idle", 11)]
+        view = (await c.get(f"/api/v2/desktop/setups/{sid}/sessions", headers=_person(OWNER))).json()["sessions"]
+        assert [(v["session_key"], v["state"]) for v in view] == [("s-1", "idle")]
+        assert _code(await c.post(url, json=_state(agent, 10, "working"), headers=_tok(token))) == (409, "stale_report")
+        assert (await c.put(SNAP, json=_snap(agent, 12, ["s-1"], "working"), headers=_tok(token))).status_code == 200
+        assert await _rows(sid) == [("s-1", "working", 12)]
 
 
 async def test_01_rows_are_kept_7_days_and_200_per_device_live_first_in_a_persons_read(world, monkeypatch):
@@ -184,7 +210,15 @@ async def test_04_a_disconnected_device_is_unknown_at_once_its_commands_rejected
     async with _client() as c:
         d = await _device(c, name="d4554 gone")
         sid, token, agent = d["setup_id"], d["device_token"], d["agents"][0]["member_id"]
-        assert (await c.put(SNAP, json=_snap(agent, 1, ["s-1"]), headers=_tok(token))).status_code == 200
+        assert (await c.put(SNAP, json=_snap(agent, 1, ["s-1"], "waiting_permission"), headers=_tok(token))).status_code == 200
+        # Kadir 4981 ②: a permission request the owner's phone answered — its answer_approval is still on its way down
+        phone, der = await _register(c)
+        await _pair(c, token, der)
+        asked = await _post_ask(c, d, _ask(agent))
+        assert asked.status_code == 201, asked.text
+        rid = asked.json()["id"]
+        answered = await c.post(f"/api/v2/agent-permission-requests/{rid}/answer", json=_answer(phone), headers=_person(OWNER))
+        assert answered.status_code == 200, answered.text
         stream = asyncio.create_task(c.get(STREAM, headers=_tok(token)))
         await asyncio.sleep(0.8)  # open · read once · waiting for a wake (its 30-second recheck is longer than this stream lives)
         cmd = await _enqueue(sid, "stop_session", {"session_key": "s-1", "signed": "sig"}, "late")
@@ -196,11 +230,36 @@ async def test_04_a_disconnected_device_is_unknown_at_once_its_commands_rejected
         # the stream ended on the disconnect's own signal: access_revoked, well before its 6-second lifespan and its 30-second check
         assert "event: access_revoked" in body and "device_disconnected" in body and "lifespan_reconnect" not in body, body
         assert time.monotonic() - started < 6
-        # the open command ended rejected · the person's view is unknown now (the revoked token's last heartbeat no longer counts)
-        rows = await _sql(fetch=f"SELECT state, result_code FROM desktop_commands WHERE id = '{cmd.id}'")
-        assert tuple(rows[0]) == ("rejected", "device_disconnected")
+        # the open commands ended rejected · the person's view is unknown now (the revoked token's last heartbeat no longer counts)
+        rows = await _sql(fetch=f"SELECT kind, state, result_code FROM desktop_commands WHERE setup_id = '{sid}' ORDER BY device_seq")
+        assert [tuple(r) for r in rows] == [("answer_approval", "rejected", "device_disconnected"), ("stop_session", "rejected", "device_disconnected")]
+        assert str(cmd.id)  # the stop made above is the second row
+        # Kadir 4981 ②: the answer never reached the device — its request is rejected with the same code in the same transaction,
+        # never left «answered» (the approver's phone would read a success that was not — mutant: the bulk update alone → RED)
+        req = await _sql(fetch=f"SELECT state, result_code FROM agent_permission_requests WHERE id = '{rid}'")
+        assert tuple(req[0]) == ("rejected", "device_disconnected")
         view = (await c.get(f"/api/v2/desktop/setups/{sid}/sessions", headers=_person(OWNER))).json()["sessions"]
         assert [(v["session_key"], v["state"], v["activity"]) for v in view] == [("s-1", "unknown", "unknown")]
+
+
+async def test_04b_remote_control_off_takes_the_same_path_an_answered_request_is_rejected_with_its_commands(world):
+    """§2.1 off rejected the open commands with its own bulk update — the same false «answered» behind it (Kadir 4981 ②). One path now:
+    the answer_approval ends rejected remote_control_off and so does its permission request; a later answer is refused as answered."""
+    async with _client() as c:
+        d = await _device(c, name="d4554 off")
+        sid, token, agent = d["setup_id"], d["device_token"], d["agents"][0]["member_id"]
+        assert (await c.put(SNAP, json=_snap(agent, 1, ["s-1"], "waiting_permission"), headers=_tok(token))).status_code == 200
+        phone, der = await _register(c)
+        await _pair(c, token, der)
+        rid = (await _post_ask(c, d, _ask(agent))).json()["id"]
+        assert (await c.post(f"/api/v2/agent-permission-requests/{rid}/answer", json=_answer(phone), headers=_person(OWNER))).status_code == 200
+        org = (await _sql(fetch=f"SELECT org_id FROM desktop_setups WHERE id = '{sid}'"))[0][0]
+        off = await c.put(f"/api/v2/organizations/{org}/remote-control", json={"enabled": False}, headers=_person(OWNER))
+        assert off.status_code == 200, off.text
+        rows = await _sql(fetch=f"SELECT kind, state, result_code FROM desktop_commands WHERE setup_id = '{sid}'")
+        assert [tuple(r) for r in rows] == [("answer_approval", "rejected", "remote_control_off")]
+        req = await _sql(fetch=f"SELECT state, result_code FROM agent_permission_requests WHERE id = '{rid}'")
+        assert tuple(req[0]) == ("rejected", "remote_control_off")
 
 
 async def test_05_the_last_stream_takes_its_queue_key_with_it(world, monkeypatch):

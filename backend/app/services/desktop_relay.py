@@ -312,7 +312,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     _check_seq_range(report.report_seq)
     latest = await _lock_device_seq(db, setup.id)
     if report.report_seq <= latest:
-        raise DesktopRelayError(409, "stale_report", f"report_seq {report.report_seq} is not after {latest}")
+        raise _stale(report.report_seq, latest)
     await _prune_expired(db, setup.id, now=_now())  # story #4554 ①
     row = (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == session_key)
@@ -335,19 +335,29 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     return row
 
 
+def _stale(seq: int, latest: int) -> DesktopRelayError:
+    """story #4554 ③ (Kadir 4981 ①): the refusal names the device's latest number, so a daemon whose own count fell behind (a state
+    file gone back to 0 · a reinstall that kept its token) takes `latest + 1` and sends its snapshot again — one round trip, and the
+    order of reports is never undone."""
+    return DesktopRelayError(409, "stale_report", f"report_seq {seq} is not after {latest}", detail={"latest": latest})
+
+
 async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: SessionSnapshot) -> int:
     """The whole list (after a reconnect): the given sessions as reported; a session the device no longer lists is stopped.
 
-    story #4554 ③ (PO 11:45Z): a snapshot is the daemon's whole truth, so it **resets the device's report baseline** — a lower
-    `report_seq` is taken and becomes the new baseline (a daemon whose state file went back to 0 is not refused for ever); the
-    single-state report keeps its strict «after the latest» rule."""
+    story #4554 ③ · Kadir 4981 ①: a snapshot obeys the same «after the latest» rule as a single report — a late snapshot (an HTTP
+    retry of an older PUT landing after a newer report · two daemon processes over a restart) never undoes newer state (seq 10
+    working → seq 11 idle → late seq 9 working was stored as working). The baseline goes to 0 with a new device token only
+    (issue_device_token — a reinstall loses the token with the state file, §12); a daemon behind the latest reads it from the 409."""
     for s in snapshot.sessions:
         _check_agent(setup, s.agent_member_id)
     _check_seq_range(snapshot.report_seq)
     keys = [s.session_key for s in snapshot.sessions]
     if len(set(keys)) != len(keys):
         raise DesktopRelayError(422, "duplicate_session_key", "a session key appears twice")
-    await _lock_device_seq(db, setup.id)  # the device row's lock — two reports at once are ordered
+    latest = await _lock_device_seq(db, setup.id)  # the device row's lock — two reports at once are ordered
+    if snapshot.report_seq <= latest:
+        raise _stale(snapshot.report_seq, latest)
     now = _now()
     await _prune_expired(db, setup.id, now=now)  # story #4554 ①
     existing = {r.session_key: r for r in (await db.execute(
@@ -592,16 +602,29 @@ def wake_key(setup_id: uuid.UUID) -> str:
     return f"desktop:{setup_id}"
 
 
-async def reject_open_commands(db: AsyncSession, *, setup_id: uuid.UUID, result_code: str) -> int:
-    """story #4554 ④ (PO 11:45Z · the same shape as remote_control.set_enabled's off): a disconnected device's open commands
-    (`queued` · `delivered`) end as `rejected` with the reason — nothing waits for a device that will not come back."""
+async def reject_open_commands(db: AsyncSession, *, setup_ids: list[uuid.UUID], result_code: str) -> int:
+    """story #4554 ④ (PO 11:45Z) · §2.1 off (remote_control.set_enabled): the devices' open commands (`queued` · `delivered`) end
+    as `rejected` with the reason — nothing waits for a device that will not come back (or may not be reached).
+
+    Kadir 4981 ②: an `answer_approval` among them carried a person's answer that never reached the device — its permission request
+    must not stay `answered` (the approver's phone would say it went through: a false success). The same handler the daemon's own
+    result takes (agent_permissions.on_answer_result) moves it to `rejected` with the same code, in this transaction."""
+    from app.services.agent_permissions import on_answer_result
+
+    if not setup_ids:
+        return 0
     now = _now()
     rejected = (await db.execute(
         update(DesktopCommand)
-        .where(DesktopCommand.setup_id == setup_id, DesktopCommand.state.in_(("queued", "delivered")))
+        .where(DesktopCommand.setup_id.in_(setup_ids), DesktopCommand.state.in_(("queued", "delivered")))
         .values(state="rejected", result_code=result_code, finished_at=now)
-        .returning(DesktopCommand.id)
-    )).scalars().all()
+        .returning(DesktopCommand.setup_id, DesktopCommand.kind, DesktopCommand.payload)
+    )).all()
+    for setup_id, kind, payload in rejected:
+        if kind == "answer_approval" and (payload or {}).get("request_id"):
+            # story #4580 (Kadir 02:08Z): the stage the command answered — a late result of the first answer never moves the second
+            stage = "confirm" if payload.get("stage") == "confirm" else "ask"
+            await on_answer_result(db, setup_id, payload["request_id"], "rejected", result_code, stage=stage)
     return len(rejected)
 
 
