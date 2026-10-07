@@ -471,4 +471,13 @@ describe('[4610] when each card was asked', () => {
     await render([req({ state: 'expired', expires_at: past(), created_at: ago(2) })], 'en');
     expect(head()).toEqual([{ waited: null, asked: 'Asked 2 min ago' }]);
   });
+
+  it('(Yuna 4990) under a minute: «방금 물음» · «Asked just now», never «0분 전에 물음»', async () => {
+    const now = new Date(Date.now() - 5_000).toISOString();
+    for (const [locale, says] of [['ko', '방금 물음'], ['en', 'Asked just now']] as const) {
+      await remount();
+      await render([req({ state: 'expired', expires_at: past(), created_at: now })], locale);
+      expect(head(), locale).toEqual([{ waited: null, asked: says }]); // mutant: the plain «{n}분 전에 물음» → «0분 전에 물음» → RED
+    }
+  });
 });

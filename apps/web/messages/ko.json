@@ -7055,7 +7055,7 @@
     },
     "chipUnknown": "상태 모름",
     "waited": "{n}분째 기다림",
-    "asked": "{n}분 전에 물음",
+    "asked": "{n, plural, =0 {방금 물음} other {#분 전에 물음}}",
     "role": "{role} 역할로 받은 요청이에요",
     "maskedNote": "비밀처럼 보이는 값은 가려서 보냈어요",
     "truncatedNote": "앞 200자만 보여요",

@@ -7055,7 +7055,7 @@
     },
     "chipUnknown": "State unknown",
     "waited": "Waiting {n} min",
-    "asked": "Asked {n} min ago",
+    "asked": "{n, plural, =0 {Asked just now} one {Asked # min ago} other {Asked # min ago}}",
     "role": "Sent to the {role} role",
     "maskedNote": "Values that look like secrets were masked",
     "truncatedNote": "Only the first 200 characters are shown",
