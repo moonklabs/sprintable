@@ -3,13 +3,23 @@
  * phone: asked in the terminal · an error · a usage limit. The why of a limit comes from the server row (`limit`); whether its time
  * has passed is this page's clock.
  */
-export interface SessionLimit { at?: string; again?: boolean; self_resume?: 'maybe' | 'no' | 'unknown' }
+// story #4560 (contract v2.1 §5): `held` — the limit's time came, but the terminal was not what the app expected, so it pressed nothing
+export interface SessionLimit { at?: string; again?: boolean; self_resume?: 'maybe' | 'no' | 'unknown'; held?: 'screen' | 'esc_not_taken' }
 
 export type RestLineKey = 'waitingInput' | 'error' | 'paused' | 'pausedAgain' | 'limitMaybe' | 'limitNo' | 'limitUnknown'
-  | 'limitErrorNoTime' | 'limitErrorAhead' | 'limitErrorPassed';
+  | 'limitErrorNoTime' | 'limitErrorAhead' | 'limitErrorPassed' | 'limitHeld';
+
+const LIMIT_STATES = new Set(['waiting_input', 'error', 'paused_limit']);
+
+/** story #4560 (Yuna `4560-limit-resume-copy.md` §③): a held limit wears the board's «사용 한도» look and its own line, no button —
+ *  on a limit word only (the server never sends a limit on another) */
+export function limitHeld(state: string, limit: SessionLimit | null | undefined): boolean {
+  return LIMIT_STATES.has(state) && (limit?.held === 'screen' || limit?.held === 'esc_not_taken');
+}
 
 /** the line's key (and its time, when the line names one) — null for any other state */
 export function limitLine(state: string, limit: SessionLimit | null, now: number): { key: RestLineKey; at?: string } | null {
+  if (limitHeld(state, limit)) return { key: 'limitHeld' }; // the person's next step is at that terminal, whatever the time says
   if (state === 'paused_limit') {
     return limit?.at ? { key: limit.again ? 'pausedAgain' : 'paused', at: limit.at } : { key: 'limitErrorNoTime' };
   }

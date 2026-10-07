@@ -14,7 +14,7 @@ import { useFieldDraft } from '@/hooks/use-field-draft';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
-import { limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
+import { limitHeld, limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
 
 /**
  * story #4534 (명세 모음 B-3 · «상태 칩 ↔ 서버 세션 상태») — the agent's session in its DM: the desktop bar's words and shapes
@@ -144,8 +144,9 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   const endCancelRef = useRef<HTMLButtonElement>(null);
   // what was written stays until it went somewhere (spec B-3: «쓴 글은 남김») — kept as a draft per agent · conversation (#4370)
   const [draft, setDraft, clearDraft] = useFieldDraft({ surface: 'agent-instruct', targetId: `${agentId}:${conversationId}`, field: 'text' });
-  // Claude at a usage limit (it may continue by itself, or ask in its terminal) wears the board's «사용 한도» look (Yuna 08:46Z)
-  const claudeLimit = view.state === 'waiting_input' && !!view.limit?.self_resume;
+  // Claude at a usage limit (it may continue by itself, or ask in its terminal) wears the board's «사용 한도» look (Yuna 08:46Z) ·
+  // story #4560: so does a limit the app held off at its end (Yuna §③ — a person's hand is needed at that terminal)
+  const claudeLimit = (view.state === 'waiting_input' && !!view.limit?.self_resume) || limitHeld(view.state, view.limit);
   const { icon: Shape, tone } = claudeLimit ? { icon: AlertTriangle, tone: 'text-warning' } : SHAPES[view.state];
   const unknown = view.state === 'unknown' || view.state === 'unrecognized';
   const busy = result?.busy === true;
@@ -360,6 +361,7 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
       paused: () => t('line.paused', { time }), pausedAgain: () => t('line.pausedAgain', { time }),
       limitMaybe: () => t('line.limitMaybe'), limitNo: () => t('line.limitNo'), limitUnknown: () => t('line.limitUnknown'),
       limitErrorNoTime: () => t('line.limitErrorNoTime'), limitErrorAhead: () => t('line.limitErrorAhead', { time }), limitErrorPassed: () => t('line.limitErrorPassed'),
+      limitHeld: () => t('line.limitHeld'),
     }[rest.key];
     return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{words()}</p>;
   }

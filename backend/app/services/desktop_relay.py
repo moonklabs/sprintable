@@ -139,6 +139,8 @@ class SessionLimit(BaseModel):
     at: OffsetDatetime | None = None
     again: bool | None = None
     self_resume: Literal["maybe", "no", "unknown"] | None = None
+    # story #4560 (contract v2.1 §5 · PO 14:41Z): the daemon held off at the limit's end — the closed words only (another → 422)
+    held: Literal["screen", "esc_not_taken"] | None = None
 
 
 class SystemHold(BaseModel):
@@ -216,6 +218,7 @@ def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
     row.limit_at = limit.at if limit else None
     row.limit_again = limit.again if limit else None
     row.limit_self_resume = limit.self_resume if limit else None
+    row.limit_held = limit.held if limit else None
 
 
 def _set_system(row: DesktopSession, report: SessionReport) -> None:
@@ -252,6 +255,8 @@ def limit_view(row: DesktopSession) -> dict | None:
         out["again"] = row.limit_again
     if row.limit_self_resume is not None:
         out["self_resume"] = row.limit_self_resume
+    if row.limit_held is not None:  # story #4560: the device list and the DM header read it from here
+        out["held"] = row.limit_held
     return out
 
 

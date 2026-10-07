@@ -131,6 +131,13 @@ describe('AgentSessionStrip — the board\'s own words (story #4534 · contract 
     [{ state: 'working', activity: 'waiting_system', system: { folder: 'desktop' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 데스크탑 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
     [{ state: 'working', activity: 'waiting_system', system: { folder: 'network_volume' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 네트워크 볼륨을 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
     [{ state: 'working', activity: 'waiting_system', system: { folder: null } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    // story #4560 (Yuna `4560-limit-resume-copy.md` §③ · contract v2.1 §5): the app held off at the limit's end — «사용 한도» · its line ·
+    // no button, on whichever limit word it comes
+    [{ state: 'idle', activity: 'error', limit: { at: earlier, held: 'screen' } }, '사용 한도', '한도가 풀릴 때가 됐지만 그 컴퓨터의 터미널 화면이 예상과 달라 앱이 손대지 않았어요 — 그 컴퓨터의 터미널에서 확인해 주세요', 'text-warning'],
+    [{ state: 'idle', activity: 'paused_limit', limit: { at: earlier, held: 'esc_not_taken' } }, '사용 한도', '한도가 풀릴 때가 됐지만 그 컴퓨터의 터미널 화면이 예상과 달라 앱이 손대지 않았어요 — 그 컴퓨터의 터미널에서 확인해 주세요', 'text-warning'],
+    // PO 14:55Z: the daemon's own word while held is waiting_input (no self_resume with it) — the same look and line
+    [{ state: 'idle', activity: 'waiting_input', limit: { at: earlier, held: 'screen' } }, '사용 한도', '한도가 풀릴 때가 됐지만 그 컴퓨터의 터미널 화면이 예상과 달라 앱이 손대지 않았어요 — 그 컴퓨터의 터미널에서 확인해 주세요', 'text-warning'],
+    [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'maybe', held: 'screen' } }, '사용 한도', '한도가 풀릴 때가 됐지만 그 컴퓨터의 터미널 화면이 예상과 달라 앱이 손대지 않았어요 — 그 컴퓨터의 터미널에서 확인해 주세요', 'text-warning'],
   ])('%j → «%s» and its line', async (over, word, expected, tone) => {
     fetchWithAuth.mockResolvedValueOnce(view({ ...over, remote_control: false }));
     await render();
