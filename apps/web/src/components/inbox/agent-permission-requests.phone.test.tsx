@@ -428,3 +428,47 @@ describe('[4604] the question\'s words only while it asks', () => {
     }
   });
 });
+
+// story #4610 (run13b 20:45Z · R13B-4580-10-unconfirmed.png): several cards of one agent looked alike with no time — the PO read the top
+// one as the question just answered in the terminal. Every card now says when it was asked, in the waiting chip's place; a card that
+// still waits keeps «{n}분째 기다림» (it says the same) and nothing more.
+describe('[4610] when each card was asked', () => {
+  const head = () => [...container.querySelectorAll('[data-testid="agent-permission-card"]')].map((c) => ({
+    waited: c.querySelector('[data-testid="agent-permission-waited"]')?.textContent ?? null,
+    asked: c.querySelector('[data-testid="agent-permission-asked"]')?.textContent ?? null,
+  }));
+  const ago = (min: number) => new Date(Date.now() - min * 60_000 - 5_000).toISOString();
+  const past = () => new Date(Date.now() - 60_000).toISOString();
+  const remount = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
+
+  it('each card shape: waiting → the chip only · expired · withdrawn · no word from the computer → «{n}분 전에 물음» — the phone app and a browser alike', async () => {
+    for (const phone of [true, false]) {
+      await remount();
+      if (phone) installShell();
+      await render([
+        req({ id: 'p', created_at: ago(3) }),
+        req({ id: 'e', request_id: 'q2', created_at: ago(7), state: 'expired', expires_at: past() }),
+        req({ id: 'w', request_id: 'q3', tool: 'SandboxNetwork', runtime: 'claude', summary: 'network', stage: 'ask', host: null, created_at: ago(12), state: 'withdrawn', host_unread: true, answerable: false }),
+        req({ id: 'u', request_id: 'q4', created_at: ago(20), device_reachable: false }),
+      ]);
+      expect(head(), `phone=${phone}`).toEqual([
+        { waited: '3분째 기다림', asked: null }, // mutant: the time on every card → RED (two lines saying one thing)
+        { waited: null, asked: '7분 전에 물음' }, // mutant: no asked line → RED
+        { waited: null, asked: '12분 전에 물음' },
+        { waited: null, asked: '20분 전에 물음' },
+      ]);
+      __resetPhoneBridgeForTest();
+    }
+  });
+
+  it('answered here: the chip gives way to «{n}분 전에 물음» at once · in English «Asked {n} min ago»', async () => {
+    installShell();
+    await render([req({ created_at: ago(4) })]);
+    expect(head()).toEqual([{ waited: '4분째 기다림', asked: null }]);
+    await press('거부');
+    expect(head()).toEqual([{ waited: null, asked: '4분 전에 물음' }]);
+    await remount();
+    await render([req({ state: 'expired', expires_at: past(), created_at: ago(2) })], 'en');
+    expect(head()).toEqual([{ waited: null, asked: 'Asked 2 min ago' }]);
+  });
+});
