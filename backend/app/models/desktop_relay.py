@@ -17,7 +17,9 @@ COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
 # story #4534 (0437 · contract v1.12): the board's own words — asked in the terminal · an error · paused at a usage limit
-SESSION_STATES = ("starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "stopped")
+# story #4599 (0442 · contract v1.13): `waiting_system` — the turn is held by a macOS window on that computer (a folder-access
+# question the person at the Mac must answer); a working word to a reader from before (legacy_state), never a resting one
+SESSION_STATES = ("starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "waiting_system", "stopped")
 # the words a usage limit comes with (the only rows that may carry its why) · Claude's «may continue by itself»
 SESSION_LIMIT_STATES = ("waiting_input", "error", "paused_limit")
 SESSION_SELF_RESUME = ("maybe", "no", "unknown")

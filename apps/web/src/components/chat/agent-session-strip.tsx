@@ -25,6 +25,9 @@ import { limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-lim
 // story #4534 (relay contract v1.12 · Yuna 03:04Z · 03:06Z): the board's own words — asked in the terminal · an error · paused at a
 // usage limit — never shown as «다음 일 기다림»; a usage limit carries its why (`limit`)
 type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'waiting_input' | 'error' | 'paused_limit' | 'stopped' | 'unknown'
+  // story #4599 (relay contract v1.13): the turn is held by a macOS window on that computer (a folder-access question only the person
+  // at the Mac can answer) — its own line, [멈춤] still (the one handle a phone has on it), never [지금 지시]
+  | 'waiting_system'
   // story #4534 (Yuna 05:41Z): a word this page does not know — not the server's `unknown` (= the computer lost): its own line
   | 'unrecognized';
 interface View {
@@ -51,6 +54,7 @@ const SHAPES: Record<SessionState, { icon: LucideIcon; tone: string }> = {
   waiting_input: { icon: CircleDot, tone: 'text-foreground' },
   error: { icon: SquareX, tone: 'text-destructive' },
   paused_limit: { icon: Circle, tone: 'text-muted-foreground fill-current' },
+  waiting_system: { icon: AlertTriangle, tone: 'text-warning' }, // a person at that Mac is needed — the permission look (4599 · Yuna to confirm)
   stopped: { icon: Check, tone: 'text-success' },
   unknown: { icon: CircleDashed, tone: 'text-muted-foreground' },
   unrecognized: { icon: CircleDashed, tone: 'text-muted-foreground' },
@@ -137,7 +141,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // [멈춤] while it works AND while it waits on a permission (Kadir 325 · PO 04:34Z: the daemon takes a stop then too — a person
   // must be able to stop an agent that is asking); [지금 지시] only while it works (it goes into a running turn)
   const mayCommand = phone && view.remote_control && view.can_command !== false;
-  const canStop = mayCommand && (view.state === 'working' || view.state === 'waiting_permission');
+  // story #4599: and while a macOS window holds its turn (the server takes the stop then too — an Esc cannot reach it, the daemon ends it)
+  const canStop = mayCommand && (view.state === 'working' || view.state === 'waiting_permission' || view.state === 'waiting_system');
   // story #4534 (PO 06:30Z · 07:00Z): and only when the daemon says it can put it into the turn (instruct_now) — all three, or none
   const canInstruct = mayCommand && view.state === 'working' && view.instruct_now === true;
   const checkOnly = pending?.verb === 'stop';
@@ -151,7 +156,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
             : view.state === 'waiting_input' ? t('state.waiting_input')
               : view.state === 'error' ? t('state.error')
                 : view.state === 'paused_limit' ? t('state.paused_limit')
-                  : view.state === 'stopped' ? t('state.stopped') : t('state.unknown');
+                  : view.state === 'waiting_system' ? t('state.waiting_system')
+                    : view.state === 'stopped' ? t('state.stopped') : t('state.unknown');
 
   const deps: CommandDeps = {
     phoneCall,
@@ -289,6 +295,9 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
   const remoteOff = useRemoteOff(); // story #4583: who can turn it on (the org's value · the session's own flag decides whether to say it)
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
   if (view.state === 'unrecognized') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.unrecognized')}</p>;
+  // story #4599: held by a macOS window — what to do is on that computer's screen, whatever remote control says (the phone's [멈춤]
+  // stands beside it: the one handle on a frozen turn)
+  if (view.state === 'waiting_system') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.waitingSystem')}</p>;
   // story #4534 (Yuna 03:04Z): what to do is «on that computer» — its own line whatever remote control says; no buttons; whether a
   // time has passed is this page's clock
   const rest = limitLine(view.state, view.limit ?? null, now);

@@ -5100,10 +5100,12 @@
         "waiting_input": "Waiting for input",
         "error": "Error",
         "paused_limit": "Paused at usage limit",
-        "usage_limit": "Usage limit"
+        "usage_limit": "Usage limit",
+        "waiting_system": "Waiting on macOS"
       },
       "line": {
         "onPhone": "You can stop or instruct it from a paired phone",
+        "waitingSystem": "macOS is asking about folder access on that computer — answer it on that computer's screen",
         "inbox": "The permission request is in the approvals inbox",
         "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
         "inboxPhone": "You can answer it in Approvals",

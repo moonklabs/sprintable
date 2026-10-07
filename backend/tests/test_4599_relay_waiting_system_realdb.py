@@ -1,0 +1,124 @@
+"""story #4599 (relay contract v1.13 · alembic 0442 · PO 2026-10-07 12:27Z) — a turn held by a macOS window reaches the phone and the web:
+the daemon reports `waiting_system`; a reader from before sees `working` (the turn is still a turn), the new web sees the word in
+`activity`; a phone's [멈춤] is still taken (the one handle on a frozen turn) · an instruction is not · no turn-end notice comes of it
+(it is not a resting word) · no usage limit rides on it."""
+from __future__ import annotations
+
+import re
+from datetime import datetime, timezone
+
+import pytest
+from sqlalchemy import text
+
+from app.models.desktop_relay import SESSION_LIMIT_STATES, SESSION_STATES
+from app.services.desktop_commands import TURN_ENDED_STATES
+from app.services.desktop_relay import legacy_state
+from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
+    OWNER,
+    OWNER_TM,
+    _addresses,
+    _client,
+    _dispose_global_engine_after_test,
+    _person,
+    _sql,
+    anyio_backend,
+    world,
+)
+from tests.test_4529_desktop_relay_realdb import _device, _tok
+from tests.test_4534_desktop_commands_realdb import (  # noqa: F401
+    _cmd,
+    _commands,
+    _post,
+    _remote_control_on,
+    _sent_and_done,
+    _state,
+    _turn_end_notices,
+    _world,
+)
+
+pytestmark = pytest.mark.anyio
+STATE = "/api/v2/desktop/relay/sessions/s-1/state"
+WORD = "waiting_system"
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _report(agent, seq, state, **extra):
+    return {"report_seq": seq, "agent_member_id": agent, "runtime": "claude", "state": state, "at": _now().isoformat(), **extra}
+
+
+async def _view(c, agent):
+    r = await c.get(f"/api/v2/agents/{agent}/desktop-session", headers=_person(OWNER))
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_00_the_word_is_in_the_code_lists_as_a_working_word_not_a_resting_or_a_limit_one():
+    assert WORD in SESSION_STATES
+    assert legacy_state(WORD) == "working", "a reader from before sees the turn it still is"
+    assert WORD not in SESSION_LIMIT_STATES, "no usage limit rides on a macOS window"
+    assert WORD not in TURN_ENDED_STATES, "a held turn has not ended — no turn-end notice of it"
+
+
+async def test_01_the_check_constraint_holds_the_nine_words(world):
+    """0442's CHECK holds the model's words, the new one among them (one changed alone → RED)."""
+    from app.core.database import async_session_factory
+
+    async with async_session_factory() as s:
+        (d,) = (await s.execute(text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_desktop_sessions_state'"))).scalars().all()
+    words = set(re.findall(r"'([a-z_]+)'", d))
+    assert words == set(SESSION_STATES) and WORD in words
+
+
+async def test_02_reported_as_itself_shown_as_working_to_a_reader_from_before_and_as_the_word_in_activity(world):
+    async with _client() as c:
+        d = await _device(c, name="d4599 window a")
+        token, agent = d["device_token"], d["agents"][0]["member_id"]
+        assert (await c.post(STATE, json=_report(agent, 1, "working"), headers=_tok(token))).status_code == 200
+        assert (await c.post(STATE, json=_report(agent, 2, WORD), headers=_tok(token))).status_code == 200
+        v = await _view(c, agent)
+        assert (v["state"], v["activity"], v["limit"]) == ("working", WORD, None)
+        rows = await _sql(fetch=f"SELECT state FROM desktop_sessions WHERE setup_id = '{d['setup_id']}'")
+        assert [tuple(r) for r in rows] == [(WORD,)], "stored as itself — never folded on the way in"
+        # the device's own list carries it the same way
+        listed = await c.get(f"/api/v2/desktop/setups/{d['setup_id']}/sessions", headers=_person(OWNER))
+        [s] = listed.json()["sessions"]
+        assert (s["state"], s["activity"]) == ("working", WORD)
+        # the window answered: the next report is the turn again
+        assert (await c.post(STATE, json=_report(agent, 3, "working"), headers=_tok(token))).status_code == 200
+        v = await _view(c, agent)
+        assert (v["state"], v["activity"]) == ("working", "working")
+        # a snapshot keeps the word too
+        snap = {"report_seq": 4, "sessions": [{"session_key": "s-1", "agent_member_id": agent, "runtime": "claude", "state": WORD, "at": _now().isoformat()}]}
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap, headers=_tok(token))).status_code == 200
+        assert (await _view(c, agent))["activity"] == WORD
+
+
+async def test_03_a_limit_on_the_word_is_refused(world):
+    async with _client() as c:
+        d = await _device(c, name="d4599 window b")
+        token, agent = d["device_token"], d["agents"][0]["member_id"]
+        r = await c.post(STATE, json=_report(agent, 1, WORD, limit={}), headers=_tok(token))
+        assert r.status_code == 422, r.text
+
+
+async def test_04_a_phone_stop_is_taken_an_instruction_is_not_and_no_turn_end_notice_comes_of_it(world):
+    """The one handle a phone has on a frozen turn is [멈춤] (the daemon ends the session · an Esc cannot reach a process held in
+    openat). An instruction goes only into a running turn. A held turn is not a turn that ended."""
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4424 mac 4599c")
+        sid = device["setup_id"]
+        # an instruction went in and was done — a resting word after it would tell the sender; the window word must not
+        await _sent_and_done(c, device, agent, phone, conv, key="k-1")
+        before = len(await _turn_end_notices(OWNER_TM))
+        await _state(c, device, agent, WORD, 3)
+        assert len(await _turn_end_notices(OWNER_TM)) == before, "held by a window: the turn has not ended"
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv, key="w-1"))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "session_not_working")
+        r = await _post(c, agent, _cmd("stop_session", phone, key="w-2"))
+        assert r.status_code == 201, r.text
+        kinds = [(k, s) for k, _p, _b, _i, s in await _commands(sid)]
+        assert ("stop_session", "queued") in kinds

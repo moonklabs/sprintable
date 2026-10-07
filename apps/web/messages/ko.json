@@ -5100,10 +5100,12 @@
         "waiting_input": "입력 대기",
         "error": "오류",
         "paused_limit": "한도로 쉬는 중",
-        "usage_limit": "사용 한도"
+        "usage_limit": "사용 한도",
+        "waiting_system": "macOS 확인 대기"
       },
       "line": {
         "onPhone": "짝지은 폰에서 멈추거나 지시할 수 있어요",
+        "waitingSystem": "그 컴퓨터에서 macOS가 폴더 접근을 묻고 있어요 — 그 컴퓨터 화면에서 답해 주세요",
         "inbox": "권한 요청은 결재함에 있어요",
         "unknown": "그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요",
         "inboxPhone": "결재함에서 답할 수 있어요",

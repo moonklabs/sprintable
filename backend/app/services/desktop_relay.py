@@ -150,7 +150,8 @@ class SessionReport(BaseModel):
     runtime: Literal["claude", "codex"]
     # story #4534 (0437 · contract v1.12): the board's own words — never folded into «idle» (asked in the terminal · an error ·
     # paused at a usage limit)
-    state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "stopped"]
+    # story #4599 (0442 · contract v1.13): `waiting_system` — held by a macOS window on that computer (no limit rides on it)
+    state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "waiting_system", "stopped"]
     at: OffsetDatetime  # a time without its offset is refused (4330)
     limit: SessionLimit | None = None
     # story #4534 (0438 · PO 06:30Z): whether this session can take an instruction into the running turn — read by the daemon once
@@ -207,7 +208,8 @@ def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
 # story #4534 (Kadir 4960 · PO 05:36Z): a reader built for the five words (a web bundle from before · a tab left open · the phone's web
 # view) must never meet a word it does not know — `state` stays one of the five (the new words fold to idle, as the daemon used to
 # send them) and the board's own word goes in `activity` beside it, read by the new web only.
-LEGACY_STATE = {"waiting_input": "idle", "error": "idle", "paused_limit": "idle"}
+# story #4599: a turn held by a macOS window is still a turn — a reader from before sees it working (what the daemon sent before)
+LEGACY_STATE = {"waiting_input": "idle", "error": "idle", "paused_limit": "idle", "waiting_system": "working"}
 
 
 def legacy_state(state: str) -> str:

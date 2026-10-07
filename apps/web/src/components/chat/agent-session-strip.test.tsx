@@ -125,6 +125,8 @@ describe('AgentSessionStrip — the board\'s own words (story #4534 · contract 
     [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'unknown' } }, '사용 한도', '사용 한도에 걸렸어요 — 그 컴퓨터의 터미널에서 어떻게 이어 갈지 확인해 주세요', 'text-warning'],
     [{ state: 'idle', activity: 'error', limit: {} }, '오류', '사용 한도에 걸려 멈췄어요 — 풀리는 시각은 그 컴퓨터의 터미널에서 볼 수 있어요', 'text-destructive'],
     [{ state: 'idle', activity: 'error', limit: { at: earlier } }, '오류', '한도가 풀렸어요 — 그 컴퓨터에서 다시 시작해 주세요', 'text-destructive'],
+    // story #4599 (contract v1.13): held by a macOS window — a reader from before sees `working`; this page sees the word
+    [{ state: 'working', activity: 'waiting_system' }, 'macOS 확인 대기', '그 컴퓨터에서 macOS가 폴더 접근을 묻고 있어요 — 그 컴퓨터 화면에서 답해 주세요', 'text-warning'],
   ])('%j → «%s» and its line', async (over, word, expected, tone) => {
     fetchWithAuth.mockResolvedValueOnce(view({ ...over, remote_control: false }));
     await render();

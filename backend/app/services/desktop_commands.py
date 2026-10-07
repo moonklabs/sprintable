@@ -225,9 +225,10 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
     if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
-    # a stop while it works or while it waits on a person's permission (Kadir 325 · PO 04:34Z — the daemon stops it then too);
-    # an instruction only into a running turn
-    if body.kind == "stop_session" and session.state not in ("working", "waiting_permission"):
+    # a stop while it works or while it waits on a person's permission (Kadir 325 · PO 04:34Z — the daemon stops it then too), and
+    # while a macOS window holds its turn (story #4599 — the one handle a phone has on a frozen turn); an instruction only into a
+    # running turn
+    if body.kind == "stop_session" and session.state not in ("working", "waiting_permission", "waiting_system"):
         return None, "already_stopped"
     if body.kind == "send_prompt" and session.state != "working":
         raise DesktopRelayError(409, "session_not_working", "the turn has ended — send it as a message")
