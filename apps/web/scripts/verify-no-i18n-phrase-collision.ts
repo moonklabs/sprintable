@@ -204,6 +204,13 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"
   // 등 6키가 이 이름을 쓴다. 개별 EXEMPT_PAIRS 대신 규칙(이 이름은 수-인접이 아님)으로 안다.
   'josa',
+  // story #4599 — {folder}: a folder's words. ko.json's three uses read directly (2026-10-07): docs.docTreeMovedIntoFolder
+  // «{title}, {folder} 폴더로 이동했어요.» (a folder's name) · chats.agentSession.line.waitingSystemFolder / …FolderPhone
+  // «macOS가 그 컴퓨터 화면에서 {folder} 쓸지 묻고 있어요 …» filled from a closed list of folder words with their particle
+  // («문서 폴더를» · «데스크탑 폴더를» · «다운로드 폴더를» · «네트워크 볼륨을» · «iCloud Drive를») — the `name` · `channel` axis,
+  // never a count. The pairs it raised (state.stopped «끝» · button.endSession / endDialog.confirm «세션 끝내기» inside that line)
+  // are the line naming the button that stands beside it — the designed copy (Yuna §①), not two counts in one word.
+  'folder',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
