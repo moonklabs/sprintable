@@ -16,6 +16,9 @@ import { AgentRunProfileBulkDialog } from './agent-run-profile-bulk-dialog';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// story #4598 — the section names the org's owners on the «not an owner» line (the /desktop card's reading of the org)
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ orgId: 'org-1' }) }));
+
 const E5 = ['low', 'medium', 'high', 'xhigh', 'max'];
 const OPTIONS: RunProfileOptions = {
   runtimes: [
@@ -66,6 +69,7 @@ describe('the table the pickers follow', () => {
 
   it('the server codes become their lines; 403 is about who may change it', () => {
     expect(saveErrorKey(403, undefined)).toBe('runProfileErrorForbidden');
+    expect(saveErrorKey(403, 'owner_required')).toBe('runProfileErrorOwnerRequired'); // story #4598 (Yuna ①): the switch is an owner's
     expect(saveErrorKey(422, 'invalid_effort')).toBe('runProfileErrorEffort');
     expect(saveErrorKey(422, 'mixed_runtime')).toBe('runProfileErrorMixed');
     expect(saveErrorKey(500, undefined)).toBe('runProfileErrorGeneric');
@@ -207,8 +211,9 @@ describe('AgentRunProfileSection', () => {
   });
 });
 
-// story #4598 (contract 4598 v0.1 §1 · §4) — «묻지 않고 일하기»: one switch of the group, read by everyone, flipped by an org owner only
-// (`can_change_unattended`), saved with [저장]; only an owner's body carries it. Mutation: the switch enabled for a non-owner → RED.
+// story #4598 (contract v0.1 §1 · §4 · Yuna's copy `yuna/4598-unattended-copy.md` ①) — «묻지 않고 일하기»: an owner of a Claude Code
+// agent gets the switch + why, saved with [저장] (only that body carries it); anyone else gets no switch but the visible «소유자(…)만»
+// line naming the owners; a Codex agent gets the fact line only. Mutation: the switch drawn for a non-owner → RED.
 describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -224,18 +229,20 @@ describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)',
     vi.unstubAllGlobals();
   });
 
-  const unattendedSwitch = () => container.querySelector<HTMLElement>('[data-testid="run-profile-unattended"] [role="switch"]')!;
-  // base-ui's Switch root says «disabled» by its attributes (not a <button>.disabled)
-  const isDisabled = (el: HTMLElement) => el.hasAttribute('data-disabled') || el.getAttribute('aria-disabled') === 'true' || (el as HTMLButtonElement).disabled === true;
+  const unattendedSwitch = () => container.querySelector<HTMLElement>('[data-testid="run-profile-unattended"] [role="switch"]');
+  const unattendedLine = () => container.querySelector<HTMLElement>('[data-testid="run-profile-unattended-line"]')?.textContent ?? null;
   const saveButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '저장') as HTMLButtonElement | undefined;
   const tick = async () => { await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); }); };
 
-  async function render(profile: Record<string, unknown>) {
+  async function render(profile: Record<string, unknown>, put?: () => Response) {
     const puts: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes('/options')) return new Response(JSON.stringify({ data: OPTIONS }));
+      // the org's remote-control reading — where the owners' names come from (story #4583 shape)
+      if (url.endsWith('/remote-control')) return new Response(JSON.stringify({ data: { enabled: true, enabled_at: null, can_change: false, owner_names: ['윤재', '도선'] } }));
       if (init?.method === 'PUT') {
         puts.push(String(init.body));
+        if (put) return put();
         return new Response(JSON.stringify({ data: { ...profile, ...JSON.parse(String(init.body)), version: 4 } }));
       }
       return new Response(JSON.stringify({ data: profile }));
@@ -250,35 +257,58 @@ describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)',
     await tick();
     return puts;
   }
-  const base = { agent_id: 'a1', runtime: 'codex', model: 'gpt-6-sol', effort: 'ultra', version: 3, updated_at: null, can_change: true };
+  const base = { agent_id: 'a1', runtime: 'claude-code', model: 'opus', effort: 'high', version: 3, updated_at: null, can_change: true };
+  const ag = koMessages.agents as Record<string, string>;
 
-  it('an owner: the switch is live · flipping it wakes [저장] · the body carries unattended · the row reads the saved value back', async () => {
+  it('an owner of a Claude Code agent: the switch (named «묻지 않고 일하기») + the why · flipping it wakes [저장] · the body carries unattended · reads back', async () => {
     const puts = await render({ ...base, unattended: false, can_change_unattended: true });
-    expect(container.textContent).toContain(koMessages.agents.runProfileUnattended);
-    expect(container.textContent).toContain(koMessages.agents.runProfileUnattendedHelp);
-    expect(container.textContent).not.toContain(koMessages.agents.runProfileUnattendedOwnerOnly);
-    const sw = unattendedSwitch();
-    expect(isDisabled(sw)).toBe(false);
+    expect(ag.runProfileUnattended).toBe('묻지 않고 일하기');
+    expect(container.textContent).toContain(ag.runProfileUnattendedHelp);
+    expect(unattendedLine()).toBeNull();
+    const sw = unattendedSwitch()!;
     expect(sw.getAttribute('aria-checked')).toBe('false');
-    expect(nameOf(sw)).toBe(koMessages.agents.runProfileUnattended);
+    expect(nameOf(sw)).toBe(ag.runProfileUnattended);
     expect(saveButton()!.disabled).toBe(true);
     await act(async () => { sw.click(); });
-    expect(unattendedSwitch().getAttribute('aria-checked')).toBe('true');
+    expect(unattendedSwitch()!.getAttribute('aria-checked')).toBe('true');
     expect(saveButton()!.disabled).toBe(false);
     await act(async () => { saveButton()!.click(); });
     await tick();
-    expect(JSON.parse(puts[0])).toEqual({ runtime: 'codex', model: 'gpt-6-sol', effort: 'ultra', unattended: true });
-    expect(unattendedSwitch().getAttribute('aria-checked')).toBe('true');
+    expect(JSON.parse(puts[0])).toEqual({ runtime: 'claude-code', model: 'opus', effort: 'high', unattended: true });
+    expect(unattendedSwitch()!.getAttribute('aria-checked')).toBe('true');
     expect(saveButton()!.disabled).toBe(true);
   });
 
-  it('an admin (may change model · effort, not the switch): the switch shows the value but is disabled · the owner-only line · a save carries no unattended', async () => {
+  it('an admin (may change model · effort, not the switch): no switch — the visible «소유자(윤재 · 도선)만» line with the value · a save carries no unattended', async () => {
     const puts = await render({ ...base, unattended: true, can_change_unattended: false });
-    const sw = unattendedSwitch();
-    expect(isDisabled(sw)).toBe(true);
-    expect(sw.getAttribute('aria-checked')).toBe('true');
-    expect(container.textContent).toContain(koMessages.agents.runProfileUnattendedOwnerOnly);
+    expect(unattendedSwitch()).toBeNull();
+    expect(unattendedLine()).toBe('묻지 않고 일하기 · 켜짐 — 조직 소유자(윤재 · 도선)만 켜고 끌 수 있어요');
     // a model change by the admin: the body never carries the switch (absent = as it is on the server)
+    const trigger = [...container.querySelectorAll('button[aria-labelledby]')].find((b) => nameOf(b).startsWith('모델')) as HTMLElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent === 'sonnet') as HTMLElement;
+    await act(async () => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { saveButton()!.click(); });
+    await tick();
+    expect(JSON.parse(puts[0])).toEqual({ runtime: 'claude-code', model: 'sonnet', effort: 'high' });
+  });
+
+  it('a reader (may change nothing) · an older server (no field): no switch · the «꺼짐 — 소유자만» line · no [저장]', async () => {
+    await render({ ...base, can_change: false });
+    expect(unattendedSwitch()).toBeNull();
+    expect(unattendedLine()).toBe('묻지 않고 일하기 · 꺼짐 — 조직 소유자(윤재 · 도선)만 켜고 끌 수 있어요');
+    expect(saveButton()).toBeUndefined();
+  });
+
+  it('a Codex agent: the fact line only — no switch even for an owner · the body carries no unattended (PO 11:37Z · Yuna ①-Codex)', async () => {
+    const puts = await render({ ...base, runtime: 'codex', model: 'gpt-6-sol', effort: 'ultra', unattended: false, can_change_unattended: true });
+    expect(unattendedSwitch()).toBeNull();
+    expect(unattendedLine()).toBe(ag.runProfileUnattendedCodex);
+    expect(unattendedLine()).not.toContain('소유자');
     const trigger = [...container.querySelectorAll('button[aria-labelledby]')].find((b) => nameOf(b).startsWith('모델')) as HTMLElement;
     await act(async () => {
       trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
@@ -292,12 +322,13 @@ describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)',
     expect(JSON.parse(puts[0])).toEqual({ runtime: 'codex', model: 'gpt-5.5', effort: null });
   });
 
-  it('a reader (may change nothing) and an older server (no field): the switch is off and disabled', async () => {
-    await render({ ...base, can_change: false });
-    const sw = unattendedSwitch();
-    expect(isDisabled(sw)).toBe(true);
-    expect(sw.getAttribute('aria-checked')).toBe('false');
-    expect(saveButton()).toBeUndefined();
+  it('403 owner_required → the all-or-nothing line in a person\'s words', async () => {
+    await render({ ...base, unattended: false, can_change_unattended: true },
+      () => new Response(JSON.stringify({ data: null, error: { code: 'owner_required' } }), { status: 403 }));
+    await act(async () => { unattendedSwitch()!.click(); });
+    await act(async () => { saveButton()!.click(); });
+    await tick();
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(ag.runProfileErrorOwnerRequired);
   });
 });
 

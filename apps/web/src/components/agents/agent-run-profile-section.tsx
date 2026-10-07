@@ -11,6 +11,9 @@ import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Switch } from '@/components/ui/switch';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgRemoteControl } from '@/lib/org-remote-control';
+import { formatOwners } from '@/components/desktop/remote-off';
 import { EFFORT_LABEL_KEYS, SAVE_ERROR_KEYS, saveErrorKey, type RunProfile, type RunProfileOptions } from '@/lib/agent-run-profile';
 import { AgentRunProfileFields, draftBody, draftReady, initialDraft, type RunProfileDraft } from './agent-run-profile-fields';
 
@@ -30,6 +33,11 @@ interface Props {
 
 export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
   const ta = useTranslations('agents');
+  // story #4598 (Yuna ① · the remote-control card's `ownerOnlyOn/Off` form): the «not an owner» line names the owners — the same
+  // reading of the org the /desktop card uses (owner_names come with it · one read per org while shown)
+  const tOff = useTranslations('remoteControlOff');
+  const { orgId } = useDashboardContext();
+  const [orgRemote] = useOrgRemoteControl(orgId);
   const [options, setOptions] = useState<RunProfileOptions | null>(null);
   const [profile, setProfile] = useState<RunProfile | null>(null);
   const [draft, setDraft] = useState<RunProfileDraft | null>(null);
@@ -83,7 +91,7 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
         // model · effort save by an admin is never refused for a switch they could not touch)
         body: JSON.stringify({
           runtime: body.runtime, model: body.model, effort: body.effort,
-          ...(profile.can_change_unattended ? { unattended: unattendedDraft } : {}),
+          ...(unattendedSwitchShown ? { unattended: unattendedDraft } : {}),
         }),
       });
       if (res.ok) {
@@ -103,9 +111,13 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
     }
   };
 
+  // story #4598 (PO 11:37Z · Yuna ①-Codex): the switch is a Claude Code agent's — a Codex agent shows the fact line only, owner or not
+  // (nothing is said to be «owners only» when nobody can turn it on). The body carries the switch only where it is drawn.
+  const unattendedSwitchShown = profile.runtime === 'claude-code' && profile.can_change_unattended === true;
   const unchanged = JSON.stringify(draftBody(draft)) === JSON.stringify(draftBody(initialDraft(options, profile)))
-    && unattendedDraft === (profile.unattended === true);
-  const canFlipUnattended = profile.can_change_unattended === true;
+    && (!unattendedSwitchShown || unattendedDraft === (profile.unattended === true));
+  const owners = formatOwners(orgRemote?.owner_names ?? [], (first, n) => tOff('ownersMore', { first, n }));
+  const ownerNames = { owners, hasOwners: owners ? 'yes' : 'no' };
 
   // story #4580 (Yuna ④ · 배치 ③): [빼기] — no confirmation (it only narrows), applies at once; the list is read again after it
   const remove = async (host: string) => {
@@ -158,21 +170,31 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
             </dd>
           </dl>
         )}
-        {/* story #4598 — «묻지 않고 일하기»: one row of the group, read by everyone, flipped by an org owner only (the server's rule
-            `can_change_unattended`). Saved with [저장] like model · effort — used from the next start. Copy = Yuna's (placeholder
-            until her words land). */}
+        {/* story #4598 (Yuna 정본 `yuna/4598-unattended-copy.md` ①) — «묻지 않고 일하기»: one row of the group. An owner of a Claude Code
+            agent gets the switch + the one-line why (saved with [저장] like model · effort — used from the next start). Anyone else sees
+            no switch but a visible line — «… · 켜짐/꺼짐 — 조직 소유자(…)만 켜고 끌 수 있어요» (the rule: a disabled reason is a visible
+            sentence, not a greyed control). A Codex agent gets the fact line only, owner or not (PO 11:37Z). */}
         <div className="grid gap-1.5 sm:grid-cols-[8rem_1fr] sm:items-start" data-testid="run-profile-unattended">
-          <span id="run-profile-unattended-label" className="text-sm text-muted-foreground sm:pt-0.5">{ta('runProfileUnattended')}</span>
-          <div className="space-y-1">
-            <Switch
-              checked={unattendedDraft}
-              disabled={saving || !canFlipUnattended}
-              aria-labelledby="run-profile-unattended-label"
-              onCheckedChange={(on) => { setUnattendedDraft(on); setLine(null); }}
-            />
-            <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileUnattendedHelp')}</p>
-            {canFlipUnattended ? null : <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileUnattendedOwnerOnly')}</p>}
-          </div>
+          {unattendedSwitchShown ? (
+            <>
+              <span id="run-profile-unattended-label" className="text-sm text-muted-foreground sm:pt-0.5">{ta('runProfileUnattended')}</span>
+              <div className="space-y-1">
+                <Switch
+                  checked={unattendedDraft}
+                  disabled={saving}
+                  aria-labelledby="run-profile-unattended-label"
+                  onCheckedChange={(on) => { setUnattendedDraft(on); setLine(null); }}
+                />
+                <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileUnattendedHelp')}</p>
+              </div>
+            </>
+          ) : (
+            <p className="break-keep text-pretty text-sm text-muted-foreground sm:col-span-2" data-testid="run-profile-unattended-line">
+              {profile.runtime !== 'claude-code'
+                ? ta('runProfileUnattendedCodex')
+                : profile.unattended === true ? ta('runProfileUnattendedOwnerOnlyOn', ownerNames) : ta('runProfileUnattendedOwnerOnlyOff', ownerNames)}
+            </p>
+          )}
         </div>
         {/* story #4580 (배치 ③): «허용 주소» — one more row of the group; [빼기] only for whoever may change it */}
         <dl className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]" data-testid="run-profile-allowed-hosts">

@@ -91,6 +91,8 @@ export const EFFORT_LABEL_KEYS: Record<string, string> = {
 /** The server's refusal codes → the line shown under the fields (namespace `agents`). */
 export const SAVE_ERROR_KEYS: Record<string, string> = {
   forbidden: 'runProfileErrorForbidden',
+  // story #4598 (Yuna ①): a non-owner's body carried the switch — all or nothing, said in a person's words
+  owner_required: 'runProfileErrorOwnerRequired',
   invalid_model: 'runProfileErrorModel',
   invalid_effort: 'runProfileErrorEffort',
   mixed_runtime: 'runProfileErrorMixed',
@@ -98,6 +100,7 @@ export const SAVE_ERROR_KEYS: Record<string, string> = {
 };
 
 export function saveErrorKey(status: number, code: string | undefined): string {
+  if (status === 403 && code === 'owner_required') return SAVE_ERROR_KEYS.owner_required;
   if (status === 403) return SAVE_ERROR_KEYS.forbidden;
   if (code === 'invalid_model' || code === 'invalid_effort' || code === 'mixed_runtime') return SAVE_ERROR_KEYS[code];
   return SAVE_ERROR_KEYS.other;
