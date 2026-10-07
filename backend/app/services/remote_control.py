@@ -54,10 +54,11 @@ def state_view(org: Organization, *, can_change: bool, owner_names: list[str], c
 
 
 async def owner_names(db: AsyncSession, org_id: uuid.UUID) -> list[str]:
-    """story #4583: the display names of the org's owners, oldest first. «Owner» is read where the PUT gate reads it
-    (resolve_member: `members.org_role` on the anchor branch · `org_members.role` on the legacy one — Didi R2), so the names
-    are exactly the people who can turn it on. The name is the person's own in this org (members · human · active · not
-    deleted — the names /desktop shows for «connected by»). An owner with no name, or inactive, is left out — never an id."""
+    """story #4583: the display names of the org's owners whose name can be shown, oldest first. «Owner» is read where the
+    PUT gate reads it (resolve_member: `members.org_role` on the anchor branch · `org_members.role` on the legacy one — Didi
+    R2). The name is the person's own in this org (members · human · active · not deleted — the names /desktop shows for
+    «connected by»). An owner with no name, or inactive, is left out — never shown as an id — though the gate may still let
+    them turn it on (the gate's own rule · 4535 — this list names, it does not decide)."""
     from app.core.config import settings
     from app.models.member import Member
     from app.models.project import OrgMember

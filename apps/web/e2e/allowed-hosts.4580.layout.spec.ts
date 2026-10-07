@@ -26,6 +26,10 @@ const STUBS: Record<string, string> = {
   '@/hooks/use-flat-href': 'export function useFlatHref() { return (h) => h; }',
   '@/lib/phone-bridge': "export const isPhoneApp = () => !!window.__phone; export const phoneCall = async (k) => (k === 'device.auth' ? { id: 'x', ok: true, auth: 'biometric' } : { id: 'x', ok: false });",
   '@/lib/phone-answer': "export async function answerOnPhone(id, decision) { return { kind: 'answered', decision }; }",
+  // story #4583: the inbox now reads the org's remote control (components/desktop/remote-off.tsx) — the dashboard context and
+  // next/link come with it. No remote-control answer here → 404 → no «off» line, so these scenes are as before.
+  '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1' }; }",
+  'next/link': "import React from 'react'; export default function Link({ href, children, ...rest }) { return React.createElement('a', { href, ...rest }, children); }",
 };
 
 let built: { js: string; css: string } | null = null;
@@ -48,8 +52,8 @@ async function build() {
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
     tsconfig: path.join(WEB, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' },
     plugins: [{ name: 'stubs', setup(b) {
-      b.onResolve({ filter: /^@\/(lib\/db\/client|hooks\/use-sse-notifications|hooks\/use-flat-href|lib\/phone-bridge|lib\/phone-answer)$/ }, (a) => ({ path: a.path, namespace: 'stub' }));
-      b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path]!, loader: 'js' }));
+      b.onResolve({ filter: /^(@\/(lib\/db\/client|hooks\/use-sse-notifications|hooks\/use-flat-href|lib\/phone-bridge|lib\/phone-answer|app\/dashboard\/dashboard-shell)|next\/link)$/ }, (a) => ({ path: a.path, namespace: 'stub' }));
+      b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path]!, loader: 'js', resolveDir: WEB }));
     } }],
   });
   const js = out.outputFiles[0]!.text;
@@ -77,7 +81,14 @@ async function open(page: Page, o: { kind: 'profile' | 'inbox'; width: number; t
   });
   await page.goto('http://preview.test/');
   if (o.phone) await page.evaluate(() => { (window as unknown as { __phone: boolean }).__phone = true; });
+  // a module the stubs miss can throw while the bundle loads — then `__mount` is never set. Say what threw, by name, instead of
+  // «__mount is not a function» (story #4583: the inbox gained remote-off.tsx's imports and this harness only said that)
+  const thrown: string[] = [];
+  page.on('pageerror', (e) => thrown.push(e.message));
   await page.addScriptTag({ content: js });
+  if (!(await page.evaluate(() => typeof (window as unknown as { __mount?: unknown }).__mount === 'function'))) {
+    throw new Error(`the bundle did not start — likely a module to stub (STUBS): ${thrown.join(' | ') || 'no page error'}`);
+  }
   await page.evaluate((k) => (window as unknown as { __mount: (k: string, l: string) => void }).__mount(k, 'ko'), o.kind);
 }
 

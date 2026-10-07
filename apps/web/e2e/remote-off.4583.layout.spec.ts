@@ -104,7 +104,14 @@ async function open(page: Page, o: { kind: Kind; width: number; theme: 'L' | 'D'
   await page.goto('about:blank');
   await page.goto(`http://preview.test/${o.hash ?? ''}`);
   if (o.phone) await page.evaluate(() => { (window as unknown as { __phone: boolean }).__phone = true; });
+  // a module the stubs miss can throw while the bundle loads — then `__mount` is never set. Say what threw, by name, instead of
+  // «__mount is not a function» (story #4583: the inbox gained remote-off.tsx's imports and this harness only said that)
+  const thrown: string[] = [];
+  page.on('pageerror', (e) => thrown.push(e.message));
   await page.addScriptTag({ content: js });
+  if (!(await page.evaluate(() => typeof (window as unknown as { __mount?: unknown }).__mount === 'function'))) {
+    throw new Error(`the bundle did not start — likely a module to stub (STUBS): ${thrown.join(' | ') || 'no page error'}`);
+  }
   await page.evaluate(([k, l]) => (window as unknown as { __mount: (k: string, l: string) => void }).__mount(k, l), [o.kind, o.locale ?? 'ko']);
 }
 
