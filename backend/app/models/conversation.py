@@ -3,10 +3,25 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.database import Base
 from app.models.base import OrgScopedMixin, SoftDeleteMixin, TimestampMixin
+
+# story #4605 (Kadir 383 QA · PO 20:5xZ): a chat message's content has an upper bound — in UTF-8 bytes, because what it must stay
+# under is the desktop daemon's inbox SSE frame limit (1 MiB, bytes; 383) with its envelope around it. Every way a message is written
+# goes through ConversationMessage (the API's send · MCP send_chat_message on it · ws chat · a2a · the Slack/Teams bridge · the channel
+# route · the daemon/system writers), so the bound is checked here, once — a new path cannot forget it.
+MESSAGE_CONTENT_MAX_BYTES = 256 * 1024
+
+
+class MessageContentTooLong(ValueError):
+    """A message's content past MESSAGE_CONTENT_MAX_BYTES — the API answers 422 `message_too_long` (main.py)."""
+
+    def __init__(self, got: int) -> None:
+        super().__init__(f"message content is {got} bytes; the limit is {MESSAGE_CONTENT_MAX_BYTES}")
+        self.got = got
+        self.limit = MESSAGE_CONTENT_MAX_BYTES
 
 
 class Conversation(Base, OrgScopedMixin, TimestampMixin):
@@ -107,3 +122,12 @@ class ConversationMessage(Base, TimestampMixin, SoftDeleteMixin):
     )
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
+
+    @validates("content")
+    def _content_within_bound(self, _key: str, value: str) -> str:
+        """story #4605: the bound, on every write of the attribute (built · assigned) — never on a row loaded from the database."""
+        if isinstance(value, str):
+            got = len(value.encode("utf-8"))
+            if got > MESSAGE_CONTENT_MAX_BYTES:
+                raise MessageContentTooLong(got)
+        return value
