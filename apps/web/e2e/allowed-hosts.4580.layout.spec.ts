@@ -54,7 +54,8 @@ async function build() {
   });
   const js = out.outputFiles[0]!.text;
   // every class the bundle can render — the strings in it, split (unknown tokens are ignored by the compiler)
-  const candidates = [...new Set([...js.matchAll(/"([^"\n]{1,400})"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean))];
+  // no length cap: a base class string (Button's is 615 long) cut off here drew the wrong border and focus ring (Yuna 4972 ②)
+  const candidates = [...new Set([...js.matchAll(/"([^"\n]+)"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean))];
   const compiler = await compile(readFileSync(path.join(APP, 'globals.css'), 'utf8'), { base: APP, onDependency: () => {} });
   const css = (optimize as unknown as (c: string, o?: object) => { code: string })(compiler.build(candidates), { minify: false }).code;
   built = { js, css };
@@ -83,6 +84,7 @@ async function open(page: Page, o: { kind: 'profile' | 'inbox'; width: number; t
 const frames = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1)))));
 async function shot(page: Page, target: Locator, name: string) {
   await target.scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0); // no hover paint from the last click (Yuna 4972 ②)
   await frames(page);
   const dir = process.env['CAPTURE_OUT'] || test.info().outputDir;
   mkdirSync(dir, { recursive: true });
@@ -103,6 +105,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     await open(page, { kind: 'profile', width, theme, api: profile([]) });
     await expect(row).toContainText('허용한 주소가 없어요');
     await expect(row.getByRole('button')).toHaveCount(0);
+    await expect(row).not.toContainText('빼면 바로 적용돼요'); // nothing to remove: no «applies right away» line
     await shot(page, row, `4580-ac2-1-1-empty-${theme}-${width}`);
 
     await open(page, { kind: 'profile', width, theme, api: { ...profile(['gitlab.com']), 'DELETE /api/agents/a1/run-profile/allowed-hosts/gitlab.com': { data: { host: 'gitlab.com', removed: true } } } });
@@ -123,6 +126,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     await open(page, { kind: 'profile', width, theme, api: profile(['gitlab.com', 'pypi.org'], false) });
     await expect(row).toContainText('pypi.org');
     await expect(row.getByRole('button')).toHaveCount(0); // not even a disabled one
+    await expect(row).not.toContainText('빼면 바로 적용돼요'); // they cannot remove: no line about removing
     await shot(page, row, `4580-ac2-1-4-no-remove-${theme}-${width}`);
 
     await open(page, { kind: 'profile', width, theme, api: profile([LONG, 'pypi.org']) });

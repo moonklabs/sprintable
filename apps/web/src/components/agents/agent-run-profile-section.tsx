@@ -168,7 +168,8 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
               </ul>
             )}
             <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileAllowedHostsHelp')}</p>
-            <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileAllowedHostsNow')}</p>
+            {/* Yuna 4972 ①: only where something can be removed (a list · a person who may change it) */}
+            {hosts.length > 0 && profile.can_change ? <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileAllowedHostsNow')}</p> : null}
           </dd>
         </dl>
         {line ? (
