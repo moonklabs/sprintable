@@ -7054,8 +7054,8 @@
       "notAllowed": "Not allowed"
     },
     "chipUnknown": "State unknown",
-    "waited": "Waiting {n} min",
-    "asked": "{n, plural, =0 {Asked just now} one {Asked # min ago} other {Asked # min ago}}",
+    "waited": "{unit, select, m {Waiting {n} min} h {{n, plural, one {Waiting {n} hour} other {Waiting {n} hours}}} other {{n, plural, one {Waiting {n} day} other {Waiting {n} days}}}}",
+    "asked": "{unit, select, m {{n, plural, =0 {Asked just now} one {Asked {n} min ago} other {Asked {n} min ago}}} h {{n, plural, one {Asked {n} hour ago} other {Asked {n} hours ago}}} other {{n, plural, one {Asked {n} day ago} other {Asked {n} days ago}}}}",
     "role": "Sent to the {role} role",
     "maskedNote": "Values that look like secrets were masked",
     "truncatedNote": "Only the first 200 characters are shown",

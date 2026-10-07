@@ -481,3 +481,40 @@ describe('[4610] when each card was asked', () => {
     }
   });
 });
+
+// story #4610 (PO 21:4xZ · «684분째»): both chips count in steps — minutes under an hour, hours under a day, days after (copy: Yuna
+// `time-words.md`, placeholders until then)
+describe('[4610] time in steps', () => {
+  const remount = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
+  const at = (min: number) => new Date(Date.now() - min * 60_000 - 5_000).toISOString();
+  const past = () => new Date(Date.now() - 60_000).toISOString();
+  const text = (id: string) => container.querySelector(`[data-testid="agent-permission-${id}"]`)?.textContent ?? null;
+
+  it('elapsedStep at each boundary — 0 · 59 · 60 · 1439 · 1440', async () => {
+    const { elapsedStep } = await import('@/lib/agent-permissions');
+    expect([0, 59, 60, 119, 1439, 1440, 2 * 1440 + 5].map(elapsedStep)).toEqual([
+      { unit: 'm', n: 0 }, { unit: 'm', n: 59 }, { unit: 'h', n: 1 }, { unit: 'h', n: 1 },
+      { unit: 'h', n: 23 }, { unit: 'd', n: 1 }, { unit: 'd', n: 2 },
+    ]); // mutant: an off-by-one boundary (≤ 60 · ≤ 1440) → RED
+  });
+
+  it('the waiting chip and the asked line in each step · ko and en', async () => {
+    const cases: Array<[number, string, string, string, string]> = [
+      // minutes · ko waited · ko asked · en waited · en asked
+      [59, '59분째 기다림', '59분 전에 물음', 'Waiting 59 min', 'Asked 59 min ago'],
+      [60, '1시간째 기다림', '1시간 전에 물음', 'Waiting 1 hour', 'Asked 1 hour ago'],
+      [684, '11시간째 기다림', '11시간 전에 물음', 'Waiting 11 hours', 'Asked 11 hours ago'], // was «684분째»
+      [1440, '1일째 기다림', '1일 전에 물음', 'Waiting 1 day', 'Asked 1 day ago'],
+      [3 * 1440, '3일째 기다림', '3일 전에 물음', 'Waiting 3 days', 'Asked 3 days ago'],
+    ];
+    for (const [min, koW, koA, enW, enA] of cases) {
+      for (const [locale, w, a] of [['ko', koW, koA], ['en', enW, enA]] as const) {
+        await remount();
+        // one still waiting (its chip) · one expired (its asked line), the same age
+        await render([req({ id: 'p', created_at: at(min), expires_at: new Date(Date.now() + 30 * 60_000).toISOString() }),
+          req({ id: 'e', request_id: 'q2', created_at: at(min), state: 'expired', expires_at: past() })], locale);
+        expect([text('waited'), text('asked')], `${min} ${locale}`).toEqual([w, a]); // mutant: minutes only → «684분째» → RED
+      }
+    }
+  });
+});

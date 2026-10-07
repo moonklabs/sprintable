@@ -61,6 +61,15 @@ export function waitedMinutes(r: PermissionRequest, now: number): number {
   return Math.max(0, Math.floor((now - Date.parse(r.created_at)) / 60000));
 }
 
+/** story #4610 (PO 21:4xZ · «684분째»): whole minutes as the card says them — minutes under an hour, hours under a day, days after;
+ *  `{unit, n}` for the copy's select (the waiting chip and the asked line both). The unit is one letter (m · h · d): a select case is
+ *  written into the ko value, and the ko guard reads a lowercase word of 3+ letters there as untranslated English */
+export function elapsedStep(minutes: number): { unit: 'm' | 'h' | 'd'; n: number } {
+  if (minutes < 60) return { unit: 'm', n: minutes };
+  if (minutes < 24 * 60) return { unit: 'h', n: Math.floor(minutes / 60) };
+  return { unit: 'd', n: Math.floor(minutes / (24 * 60)) };
+}
+
 /** story 4542: the tool as this card names it — the server's name in this language, else the value as it is (never guessed here) */
 export function shownToolName(r: Pick<PermissionRequest, 'tool' | 'tool_name'>, locale: string): string {
   const n = r.tool_name;
