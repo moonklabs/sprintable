@@ -115,6 +115,20 @@ describe('AgentPermissionRequests · the named `dispatched` frame through the re
     expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
   });
 
+  it('[4612] own EventSource: a request\'s change frame `agent.permission_request.changed` reads at once (the transient frame\'s shape)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(answer([req()]));
+    await render();
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+    const es = sources.at(-1)!;
+    fetchWithAuth.mockResolvedValueOnce(answer([]));
+    // the live frame of a transient push: its keys + the id the stream gave it (routers/events.py live loop) · no payload, no summary
+    const frame = JSON.stringify({ event_type: 'agent.permission_request.changed', request_id: 'q1', state: 'answered', event_id: 't-1', is_backfill: false });
+    await act(async () => { for (const cb of es.listeners['agent.permission_request.changed'] ?? []) cb({ data: frame }); });
+    await settle();
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="agent-permission-card"]')).toBeNull(); // the card left (answered elsewhere)
+  });
+
   it('shared multiplexer: the hook subscribes `dispatched` by name and a new request\'s frame reads at once', async () => {
     mux.on = true;
     fetchWithAuth.mockResolvedValueOnce(answer([]));

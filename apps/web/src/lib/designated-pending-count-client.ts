@@ -92,6 +92,9 @@ export function fetchDesignatedPendingCount(opts?: { fresh?: boolean }): Promise
 /** story #4263 — 결재 대기 수를 바꿀 수 있는 게이트 SSE 이벤트(승인 · 반려 · 위임 · 토스). 사이드바와 모바일 탭바가 같은 목록 · 같은 판정을 쓴다. */
 export const DESIGNATED_PENDING_COUNT_EVENTS = ['conversation.gate_resolved', 'conversation.gate_delegated', 'conversation.gate_tossed'] as const;
 
+/** story #4612 — the server's transient SSE name for a permission request's later change (backend services/agent_permissions.py) */
+export const PERMISSION_REQUEST_CHANGED_EVENT = 'agent.permission_request.changed';
+
 /** story #4533 — the bell notice of an agent's permission request (a person's dispatched Event carrying that kind). */
 export function isPermissionRequestNotice(data: string): boolean {
   try {
@@ -116,7 +119,11 @@ export function subscribeDesignatedPendingCount(
     void fetchDesignatedPendingCount({ fresh: true }).then((count) => { if (count !== null) onCount(count); });
   };
   const unsubs = DESIGNATED_PENDING_COUNT_EVENTS.map((name) => mux.subscribe(name, refetch));
-  // story #4533 — an agent's permission request sent to me counts too (the server adds it): its bell notice recounts
-  unsubs.push(mux.subscribe('event_notification', (data) => { if (isPermissionRequestNotice(data)) refetch(data); }));
+  // story #4533 — an agent's permission request sent to me counts too (the server adds it): its bell notice recounts.
+  // story #4612: by the name the server really writes — a person's notice is the NAMED frame `event: dispatched` (backend
+  // routers/events.py); the `event_notification` this listened to is a name no server code sends, so the count never moved on it
+  unsubs.push(mux.subscribe('dispatched', (data) => { if (isPermissionRequestNotice(data)) refetch(data); }));
+  // story #4612: a request's later change (answered · withdrawn · rejected · back to pending) moves the count too
+  unsubs.push(mux.subscribe(PERMISSION_REQUEST_CHANGED_EVENT, refetch));
   return () => { for (const unsub of unsubs) unsub(); };
 }
