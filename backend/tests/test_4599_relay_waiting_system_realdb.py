@@ -105,9 +105,11 @@ async def test_03_a_limit_on_the_word_is_refused(world):
         assert r.status_code == 422, r.text
 
 
-async def test_04_a_phone_stop_is_taken_an_instruction_is_not_and_no_turn_end_notice_comes_of_it(world):
-    """The one handle a phone has on a frozen turn is [멈춤] (the daemon ends the session · an Esc cannot reach a process held in
-    openat). An instruction goes only into a running turn. A held turn is not a turn that ended."""
+async def test_04_neither_a_phone_stop_nor_an_instruction_takes_a_command_and_no_turn_end_notice_comes_of_it(world):
+    """PO 12:40Z ④: a stop is never turned into an end of the session behind the person's back — an Esc cannot reach a process held
+    in openat, so the phone and the web hide [멈춤] on a held turn and say [끝내기] (the desktop app's); a stop that still arrives takes
+    no command (the «already_stopped» answer, as for any non-working word). An instruction goes only into a running turn. A held turn
+    is not a turn that ended."""
     async with _client() as c:
         device, agent, phone, _der, conv = await _world(c, "d4424 mac 4599c")
         sid = device["setup_id"]
@@ -119,9 +121,13 @@ async def test_04_a_phone_stop_is_taken_an_instruction_is_not_and_no_turn_end_no
         r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv, key="w-1"))
         assert (r.status_code, r.json()["error"]["code"]) == (409, "session_not_working")
         r = await _post(c, agent, _cmd("stop_session", phone, key="w-2"))
-        assert r.status_code == 201, r.text
+        assert (r.status_code, r.json()) == (200, {"state": "already_stopped"}), r.text
         kinds = [(k, s) for k, _p, _b, _i, s in await _commands(sid)]
-        assert ("stop_session", "queued") in kinds
+        assert ("stop_session", "queued") not in kinds, "no stop command goes down onto a held turn"
+        # the window answered: the turn runs on, and a stop is taken as before
+        await _state(c, device, agent, "working", 4)
+        r = await _post(c, agent, _cmd("stop_session", phone, key="w-3"))
+        assert r.status_code == 201, r.text
 
 
 async def test_05_the_windows_folder_rides_with_the_word_only_a_closed_list_and_clears_with_the_next_word(world):
