@@ -5101,11 +5101,19 @@
         "error": "오류",
         "paused_limit": "한도로 쉬는 중",
         "usage_limit": "사용 한도",
-        "waiting_system": "macOS 확인 대기"
+        "waiting_system": "macOS 창 대기"
+      },
+      "folder": {
+        "documents": "문서 폴더를",
+        "desktop": "데스크탑 폴더를",
+        "downloads": "다운로드 폴더를",
+        "network_volume": "네트워크 볼륨을",
+        "icloud": "iCloud Drive를"
       },
       "line": {
         "onPhone": "짝지은 폰에서 멈추거나 지시할 수 있어요",
-        "waitingSystem": "그 컴퓨터에서 macOS가 폴더 접근을 묻고 있어요 — 그 컴퓨터 화면에서 답해 주세요",
+        "waitingSystem": "macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요",
+        "waitingSystemFolder": "macOS가 그 컴퓨터 화면에서 {folder} 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요",
         "inbox": "권한 요청은 결재함에 있어요",
         "unknown": "그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요",
         "inboxPhone": "결재함에서 답할 수 있어요",

@@ -5101,11 +5101,19 @@
         "error": "Error",
         "paused_limit": "Paused at usage limit",
         "usage_limit": "Usage limit",
-        "waiting_system": "Waiting on macOS"
+        "waiting_system": "Waiting on a macOS prompt"
+      },
+      "folder": {
+        "documents": "the Documents folder",
+        "desktop": "the Desktop folder",
+        "downloads": "the Downloads folder",
+        "network_volume": "the network volume",
+        "icloud": "iCloud Drive"
       },
       "line": {
         "onPhone": "You can stop or instruct it from a paired phone",
-        "waitingSystem": "macOS is asking about folder access on that computer — answer it on that computer's screen",
+        "waitingSystem": "macOS is asking on that computer's screen whether to use a folder — it can't be answered here. Answer the prompt at that computer, or press [End] in the desktop app",
+        "waitingSystemFolder": "macOS is asking on that computer's screen whether to use {folder} — it can't be answered here. Answer the prompt at that computer, or press [End] in the desktop app",
         "inbox": "The permission request is in the approvals inbox",
         "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
         "inboxPhone": "You can answer it in Approvals",

@@ -23,6 +23,9 @@ SESSION_STATES = ("starting", "working", "idle", "waiting_permission", "waiting_
 # the words a usage limit comes with (the only rows that may carry its why) · Claude's «may continue by itself»
 SESSION_LIMIT_STATES = ("waiting_input", "error", "paused_limit")
 SESSION_SELF_RESUME = ("maybe", "no", "unknown")
+# story #4599 (0442 · contract v1.13 · Kadir lens ③): the folder a macOS window asks about — a closed list, carried with
+# `waiting_system` only (the daemon read it from tccd's service name; a window seen by owner only carries none)
+SESSION_SYSTEM_FOLDERS = ("documents", "desktop", "downloads", "network_volume", "icloud")
 SESSION_RUNTIMES = ("claude", "codex")
 
 
@@ -56,6 +59,7 @@ class DesktopSession(Base):
         CheckConstraint(_in("state", SESSION_STATES), name="ck_desktop_sessions_state"),
         CheckConstraint(_in("runtime", SESSION_RUNTIMES), name="ck_desktop_sessions_runtime"),
         CheckConstraint(f"limit_self_resume IS NULL OR {_in('limit_self_resume', SESSION_SELF_RESUME)}", name="ck_desktop_sessions_limit_self_resume"),
+        CheckConstraint(f"system_folder IS NULL OR {_in('system_folder', SESSION_SYSTEM_FOLDERS)}", name="ck_desktop_sessions_system_folder"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -71,6 +75,8 @@ class DesktopSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # story #4534 (0437): a usage limit's why — on a limit word only (services.desktop_relay)
+    # story #4599: the folder the macOS window asks about (waiting_system only · a closed list · never a path)
+    system_folder: Mapped[str | None] = mapped_column(Text, nullable=True)
     limited: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     limit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     limit_again: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

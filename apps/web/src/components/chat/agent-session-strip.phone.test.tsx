@@ -115,12 +115,12 @@ describe('[4534] the strip inside the phone app', () => {
     expect(buttons()).toEqual([ko.button.stop]);
   });
 
-  it('story #4599: held by a macOS window — its own line, [멈춤] still (the one handle on a frozen turn), no [지금 지시]', async () => {
-    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system' };
+  it('story #4599 (Yuna ①): held by a macOS window — its own line (the folder when read), no button at all ([멈춤] would not work there)', async () => {
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'documents' } };
     server(res(201, {}));
     await render();
-    expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent).toBe(ko.line.waitingSystem);
-    expect(buttons()).toEqual([ko.button.stop]);
+    expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent).toBe(ko.line.waitingSystemFolder.replace('{folder}', ko.folder.documents));
+    expect(buttons()).toEqual([]);
   });
 
   it('waiting for permission, [멈춤] signs a stop the same way (agent only) and posts it', async () => {

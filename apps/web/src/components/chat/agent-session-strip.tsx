@@ -25,8 +25,9 @@ import { limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-lim
 // story #4534 (relay contract v1.12 · Yuna 03:04Z · 03:06Z): the board's own words — asked in the terminal · an error · paused at a
 // usage limit — never shown as «다음 일 기다림»; a usage limit carries its why (`limit`)
 type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'waiting_input' | 'error' | 'paused_limit' | 'stopped' | 'unknown'
-  // story #4599 (relay contract v1.13): the turn is held by a macOS window on that computer (a folder-access question only the person
-  // at the Mac can answer) — its own line, [멈춤] still (the one handle a phone has on it), never [지금 지시]
+  // story #4599 (relay contract v1.13 · Yuna 12:4xZ ①): the turn is held by a macOS window on that computer (a folder-access question
+  // only the person at the Mac can answer) — «macOS 창 대기», its own line naming the folder when the daemon read it, no button
+  // ([멈춤] would not work: Esc · SIGTERM are ignored there — only the desktop app's [끝내기] frees it)
   | 'waiting_system'
   // story #4534 (Yuna 05:41Z): a word this page does not know — not the server's `unknown` (= the computer lost): its own line
   | 'unrecognized';
@@ -39,6 +40,8 @@ interface View {
   // true (a daemon from before says nothing → hidden: its «지금 턴» was not so). It hides a button; the daemon decides again.
   instruct_now?: boolean | null;
   limit?: SessionLimit | null;
+  // story #4599: a held turn's why — the folder the macOS window asks about, when the daemon read it (a closed list; null = not read)
+  system?: { folder?: SystemFolder | null } | null;
   remote_control: boolean;
   can_command?: boolean;
   pending_permission_request_id: string | null;
@@ -54,11 +57,14 @@ const SHAPES: Record<SessionState, { icon: LucideIcon; tone: string }> = {
   waiting_input: { icon: CircleDot, tone: 'text-foreground' },
   error: { icon: SquareX, tone: 'text-destructive' },
   paused_limit: { icon: Circle, tone: 'text-muted-foreground fill-current' },
-  waiting_system: { icon: AlertTriangle, tone: 'text-warning' }, // a person at that Mac is needed — the permission look (4599 · Yuna to confirm)
+  waiting_system: { icon: AlertTriangle, tone: 'text-warning' }, // Yuna ①: the «권한 대기» look (a person's hand needed), its own word
   stopped: { icon: Check, tone: 'text-success' },
   unknown: { icon: CircleDashed, tone: 'text-muted-foreground' },
   unrecognized: { icon: CircleDashed, tone: 'text-muted-foreground' },
 };
+// story #4599 (Yuna ① · macOS's own Korean window spelling): the folder the window asks about (a closed list from the server)
+type SystemFolder = 'documents' | 'desktop' | 'downloads' | 'network_volume' | 'icloud';
+const SYSTEM_FOLDERS: ReadonlySet<string> = new Set<SystemFolder>(['documents', 'desktop', 'downloads', 'network_volume', 'icloud']);
 const REREAD_MS = 30_000;
 
 /** story #4534 (Kadir 4960 · PO 05:36Z): the board's own word when the server sends one (`activity`), else the five-word `state`;
@@ -141,8 +147,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // [멈춤] while it works AND while it waits on a permission (Kadir 325 · PO 04:34Z: the daemon takes a stop then too — a person
   // must be able to stop an agent that is asking); [지금 지시] only while it works (it goes into a running turn)
   const mayCommand = phone && view.remote_control && view.can_command !== false;
-  // story #4599: and while a macOS window holds its turn (the server takes the stop then too — an Esc cannot reach it, the daemon ends it)
-  const canStop = mayCommand && (view.state === 'working' || view.state === 'waiting_permission' || view.state === 'waiting_system');
+  // story #4599 (Yuna ①): not while a macOS window holds its turn — [멈춤] would not work there (Esc · SIGTERM ignored); the line says [끝내기]
+  const canStop = mayCommand && (view.state === 'working' || view.state === 'waiting_permission');
   // story #4534 (PO 06:30Z · 07:00Z): and only when the daemon says it can put it into the turn (instruct_now) — all three, or none
   const canInstruct = mayCommand && view.state === 'working' && view.instruct_now === true;
   const checkOnly = pending?.verb === 'stop';
@@ -295,9 +301,16 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
   const remoteOff = useRemoteOff(); // story #4583: who can turn it on (the org's value · the session's own flag decides whether to say it)
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
   if (view.state === 'unrecognized') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.unrecognized')}</p>;
-  // story #4599: held by a macOS window — what to do is on that computer's screen, whatever remote control says (the phone's [멈춤]
-  // stands beside it: the one handle on a frozen turn)
-  if (view.state === 'waiting_system') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.waitingSystem')}</p>;
+  // story #4599 (Yuna ①): held by a macOS window — what to do is on that computer's screen, whatever remote control says; the folder
+  // named only when the daemon read it (a wrong folder name is worse than none); no button
+  if (view.state === 'waiting_system') {
+    const f = view.system?.folder;
+    // the folder's words, with their particle — «{folder} 쓸지» (each key read by its own literal call: the dead-key guard's axis A)
+    const folder = !f || !SYSTEM_FOLDERS.has(f) ? null
+      : f === 'documents' ? t('folder.documents') : f === 'desktop' ? t('folder.desktop') : f === 'downloads' ? t('folder.downloads')
+        : f === 'network_volume' ? t('folder.network_volume') : t('folder.icloud');
+    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{folder ? t('line.waitingSystemFolder', { folder }) : t('line.waitingSystem')}</p>;
+  }
   // story #4534 (Yuna 03:04Z): what to do is «on that computer» — its own line whatever remote control says; no buttons; whether a
   // time has passed is this page's clock
   const rest = limitLine(view.state, view.limit ?? null, now);

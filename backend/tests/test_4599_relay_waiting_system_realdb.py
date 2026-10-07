@@ -122,3 +122,50 @@ async def test_04_a_phone_stop_is_taken_an_instruction_is_not_and_no_turn_end_no
         assert r.status_code == 201, r.text
         kinds = [(k, s) for k, _p, _b, _i, s in await _commands(sid)]
         assert ("stop_session", "queued") in kinds
+
+
+async def test_05_the_windows_folder_rides_with_the_word_only_a_closed_list_and_clears_with_the_next_word(world):
+    """Kadir lens ③ · Yuna ①: `system: {folder}` — the folder the window asks about, from a closed list, carried with waiting_system
+    only; the DM header and the device list show it (`system.folder` · null when not read); any other word clears it; a folder outside
+    the list, a path, or `system` on another word → 422; the CHECK holds the list."""
+    from app.models.desktop_relay import SESSION_SYSTEM_FOLDERS
+
+    async with _client() as c:
+        d = await _device(c, name="d4599 window c")
+        token, agent = d["device_token"], d["agents"][0]["member_id"]
+        assert (await c.post(STATE, json=_report(agent, 1, "working"), headers=_tok(token))).status_code == 200
+        assert (await c.post(STATE, json=_report(agent, 2, WORD, system={"folder": "desktop"}), headers=_tok(token))).status_code == 200
+        v = await _view(c, agent)
+        assert (v["state"], v["activity"], v["system"]) == ("working", WORD, {"folder": "desktop"})
+        [s] = (await c.get(f"/api/v2/desktop/setups/{d['setup_id']}/sessions", headers=_person(OWNER))).json()["sessions"]
+        assert s["system"] == {"folder": "desktop"}
+        # the window seen by its owner alone: the word without a folder
+        assert (await c.post(STATE, json=_report(agent, 3, WORD, system={}), headers=_tok(token))).status_code == 200
+        assert (await _view(c, agent))["system"] == {"folder": None}
+        assert (await c.post(STATE, json=_report(agent, 4, WORD), headers=_tok(token))).status_code == 200
+        assert (await _view(c, agent))["system"] == {"folder": None}
+        # the hold is over: the next word carries none, and the row's folder is gone
+        assert (await c.post(STATE, json=_report(agent, 5, WORD, system={"folder": "icloud"}), headers=_tok(token))).status_code == 200
+        assert (await c.post(STATE, json=_report(agent, 6, "working"), headers=_tok(token))).status_code == 200
+        v = await _view(c, agent)
+        assert v["system"] is None
+        rows = await _sql(fetch=f"SELECT system_folder FROM desktop_sessions WHERE setup_id = '{d['setup_id']}'")
+        assert [tuple(r) for r in rows] == [(None,)]
+        # refused: a folder outside the list · a path · an extra field · system on another word
+        for seq, (state, system) in enumerate([(WORD, {"folder": "pictures"}), (WORD, {"folder": "/Users/p/Documents"}), (WORD, {"folder": "documents", "path": "x"}),
+                                               ("working", {"folder": "documents"}), ("waiting_permission", {})], start=7):
+            r = await c.post(STATE, json=_report(agent, seq, state, system=system), headers=_tok(token))
+            assert r.status_code == 422, (state, system, r.text)
+        # the snapshot carries it the same way, and a dropped session loses it
+        snap = {"report_seq": 20, "sessions": [{"session_key": "s-1", "agent_member_id": agent, "runtime": "claude", "state": WORD, "at": _now().isoformat(), "system": {"folder": "downloads"}}]}
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap, headers=_tok(token))).status_code == 200
+        assert (await _view(c, agent))["system"] == {"folder": "downloads"}
+        assert (await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 21, "sessions": []}, headers=_tok(token))).status_code == 200
+        rows = await _sql(fetch=f"SELECT state, system_folder FROM desktop_sessions WHERE setup_id = '{d['setup_id']}'")
+        assert [tuple(r) for r in rows] == [("stopped", None)]
+    from app.core.database import async_session_factory
+
+    async with async_session_factory() as s:
+        (d,) = (await s.execute(text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_desktop_sessions_system_folder'"))).scalars().all()
+    assert set(re.findall(r"'([a-z_]+)'", d)) == set(SESSION_SYSTEM_FOLDERS)

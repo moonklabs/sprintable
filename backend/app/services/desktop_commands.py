@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopCommand, DesktopSession
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import INSTRUCT_NOW_MAX, PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError, legacy_state, limit_view
+from app.services.desktop_relay import INSTRUCT_NOW_MAX, PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError, legacy_state, limit_view, system_view
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,8 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         "state": legacy_state(state), "activity": state, "state_at": pick.state_at.isoformat(),
         # story #4534 (contract v1.12): a usage limit's why — only while the row is a limit word and the device is heard
         "limit": limit_view(pick) if state == pick.state else None,
+        # story #4599: a held turn's why (the window's folder) — only while the device is heard
+        "system": system_view(pick) if state == pick.state else None,
         # story #4534 (PO 06:30Z · Kadir 06:31Z): whether [지금 지시] can go into its turn — only while the device is heard
         "instruct_now": pick.instruct_now if state == pick.state else None,
         "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
