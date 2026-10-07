@@ -137,12 +137,17 @@ async def is_active_owner(db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.
     """story #4598 (contract v0.1 §1 · PO: «org owner + is_active만») — who may flip «묻지 않고 일하기»: an owner of the org
     (`OrgMember.role == "owner"`, the remote-control gate's rule) whose member row is active. The run profile's other fields keep
     their own rule (`may_change`: creator · owner/admin) — this one is narrower on purpose: it turns a person's questions off."""
+    # Kadir qa:changes (4980 ①): fail closed — an owner row with no members row, a soft-deleted members row, or one that is not
+    # active is not an owner here (an OUTER join with «is not False» let all three through)
     row = (await db.execute(
-        select(OrgMember.role, Member.is_active)
-        .outerjoin(Member, Member.id == OrgMember.id)
-        .where(OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+        select(OrgMember.role)
+        .join(Member, Member.id == OrgMember.id)
+        .where(
+            OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None),
+            Member.deleted_at.is_(None), Member.is_active.is_(True),
+        )
     )).first()
-    return row is not None and row[0] == "owner" and row[1] is not False
+    return row is not None and row[0] == "owner"
 
 
 async def _agent(db: AsyncSession, *, org_id: uuid.UUID, agent_id: uuid.UUID) -> Member:

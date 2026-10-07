@@ -126,6 +126,40 @@ async def test_03_a_deactivated_owner_is_not_an_owner_for_this(world):
         assert (await c.put(_one(agent), json={"model": None, "effort": None, "unattended": True}, headers=_person(OWNER))).status_code == 200
 
 
+async def test_03b_an_owner_row_without_a_live_members_row_is_not_an_owner_for_this(world):
+    """Kadir qa:changes (4980 ①): the check fails closed. An org owner (org_members.role = owner) whose members row is missing, or
+    soft-deleted, is refused like a deactivated one — 403 and nothing written; `can_change_unattended` false. `members.is_active`
+    cannot be NULL at all (the column is NOT NULL — pinned here, so «NULL counts as active» has no row to stand on)."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4598c2")
+        agent = device["agents"][0]["member_id"]
+        await _set_runtime(agent, "claude-code")
+        [(nullable,)] = await _sql(fetch="SELECT is_nullable FROM information_schema.columns WHERE table_name = 'members' AND column_name = 'is_active'")
+        assert nullable == "NO", "is_active has no NULL to fail open on"
+        plain_om = (await _sql(fetch=f"SELECT id, role FROM org_members WHERE org_id = '{ORG}' AND user_id = '{PLAIN}'"))[0]
+        plain_tm, plain_role = plain_om[0], plain_om[1]
+        try:
+            # ① an owner by org_members alone — no members row at all
+            await _sql(f"UPDATE org_members SET role = 'owner' WHERE id = '{plain_tm}'")
+            assert (await c.get(_one(agent), headers=_person(PLAIN))).json()["can_change_unattended"] is False
+            denied = await c.put(_one(agent), json={"model": None, "effort": None, "unattended": True}, headers=_person(PLAIN))
+            assert _code(denied) == (403, "owner_required")
+            assert await _flag(agent) is None
+            # ② a members row that was soft-deleted
+            await _sql(f"INSERT INTO members (id,org_id,user_id,type,name,is_active,deleted_at) VALUES ('{plain_tm}','{ORG}','{PLAIN}','human','Plain',true,now())")
+            assert (await c.get(_one(agent), headers=_person(PLAIN))).json()["can_change_unattended"] is False
+            denied = await c.put(_one(agent), json={"model": None, "effort": None, "unattended": True}, headers=_person(PLAIN))
+            assert _code(denied) == (403, "owner_required")
+            assert await _flag(agent) is None
+            # ③ the same row live again — now an owner for this
+            await _sql(f"UPDATE members SET deleted_at = NULL WHERE id = '{plain_tm}'")
+            assert (await c.get(_one(agent), headers=_person(PLAIN))).json()["can_change_unattended"] is True
+            assert (await c.put(_one(agent), json={"model": None, "effort": None, "unattended": True}, headers=_person(PLAIN))).status_code == 200
+            assert (await _flag(agent))[0] is True
+        finally:
+            await _sql(f"DELETE FROM members WHERE id = '{plain_tm}'", f"UPDATE org_members SET role = '{plain_role}' WHERE id = '{plain_tm}'")
+
+
 async def test_04_many_at_once_and_what_keeps_the_flag(world):
     async with _client() as c:
         device = await _device(c, name="d4424 mac 4598d")
