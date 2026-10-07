@@ -10,7 +10,7 @@ import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgRemoteControl, type OrgRemoteControl } from '@/lib/org-remote-control';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
-import { formatOwners, REMOTE_CONTROL_ANCHOR } from '@/components/desktop/remote-off';
+import { formatOwners, holdArrivalFocus, REMOTE_CONTROL_ANCHOR, takeArrival } from '@/components/desktop/remote-off';
 
 /**
  * story #4535 AC1 (명세 모음 B-1 ① · 유나 09:24Z 자리 확정) — /desktop의 «데스크톱 앱» 카드와 «연결된 기기» 사이 카드 하나.
@@ -37,11 +37,16 @@ export function DesktopRemoteControlCard() {
 
   // story #4583: every «원격 제어 켜러 가기» lands here (`/desktop#remote-control`) — once the card is drawn, bring it into view and put
   // the focus on the switch (an owner) or on the card (anyone else). It only moves; turning it on stays one press on the switch.
+  // AC6 live: an in-app link press reaches here by a client navigation — Next's scroll handler may move the focus after this
+  // effect, and the `#` may not be on the address yet; `takeArrival` and `holdArrivalFocus` (remote-off.tsx) cover both.
   useEffect(() => {
-    if (!state || arrived.current || typeof window === 'undefined' || window.location.hash !== `#${REMOTE_CONTROL_ANCHOR}`) return;
+    if (!state || arrived.current || typeof window === 'undefined') return;
+    const byHash = window.location.hash === `#${REMOTE_CONTROL_ANCHOR}`;
+    if (!takeArrival() && !byHash) return;
     arrived.current = true;
     cardRef.current?.scrollIntoView({ block: 'center' });
-    (state.can_change ? switchRef.current : cardRef.current)?.focus();
+    const target = state.can_change ? switchRef.current : cardRef.current;
+    if (target) return holdArrivalFocus(target, cardRef.current);
   }, [state]);
 
   // the in-line confirmation closed ([끄기] or [취소]): the focus it held goes back to the switch, not to the page

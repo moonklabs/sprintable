@@ -14,6 +14,56 @@ import { useOrgRemoteControl } from '@/lib/org-remote-control';
 
 export const REMOTE_CONTROL_ANCHOR = 'remote-control';
 
+/**
+ * story #4583 AC6 (live run 13 · 07:07Z): pressing the link is an in-app (client) navigation, and there the card's arrival focus
+ * did not hold — the switch ended unfocused (activeElement = body), while opening the same address fresh focused it. Next's own
+ * scroll handler runs on a later commit after a client navigation and moves the focus (16.x: it blurs the active element · the
+ * older handler focuses the hash target instead). So: the link leaves a one-time «arriving» mark (the card then knows even if the
+ * address has no `#` yet when it mounts), and the card holds its focus for a moment against a move it did not make.
+ */
+const ARRIVAL_MS = 5000;
+let arrivalAt = 0;
+
+export function markArrival(): void {
+  arrivalAt = Date.now();
+}
+
+/** true once, within ARRIVAL_MS of a link press — and clears it */
+export function takeArrival(): boolean {
+  const fresh = arrivalAt > 0 && Date.now() - arrivalAt < ARRIVAL_MS;
+  arrivalAt = 0;
+  return fresh;
+}
+
+/**
+ * Focus `target` and, for HOLD_MS, put it back if the focus falls to the page (body) or onto `card` itself without the person
+ * acting (a key or a pointer press ends the hold — then any move is theirs). Returns the cleanup.
+ */
+export function holdArrivalFocus(target: HTMLElement, card: HTMLElement | null, holdMs = 1500): () => void {
+  target.focus();
+  let done = false;
+  const stop = () => {
+    done = true;
+    target.removeEventListener('focusout', onOut);
+    document.removeEventListener('keydown', stop, true);
+    document.removeEventListener('pointerdown', stop, true);
+    clearTimeout(timer);
+  };
+  const onOut = () => {
+    // the new focus is known only after the event — look once it has landed
+    setTimeout(() => {
+      if (done) return;
+      const now = document.activeElement;
+      if (now === null || now === document.body || (card !== null && now === card && card !== target)) target.focus();
+    }, 0);
+  };
+  target.addEventListener('focusout', onOut);
+  document.addEventListener('keydown', stop, true);
+  document.addEventListener('pointerdown', stop, true);
+  const timer = setTimeout(stop, holdMs);
+  return stop;
+}
+
 export interface RemoteOff {
   /** an owner (`can_change`): the link · anyone else: the names */
   owner: boolean;
@@ -49,7 +99,7 @@ export function RemoteControlLink({ variant = 'link' }: { variant?: 'link' | 'bu
   const flat = useFlatHref();
   const href = `${flat('/desktop')}#${REMOTE_CONTROL_ANCHOR}`;
   if (variant === 'button') {
-    return <Button asChild><Link href={href} data-testid="remote-off-link">{t('goTo')}</Link></Button>;
+    return <Button asChild><Link href={href} onClick={markArrival} data-testid="remote-off-link">{t('goTo')}</Link></Button>;
   }
-  return <Link href={href} className="text-sm underline" data-testid="remote-off-link">{t('goTo')}</Link>;
+  return <Link href={href} onClick={markArrival} className="text-sm underline" data-testid="remote-off-link">{t('goTo')}</Link>;
 }
