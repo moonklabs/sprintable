@@ -1001,9 +1001,13 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
         .values(revoked_at=now).returning(ApiKey.id)
     )).scalars().all()
-    from app.services.desktop_relay import revoke_device_tokens
+    from app.services import desktop_relay
 
-    await revoke_device_tokens(db, setup.id, now=now)  # story #4529 — the device's relay token goes with its keys
+    await desktop_relay.revoke_device_tokens(db, setup.id, now=now)  # story #4529 — the device's relay token goes with its keys
+    # story #4554 ④ (PO 11:45Z): nothing waits for a disconnected device — its open commands end as rejected `device_disconnected`,
+    # and its open stream is told after the commit so it ends with `access_revoked` now, not at its next 30-second check
+    await desktop_relay.reject_open_commands(db, setup_ids=[setup.id], result_code=desktop_relay.DISCONNECTED_CODE)
+    desktop_relay.schedule_disconnected_after_commit(db, setup.id)
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
     agent_ids = {
