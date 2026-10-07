@@ -680,7 +680,13 @@ async def agent_stream(
                 # 재트리거 안 함(매 재접속마다 이벤트 스팸 방지).
                 from app.services.agent_verify import get_verification_state, start_verification
                 _prior_verify = await get_verification_state(_pdb, agent_id, org_id=uuid.UUID(org_id_str), transport="stdio")
-                _newly_started = not _prior_verify["verified"]
+                # story #4582 (Damrong · 6,389 rows): at most ONE connection test waits — an agent whose last test is not acked yet
+                # gets no new one on a reconnect. Before, every connect of a never-verified agent added one (the stream reconnects
+                # every ~5 min · a receiver that drops this kind without an ack never moves its cursor past it), so an agent with no
+                # other traffic piled up a test per reconnect for weeks. The person's [확인] button (POST verify-connection) is
+                # unchanged — it still starts a fresh one on purpose.
+                _test_waiting = _prior_verify["verify_seq"] is not None and not _prior_verify["verified"]
+                _newly_started = not _prior_verify["verified"] and not _test_waiting
                 if _newly_started:
                     await start_verification(
                         _pdb, agent_id=agent_id, org_id=tm.org_id, project_id=tm.project_id,

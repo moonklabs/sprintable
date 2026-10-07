@@ -24,7 +24,8 @@ def test_stream_connect_auto_starts_verify_when_not_yet_verified():
     from app.routers import agent_gateway
     src = inspect.getsource(agent_gateway)
     assert "get_verification_state(_pdb, agent_id" in src
-    assert "_newly_started = not _prior_verify[\"verified\"]" in src
+    # story #4582: and only when no earlier test is still waiting (behaviour pinned by test_4582_one_waiting_connection_test_realdb)
+    assert "_newly_started = not _prior_verify[\"verified\"] and not _test_waiting" in src
     assert "if _newly_started:" in src
     assert "start_verification(" in src
     # 재연결 스팸 방지 — verified 인 상태에서 재접속 시 start_verification 재호출 금지(게이트 존재).
