@@ -7011,6 +7011,7 @@
       "askLine": "Press [Allow…] to see where it wants to connect — you decide after seeing it",
       "allowMore": "Allow…",
       "checking": "Checking the address…",
+      "hostUnread": "Couldn't confirm the address, so this connection wasn't allowed",
       "confirmTitle": "Allow connecting to {host} and carry on?",
       "confirmBody": "The agent stopped while trying to connect to this address. Allowing adds it to this agent's allowed addresses and tells the agent to try again.",
       "confirmScope": "Only this agent, only this address — you can remove it in the agent's settings",

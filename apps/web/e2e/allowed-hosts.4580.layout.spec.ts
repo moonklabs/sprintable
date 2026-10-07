@@ -184,6 +184,12 @@ for (const theme of ['L', 'D'] as const) {
     await expect(card).toContainText('허용하지 않았어요');
     await shot(page, card, `4580-ac2-2-6-not-allowed-${theme}-390`);
 
+    // 2-7 (F2): the host could not be read — the request ended with nothing allowed
+    await open(page, { kind: 'inbox', width: 390, theme, api: inbox(req0({ state: 'withdrawn', host_unread: true, answerable: false })), phone: true });
+    await expect(card).toContainText('주소를 확인하지 못해 이번 연결은 허용하지 못했어요');
+    await expect(card.getByRole('button')).toHaveCount(0);
+    await shot(page, card, `4580-ac2-2-7-host-unread-${theme}-390`);
+
     await open(page, { kind: 'inbox', width: 390, theme, api: inbox(req0({ stage: 'confirm', host: LONG })), phone: true });
     await expect(card).toContainText(LONG);
     expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'a long host wraps inside the card').toBe(true);

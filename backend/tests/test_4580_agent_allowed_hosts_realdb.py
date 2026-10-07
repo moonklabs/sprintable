@@ -260,3 +260,56 @@ async def test_06_what_never_gets_a_second_answer_or_adds_a_host(world):
         await c.post(f"{REQS}/{pk2}/answer", json=_answer(phone, "deny"), headers=_person(OWNER))
         assert _code(await c.post(_added(rid2), json={"host": "gitlab.com"}, headers=_tok(token))) == (409, "not_confirmed")
         assert (await _sql(fetch=f"SELECT count(*) FROM agent_allowed_hosts WHERE member_id = '{agent}'"))[0][0] == 0
+
+
+async def test_07_host_unread_ends_only_a_network_question_answered_allow(world):
+    """D4 (PO 02:05Z · Yuna 2-7): the daemon found no host it may trust in Claude's own text after a first «allow…» — the request
+    ends (`withdrawn` · `host_unread`), nothing is allowed, the card says so. Never for another request or state."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4580g")
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone, der = await _register(c)
+        await _pair(c, token, der)
+        wd = lambda rid: f"/api/v2/desktop/relay/permission-requests/{rid}/withdraw"  # noqa: E731
+
+        rid, pk = await _network_ask(c, device, agent)
+        assert _code(await c.post(wd(rid), json={"reason": "host_unread"}, headers=_tok(token))) == (409, "not_allowed_yet")  # not answered
+        await c.post(f"{REQS}/{pk}/answer", json=_answer(phone), headers=_person(OWNER))
+        r = await c.post(wd(rid), json={"reason": "host_unread"}, headers=_tok(token))
+        assert r.status_code == 200 and r.json()["state"] == "withdrawn", r.text
+        [view] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert (view["state"], view["host_unread"], view["answerable"]) == ("withdrawn", True, False)
+        assert (await _sql(fetch=f"SELECT count(*) FROM agent_allowed_hosts WHERE member_id = '{agent}'"))[0][0] == 0
+
+        tool = _ask(agent)
+        made = await _post_ask(c, device, tool)
+        await c.post(f"{REQS}/{made.json()['id']}/answer", json=_answer(phone), headers=_person(OWNER))
+        assert _code(await c.post(wd(tool["request_id"]), json={"reason": "host_unread"}, headers=_tok(token))) == (409, "not_allowed_yet")
+        rid2, pk2 = await _network_ask(c, device, agent)
+        await c.post(f"{REQS}/{pk2}/answer", json=_answer(phone, "deny"), headers=_person(OWNER))
+        assert _code(await c.post(wd(rid2), json={"reason": "host_unread"}, headers=_tok(token))) == (409, "not_allowed_yet")
+
+
+async def test_08_a_late_result_of_the_first_answer_never_moves_the_second_stage(world):
+    """Kadir 02:08Z: the first answer's command result (say «rejected») arriving after the row went on to stage confirm and was
+    answered again must not mark the second answer rejected — a result moves only the stage its command answered."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4580h")
+        token, sid = device["device_token"], device["setup_id"]
+        agent = await _with_session(c, device)
+        phone, der = await _register(c)
+        await _pair(c, token, der)
+        rid, pk = await _network_ask(c, device, agent)
+        await c.post(f"{REQS}/{pk}/answer", json=_answer(phone), headers=_person(OWNER))
+        await c.post(_confirm(rid), json={"host": "gitlab.com", "expires_at": _later()}, headers=_tok(token))
+        await c.post(f"{REQS}/{pk}/answer", json=_answer(phone, signed="eyJ2IjoxfQ.second"), headers=_person(OWNER))
+        cmds = dict(await _sql(fetch=f"SELECT idempotency_key, id FROM desktop_commands WHERE setup_id = '{sid}'"))
+        first, second = cmds[f"perm:{rid}"], cmds[f"perm:{rid}:confirm"]
+        r = await c.post(f"/api/v2/desktop/relay/commands/{first}/result", json={"state": "rejected", "result_code": "bad_signature"}, headers=_tok(token))
+        assert r.status_code == 200, r.text
+        row = await _sql(fetch=f"SELECT state, stage, result_code FROM agent_permission_requests WHERE id = '{pk}'")
+        assert tuple(row[0]) == ("answered", "confirm", None)  # the second answer stands
+        r = await c.post(f"/api/v2/desktop/relay/commands/{second}/result", json={"state": "rejected", "result_code": "mismatch"}, headers=_tok(token))
+        row = await _sql(fetch=f"SELECT state, result_code FROM agent_permission_requests WHERE id = '{pk}'")
+        assert tuple(row[0]) == ("rejected", "mismatch")  # its own result does

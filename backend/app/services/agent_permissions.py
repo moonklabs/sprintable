@@ -496,7 +496,7 @@ async def _send_permission_notice(db: AsyncSession, setup: DesktopSetup, row: Ag
 class Withdrawal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    reason: Literal["answered_locally", "session_ended", "expired"]
+    reason: Literal["answered_locally", "session_ended", "expired", "host_unread"]
 
 
 async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUID, body: Withdrawal) -> AgentPermissionRequest:
@@ -506,6 +506,14 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
     )).scalar_one_or_none()
     if row is None:
         raise DesktopRelayError(404, "request_not_found", "no such permission request on this device")
+    if body.reason == "host_unread":
+        # story #4580 AC2 F2: only a network question answered «allow…» at its first stage — the daemon pressed Esc and found no host
+        # it may trust in Claude's own text; the request ends with nothing allowed (Yuna 2-7)
+        if row.runtime != "claude" or row.tool != SANDBOX_NET_TOOL or row.stage != "ask" or row.state != "answered" or row.decision != "allow":
+            raise DesktopRelayError(409, "not_allowed_yet", "only a network question answered «allow…» can end with its host unread")
+        row.state, row.result_code = "withdrawn", "host_unread"
+        await db.flush()
+        return row
     if row.state == "pending":
         row.state, row.result_code = "withdrawn", body.reason
         await db.flush()
@@ -660,6 +668,7 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             # story #4580 AC2: the second answer of a network question — the card's second state shows the host (the daemon's value
             # from Claude's own hook text) and the phone signs it along
             "stage": r.stage, "host": r.host if r.stage == "confirm" else None,
+            "host_unread": r.state == "withdrawn" and r.result_code == "host_unread",
         })
     return out
 
@@ -744,7 +753,7 @@ async def paired_phone(db: AsyncSession, *, member_id: uuid.UUID, phone_id: uuid
 # ── ④ the daemon's verdict on the answer ────────────────────────────────────────────────────────────────────────────────
 
 
-async def on_answer_result(db: AsyncSession, setup_id: uuid.UUID, request_id: str, state: str, result_code: str | None) -> None:
+async def on_answer_result(db: AsyncSession, setup_id: uuid.UUID, request_id: str, state: str, result_code: str | None, *, stage: str = "ask") -> None:
     """Called with an `answer_approval` command's result: the daemon refused the signature (or failed) → `rejected` + its code.
     `done` leaves `answered` as it is."""
     if state not in ("rejected", "failed"):
@@ -755,6 +764,6 @@ async def on_answer_result(db: AsyncSession, setup_id: uuid.UUID, request_id: st
     await db.execute(
         update(AgentPermissionRequest)
         .where(AgentPermissionRequest.setup_id == setup_id, AgentPermissionRequest.request_id == rid,
-               AgentPermissionRequest.state == "answered")
+               AgentPermissionRequest.state == "answered", AgentPermissionRequest.stage == stage)
         .values(state="rejected", result_code=result_code or state)
     )

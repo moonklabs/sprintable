@@ -195,8 +195,10 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
         </div>
       )}
       {r.workdir ? <p className="text-[11px] text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
-      {answersHere ? (
-        <PhoneAnswerPlace tool={tool} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} />
+      {net === 'ask' && r.host_unread && answer === null ? (
+        <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
+      ) : answersHere ? (
+        <PhoneAnswerPlace tool={tool} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} hostUnread={r.host_unread === true} />
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">
           {line === 'expired' ? t('line.expired')
@@ -210,10 +212,12 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
 }
 
 /** The button place inside the phone app (명세 «폰 서명 · 권한 창 문구» ③ · B-2 결과 줄). */
-function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '' }: {
+function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '', hostUnread = false }: {
   tool: string; auth: PhoneAuth | null; answer: Answer | null; onAnswer: (decision: 'allow' | 'deny') => void;
   /** story #4580 AC2: the network question's stage (its own buttons and result lines) */
   net?: 'ask' | 'confirm' | null; host?: string;
+  /** story #4580 AC2 F2 (Yuna 2-7): the host could not be read — the request ended with nothing allowed */
+  hostUnread?: boolean;
 }) {
   const t = useTranslations('agentPermissions');
   const flat = useFlatHref();
@@ -245,7 +249,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '' 
   switch (a.kind) {
     case 'sending': return <Line focus>{t('phone.sending')}</Line>;
     case 'answered':
-      if (net === 'ask' && a.decision === 'allow') return <Line focus>{t('net.checking')}</Line>; // the second card comes with the host
+      if (net === 'ask' && a.decision === 'allow') return <Line focus>{hostUnread ? t('net.hostUnread') : t('net.checking')}</Line>; // the second card comes with the host
       if (net === 'confirm') return <Line focus>{a.decision === 'allow' ? t('net.allowedGo', { host }) : t('net.notAllowed')}</Line>;
       return <Line focus>{a.decision === 'allow' ? t('phone.allowed', { tool }) : t('phone.denied', { tool })}</Line>;
     case 'answered_by':

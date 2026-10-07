@@ -23,7 +23,9 @@ RECIPIENT_REASONS = ("paired", "no_paired_phone")
 # story #4580 AC2 (B · Kadir ⓐ): a network question's request answered «allow…» comes back for a second answer with the host the
 # daemon read from Claude's own hook text — `ask` → `confirm`
 PERMISSION_STAGES = ("ask", "confirm")
-WITHDRAW_REASONS = ("answered_locally", "session_ended", "expired")
+# story #4580 AC2 (D4 · PO 02:05Z): `host_unread` — a network question answered «allow…» whose host the daemon could not read from
+# Claude's own hook text (F2): nothing is allowed, the phone says so
+WITHDRAW_REASONS = ("answered_locally", "session_ended", "expired", "host_unread")
 
 
 class AgentPermissionRequest(Base):

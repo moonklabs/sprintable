@@ -303,3 +303,23 @@ describe('[4580 AC2] the network question on the phone', () => {
     expect(phoneLines()).toEqual(['허용하지 않았어요']);
   });
 });
+
+describe('[4580 AC2 F2] the host could not be read', () => {
+  it('[허용…] → «주소를 확인하는 중…» → the request ends host_unread → «주소를 확인하지 못해 이번 연결은 허용하지 못했어요», no buttons', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      installShell();
+      const net = req({ tool: 'SandboxNetwork', runtime: 'claude', summary: 'network', stage: 'ask', host: null });
+      await render([net]);
+      await press('허용…');
+      expect(phoneLines()).toEqual(['주소를 확인하는 중…']);
+      fetchWithAuth.mockImplementation(async () => list([{ ...net, state: 'withdrawn', host_unread: true, answerable: false }]));
+      await act(async () => { vi.advanceTimersByTime(15_000); });
+      await settle();
+      expect(phoneLines()).toEqual(['주소를 확인하지 못해 이번 연결은 허용하지 못했어요']);
+      expect(buttons()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

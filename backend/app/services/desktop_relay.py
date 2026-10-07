@@ -458,7 +458,9 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
     if cmd.kind == "answer_approval":  # story #4533 — the daemon's verdict on a phone's signed answer moves the request
         from app.services.agent_permissions import on_answer_result
 
-        await on_answer_result(db, setup.id, (cmd.payload or {}).get("request_id"), result.state, result.result_code)
+        # story #4580 (Kadir 02:08Z): the stage the command answered — a late result of the first answer never moves the second
+        stage = "confirm" if (cmd.payload or {}).get("stage") == "confirm" else "ask"
+        await on_answer_result(db, setup.id, (cmd.payload or {}).get("request_id"), result.state, result.result_code, stage=stage)
     # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice); an instruction done writes its line
     if cmd.kind in ("stop_session", "send_prompt"):
         from app.services.desktop_commands import on_command_done
