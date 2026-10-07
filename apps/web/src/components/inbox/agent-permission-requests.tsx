@@ -79,8 +79,9 @@ export function AgentPermissionRequests() {
   const [requests, setRequests] = useState<PermissionRequest[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const phone = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
-  // answers given on this page: the card stays with its line (the server list drops an answered request)
-  const [answers, setAnswers] = useState<ReadonlyMap<string, { row: PermissionRequest; answer: Answer }>>(new Map());
+  // answers given on this page: the card stays with its line until the next read (story #4596 — the list is what waits; `at` = when its
+  // answer was given)
+  const [answers, setAnswers] = useState<ReadonlyMap<string, Kept>>(new Map());
   // back from the phone's settings able to confirm: a «no fingerprint · no screen lock» answer gives its buttons back
   const auth = usePhoneAuth(phone, (now) => {
     if (!canConfirm(now)) return;
@@ -108,10 +109,14 @@ export function AgentPermissionRequests() {
     let pending = false;
     const read = () => {
       pending = true;
+      const started = Date.now();
       void readRequests().then((list) => {
         pending = false;
         if (off) return;
         setRequests((prev) => list ?? prev ?? []);
+        // story #4596 AC1: a card answered here leaves at the first read made after its answer that no longer lists it — a page kept
+        // open through many answers never holds them (a failed read keeps what was shown)
+        if (list) setAnswers((m) => afterRead(m, list, started));
         setNow(Date.now());
       });
     };
@@ -125,7 +130,7 @@ export function AgentPermissionRequests() {
   }, [waiting, notices]);
 
   const answer = async (row: PermissionRequest, decision: 'allow' | 'deny') => {
-    const put = (a: Answer) => setAnswers((m) => new Map(m).set(row.id, { row, answer: a }));
+    const put = (a: Answer) => setAnswers((m) => new Map(m).set(row.id, { row, answer: a, at: Date.now() }));
     put({ kind: 'sending', decision });
     put(await answerOnPhone(row.id, decision, { phoneCall }));
   };
@@ -163,8 +168,32 @@ export function AgentPermissionRequests() {
 /** story 4580: the daemon's value for Claude's sandbox network question (sprintable-mobile desktop-host · tool-names.json) */
 const SANDBOX_NET_TOOL = 'SandboxNetwork';
 
+type Kept = { row: PermissionRequest; answer: Answer; at: number };
+/** story #4596: the network question's first «allow…» — the request comes back (its second card · or «주소를 확인하지 못해…») a few
+ *  seconds later; its card waits for that, never more than this */
+const NET_FIRST_ALLOW_KEEP_MS = 2 * 60 * 1000;
+
+/** story #4596 AC1: what stays of the answers given here after a read that started at `started` — one the read still lists is shown from
+ *  the list anyway; one it no longer lists leaves, once the read was made after its answer. Kept: an answer still on its way, and the
+ *  network question's first «allow…» until its request is listed again (at most NET_FIRST_ALLOW_KEEP_MS) */
+export function afterRead(m: ReadonlyMap<string, Kept>, list: readonly PermissionRequest[], started: number, now = Date.now()): ReadonlyMap<string, Kept> {
+  const listed = new Set(list.map((r) => r.id));
+  const kept = [...m].filter(([id, k]) => {
+    if (listed.has(id) || k.answer.kind === 'sending' || started < k.at) return true;
+    const netFirstAllow = k.row.tool === SANDBOX_NET_TOOL && (k.row.stage ?? 'ask') === 'ask' && k.answer.kind === 'answered' && k.answer.decision === 'allow';
+    return netFirstAllow && now - k.at < NET_FIRST_ALLOW_KEEP_MS;
+  });
+  return kept.length === m.size ? m : new Map(kept);
+}
+
+/** story #4596 AC2: «{n}분째 기다림» only on a card that still waits — pending, and not just answered here */
+export function stillWaiting(r: PermissionRequest, answer: Answer | null): boolean {
+  if (r.state !== 'pending') return false;
+  return !(answer && (answer.kind === 'sending' || answer.kind === 'answered' || answer.kind === 'answered_by' || answer.kind === 'expired' || answer.kind === 'closed'));
+}
+
 /** story #4580 AC2: an answer given here belongs to the stage it was given at — the first «allow…» never stands on the second card */
-function answerFor(answers: ReadonlyMap<string, { row: PermissionRequest; answer: Answer }>, r: PermissionRequest): Answer | null {
+function answerFor(answers: ReadonlyMap<string, Kept>, r: PermissionRequest): Answer | null {
   const a = answers.get(r.id);
   return a && (a.row.stage ?? 'ask') === (r.stage ?? 'ask') ? a.answer : null;
 }
@@ -190,8 +219,8 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
         ) : (
           <Badge variant="chip">{t('chip')}</Badge>
         )}
-        {line === 'unknown' ? null : (
-          <span className="text-[11px] text-muted-foreground">{t('waited', { n: waitedMinutes(r, now) })}</span>
+        {line === 'unknown' || !stillWaiting(r, answer) ? null : (
+          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-waited">{t('waited', { n: waitedMinutes(r, now) })}</span>
         )}
       </div>
       <p className="text-sm text-foreground">{agentOnDevice(r.agent_name, r.device_name)}</p>
