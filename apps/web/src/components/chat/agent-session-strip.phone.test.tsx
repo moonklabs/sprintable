@@ -90,7 +90,7 @@ describe('[4534] the strip inside the phone app', () => {
     server(res(201, {}));
     for (const [over, isPhone, line] of [
       [{ state: 'idle' }, true, null],
-      [{ remote_control: false }, true, ko.line.remoteOff],
+      [{ remote_control: false }, true, '원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요 — 조직 소유자가 켤 수 있어요'], // story #4583
       [{ can_command: false }, true, null],
       [{}, false, ko.line.onPhone],
     ] as const) {

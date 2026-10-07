@@ -747,7 +747,7 @@
     "gcFieldModelVoice": "음성",
     "gcModelHint": "비워 두면 그 모달리티는 이 커넥터로 생성하지 않아요.",
     "gcFieldCredential": "서비스 계정 자격 (JSON)",
-    "gcCredentialPlaceholder": "'{ \"type\": \"service_account\", \"project_id\": \"…\", \"private_key\": \"…\" }'\u2060를 붙여넣어요",
+    "gcCredentialPlaceholder": "'{ \"type\": \"service_account\", \"project_id\": \"…\", \"private_key\": \"…\" }'⁠를 붙여넣어요",
     "gcRevokeAction": "해지",
     "gcRevokeAriaLabel": "{n}번째 연산 커넥터 {label} 해지",
     "gcRevokeConfirmTitle": "{name}{josa} 해지할까요",
@@ -5098,7 +5098,6 @@
         "onPhone": "짝지은 폰에서 멈추거나 지시할 수 있어요",
         "inbox": "권한 요청은 결재함에 있어요",
         "unknown": "그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요",
-        "remoteOff": "이 조직은 원격 제어를 꺼 두었어요 — 그 컴퓨터에서 직접 해 주세요",
         "inboxPhone": "결재함에서 답할 수 있어요",
         "waitingInput": "그 컴퓨터의 터미널에서 답을 기다리고 있어요 — 그 컴퓨터에서 답해 주세요",
         "error": "에이전트가 오류로 멈췄어요 — 까닭은 그 컴퓨터의 데스크톱 앱에서 볼 수 있어요",
@@ -5111,7 +5110,9 @@
         "limitErrorAhead": "사용 한도에 걸려 멈췄어요 — {time}에 풀려요",
         "limitErrorPassed": "한도가 풀렸어요 — 그 컴퓨터에서 다시 시작해 주세요",
         "unrecognized": "이 페이지가 아직 모르는 상태예요 — 새로 고치면 보일 수 있어요",
-        "instructNotNow": "이 에이전트에는 지금 턴에 지시를 넣을 수 없어요 — 이 대화로 보내면 차례가 오면 들어가요"
+        "instructNotNow": "이 에이전트에는 지금 턴에 지시를 넣을 수 없어요 — 이 대화로 보내면 차례가 오면 들어가요",
+        "remoteOffOwner": "원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요",
+        "remoteOffOthers": "원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요 — 조직 소유자{hasOwners, select, yes {({owners})} other {}}가 켤 수 있어요"
       },
       "button": {
         "stop": "멈춤",
@@ -6972,19 +6973,21 @@
       "devicesAction": "연결된 기기 보기",
       "failed": "켜지 못했어요 — 잠시 뒤 다시 눌러 주세요",
       "retry": "다시 시도",
-      "remoteOff": "이 조직은 원격 제어를 꺼 두었어요 — 조직 소유자가 켜면 다시 할 수 있어요"
+      "remoteOffOwner": "이 조직은 원격 제어가 꺼져 있어 이 컴퓨터를 켤 수 없어요 — 조직의 원격 제어를 먼저 켜 주세요",
+      "remoteOffOthers": "이 조직은 원격 제어가 꺼져 있어 이 컴퓨터를 켤 수 없어요 — 조직 소유자{hasOwners, select, yes {({owners})} other {}}가 켜면 다시 할 수 있어요"
     },
     "remoteControl": {
       "title": "원격 제어",
       "body": "짝지은 폰에서 이 조직의 데스크톱 에이전트를 멈추고, 지시하고, 권한 요청에 답할 수 있어요.",
       "allowed": "허용되는 일: 지시 · 권한 응답 · 멈춤",
       "since": "{date}부터 켜져 있어요",
-      "ownerOnlyOn": "원격 제어 · 켜짐 — 조직 소유자만 켜고 끌 수 있어요",
-      "ownerOnlyOff": "원격 제어 · 꺼짐 — 조직 소유자만 켜고 끌 수 있어요",
+      "ownerOnlyOn": "원격 제어 · 켜짐 — 조직 소유자{hasOwners, select, yes {({owners})} other {}}만 켜고 끌 수 있어요",
+      "ownerOnlyOff": "원격 제어 · 꺼짐 — 조직 소유자{hasOwners, select, yes {({owners})} other {}}만 켜고 끌 수 있어요",
       "confirmOff": "끄면 짝지은 기기에서 이 조직의 에이전트를 바로 제어할 수 없어요 — 짝은 그대로 남아요",
       "turnOff": "끄기",
       "cancel": "취소",
-      "failed": "바꾸지 못했어요 — 다시 시도해 주세요"
+      "failed": "바꾸지 못했어요 — 다시 시도해 주세요",
+      "offEffect": "꺼져 있으면 권한 요청이 폰으로 오지 않고, 폰에서 멈추거나 지시할 수도 없어요"
     },
     "remoteDevices": {
       "title": "원격 기기",
@@ -7054,7 +7057,9 @@
       "pairAgain": "다시 짝짓기",
       "signedOut": "로그인이 풀려 보내지 못했어요 — 요청은 그대로예요. 다시 로그인한 뒤 눌러 주세요",
       "signInAgain": "다시 로그인"
-    }
+    },
+    "remoteOffOwner": "원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요",
+    "remoteOffOthers": "원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요 — 조직 소유자{hasOwners, select, yes {({owners})} other {}}가 켤 수 있어요"
   },
   "phonePairing": {
     "start": "컴퓨터와 짝짓기 — 컴퓨터의 Sprintable 앱에서 [폰 짝짓기]를 눌러 나온 QR을 찍어 주세요",
@@ -7073,14 +7078,15 @@
     "notOurs": "Sprintable 짝짓기 QR이 아니에요",
     "alreadyPaired": "이미 짝지은 컴퓨터예요",
     "notPaired": "짝짓지 못했어요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요",
-    "remoteOff": "이 조직은 원격 제어를 꺼 두었어요 — 조직 소유자가 켜면 다시 할 수 있어요",
     "unreachable": "그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요",
     "setupNotFound": "이 QR의 컴퓨터를 찾지 못했어요 — 같은 조직의 컴퓨터인지 확인해 주세요",
     "offerUsed": "이 QR은 이미 쓰였어요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요",
     "registerAgain": "이 폰을 다시 등록해야 해요 — [다시 찍기]를 누르면 등록부터 해요",
     "limit": "이 계정의 원격 기기가 이미 3대예요 — 컴퓨터의 Sprintable 앱이나 웹 «데스크톱 앱 › 원격 기기»에서 하나를 빼 주세요",
     "failed": "짝짓기를 보내지 못했어요 — 다시 찍어 주세요",
-    "notInApp": "폰의 Sprintable 앱에서 이 화면을 열어 주세요"
+    "notInApp": "폰의 Sprintable 앱에서 이 화면을 열어 주세요",
+    "remoteOffOwner": "원격 제어가 꺼져 있어 짝지을 수 없어요 — 켜면 이 폰에서 에이전트에 답하고, 멈추거나 지시할 수 있어요",
+    "remoteOffOthers": "원격 제어가 꺼져 있어 짝지을 수 없어요 — 조직 소유자{hasOwners, select, yes {({owners})} other {}}가 켜면 다시 할 수 있어요"
   },
   "recipePreset": {
     "blogArticleName": "블로그 글",
@@ -7204,5 +7210,9 @@
     "resendFailed": "메일을 보내지 못했어요 — 잠시 뒤 다시 보내 주세요.",
     "resendLimited": "한 시간에 세 번까지 보낼 수 있어요 — 조금 뒤에 다시 보내 주세요.",
     "otherAddress": "다른 주소로 가입하기"
+  },
+  "remoteControlOff": {
+    "goTo": "원격 제어 켜러 가기",
+    "ownersMore": "{first} 외 {n}명"
   }
 }

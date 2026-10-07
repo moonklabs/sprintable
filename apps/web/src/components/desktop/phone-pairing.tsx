@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
 
@@ -48,6 +49,7 @@ function Pairing() {
   const t = useTranslations('phonePairing');
   const tp = useTranslations('agentPermissions.phone');
   const flat = useFlatHref();
+  const remoteOff = useRemoteOff(); // story #4583: who can turn it on — read now, shown only on the refusal
   const [view, setView] = useState<View>({ kind: 'start' });
   const [pressed, setPressed] = useState(false); // a line that follows a press takes the focus (the button is gone)
   const deps = { phoneCall };
@@ -156,7 +158,9 @@ function Pairing() {
     case 'alreadyPaired':
       return <Shell><Line focus>{t('alreadyPaired')}</Line><Actions>{close}</Actions></Shell>;
     case 'remoteOff':
-      return <Shell><Line focus>{t('remoteOff')}</Line><Actions>{close}</Actions></Shell>;
+      // story #4583 (Yuna copy.md row 1): the owner gets the way to the switch (and may still close) · anyone else the owner's name
+      if (remoteOff?.owner) return <Shell><Line focus>{t('remoteOffOwner')}</Line><Actions><RemoteControlLink variant="button" />{close}</Actions></Shell>;
+      return <Shell><Line focus>{t('remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</Line><Actions>{close}</Actions></Shell>;
     case 'limit':
       return <Shell><Line focus>{t('limit')}</Line></Shell>;
     case 'noScreenLock':

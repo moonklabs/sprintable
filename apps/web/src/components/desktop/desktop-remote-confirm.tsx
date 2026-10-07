@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 
 /**
  * story #4548 (E-DESKTOP-2 B-1 · 명세 모음 B-1 «②'» · 유나 «4548 서버 코드 ↔ 사람 문구» 표) — 이미 설정한 컴퓨터의 원격 제어를
@@ -94,6 +95,7 @@ function OpenFromApp() {
 function Confirm({ code }: { code: string }) {
   const t = useTranslations('desktop.remote');
   const flat = useFlatHref();
+  const remoteOff = useRemoteOff(); // story #4583: who can turn it on
   const [view, setView] = useState<View>({ kind: 'loading' });
   const [pressed, setPressed] = useState(false); // the result came from [켜기] — focus goes to it
 
@@ -159,7 +161,16 @@ function Confirm({ code }: { code: string }) {
     );
   }
   if (view.kind === 'remoteOff') {
-    return <Card className="break-keep p-6"><ResultLine focus={pressed}>{t('remoteOff')}</ResultLine></Card>;
+    // story #4583 (Yuna copy.md row 2): no longer a dead end — the owner gets the way to the switch, anyone else the owner's name
+    if (remoteOff?.owner) {
+      return (
+        <Card className="break-keep flex flex-col gap-3 p-6">
+          <ResultLine focus={pressed}>{t('remoteOffOwner')}</ResultLine>
+          <div><RemoteControlLink variant="button" /></div>
+        </Card>
+      );
+    }
+    return <Card className="break-keep p-6"><ResultLine focus={pressed}>{t('remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</ResultLine></Card>;
   }
   if (view.kind === 'expired' || view.kind === 'spent') {
     return <Card className="break-keep p-6"><ResultLine focus={pressed}>{view.kind === 'expired' ? t('expired') : t('spent')}</ResultLine></Card>;

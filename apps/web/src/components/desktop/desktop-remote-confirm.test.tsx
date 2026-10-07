@@ -101,7 +101,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     ['code_expired', 410, '시간이 지났어요 — 데스크톱 앱에서 [이 컴퓨터에서 켜기]를 다시 눌러 주세요.'],
     ['code_used', 410, '이 링크는 더 쓸 수 없어요 — 데스크톱 앱에서 [이 컴퓨터에서 켜기]를 다시 눌러 주세요'],
     ['code_not_found', 404, '이 링크는 더 쓸 수 없어요 — 데스크톱 앱에서 [이 컴퓨터에서 켜기]를 다시 눌러 주세요'],
-    ['remote_control_off', 409, '이 조직은 원격 제어를 꺼 두었어요 — 조직 소유자가 켜면 다시 할 수 있어요'], // story #4535
+    ['remote_control_off', 409, '이 조직은 원격 제어가 꺼져 있어 이 컴퓨터를 켤 수 없어요 — 조직 소유자가 켜면 다시 할 수 있어요'], // story #4535 · 4583 (no org read here: no names)
   ])('%s reads its own line', async (code, status, line) => {
     fetchWithAuth.mockResolvedValueOnce(err(status, code));
     await open(`#code=${CODE}`);

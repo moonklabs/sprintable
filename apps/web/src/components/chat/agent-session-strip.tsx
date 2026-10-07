@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
@@ -242,6 +243,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
 function ResultLine({ result }: { result: Result }) {
   const t = useTranslations('chats.agentSession');
   const flatHref = useFlatHref();
+  const remoteOff = useRemoteOff(); // story #4583: a command refused while off says who turns it on
   const ref = useRef<HTMLParagraphElement>(null);
   useEffect(() => { ref.current?.focus(); }, [result]); // the line takes focus (Yuna 12:47Z C)
   const line = (text: string, action?: ReactNode) => (
@@ -265,7 +267,10 @@ function ResultLine({ result }: { result: Result }) {
     case 'too_long': return line(t('sheet.tooLong'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
     case 'unknown': return line(stop ? t('command.stopUnknown') : t('command.sendUnknown'));
-    case 'remote_off': return line(t('line.remoteOff'));
+    // story #4583 (Yuna copy.md row 3): the same words as the strip's line — the owner gets the way to the switch
+    case 'remote_off': return remoteOff?.owner
+      ? line(t('line.remoteOffOwner'), <RemoteControlLink />)
+      : line(t('line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' }));
     case 'conversation_not_found': return line(t('command.conversationNotFound'));
     case 'cancelled': return line(stop ? t('command.stop.cancelled') : t('command.send.cancelled'));
     case 'not_paired': return line(stop ? t('command.stop.notPaired') : t('command.send.notPaired'));
@@ -281,6 +286,7 @@ function ResultLine({ result }: { result: Result }) {
 function Line({ view, now, phone, href }: { view: View & { state: SessionState }; now: number; phone: boolean; href: string }) {
   const t = useTranslations('chats.agentSession');
   const locale = useLocale();
+  const remoteOff = useRemoteOff(); // story #4583: who can turn it on (the org's value · the session's own flag decides whether to say it)
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
   if (view.state === 'unrecognized') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.unrecognized')}</p>;
   // story #4534 (Yuna 03:04Z): what to do is «on that computer» — its own line whatever remote control says; no buttons; whether a
@@ -298,7 +304,19 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
   }
   if (view.state !== 'working' && view.state !== 'waiting_permission') return null; // idle · starting · stopped: no button place
   // remote control off wins over both (Yuna 17:27Z ②)
-  if (!view.remote_control) return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOff')}</p>;
+  // story #4583 (Yuna copy.md row 3 · PO 04:11Z: still only while it works or waits — idle agents get no line): the owner gets the way
+  // to the switch on its own row, anyone else the owner's name
+  if (!view.remote_control) {
+    if (remoteOff?.owner) {
+      return (
+        <div className="flex w-full flex-col gap-1">
+          <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOffOwner')}</p>
+          <RemoteControlLink />
+        </div>
+      );
+    }
+    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</p>;
+  }
   if (view.state === 'waiting_permission') {
     // the web's inbox card only looks, so not «answer there» — where the request is (Yuna 17:27Z ②); the phone app's card answers
     return <Link className="w-full text-muted-foreground underline" href={href} data-testid="agent-session-line">{phone ? t('line.inboxPhone') : t('line.inbox')}</Link>;

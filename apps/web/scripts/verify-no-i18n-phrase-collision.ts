@@ -194,6 +194,11 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // at least one dot, the last label a letter — never a number). ko.json's three uses read directly (2026-10-07): runProfileAllowedHostRemoved
   // «뺐어요 · {host}» · agentPermissions.net.confirmTitle · net.allowedGo — every one fills the same host, the slug · channel axis.
   'host',
+  // story #4583 — {owners}: the org owners' display names joined by remote-off.tsx formatOwners («송윤재» · «A · B» · «A 외 n명» —
+  // the «n» is already inside the names text, never a number this line stands next to) — the `name` axis. {hasOwners}: an ICU
+  // select key ('yes' | 'no') that only decides whether the «({owners})» parenthesis is drawn — renders nothing itself. ko.json's
+  // uses read directly (2026-10-07): the six «… 조직 소유자{hasOwners, select, yes {({owners})} other {}} …» lines of remote control off.
+  'owners', 'hasOwners',
   // story #3900(§⑤ 어조 가드 사각 3) — 플레이스홀더 뒤 받침 의존 조사(이/가·을/를)를
   // korean-particle 헬퍼로 뽑아 넣는 {josa}. 'particle'과 같은 결(한글 문법 조사·절대 수가
   // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"

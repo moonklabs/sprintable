@@ -130,6 +130,6 @@ describe('DesktopRemoteControlCard (story #4535)', () => {
   it('en', async () => {
     fetchWithAuth.mockResolvedValueOnce(ok({ enabled: false, enabled_at: null, can_change: false }));
     await render('en');
-    expect(text()).toContain('Remote control · off — only organization owners can turn it on or off');
+    expect(text()).toContain('Remote control · off — only an organization owner can turn it on or off'); // story #4583 (Yuna copy.md 5b · no names in this read)
   });
 });

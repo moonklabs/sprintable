@@ -1,7 +1,7 @@
 """story #4535 (E-DESKTOP-2 B-4 · AC1) — an organization's «원격 제어» switch (services.remote_control).
 
 - GET  /api/v2/organizations/{org_id}/remote-control — a person of that org: the state, and whether they may change it
-- PUT  /api/v2/organizations/{org_id}/remote-control — an owner only (an admin · an agent key: 403 · another org: 404)
+- PUT  /api/v2/organizations/{org_id}/remote-control — an owner only (an admin · an agent key: 403 · another org: 400)
 - GET  /api/v2/desktop/remote-control — a device's own agent key: the state of its org (the app's chip · the relay's floor)
 """
 from __future__ import annotations
@@ -26,6 +26,9 @@ class RemoteControlState(BaseModel):
     enabled: bool
     enabled_at: str | None
     can_change: bool
+    # story #4583: display names only (no email · no id) · a count only (no device name)
+    owner_names: list[str]
+    connected_computers: int
 
 
 class RemoteControlChange(BaseModel):
@@ -36,10 +39,12 @@ class RemoteControlChange(BaseModel):
 
 class DeviceRemoteControl(BaseModel):
     enabled: bool
+    # story #4583: the app's «remote control off for this org» card names who can turn it on — its own org's owners only
+    owner_names: list[str]
 
 
 async def _person_of(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
-    """A person of the org (an agent key: 403). Not a member: resolve_member's own 404."""
+    """A person of the org (an agent key: 403). Not a member: resolve_member's own 400 — with nothing of the org in it."""
     member = await resolve_member(auth, org_id, db)
     if member.type != "human":
         raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
@@ -57,7 +62,14 @@ async def _org(db: AsyncSession, org_id: uuid.UUID, *, lock: bool = False) -> Or
 @router.get("/api/v2/organizations/{org_id}/remote-control", response_model=RemoteControlState)
 async def get_remote_control(org_id: uuid.UUID, db: AsyncSession = Depends(get_db), auth: AuthContext = Depends(get_current_user)):
     member = await _person_of(db, auth, org_id)
-    return remote_control.state_view(await _org(db, org_id), can_change=member.role == "owner")
+    return await _view(db, await _org(db, org_id), can_change=member.role == "owner")
+
+
+async def _view(db: AsyncSession, org: Organization, *, can_change: bool) -> dict:
+    return remote_control.state_view(
+        org, can_change=can_change, owner_names=await remote_control.owner_names(db, org.id),
+        connected_computers=await remote_control.connected_computers(db, org.id),
+    )
 
 
 @router.put("/api/v2/organizations/{org_id}/remote-control", response_model=RemoteControlState)
@@ -76,7 +88,7 @@ async def put_remote_control(
     org = await _org(db, org_id, lock=True)
     await remote_control.set_enabled(db, org=org, actor_id=member.id, enabled=body.enabled)
     await db.commit()
-    return remote_control.state_view(org, can_change=True)
+    return await _view(db, org, can_change=True)
 
 
 @router.get("/api/v2/desktop/remote-control", response_model=DeviceRemoteControl)
@@ -95,4 +107,4 @@ async def get_device_remote_control(db: AsyncSession = Depends(get_db), auth: Au
         )).scalar_one_or_none()
     if org_id is None:
         raise HTTPException(status_code=404, detail={"code": "setup_not_found", "message": "this key is not a device's"})
-    return DeviceRemoteControl(enabled=await remote_control.is_enabled(db, org_id))
+    return DeviceRemoteControl(enabled=await remote_control.is_enabled(db, org_id), owner_names=await remote_control.owner_names(db, org_id))

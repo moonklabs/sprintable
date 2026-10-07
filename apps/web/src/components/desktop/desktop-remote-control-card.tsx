@@ -10,6 +10,7 @@ import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgRemoteControl, type OrgRemoteControl } from '@/lib/org-remote-control';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { formatOwners, REMOTE_CONTROL_ANCHOR } from '@/components/desktop/remote-off';
 
 /**
  * story #4535 AC1 (명세 모음 B-1 ① · 유나 09:24Z 자리 확정) — /desktop의 «데스크톱 앱» 카드와 «연결된 기기» 사이 카드 하나.
@@ -22,6 +23,7 @@ type State = OrgRemoteControl;
 
 export function DesktopRemoteControlCard() {
   const t = useTranslations('desktop.remoteControl');
+  const tOff = useTranslations('remoteControlOff');
   const { orgId } = useDashboardContext();
   // one value with «원격 기기» (story #4535 · PO 18:58Z): a change here is what that part shows, with no reload
   const [state, setState] = useOrgRemoteControl(orgId);
@@ -29,7 +31,18 @@ export function DesktopRemoteControlCard() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const switchRef = useRef<HTMLButtonElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const wasAsking = useRef(false);
+  const arrived = useRef(false);
+
+  // story #4583: every «원격 제어 켜러 가기» lands here (`/desktop#remote-control`) — once the card is drawn, bring it into view and put
+  // the focus on the switch (an owner) or on the card (anyone else). It only moves; turning it on stays one press on the switch.
+  useEffect(() => {
+    if (!state || arrived.current || typeof window === 'undefined' || window.location.hash !== `#${REMOTE_CONTROL_ANCHOR}`) return;
+    arrived.current = true;
+    cardRef.current?.scrollIntoView({ block: 'center' });
+    (state.can_change ? switchRef.current : cardRef.current)?.focus();
+  }, [state]);
 
   // the in-line confirmation closed ([끄기] or [취소]): the focus it held goes back to the switch, not to the page
   useEffect(() => {
@@ -62,9 +75,12 @@ export function DesktopRemoteControlCard() {
   }, [orgId, state, setState]);
 
   if (!state) return null; // not an org person · not loaded: the page goes on without the card
+  // story #4583 (Yuna copy.md 5b): the owner named in «조직 소유자({owners})만 …» (no parenthesis when there is no name)
+  const owners = formatOwners(state.owner_names ?? [], (first, n) => tOff('ownersMore', { first, n }));
+  const ownerNames = { owners, hasOwners: owners ? 'yes' : 'no' };
 
   return (
-    <Card className="break-keep flex flex-col gap-2 p-6" data-testid="desktop-remote-control">
+    <Card ref={cardRef} id={REMOTE_CONTROL_ANCHOR} tabIndex={-1} className="break-keep flex scroll-mt-24 flex-col gap-2 p-6 focus:outline-none" data-testid="desktop-remote-control">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold">{t('title')}</h2>
         {state.can_change ? (
@@ -78,11 +94,13 @@ export function DesktopRemoteControlCard() {
         ) : null}
       </div>
       <p className="text-sm text-muted-foreground">{t('body')}</p>
+      {/* story #4583 (Yuna copy.md 5a): what off means, for everyone */}
+      {!state.enabled ? <p className="text-sm text-muted-foreground" data-testid="desktop-remote-control-off-effect">{t('offEffect')}</p> : null}
       <p className="text-xs text-muted-foreground">{t('allowed')}</p>
       {state.enabled && state.enabled_at ? <EnabledSince at={state.enabled_at} /> : null}
       {!state.can_change ? (
         <p className="text-xs text-muted-foreground" data-testid="desktop-remote-control-owner-only">
-          {state.enabled ? t('ownerOnlyOn') : t('ownerOnlyOff')}
+          {state.enabled ? t('ownerOnlyOn', ownerNames) : t('ownerOnlyOff', ownerNames)}
         </p>
       ) : null}
       {asking ? <ConfirmOff busy={busy} onConfirm={() => void change(false)} onCancel={() => setAsking(false)} /> : null}
