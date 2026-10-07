@@ -725,7 +725,11 @@ async def agent_stream(
                 # 클릭 불요 — 커넥터의 "10초 내 살아있음 신호" 의무는 이 라운드트립의 ack로
                 # 충족된다, sse_bridge.py 의 자동 ack 재사용·발명 0). 이미 verified 인 재연결은
                 # 재트리거 안 함(매 재접속마다 이벤트 스팸 방지).
-                from app.services.agent_verify import get_verification_state, start_verification
+                from app.services.agent_verify import get_verification_state, lock_connection_test_decision, start_verification
+                # story #4594 (Qadir · QA on 4975): the read just below and the write after it are ONE decision — a second
+                # connect of the same agent at the same moment waits here until this one has committed, then reads what it
+                # wrote (before: both read «none waiting», both started a test). Released with the commit below.
+                await lock_connection_test_decision(_pdb, agent_id)
                 _prior_verify = await get_verification_state(_pdb, agent_id, org_id=uuid.UUID(org_id_str), transport="stdio")
                 # story #4582 (Damrong · 6,389 rows): at most ONE connection test waits — an agent whose last test is not acked yet
                 # gets no new one on a reconnect. Before, every connect of a never-verified agent added one (the stream reconnects

@@ -24,6 +24,9 @@ def test_stream_connect_auto_starts_verify_when_not_yet_verified():
     from app.routers import agent_gateway
     src = inspect.getsource(agent_gateway)
     assert "get_verification_state(_pdb, agent_id" in src
+    # story #4594: the read and the write are one decision — the per-agent lock is taken BEFORE the read (behaviour pinned by
+    # test_4594_connection_test_guard_atomic_realdb: two connects at once → one test)
+    assert src.index("await lock_connection_test_decision(_pdb, agent_id)") < src.index("get_verification_state(_pdb, agent_id")
     # story #4582: and only when no earlier test is still waiting (behaviour pinned by test_4582_one_waiting_connection_test_realdb)
     assert "_newly_started = not _prior_verify[\"verified\"] and not _test_waiting" in src
     assert "if _newly_started:" in src
