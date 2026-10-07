@@ -22,6 +22,7 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
@@ -511,6 +512,83 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
     return row
 
 
+# ── story #4580 AC2 B (Kadir ⓐ) — a network question's second answer · the host it added ────────────────────────────────
+
+
+SANDBOX_NET_TOOL = "SandboxNetwork"  # the desktop daemon's value for Claude's sandbox network question (tool-names.json)
+
+
+class HostConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(min_length=1, max_length=253)
+    expires_at: AwareDatetime
+
+
+class HostAdded(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(min_length=1, max_length=253)
+
+
+async def _own_row(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUID) -> AgentPermissionRequest:
+    row = (await db.execute(
+        select(AgentPermissionRequest).where(AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == request_id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if row is None:
+        raise DesktopRelayError(404, "request_not_found", "no such permission request on this device")
+    return row
+
+
+async def confirm_host(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUID, body: HostConfirm) -> AgentPermissionRequest:
+    """The daemon, after the first answer «allow…» on a network question: it pressed Esc (never a key that allows), read the host
+    from Claude's own hook text, and asks the same person again with it — the row goes back to `pending` at stage `confirm`."""
+    from app.services.agent_run_profile import clean_host
+
+    row = await _own_row(db, setup, request_id)
+    if row.runtime != "claude" or row.tool != SANDBOX_NET_TOOL:
+        raise DesktopRelayError(409, "not_a_network_request", "only a network question has a second answer")
+    host = clean_host(body.host)
+    if host is None:
+        raise DesktopRelayError(422, "invalid_host", "a DNS name only (no IP, wildcard, port or path)")
+    if row.stage == "confirm":  # the same report again: the same row · another host: never replaced
+        if row.host != host:
+            raise DesktopRelayError(409, "host_mismatch", "this request already carries another host")
+        return row
+    if row.state != "answered" or row.decision != "allow":
+        raise DesktopRelayError(409, "not_allowed_yet", "the first answer was not «allow»")
+    now = _now()
+    if not now < body.expires_at <= now + MAX_WINDOW:
+        raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
+    row.stage, row.host, row.state, row.expires_at = "confirm", host, "pending", body.expires_at
+    row.decision = row.answered_by = row.answered_phone_key_id = row.answered_at = row.result_code = None
+    await db.flush()
+    return row
+
+
+async def host_added(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUID, body: HostAdded) -> bool:
+    """The daemon checked the second signature and wrote the agent folder's line: the host joins the agent's «허용 주소» list —
+    only for a row of this device at stage `confirm` answered «allow», and only the row's own host (never one taken from here:
+    Kadir ⓐ · a different host is refused). `added_by` = the person who signed it. True when a row was added."""
+    from app.models.agent_allowed_host import AgentAllowedHost
+    from app.services.agent_run_profile import _bump, clean_host
+
+    row = await _own_row(db, setup, request_id)
+    if row.stage != "confirm" or row.state != "answered" or row.decision != "allow" or row.host is None:
+        raise DesktopRelayError(409, "not_confirmed", "no signed «allow» on this request's host")
+    if clean_host(body.host) != row.host:
+        raise DesktopRelayError(409, "host_mismatch", "not the host this request was answered for")
+    added = (await db.execute(
+        pg_insert(AgentAllowedHost).values(
+            member_id=row.agent_member_id, host=row.host, added_by=row.answered_by, request_id=row.request_id,
+        ).on_conflict_do_nothing(index_elements=[AgentAllowedHost.member_id, AgentAllowedHost.host])
+    )).rowcount
+    if added:
+        await _bump(db, member_id=row.agent_member_id, updated_by=row.answered_by)
+    return bool(added)
+
+
 # ── ② the person's view ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -579,6 +657,9 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             # row the person can answer now (까디르 ② · PO 01:40Z): `input_hash` is an unsalted sha256 of the raw input, so a short
             # secret in it could be matched offline — no row carries it longer than its answer needs. (the keyed hash is second-line)
             "session_key": r.session_key if answerable else None, "input_hash": r.input_hash if answerable else None,
+            # story #4580 AC2: the second answer of a network question — the card's second state shows the host (the daemon's value
+            # from Claude's own hook text) and the phone signs it along
+            "stage": r.stage, "host": r.host if r.stage == "confirm" else None,
         })
     return out
 
@@ -634,9 +715,14 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
     if setup.id not in await _reachable(db, {setup.id}, now):
         raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
+    # story #4580: the second answer (stage «confirm») is its own command — the first one's key would drop it as a repeat — and
+    # carries the host the person saw, which the daemon checks against its own value and the signed payload
+    confirm = row.stage == "confirm"
     await enqueue_command(
-        db, setup=setup, kind="answer_approval", idempotency_key=f"perm:{row.request_id}", requested_by=member_id,
-        payload={"session_key": row.session_key, "request_id": str(row.request_id), "decision": body.decision, "signed": body.signed},
+        db, setup=setup, kind="answer_approval", idempotency_key=f"perm:{row.request_id}{':confirm' if confirm else ''}",
+        requested_by=member_id,
+        payload={"session_key": row.session_key, "request_id": str(row.request_id), "decision": body.decision, "signed": body.signed,
+                 **({"stage": "confirm", "host": row.host} if confirm else {})},
     )
     row.state, row.answered_by, row.answered_phone_key_id = "answered", member_id, phone.id
     row.decision, row.answered_at = body.decision, now

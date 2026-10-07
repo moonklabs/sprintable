@@ -20,6 +20,9 @@ PERMISSION_DECISIONS = ("allow", "deny")
 # why the request went to its recipient: a person with a phone paired to that device, or (no one in the chain has one) the
 # chain's head, who can only look (contract §9 ② · PO 13:21Z)
 RECIPIENT_REASONS = ("paired", "no_paired_phone")
+# story #4580 AC2 (B · Kadir ⓐ): a network question's request answered «allow…» comes back for a second answer with the host the
+# daemon read from Claude's own hook text — `ask` → `confirm`
+PERMISSION_STAGES = ("ask", "confirm")
 WITHDRAW_REASONS = ("answered_locally", "session_ended", "expired")
 
 
@@ -35,6 +38,7 @@ class AgentPermissionRequest(Base):
             f"decision IS NULL OR {_in('decision', PERMISSION_DECISIONS)}", name="ck_agent_permission_requests_decision",
         ),
         CheckConstraint(_in("recipient_reason", RECIPIENT_REASONS), name="ck_agent_permission_requests_recipient_reason"),
+        CheckConstraint(_in("stage", PERMISSION_STAGES), name="ck_agent_permission_requests_stage"),
         Index("ix_agent_permission_requests_recipient_state", "recipient_member_id", "state"),
     )
 
@@ -61,6 +65,8 @@ class AgentPermissionRequest(Base):
     decision: Mapped[str | None] = mapped_column(Text, nullable=True)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     result_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stage: Mapped[str] = mapped_column(Text, nullable=False, server_default="ask")
+    host: Mapped[str | None] = mapped_column(Text, nullable=True)  # story #4580: set with stage «confirm» only (the daemon's value)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

@@ -24,7 +24,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
 from app.services import desktop_relay as relay
-from app.services.agent_permissions import PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
+from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -250,6 +250,38 @@ async def post_permission_withdraw(
         return _error(exc)
     await db.commit()
     return {"id": str(row.id), "state": row.state}
+
+
+@router.post("/relay/permission-requests/{request_id}/confirm-host")
+async def post_permission_confirm_host(
+    request_id: uuid.UUID, body: HostConfirm, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+):
+    """story #4580 AC2 B — a network question answered «allow…»: the host read from Claude's own hook text, for a second answer."""
+    from app.services import agent_permissions
+
+    try:
+        row = await agent_permissions.confirm_host(db, setup, request_id, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"id": str(row.id), "state": row.state, "stage": row.stage}
+
+
+@router.post("/relay/permission-requests/{request_id}/host-added")
+async def post_permission_host_added(
+    request_id: uuid.UUID, body: HostAdded, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+):
+    """story #4580 AC2 B (Kadir ⓐ) — the daemon checked the second signature and wrote the line: the row's host joins the list."""
+    from app.services import agent_permissions
+
+    try:
+        added = await agent_permissions.host_added(db, setup, request_id, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"added": added}
 
 
 @router.post("/relay/pairing-offers/{offer_id}/reveal")

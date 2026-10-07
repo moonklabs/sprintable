@@ -31,6 +31,9 @@ export interface PermissionRequest {
    *  null unless `answerable` (an unsalted hash of the input is carried no longer than its answer needs) */
   session_key: string | null;
   input_hash: string | null;
+  /** story #4580 AC2: a network question's second answer carries the host (the daemon's value from Claude's own hook text) */
+  stage?: 'ask' | 'confirm';
+  host?: string | null;
 }
 
 /** The line in the button place — one, in the spec's order: the window passed · the computer gone quiet · no paired phone · the phone. */

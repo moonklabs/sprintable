@@ -342,6 +342,10 @@ class AnswerApprovalPayload(_Payload):
     request_id: str = Field(min_length=1, max_length=128)
     decision: Literal["allow", "deny"]
     signed: str = Field(min_length=1, max_length=16384)  # the phone's signed blob, carried as is (B-2) — never made or changed here
+    # story #4580 AC2 B: a network question's second answer — the host the person saw (the row's own value); the daemon checks it
+    # against what it reported and what the phone signed
+    stage: Literal["confirm"] | None = None
+    host: str | None = Field(default=None, min_length=1, max_length=253)
 
 
 class StopSessionPayload(_Payload):
@@ -394,6 +398,8 @@ async def enqueue_command(
         .returning(DesktopSetup.relay_command_seq)
     )).scalar_one()
     body = parsed.model_dump(mode="json")
+    if kind == "answer_approval":  # story #4580: a first answer carries no stage · host (the same bytes as before)
+        body = {k: v for k, v in body.items() if not (k in ("stage", "host") and v is None)}
     cmd = DesktopCommand(
         id=uuid.uuid4(), setup_id=setup.id, device_seq=seq, kind=kind, session_key=body.get("session_key"), payload=body,
         idempotency_key=idempotency_key, requested_by=requested_by, state="queued",
