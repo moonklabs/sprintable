@@ -236,7 +236,7 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
           <p className="break-keep text-pretty text-sm text-foreground">{t('net.confirmBody')}</p>
           <p className="break-keep text-pretty text-xs text-muted-foreground">{t('net.confirmScope')}</p>
         </div>
-      ) : net === 'ask' ? (!asking ? null :
+      ) : net === 'ask' ? (!(asking && line === 'answerOnPhone') ? null : // Yuna 4987: no «press [허용…]» where no button can come (no word from the computer · no paired phone)
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-net">{t('net.askLine')}</p>
       ) : (
         <div className="rounded-md bg-muted/50 px-2 py-1.5">

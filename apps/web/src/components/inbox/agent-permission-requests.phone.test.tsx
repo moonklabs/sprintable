@@ -411,4 +411,20 @@ describe('[4604] the question\'s words only while it asks', () => {
     await render([net()]); // a browser: the request still asks (answered on the phone) — its words stay
     expect(askLine()?.textContent).toBe(ko.net.askLine);
   });
+
+  it('(Yuna 4987) pending, but no button can come — no word from the computer · no paired phone → no «press [허용…]» line, the card\'s own line says why', async () => {
+    for (const phone of [true, false]) {
+      for (const [over, says] of [
+        [{ device_reachable: false }, koMessages.agentPermissions.line.unknown],
+        [{ recipient_reason: 'no_paired_phone' }, koMessages.agentPermissions.line.noPairedPhone],
+      ] as const) {
+        await remount();
+        if (phone) installShell();
+        await render([net(over as Partial<PermissionRequest>)]);
+        expect(askLine(), JSON.stringify(over)).toBeNull(); // mutant: «asking» alone → the line stands with no button → RED
+        expect(container.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe(says);
+        __resetPhoneBridgeForTest();
+      }
+    }
+  });
 });
