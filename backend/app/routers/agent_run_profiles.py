@@ -35,6 +35,8 @@ class OneChange(BaseModel):
     runtime: str | None = None  # absent: as it is
     model: str | None  # null: the runtime's default
     effort: str | None
+    # story #4598 — «묻지 않고 일하기»: absent = as it is · a change of it is an org owner's only (the service: 403 owner_required)
+    unattended: bool | None = None
 
 
 class BulkChange(BaseModel):
@@ -42,6 +44,7 @@ class BulkChange(BaseModel):
     runtime: str = _KEEP
     model: str | None = _KEEP
     effort: str | None = _KEEP
+    unattended: bool | str = _KEEP  # story #4598 — a bool, or "keep" as the other fields
 
 
 def _keep(value: Any) -> Any:
@@ -103,9 +106,13 @@ async def put_many_profiles(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     person = await _person_session(db, auth, org_id)
+    if not isinstance(body.unattended, bool) and body.unattended != _KEEP:
+        raise HTTPException(status_code=422, detail={"code": "invalid_unattended"})
     views = await profiles.change(
         db, org_id=org_id, user_id=uuid.UUID(auth.user_id), updated_by=uuid.UUID(str(person.id)),
         agent_ids=body.agent_ids, runtime=_keep(body.runtime), model=_keep(body.model), effort=_keep(body.effort),
+        unattended=_keep(body.unattended),
+        actor_is_owner=await profiles.is_active_owner(db, org_id=org_id, user_id=uuid.UUID(auth.user_id)),
     )
     await db.commit()
     return {"profiles": views}
@@ -120,14 +127,17 @@ async def put_agent_profile(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     person = await _person_session(db, auth, org_id)
+    actor_is_owner = await profiles.is_active_owner(db, org_id=org_id, user_id=uuid.UUID(auth.user_id))
     views = await profiles.change(
         db, org_id=org_id, user_id=uuid.UUID(auth.user_id), updated_by=uuid.UUID(str(person.id)),
         agent_ids=[agent_id], runtime=profiles.KEEP if body.runtime is None else body.runtime,
         model=body.model, effort=body.effort,
+        unattended=profiles.KEEP if body.unattended is None else body.unattended, actor_is_owner=actor_is_owner,
     )
     await db.commit()
     view = views[0]
     view["can_change"] = True
+    view["can_change_unattended"] = actor_is_owner  # story #4598
     return view
 
 
