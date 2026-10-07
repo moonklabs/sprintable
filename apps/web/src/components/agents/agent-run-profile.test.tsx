@@ -207,6 +207,100 @@ describe('AgentRunProfileSection', () => {
   });
 });
 
+// story #4598 (contract 4598 v0.1 §1 · §4) — «묻지 않고 일하기»: one switch of the group, read by everyone, flipped by an org owner only
+// (`can_change_unattended`), saved with [저장]; only an owner's body carries it. Mutation: the switch enabled for a non-owner → RED.
+describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  const unattendedSwitch = () => container.querySelector<HTMLElement>('[data-testid="run-profile-unattended"] [role="switch"]')!;
+  // base-ui's Switch root says «disabled» by its attributes (not a <button>.disabled)
+  const isDisabled = (el: HTMLElement) => el.hasAttribute('data-disabled') || el.getAttribute('aria-disabled') === 'true' || (el as HTMLButtonElement).disabled === true;
+  const saveButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '저장') as HTMLButtonElement | undefined;
+  const tick = async () => { await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); }); };
+
+  async function render(profile: Record<string, unknown>) {
+    const puts: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/options')) return new Response(JSON.stringify({ data: OPTIONS }));
+      if (init?.method === 'PUT') {
+        puts.push(String(init.body));
+        return new Response(JSON.stringify({ data: { ...profile, ...JSON.parse(String(init.body)), version: 4 } }));
+      }
+      return new Response(JSON.stringify({ data: profile }));
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <AgentRunProfileSection agentId="a1" runtimeType="codex" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await tick();
+    return puts;
+  }
+  const base = { agent_id: 'a1', runtime: 'codex', model: 'gpt-6-sol', effort: 'ultra', version: 3, updated_at: null, can_change: true };
+
+  it('an owner: the switch is live · flipping it wakes [저장] · the body carries unattended · the row reads the saved value back', async () => {
+    const puts = await render({ ...base, unattended: false, can_change_unattended: true });
+    expect(container.textContent).toContain(koMessages.agents.runProfileUnattended);
+    expect(container.textContent).toContain(koMessages.agents.runProfileUnattendedHelp);
+    expect(container.textContent).not.toContain(koMessages.agents.runProfileUnattendedOwnerOnly);
+    const sw = unattendedSwitch();
+    expect(isDisabled(sw)).toBe(false);
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    expect(nameOf(sw)).toBe(koMessages.agents.runProfileUnattended);
+    expect(saveButton()!.disabled).toBe(true);
+    await act(async () => { sw.click(); });
+    expect(unattendedSwitch().getAttribute('aria-checked')).toBe('true');
+    expect(saveButton()!.disabled).toBe(false);
+    await act(async () => { saveButton()!.click(); });
+    await tick();
+    expect(JSON.parse(puts[0])).toEqual({ runtime: 'codex', model: 'gpt-6-sol', effort: 'ultra', unattended: true });
+    expect(unattendedSwitch().getAttribute('aria-checked')).toBe('true');
+    expect(saveButton()!.disabled).toBe(true);
+  });
+
+  it('an admin (may change model · effort, not the switch): the switch shows the value but is disabled · the owner-only line · a save carries no unattended', async () => {
+    const puts = await render({ ...base, unattended: true, can_change_unattended: false });
+    const sw = unattendedSwitch();
+    expect(isDisabled(sw)).toBe(true);
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    expect(container.textContent).toContain(koMessages.agents.runProfileUnattendedOwnerOnly);
+    // a model change by the admin: the body never carries the switch (absent = as it is on the server)
+    const trigger = [...container.querySelectorAll('button[aria-labelledby]')].find((b) => nameOf(b).startsWith('모델')) as HTMLElement;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent === 'gpt-5.5') as HTMLElement;
+    await act(async () => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { saveButton()!.click(); });
+    await tick();
+    expect(JSON.parse(puts[0])).toEqual({ runtime: 'codex', model: 'gpt-5.5', effort: null });
+  });
+
+  it('a reader (may change nothing) and an older server (no field): the switch is off and disabled', async () => {
+    await render({ ...base, can_change: false });
+    const sw = unattendedSwitch();
+    expect(isDisabled(sw)).toBe(true);
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    expect(saveButton()).toBeUndefined();
+  });
+});
+
 describe('AgentRunProfileBulkDialog', () => {
   let container: HTMLDivElement;
   let root: Root;

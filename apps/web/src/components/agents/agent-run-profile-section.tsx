@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Switch } from '@/components/ui/switch';
 import { fetchWithAuth } from '@/lib/db/client';
 import { EFFORT_LABEL_KEYS, SAVE_ERROR_KEYS, saveErrorKey, type RunProfile, type RunProfileOptions } from '@/lib/agent-run-profile';
 import { AgentRunProfileFields, draftBody, draftReady, initialDraft, type RunProfileDraft } from './agent-run-profile-fields';
@@ -32,6 +33,8 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
   const [options, setOptions] = useState<RunProfileOptions | null>(null);
   const [profile, setProfile] = useState<RunProfile | null>(null);
   const [draft, setDraft] = useState<RunProfileDraft | null>(null);
+  // story #4598 — «묻지 않고 일하기»: its own draft beside the fields' (the fields are shared with the bulk dialog, this switch is not)
+  const [unattendedDraft, setUnattendedDraft] = useState(false);
   const [saving, setSaving] = useState(false);
   const [line, setLine] = useState<{ kind: 'saved' | 'error' | 'removed'; key: string; host?: string } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -48,6 +51,7 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
     setOptions(opts);
     setProfile(data);
     setDraft(initialDraft(opts, data));
+    setUnattendedDraft(data.unattended === true);
   }, [agentId]);
 
   useEffect(() => {
@@ -75,12 +79,18 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
       const res = await fetchWithAuth(`/api/agents/${agentId}/run-profile`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ runtime: body.runtime, model: body.model, effort: body.effort }),
+        // story #4598 — the switch rides with the fields; only an owner's body carries it (anyone else: absent = as it is, so a
+        // model · effort save by an admin is never refused for a switch they could not touch)
+        body: JSON.stringify({
+          runtime: body.runtime, model: body.model, effort: body.effort,
+          ...(profile.can_change_unattended ? { unattended: unattendedDraft } : {}),
+        }),
       });
       if (res.ok) {
         const data = ((await res.json()) as { data: RunProfile }).data;
         setProfile(data);
         setDraft(initialDraft(options, data));
+        setUnattendedDraft(data.unattended === true);
         setLine({ kind: 'saved', key: '' });
       } else {
         const json = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
@@ -93,7 +103,9 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
     }
   };
 
-  const unchanged = JSON.stringify(draftBody(draft)) === JSON.stringify(draftBody(initialDraft(options, profile)));
+  const unchanged = JSON.stringify(draftBody(draft)) === JSON.stringify(draftBody(initialDraft(options, profile)))
+    && unattendedDraft === (profile.unattended === true);
+  const canFlipUnattended = profile.can_change_unattended === true;
 
   // story #4580 (Yuna ④ · 배치 ③): [빼기] — no confirmation (it only narrows), applies at once; the list is read again after it
   const remove = async (host: string) => {
@@ -146,6 +158,22 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
             </dd>
           </dl>
         )}
+        {/* story #4598 — «묻지 않고 일하기»: one row of the group, read by everyone, flipped by an org owner only (the server's rule
+            `can_change_unattended`). Saved with [저장] like model · effort — used from the next start. Copy = Yuna's (placeholder
+            until her words land). */}
+        <div className="grid gap-1.5 sm:grid-cols-[8rem_1fr] sm:items-start" data-testid="run-profile-unattended">
+          <span id="run-profile-unattended-label" className="text-sm text-muted-foreground sm:pt-0.5">{ta('runProfileUnattended')}</span>
+          <div className="space-y-1">
+            <Switch
+              checked={unattendedDraft}
+              disabled={saving || !canFlipUnattended}
+              aria-labelledby="run-profile-unattended-label"
+              onCheckedChange={(on) => { setUnattendedDraft(on); setLine(null); }}
+            />
+            <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileUnattendedHelp')}</p>
+            {canFlipUnattended ? null : <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileUnattendedOwnerOnly')}</p>}
+          </div>
+        </div>
         {/* story #4580 (배치 ③): «허용 주소» — one more row of the group; [빼기] only for whoever may change it */}
         <dl className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]" data-testid="run-profile-allowed-hosts">
           <dt className="text-muted-foreground">{ta('runProfileAllowedHosts')}</dt>

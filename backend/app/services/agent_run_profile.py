@@ -24,6 +24,7 @@ from app.dependencies.ownership import assert_agent_owner_mutable
 from app.models.agent_allowed_host import AgentAllowedHost
 from app.models.agent_run_profile import AgentRunProfile
 from app.models.member import Member
+from app.models.project import OrgMember
 
 # the runtimes a desktop agent can have, and the name the daemon knows each by (desktop_setup.RUNTIME_TYPES, the other way)
 DESKTOP_RUNTIMES = {"claude-code": "claude", "codex": "codex"}
@@ -127,7 +128,21 @@ def _view(member: Member, profile: AgentRunProfile | None) -> dict:
         "effort": profile.effort if profile else None,
         "version": profile.version if profile else 0,
         "updated_at": _iso(profile.updated_at) if profile else None,
+        # story #4598 — «묻지 않고 일하기» (no row = off, as the column default)
+        "unattended": bool(profile.unattended) if profile else False,
     }
+
+
+async def is_active_owner(db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    """story #4598 (contract v0.1 §1 · PO: «org owner + is_active만») — who may flip «묻지 않고 일하기»: an owner of the org
+    (`OrgMember.role == "owner"`, the remote-control gate's rule) whose member row is active. The run profile's other fields keep
+    their own rule (`may_change`: creator · owner/admin) — this one is narrower on purpose: it turns a person's questions off."""
+    row = (await db.execute(
+        select(OrgMember.role, Member.is_active)
+        .outerjoin(Member, Member.id == OrgMember.id)
+        .where(OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+    )).first()
+    return row is not None and row[0] == "owner" and row[1] is not False
 
 
 async def _agent(db: AsyncSession, *, org_id: uuid.UUID, agent_id: uuid.UUID) -> Member:
@@ -179,6 +194,7 @@ async def read_for_person(db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.
     member = await _agent(db, org_id=org_id, agent_id=agent_id)
     view = _view(member, await _profile(db, member.id))
     view["can_change"] = await may_change(db, org_id=org_id, user_id=user_id, agent_id=agent_id)
+    view["can_change_unattended"] = await is_active_owner(db, org_id=org_id, user_id=user_id)  # story #4598
     # story #4580: the «허용 주소» list (web «실행» group · Yuna ④) — who added it stays on the server
     view["allowed_hosts"] = [{"host": h.host, "added_at": _iso(h.added_at)} for h in await allowed_hosts(db, member.id)]
     return view
@@ -203,6 +219,8 @@ async def read_for_daemon(db: AsyncSession, *, member: Member) -> dict:
         # story #4580: the hosts this agent may connect to without asking — the daemon writes them as its folder's
         # `WebFetch(domain:<host>)` lines (and takes out the ones it wrote that are gone from here)
         "allowed_hosts": [h.host for h in await allowed_hosts(db, member.id)],
+        # story #4598: on → the daemon starts the next session in the CLI's bypass mode (contract v0.1 §2)
+        "unattended": bool(profile.unattended) if profile else False,
     }
 
 
@@ -290,15 +308,16 @@ async def remove_allowed_host(
 
 async def _save(
     db: AsyncSession, *, member_id: uuid.UUID, model: str | None, effort: str | None, updated_by: uuid.UUID | None,
+    unattended: bool = False,
 ) -> None:
     now = datetime.now(timezone.utc)
     stmt = pg_insert(AgentRunProfile).values(
-        member_id=member_id, model=model, effort=effort, version=1, updated_by=updated_by, updated_at=now,
+        member_id=member_id, model=model, effort=effort, unattended=unattended, version=1, updated_by=updated_by, updated_at=now,
     )
     version = (await db.execute(stmt.on_conflict_do_update(
         index_elements=[AgentRunProfile.member_id],
         set_={
-            "model": model, "effort": effort, "version": AgentRunProfile.version + 1,
+            "model": model, "effort": effort, "unattended": unattended, "version": AgentRunProfile.version + 1,
             "updated_by": updated_by, "updated_at": now,
         },
     ).returning(AgentRunProfile.version))).scalar_one()
@@ -307,8 +326,13 @@ async def _save(
 
 async def on_runtime_changed(db: AsyncSession, *, member_id: uuid.UUID, updated_by: uuid.UUID | None) -> None:
     """The runtime changed somewhere else (the team-members PATCH): the two CLIs name their values differently, so model and
-    effort go back to the defaults and the version moves on — a Codex model must not ride along into a Claude start."""
-    await _save(db, member_id=member_id, model=None, effort=None, updated_by=updated_by)
+    effort go back to the defaults and the version moves on — a Codex model must not ride along into a Claude start.
+    story #4598: «묻지 않고 일하기» is not a runtime's word — it stays as it is."""
+    current = await _profile(db, member_id)
+    await _save(
+        db, member_id=member_id, model=None, effort=None, updated_by=updated_by,
+        unattended=bool(current.unattended) if current else False,
+    )
 
 
 async def change(
@@ -321,21 +345,35 @@ async def change(
     runtime: Any,
     model: Any,
     effort: Any,
+    unattended: Any = KEEP,
+    actor_is_owner: bool = False,
 ) -> list[dict]:
     """One agent or many — all or nothing (§3): every agent is checked (rights, then the saved result) before anything is
-    written. `KEEP` leaves a field as it is; None means the runtime's default."""
+    written. `KEEP` leaves a field as it is; None means the runtime's default.
+
+    story #4598: `unattended` (a bool, or KEEP) — a change of it is an org owner's only (`actor_is_owner` = `is_active_owner`):
+    anyone else changing it gets 403 `owner_required` and nothing of the body is written, even its model · effort (all or
+    nothing). The current value sent again is not a change of it. The same value moves no version."""
     if not agent_ids or len(agent_ids) > BULK_MAX:
         raise _reject(422, "invalid_agent_ids")
+    if unattended is not KEEP and not isinstance(unattended, bool):
+        raise _reject(422, "invalid_unattended")
     ids = list(dict.fromkeys(agent_ids))
     for agent_id in ids:  # rights first — 404 · 403 · 409 SYSTEM_PUBLISHER_RESERVED, nothing written
         await assert_agent_owner_mutable(agent_id, db, org_id, user_id)
     members = [await _agent(db, org_id=org_id, agent_id=agent_id) for agent_id in ids]
     profiles = {m.id: await _profile(db, m.id) for m in members}
 
+    if unattended is not KEEP and not actor_is_owner:
+        for member in members:  # story #4598: the switch is an owner's — before the plan, before any write
+            current = profiles[member.id]
+            if unattended != (bool(current.unattended) if current else False):
+                raise _reject(403, "owner_required")
+
     if runtime is KEEP and (model is not KEEP or effort is not KEEP) and len({m.runtime_type for m in members}) > 1:
         raise _reject(422, "mixed_runtime")  # model · effort only among the same runtime (the names differ)
 
-    plan: list[tuple[Member, str, str | None, str | None]] = []
+    plan: list[tuple[Member, str, str | None, str | None, bool]] = []
     for member in members:
         current = profiles[member.id]
         new_runtime = member.runtime_type if runtime is KEEP else runtime
@@ -344,21 +382,23 @@ async def change(
         base_effort = None if runtime_changed or current is None else current.effort
         new_model = base_model if model is KEEP else model
         new_effort = base_effort if effort is KEEP else effort
+        new_unattended = (bool(current.unattended) if current else False) if unattended is KEEP else unattended
         check(new_runtime, new_model, new_effort)
-        plan.append((member, new_runtime, new_model, new_effort))
+        plan.append((member, new_runtime, new_model, new_effort, new_unattended))
 
-    for member, new_runtime, new_model, new_effort in plan:
+    for member, new_runtime, new_model, new_effort, new_unattended in plan:
         current = profiles[member.id]
         unchanged = (
             new_runtime == member.runtime_type
             and new_model == (current.model if current else None)
             and new_effort == (current.effort if current else None)
+            and new_unattended == (bool(current.unattended) if current else False)
         )
         if unchanged:
             continue  # the same PUT again moves no version (nothing to restart for)
         if new_runtime != member.runtime_type:
             member.runtime_type = new_runtime
-        await _save(db, member_id=member.id, model=new_model, effort=new_effort, updated_by=updated_by)
+        await _save(db, member_id=member.id, model=new_model, effort=new_effort, updated_by=updated_by, unattended=new_unattended)
     await db.flush()
 
     views = []
