@@ -355,3 +355,76 @@ describe('[4580 AC2 F2] the host could not be read', () => {
     }
   });
 });
+
+// story #4604 (Yuna · 4596 AC4 run 13b · PO 20:06Z): the question's own words stand only while it asks — an answered · expired ·
+// withdrawn card keeps its tool name and result line, never «[허용…]을 누르세요» or «{host}에 연결하려고 해요» with no button under it
+describe('[4604] the question\'s words only while it asks', () => {
+  const net = (over: Partial<PermissionRequest> = {}) => req({ tool: 'SandboxNetwork', runtime: 'claude', summary: 'network', stage: 'ask', host: null, ...over });
+  const askLine = () => container.querySelector('[data-testid="agent-permission-net"]');
+  const confirmBody = () => container.querySelector('[data-testid="agent-permission-net-confirm"]');
+  const ko = koMessages.agentPermissions;
+  const remount = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
+
+  it('the first card: the line while it asks → [거부] → only the tool and «거부됨 · …» (the D1 capture) · a press that comes back (cancelled) brings the buttons and the line back', async () => {
+    installShell();
+    await render([net()]);
+    expect(askLine()?.textContent).toBe(ko.net.askLine);
+    await press('거부');
+    expect(phoneLines()).toEqual(['거부됨 · SandboxNetwork']);
+    expect(buttons()).toEqual([]);
+    expect(askLine()).toBeNull(); // mutant: the line drawn whatever the answer → RED
+    expect(container.querySelector('[data-testid="agent-permission-tool"]')?.textContent).toBe('SandboxNetwork');
+    // not confirmed on the OS prompt: the request still asks — its buttons and its words are back
+    await remount();
+    signAnswer = { ok: false, code: 'cancelled' };
+    await render([net()]);
+    await press('거부');
+    expect(buttons()).toEqual(['허용…', '거부']);
+    expect(askLine()?.textContent).toBe(ko.net.askLine);
+  });
+
+  it('the second card: «{host}에 연결하려고 해요» while it asks → [허용하지 않기] → only «허용하지 않았어요»', async () => {
+    installShell();
+    await render([net({ stage: 'confirm', host: 'gitlab.com' })]);
+    expect(confirmBody()?.textContent).toContain('gitlab.com');
+    await press('허용하지 않기');
+    expect(phoneLines()).toEqual(['허용하지 않았어요']);
+    expect(confirmBody()).toBeNull(); // mutant: the body drawn whatever the answer → RED
+  });
+
+  it('an expired card · a withdrawn one (host unread) — kept an hour — carry no line and no body, in the phone app and in a browser; a pending one in a browser keeps its line', async () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    for (const phone of [true, false]) {
+      await remount();
+      if (phone) installShell();
+      await render([
+        net({ id: 'e1', state: 'expired', expires_at: past }),
+        net({ id: 'w1', request_id: 'q2', state: 'withdrawn', host_unread: true, answerable: false }),
+        net({ id: 'c1', request_id: 'q3', stage: 'confirm', host: 'gitlab.com', state: 'expired', expires_at: past }),
+      ]);
+      expect(container.querySelectorAll('[data-testid="agent-permission-card"]').length).toBe(3);
+      expect(askLine()).toBeNull();
+      expect(confirmBody()).toBeNull();
+      __resetPhoneBridgeForTest();
+    }
+    await remount();
+    await render([net()]); // a browser: the request still asks (answered on the phone) — its words stay
+    expect(askLine()?.textContent).toBe(ko.net.askLine);
+  });
+
+  it('(Yuna 4987) pending, but no button can come — no word from the computer · no paired phone → no «press [허용…]» line, the card\'s own line says why', async () => {
+    for (const phone of [true, false]) {
+      for (const [over, says] of [
+        [{ device_reachable: false }, koMessages.agentPermissions.line.unknown],
+        [{ recipient_reason: 'no_paired_phone' }, koMessages.agentPermissions.line.noPairedPhone],
+      ] as const) {
+        await remount();
+        if (phone) installShell();
+        await render([net(over as Partial<PermissionRequest>)]);
+        expect(askLine(), JSON.stringify(over)).toBeNull(); // mutant: «asking» alone → the line stands with no button → RED
+        expect(container.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe(says);
+        __resetPhoneBridgeForTest();
+      }
+    }
+  });
+});

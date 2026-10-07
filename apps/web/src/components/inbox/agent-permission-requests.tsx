@@ -211,6 +211,10 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
   const answersHere = phone && (answer !== null || (line === 'answerOnPhone' && r.state === 'pending' && r.answerable));
   // story #4580 AC2 (Yuna «4580 AC2» ① ② · 배치 ① ②): the network question — first with no host, then its second state with the host
   const net = r.tool === SANDBOX_NET_TOOL && r.runtime === 'claude' ? (r.stage === 'confirm' && r.host ? 'confirm' : 'ask') : null;
+  // story #4604 (Yuna · 4596 AC4 run 13b): the question's own words — «press [Allow…]» · «{host}에 연결하려고 해요» — only while it
+  // still asks (the waiting chip's rule): an answered · expired · withdrawn card keeps the tool name and its result line, never an
+  // instruction with no button under it. A press that came back (cancelled · failed) brings the buttons back, and the words with them
+  const asking = stillWaiting(r, answer);
   return (
     <Card className="flex flex-col gap-1.5 px-4 py-3" data-testid="agent-permission-card">
       <div className="flex w-full flex-wrap items-center gap-1.5">
@@ -219,20 +223,20 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
         ) : (
           <Badge variant="chip">{t('chip')}</Badge>
         )}
-        {line === 'unknown' || !stillWaiting(r, answer) ? null : (
+        {line === 'unknown' || !asking ? null : (
           <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-waited">{t('waited', { n: waitedMinutes(r, now) })}</span>
         )}
       </div>
       <p className="text-sm text-foreground">{agentOnDevice(r.agent_name, r.device_name)}</p>
       {r.role ? <p className="text-xs text-muted-foreground">{t('role', { role: r.role })}</p> : null}
       <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
-      {net === 'confirm' ? (
+      {net === 'confirm' ? (!asking ? null :
         <div className="space-y-1" data-testid="agent-permission-net-confirm">
           <p className="break-keep text-sm font-medium text-foreground [overflow-wrap:anywhere]">{t('net.confirmTitle', { host: r.host ?? '' })}</p>
           <p className="break-keep text-pretty text-sm text-foreground">{t('net.confirmBody')}</p>
           <p className="break-keep text-pretty text-xs text-muted-foreground">{t('net.confirmScope')}</p>
         </div>
-      ) : net === 'ask' ? (
+      ) : net === 'ask' ? (!(asking && line === 'answerOnPhone') ? null : // Yuna 4987: no «press [허용…]» where no button can come (no word from the computer · no paired phone)
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-net">{t('net.askLine')}</p>
       ) : (
         <div className="rounded-md bg-muted/50 px-2 py-1.5">
