@@ -5161,6 +5161,7 @@
         "alreadyStopped": "It had already stopped",
         "stopUnreachable": "Lost the connection to that computer, so it wasn't stopped",
         "stopSystemWait": "macOS is asking on that computer's screen whether to use a folder, so it couldn't be stopped — only [End session] works right now. Answer the prompt at that computer and the agent carries on",
+        "endNotHeld": "The macOS prompt was answered on that computer in the meantime, so it's working again — the session wasn't ended",
         "stopUnknown": "Couldn't confirm whether it stopped — it may already have stopped",
         "sentNow": "Sent · it went into the current turn",
         "sentAfterStep": "Sent — it goes in as soon as the agent finishes its current step",

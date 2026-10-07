@@ -176,6 +176,28 @@ describe('[4534] the strip inside the phone app', () => {
     expect(JSON.parse(post.init!.body as string)).not.toHaveProperty('text');
   });
 
+  it('story #4599 (Yuna · PO 19:47Z): [세션 끝내기] confirmed after the window was answered on that Mac → the shell says not_held → «세션은 끝내지 않았어요» — never «다시 눌러 주세요» (that would press [멈춤] on a working turn) · nothing posted', async () => {
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'documents' } };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: false, code: 'not_held' });
+    await render();
+    await press(ko.button.endSession);
+    const confirm = document.querySelector('[data-testid="agent-end-confirm"]') as HTMLButtonElement;
+    await act(async () => { confirm.click(); });
+    await settle();
+    expect(commandLine()?.textContent).toBe(ko.command.endNotHeld);
+    expect(commandLine()?.textContent).not.toBe(ko.command.stop.failed);
+    expect(calls.some((c) => c.init?.method === 'POST')).toBe(false);
+    // en
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render('en');
+    await press(enMessages.chats.agentSession.button.endSession);
+    await act(async () => { (document.querySelector('[data-testid="agent-end-confirm"]') as HTMLButtonElement).click(); });
+    await settle();
+    expect(commandLine()?.textContent).toBe(enMessages.chats.agentSession.command.endNotHeld);
+  });
+
   it('story #4599 (PO 14:18Z): [멈춤] pressed just before the window came up — the server\'s closed reason → its own line, nothing as a message', async () => {
     const calls = server(res(409, { error: { code: 'system_wait_end_only' } }));
     phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' });

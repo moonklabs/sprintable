@@ -84,6 +84,15 @@ describe('[4534] commandOnPhone — what the web asks and posts', () => {
     expect(d.sent).toEqual([]);
   });
 
+  // story #4599 (Yuna · PO 19:47Z): the shell signs no end when the window was answered on that Mac first (phoneCalls.js `not_held`)
+  it('an end the shell refuses `not_held` (the window was answered on that Mac first) → its own outcome — never failed, nothing posted', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }));
+    const d = deps({ id: 'w', ok: false, code: 'not_held' } as PhoneAnswer);
+    await expect(commandOnPhone({ agentId: AGENT, kind: 'end_session' }, d)).resolves.toEqual({ kind: 'not_held' }); // mutant: the code unknown → failed → RED
+    expect(calls).toEqual([]);
+    expect(d.sent).toEqual([]);
+  });
+
   it('a shell answer missing what must be posted → failed, nothing posted', async () => {
     for (const a of [{ ...signedPrompt, session_key: undefined }, { ...signedPrompt, text: undefined }, { ...signedPrompt, signed: undefined }]) {
       const calls = server(json(201, {}));
