@@ -7054,8 +7054,8 @@
       "notAllowed": "허용하지 않았어요"
     },
     "chipUnknown": "상태 모름",
-    "waited": "{unit, select, m {{n}분째 기다림} h {{n}시간째 기다림} other {{n}일째 기다림}}",
-    "asked": "{unit, select, m {{n, plural, =0 {방금 물음} other {{n}분 전에 물음}}} h {{n}시간 전에 물음} other {{n}일 전에 물음}}",
+    "waited": "{unit, select, s {방금 물음} m {{n}분째 기다림} h {{n}시간째 기다림} other {{n}일째 기다림}}",
+    "asked": "{unit, select, s {방금 물음} m {{n}분 전에 물음} h {{n}시간 전에 물음} other {{n}일 전에 물음}}",
     "role": "{role} 역할로 받은 요청이에요",
     "maskedNote": "비밀처럼 보이는 값은 가려서 보냈어요",
     "truncatedNote": "앞 200자만 보여요",

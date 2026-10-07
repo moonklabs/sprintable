@@ -482,38 +482,49 @@ describe('[4610] when each card was asked', () => {
   });
 });
 
-// story #4610 (PO 21:4xZ · «684분째»): both chips count in steps — minutes under an hour, hours under a day, days after (copy: Yuna
-// `time-words.md`, placeholders until then)
-describe('[4610] time in steps', () => {
-  const remount = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
-  const at = (min: number) => new Date(Date.now() - min * 60_000 - 5_000).toISOString();
-  const past = () => new Date(Date.now() - 60_000).toISOString();
-  const text = (id: string) => container.querySelector(`[data-testid="agent-permission-${id}"]`)?.textContent ?? null;
 
-  it('elapsedStep at each boundary — 0 · 59 · 60 · 1439 · 1440', async () => {
-    const { elapsedStep } = await import('@/lib/agent-permissions');
-    expect([0, 59, 60, 119, 1439, 1440, 2 * 1440 + 5].map(elapsedStep)).toEqual([
-      { unit: 'm', n: 0 }, { unit: 'm', n: 59 }, { unit: 'h', n: 1 }, { unit: 'h', n: 1 },
-      { unit: 'h', n: 23 }, { unit: 'd', n: 1 }, { unit: 'd', n: 2 },
-    ]); // mutant: an off-by-one boundary (≤ 60 · ≤ 1440) → RED
+// story #4610 (Yuna `time-words.md` · the board's relativeTime steps): both chips say the age in one unit — «방금» under 60 s, then whole
+// minutes · hours · days, rounded down. The nine rows of §3 are the expected values, the bounds exactly.
+describe('[4610] time in steps (Yuna time-words.md §3)', () => {
+  const S = 1000, M = 60 * S, H = 60 * M, D = 24 * H;
+  // [age ms, ko waited, en waited, ko asked, en asked]
+  const ROWS: Array<[number, string, string, string, string]> = [
+    [5 * S, '방금 물음', 'Asked just now', '방금 물음', 'Asked just now'],
+    [59 * S, '방금 물음', 'Asked just now', '방금 물음', 'Asked just now'],
+    [1 * M, '1분째 기다림', 'Waiting 1 min', '1분 전에 물음', 'Asked 1 min ago'],
+    [59 * M + 59 * S, '59분째 기다림', 'Waiting 59 min', '59분 전에 물음', 'Asked 59 min ago'],
+    [1 * H, '1시간째 기다림', 'Waiting 1 h', '1시간 전에 물음', 'Asked 1 h ago'],
+    [11 * H + 24 * M, '11시간째 기다림', 'Waiting 11 h', '11시간 전에 물음', 'Asked 11 h ago'], // run 13's «684분째»
+    [23 * H + 59 * M, '23시간째 기다림', 'Waiting 23 h', '23시간 전에 물음', 'Asked 23 h ago'],
+    [24 * H, '1일째 기다림', 'Waiting 1 d', '1일 전에 물음', 'Asked 1 d ago'],
+    [3 * D + 5 * H, '3일째 기다림', 'Waiting 3 d', '3일 전에 물음', 'Asked 3 d ago'],
+  ];
+
+  it('each row, at its exact age: ageParts → the ko · en copy of both keys (the real message files, parsed)', async () => {
+    const { ageParts } = await import('@/lib/agent-permissions');
+    const { createTranslator } = await import('next-intl');
+    type T = (k: string, v?: Record<string, string | number>) => string;
+    const ko = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'agentPermissions' }) as unknown as T;
+    const en = createTranslator({ locale: 'en', messages: enMessages, namespace: 'agentPermissions' }) as unknown as T;
+    for (const [ms, koW, enW, koA, enA] of ROWS) {
+      const p = ageParts(ms);
+      // mutant: a bound off by one (≤ 60 s · ≤ 60 min · ≤ 24 h) or minutes only → a row RED
+      expect([ko('waited', p), en('waited', p), ko('asked', p), en('asked', p)], `${ms} ms`).toEqual([koW, enW, koA, enA]);
+    }
+    expect(ageParts(-5 * S)).toEqual({ unit: 's', n: 0 }); // a clock a little behind the server's: never a negative age
   });
 
-  it('the waiting chip and the asked line in each step · ko and en', async () => {
-    const cases: Array<[number, string, string, string, string]> = [
-      // minutes · ko waited · ko asked · en waited · en asked
-      [59, '59분째 기다림', '59분 전에 물음', 'Waiting 59 min', 'Asked 59 min ago'],
-      [60, '1시간째 기다림', '1시간 전에 물음', 'Waiting 1 hour', 'Asked 1 hour ago'],
-      [684, '11시간째 기다림', '11시간 전에 물음', 'Waiting 11 hours', 'Asked 11 hours ago'], // was «684분째»
-      [1440, '1일째 기다림', '1일 전에 물음', 'Waiting 1 day', 'Asked 1 day ago'],
-      [3 * 1440, '3일째 기다림', '3일 전에 물음', 'Waiting 3 days', 'Asked 3 days ago'],
-    ];
-    for (const [min, koW, koA, enW, enA] of cases) {
+  it('on the card: a waiting chip and an asked line of the same age (away from the bounds) · ko and en', async () => {
+    const remount = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
+    const text = (id: string) => container.querySelector(`[data-testid="agent-permission-${id}"]`)?.textContent ?? null;
+    const past = new Date(Date.now() - 60_000).toISOString();
+    for (const [ms, koW, enW, koA, enA] of [ROWS[0], ROWS[5], ROWS[8]]) {
       for (const [locale, w, a] of [['ko', koW, koA], ['en', enW, enA]] as const) {
         await remount();
-        // one still waiting (its chip) · one expired (its asked line), the same age
-        await render([req({ id: 'p', created_at: at(min), expires_at: new Date(Date.now() + 30 * 60_000).toISOString() }),
-          req({ id: 'e', request_id: 'q2', created_at: at(min), state: 'expired', expires_at: past() })], locale);
-        expect([text('waited'), text('asked')], `${min} ${locale}`).toEqual([w, a]); // mutant: minutes only → «684분째» → RED
+        const created = new Date(Date.now() - ms).toISOString();
+        await render([req({ id: 'p', created_at: created, expires_at: new Date(Date.now() + 30 * 60_000).toISOString() }),
+          req({ id: 'e', request_id: 'q2', created_at: created, state: 'expired', expires_at: past })], locale);
+        expect([text('waited'), text('asked')], `${ms} ${locale}`).toEqual([w, a]);
       }
     }
   });
