@@ -258,7 +258,7 @@ describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)',
     return puts;
   }
   const base = { agent_id: 'a1', runtime: 'claude-code', model: 'opus', effort: 'high', version: 3, updated_at: null, can_change: true };
-  const ag = koMessages.agents as Record<string, string>;
+  const ag = koMessages.agents as unknown as Record<string, string>; // the agents block carries nested objects since 4976; only its string leaves are read here
 
   it('an owner of a Claude Code agent: the switch (named «묻지 않고 일하기») + the why · flipping it wakes [저장] · the body carries unattended · reads back', async () => {
     const puts = await render({ ...base, unattended: false, can_change_unattended: true });
