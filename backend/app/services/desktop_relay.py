@@ -424,6 +424,12 @@ async def device_sessions_view(
         **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
         # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))
         "instruct_now": None if silent else r.instruct_now,
+        # story #4543 (PO 21:12Z): when the session began and ended — the crew's daily ledger reads app coverage from these. Facts, not
+        # the live state, so shown for a silent device too. created_at = the server's first row for the key; ended_at = the device's
+        # `at` of its stopped report, or the server's time when a snapshot dropped the key; null while live (a stopped key reported
+        # live again clears it)
+        "created_at": r.created_at.isoformat(),
+        "ended_at": r.ended_at.isoformat() if r.ended_at else None,
     } for r in rows]
 
 
