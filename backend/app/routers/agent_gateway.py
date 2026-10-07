@@ -461,6 +461,53 @@ def _access_revoked_frame(reason: str) -> str:
     return f"event: access_revoked\ndata: {json.dumps({'reason': reason})}\n\n"
 
 
+# story #4605 (PO 21:03Z (가)): one event frame's data is bounded here — the one place every row and push leaves through. The desktop
+# daemon ends its connection on a frame past 1 MiB (story 4550 · its SSE_FRAME_MAX_CHARS) and skips that event; a chat message is
+# capped on write (128 KiB) but a dispatch carries a whole doc · story description, an event payload or an `event_context` any
+# caller sends has no bound of its own. Half the daemon's limit leaves room for the envelope. Written without \u-escapes (Hangul
+# 3 bytes, not 6 · an emoji 4, not 12).
+AGENT_FRAME_MAX_BYTES = 512 * 1024
+# a string kept whole in a cut frame — longer ones are cut to this and marked
+_FRAME_STR_KEEP_BYTES = 8 * 1024
+FRAME_CUT_NOTE = " … [truncated — read the full text through the API]"
+
+
+def _cut_strings(value: object) -> object:
+    if isinstance(value, str):
+        raw = value.encode("utf-8")
+        if len(raw) <= _FRAME_STR_KEEP_BYTES:
+            return value
+        return raw[:_FRAME_STR_KEEP_BYTES].decode("utf-8", errors="ignore") + FRAME_CUT_NOTE
+    if isinstance(value, dict):
+        return {k: _cut_strings(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_cut_strings(v) for v in value]
+    return value
+
+
+def _dumps(o: object) -> tuple[str, int]:
+    """JSON without \\u-escapes and its UTF-8 size — a lone surrogate (never storable, only in a pushed dict) keeps the escaped form"""
+    s = json.dumps(o, ensure_ascii=False)
+    try:
+        return s, len(s.encode("utf-8"))
+    except UnicodeEncodeError:
+        s = json.dumps(o)
+        return s, len(s)
+
+
+def _frame_data(data: dict) -> str:
+    """the frame's `data:` — whole when it fits; else every long string cut (`truncated: true` · the full text stays readable through
+    the API by its ids); else, when even that does not fit (a huge list or dict of short strings), the frame's own short fields only."""
+    whole, size = _dumps(data)
+    if size <= AGENT_FRAME_MAX_BYTES:
+        return whole
+    cut, size = _dumps({**_cut_strings(data), "truncated": True})  # type: ignore[dict-item]
+    if size <= AGENT_FRAME_MAX_BYTES:
+        return cut
+    short = {k: v for k, v in data.items() if v is None or isinstance(v, (bool, int, float)) or (isinstance(v, str) and len(v) <= 256)}
+    return _dumps({**short, "truncated": True})[0]
+
+
 async def _stream_access_revoked(api_key_id: object, agent_id: uuid.UUID) -> str | None:
     """story #4434 (Qadir 4847 ④ · PO) — is this open stream still allowed? The key and the agent are checked when the stream
     connects; a desktop setup disconnected afterwards (keys revoked · its agents stopped) must also end a stream that is already
@@ -811,7 +858,7 @@ async def agent_stream(
                         if gseq not in _sent_unacked:
                             _sent_unacked.add(gseq)
                             data = _row_to_payload(row)
-                            _sse = json.dumps({**data, "is_backfill": is_backfill})
+                            _sse = _frame_data({**data, "is_backfill": is_backfill})
                             # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
                             yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
                     await _presence_tick_if_due()  # between batches too (PO 01:28Z) — a long catch-up keeps presence / lease fresh
@@ -908,7 +955,7 @@ async def agent_stream(
                             yield _access_revoked_frame(_revoked)
                             return
                         event_type = signal.get("event_type", "message")
-                        _sse = json.dumps({**signal, "is_backfill": False})
+                        _sse = _frame_data({**signal, "is_backfill": False})
                         yield f"event: {event_type}\ndata: {_sse}\n\n"
                 finally:
                     for t in (get_task, shutdown_task):

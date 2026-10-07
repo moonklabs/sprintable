@@ -21,9 +21,14 @@ from app.models.conversation import MESSAGE_CONTENT_MAX_BYTES, ConversationMessa
 LIMIT = MESSAGE_CONTENT_MAX_BYTES
 
 
-def test_the_bound_is_256_kib_well_under_the_daemon_frame_limit():
-    assert LIMIT == 256 * 1024
-    assert LIMIT * 3 < 1024 * 1024  # room for the event envelope, escaping and the stream's own framing
+def test_the_bound_is_128_kib_and_a_message_frame_fits_the_stream_bound_whole():
+    from app.routers.agent_gateway import AGENT_FRAME_MAX_BYTES
+
+    assert LIMIT == 128 * 1024
+    # PO 21:03Z (가): a message at the bound goes down the agent stream whole — twice (payload · top-level), each with up to 24k
+    # characters of attachment text appended (attachment_context · 3 bytes each at most), and the envelope — under the stream's frame
+    # bound, itself half the daemon's 1 MiB
+    assert 2 * (LIMIT + 3 * 24_000) + 16 * 1024 < AGENT_FRAME_MAX_BYTES <= 512 * 1024
 
 
 @pytest.mark.parametrize("content", ["a" * LIMIT, "가" * (LIMIT // 3), "", "hello"], ids=["ascii-at-limit", "hangul-under", "empty", "short"])
@@ -182,3 +187,64 @@ def test_the_guard_sees_what_it_guards():
     upd = "update(ConversationMessage)\n  .where(x)\n  .values(content='y')\n)"
     m = re.search(r"update\(\s*ConversationMessage\s*\)(.*?)\)\s*\)", upd, re.DOTALL)
     assert m and re.search(r"\bcontent\s*=", m.group(1))
+
+
+# ── PO 21:03Z (가): the agent stream's frame bound — what is not a message (a dispatch's doc · an event payload · event_context) ──
+
+def _gw():
+    from app.routers import agent_gateway
+
+    return agent_gateway
+
+
+def test_a_frame_is_written_without_u_escapes_hangul_three_bytes_not_six():
+    gw = _gw()
+    data = {"event_id": "e1", "content": "안녕 👋", "payload": {"content": "안녕 👋"}}
+    out = gw._frame_data(data)
+    assert out == json.dumps(data, ensure_ascii=False) and "\\u" not in out  # mutant: ensure_ascii left on → RED
+    assert json.loads(out) == data
+
+
+def test_a_message_at_the_bound_goes_down_whole():
+    gw = _gw()
+    body = "가" * (LIMIT // 3)
+    out = gw._frame_data({"event_id": "e1", "content": body, "payload": {"content": body, "audience": None}, "is_backfill": False})
+    assert "truncated" not in json.loads(out) and json.loads(out)["content"] == body
+
+
+def test_a_frame_past_the_bound_has_its_long_strings_cut_and_says_so_its_ids_kept():
+    gw = _gw()
+    doc = "문서 본문 " * 200_000  # ~2.6 MB — a dispatch carrying a whole doc (agent_dispatch · no bound of its own)
+    data = {"event_id": "e9", "event_type": "dispatched", "recipient_seq": 41, "content": doc,
+            "payload": {"content": doc, "context_pack": doc, "story_id": "s-1"}, "is_backfill": False}
+    out = gw._frame_data(data)
+    assert len(out.encode("utf-8")) <= gw.AGENT_FRAME_MAX_BYTES  # mutant: no bound (plain json.dumps) → RED
+    frame = json.loads(out)
+    assert frame["truncated"] is True
+    assert (frame["event_id"], frame["event_type"], frame["recipient_seq"], frame["payload"]["story_id"]) == ("e9", "dispatched", 41, "s-1")
+    for s in (frame["content"], frame["payload"]["content"], frame["payload"]["context_pack"]):
+        assert s.startswith("문서 본문 ") and s.endswith(gw.FRAME_CUT_NOTE)
+        assert len(s.encode("utf-8")) <= gw._FRAME_STR_KEEP_BYTES + len(gw.FRAME_CUT_NOTE.encode("utf-8"))
+
+
+def test_a_frame_of_many_short_strings_falls_back_to_its_own_short_fields():
+    gw = _gw()
+    data = {"event_id": "e7", "recipient_seq": 3, "event_type": "custom", "payload": {"rows": ["값" * 100] * 50_000}}
+    out = gw._frame_data(data)
+    assert len(out.encode("utf-8")) <= gw.AGENT_FRAME_MAX_BYTES
+    assert json.loads(out) == {"event_id": "e7", "recipient_seq": 3, "event_type": "custom", "truncated": True}
+
+
+def test_a_lone_surrogate_in_a_pushed_dict_keeps_the_escaped_form():
+    gw = _gw()
+    out = gw._frame_data({"event_id": "e2", "content": "a\ud800b"})
+    out.encode("utf-8")  # writable
+    assert "\\ud800" in out
+
+
+def test_every_event_frame_of_the_agent_stream_goes_through_the_bound():
+    """both places a row or a push becomes a frame call _frame_data — a frame written with json.dumps beside it skips the bound"""
+    src = Path(_gw().__file__).read_text(encoding="utf-8")
+    frames = re.findall(r"_sse = (\w+)\(", src)
+    assert frames == ["_frame_data", "_frame_data"], frames  # mutant: either site back on json.dumps → RED
+    assert re.findall(r'yield f"event: \{[^}]+\}(?:\\nid: \{gseq\})?\\ndata: \{(\w+)\}', src) == ["_sse", "_sse"]

@@ -12,7 +12,9 @@ from app.models.base import OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 # under is the desktop daemon's inbox SSE frame limit (1 MiB, bytes; 383) with its envelope around it. Every way a message is written
 # goes through ConversationMessage (the API's send · MCP send_chat_message on it · ws chat · a2a · the Slack/Teams bridge · the channel
 # route · the daemon/system writers), so the bound is checked here, once — a new path cannot forget it.
-MESSAGE_CONTENT_MAX_BYTES = 256 * 1024
+# PO 21:03Z (가): 128 KiB — the agent stream carries a message twice (its payload and the top-level copy) beside attachment text;
+# the stream's own frame bound (agent_gateway.AGENT_FRAME_MAX_BYTES) covers everything that is not a message.
+MESSAGE_CONTENT_MAX_BYTES = 128 * 1024
 
 
 class MessageContentTooLong(ValueError):
