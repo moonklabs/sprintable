@@ -16,11 +16,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.ownership import assert_agent_owner_mutable
+from app.models.agent_allowed_host import AgentAllowedHost
 from app.models.agent_run_profile import AgentRunProfile
 from app.models.member import Member
 
@@ -153,10 +154,33 @@ async def may_change(db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID,
     return True
 
 
+# story #4580 (Kadir 01:02Z · one rule with lane.py KEEP_ALLOW and the daemon's hook-text parser — the shared cases are
+# app/services/host-rule-vectors.json): a DNS name only — lower-case labels of letters, digits and hyphens (no edge hyphen, ≤ 63),
+# ≤ 253 in all, at least one dot (PO 01:13Z: one label is refused — `localhost` too), its LAST label starting with a letter (so no IP
+# in any spelling: dotted, hex, octal, one integer · IPv6 has «:») and never `localhost` (`*.localhost` refused); never a wildcard,
+# a port, a path, a space or a trailing dot. Upper case is folded; nothing is trimmed (lane.py matches the whole line).
+HOST_RE = re.compile(r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+
+
+def clean_host(value: str) -> str | None:
+    host = (value or "").lower()
+    if not HOST_RE.fullmatch(host) or host.rsplit(".", 1)[-1] == "localhost":
+        return None
+    return host
+
+
+async def allowed_hosts(db: AsyncSession, member_id: uuid.UUID) -> list[AgentAllowedHost]:
+    return list((await db.execute(
+        select(AgentAllowedHost).where(AgentAllowedHost.member_id == member_id).order_by(AgentAllowedHost.host)
+    )).scalars())
+
+
 async def read_for_person(db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
     member = await _agent(db, org_id=org_id, agent_id=agent_id)
     view = _view(member, await _profile(db, member.id))
     view["can_change"] = await may_change(db, org_id=org_id, user_id=user_id, agent_id=agent_id)
+    # story #4580: the «허용 주소» list (web «실행» group · Yuna ④) — who added it stays on the server
+    view["allowed_hosts"] = [{"host": h.host, "added_at": _iso(h.added_at)} for h in await allowed_hosts(db, member.id)]
     return view
 
 
@@ -176,7 +200,39 @@ async def read_for_daemon(db: AsyncSession, *, member: Member) -> dict:
         "effort": profile.effort if profile else None,
         "version": profile.version if profile else 0,
         "updated_at": _iso(profile.updated_at) if profile else None,
+        # story #4580: the hosts this agent may connect to without asking — the daemon writes them as its folder's
+        # `WebFetch(domain:<host>)` lines (and takes out the ones it wrote that are gone from here)
+        "allowed_hosts": [h.host for h in await allowed_hosts(db, member.id)],
     }
+
+
+async def _bump(db: AsyncSession, *, member_id: uuid.UUID, updated_by: uuid.UUID | None) -> None:
+    """story #4580: the version moves on with the model and effort kept (a row made now keeps the defaults) — so the daemon's
+    «running ≠ saved» check (§4) sees a change in the allowed hosts too."""
+    now = datetime.now(timezone.utc)
+    stmt = pg_insert(AgentRunProfile).values(member_id=member_id, model=None, effort=None, version=1, updated_by=updated_by, updated_at=now)
+    await db.execute(stmt.on_conflict_do_update(
+        index_elements=[AgentRunProfile.member_id],
+        set_={"version": AgentRunProfile.version + 1, "updated_by": updated_by, "updated_at": now},
+    ))
+
+
+async def remove_allowed_host(
+    db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID, updated_by: uuid.UUID, agent_id: uuid.UUID, host: str,
+) -> dict:
+    """[빼기] (Yuna ④ · no confirmation): the run profile's own rights (§3 ⓔ) · the same host again = the same answer (idempotent;
+    the version moves only when a row went)."""
+    await assert_agent_owner_mutable(agent_id, db, org_id, user_id)
+    member = await _agent(db, org_id=org_id, agent_id=agent_id)
+    clean = clean_host(host)
+    if clean is None:
+        raise _reject(422, "invalid_host")
+    gone = (await db.execute(
+        delete(AgentAllowedHost).where(AgentAllowedHost.member_id == member.id, AgentAllowedHost.host == clean)
+    )).rowcount
+    if gone:
+        await _bump(db, member_id=member.id, updated_by=updated_by)
+    return {"host": clean, "removed": bool(gone)}
 
 
 async def _save(

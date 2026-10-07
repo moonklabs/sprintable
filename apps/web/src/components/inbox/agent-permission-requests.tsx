@@ -136,7 +136,7 @@ export function AgentPermissionRequests() {
         {t('groupTitle')} · {shown.length}
       </h2>
       {shown.map((r) => (
-        <PermissionCard key={r.id} request={r} now={now} phone={phone} auth={auth} answer={answers.get(r.id)?.answer ?? null}
+        <PermissionCard key={`${r.id}:${r.stage ?? 'ask'}`} request={r} now={now} phone={phone} auth={auth} answer={answerFor(answers, r)}
           onAnswer={(decision) => void answer(r, decision)} />
       ))}
     </section>
@@ -145,6 +145,12 @@ export function AgentPermissionRequests() {
 
 /** story 4580: the daemon's value for Claude's sandbox network question (sprintable-mobile desktop-host · tool-names.json) */
 const SANDBOX_NET_TOOL = 'SandboxNetwork';
+
+/** story #4580 AC2: an answer given here belongs to the stage it was given at — the first «allow…» never stands on the second card */
+function answerFor(answers: ReadonlyMap<string, { row: PermissionRequest; answer: Answer }>, r: PermissionRequest): Answer | null {
+  const a = answers.get(r.id);
+  return a && (a.row.stage ?? 'ask') === (r.stage ?? 'ask') ? a.answer : null;
+}
 
 function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
   request: PermissionRequest; now: number; phone: boolean; auth: PhoneAuth | null; answer: Answer | null;
@@ -157,6 +163,8 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
   const notes = [r.masked ? t('maskedNote') : null, r.truncated ? t('truncatedNote') : null].filter(Boolean);
   // the phone app answers here; everything else keeps the one read-only line
   const answersHere = phone && (answer !== null || (line === 'answerOnPhone' && r.state === 'pending' && r.answerable));
+  // story #4580 AC2 (Yuna «4580 AC2» ① ② · 배치 ① ②): the network question — first with no host, then its second state with the host
+  const net = r.tool === SANDBOX_NET_TOOL && r.runtime === 'claude' ? (r.stage === 'confirm' && r.host ? 'confirm' : 'ask') : null;
   return (
     <Card className="flex flex-col gap-1.5 px-4 py-3" data-testid="agent-permission-card">
       <div className="flex w-full flex-wrap items-center gap-1.5">
@@ -172,18 +180,25 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
       <p className="text-sm text-foreground">{agentOnDevice(r.agent_name, r.device_name)}</p>
       {r.role ? <p className="text-xs text-muted-foreground">{t('role', { role: r.role })}</p> : null}
       <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
-      <div className="rounded-md bg-muted/50 px-2 py-1.5">
-        {/* story 4580 (Yuna 08:51Z): Claude's sandbox network question — its host is a name, not a command: one body-font line */}
-        {r.tool === SANDBOX_NET_TOOL && r.runtime === 'claude' ? (
-          <p className="break-all text-xs text-foreground" data-testid="agent-permission-net">{t('netConnect', { host: r.summary })}</p>
-        ) : (
+      {net === 'confirm' ? (
+        <div className="space-y-1" data-testid="agent-permission-net-confirm">
+          <p className="break-keep text-sm font-medium text-foreground [overflow-wrap:anywhere]">{t('net.confirmTitle', { host: r.host ?? '' })}</p>
+          <p className="break-keep text-pretty text-sm text-foreground">{t('net.confirmBody')}</p>
+          <p className="break-keep text-pretty text-xs text-muted-foreground">{t('net.confirmScope')}</p>
+        </div>
+      ) : net === 'ask' ? (
+        <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-net">{t('net.askLine')}</p>
+      ) : (
+        <div className="rounded-md bg-muted/50 px-2 py-1.5">
           <p className="break-all font-mono text-xs text-foreground">{r.summary}</p>
-        )}
-        {notes.length > 0 ? <p className="mt-0.5 text-[11px] text-muted-foreground">{notes.join(' · ')}</p> : null}
-      </div>
+          {notes.length > 0 ? <p className="mt-0.5 text-[11px] text-muted-foreground">{notes.join(' · ')}</p> : null}
+        </div>
+      )}
       {r.workdir ? <p className="text-[11px] text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
-      {answersHere ? (
-        <PhoneAnswerPlace tool={tool} auth={auth} answer={answer} onAnswer={onAnswer} />
+      {net === 'ask' && r.host_unread && answer === null ? (
+        <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
+      ) : answersHere ? (
+        <PhoneAnswerPlace tool={tool} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} hostUnread={r.host_unread === true} />
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">
           {line === 'expired' ? t('line.expired')
@@ -197,17 +212,27 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
 }
 
 /** The button place inside the phone app (명세 «폰 서명 · 권한 창 문구» ③ · B-2 결과 줄). */
-function PhoneAnswerPlace({ tool, auth, answer, onAnswer }: {
+function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '', hostUnread = false }: {
   tool: string; auth: PhoneAuth | null; answer: Answer | null; onAnswer: (decision: 'allow' | 'deny') => void;
+  /** story #4580 AC2: the network question's stage (its own buttons and result lines) */
+  net?: 'ask' | 'confirm' | null; host?: string;
+  /** story #4580 AC2 F2 (Yuna 2-7): the host could not be read — the request ended with nothing allowed */
+  hostUnread?: boolean;
 }) {
   const t = useTranslations('agentPermissions');
   const flat = useFlatHref();
   const a = answer;
   const pressed = a !== null; // a result after a press takes the focus the buttons had
-  const buttons = (
+  const buttons = net === 'confirm' ? (
+    // Yuna «4580 AC2» ②: the opening one filled · «허용하지 않기» outline and focused first (the person picks the opening side)
+    <div className="flex gap-2" data-testid="agent-permission-buttons">
+      <Button size="sm" onClick={() => onAnswer('allow')}>{t('net.allowAndGo')}</Button>
+      <Button size="sm" variant="outline" autoFocus onClick={() => onAnswer('deny')}>{t('net.dontAllow')}</Button>
+    </div>
+  ) : (
     <div className="flex gap-2" data-testid="agent-permission-buttons">
       {/* the person's one judgement here: both the same weight, as the desktop band (Yuna 4951 · no default pushed) */}
-      <Button size="sm" variant="outline" onClick={() => onAnswer('allow')}>{t('phone.allow')}</Button>
+      <Button size="sm" variant="outline" onClick={() => onAnswer('allow')}>{net === 'ask' ? t('net.allowMore') : t('phone.allow')}</Button>
       <Button size="sm" variant="outline" onClick={() => onAnswer('deny')}>{t('phone.deny')}</Button>
     </div>
   );
@@ -223,7 +248,10 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer }: {
   }
   switch (a.kind) {
     case 'sending': return <Line focus>{t('phone.sending')}</Line>;
-    case 'answered': return <Line focus>{a.decision === 'allow' ? t('phone.allowed', { tool }) : t('phone.denied', { tool })}</Line>;
+    case 'answered':
+      if (net === 'ask' && a.decision === 'allow') return <Line focus>{hostUnread ? t('net.hostUnread') : t('net.checking')}</Line>; // the second card comes with the host
+      if (net === 'confirm') return <Line focus>{a.decision === 'allow' ? t('net.allowedGo', { host }) : t('net.notAllowed')}</Line>;
+      return <Line focus>{a.decision === 'allow' ? t('phone.allowed', { tool }) : t('phone.denied', { tool })}</Line>;
     case 'answered_by':
       return <Line focus>{a.name && a.decision ? t(a.decision === 'allow' ? 'phone.allowedBy' : 'phone.deniedBy', { name: a.name }) : t('phone.answeredElsewhere')}</Line>;
     case 'closed': return <Line focus>{t('phone.closed')}</Line>;

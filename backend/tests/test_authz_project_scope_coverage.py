@@ -292,6 +292,7 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     # the caller's own phone unless the caller is that org's owner/admin; the pair is that phone's — no project axis
     "app.routers.agent_permissions:delete_remote_device_pair": "person-owned phone in the caller's org, owner or org owner/admin only (services.agent_permissions.remove_pair)",
     "app.routers.agent_run_profiles:put_agent_profile": "org-level agent in the caller's org, the runtime PATCH's rule (creator · org owner/admin · never the system agent) via assert_agent_owner_mutable (story #4540)",
+    "app.routers.agent_run_profiles:remove_allowed_host": "org-level agent in the caller's org — [빼기] on its «허용 주소» takes the run profile's own rule (creator · org owner/admin · never the system agent) via assert_agent_owner_mutable, before the agent is read (story #4580 AC2)",
     # story #3786 — dependencies.py의 update/delete는 까심 QA CI FAILURE 원칙(2026-07-08,
     # agents.py::get_agent_connection_artifact/_connection_artifact 선례)에 따라 Header() DI
     # 마커를 라우트 진입점(update_dependency/delete_dependency)에서만 받고, 실 로직(가드 호출

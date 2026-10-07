@@ -355,6 +355,11 @@
 "kind": "unknown"
 },
 {
+"method": "DELETE",
+"path": "/api/v2/agents/{}/run-profile/allowed-hosts/{}",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/agents/{}/verification-status",
 "kind": "unknown"
@@ -872,6 +877,16 @@
 {
 "method": "POST",
 "path": "/api/v2/desktop/relay/permission-requests",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/permission-requests/{}/confirm-host",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/permission-requests/{}/host-added",
 "kind": "unknown"
 },
 {

@@ -1,0 +1,193 @@
+{
+  "_": "[SID:4580] the host rule for an agent's allowed addresses — one rule for the server (agent_run_profile.HOST_RE), lane.py KEEP_ALLOW and the desktop daemon's hook-text parser (Kadir 01:02Z). A DNS name only: lower-case [a-z0-9-] labels (no edge hyphen, ≤ 63), ≤ 253 in all, at least one dot, the last label starting with a letter and never `localhost` (PO 01:13Z) — no IP in any spelling, no wildcard, port, path, user, space, trailing dot. `clean` = what the server stores (upper case folded · nothing trimmed · null = refused). lane.py (Min) keeps `WebFetch(domain:<clean>)` when clean is not null, drops `WebFetch(domain:<in>)` when it is.",
+  "vectors": [
+    {
+      "in": "gitlab.com",
+      "clean": "gitlab.com"
+    },
+    {
+      "in": "GitLab.COM",
+      "clean": "gitlab.com"
+    },
+    {
+      "in": "  pypi.org ",
+      "clean": null
+    },
+    {
+      "in": "www.wikipedia.org",
+      "clean": "www.wikipedia.org"
+    },
+    {
+      "in": "a-b.c-d.io",
+      "clean": "a-b.c-d.io"
+    },
+    {
+      "in": "123.com",
+      "clean": "123.com"
+    },
+    {
+      "in": "localhost",
+      "clean": null
+    },
+    {
+      "in": "xn--bcher-kva.example",
+      "clean": "xn--bcher-kva.example"
+    },
+    {
+      "in": "1.2.3.4",
+      "clean": null
+    },
+    {
+      "in": "127.0.0.1",
+      "clean": null
+    },
+    {
+      "in": "0x7f.0.0.1",
+      "clean": null
+    },
+    {
+      "in": "0x7f000001",
+      "clean": null
+    },
+    {
+      "in": "2130706433",
+      "clean": null
+    },
+    {
+      "in": "0177.0.0.1",
+      "clean": null
+    },
+    {
+      "in": "127.1",
+      "clean": null
+    },
+    {
+      "in": "::1",
+      "clean": null
+    },
+    {
+      "in": "[::1]",
+      "clean": null
+    },
+    {
+      "in": "fe80::1",
+      "clean": null
+    },
+    {
+      "in": "*.example.com",
+      "clean": null
+    },
+    {
+      "in": "example.com:443",
+      "clean": null
+    },
+    {
+      "in": "example.com/",
+      "clean": null
+    },
+    {
+      "in": "user@example.com",
+      "clean": null
+    },
+    {
+      "in": "example.com.",
+      "clean": null
+    },
+    {
+      "in": ".example.com",
+      "clean": null
+    },
+    {
+      "in": "-bad.com",
+      "clean": null
+    },
+    {
+      "in": "bad-.com",
+      "clean": null
+    },
+    {
+      "in": "exa mple.com",
+      "clean": null
+    },
+    {
+      "in": "exa_mple.com",
+      "clean": null
+    },
+    {
+      "in": "",
+      "clean": null
+    },
+    {
+      "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+      "clean": null
+    },
+    {
+      "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+      "clean": null
+    },
+    {
+      "in": "例え.jp",
+      "clean": null
+    },
+    {
+      "in": "example.com‮",
+      "clean": null
+    },
+    {
+      "in": "example..com",
+      "clean": null
+    },
+    {
+      "in": "foo.localhost",
+      "clean": null
+    },
+    {
+      "in": "dev.example.org",
+      "clean": "dev.example.org"
+    },
+    {
+      "in": "api.github.com",
+      "clean": "api.github.com"
+    },
+    {
+      "in": "sprintable-backend-dev-787818285179.asia-northeast3.run.app",
+      "clean": "sprintable-backend-dev-787818285179.asia-northeast3.run.app"
+    },
+    {
+      "in": "0x7f.1",
+      "clean": null
+    },
+    {
+      "in": "a.b.c.123",
+      "clean": null
+    },
+    {
+      "in": "1.2.3.4.nip.io.123",
+      "clean": null
+    },
+    {
+      "in": "::ffff:127.0.0.1",
+      "clean": null
+    },
+    {
+      "in": "[::ffff:7f00:1]",
+      "clean": null
+    },
+    {
+      "in": "example",
+      "clean": null
+    },
+    {
+      "in": "example.org:8080",
+      "clean": null
+    },
+    {
+      "in": "../example.org",
+      "clean": null
+    },
+    {
+      "in": "example.org\n",
+      "clean": null
+    }
+  ]
+}

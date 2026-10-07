@@ -129,3 +129,20 @@ async def put_agent_profile(
     view = views[0]
     view["can_change"] = True
     return view
+
+
+@router.delete("/agents/{agent_id}/run-profile/allowed-hosts/{host}")
+async def remove_allowed_host(
+    agent_id: uuid.UUID,
+    host: str,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4580 — [빼기] on the agent's «허용 주소» list (a person, with the run profile's own rights · idempotent)."""
+    person = await _person_session(db, auth, org_id)
+    result = await profiles.remove_allowed_host(
+        db, org_id=org_id, user_id=uuid.UUID(auth.user_id), updated_by=uuid.UUID(str(person.id)), agent_id=agent_id, host=host,
+    )
+    await db.commit()
+    return result

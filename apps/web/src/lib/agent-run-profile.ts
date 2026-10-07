@@ -31,6 +31,8 @@ export interface RunProfile {
   version: number;
   updated_at: string | null;
   can_change?: boolean;
+  /** story #4580: the hosts this agent may connect to without asking (absent from an older server) */
+  allowed_hosts?: { host: string; added_at: string | null }[];
 }
 
 export function isDesktopRuntime(runtime: string | null | undefined): runtime is DesktopRuntime {

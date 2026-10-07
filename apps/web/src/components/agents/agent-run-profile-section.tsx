@@ -33,7 +33,8 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
   const [profile, setProfile] = useState<RunProfile | null>(null);
   const [draft, setDraft] = useState<RunProfileDraft | null>(null);
   const [saving, setSaving] = useState(false);
-  const [line, setLine] = useState<{ kind: 'saved' | 'error'; key: string } | null>(null);
+  const [line, setLine] = useState<{ kind: 'saved' | 'error' | 'removed'; key: string; host?: string } | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
@@ -94,6 +95,27 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
 
   const unchanged = JSON.stringify(draftBody(draft)) === JSON.stringify(draftBody(initialDraft(options, profile)));
 
+  // story #4580 (Yuna ④ · 배치 ③): [빼기] — no confirmation (it only narrows), applies at once; the list is read again after it
+  const remove = async (host: string) => {
+    setRemoving(host);
+    setLine(null);
+    try {
+      const res = await fetchWithAuth(`/api/agents/${agentId}/run-profile/allowed-hosts/${encodeURIComponent(host)}`, { method: 'DELETE' });
+      if (res.ok) {
+        setProfile((p) => (p ? { ...p, allowed_hosts: (p.allowed_hosts ?? []).filter((h) => h.host !== host) } : p));
+        setLine({ kind: 'removed', key: '', host });
+      } else {
+        const json = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+        setLine({ kind: 'error', key: saveErrorKey(res.status, json?.error?.code) });
+      }
+    } catch {
+      setLine({ kind: 'error', key: SAVE_ERROR_KEYS.other });
+    } finally {
+      setRemoving(null);
+    }
+  };
+  const hosts = profile.allowed_hosts ?? [];
+
   return (
     <SectionCard>
       <SectionCardHeader>
@@ -124,8 +146,36 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
             </dd>
           </dl>
         )}
+        {/* story #4580 (배치 ③): «허용 주소» — one more row of the group; [빼기] only for whoever may change it */}
+        <dl className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]" data-testid="run-profile-allowed-hosts">
+          <dt className="text-muted-foreground">{ta('runProfileAllowedHosts')}</dt>
+          <dd className="space-y-1">
+            {hosts.length === 0 ? (
+              <p className="text-muted-foreground">{ta('runProfileAllowedHostsEmpty')}</p>
+            ) : (
+              <ul className="space-y-1">
+                {hosts.map((h) => (
+                  <li key={h.host} className="flex items-center justify-between gap-2">
+                    <span className="break-keep text-sm font-medium text-foreground [overflow-wrap:anywhere]">{h.host}</span>
+                    {profile.can_change ? (
+                      <Button variant="ghost" size="sm" onClick={() => void remove(h.host)} disabled={removing !== null}
+                        aria-label={`${ta('runProfileAllowedHostRemove')} · ${h.host}`}>
+                        {ta('runProfileAllowedHostRemove')}
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileAllowedHostsHelp')}</p>
+            {/* Yuna 4972 ①: only where something can be removed (a list · a person who may change it) */}
+            {hosts.length > 0 && profile.can_change ? <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileAllowedHostsNow')}</p> : null}
+          </dd>
+        </dl>
         {line ? (
-          <p role="status" className={line.kind === 'error' ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>{line.kind === 'saved' ? ta('runProfileSavedLine') : ta(line.key)}</p>
+          <p role="status" className={line.kind === 'error' ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
+            {line.kind === 'saved' ? ta('runProfileSavedLine') : line.kind === 'removed' ? ta('runProfileAllowedHostRemoved', { host: line.host ?? '' }) : ta(line.key)}
+          </p>
         ) : null}
       </SectionCardBody>
     </SectionCard>

@@ -38,6 +38,10 @@ _KNOWN = {
     # and its list of QR-pinned phone keys — the device's own rows, no project entity
     "app/routers/desktop_relay.py::post_permission_request",
     "app/routers/desktop_relay.py::post_permission_withdraw",
+    # story #4580 AC2 — the same device token: a network question's host for its second answer (confirm-host) and the host it then
+    # added (host-added) — that device's own permission request row (setup_id · request_id), its own agent; no project entity
+    "app/routers/desktop_relay.py::post_permission_confirm_host",
+    "app/routers/desktop_relay.py::post_permission_host_added",
     "app/routers/desktop_relay.py::put_pairings",
     "app/routers/desktop_relay.py::post_pairing_reveal",  # story #4531 — the device token's own pairing offer (setup-scoped, not project-owned)
     # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's

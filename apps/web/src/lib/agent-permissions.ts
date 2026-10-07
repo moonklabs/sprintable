@@ -31,6 +31,11 @@ export interface PermissionRequest {
    *  null unless `answerable` (an unsalted hash of the input is carried no longer than its answer needs) */
   session_key: string | null;
   input_hash: string | null;
+  /** story #4580 AC2: a network question's second answer carries the host (the daemon's value from Claude's own hook text) */
+  stage?: 'ask' | 'confirm';
+  host?: string | null;
+  /** story #4580 AC2 F2: the daemon could not read the host from Claude's own text — the request ended, nothing allowed */
+  host_unread?: boolean;
 }
 
 /** The line in the button place — one, in the spec's order: the window passed · the computer gone quiet · no paired phone · the phone. */
@@ -46,6 +51,8 @@ export function permissionLine(r: PermissionRequest): PermissionLine {
 /** Still waiting for someone: pending, or past its window within the last hour (the card says so, then leaves — a window is ≤1h). */
 export function stillShown(r: PermissionRequest, now: number): boolean {
   if (r.state === 'pending') return true;
+  // story #4580 AC2 F2: a network question whose host could not be read stays with its line for a while, as an expired one
+  if (r.state === 'withdrawn' && r.host_unread) return now - Date.parse(r.created_at) <= 60 * 60 * 1000;
   return r.state === 'expired' && now - Date.parse(r.expires_at) <= 60 * 60 * 1000;
 }
 

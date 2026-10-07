@@ -265,3 +265,61 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(phoneLines()).toEqual(['Allowed · Bash']);
   });
 });
+
+// story #4580 AC2 (Yuna «4580 AC2» ① ② · 배치 ①' ②'): the network question on the phone — [허용…] first («주소를 확인하는 중…»), then
+// the same card comes back with the host for a second answer; the first answer's line never stands on it
+describe('[4580 AC2] the network question on the phone', () => {
+  const net = (over: Partial<PermissionRequest> = {}) => req({ tool: 'SandboxNetwork', runtime: 'claude', summary: 'network', stage: 'ask', host: null, ...over });
+  it('[허용…] → «주소를 확인하는 중…» · the second state comes with the host · its own buttons · [허용하고 이어 가기] → «허용됐어요 · {host} — …»', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      installShell();
+      await render([net()]);
+      expect(buttons()).toEqual(['허용…', '거부']);
+      await press('허용…');
+      expect(phoneLines()).toEqual(['주소를 확인하는 중…']);
+      // the daemon reported the host: the next read brings the same request back at stage confirm
+      fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (init?.method === 'POST' ? answerResponse() : list([net({ stage: 'confirm', host: 'gitlab.com' })])));
+      await act(async () => { vi.advanceTimersByTime(15_000); });
+      await settle();
+      expect(phoneLines()).toEqual([]); // «확인하는 중…» does not stand on the second card
+      expect(buttons()).toEqual(['허용하고 이어 가기', '허용하지 않기']);
+      expect(document.activeElement?.textContent).toBe('허용하지 않기'); // first focus: the side that keeps it closed
+      await press('허용하고 이어 가기');
+      expect(phoneLines()).toEqual(['허용됐어요 · gitlab.com — 에이전트에게 다시 해 보라고 넘겼어요']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('[거부] on the first card → «거부됨 · {tool}» · [허용하지 않기] on the second → «허용하지 않았어요»', async () => {
+    installShell();
+    await render([net()]);
+    await press('거부');
+    expect(phoneLines()).toEqual(['거부됨 · SandboxNetwork']);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render([net({ stage: 'confirm', host: 'gitlab.com' })]);
+    await press('허용하지 않기');
+    expect(phoneLines()).toEqual(['허용하지 않았어요']);
+  });
+});
+
+describe('[4580 AC2 F2] the host could not be read', () => {
+  it('[허용…] → «주소를 확인하는 중…» → the request ends host_unread → «주소를 확인하지 못해 이번 연결은 허용하지 못했어요», no buttons', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      installShell();
+      const net = req({ tool: 'SandboxNetwork', runtime: 'claude', summary: 'network', stage: 'ask', host: null });
+      await render([net]);
+      await press('허용…');
+      expect(phoneLines()).toEqual(['주소를 확인하는 중…']);
+      fetchWithAuth.mockImplementation(async () => list([{ ...net, state: 'withdrawn', host_unread: true, answerable: false }]));
+      await act(async () => { vi.advanceTimersByTime(15_000); });
+      await settle();
+      expect(phoneLines()).toEqual(['주소를 확인하지 못해 이번 연결은 허용하지 못했어요']);
+      expect(buttons()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

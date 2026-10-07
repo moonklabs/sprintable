@@ -14,6 +14,7 @@ from app.models.agent_watch import AgentWatch, DeployServing, GithubPullRequest
 from app.models.desktop_setup import DesktopSetup
 from app.models.remote_control_audit_log import OrgRemoteControlAuditLog
 from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
+from app.models.agent_allowed_host import AgentAllowedHost
 from app.models.agent_run_profile import AgentRunProfile
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.chat_command_audit_log import ChatCommandAuditLog
@@ -184,6 +185,7 @@ __all__ = [
     "RemoteDevice",
     "RemoteDevicePairing",
     "RemoteDevicePairingOffer",
+    "AgentAllowedHost",
     "AgentRunProfile",
     "DesktopSession",
     "DesktopCommand",

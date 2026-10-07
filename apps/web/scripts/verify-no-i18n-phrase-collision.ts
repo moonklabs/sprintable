@@ -190,6 +190,10 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // 'navigate'="이동"과 부분문자열로 겹치는 건 «이동» 섹션 헤더와 «항목별 이동 문구»라
   // 애초에 사람이 헷갈릴 자리가 아니다(#2352·#2365류 "다른 두 셈이 같은 말"이 아니다).
   'label', 'particle',
+  // story #4580 AC2 — {host}: a DNS name the server's one host rule passed (agent_run_profile.clean_host · host-rule-vectors.json:
+  // at least one dot, the last label a letter — never a number). ko.json's three uses read directly (2026-10-07): runProfileAllowedHostRemoved
+  // «뺐어요 · {host}» · agentPermissions.net.confirmTitle · net.allowedGo — every one fills the same host, the slug · channel axis.
+  'host',
   // story #3900(§⑤ 어조 가드 사각 3) — 플레이스홀더 뒤 받침 의존 조사(이/가·을/를)를
   // korean-particle 헬퍼로 뽑아 넣는 {josa}. 'particle'과 같은 결(한글 문법 조사·절대 수가
   // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"
