@@ -33,7 +33,8 @@ export interface RunProfile {
   can_change?: boolean;
   /** story #4580: the hosts this agent may connect to without asking (absent from an older server) */
   allowed_hosts?: { host: string; added_at: string | null }[];
-  /** story #4598: «묻지 않고 일하기» — on → the next session starts in the CLI's bypass mode (absent from an older server = off) */
+  /** story #4598: «묻지 않고 일하기» — on → the next session starts in the CLI's dontAsk mode (allowed things run, the rest is skipped
+   *  without a question — never bypass) (absent from an older server = off) */
   unattended?: boolean;
   /** story #4598: an org owner only may flip it (the server's rule; the switch is read-only for everyone else) */
   can_change_unattended?: boolean;

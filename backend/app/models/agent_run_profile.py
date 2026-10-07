@@ -22,8 +22,9 @@ class AgentRunProfile(Base):
     )
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
     effort: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # story #4598 (alembic 0441) — «묻지 않고 일하기»: on → the next session starts in the CLI's bypass mode (owners only may
-    # change it · contract 4598 v0.1 §1). False = today's asking mode, the default for every row and a new customer.
+    # story #4598 (alembic 0441) — «묻지 않고 일하기»: on → the next session starts in the CLI's dontAsk mode — what is allowed
+    # beforehand runs, anything else is skipped without a question; never bypass (owners only may change it · contract 4598
+    # v0.1 §1 · PO 12:1xZ). False = today's asking mode, the default for every row and a new customer.
     unattended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

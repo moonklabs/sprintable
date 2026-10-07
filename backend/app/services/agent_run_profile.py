@@ -219,7 +219,8 @@ async def read_for_daemon(db: AsyncSession, *, member: Member) -> dict:
         # story #4580: the hosts this agent may connect to without asking — the daemon writes them as its folder's
         # `WebFetch(domain:<host>)` lines (and takes out the ones it wrote that are gone from here)
         "allowed_hosts": [h.host for h in await allowed_hosts(db, member.id)],
-        # story #4598: on → the daemon starts the next session in the CLI's bypass mode (contract v0.1 §2)
+        # story #4598: on → the daemon starts the next session in the CLI's dontAsk mode — what is allowed beforehand runs, anything
+        # else is skipped without a question (PO 12:1xZ: never bypass — the fences stay up) (contract v0.1 §2)
         "unattended": bool(profile.unattended) if profile else False,
     }
 
