@@ -112,6 +112,10 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
         removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
         offers_sent: set[str] = set()  # story #4531 — each live pairing offer once per connection, again on the next
         try:
+            # story #4607 (run13b ⑪ · PO 21:02Z): a first byte now — the front end holds the response head until the body's first byte,
+            # and the first heartbeat is 30 s away: the daemon counted every reconnect (each ~5 min 20 s) as 30 s closed and held its
+            # approvals for them. An SSE comment: the daemon's parser drops it (inbox/sse.ts · a line starting with ':').
+            yield ": open\n\n"
             while True:
                 if await request.is_disconnected():
                     return
