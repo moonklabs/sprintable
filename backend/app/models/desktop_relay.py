@@ -28,6 +28,9 @@ SESSION_SELF_RESUME = ("maybe", "no", "unknown")
 # story #4599 (0442 · contract v1.13 · Kadir lens ③): the folder a macOS window asks about — a closed list, carried with
 # `waiting_system` only (the daemon read it from tccd's service name; a window seen by owner only carries none)
 SESSION_SYSTEM_FOLDERS = ("documents", "desktop", "downloads", "network_volume", "icloud")
+# story #4560 (0444 · contract v2.1 §5 · PO 14:41Z): the daemon did not touch a session whose limit should be over — the terminal's
+# screen was not the expected one (`screen`), or the one Esc it sent was not taken (`esc_not_taken`)
+SESSION_LIMIT_HELD = ("screen", "esc_not_taken")
 SESSION_RUNTIMES = ("claude", "codex")
 
 
@@ -62,6 +65,7 @@ class DesktopSession(Base):
         CheckConstraint(_in("runtime", SESSION_RUNTIMES), name="ck_desktop_sessions_runtime"),
         CheckConstraint(f"limit_self_resume IS NULL OR {_in('limit_self_resume', SESSION_SELF_RESUME)}", name="ck_desktop_sessions_limit_self_resume"),
         CheckConstraint(f"system_folder IS NULL OR {_in('system_folder', SESSION_SYSTEM_FOLDERS)}", name="ck_desktop_sessions_system_folder"),
+        CheckConstraint(f"limit_held IS NULL OR {_in('limit_held', SESSION_LIMIT_HELD)}", name="ck_desktop_sessions_limit_held"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -83,6 +87,8 @@ class DesktopSession(Base):
     limit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     limit_again: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     limit_self_resume: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4560 (0444): the daemon held off — the limit's time is over but it did not touch the terminal (screen · esc_not_taken)
+    limit_held: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4534 (0438): whether the session can take an instruction into the running turn — hides [지금 지시] when not (only)
     instruct_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
