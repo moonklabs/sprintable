@@ -379,7 +379,7 @@ describe('ApprovalsQueue', () => {
     await mount();
     expect(container.textContent).toContain(koMessages.cage.gateReapprovalResubmitWaiting);
     const approveButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
-    const rejectButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
+    const rejectButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigReject));
     expect(approveButton?.hasAttribute('disabled')).toBe(true);
     expect(rejectButton?.hasAttribute('disabled')).toBe(true);
   });
@@ -680,7 +680,7 @@ describe('ApprovalsQueue', () => {
     await mount();
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.sigRequestChanges))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigReject))).toBe(true);
   });
 
   // story 22affaf2(PO 결정, 2026-08-16) — 구 #1961 AC "고위험 항목 인라인 승인 버튼 0"을
@@ -695,7 +695,7 @@ describe('ApprovalsQueue', () => {
     // (원탭 전용 "승인" 단독 버튼이 안 남아있어야 함 — 서명 게이팅 우회 경로가 없다는 뜻).
     expect(buttons.some((t) => t === koMessages.cage.sigApproveAndSign)).toBe(true);
     expect(buttons.some((t) => t === koMessages.cage.gateApprove)).toBe(false);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.sigRequestChanges))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigReject))).toBe(true);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateDiscussSubmit))).toBe(true);
   });
 
@@ -843,12 +843,12 @@ describe('ApprovalsQueue', () => {
   it('변경 요청 클릭 시(저위험) 사유 다이얼로그를 열고, 사유 입력 後에만 status=rejected로 호출한다', async () => {
     const calls = mockFetches([lowRiskActionable({ id: 'g-rej' })], []);
     await mount();
-    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // 다이얼로그가 열렸다 — 즉시 POST는 아직 안 나갔다.
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
-    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges)) as HTMLButtonElement;
+    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigReject)) as HTMLButtonElement;
     expect(dialogRejectBtn.disabled).toBe(true); // AC — 사유 입력 前 비활성.
 
     const textarea = document.body.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
@@ -1008,7 +1008,7 @@ describe('ApprovalsQueue', () => {
   it('AC 음성대조 — 반려 클릭은 다이얼로그만 열고(취소 버튼 안 뜸), 사유 입력 後 제출해야 취소 버튼이 뜬다', async () => {
     mockFetches([lowRiskActionable({ id: 'g-reject-undo' })], []);
     await mount();
-    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     // 다이얼로그만 열렸다 — 아직 반려되지 않았으므로 취소 버튼은 여전히 없다.
@@ -1020,7 +1020,7 @@ describe('ApprovalsQueue', () => {
       setter.call(textarea, '재작업 필요');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges)) as HTMLButtonElement;
+    const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigReject)) as HTMLButtonElement;
     await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(true);
   });
@@ -1105,7 +1105,7 @@ describe('ApprovalsQueue', () => {
         setter.call(textarea, '재작업 필요');
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      const rejectButtons = Array.from(dialog.querySelectorAll('button')).filter((b) => b.textContent === koMessages.cage.sigRequestChanges);
+      const rejectButtons = Array.from(dialog.querySelectorAll('button')).filter((b) => b.textContent === koMessages.cage.sigReject);
       await act(async () => { rejectButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
       const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
@@ -1116,7 +1116,7 @@ describe('ApprovalsQueue', () => {
     it('큐 카드의 행2 [변경 요청] 버튼을 직접 눌러도(모달을 열지 않고) 고위험은 여전히 모달을 연다(서명 우회 경로 없음)', async () => {
       const calls = mockFetches([highRiskActionable({ id: 'g-sig-reject-entry' })], []);
       await mount();
-      const rejectEntry = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
+      const rejectEntry = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
       await act(async () => { rejectEntry?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
       expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
@@ -1158,7 +1158,7 @@ describe('ApprovalsQueue', () => {
       const primary = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label);
       expect(primary).toBeTruthy();
       const actionRow = primary!.parentElement!;
-      const rejectBtn = Array.from(actionRow.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigRequestChanges);
+      const rejectBtn = Array.from(actionRow.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigReject);
       const holdBtn = Array.from(actionRow.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit);
       expect(rejectBtn && holdBtn).toBeTruthy();
       // reject/hold 자신의 order-N은 그 둘을 감싼 wrapper div(order-2, sm:contents) 안에서
@@ -1469,7 +1469,7 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     const calls = mockFetches([decisionGate()], []);
     await mount();
     const rejectBtn = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes(koMessages.cage.sigRequestChanges),
+      (b) => b.textContent?.includes(koMessages.cage.sigReject),
     ) as HTMLButtonElement;
     expect(rejectBtn.disabled).toBe(false); // 옵션 미선택 상태에서도 클릭 자체는 가능.
     await act(async () => { rejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -1482,7 +1482,7 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
     const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find(
-      (b) => b.textContent?.includes(koMessages.cage.sigRequestChanges),
+      (b) => b.textContent?.includes(koMessages.cage.sigReject),
     ) as HTMLButtonElement;
     await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));

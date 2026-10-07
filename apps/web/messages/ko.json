@@ -372,6 +372,8 @@
     "claim": {
       "label": "에이전트 주장 · 완료했다고 말해요",
       "publishApprovalLabel": "발행 승인 · 이대로 발행할지 결정해요",
+      "decisionRequestLabel": "에이전트 질문 · 판단을 기다려요",
+      "goAheadLabel": "진행 승인 · 이대로 진행할지 결정해요",
       "executor": "실행 {name}",
       "now": "지금: <b>{now}</b>",
       "running": "실행 중"
@@ -5959,7 +5961,7 @@
     "sigReasonLabel": "결정 사유",
     "sigReasonPlaceholder": "기록에 남을 결정 사유를 입력하세요",
     "sigConsequenceNote": "승인은 내 서명으로 기록돼요",
-    "sigRequestChanges": "변경 요청",
+    "sigReject": "반려",
     "sigApproveAndSign": "승인하고 서명",
     "sigApproveAndSignNewsletterSend": "발송 승인하고 서명",
     "sigApproveAndSignCampaign": "캠페인 승인하고 서명",

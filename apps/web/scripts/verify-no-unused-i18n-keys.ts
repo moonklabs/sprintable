@@ -108,6 +108,14 @@ export function isKeyReferenced(flatKey: string, inputs: DeadKeyScanInputs): boo
   if (inputs.indirectLookupRefFullKeys.has(flatKey)) return true; // A″
   const bare = flatKey.slice(flatKey.lastIndexOf('.') + 1);
   if (inputs.unknownNsLiteralWords.has(bare)) return true; // A′
+  // A′(점 포함) — story #4558: ns를 모르는 번역자(파라미터로 받은 `tProof`)에 `t('claim.goAheadLabel')`처럼 **점이 든**
+  // 리터럴을 넘기면 위 말단 비교(`bare` = 'goAheadLabel' ≠ 'claim.goAheadLabel')가 영영 안 맞아 산 키가 죽은 키로 읽혔다.
+  // 그 리터럴을 전체경로의 꼬리(`…​.claim.goAheadLabel`)로 맞춘다 — 말단 하나보다 좁아(한 세그먼트 더 봄) 새 기전이 아니라
+  // 같은 축의 확장. 자기 시험: verify-no-unused-i18n-keys.test.ts.
+  for (let i = flatKey.indexOf('.'); i !== -1; i = flatKey.indexOf('.', i + 1)) {
+    const tail = flatKey.slice(i + 1);
+    if (tail.includes('.') && inputs.unknownNsLiteralWords.has(tail)) return true;
+  }
   if (inputs.indirectLookupWords.has(bare)) return true; // A″-word
   if (isDynamicallyComposed(flatKey)) return true; // B
   if (inputs.tableBareKeys.has(bare)) return true; // C

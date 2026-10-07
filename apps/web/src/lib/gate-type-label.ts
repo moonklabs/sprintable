@@ -67,3 +67,49 @@ export function gateTypeLabel(t: (key: string) => string, gateType: string | nul
   const key = gateTypeLabelKey(gateType);
   return key ? t(key) : t('ccGateGeneric');
 }
+
+// story #4558(유나 AC0 정본 2026-10-07 · PO 10:19Z) — 게이트 머리 눈썹 글(proof capsule `claimLabel`)은 게이트가
+// «무엇을 묻는가»로 세 묶음: 완료 주장(에이전트가 «했다»고 말함) · 판단 요청(에이전트가 «어떻게 할지» 물음) ·
+// 진행 승인(이대로 진행할지 사람이 정함). 예전엔 기본값이 늘 «에이전트 주장 · 완료했다고 말해요»라 판단 요청
+// 게이트(agent_decision_request)에도 «완료했다고 말해요»가 떴다 — 묻는 것을 주장으로 읽게 하는 틀린 낱말.
+// 맵 밖 종류는 «진행 승인» 묶음으로 — 모르는 것을 «완료»라고 단정하지 않는다(정본 §2).
+// ⛔종류 집합은 위 GATE_TYPE_LABEL_KEYS와 같은 16종 — 새 gate_type을 저 표에 더하면 여기도 한 묶음에 넣는다
+// (gate-type-label.test.ts가 두 표의 키 집합이 같은지 고정).
+export type GateClaimGroup = 'claim' | 'decision_request' | 'go_ahead';
+
+export const GATE_CLAIM_GROUPS: Record<string, GateClaimGroup> = {
+  qa: 'claim',
+  pr_review: 'claim',
+  merge: 'claim',
+  doc_approval: 'claim',
+  concept_approval: 'claim',
+  artifact_canonicalize: 'claim',
+  agent_decision_request: 'decision_request',
+  loop_decision: 'decision_request',
+  hypothesis_outcome_confirm: 'decision_request',
+  support_escalation_review: 'decision_request',
+  external_publish: 'go_ahead',
+  newsletter_send: 'go_ahead',
+  ads_boost: 'go_ahead',
+  generation_budget: 'go_ahead',
+  deploy: 'go_ahead',
+  workflow_config_publish: 'go_ahead',
+};
+
+/** gate_type → 눈썹 묶음. 맵 밖(미래 확장·오타)은 «진행 승인»(완료라고 단정하지 않는 쪽). */
+export function gateClaimGroup(gateType: string | null | undefined): GateClaimGroup {
+  return (gateType ? GATE_CLAIM_GROUPS[gateType] : undefined) ?? 'go_ahead';
+}
+
+/**
+ * gate_type → 눈썹 글(완성 문자열). `tProof` = `useTranslations('proofCapsule')`. external_publish만 «발행 승인 · …»(story #4336
+ * 낱말 그대로), 나머지 진행 승인 묶음은 «진행 승인 · 이대로 진행할지 결정해요». 키는 여기 리터럴로만 부른다(gateTypeLabel과 같은 꼴 —
+ * 키 문자열을 돌려주면 dead-key 가드가 소비처를 못 찾는다).
+ */
+export function gateClaimLabel(tProof: (key: string) => string, gateType: string | null | undefined): string {
+  if (gateType === 'external_publish') return tProof('claim.publishApprovalLabel');
+  const group = gateClaimGroup(gateType);
+  if (group === 'claim') return tProof('claim.label');
+  if (group === 'decision_request') return tProof('claim.decisionRequestLabel');
+  return tProof('claim.goAheadLabel');
+}
