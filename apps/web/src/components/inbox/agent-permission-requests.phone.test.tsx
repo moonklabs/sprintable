@@ -110,22 +110,54 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(document.activeElement?.textContent).toBe('허용됨 · Bash'); // the result takes the pressed button's focus
   });
 
-  it('stays with its line after the list drops the answered request', async () => {
+  it('[4596 AC1] answered here: the result line until the next read, then gone — three answers on one open page leave no card', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     try {
       installShell();
-      await render([req()]);
-      await press('거부');
-      expect(phoneLines()).toEqual(['거부됨 · Bash']);
+      await render([req({ id: 'r1' }), req({ id: 'r2', request_id: 'q2' }), req({ id: 'r3', request_id: 'q3' })]);
+      for (const _ of [1, 2, 3]) await press('거부'); // each card's [거부] in turn (an answered card shows its line, no buttons)
+      expect(phoneLines()).toEqual(['거부됨 · Bash', '거부됨 · Bash', '거부됨 · Bash']); // right after: each with its line
       const reads = fetchWithAuth.mock.calls.length;
-      fetchWithAuth.mockImplementation(async () => list([]));
+      fetchWithAuth.mockImplementation(async () => list([])); // the server drops answered requests
       await act(async () => { vi.advanceTimersByTime(15_000); });
       await settle();
-      expect(fetchWithAuth.mock.calls.length).toBe(reads + 1); // the list was read again — and came back empty
-      expect(phoneLines()).toEqual(['거부됨 · Bash']);
+      expect(fetchWithAuth.mock.calls.length).toBe(reads + 1);
+      expect(container.querySelectorAll('[data-testid="agent-permission-card"]').length).toBe(0); // the list is what waits
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('[4596 AC1] a read that started before the answer does not take its card', async () => {
+    const { afterRead } = await import('./agent-permission-requests');
+    const row = req();
+    const kept = new Map([[row.id, { row, answer: { kind: 'answered' as const, decision: 'deny' as const }, at: 2_000 }]]);
+    expect(afterRead(kept, [], 1_000, 3_000).size).toBe(1); // that read began before the answer: it says nothing about it
+    expect(afterRead(kept, [], 2_500, 3_000).size).toBe(0);
+    const sending = new Map([[row.id, { row, answer: { kind: 'sending' as const, decision: 'deny' as const }, at: 2_000 }]]);
+    expect(afterRead(sending, [], 2_500, 3_000).size).toBe(1); // still on its way
+  });
+
+  it('[4596 AC1 · 4580] the network question\'s first «allow…» waits for its request to come back (at most 2 min), not the next read', async () => {
+    const { afterRead } = await import('./agent-permission-requests');
+    const row = req({ tool: 'SandboxNetwork', runtime: 'claude', stage: 'ask' } as never);
+    const kept = new Map([[row.id, { row, answer: { kind: 'answered' as const, decision: 'allow' as const }, at: 1_000 }]]);
+    expect(afterRead(kept, [], 2_000, 2_000 + 60_000).size).toBe(1);
+    expect(afterRead(kept, [], 2_000, 1_000 + 2 * 60_000).size).toBe(0);
+    const denied = new Map([[row.id, { row, answer: { kind: 'answered' as const, decision: 'deny' as const }, at: 1_000 }]]);
+    expect(afterRead(denied, [], 2_000, 2_500).size).toBe(0); // its [거부] ends it: no second card comes
+  });
+
+  it('[4596 AC2] «N분째 기다림» only on a card that still waits — not on one answered here, nor withdrawn · expired', async () => {
+    installShell();
+    await render([req({ id: 'r1' }), req({ id: 'r2', request_id: 'q2', state: 'expired', expires_at: new Date(Date.now() - 60_000).toISOString() })]);
+    const waited = () => [...container.querySelectorAll('[data-testid="agent-permission-waited"]')].map((x) => x.textContent);
+    expect(waited().length).toBe(1); // the pending one only
+    await press('거부');
+    expect(waited()).toEqual([]); // answered here: no «기다림»
+    const { stillWaiting } = await import('./agent-permission-requests');
+    expect(stillWaiting(req({ state: 'withdrawn' } as never), null)).toBe(false);
+    expect(stillWaiting(req(), { kind: 'cancelled' })).toBe(true); // not confirmed on the OS prompt: it still waits
   });
 
   it('outside the phone app, or a request this phone cannot answer → the read-only line, no button', async () => {
