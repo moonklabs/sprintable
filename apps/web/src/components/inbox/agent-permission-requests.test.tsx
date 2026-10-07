@@ -14,8 +14,12 @@ import type { PermissionRequest } from '@/lib/agent-permissions';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 let onNotice: ((n: { event_type: string; payload: Record<string, unknown> | null }) => void) | undefined;
+let extraNames: string[] | undefined;
+let onExtra: ((name: string, data: unknown) => void) | undefined;
 vi.mock('@/hooks/use-sse-notifications', () => ({
-  useSseNotifications: (o: { onNotification?: typeof onNotice }) => { onNotice = o.onNotification; },
+  useSseNotifications: (o: { onNotification?: typeof onNotice; extraEventNames?: string[]; onExtraEvent?: typeof onExtra }) => {
+    onNotice = o.onNotification; extraNames = o.extraEventNames; onExtra = o.onExtraEvent;
+  },
 }));
 const { AgentPermissionRequests } = await import('./agent-permission-requests');
 
@@ -151,6 +155,23 @@ describe('AgentPermissionRequests (story #4533)', () => {
     expect(fetchWithAuth).toHaveBeenCalledTimes(1);
     fetchWithAuth.mockResolvedValueOnce(answer([req()]));
     await act(async () => { onNotice?.({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } }); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
+  });
+
+  // story #4607: the server sends the notice as a NAMED frame `event: dispatched` (backend routers/events.py) — the hook passes it to
+  // onExtraEvent only when 'dispatched' is among extraEventNames; its data is the frame (event_type · payload{event_type} …)
+  it('a new request\'s notice arriving as the named `dispatched` frame reads at once — other dispatched kinds do not', async () => {
+    fetchWithAuth.mockResolvedValueOnce(answer([]));
+    await render();
+    expect(extraNames).toContain('dispatched');
+    await act(async () => { onExtra?.('dispatched', { event_id: 'e0', event_type: 'dispatched', payload: { event_type: 'conversation.message' } }); });
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+    fetchWithAuth.mockResolvedValueOnce(answer([req()]));
+    await act(async () => {
+      onExtra?.('dispatched', { event_id: 'e1', event_type: 'dispatched', source: { type: 'agent_permission_request', id: 'r1' }, payload: { event_type: 'agent.permission_request', title: 'Dev', body: 'Bash' } });
+    });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
     expect(line()).toBe('짝지은 폰에서 답할 수 있어요');

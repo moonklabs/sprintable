@@ -263,7 +263,32 @@ async def post_permission_request(
     await relay.touch_device(db, setup.id)
     await db.commit()
     content = {"id": str(row.id), "state": row.state, "recipient_reason": row.recipient_reason}
+    if created and row.recipient_member_id is not None:
+        await _push_permission_notice_live(db, row.id, row.recipient_member_id)
     return JSONResponse(status_code=201 if created else 200, content=content)
+
+
+async def _push_permission_notice_live(db: AsyncSession, request_row_id: uuid.UUID, recipient: uuid.UUID) -> None:
+    """story #4607 (PO 22:42Z · measured: phone card 0.76 s / 9.1 s — the 15 s poll's phase): the recipient's notice was only an Event
+    row (dispatch_notification INSERTs a person's Event and never puts it on a live stream), so a phone whose event stream was open
+    got it at its next reconnect's backfill at best — the approvals page's «a new request → read now» never ran. After the commit
+    (never before — a push for a row a rollback undoes), the Event(s) dispatch_notification made for this request go to the
+    recipient's open streams, in the backfill frame's shape (one event_id → the client's dedup holds across both). Best effort: a
+    failed push leaves the 201 as it is (the poll and the next backfill still bring it)."""
+    from app.models.event import Event
+    from app.routers.events import _backfill_frame_data, _push_to_agent
+
+    try:
+        events = (await db.execute(
+            select(Event).where(
+                Event.recipient_id == recipient, Event.event_type == "dispatched",
+                Event.source_entity_type == "agent_permission_request", Event.source_entity_id == request_row_id,
+            )
+        )).scalars().all()
+        for evt in events:
+            _push_to_agent(str(recipient), _backfill_frame_data(evt))
+    except Exception:  # noqa: BLE001 — best effort: the notice row is committed already
+        logger.warning("permission notice live push failed request=%s recipient=%s", request_row_id, recipient, exc_info=True)
 
 
 @router.post("/relay/permission-requests/{request_id}/withdraw")

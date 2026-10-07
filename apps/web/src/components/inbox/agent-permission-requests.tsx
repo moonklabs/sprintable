@@ -100,6 +100,14 @@ export function AgentPermissionRequests() {
     onNotification: (n) => {
       if (n.event_type === 'dispatched' && n.payload?.event_type === 'agent.permission_request') setNotices((k) => k + 1);
     },
+    // story #4607: the server sends a person's notice as a NAMED frame (`event: dispatched` — backend routers/events.py, backfill and
+    // live), which the hook's default names and the unnamed `message` never receive — so a new request's notice never read the list
+    // here (the card came by the 15 s poll: 0.76 s / 9.1 s measured). Subscribed by name now.
+    extraEventNames: ['dispatched'],
+    onExtraEvent: (_name, data) => {
+      const d = data as { payload?: { event_type?: unknown } | null } | null;
+      if (d?.payload?.event_type === 'agent.permission_request') setNotices((k) => k + 1);
+    },
   });
 
   // read on mount and on each new request's notice, then every 15 s while something is shown (30 s while nothing is) and whenever the
