@@ -297,6 +297,50 @@ describe('arrival by an in-app link press (client navigation)', () => {
     }
   });
 
+  // story 4595 (codex on 5021): a change inside the hold leaves a retake; then the card has no state for a while (state null), the hold
+  // runs out, the person moves on, and the value comes back. The old retake must not fire then.
+  it('[4595 · codex] state → null → the value back after the hold: a leftover retake does not take the focus', async () => {
+    vi.useFakeTimers();
+    try {
+      org = { ...OFF, can_change: true };
+      window.history.replaceState(null, '', '/desktop#remote-control');
+      Element.prototype.scrollIntoView = vi.fn();
+      const base = fetchWithAuth.getMockImplementation()!;
+      fetchWithAuth.mockImplementation(async (url: string) => (url.includes('org-pending') ? new Promise(() => {}) : base(url)));
+      const home = orgId;
+      let change: ((next: { enabled: boolean; can_change: boolean; owner_names: string[]; connected_computers: number; enabled_at: string | null }) => void) | undefined;
+      function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
+      const page = () => (<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
+      const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+      await act(async () => { root.render(page()); });
+      await settle();
+      const other = document.createElement('button');
+      container.append(other); // after the first render: the render takes over the container
+      expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+      // 1. a change inside the hold: the card's cleanup leaves a retake
+      await act(async () => { change?.({ ...org, enabled: true, can_change: true, enabled_at: '2026-10-08T00:00:00Z' }); });
+      await settle();
+      // 2. no state for a while: the card is pending on another org
+      orgId = 'org-pending';
+      await act(async () => { root.render(page()); });
+      await settle();
+      // 3. the hold runs out, the person moves on
+      await act(async () => { vi.advanceTimersByTime(1600); });
+      await act(async () => { other.focus(); });
+      await act(async () => { vi.advanceTimersByTime(10); });
+      await settle();
+      expect(document.activeElement).toBe(other);
+      // 4. the value comes back after the hold
+      orgId = home;
+      await act(async () => { root.render(page()); });
+      await settle();
+      expect(document.activeElement).toBe(other);
+      expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('the mark stays while the focus stays after the hold ends, and comes off when the focus leaves', async () => {
     const a = document.createElement('button'); const b = document.createElement('button');
     container.append(a, b);

@@ -42,11 +42,17 @@ export function DesktopRemoteControlCard() {
   // AC6 live: an in-app link press reaches here by a client navigation — Next's scroll handler may move the focus after this
   // effect, and the `#` may not be on the address yet; `takeArrival` and `holdArrivalFocus` (remote-off.tsx) cover both.
   useEffect(() => {
-    if (!state || arrived.current || typeof window === 'undefined') return;
-    const retake = arrivalRetake.current;
+    if (typeof window === 'undefined') return;
+    // story 4595 (codex on 5021): a retake counts only inside the hold it came from, and no card (state null) ends it. It is read here,
+    // before the state checks, so a flag left by a cleanup can never fire after the hold ran out (state → null → value).
+    const retake = arrivalRetake.current && !!state && Date.now() < arrivedHoldEnds.current;
     arrivalRetake.current = false;
-    const byHash = window.location.hash === `#${REMOTE_CONTROL_ANCHOR}`;
-    if (!retake && !takeArrival() && !byHash) return;
+    if (!state) return;
+    if (!retake) {
+      if (arrived.current) return;
+      const byHash = window.location.hash === `#${REMOTE_CONTROL_ANCHOR}`;
+      if (!takeArrival() && !byHash) return;
+    }
     arrived.current = true;
     cardRef.current?.scrollIntoView({ block: 'center' });
     const target = state.can_change ? switchRef.current : cardRef.current;
@@ -55,9 +61,9 @@ export function DesktopRemoteControlCard() {
     arrivedHoldEnds.current = Date.now() + ARRIVAL_HOLD_MS;
     return () => {
       release();
-      // story 4595: a cleanup inside the hold (a development Strict re-run, or the value changing in those 1.5 s) lets the next run
-      // take the arrival again; after the hold it stays taken, so a later change does not move the focus
-      if (Date.now() < arrivedHoldEnds.current) { arrived.current = false; arrivalRetake.current = true; }
+      // story 4595: a cleanup inside the hold (a development Strict re-run, or the value changing in those 1.5 s) leaves the next run a
+      // retake; after the hold none is left, so a later change does not move the focus
+      if (Date.now() < arrivedHoldEnds.current) arrivalRetake.current = true;
     };
   }, [state]);
 
