@@ -357,22 +357,14 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     const clip = { x: Math.max(0, s.x - 6), y: Math.max(0, s.y - 6), width: s.width + 12, height: s.height + 12 };
     const focused = await page.screenshot({ clip });
     await page.screenshot({ path: path.join(outDir(), `4583-web-5c-arrive-owner-${tag}.png`) });
-    // 4595 (PO, 5021 L-390): diagnosis — the focus right before the blur, synchronously right after it, and after the frames
-    const focusOf = () => page.evaluate(() => {
-      const a = document.activeElement as HTMLElement | null;
-      return { tag: a?.tagName ?? null, slot: a?.getAttribute('data-slot') ?? null, arrived: a?.hasAttribute('data-arrived') ?? null };
-    });
-    console.log(`[4595 L-390 focus before blur] ${JSON.stringify(await focusOf())}`);
-    const sync = await sw.evaluate((el) => {
-      (el as HTMLElement).blur();
-      const a = document.activeElement as HTMLElement | null;
-      return { tag: a?.tagName ?? null, slot: a?.getAttribute('data-slot') ?? null };
-    });
-    console.log(`[4595 L-390 focus sync after blur] ${JSON.stringify(sync)}`);
+    // 4595 (PO, 5021 L-390): the person leaves with Tab (a keypress ends the arrival hold, remote-off.tsx). A script blur() is not a
+    // person: it drops the focus to the body, and the hold takes it back — the same path that keeps the focus through Next's scroll
+    // reset (AC6), so it must stay. The ring then goes once the person has moved on.
+    await page.keyboard.press('Tab');
     await frames(page);
-    console.log(`[4595 L-390 focus after frames] ${JSON.stringify(await focusOf())}`);
+    const after = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-slot') ?? null);
+    expect(after, 'the person moved the focus off the switch').not.toBe('switch');
     const blurred = await page.screenshot({ clip });
-    console.log(`[4595 L-390 clip bytes] focused=${focused.length} blurred=${blurred.length} equal=${focused.equals(blurred)}`);
     expect(focused.equals(blurred), 'the focus ring shows in pixels').toBe(false);
 
     await open(page, { kind: 'card-far', width, theme, hash: '#remote-control', api: org({ owner: false }) });
