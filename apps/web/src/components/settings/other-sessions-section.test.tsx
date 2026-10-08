@@ -66,6 +66,11 @@ describe('[SID:4630] «로그인한 다른 기기»', () => {
     expect(q('other-sessions-open')!.textContent).toBe('다른 기기에서 모두 로그아웃');
   });
 
+  it('the card carries the #other-sessions anchor, so ?tab=profile#other-sessions lands on it', async () => {
+    await mount();
+    expect(document.getElementById('other-sessions')).toBe(q('other-sessions'));
+  });
+
   it('the button asks first: the confirmation text · the focus on [취소] · nothing sent yet', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

@@ -56,7 +56,8 @@ export function OtherSessionsSection() {
   const line = done ? otherSessionsLine(t, done) : null;
 
   return (
-    <SectionCard data-testid="other-sessions">
+    // 5018 nit: `#other-sessions` lands on this card; scroll-mt clears the page's top edge so the button shows
+    <SectionCard id="other-sessions" className="scroll-mt-24" data-testid="other-sessions">
       <SectionCardHeader>
         <div className="space-y-1">
           <h2 className="flex items-center gap-1.5 text-base font-semibold text-foreground"><LogOut className="size-4" />{t('otherSessionsTitle')}</h2>
