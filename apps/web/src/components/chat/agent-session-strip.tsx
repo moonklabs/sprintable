@@ -343,8 +343,8 @@ function ResultLine({ result }: { result: Result }) {
 }
 
 // story #4641 (Yuna's copy, 2026-10-08): one plain muted line under the session, only when a person widened the mode at the terminal —
-// the mode it became (to), never the one it was. A mode with no name yet (bypassPermissions: the CLI check first) shows no line.
-const WIDENED_MODES = new Set(['default', 'acceptEdits', 'plan', 'auto']);
+// the mode it became (to), never the one it was. A mode outside the list shows no line.
+const WIDENED_MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions']);
 
 function WidenedLine({ view }: { view: View }) {
   const t = useTranslations('chats.agentSession');
@@ -356,7 +356,8 @@ function WidenedLine({ view }: { view: View }) {
   const time = new Intl.DateTimeFormat(locale, { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(at));
   // each name by its own literal call (the dead-key guard reads the literals)
   const mode = to === 'default' ? t('widenedMode.default') : to === 'acceptEdits' ? t('widenedMode.acceptEdits')
-    : to === 'plan' ? t('widenedMode.plan') : t('widenedMode.auto');
+    : to === 'plan' ? t('widenedMode.plan') : to === 'auto' ? t('widenedMode.auto')
+    : to === 'dontAsk' ? t('widenedMode.dontAsk') : t('widenedMode.bypassPermissions');
   return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-widened">{t('widened', { time, mode })}</p>;
 }
 

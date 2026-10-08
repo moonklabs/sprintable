@@ -5127,7 +5127,9 @@
         "default": "Default mode",
         "acceptEdits": "Accept-edits mode",
         "plan": "Plan mode",
-        "auto": "Auto mode"
+        "auto": "Auto mode",
+        "dontAsk": "Don't-ask mode",
+        "bypassPermissions": "Bypass-permissions mode (widest)"
       },
       "state": {
         "starting": "Started",

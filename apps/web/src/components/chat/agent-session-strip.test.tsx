@@ -214,9 +214,15 @@ describe('AgentSessionStrip — a permission widened at the terminal (story #464
     expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
   });
 
-  it('a mode with no name yet (bypassPermissions) draws no line', async () => {
-    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'auto', permission_widened_to: 'bypassPermissions' }));
+  it('dontAsk draws its line in Korean with its own name', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'default', permission_widened_to: 'dontAsk' }));
     await render();
-    expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-session-widened"]')?.textContent).toBe('터미널에서 권한을 넓힘 · 20:51 · 묻지 않는 모드');
+  });
+
+  it('the two modes Yuna named (dontAsk, bypassPermissions) draw their line; the widest says so in its name', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'auto', permission_widened_to: 'bypassPermissions' }));
+    await render('en');
+    expect(container.querySelector('[data-testid="agent-session-widened"]')?.textContent).toBe('Permissions widened in the terminal · 20:51 · Bypass-permissions mode (widest)');
   });
 });
