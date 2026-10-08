@@ -31,6 +31,9 @@ export interface PermissionRequest {
   device_reachable: boolean;
   recipient_reason: 'paired' | 'no_paired_phone';
   answerable: boolean;
+  /** story #4589: the org's «원격 제어» is off — nothing can be answered here until it is on again (the row is kept, not withdrawn;
+   *  an older server sends none) */
+  remote_control_off?: boolean;
   /** story 4532: what the phone signs — its own shell reads them from this list (the web never passes them to the phone) ·
    *  null unless `answerable` (an unsalted hash of the input is carried no longer than its answer needs) */
   session_key: string | null;
@@ -42,13 +45,15 @@ export interface PermissionRequest {
   host_unread?: boolean;
 }
 
-/** The line in the button place — one, in the spec's order: the window passed · the computer gone quiet · only its terminal answers ·
- *  no paired phone · the phone. story #4590 (Yuna §1): a terminal-only question cannot be answered by a phone, paired or not — so its
- *  line comes before the two phone lines, after the facts of time and state. */
-export type PermissionLine = 'expired' | 'unknown' | 'terminalOnly' | 'noPairedPhone' | 'answerOnPhone';
+/** The line in the button place — one, in the spec's order: the window passed · remote control off · the computer gone quiet · only
+ *  its terminal answers · no paired phone · the phone. story #4589 (Yuna 4589-remote-off-card.md): off comes before «unknown» — turning
+ *  it off also silences the computer's line, and that is not a lost connection. story #4590 (Yuna §1): a terminal-only question cannot
+ *  be answered by a phone, paired or not — so its line comes before the two phone lines, after the facts of time and state. */
+export type PermissionLine = 'expired' | 'remoteControlOff' | 'unknown' | 'terminalOnly' | 'noPairedPhone' | 'answerOnPhone';
 
 export function permissionLine(r: PermissionRequest): PermissionLine {
   if (r.state === 'expired') return 'expired';
+  if (r.remote_control_off) return 'remoteControlOff';
   if (!r.device_reachable) return 'unknown';
   if (r.terminal_only) return 'terminalOnly';
   if (r.recipient_reason === 'no_paired_phone') return 'noPairedPhone';

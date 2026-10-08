@@ -217,8 +217,8 @@ const KO = {
   remoteMember: (o: string) => `이 조직은 원격 제어가 꺼져 있어 이 컴퓨터를 켤 수 없어요 — 조직 소유자${o}가 켜면 다시 할 수 있어요`,
   stripOwner: '원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요',
   stripMember: (o: string) => `원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요 — 조직 소유자${o}가 켤 수 있어요`,
-  inboxOwner: '원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요',
-  inboxMember: (o: string) => `원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요 — 조직 소유자${o}가 켤 수 있어요`,
+  inboxOwner: '원격 제어가 꺼져 있어 데스크톱 에이전트의 새 권한 요청이 여기로 오지 않아요',
+  inboxMember: (o: string) => `원격 제어가 꺼져 있어 데스크톱 에이전트의 새 권한 요청이 여기로 오지 않아요 — 조직 소유자${o}가 켤 수 있어요`,
   offEffect: '꺼져 있으면 권한 요청이 폰으로 오지 않고, 폰에서 멈추거나 지시할 수도 없어요',
   ownerOnlyOff: (o: string) => `원격 제어 · 꺼짐 — 조직 소유자${o}만 켜고 끌 수 있어요`,
   ownerOnlyOn: (o: string) => `원격 제어 · 켜짐 — 조직 소유자${o}만 켜고 끌 수 있어요`,
@@ -435,7 +435,7 @@ test('[4583] ⑧ en — 1a · 4a · 5b · 1440 L', async ({ page }) => {
   await shot(page, page.getByTestId('phone-pairing'), '4583-web-8-pair-refused-owner-en-L-1440');
 
   await open(page, { kind: 'inbox', width: w, theme, locale, api: inboxApi({ owner: true, names: NAMES3_EN }) });
-  await expect(page.getByTestId('agent-permission-remote-off').locator('p')).toHaveText("Remote control is off, so desktop agents' permission requests don't come here");
+  await expect(page.getByTestId('agent-permission-remote-off').locator('p')).toHaveText("Remote control is off, so desktop agents' new permission requests don't come here");
   await shot(page, page.locator('#root'), '4583-web-8-inbox-owner-en-L-1440');
 
   await open(page, { kind: 'card', width: w, theme, locale, api: org({ owner: false, names: NAMES3_EN }) });
