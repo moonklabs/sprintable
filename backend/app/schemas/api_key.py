@@ -45,6 +45,38 @@ class ApiKeyUsageLogResponse(BaseModel):
     occurred_at: datetime
 
 
+class ApiKeyUsagePath(BaseModel):
+    method: str
+    path: str  # ids folded to {id}
+    count: int
+    via_mcp: int
+
+
+class ApiKeyUsageTool(BaseModel):
+    tool: str
+    count: int
+
+
+class ApiKeyUsageAddress(BaseModel):
+    remote_ip: str | None = None
+    count: int
+    via_mcp: int
+
+
+class ApiKeyUsageSummaryResponse(BaseModel):
+    """story #4546 AC3 — one key over the last `days`: through our MCP client vs direct, top paths · tools · client addresses."""
+
+    api_key_id: uuid.UUID
+    days: int
+    total: int
+    direct: int
+    via_mcp: int
+    via_mcp_by_transport: dict[str, int]
+    top_paths: list[ApiKeyUsagePath]
+    top_tools: list[ApiKeyUsageTool]
+    top_remote_ips: list[ApiKeyUsageAddress]
+
+
 class RotateApiKeyRequest(BaseModel):
     api_key_id: uuid.UUID
 

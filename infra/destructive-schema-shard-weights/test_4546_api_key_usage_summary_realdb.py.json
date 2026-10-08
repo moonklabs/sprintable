@@ -1,0 +1,1 @@
+{"file": "tests/test_4546_api_key_usage_summary_realdb.py", "sec": 32.0, "source": "story #4546(2026-10-08) — 잠정: 같은 꼴(테스트마다 create_all/drop_all · 4건)인 test_2087_api_key_logs_endpoint_realdb.py CI 실측 24.0s(3건) 비례. 로컬 41.8s(공유 기계). 실 CI 샤드 로그로 재확認 필요."}
