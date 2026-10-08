@@ -16,6 +16,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     ORG2,
     OUTSIDER,
     OWNER,
+    OWNER_TM,
     PLAIN,
     _addresses,
     _client,
@@ -117,6 +118,48 @@ async def test_03_only_its_owner_or_an_org_admin_and_anyone_else_sees_404(world)
         # the plain member's own key: yes · the org's owner removing a member's key: yes
         assert (await c.delete(f"{PHONES}/{plains}", headers=_person(PLAIN))).json() == {"removed": True}
         await _sql(f"UPDATE remote_devices SET revoked_at = NULL WHERE id = '{plains}'")
+        assert (await c.delete(f"{PHONES}/{plains}", headers=_person(OWNER))).json() == {"removed": True}
+
+
+async def _pair_live(phone_id: str, setup_id: str) -> bool:
+    return (await _sql(fetch=f"SELECT count(*) FROM remote_device_pairings WHERE remote_device_id = '{phone_id}' AND setup_id = '{setup_id}' AND removed_at IS NULL"))[0][0] == 1
+
+
+async def test_03b_a_deactivated_owner_or_admin_is_no_admin_here_for_the_key_or_the_pair(world):
+    """Kadir QA (PO 08:41Z): an org owner/admin whose members row is inactive removed another person's phone key or pair (200). The
+    same rule as remote control and «묻지 않고 일하기» (4585 · 4598, `is_active_org_admin` beside `is_active_owner`): only an active
+    owner/admin passes for another person's — anyone else sees the same 404 as a missing one, and nothing changes."""
+    async with _client() as c:
+        plain_tm = await _plain_member()
+        device = await _device(c, name="d4424 mac 4624c")
+        token, sid = device["device_token"], device["setup_id"]
+        plains, plain_der = await _register(c, who=PLAIN)
+        owners, owner_der = await _register(c)
+        await _pair(c, token, plain_der, owner_der)
+
+        # ① the org's owner, deactivated: PLAIN's key and its pair are not theirs to remove
+        await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")
+        try:
+            for url, code in ((f"{PHONES}/{plains}/pairs/{sid}", "pairing_not_found"), (f"{PHONES}/{plains}", "phone_not_found")):
+                r = await c.delete(url, headers=_person(OWNER))
+                assert (r.status_code, r.json()["error"]["code"]) == (404, code), r.text
+            assert await _live(plains) and await _pair_live(plains, sid)
+        finally:
+            await _sql(f"UPDATE members SET is_active = true WHERE id = '{OWNER_TM}'")
+
+        # ② an admin, deactivated: the owner's key and its pair are not theirs either
+        await _sql(f"UPDATE org_members SET role = 'admin' WHERE org_id = '{ORG}' AND user_id = '{PLAIN}'")
+        await _sql(f"UPDATE members SET is_active = false WHERE id = '{plain_tm}'")
+        try:
+            for url, code in ((f"{PHONES}/{owners}/pairs/{sid}", "pairing_not_found"), (f"{PHONES}/{owners}", "phone_not_found")):
+                r = await c.delete(url, headers=_person(PLAIN))
+                assert (r.status_code, r.json()["error"]["code"]) == (404, code), r.text
+            assert await _live(owners) and await _pair_live(owners, sid)
+        finally:
+            await _sql(f"UPDATE members SET is_active = true WHERE id = '{plain_tm}'")
+
+        # the same two, active again: yes (the refusals above were the inactive row, not the role)
+        assert (await c.delete(f"{PHONES}/{owners}/pairs/{sid}", headers=_person(PLAIN))).json() == {"removed": True}
         assert (await c.delete(f"{PHONES}/{plains}", headers=_person(OWNER))).json() == {"removed": True}
 
 

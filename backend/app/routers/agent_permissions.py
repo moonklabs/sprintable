@@ -25,7 +25,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.services import agent_permissions
 from app.services.desktop_relay import DesktopRelayError
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import is_active_org_admin, resolve_member
 
 router = APIRouter(prefix="/api/v2", tags=["agent-permissions"])
 
@@ -151,11 +151,11 @@ async def delete_remote_device(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
-    """story #4624: the phone key itself (its pairs with it) — its owner, or an owner/admin of the org."""
+    """story #4624: the phone key itself (its pairs with it) — its owner, or an active owner/admin of the org."""
     member = await _person(db, auth, org_id, interactive=False)
     try:
         removed = await agent_permissions.remove_phone(
-            db, phone_id=phone_id, actor_member_id=uuid.UUID(str(member.id)), actor_is_admin=member.role in ("owner", "admin"), org_id=org_id,
+            db, phone_id=phone_id, actor_member_id=uuid.UUID(str(member.id)), actor_is_admin=await is_active_org_admin(db, member), org_id=org_id,
         )
     except DesktopRelayError as exc:
         await db.rollback()
@@ -176,7 +176,7 @@ async def delete_remote_device_pair(
     try:
         removed = await agent_permissions.remove_pair(
             db, phone_id=phone_id, setup_id=setup_id, actor_member_id=uuid.UUID(str(member.id)),
-            actor_is_admin=member.role in ("owner", "admin"), org_id=org_id,
+            actor_is_admin=await is_active_org_admin(db, member), org_id=org_id,  # story #4624: an inactive admin is not one
         )
     except DesktopRelayError as exc:
         await db.rollback()

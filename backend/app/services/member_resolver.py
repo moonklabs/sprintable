@@ -144,6 +144,18 @@ async def is_active_owner(session: AsyncSession, member: ResolvedMember) -> bool
     One rule in one place — the remote-control gate and the run profile's gates both call this."""
     if member.role != "owner":
         return False
+    return await _member_row_active(session, member)
+
+
+async def is_active_org_admin(session: AsyncSession, member: ResolvedMember) -> bool:
+    """story #4624 (Kadir QA · PO 08:41Z): an owner or admin by `resolve_member` whose members row is active and not deleted — the
+    same rule as `is_active_owner`, for the gates an admin passes too (removing another person's phone key or pair). Fail closed."""
+    if member.role not in ("owner", "admin"):
+        return False
+    return await _member_row_active(session, member)
+
+
+async def _member_row_active(session: AsyncSession, member: ResolvedMember) -> bool:
     return (await session.execute(
         select(Member.id).where(Member.id == member.id, Member.is_active.is_(True), Member.deleted_at.is_(None))
     )).first() is not None
