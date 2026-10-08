@@ -688,3 +688,90 @@ async def test_4631_the_block_stays_unless_every_condition_holds(case):
             assert await _open_breaker_count(s, conv_id) == 1
     finally:
         await engine.dispose()
+
+
+# ─── story #4631 C: the conversation's open block, as the web's banner reads it ─────────────────────
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_the_open_block_as_the_web_reads_it_and_who_may_release_it():
+    """open_circuit_breaker_state: none open → None · open → opened_at · release_mode «manual» (no settings row = the default) ·
+    can_release only for a human org owner/admin (the release API's own rule): an owner yes · a plain member no · not a human
+    session (an agent) no · released → None again."""
+    from app.services.chain_escalation import _open_circuit_breaker, open_circuit_breaker_state, release_circuit_breaker
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            owner_user_id, owner_member = await _seed_human(s, org_id, project_id, role="owner")
+            member_user_id, _ = await _seed_human(s, org_id, project_id, role="member")
+            conv_id = await _seed_conversation(s, org_id, project_id)
+
+            def state(caller):
+                return open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=caller)
+
+            assert await state(owner_user_id) is None, "no block open"
+            await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+            await s.commit()
+            as_owner = await state(owner_user_id)
+            assert (as_owner["release_mode"], as_owner["can_release"]) == ("manual", True)
+            assert as_owner["opened_at"] is not None
+            assert (await state(member_user_id))["can_release"] is False, "a plain member: the release API's 403"
+            assert (await state(None))["can_release"] is False, "not a human session (an agent): never its own block"
+
+            await release_circuit_breaker(s, conversation_id=conv_id, released_by=owner_member, reason="확인")
+            await s.commit()
+            assert await state(owner_user_id) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_get_conversation_carries_it_owner_may_release_agent_may_not():
+    """The wiring: GET /conversations/{id} carries the state — the owner's view can_release · the agent's (its own block) cannot ·
+    and the JSON keys the web reads. The read rule itself is not this story's (stubbed to «readable»; test_2697 owns it)."""
+    from app.routers.conversations import get_conversation
+    from app.services.chain_escalation import _open_circuit_breaker
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            owner_user_id, _ = await _seed_human(s, org_id, project_id, role="owner")
+            agent_id = await _seed_agent(s, org_id, project_id)
+            conv_id = await _seed_conversation(s, org_id, project_id)
+            await _add_participant(s, conv_id, agent_id)
+            with patch("app.routers.conversations._can_read_conversation", AsyncMock(return_value=True)):
+                quiet = await get_conversation(conv_id, db=s, auth=_human_auth(owner_user_id, org_id), org_id=org_id)
+                assert quiet.circuit_breaker is None
+                await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+                await s.commit()
+                as_owner = await get_conversation(conv_id, db=s, auth=_human_auth(owner_user_id, org_id), org_id=org_id)
+                as_agent = await get_conversation(conv_id, db=s, auth=_agent_auth(agent_id, org_id), org_id=org_id)
+            body = as_owner.model_dump(mode="json")["circuit_breaker"]
+            assert set(body) == {"opened_at", "release_mode", "can_release"}
+            assert (body["release_mode"], body["can_release"]) == ("manual", True)
+            assert as_agent.model_dump(mode="json")["circuit_breaker"]["can_release"] is False
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_an_auto_org_says_auto():
+    from app.services.chain_escalation import _open_circuit_breaker, open_circuit_breaker_state
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_org_config(s, org_id, circuit_breaker_release_mode="auto")
+            conv_id = await _seed_conversation(s, org_id, project_id)
+            await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+            await s.commit()
+            got = await open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=None)
+            assert got["release_mode"] == "auto"
+    finally:
+        await engine.dispose()

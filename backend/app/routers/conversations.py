@@ -1266,6 +1266,18 @@ class ConversationResponse(BaseModel):
     # story #4179 — free_response(#2603 멘션 전용 라우팅의 방 단위 예외)가 PATCH 응답에만 있어
     # 웹 토글이 새로 열 때마다 off로 읽혔다(그 상태로 다시 저장하면 꺼짐 — 데이터 훼손). additive.
     free_response: bool = False
+    # story #4631 C — the flood block of this conversation, while one is open (else absent): when it opened, how it is released
+    # (the org's release_mode) and whether the caller may release it (a human org owner/admin — the release API's own rule).
+    circuit_breaker: "CircuitBreakerState | None" = None
+
+
+class CircuitBreakerState(BaseModel):
+    opened_at: datetime
+    release_mode: str
+    can_release: bool
+
+
+ConversationResponse.model_rebuild()
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -1873,6 +1885,14 @@ async def get_conversation(
     # FE가 30건 캡 있는 list 엔드포인트에 기대던 workaround(.find() miss 버그) 제거.
     participants_map = await _fetch_conversation_participants([conversation_id], db)
     resp.participants = participants_map.get(conversation_id, [])
+    # story #4631 C: the open flood block, for the conversation's banner and its [차단 해제]
+    from app.services.chain_escalation import open_circuit_breaker_state
+
+    breaker = await open_circuit_breaker_state(
+        db, conversation_id=conversation_id, org_id=org_id,
+        caller_user_id=uuid.UUID(auth.user_id) if sender.type == "human" else None,
+    )
+    resp.circuit_breaker = CircuitBreakerState(**breaker) if breaker else None
     return resp
 
 

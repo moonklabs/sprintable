@@ -338,6 +338,27 @@ async def get_open_circuit_breaker_id(db: AsyncSession, conversation_id: uuid.UU
     )).scalar_one_or_none()
 
 
+async def open_circuit_breaker_state(
+    db: AsyncSession, *, conversation_id: uuid.UUID, org_id: uuid.UUID, caller_user_id: uuid.UUID | None,
+) -> dict | None:
+    """story #4631 C: the conversation's open flood block as the web shows it — None when none is open. `can_release` follows the
+    release API's own rule (a human org owner/admin · `caller_user_id` None = not a human session → never)."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+    from app.services.project_auth import is_org_owner_or_admin
+
+    opened_at = (await db.execute(
+        select(ChainCircuitBreaker.opened_at).where(
+            ChainCircuitBreaker.conversation_id == conversation_id,
+            ChainCircuitBreaker.released_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if opened_at is None:
+        return None
+    _enabled, _window, _threshold, _mode, release_mode = await _get_org_config(db, org_id)
+    can_release = caller_user_id is not None and await is_org_owner_or_admin(db, caller_user_id, org_id)
+    return {"opened_at": opened_at, "release_mode": release_mode, "can_release": can_release}
+
+
 async def release_circuit_breaker(
     db: AsyncSession, *, conversation_id: uuid.UUID, released_by: uuid.UUID, reason: str | None,
 ) -> bool:
