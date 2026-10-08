@@ -1,18 +1,16 @@
 {
-  "_": "[SID:4542] the one definition of a tool's name a person reads (PO 2026-10-05 01:59Z · 02:04Z · Yuna 02:05Z · Kadir 02:04Z). Same bytes in sprintable-mobile contracts/tool-names.json (in the phone's own bundle) and sprintable backend/app/services/tool-names.json; both repos pin its sha256. Every vector: removing U+200B/U+2060 from *_wrapped gives the plain name, and the tool must match ^[A-Za-z0-9_.:-]{1,128}$ before it is named on a signing sheet (Kadir 02:07Z). Rules: (1) mcp__{server}__{tool} (any runtime) → the `mcp` words; (2) runtime claude → table.claude.names[tool] by exact own key (a value the daemon itself makes for a window with no tool of its own — story 4580 SandboxNetwork), else its own name as is; (3) other runtimes → table[runtime].names[tool] by exact own key, else table[runtime].other with {value} = the tool (a runtime not in the table: no names, codex's «other» wording); keys never matched by prototype or case. Wrap (display only, never signed): U+200B after _ - . / : (when a non-space follows) and between [a-z0-9] and [A-Z]; U+2060 between two Hangul syllables and between a Hangul syllable and an adjacent non-space non-Hangul character; nothing next to an existing U+200B/U+2060.",
+  "_": "[SID:4542] the one definition of a tool's name a person reads (PO 2026-10-05 01:59Z · 02:04Z · Yuna 02:05Z · Kadir 02:04Z). Same bytes in sprintable-mobile contracts/tool-names.json (in the phone's own bundle) and sprintable backend/app/services/tool-names.json; both repos pin its sha256. Every vector: removing U+200B/U+2060 from *_wrapped gives the plain name, and the tool must match ^[A-Za-z0-9_.:-]{1,128}$ before it is named on a signing sheet (Kadir 02:07Z). Rules: (1) mcp__{server}__{tool} (any runtime) → the `mcp` words; (2) a value the daemon itself makes for a window with no tool of its own (story 4580 SandboxNetwork) → own[tool] by exact own key, whatever the runtime — none too (story 4591: the title and the summary ask the same question); (3) runtime claude → its own name as is; runtime none (an older server's row) → the value as is; (4) other runtimes → table[runtime].names[tool] by exact own key, else table[runtime].other with {value} = the tool (a runtime not in the table: no names, codex's «other» wording); keys never matched by prototype or case. Wrap (display only, never signed): U+200B after _ - . / : (when a non-space follows) and between [a-z0-9] and [A-Z]; U+2060 between two Hangul syllables and between a Hangul syllable and an adjacent non-space non-Hangul character; nothing next to an existing U+200B/U+2060.",
   "mcp": {
     "ko": "{server}의 {tool}",
     "en": "{tool} from {server}"
   },
+  "own": {
+    "SandboxNetwork": {
+      "ko": "네트워크 연결",
+      "en": "Network connection"
+    }
+  },
   "table": {
-    "claude": {
-      "names": {
-        "SandboxNetwork": {
-          "ko": "네트워크 연결",
-          "en": "Network connection"
-        }
-      }
-    },
     "codex": {
       "names": {
         "commandExecution": {
@@ -286,18 +284,50 @@
     {
       "runtime": "codex",
       "tool": "SandboxNetwork",
-      "ko": "작업⁠(SandboxNetwork)",
-      "en": "Action (SandboxNetwork)",
-      "ko_wrapped": "작⁠업⁠(Sandbox​Network)",
-      "en_wrapped": "Action (Sandbox​Network)"
+      "ko": "네트워크 연결",
+      "en": "Network connection",
+      "ko_wrapped": "네⁠트⁠워⁠크 연⁠결",
+      "en_wrapped": "Network connection"
     },
     {
       "runtime": "hermes",
       "tool": "SandboxNetwork",
-      "ko": "작업⁠(SandboxNetwork)",
-      "en": "Action (SandboxNetwork)",
-      "ko_wrapped": "작⁠업⁠(Sandbox​Network)",
-      "en_wrapped": "Action (Sandbox​Network)"
+      "ko": "네트워크 연결",
+      "en": "Network connection",
+      "ko_wrapped": "네⁠트⁠워⁠크 연⁠결",
+      "en_wrapped": "Network connection"
+    },
+    {
+      "runtime": null,
+      "tool": "SandboxNetwork",
+      "ko": "네트워크 연결",
+      "en": "Network connection",
+      "ko_wrapped": "네⁠트⁠워⁠크 연⁠결",
+      "en_wrapped": "Network connection"
+    },
+    {
+      "runtime": "codex",
+      "tool": "sandboxnetwork",
+      "ko": "작업⁠(sandboxnetwork)",
+      "en": "Action (sandboxnetwork)",
+      "ko_wrapped": "작⁠업⁠(sandboxnetwork)",
+      "en_wrapped": "Action (sandboxnetwork)"
+    },
+    {
+      "runtime": null,
+      "tool": "constructor",
+      "ko": "constructor",
+      "en": "constructor",
+      "ko_wrapped": "constructor",
+      "en_wrapped": "constructor"
+    },
+    {
+      "runtime": "codex",
+      "tool": "exec_command",
+      "ko": "작업⁠(exec_command)",
+      "en": "Action (exec_command)",
+      "ko_wrapped": "작⁠업⁠(exec_​command)",
+      "en_wrapped": "Action (exec_​command)"
     }
   ]
 }
