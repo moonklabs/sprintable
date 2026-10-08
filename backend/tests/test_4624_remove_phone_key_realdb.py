@@ -56,7 +56,7 @@ async def test_01_removing_a_key_frees_its_place_under_the_limit_and_is_idempote
         full = await c.post(PHONES, json={"label": "넷째", "public_key": key}, headers=_person(OWNER))
         assert full.status_code == 409 and full.json()["error"]["code"] == "remote_device_limit"
         gone = await c.delete(f"{PHONES}/{ids[0]}", headers=_person(OWNER))
-        assert gone.status_code == 200 and gone.json() == {"removed": True}
+        assert gone.status_code == 200 and gone.json() == {"removed": True, "session": "not_found"}
         assert not await _live(ids[0])
         assert [d["id"] for d in (await c.get(PHONES, headers=_person(OWNER))).json()["devices"]] == ids[1:], "gone from the list"
         again = await c.post(PHONES, json={"label": "넷째", "public_key": key}, headers=_person(OWNER))
@@ -87,7 +87,7 @@ async def test_02_its_pairs_go_with_it_at_once_and_an_answer_signed_by_it_is_ref
         woken: list[str] = []
         real_wake = perms._wake_device_after_commit
         monkeypatch.setattr(perms, "_wake_device_after_commit", lambda db, sid: (woken.append(str(sid)), real_wake(db, sid))[1])
-        assert (await c.delete(f"{PHONES}/{phone_id}", headers=_person(OWNER))).json() == {"removed": True}
+        assert (await c.delete(f"{PHONES}/{phone_id}", headers=_person(OWNER))).json() == {"removed": True, "session": "not_found"}
         assert sorted(woken) == sorted([a["setup_id"], b["setup_id"]]), woken
         live_pairs = (await _sql(fetch=f"SELECT count(*) FROM remote_device_pairings WHERE remote_device_id = '{phone_id}' AND removed_at IS NULL"))[0][0]
         assert live_pairs == 0, "both pairs removed with the key"
@@ -116,9 +116,9 @@ async def test_03_only_its_owner_or_an_org_admin_and_anyone_else_sees_404(world)
         assert r.status_code == 404 and r.json()["error"]["code"] == "phone_not_found", r.text
         assert await _live(owners)
         # the plain member's own key: yes · the org's owner removing a member's key: yes
-        assert (await c.delete(f"{PHONES}/{plains}", headers=_person(PLAIN))).json() == {"removed": True}
+        assert (await c.delete(f"{PHONES}/{plains}", headers=_person(PLAIN))).json() == {"removed": True, "session": "not_found"}
         await _sql(f"UPDATE remote_devices SET revoked_at = NULL WHERE id = '{plains}'")
-        assert (await c.delete(f"{PHONES}/{plains}", headers=_person(OWNER))).json() == {"removed": True}
+        assert (await c.delete(f"{PHONES}/{plains}", headers=_person(OWNER))).json() == {"removed": True, "session": "not_found"}
 
 
 async def _pair_live(phone_id: str, setup_id: str) -> bool:
@@ -168,7 +168,7 @@ async def test_03b_a_deactivated_owner_or_admin_is_no_admin_here_for_the_key_or_
         # the same two, active again: yes (the refusals above were the inactive row, not the role)
         assert sorted(d["id"] for d in (await c.get(f"{PHONES}?scope=org", headers=_person(PLAIN))).json()["devices"]) == sorted([owners, plains])
         assert (await c.delete(f"{PHONES}/{owners}/pairs/{sid}", headers=_person(PLAIN))).json() == {"removed": True}
-        assert (await c.delete(f"{PHONES}/{plains}", headers=_person(OWNER))).json() == {"removed": True}
+        assert (await c.delete(f"{PHONES}/{plains}", headers=_person(OWNER))).json() == {"removed": True, "session": "not_found"}
 
 
 async def test_03c_a_deactivated_person_still_removes_their_own_key_and_pair(world):
@@ -182,7 +182,7 @@ async def test_03c_a_deactivated_person_still_removes_their_own_key_and_pair(wor
         await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")
         try:
             assert (await c.delete(f"{PHONES}/{a}/pairs/{device['setup_id']}", headers=_person(OWNER))).json() == {"removed": True}
-            assert (await c.delete(f"{PHONES}/{b}", headers=_person(OWNER))).json() == {"removed": True}
+            assert (await c.delete(f"{PHONES}/{b}", headers=_person(OWNER))).json() == {"removed": True, "session": "not_found"}
         finally:
             await _sql(f"UPDATE members SET is_active = true WHERE id = '{OWNER_TM}'")
 
