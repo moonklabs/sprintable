@@ -613,9 +613,13 @@ async def test_get_conversation_200_returns_project_id():
         participants_result = MagicMock()
         participants_result.all.return_value = []
 
+        # story #4631 C: the read ends with the conversation's open flood block (open_circuit_breaker_state) — none open here
+        breaker_result = MagicMock()
+        breaker_result.scalar_one_or_none.return_value = None
+
         session.execute = AsyncMock(side_effect=[
             conv_result, member_result, access_valid_result, predicate_result,
-            member_result, muted_result, participants_result,
+            member_result, muted_result, participants_result, breaker_result,
         ])
 
         async with client as c:

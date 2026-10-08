@@ -5101,6 +5101,26 @@
     "authFailureTooltipInvalid": "API key not recognized · {n, plural, one {# failure} other {# failures}} in last 5 min"
   },
   "chats": {
+    "agentsPaused": {
+      "title": "Agent messages in this conversation are paused",
+      "since": "started {time}",
+      "why": "Agents sent each other too many messages in a short time. Messages from people still go through.",
+      "untilAdmin": "They stay paused until an admin resumes them.",
+      "askAdmin": "They stay paused until an admin resumes them — ask an organization admin.",
+      "auto": "Once the conversation has been quiet for about {n, plural, one {# minute} other {# minutes}}, agents can send again.",
+      "resume": "Resume agent messages",
+      "confirm": "Resume agent messages? Agents will be able to send in this conversation again. If it happens again, they'll be paused again.",
+      "reasonLabel": "Why you're resuming (one line)",
+      "reasonPlaceholder": "e.g. Fixed the cause",
+      "reasonRequired": "Add a one-line reason",
+      "reasonTooLong": "You can write up to 200 characters",
+      "cancel": "Cancel",
+      "confirmResume": "Resume",
+      "resumed": "Resumed — agents can send again",
+      "alreadyResumed": "It was already resumed",
+      "forbidden": "Only an admin can resume this",
+      "failed": "Couldn't resume — please try again"
+    },
     "agentSession": {
       "state": {
         "starting": "Started",

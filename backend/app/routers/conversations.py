@@ -1266,6 +1266,20 @@ class ConversationResponse(BaseModel):
     # story #4179 — free_response(#2603 멘션 전용 라우팅의 방 단위 예외)가 PATCH 응답에만 있어
     # 웹 토글이 새로 열 때마다 off로 읽혔다(그 상태로 다시 저장하면 꺼짐 — 데이터 훼손). additive.
     free_response: bool = False
+    # story #4631 C — the flood block of this conversation, while one is open (else absent): when it opened, how it is released
+    # (the org's release_mode) and whether the caller may release it (a human org owner/admin — the release API's own rule).
+    circuit_breaker: "CircuitBreakerState | None" = None
+
+
+class CircuitBreakerState(BaseModel):
+    opened_at: datetime
+    release_mode: str
+    can_release: bool
+    # auto only: after how many quiet minutes agents may send again (window × 2 · the server's value)
+    auto_release_after_minutes: int | None = None
+
+
+ConversationResponse.model_rebuild()
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -1873,6 +1887,14 @@ async def get_conversation(
     # FE가 30건 캡 있는 list 엔드포인트에 기대던 workaround(.find() miss 버그) 제거.
     participants_map = await _fetch_conversation_participants([conversation_id], db)
     resp.participants = participants_map.get(conversation_id, [])
+    # story #4631 C: the open flood block, for the conversation's banner and its [차단 해제]
+    from app.services.chain_escalation import open_circuit_breaker_state
+
+    breaker = await open_circuit_breaker_state(
+        db, conversation_id=conversation_id, org_id=org_id,
+        caller_user_id=uuid.UUID(auth.user_id) if sender.type == "human" else None,
+    )
+    resp.circuit_breaker = CircuitBreakerState(**breaker) if breaker else None
     return resp
 
 
@@ -2428,7 +2450,11 @@ async def release_circuit_breaker_endpoint(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    if not await is_org_owner_or_admin(db, uuid.UUID(auth.user_id), org_id):
+    # story #4631 (Kadir 5016): an active owner/admin only — a deactivated one releases nothing (the #4624 rule); the conversation
+    # read's can_release asks the same question, so the band's button and this route never disagree
+    from app.services.chain_escalation import may_release_circuit_breaker
+
+    if not await may_release_circuit_breaker(db, user_id=uuid.UUID(auth.user_id), org_id=org_id):
         raise HTTPException(
             status_code=403,
             detail="서킷브레이커 해제는 org owner/admin만 가능합니다.",
@@ -2620,23 +2646,27 @@ async def send_message_core(
             # "circuit_breaker_open"이면 api_client.py::_split_code_message의 코드
             # 인식 정규식(`^[A-Z][A-Z0-9_]*: `)이 못 잡아 code가 안 뽑힌다 — 값 자체를
             # 새로 발명하는 게 아니라 이 레포 전체가 이미 쓰는 대소문자 관례로 맞추는 것.
-            # 원문 리터럴은 개명 前 그대로 한 덩어리 유지(인접 문자열 리터럴 결합 —
-            # `scripts/verify_no_new_korean_user_strings.py`가 AST `ast.Constant` 단위로
-            # 세므로 이렇게 두 줄로 이어 써도 파서가 하나의 상수로 합친다) — message/hint
-            # 분리는 런타임 `.split(" — ", 1)`로만 한다. 리터럴 자체를 둘로 쪼개면 그
-            # 가드의 "baseline can only shrink" 순증 체크가 파일당 항목 수 증가로 잡는다
-            # (CI 실측, PR#4357 — 5→6건 FAIL). 새 낱말은 여전히 0.
-            _circuit_breaker_notice = (
-                "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
-                "org owner/admin의 해제 또는 자동 해소를 기다려주세요."
+            # story #4631 (Yuna «4631» §5): the words from the shared catalog in the org's language, and true to how this org's
+            # block is released — the old hint promised a «자동 해소» a manual org never gives, and said nothing of sending again
+            # (each retry is another refused turn). manual → wait for an organization admin · auto → about {n} quiet minutes.
+            from app.services.chain_escalation import _get_org_config, auto_release_after_minutes
+            from app.services.i18n_catalog import t
+            from app.services.org_locale import resolve_org_locale
+
+            _locale = await resolve_org_locale(db, org_id)
+            _enabled, _window, _threshold, _mode, _release_mode = await _get_org_config(db, org_id)
+            _quiet_minutes = auto_release_after_minutes(_window)
+            _cb_hint = (
+                t("conversation.agents_paused_hint_auto_one" if _quiet_minutes == 1 else "conversation.agents_paused_hint_auto",
+                  _locale, n=_quiet_minutes)
+                if _release_mode == "auto" else t("conversation.agents_paused_hint_manual", _locale)
             )
-            _cb_message, _cb_hint = _circuit_breaker_notice.split(" — ", 1)
             raise HTTPException(
                 status_code=423,
                 detail={
                     "code": "CIRCUIT_BREAKER_OPEN",
-                    "message": _cb_message,
-                    "hint": _cb_hint.rstrip("."),
+                    "message": t("conversation.agents_paused_message", _locale),
+                    "hint": _cb_hint,
                     "conversation_id": str(conversation_id),
                     "circuit_breaker_id": str(open_breaker_id),
                 },
