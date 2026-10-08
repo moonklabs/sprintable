@@ -56,9 +56,21 @@ export function stillShown(r: PermissionRequest, now: number): boolean {
   return r.state === 'expired' && now - Date.parse(r.expires_at) <= 60 * 60 * 1000;
 }
 
-/** «{n}분째 기다림» — whole minutes since the request came; not shown while the computer's state is unknown (명세 B-2). */
-export function waitedMinutes(r: PermissionRequest, now: number): number {
-  return Math.max(0, Math.floor((now - Date.parse(r.created_at)) / 60000));
+/** story #4610 (Yuna `time-words.md` §1 · the desktop board's relativeTime steps and bounds): how long ago, as the card head says it —
+ *  under 60 s «방금», then whole minutes · hours · days, one unit, rounded down. The one rule both keys (`waited` · `asked`) use.
+ *  The unit is one letter (s · m · h · d — Yuna's now · min · hour · day): a select case is written into the ko value, and the ko guard
+ *  (verify-no-ascii-token-in-ko-value) reads a lowercase word of 3+ letters there as untranslated English. The words shown are hers. */
+export function ageParts(ms: number): { unit: 's' | 'm' | 'h' | 'd'; n: number } {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return { unit: 's', n: 0 };
+  if (s < 3600) return { unit: 'm', n: Math.floor(s / 60) };
+  if (s < 86400) return { unit: 'h', n: Math.floor(s / 3600) };
+  return { unit: 'd', n: Math.floor(s / 86400) };
+}
+
+/** the request's age at `now` (명세 B-2: the waiting chip is not shown while the computer's state is unknown) */
+export function requestAge(r: PermissionRequest, now: number): ReturnType<typeof ageParts> {
+  return ageParts(now - Date.parse(r.created_at));
 }
 
 /** story 4542: the tool as this card names it — the server's name in this language, else the value as it is (never guessed here) */

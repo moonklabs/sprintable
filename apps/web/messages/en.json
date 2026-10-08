@@ -7054,7 +7054,8 @@
       "notAllowed": "Not allowed"
     },
     "chipUnknown": "State unknown",
-    "waited": "Waiting {n} min",
+    "waited": "{unit, select, s {Asked just now} m {Waiting {n} min} h {Waiting {n} h} other {Waiting {n} d}}",
+    "asked": "{unit, select, s {Asked just now} m {Asked {n} min ago} h {Asked {n} h ago} other {Asked {n} d ago}}",
     "role": "Sent to the {role} role",
     "maskedNote": "Values that look like secrets were masked",
     "truncatedNote": "Only the first 200 characters are shown",

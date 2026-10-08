@@ -428,3 +428,104 @@ describe('[4604] the question\'s words only while it asks', () => {
     }
   });
 });
+
+// story #4610 (run13b 20:45Z · R13B-4580-10-unconfirmed.png): several cards of one agent looked alike with no time — the PO read the top
+// one as the question just answered in the terminal. Every card now says when it was asked, in the waiting chip's place; a card that
+// still waits keeps «{n}분째 기다림» (it says the same) and nothing more.
+describe('[4610] when each card was asked', () => {
+  const head = () => [...container.querySelectorAll('[data-testid="agent-permission-card"]')].map((c) => ({
+    waited: c.querySelector('[data-testid="agent-permission-waited"]')?.textContent ?? null,
+    asked: c.querySelector('[data-testid="agent-permission-asked"]')?.textContent ?? null,
+  }));
+  const ago = (min: number) => new Date(Date.now() - min * 60_000 - 5_000).toISOString();
+  const past = () => new Date(Date.now() - 60_000).toISOString();
+  const remount = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
+
+  it('each card shape: waiting → the chip only · expired · withdrawn · no word from the computer → «{n}분 전에 물음» — the phone app and a browser alike', async () => {
+    for (const phone of [true, false]) {
+      await remount();
+      if (phone) installShell();
+      await render([
+        req({ id: 'p', created_at: ago(3) }),
+        req({ id: 'e', request_id: 'q2', created_at: ago(7), state: 'expired', expires_at: past() }),
+        req({ id: 'w', request_id: 'q3', tool: 'SandboxNetwork', runtime: 'claude', summary: 'network', stage: 'ask', host: null, created_at: ago(12), state: 'withdrawn', host_unread: true, answerable: false }),
+        req({ id: 'u', request_id: 'q4', created_at: ago(20), device_reachable: false }),
+      ]);
+      expect(head(), `phone=${phone}`).toEqual([
+        { waited: '3분째 기다림', asked: null }, // mutant: the time on every card → RED (two lines saying one thing)
+        { waited: null, asked: '7분 전에 물음' }, // mutant: no asked line → RED
+        { waited: null, asked: '12분 전에 물음' },
+        { waited: null, asked: '20분 전에 물음' },
+      ]);
+      __resetPhoneBridgeForTest();
+    }
+  });
+
+  it('answered here: the chip gives way to «{n}분 전에 물음» at once · in English «Asked {n} min ago»', async () => {
+    installShell();
+    await render([req({ created_at: ago(4) })]);
+    expect(head()).toEqual([{ waited: '4분째 기다림', asked: null }]);
+    await press('거부');
+    expect(head()).toEqual([{ waited: null, asked: '4분 전에 물음' }]);
+    await remount();
+    await render([req({ state: 'expired', expires_at: past(), created_at: ago(2) })], 'en');
+    expect(head()).toEqual([{ waited: null, asked: 'Asked 2 min ago' }]);
+  });
+
+  it('(Yuna 4990) under a minute: «방금 물음» · «Asked just now», never «0분 전에 물음»', async () => {
+    const now = new Date(Date.now() - 5_000).toISOString();
+    for (const [locale, says] of [['ko', '방금 물음'], ['en', 'Asked just now']] as const) {
+      await remount();
+      await render([req({ state: 'expired', expires_at: past(), created_at: now })], locale);
+      expect(head(), locale).toEqual([{ waited: null, asked: says }]); // mutant: the plain «{n}분 전에 물음» → «0분 전에 물음» → RED
+    }
+  });
+});
+
+
+// story #4610 (Yuna `time-words.md` · the board's relativeTime steps): both chips say the age in one unit — «방금» under 60 s, then whole
+// minutes · hours · days, rounded down. The nine rows of §3 are the expected values, the bounds exactly.
+describe('[4610] time in steps (Yuna time-words.md §3)', () => {
+  const S = 1000, M = 60 * S, H = 60 * M, D = 24 * H;
+  // [age ms, ko waited, en waited, ko asked, en asked]
+  const ROWS: Array<[number, string, string, string, string]> = [
+    [5 * S, '방금 물음', 'Asked just now', '방금 물음', 'Asked just now'],
+    [59 * S, '방금 물음', 'Asked just now', '방금 물음', 'Asked just now'],
+    [1 * M, '1분째 기다림', 'Waiting 1 min', '1분 전에 물음', 'Asked 1 min ago'],
+    [59 * M + 59 * S, '59분째 기다림', 'Waiting 59 min', '59분 전에 물음', 'Asked 59 min ago'],
+    [1 * H, '1시간째 기다림', 'Waiting 1 h', '1시간 전에 물음', 'Asked 1 h ago'],
+    [11 * H + 24 * M, '11시간째 기다림', 'Waiting 11 h', '11시간 전에 물음', 'Asked 11 h ago'], // run 13's «684분째»
+    [23 * H + 59 * M, '23시간째 기다림', 'Waiting 23 h', '23시간 전에 물음', 'Asked 23 h ago'],
+    [24 * H, '1일째 기다림', 'Waiting 1 d', '1일 전에 물음', 'Asked 1 d ago'],
+    [3 * D + 5 * H, '3일째 기다림', 'Waiting 3 d', '3일 전에 물음', 'Asked 3 d ago'],
+  ];
+
+  it('each row, at its exact age: ageParts → the ko · en copy of both keys (the real message files, parsed)', async () => {
+    const { ageParts } = await import('@/lib/agent-permissions');
+    const { createTranslator } = await import('next-intl');
+    type T = (k: string, v?: Record<string, string | number>) => string;
+    const ko = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'agentPermissions' }) as unknown as T;
+    const en = createTranslator({ locale: 'en', messages: enMessages, namespace: 'agentPermissions' }) as unknown as T;
+    for (const [ms, koW, enW, koA, enA] of ROWS) {
+      const p = ageParts(ms);
+      // mutant: a bound off by one (≤ 60 s · ≤ 60 min · ≤ 24 h) or minutes only → a row RED
+      expect([ko('waited', p), en('waited', p), ko('asked', p), en('asked', p)], `${ms} ms`).toEqual([koW, enW, koA, enA]);
+    }
+    expect(ageParts(-5 * S)).toEqual({ unit: 's', n: 0 }); // a clock a little behind the server's: never a negative age
+  });
+
+  it('on the card: a waiting chip and an asked line of the same age (away from the bounds) · ko and en', async () => {
+    const remount = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
+    const text = (id: string) => container.querySelector(`[data-testid="agent-permission-${id}"]`)?.textContent ?? null;
+    const past = new Date(Date.now() - 60_000).toISOString();
+    for (const [ms, koW, enW, koA, enA] of [ROWS[0], ROWS[5], ROWS[8]]) {
+      for (const [locale, w, a] of [['ko', koW, koA], ['en', enW, enA]] as const) {
+        await remount();
+        const created = new Date(Date.now() - ms).toISOString();
+        await render([req({ id: 'p', created_at: created, expires_at: new Date(Date.now() + 30 * 60_000).toISOString() }),
+          req({ id: 'e', request_id: 'q2', created_at: created, state: 'expired', expires_at: past })], locale);
+        expect([text('waited'), text('asked')], `${ms} ${locale}`).toEqual([w, a]);
+      }
+    }
+  });
+});

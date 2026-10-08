@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { agentOnDevice, permissionLine, shownToolName, stillShown, waitedMinutes, type PermissionRequest } from '@/lib/agent-permissions';
+import { agentOnDevice, permissionLine, requestAge, shownToolName, stillShown, type PermissionRequest } from '@/lib/agent-permissions';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
@@ -231,8 +231,12 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
         ) : (
           <Badge variant="chip">{t('chip')}</Badge>
         )}
-        {line === 'unknown' || !asking ? null : (
-          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-waited">{t('waited', { n: waitedMinutes(r, now) })}</span>
+        {line !== 'unknown' && asking ? (
+          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-waited">{t('waited', requestAge(r, now))}</span>
+        ) : (
+          // story #4610 (run13b 20:45Z): every other card says when it was asked, in the chip's place — answered · expired · withdrawn
+          // cards stay a while (#4596) and several of one agent looked alike: which question a result belongs to is this time
+          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-asked">{t('asked', requestAge(r, now))}</span>
         )}
       </div>
       <p className="text-sm text-foreground">{agentOnDevice(r.agent_name, r.device_name)}</p>
