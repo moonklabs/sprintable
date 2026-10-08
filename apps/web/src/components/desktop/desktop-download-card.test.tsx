@@ -4,18 +4,32 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { DesktopDownloadCard } from './desktop-download-card';
+import enMessages from '../../../messages/en.json';
+
+// story #4547: the card tells a Mac from anything else — jsdom's own user agent («(darwin|linux) … jsdom») is no Mac's, so each case
+// says which device it is (a Mac by default: the suite below is the Mac card)
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36';
+const WINDOWS = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36';
+let ua = MAC;
+let inPhoneApp = false;
+vi.mock('@/lib/phone-bridge', () => ({ isPhoneApp: () => inPhoneApp }));
+const { DesktopDownloadCard, notAMac } = await import('./desktop-download-card');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
-function wrap(node: React.ReactNode) {
-  return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">{node}</NextIntlClientProvider>;
+function wrap(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
+  return <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="UTC">{node}</NextIntlClientProvider>;
 }
 
 beforeEach(() => {
+  ua = MAC;
+  inPhoneApp = false;
+  vi.spyOn(navigator, 'userAgent', 'get').mockImplementation(() => ua);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -25,6 +39,7 @@ afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function flush() {
@@ -129,5 +144,71 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
     await flush();
     expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent).toBe(koMessages.desktop.unavailable);
     expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
+  });
+});
+
+describe('[4547] not a Mac — one line where the warning and [다운로드] were (Yuna 4547-phone-download-card.md · spec «4524 곁»)', () => {
+  // [SID:4619] the Electron app's manifest shape (/desktop/downloads/macos.json)
+  const manifest = () => vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+    product: 'Sprintable Dev Setup', version: '0.3.1', build: 'abc123def',
+    url: 'https://storage.googleapis.com/x/Sprintable-Dev-Setup-abc123def-arm64.dmg',
+  })));
+  /** 4619's first-open guide box (its title · its two steps) and the button — the Mac-only part of the card */
+  const macPart = () => ({ title: !!q('desktop-download-gatekeeper-title'), steps: !!q('desktop-download-install-steps'),
+    oldMac: !!q('desktop-download-old-mac'), button: !!q('desktop-download-button') });
+  const q = (id: string) => container.querySelector(`[data-testid="${id}"]`);
+  async function show(locale: 'ko' | 'en' = 'ko') {
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />, locale)); });
+    await flush();
+  }
+
+  it('the device decides: iPhone · Android · Windows · the phone app → not a Mac; a Mac (a narrow window too) · iPadOS (reports «Macintosh») → a Mac', () => {
+    expect([IPHONE, ANDROID, WINDOWS].map((u) => notAMac(u, false))).toEqual([true, true, true]);
+    expect(notAMac(MAC, true)).toBe(true); // inside the phone app's shell, whatever it reports
+    expect(notAMac(MAC, false)).toBe(false);
+  });
+
+  it('a phone: title · target · version stay · no first-open guide box (4619) · no button · the one muted line · no link', async () => {
+    ua = IPHONE;
+    manifest();
+    await show();
+    expect(q('desktop-download-target')?.textContent).toBe(koMessages.desktop.targetLabel);
+    expect(q('desktop-download-version')?.textContent).toBe('버전 0.3.1');
+    expect(macPart()).toEqual({ title: false, steps: false, oldMac: false, button: false });
+    const line = q('desktop-download-open-on-mac');
+    expect(line?.textContent).toBe('Mac에서 이 화면을 열어 받아 주세요');
+    expect(line?.className).toContain('text-muted-foreground');
+    expect(q('desktop-download-card')?.querySelector('a, button')).toBeNull();
+  });
+
+  it('inside the phone app (its shell) the same, even with a Mac-looking user agent', async () => {
+    inPhoneApp = true;
+    manifest();
+    await show();
+    expect(q('desktop-download-button')).toBeNull();
+    expect(q('desktop-download-open-on-mac')).not.toBeNull();
+  });
+
+  it('a Mac in a 390 px window keeps [다운로드] and the whole first-open guide box (4619) — the width never decides (negative control)', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(390);
+    manifest();
+    await show();
+    expect(macPart()).toEqual({ title: true, steps: true, oldMac: true, button: true });
+    expect(q('desktop-download-open-on-mac')).toBeNull();
+  });
+
+  it('the manifest not read × a phone: the «not available» line, not «open on your Mac» (a Mac could not get it either)', async () => {
+    ua = ANDROID;
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(null, false)));
+    await show();
+    expect(q('desktop-download-unavailable')?.textContent).toBe(koMessages.desktop.unavailable);
+    expect(q('desktop-download-open-on-mac')).toBeNull();
+  });
+
+  it('reads in English', async () => {
+    ua = IPHONE;
+    manifest();
+    await show('en');
+    expect(q('desktop-download-open-on-mac')?.textContent).toBe('Open this page on your Mac to download');
   });
 });

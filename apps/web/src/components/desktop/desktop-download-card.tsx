@@ -7,6 +7,7 @@ import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ourDownloadUrl } from '@/lib/desktop-downloads';
+import { isPhoneApp } from '@/lib/phone-bridge';
 
 /**
  * story #3807 AC3(페드루 PO 確定 2026-09-11) — dev-app 다운로드 자리(최소 1곳).
@@ -50,13 +51,25 @@ interface DesktopDownloadManifest {
   url: string;
 }
 
+/**
+ * story #4547 (Yuna `4547-phone-download-card.md` · spec b0713c54 «4524 곁» · AC1): the macOS download is for a Mac — the device
+ * decides, never the window's width (a narrow Mac window keeps [다운로드]). Not a Mac: inside the phone app's shell, or a browser
+ * whose user agent is not a Mac's (iPhone · Android · a tablet · another OS). iPadOS reports itself as «Macintosh» and stays on the
+ * Mac side (nothing is blocked there).
+ */
+export function notAMac(userAgent: string, inPhoneApp: boolean): boolean {
+  return inPhoneApp || !/Macintosh/.test(userAgent);
+}
+
 export function DesktopDownloadCard() {
   const t = useTranslations('desktop');
   const [manifest, setManifest] = useState<DesktopDownloadManifest | null>(null);
   const [loading, setLoading] = useState(true);
+  const [elsewhere, setElsewhere] = useState(false); // story #4547: read after mount (the server render has no device)
 
   useEffect(() => {
     let alive = true;
+    setElsewhere(notAMac(navigator.userAgent, isPhoneApp()));
     fetch('/desktop/downloads/macos.json')
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null)
@@ -115,6 +128,12 @@ export function DesktopDownloadCard() {
           AlertTitle로 먼저 보이고, 「왜」(공증 전 내부용)는 AlertDescription으로 덧붙인다.
           이전엔 둘 다 위 메타 정보(버전·대상 플랫폼)와 같은 text-xs text-muted-foreground라
           경고라는 게 눈에 안 띄었다(유나 지적). */}
+      {/* story #4547: not a Mac — nothing to do here: no warning, no button, one line where they were (no link either: no way to
+          open the Mac's screen from here). The unavailable state above keeps its own line (a Mac could not get it either) */}
+      {elsewhere ? (
+        <p className="break-keep text-xs text-muted-foreground" data-testid="desktop-download-open-on-mac">{t('openOnMac')}</p>
+      ) : (
+      <>
       {/* [SID:4619] 유나 정본 — 제목 = 지금 할 일 · 손순서 두 줄(번호가 뜻) · macOS 12 덧줄 · 까닭(공증 전) */}
       <Alert variant="warning">
         <AlertTriangle className="h-4 w-4" />
@@ -137,6 +156,8 @@ export function DesktopDownloadCard() {
       <Button asChild size="sm" data-testid="desktop-download-button">
         <a href={downloadUrl} download>{t('downloadCta')}</a>
       </Button>
+      </>
+      )}
     </Card>
   );
 }
