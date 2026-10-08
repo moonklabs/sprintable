@@ -166,6 +166,39 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(text()).toContain('아직 짝지은 폰이 없어요');
   });
 
+  // story #4629 (Yuna «4629»): removing a phone also says whether its login was ended — ended (muted, as the line was) · not_found
+  // (the text colour: it must be read; not a warning — nothing to do next) · a server that does not say → the line as before
+  it('[4629] the result says whether that phone\'s login was ended: ended · not_found · (older server) the line as before', async () => {
+    const result = () => container.querySelector('[data-testid="desktop-remote-devices-result"]') as HTMLElement;
+    const removeWith = async (answer: Record<string, unknown>, locale: 'ko' | 'en' = 'ko') => {
+      await act(async () => { root.unmount(); }); // a fresh mount each time: the list is read anew
+      root = createRoot(container);
+      answers([phone({ label: 'Galaxy S24' })]);
+      await render(locale);
+      await act(async () => { button(locale === 'ko' ? '이 폰 빼기' : 'Remove this phone')[0].click(); });
+      fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
+        init?.method === 'DELETE' ? json(answer) : url === '/api/remote-devices' ? json({ devices: [] }) : json({ data: { enabled: true } })
+      ));
+      await act(async () => { (container.querySelector('[role="group"] button') as HTMLButtonElement).click(); });
+      await flush();
+    };
+    await removeWith({ removed: true, session: 'ended' });
+    expect(status()).toBe('뺐어요 · Galaxy S24 — 원격 기기 자리 하나가 비었어요. 그 폰은 이제 승인 · 멈춤 · 지시를 못 하고, 길어야 1시간 안에 로그아웃돼요');
+    expect(result().className).toContain('text-muted-foreground');
+    await removeWith({ removed: true, session: 'not_found' });
+    expect(status()).toBe('뺐어요 · Galaxy S24 — 원격 기기 자리 하나가 비었어요. 그 폰의 로그인은 찾지 못했어요(이미 로그아웃됐을 수 있어요) — 그 폰으로 승인 · 멈춤 · 지시는 더는 못 해요');
+    expect(result().className).toContain('text-foreground');
+    expect(result().className).not.toContain('text-muted-foreground');
+    expect(result().className).not.toMatch(/warning|destructive|amber|red/);
+    await removeWith({ removed: true });
+    expect(status()).toBe('뺐어요 · Galaxy S24 — 원격 기기 자리 하나가 비었어요');
+    expect(result().className).toContain('text-muted-foreground');
+    await removeWith({ removed: true, session: 'not_found' }, 'en');
+    expect(status()).toBe("Removed · Galaxy S24 — one remote device place is free. Its sign-in wasn't found (it may already be signed out) — that phone can no longer approve, stop or instruct");
+    await removeWith({ removed: true, session: 'ended' }, 'en');
+    expect(status()).toBe('Removed · Galaxy S24 — one remote device place is free. That phone can no longer approve, stop or instruct, and it will be signed out within an hour');
+  });
+
   it('a phone with no pair left is still listed («짝 없음» + [이 폰 빼기]) · phones sorted by the longest unused first · [취소] returns to the button', async () => {
     answers([
       phone({ id: 'new', label: 'Pixel', last_used_at: '2026-10-08T07:00:00Z' }),

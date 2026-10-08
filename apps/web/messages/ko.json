@@ -7038,6 +7038,8 @@
       "confirmRemovePhone": "이 폰을 뺄까요? · {phone} — 빼면 그 폰으로는 승인 · 멈춤 · 지시를 할 수 없고, 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.",
       "confirmRemovePhoneUnpaired": "이 폰을 뺄까요? · {phone} — 짝지은 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.",
       "phoneRemoved": "뺐어요 · {phone} — 원격 기기 자리 하나가 비었어요",
+      "phoneRemovedSignedOut": "뺐어요 · {phone} — 원격 기기 자리 하나가 비었어요. 그 폰은 이제 승인 · 멈춤 · 지시를 못 하고, 길어야 1시간 안에 로그아웃돼요",
+      "phoneRemovedSessionNotFound": "뺐어요 · {phone} — 원격 기기 자리 하나가 비었어요. 그 폰의 로그인은 찾지 못했어요(이미 로그아웃됐을 수 있어요) — 그 폰으로 승인 · 멈춤 · 지시는 더는 못 해요",
       "noPairs": "짝 없음",
       "removed": "뺐어요 · {phone}",
       "alreadyRemoved": "이미 빠져 있었어요 · {phone}",
