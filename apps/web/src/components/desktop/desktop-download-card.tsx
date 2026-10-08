@@ -6,6 +6,7 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
 import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ourDownloadUrl } from '@/lib/desktop-downloads';
 
 /**
  * story #3807 AC3(페드루 PO 確定 2026-09-11) — dev-app 다운로드 자리(최소 1곳).
@@ -61,7 +62,9 @@ export function DesktopDownloadCard() {
       .catch(() => null)
       .then((json: DesktopDownloadManifest | null) => {
         if (!alive) return;
-        setManifest(json?.version && json.url ? json : null);
+        // [SID:4619 · Kadir 5004 후속 ①] a link only into our bucket — any other url is «지금은 받을 수 없어요», as no manifest
+        const url = ourDownloadUrl(json?.url);
+        setManifest(json?.version && url ? { ...json, url } : null);
         setLoading(false);
       });
     return () => { alive = false; };

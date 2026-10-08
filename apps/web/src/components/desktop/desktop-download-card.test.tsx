@@ -99,6 +99,15 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
     expect(en.desktop.installStepOpen).toBe('Try opening the app once, then go to System Settings → Privacy & Security → "Open Anyway"');
   });
 
+  it('[SID:4619 · Kadir 5004 후속 ①] a manifest whose url is not our bucket is «지금은 받을 수 없어요» — no link to it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ...MANIFEST, url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev-evil/x.dmg' })));
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent).toBe(koMessages.desktop.unavailable);
+    expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
+    expect(container.innerHTML.includes('dev-evil')).toBe(false);
+  });
+
   it('[SID:4619] a manifest without a url (or the old Tauri shape) is «지금은 받을 수 없어요», not a broken button', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ version: '0.1.2', platforms: { 'darwin-aarch64': { url: 'https://x/Sprintable.app.tar.gz', signature: 's' } } })));
     await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
