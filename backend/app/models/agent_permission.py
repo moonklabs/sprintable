@@ -25,7 +25,7 @@ RECIPIENT_REASONS = ("paired", "no_paired_phone")
 PERMISSION_STAGES = ("ask", "confirm")
 # story #4580 AC2 (D4 · PO 02:05Z): `host_unread` — a network question answered «allow…» whose host the daemon could not read from
 # Claude's own hook text (F2): nothing is allowed, the phone says so
-WITHDRAW_REASONS = ("answered_locally", "session_ended", "expired", "host_unread")
+WITHDRAW_REASONS = ("answered_locally", "session_ended", "expired", "host_unread", "terminal_only")
 
 
 class AgentPermissionRequest(Base):
@@ -41,6 +41,13 @@ class AgentPermissionRequest(Base):
         ),
         CheckConstraint(_in("recipient_reason", RECIPIENT_REASONS), name="ck_agent_permission_requests_recipient_reason"),
         CheckConstraint(_in("stage", PERMISSION_STAGES), name="ck_agent_permission_requests_stage"),
+        # story #4590 (0445): a terminal-only row carries no hash (nothing to sign) and may lack tool · summary (not read); every
+        # other row keeps all three
+        CheckConstraint(
+            "(terminal_only AND input_hash IS NULL) OR "
+            "(NOT terminal_only AND input_hash IS NOT NULL AND tool IS NOT NULL AND summary IS NOT NULL)",
+            name="ck_agent_permission_requests_terminal_only_fields",
+        ),
         Index("ix_agent_permission_requests_recipient_state", "recipient_member_id", "state"),
     )
 
@@ -52,12 +59,14 @@ class AgentPermissionRequest(Base):
     session_key: Mapped[str] = mapped_column(Text, nullable=False)
     agent_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     runtime: Mapped[str] = mapped_column(Text, nullable=False)
-    tool: Mapped[str] = mapped_column(Text, nullable=False)
-    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    tool: Mapped[str | None] = mapped_column(Text, nullable=True)  # story #4590: absent only on a terminal-only row whose tool was not read
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)  # story #4590: likewise
     masked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     workdir: Mapped[str | None] = mapped_column(Text, nullable=True)
-    input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    input_hash: Mapped[str | None] = mapped_column(Text, nullable=True)  # story #4590: never on a terminal-only row (nothing to sign)
+    # story #4590: a question only that computer's terminal can answer — shown as a card with no buttons, no notice (no push)
+    terminal_only: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     state: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
     recipient_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

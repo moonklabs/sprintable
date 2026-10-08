@@ -7063,11 +7063,13 @@
     "maskedNote": "Values that look like secrets were masked",
     "truncatedNote": "Only the first 200 characters are shown",
     "workdir": "Working folder · {path}",
+    "toolUnread": "What it asks is shown in that computer's terminal",
     "line": {
       "answerOnPhone": "You can answer from a paired phone",
       "expired": "The time has passed, so it can't be answered here — answer in that computer's terminal",
       "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
-      "noPairedPhone": "No phone is paired with that computer, so it can't be answered here — answer in that computer's terminal"
+      "noPairedPhone": "No phone is paired with that computer, so it can't be answered here — answer in that computer's terminal",
+      "terminalOnly": "This question can only be answered in that computer's terminal"
     },
     "phone": {
       "allow": "Allow",

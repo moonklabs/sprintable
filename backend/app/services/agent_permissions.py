@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -419,13 +419,25 @@ class PermissionRequestReport(BaseModel):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
     agent_member_id: uuid.UUID
     runtime: Literal["claude", "codex"]
-    tool: str = Field(pattern=_TOOL_PATTERN)
-    summary: str = Field(min_length=1, max_length=200)
+    tool: str | None = Field(default=None, pattern=_TOOL_PATTERN)
+    summary: str | None = Field(default=None, min_length=1, max_length=200)
     masked: bool = False
     truncated: bool = False
     workdir: str | None = Field(default=None, max_length=200)
-    input_hash: str = Field(pattern=_HASH_PATTERN)
+    input_hash: str | None = Field(default=None, pattern=_HASH_PATTERN)
     expires_at: AwareDatetime
+    # story #4590 (Mirko's contract v1.14 ①): a question only that computer's terminal can answer — nothing to sign, so no hash;
+    # its tool and summary only when the daemon read them. Every other report keeps all three, as before.
+    terminal_only: bool = False
+
+    @model_validator(mode="after")
+    def _fields_for_its_kind(self) -> "PermissionRequestReport":
+        if self.terminal_only:
+            if self.input_hash is not None:
+                raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
+        elif self.tool is None or self.summary is None or self.input_hash is None:
+            raise ValueError("tool, summary and input_hash are required unless the request is terminal_only")
+        return self
 
 
 async def report_request(db: AsyncSession, setup: DesktopSetup, body: PermissionRequestReport) -> tuple[AgentPermissionRequest, bool]:
@@ -453,14 +465,16 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
         id=uuid.uuid4(), setup_id=setup.id, request_id=body.request_id, session_key=body.session_key,
         agent_member_id=body.agent_member_id, runtime=body.runtime, tool=body.tool, summary=body.summary, masked=body.masked,
         truncated=body.truncated, workdir=body.workdir, input_hash=body.input_hash, expires_at=body.expires_at, state="pending",
-        recipient_member_id=recipient, recipient_reason=reason,
+        recipient_member_id=recipient, recipient_reason=reason, terminal_only=body.terminal_only,
     )
     try:
         async with db.begin_nested():  # the same request twice at once: one row, the other reads it
             db.add(row)
     except IntegrityError:
         return (await db.execute(q)).scalar_one(), False
-    if recipient is not None:
+    # story #4590 (Yuna §3): a terminal-only question sends no notice — the notice is the phone's push, and a push calls a person to
+    # something they cannot do there; the card is on the approvals list (its count), the one at that computer sees the board
+    if recipient is not None and not row.terminal_only:
         await _send_permission_notice(db, setup, row, recipient)
     return row, True
 
@@ -496,7 +510,9 @@ async def _send_permission_notice(db: AsyncSession, setup: DesktopSetup, row: Ag
 class Withdrawal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    reason: Literal["answered_locally", "session_ended", "expired", "host_unread"]
+    # story #4590 (Mirko ②): `terminal_only` — the question the phone could answer became one only the terminal can; the daemon withdraws
+    # the answerable row so and reports a new terminal-only one (a row never turns from answerable to not: the signing path is untouched)
+    reason: Literal["answered_locally", "session_ended", "expired", "host_unread", "terminal_only"]
 
 
 async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUID, body: Withdrawal) -> AgentPermissionRequest:
@@ -646,7 +662,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     out = []
     for r, s in rows:
         shown = shown_state(r, now)
-        answerable = shown == "pending" and s.id in reachable and s.id in paired_setups
+        # story #4590: a terminal-only question is never answerable here (no button · no signing values · the answer route refuses it)
+        answerable = shown == "pending" and s.id in reachable and s.id in paired_setups and not r.terminal_only
         role = next((m.get("role") for m in (s.members or []) if m.get("member_id") == str(r.agent_member_id)), None)
         out.append({
             "id": str(r.id), "request_id": str(r.request_id), "setup_id": str(s.id), "device_name": s.device_name,
@@ -654,7 +671,9 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             # story 4542: the name a person reads (web card) by the one rule, from the row's own runtime + tool — the phone's signing
             # sheet never shows it (it names the tool from the value it signs)
             "runtime": r.runtime, "tool": r.tool,
-            "tool_name": {lang: shown_tool(r.runtime, r.tool, lang) for lang in ("ko", "en")},
+            # story #4590: no tool read (a terminal-only question) → no name; the card says «무엇을 묻는지는 … 볼 수 있어요» instead
+            "tool_name": {lang: shown_tool(r.runtime, r.tool, lang) for lang in ("ko", "en")} if r.tool is not None else None,
+            "terminal_only": r.terminal_only,
             "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
@@ -680,7 +699,9 @@ def open_requests_count(*, member_id, org_id: uuid.UUID):
         select(func.count()).select_from(AgentPermissionRequest)
         .join(DesktopSetup, DesktopSetup.id == AgentPermissionRequest.setup_id)
         .where(AgentPermissionRequest.recipient_member_id == member_id, AgentPermissionRequest.state == "pending",
-               AgentPermissionRequest.expires_at > func.now(), DesktopSetup.org_id == org_id)
+               AgentPermissionRequest.expires_at > func.now(), DesktopSetup.org_id == org_id,
+               # story #4590 (Yuna §3): a terminal-only question is on the list but never on the badge — nothing to do here
+               AgentPermissionRequest.terminal_only.is_(False))
         .scalar_subquery()
     )
 
@@ -715,6 +736,9 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
         raise DesktopRelayError(409, "already_answered", "this request was answered", detail={"answered_by_name": who, "decision": row.decision})
     if row.state == "withdrawn":
         raise DesktopRelayError(410, "withdrawn", "the agent no longer waits for this answer")
+    # story #4590 (Mirko ③): only that computer's terminal answers it — no command goes down (its list row was never answerable)
+    if row.terminal_only:
+        raise DesktopRelayError(409, "terminal_only", "this question can only be answered in that computer's terminal")
     if shown_state(row, now) == "expired":
         raise DesktopRelayError(410, "expired", "the permission window has passed")
     # the phone must be this person's and paired to this device now — or the daemon would refuse it (unknown_key) and, the

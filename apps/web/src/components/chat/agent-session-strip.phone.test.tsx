@@ -115,6 +115,23 @@ describe('[4534] the strip inside the phone app', () => {
     expect(buttons()).toEqual([ko.button.stop]);
   });
 
+  it('story #4590 (Yuna §2): the question only that computer\'s terminal answers — the card\'s line, no inbox link, [멈춤] only · a browser alike', async () => {
+    const words = koMessages.agentPermissions.line.terminalOnly;
+    for (const isPhone of [true, false]) {
+      phone = isPhone;
+      sessionView = { ...sessionView, state: 'waiting_permission', pending_permission_request_id: 'p-1', ask_terminal_only: true };
+      server(res(201, {}));
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await render();
+      const line = container.querySelector('[data-testid="agent-session-line"]');
+      expect(line?.textContent).toBe(words);
+      expect(line?.tagName).toBe('P'); // not the inbox link
+      expect(container.querySelector('a')).toBeNull();
+      expect(buttons()).toEqual(isPhone ? [ko.button.stop] : []);
+    }
+  });
+
   it('story #4599 (Yuna ① · PO 14:25Z): held by a macOS window — the phone line («여기서 [세션 끝내기]») and one button, [세션 끝내기] ([멈춤] would not work there)', async () => {
     sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'documents' } };
     server(res(201, {}));

@@ -241,7 +241,9 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
       </div>
       <p className="text-sm text-foreground">{agentOnDevice(r.agent_name, r.device_name)}</p>
       {r.role ? <p className="text-xs text-muted-foreground">{t('role', { role: r.role })}</p> : null}
-      <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
+      {/* story #4590 (Yuna §1): a terminal-only question whose tool was not read — where to see it, never a made-up name */}
+      {tool !== null ? <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
+        : <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-tool-unread">{t('toolUnread')}</p>}
       {net === 'confirm' ? (!asking ? null :
         <div className="space-y-1" data-testid="agent-permission-net-confirm">
           <p className="break-keep text-sm font-medium text-foreground [overflow-wrap:anywhere]">{t('net.confirmTitle', { host: r.host ?? '' })}</p>
@@ -250,7 +252,7 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
         </div>
       ) : net === 'ask' ? (!(asking && line === 'answerOnPhone') ? null : // Yuna 4987: no «press [허용…]» where no button can come (no word from the computer · no paired phone)
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-net">{t('net.askLine')}</p>
-      ) : (
+      ) : r.summary === null ? null : ( // story #4590: no detail read → no summary box
         <div className="rounded-md bg-muted/50 px-2 py-1.5">
           <p className="break-all font-mono text-xs text-foreground">{r.summary}</p>
           {notes.length > 0 ? <p className="mt-0.5 text-[11px] text-muted-foreground">{notes.join(' · ')}</p> : null}
@@ -260,13 +262,14 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
       ) : answersHere ? (
-        <PhoneAnswerPlace tool={tool} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} hostUnread={r.host_unread === true} />
+        <PhoneAnswerPlace tool={tool ?? ''} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} hostUnread={r.host_unread === true} />
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">
           {line === 'expired' ? t('line.expired')
             : line === 'unknown' ? t('line.unknown')
-              : line === 'noPairedPhone' ? t('line.noPairedPhone')
-                : t('line.answerOnPhone')}
+              : line === 'terminalOnly' ? t('line.terminalOnly')
+                : line === 'noPairedPhone' ? t('line.noPairedPhone')
+                  : t('line.answerOnPhone')}
         </p>
       )}
     </Card>

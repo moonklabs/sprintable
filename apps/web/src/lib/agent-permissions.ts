@@ -10,12 +10,16 @@ export interface PermissionRequest {
   agent_member_id: string;
   agent_name: string | null;
   role: string | null;
-  tool: string;
+  /** story #4590: null on a terminal-only question whose tool the daemon did not read */
+  tool: string | null;
   /** story 4542: the server's name for the tool by the one rule (backend app/services/tool-names.json) — what this card shows; a row
-   *  from an older server has none (the value is shown as it is) */
+   *  from an older server has none (the value is shown as it is) · story #4590: null when no tool was read */
   runtime?: string;
-  tool_name?: { ko: string; en: string };
-  summary: string;
+  tool_name?: { ko: string; en: string } | null;
+  /** story #4590: null on a terminal-only question with no detail read */
+  summary: string | null;
+  /** story #4590: only that computer's terminal answers it — no buttons, its own line (an older server sends none) */
+  terminal_only?: boolean;
   masked: boolean;
   truncated: boolean;
   workdir: string | null;
@@ -38,12 +42,15 @@ export interface PermissionRequest {
   host_unread?: boolean;
 }
 
-/** The line in the button place — one, in the spec's order: the window passed · the computer gone quiet · no paired phone · the phone. */
-export type PermissionLine = 'expired' | 'unknown' | 'noPairedPhone' | 'answerOnPhone';
+/** The line in the button place — one, in the spec's order: the window passed · the computer gone quiet · only its terminal answers ·
+ *  no paired phone · the phone. story #4590 (Yuna §1): a terminal-only question cannot be answered by a phone, paired or not — so its
+ *  line comes before the two phone lines, after the facts of time and state. */
+export type PermissionLine = 'expired' | 'unknown' | 'terminalOnly' | 'noPairedPhone' | 'answerOnPhone';
 
 export function permissionLine(r: PermissionRequest): PermissionLine {
   if (r.state === 'expired') return 'expired';
   if (!r.device_reachable) return 'unknown';
+  if (r.terminal_only) return 'terminalOnly';
   if (r.recipient_reason === 'no_paired_phone') return 'noPairedPhone';
   return 'answerOnPhone';
 }
@@ -73,10 +80,11 @@ export function requestAge(r: PermissionRequest, now: number): ReturnType<typeof
   return ageParts(now - Date.parse(r.created_at));
 }
 
-/** story 4542: the tool as this card names it — the server's name in this language, else the value as it is (never guessed here) */
-export function shownToolName(r: Pick<PermissionRequest, 'tool' | 'tool_name'>, locale: string): string {
+/** story 4542: the tool as this card names it — the server's name in this language, else the value as it is (never guessed here) ·
+ *  story #4590: null when the daemon did not read a tool (a terminal-only question) — the card says where to see it instead */
+export function shownToolName(r: Pick<PermissionRequest, 'tool' | 'tool_name'>, locale: string): string | null {
   const n = r.tool_name;
-  return (n && (locale === 'en' ? n.en : n.ko)) || r.tool;
+  return (n && (locale === 'en' ? n.en : n.ko)) || r.tool || null;
 }
 
 /** story 4542 (Yuna · Kadir ④): «{agent} · {computer}» — the computer not again when the agent's name already ends in exactly

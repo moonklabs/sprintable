@@ -529,3 +529,49 @@ describe('[4610] time in steps (Yuna time-words.md §3)', () => {
     }
   });
 });
+
+describe('[4590] a question only that computer\'s terminal answers (Yuna 4590-terminal-only-card.md §1 · §6)', () => {
+  const terminal = (over: Partial<PermissionRequest> = {}) =>
+    req({ terminal_only: true, answerable: false, session_key: null, input_hash: null, ...over });
+  const line = () => container.querySelector('[data-testid="agent-permission-line"]')?.textContent;
+
+  it('the line order, one table: expired > unknown > terminalOnly > noPairedPhone > answerOnPhone', async () => {
+    const { permissionLine } = await import('@/lib/agent-permissions');
+    const rows: Array<[Partial<PermissionRequest>, string]> = [
+      [{ state: 'expired', terminal_only: true, device_reachable: false, recipient_reason: 'no_paired_phone' }, 'expired'],
+      [{ terminal_only: true, device_reachable: false, recipient_reason: 'no_paired_phone' }, 'unknown'],
+      [{ terminal_only: true, recipient_reason: 'no_paired_phone' }, 'terminalOnly'], // not noPairedPhone: no phone answers it anyway
+      [{ terminal_only: true }, 'terminalOnly'],
+      [{ recipient_reason: 'no_paired_phone' }, 'noPairedPhone'],
+      [{}, 'answerOnPhone'],
+      [{ terminal_only: false }, 'answerOnPhone'],
+    ];
+    expect(rows.map(([over]) => permissionLine(req(over)))).toEqual(rows.map(([, want]) => want));
+  });
+
+  it('inside the phone app: the card with its chip and wait, no button, the terminal line — never the phone lines', async () => {
+    installShell();
+    await render([terminal({ recipient_reason: 'no_paired_phone' })]);
+    expect(buttons()).toEqual([]);
+    expect(container.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('권한 요청');
+    expect(container.querySelector('[data-testid="agent-permission-waited"]')?.textContent).toBe('1분째 기다림');
+    expect(line()).toBe('이 물음은 그 컴퓨터의 터미널에서만 답할 수 있어요');
+    expect(container.textContent).not.toContain('짝지은 폰');
+    expect(container.querySelector('[data-testid="agent-permission-tool"]')?.textContent).toBe('Bash'); // read: named as ever
+    expect(container.querySelector('[data-testid="agent-permission-tool-unread"]')).toBeNull();
+  });
+
+  it('a tool not read: where to see it in its place, no summary box, no made-up name', async () => {
+    await render([terminal({ tool: null, tool_name: null, summary: null })]);
+    expect(container.querySelector('[data-testid="agent-permission-tool"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-permission-tool-unread"]')?.textContent).toBe('무엇을 묻는지는 그 컴퓨터의 터미널에서 볼 수 있어요');
+    expect(container.querySelector('.font-mono')).toBeNull();
+    expect(line()).toBe('이 물음은 그 컴퓨터의 터미널에서만 답할 수 있어요');
+  });
+
+  it('reads in English', async () => {
+    await render([terminal({ tool: null, tool_name: null, summary: null })], 'en');
+    expect(container.querySelector('[data-testid="agent-permission-tool-unread"]')?.textContent).toBe("What it asks is shown in that computer's terminal");
+    expect(line()).toBe("This question can only be answered in that computer's terminal");
+  });
+});
