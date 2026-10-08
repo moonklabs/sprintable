@@ -46,6 +46,9 @@ interface View {
   remote_control: boolean;
   can_command?: boolean;
   pending_permission_request_id: string | null;
+  /** story #4590: the question it waits on can only be answered in that computer's terminal (the server reads it from the request
+   *  rows) — the strip says so in place of the inbox line (an older server sends none) */
+  ask_terminal_only?: boolean;
 }
 
 // the desktop bar's own marks and tones (board.ts DISPLAY · Yuna 17:27Z): idle = a filled dot, muted · done = a check, success ·
@@ -333,6 +336,7 @@ function ResultLine({ result }: { result: Result }) {
 
 function Line({ view, now, phone, href }: { view: View & { state: SessionState }; now: number; phone: boolean; href: string }) {
   const t = useTranslations('chats.agentSession');
+  const tPermissions = useTranslations('agentPermissions'); // story #4590: the terminal-only line is the card's own key (Yuna §2)
   const locale = useLocale();
   const remoteOff = useRemoteOff(); // story #4583: who can turn it on (the org's value · the session's own flag decides whether to say it)
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
@@ -383,6 +387,9 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
     return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</p>;
   }
   if (view.state === 'waiting_permission') {
+    // story #4590 (Yuna §2): a question only that computer's terminal answers — the card's own line (one key for both), no inbox link:
+    // «결재함에서 답할 수 있어요» would be untrue for it. [멈춤] stays (the daemon takes it while it waits)
+    if (view.ask_terminal_only) return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{tPermissions('line.terminalOnly')}</p>;
     // the web's inbox card only looks, so not «answer there» — where the request is (Yuna 17:27Z ②); the phone app's card answers
     return <Link className="w-full text-muted-foreground underline" href={href} data-testid="agent-session-line">{phone ? t('line.inboxPhone') : t('line.inbox')}</Link>;
   }

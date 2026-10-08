@@ -156,6 +156,16 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         )).scalar_one_or_none()
         if view["pending_permission_request_id"] is not None:
             view["pending_permission_request_id"] = str(view["pending_permission_request_id"])
+        # story #4590 (Yuna §2): the question it waits on can only be answered in that computer's terminal — the DM strip says so in
+        # place of the inbox line (whoever it was sent to: a fact of the question, not of the reader). Read from the request rows —
+        # no field on the session row (Mirko's contract §5)
+        view["ask_terminal_only"] = (await db.execute(
+            select(AgentPermissionRequest.id).where(
+                AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.session_key == pick.session_key,
+                AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at > now,
+                AgentPermissionRequest.terminal_only.is_(True),
+            ).limit(1)
+        )).scalar_one_or_none() is not None
     return view
 
 
