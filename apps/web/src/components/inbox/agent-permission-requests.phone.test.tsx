@@ -596,3 +596,52 @@ describe('[4590] a question only that computer\'s terminal answers (Yuna 4590-te
     expect(line()).toBe("This question can only be answered in that computer's terminal");
   });
 });
+
+describe('[4589] a request waiting while «원격 제어» is off (Yuna 4589-remote-off-card.md)', () => {
+  const off = (over: Partial<PermissionRequest> = {}) =>
+    req({ remote_control_off: true, answerable: false, session_key: null, input_hash: null, ...over });
+  const line = () => container.querySelector('[data-testid="agent-permission-line"]')?.textContent;
+  const OFF_KO = '원격 제어가 꺼져 있어 여기서는 답할 수 없어요 — 그 컴퓨터의 터미널에서 답해 주세요';
+
+  it('the line order: expired > remoteControlOff > unknown > terminalOnly > noPairedPhone > answerOnPhone', async () => {
+    const { permissionLine } = await import('@/lib/agent-permissions');
+    const rows: Array<[Partial<PermissionRequest>, string]> = [
+      [{ state: 'expired', remote_control_off: true, device_reachable: false }, 'expired'],
+      [{ remote_control_off: true, device_reachable: false }, 'remoteControlOff'], // off silences the computer too — not «lost»
+      [{ remote_control_off: true, recipient_reason: 'no_paired_phone' }, 'remoteControlOff'],
+      [{ remote_control_off: true }, 'remoteControlOff'],
+      // rebase onto 4590: off comes before a terminal-only question too (turning it on again leaves the terminal line)
+      [{ remote_control_off: true, terminal_only: true }, 'remoteControlOff'],
+      [{ remote_control_off: false, terminal_only: true }, 'terminalOnly'],
+      [{ device_reachable: false }, 'unknown'],
+      [{ remote_control_off: false }, 'answerOnPhone'],
+    ];
+    expect(rows.map(([over]) => permissionLine(req(over)))).toEqual(rows.map(([, want]) => want));
+  });
+
+  it('inside the phone app: «권한 요청» · still waiting · no button · the off line — never «연결이 끊겨», no link in the card', async () => {
+    installShell();
+    await render([off({ device_reachable: false })]);
+    expect(buttons()).toEqual([]);
+    expect(container.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('권한 요청');
+    expect(container.querySelector('[data-testid="agent-permission-waited"]')?.textContent).toBe('1분째 기다림');
+    expect(line()).toBe(OFF_KO);
+    expect(container.textContent).not.toContain('연결이 끊겨');
+  });
+
+  it('turned on again: the next read brings the buttons back (the row was never withdrawn)', async () => {
+    installShell();
+    await render([off()]);
+    expect(buttons()).toEqual([]);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    installShell();
+    await render([req()]); // the same row, read after it was turned on
+    expect(buttons()).toEqual(['허용', '거부']);
+  });
+
+  it('reads in English', async () => {
+    await render([off()], 'en');
+    expect(line()).toBe("Remote control is off, so it can't be answered here — answer in that computer's terminal");
+  });
+});

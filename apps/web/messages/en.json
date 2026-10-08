@@ -7070,7 +7070,8 @@
       "expired": "The time has passed, so it can't be answered here — answer in that computer's terminal",
       "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
       "noPairedPhone": "No phone is paired with that computer, so it can't be answered here — answer in that computer's terminal",
-      "terminalOnly": "This question can only be answered in that computer's terminal"
+      "terminalOnly": "This question can only be answered in that computer's terminal",
+      "remoteControlOff": "Remote control is off, so it can't be answered here — answer in that computer's terminal"
     },
     "phone": {
       "allow": "Allow",
@@ -7095,8 +7096,8 @@
       "signedOut": "You were signed out, so it wasn't sent — the request is still open. Sign in again, then press it",
       "signInAgain": "Sign in again"
     },
-    "remoteOffOwner": "Remote control is off, so desktop agents' permission requests don't come here",
-    "remoteOffOthers": "Remote control is off, so desktop agents' permission requests don't come here — an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on"
+    "remoteOffOwner": "Remote control is off, so desktop agents' new permission requests don't come here",
+    "remoteOffOthers": "Remote control is off, so desktop agents' new permission requests don't come here — an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on"
   },
   "phonePairing": {
     "start": "Pair with a computer — scan the QR that appears when you press [Pair a phone] in the computer's Sprintable app",

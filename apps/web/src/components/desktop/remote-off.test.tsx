@@ -86,14 +86,14 @@ describe('formatOwners (Yuna: 1 «A» · 2 «A · B» · 3+ «A 외 n명»)', ()
 describe('결재함 line (Yuna row 4 · only off + a connected computer)', () => {
   it('not owner: the line with the owner name, no link', async () => {
     await render(<AgentPermissionRequests />);
-    expect(q('agent-permission-remote-off')?.textContent).toBe('원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요 — 조직 소유자(송윤재)가 켤 수 있어요');
+    expect(q('agent-permission-remote-off')?.textContent).toBe('원격 제어가 꺼져 있어 데스크톱 에이전트의 새 권한 요청이 여기로 오지 않아요 — 조직 소유자(송윤재)가 켤 수 있어요');
     expect(link()).toBeNull();
   });
 
   it('owner: the line without names, and the link on its own row to the card', async () => {
     org = { ...OFF, can_change: true };
     await render(<AgentPermissionRequests />);
-    expect(q('agent-permission-remote-off')?.querySelector('p')?.textContent).toBe('원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요');
+    expect(q('agent-permission-remote-off')?.querySelector('p')?.textContent).toBe('원격 제어가 꺼져 있어 데스크톱 에이전트의 새 권한 요청이 여기로 오지 않아요');
     expect(link()?.textContent).toBe('원격 제어 켜러 가기');
     expect(link()?.getAttribute('href')).toBe('/desktop#remote-control');
   });
@@ -125,7 +125,7 @@ describe('결재함 line (Yuna row 4 · only off + a connected computer)', () =>
   it('no names known: «조직 소유자가» without an empty parenthesis', async () => {
     org = { ...OFF, owner_names: [] };
     await render(<AgentPermissionRequests />);
-    expect(q('agent-permission-remote-off')?.textContent).toBe('원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요 — 조직 소유자가 켤 수 있어요');
+    expect(q('agent-permission-remote-off')?.textContent).toBe('원격 제어가 꺼져 있어 데스크톱 에이전트의 새 권한 요청이 여기로 오지 않아요 — 조직 소유자가 켤 수 있어요');
   });
 });
 

@@ -160,7 +160,8 @@ export function AgentPermissionRequests() {
 
   // story #4583 (Yuna copy.md row 4): while remote control is off no request reaches the server, so the list is empty without a word —
   // one muted line says why, above the list (web and the phone's approvals list are this component). Only with a connected computer:
-  // an org that never connected one gets no line (it would be noise).
+  // an org that never connected one gets no line (it would be noise). story #4589: «새» requests — the ones waiting when it was turned
+  // off stay below, each with its own line (the words stay true with the list empty or not)
   const offLine = remoteOff && remoteOff.connectedComputers > 0 ? (
     <div className="mb-4 flex flex-col gap-1" data-testid="agent-permission-remote-off">
       <p className="break-keep text-sm text-muted-foreground">
@@ -281,8 +282,9 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">
           {line === 'expired' ? t('line.expired')
-            : line === 'unknown' ? t('line.unknown')
-              : line === 'terminalOnly' ? t('line.terminalOnly')
+            : line === 'remoteControlOff' ? t('line.remoteControlOff') // story #4589: no link here — the off line above the list has it
+              : line === 'unknown' ? t('line.unknown')
+                : line === 'terminalOnly' ? t('line.terminalOnly')
                 : line === 'noPairedPhone' ? t('line.noPairedPhone')
                   : t('line.answerOnPhone')}
         </p>
