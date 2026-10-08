@@ -62,6 +62,9 @@ function usePhoneAuth(phone: boolean, onRead: (auth: PhoneAuth) => void): PhoneA
   return phone ? auth : null;
 }
 
+/** story #4612: the server's SSE name for a request's later change (backend services/agent_permissions.py PERMISSION_CHANGED_EVENT) */
+const PERMISSION_CHANGED_EVENT = 'agent.permission_request.changed';
+
 async function readRequests(): Promise<PermissionRequest[] | null> {
   try {
     const res = await fetchWithAuth('/api/agent-permission-requests');
@@ -95,6 +98,10 @@ export function AgentPermissionRequests() {
   const waiting = shown.length > 0;
   const [notices, setNotices] = useState(0);
   const readFor = useRef(-1);
+  // story #4612: the requests answered on THIS page — their change frame is not read on (the card keeps its result line until the
+  // next read, story #4596 D-1; a read at once would take it away the moment it was answered)
+  const answeredHere = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => { answeredHere.current = new Set([...answers.values()].map((k) => k.row.request_id)); }, [answers]);
 
   useSseNotifications({
     onNotification: (n) => {
@@ -103,8 +110,16 @@ export function AgentPermissionRequests() {
     // story #4607: the server sends a person's notice as a NAMED frame (`event: dispatched` — backend routers/events.py, backfill and
     // live), which the hook's default names and the unnamed `message` never receive — so a new request's notice never read the list
     // here (the card came by the 15 s poll: 0.76 s / 9.1 s measured). Subscribed by name now.
-    extraEventNames: ['dispatched'],
-    onExtraEvent: (_name, data) => {
+    // story #4612: a request's later change (answered · withdrawn · rejected · its second answer) comes as the named transient frame
+    // `agent.permission_request.changed` {request_id, state} — read at once, so a card left open here leaves when another screen,
+    // the terminal or the daemon changed it (it waited for the next 15 s read)
+    extraEventNames: ['dispatched', PERMISSION_CHANGED_EVENT],
+    onExtraEvent: (name, data) => {
+      if (name === PERMISSION_CHANGED_EVENT) {
+        const id = (data as { request_id?: unknown } | null)?.request_id;
+        if (typeof id === 'string' && !answeredHere.current.has(id)) setNotices((k) => k + 1);
+        return;
+      }
       const d = data as { payload?: { event_type?: unknown } | null } | null;
       if (d?.payload?.event_type === 'agent.permission_request') setNotices((k) => k + 1);
     },

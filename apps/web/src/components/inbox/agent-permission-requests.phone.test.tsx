@@ -14,7 +14,10 @@ import { __resetPhoneBridgeForTest, claimPhoneBridge } from '@/lib/phone-bridge'
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
-vi.mock('@/hooks/use-sse-notifications', () => ({ useSseNotifications: () => {} }));
+let onExtra: ((name: string, data: unknown) => void) | undefined; // story #4612: the hook's named-frame callback, kept
+vi.mock('@/hooks/use-sse-notifications', () => ({
+  useSseNotifications: (o: { onExtraEvent?: typeof onExtra }) => { onExtra = o.onExtraEvent; },
+}));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
 const { AgentPermissionRequests } = await import('./agent-permission-requests');
 
@@ -108,6 +111,24 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(phoneLines()).toEqual(['허용됨 · Bash']);
     expect(buttons()).toEqual([]);
     expect(document.activeElement?.textContent).toBe('허용됨 · Bash'); // the result takes the pressed button's focus
+  });
+
+  it('[4612] a change frame for a request answered HERE is not read on (its result line stays) — one for another request reads at once', async () => {
+    installShell();
+    await render([req({ id: 'r1' }), req({ id: 'r2', request_id: 'q2' })]);
+    await press('허용'); // r1's [허용] (the first card)
+    expect(phoneLines()).toEqual(['허용됨 · Bash']);
+    const reads = () => fetchWithAuth.mock.calls.filter(([u, i]) => u === '/api/agent-permission-requests' && !(i as RequestInit | undefined)?.method).length;
+    const before = reads();
+    // the server's frame for the answer given here (its own push comes back to this screen too)
+    await act(async () => { onExtra?.('agent.permission_request.changed', { event_type: 'agent.permission_request.changed', request_id: 'q1', state: 'answered' }); });
+    await settle();
+    expect(reads()).toBe(before);
+    expect(phoneLines()).toEqual(['허용됨 · Bash']); // 4596 D-1: right after answering, the line stays
+    // another request changed elsewhere (the terminal answered it · the daemon withdrew it): read at once
+    await act(async () => { onExtra?.('agent.permission_request.changed', { event_type: 'agent.permission_request.changed', request_id: 'q2', state: 'withdrawn' }); });
+    await settle();
+    expect(reads()).toBe(before + 1);
   });
 
   it('[4596 AC1] answered here: the result line until the next read, then gone — three answers on one open page leave no card', async () => {

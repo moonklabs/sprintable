@@ -515,6 +515,31 @@ class Withdrawal(BaseModel):
     reason: Literal["answered_locally", "session_ended", "expired", "host_unread", "terminal_only"]
 
 
+# story #4612 (PO 23:36Z · after 4607): a request's later change — answered · withdrawn · rejected by the daemon · back to pending
+# for its second answer — told to the one person whose list shows it (`list_for_member`: recipient_member_id only), so a card left
+# open on another screen leaves at once instead of at its next 15 s read. A transient SSE frame (no Event row — nothing for the
+# bell), carrying only which request and its state (the 4533 rule: no summary · tool · folder), sent after the outer commit
+# (`schedule_after_commit` — a rolled-back change sends nothing).
+PERMISSION_CHANGED_EVENT = "agent.permission_request.changed"
+
+
+def _schedule_changed(db: AsyncSession, request_id: uuid.UUID, recipient: uuid.UUID | None, state: str) -> None:
+    if recipient is None:
+        return
+    import functools
+
+    from app.services.after_commit import schedule_after_commit
+
+    payload = {"event_type": PERMISSION_CHANGED_EVENT, "request_id": str(request_id), "state": state}
+    schedule_after_commit(db, [functools.partial(_fire_changed, str(recipient), payload)])
+
+
+def _fire_changed(member_id: str, payload: dict) -> None:
+    from app.routers.events import _push_to_agent
+
+    _push_to_agent(member_id, dict(payload))  # no event_id → the transient path (its own id · the reconnect replay buffer)
+
+
 async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUID, body: Withdrawal) -> AgentPermissionRequest:
     row = (await db.execute(
         select(AgentPermissionRequest).where(AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == request_id)
@@ -529,10 +554,12 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
             raise DesktopRelayError(409, "not_allowed_yet", "only a network question answered «allow…» can end with its host unread")
         row.state, row.result_code = "withdrawn", "host_unread"
         await db.flush()
+        _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
         return row
     if row.state == "pending":
         row.state, row.result_code = "withdrawn", body.reason
         await db.flush()
+        _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
     return row
 
 
@@ -588,6 +615,7 @@ async def confirm_host(db: AsyncSession, setup: DesktopSetup, request_id: uuid.U
     row.stage, row.host, row.state, row.expires_at = "confirm", host, "pending", body.expires_at
     row.decision = row.answered_by = row.answered_phone_key_id = row.answered_at = row.result_code = None
     await db.flush()
+    _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: the card's second state
     return row
 
 
@@ -761,6 +789,7 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     row.decision, row.answered_at = body.decision, now
     phone.last_used_at = now
     await db.flush()
+    _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: other open screens
     return row
 
 
@@ -785,9 +814,12 @@ async def on_answer_result(db: AsyncSession, setup_id: uuid.UUID, request_id: st
     rid = _uuid(request_id)
     if rid is None:
         return
-    await db.execute(
+    changed = (await db.execute(
         update(AgentPermissionRequest)
         .where(AgentPermissionRequest.setup_id == setup_id, AgentPermissionRequest.request_id == rid,
                AgentPermissionRequest.state == "answered", AgentPermissionRequest.stage == stage)
         .values(state="rejected", result_code=result_code or state)
-    )
+        .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+    )).all()
+    for req_id, recipient in changed:  # story #4612: only a row that really moved
+        _schedule_changed(db, req_id, recipient, "rejected")
