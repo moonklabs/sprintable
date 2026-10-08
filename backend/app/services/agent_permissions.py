@@ -109,11 +109,17 @@ async def register_phone(
 ) -> tuple[dict, bool]:
     """The phone app registers its key under the person's own login. The same key again → the same row (created False); a
     fourth live key → 409 remote_device_limit with the three, to choose one to remove (PO B-4). story #4629: the session it
-    registered from is recorded on the key (each registration — the latest login wins; none found keeps what was there)."""
+    registered from is recorded on the key (each registration — the latest login wins; none sent keeps what was there); a token
+    sent that is not a live login of the person → 401 session_ended."""
     der = _decode_public_key(body.public_key)
     fp = fingerprint_of(der)
     session_id = await _session_row_id(db, user_id=user_id, raw=body.refresh_token) if user_id is not None else None
-    existing = (await db.execute(select(RemoteDevice).where(RemoteDevice.fingerprint == fp).with_for_update())).scalar_one_or_none()
+    # Kadir (5012): a phone whose login was ended with its key still holds an access token for up to an hour, and the web sends its
+    # now-dead refresh token along — that registration would bring the removed key back. A refresh token that is not a live login
+    # of this person (ended · expired · someone else's) → refused: sign in again. None sent (no cookie) records nothing, as before.
+    if body.refresh_token and user_id is not None and session_id is None:
+        raise DesktopRelayError(401, "session_ended", "this login has ended — sign in again to register the phone")
+    existing =(await db.execute(select(RemoteDevice).where(RemoteDevice.fingerprint == fp).with_for_update())).scalar_one_or_none()
     if existing is not None and existing.member_id != member_id:
         raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
     if existing is not None and existing.revoked_at is None:

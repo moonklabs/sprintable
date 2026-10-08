@@ -27,6 +27,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 from tests.test_4533_agent_permissions_realdb import (  # noqa: F401 — autouse: remote control on for ORG
     PHONES,
     _phone_key,
+    _plain_member,
     _remote_control_on,
 )
 
@@ -112,9 +113,11 @@ async def test_03_a_key_with_no_recorded_session_ends_nothing_and_says_so(world)
 async def test_04_another_persons_token_binds_nothing_and_the_raw_token_is_kept_nowhere(world):
     async with _client() as c:
         plains = await _login(PLAIN)
-        phone = await _register(c, who=OWNER, rt=plains)  # someone's token sent with OWNER's registration
-        assert (await _sql(fetch=f"SELECT session_token_id FROM remote_devices WHERE id = '{phone}'"))[0][0] is None
-        assert (await c.delete(f"{PHONES}/{phone}", headers=_person(OWNER))).json()["session"] == "not_found"
+        key, _der = _phone_key()  # someone's token sent with OWNER's registration: refused, no key made, nothing bound
+        r = await c.post(PHONES, json={"label": "폰", "public_key": key, "refresh_token": plains}, headers=_person(OWNER))
+        assert r.status_code == 401 and r.json()["error"]["code"] == "session_ended", r.text
+        assert plains not in r.text
+        assert (await _sql(fetch=f"SELECT count(*) FROM remote_devices WHERE member_id IN (SELECT id FROM members WHERE user_id = '{OWNER}')"))[0][0] == 0
         assert (await _refresh(c, plains)).status_code == 200, "the other person's session lives on"
         # the raw token appears in no column of the key row
         own = await _login(OWNER)
@@ -134,3 +137,52 @@ async def test_05_registering_the_same_key_again_from_a_new_login_moves_the_sess
         assert again.status_code == 200 and again.json()["id"] == first.json()["id"]
         assert (await c.delete(f"{PHONES}/{first.json()['id']}", headers=_person(OWNER))).json()["session"] == "ended"
         assert (await _refresh(c, new_rt)).status_code == 401, "the latest login is the one ended"
+
+
+async def test_06_an_admin_removing_a_members_phone_ends_that_phones_login_only(world):
+    """Kadir (5012): the org's owner removes a member's phone — the member's phone login ends; the owner's own session and the
+    member's other session go on."""
+    async with _client() as c:
+        await _plain_member()
+        members_phone_rt = await _login(PLAIN)
+        members_mac_rt = await _login(PLAIN)
+        owners_rt = await _login(OWNER)
+        phone = await _register(c, who=PLAIN, rt=members_phone_rt)
+        gone = await c.delete(f"{PHONES}/{phone}", headers=_person(OWNER))
+        assert gone.json() == {"removed": True, "session": "ended"}
+        assert (await _refresh(c, members_phone_rt)).status_code == 401, "the member's phone login is over"
+        assert (await _refresh(c, members_mac_rt)).status_code == 200, "the member's other login is untouched"
+        assert (await _refresh(c, owners_rt)).status_code == 200, "the admin's own login is untouched"
+
+
+async def test_07_two_keys_registered_from_one_login_share_it(world):
+    """Kadir (5012): two keys registered from the same login (the app reinstalled with a new key, logged in still) name the same
+    session — it is that login, not the key, that is ended: removing either ends it for both, and the other then answers not_found."""
+    async with _client() as c:
+        rt = await _login(OWNER)
+        elsewhere = await _login(OWNER)
+        first = await _register(c, rt=rt)
+        second = await _register(c, rt=rt)
+        assert (await c.delete(f"{PHONES}/{first}", headers=_person(OWNER))).json()["session"] == "ended"
+        assert (await _refresh(c, rt)).status_code == 401
+        assert (await c.delete(f"{PHONES}/{second}", headers=_person(OWNER))).json() == {"removed": True, "session": "not_found"}
+        assert (await _refresh(c, elsewhere)).status_code == 200, "a login neither key named lives on"
+
+
+async def test_08_the_removed_phone_cannot_bring_its_key_back_without_signing_in_again(world):
+    """Kadir (5012) · AC1: the phone's access token outlives the ended login by up to an hour, and the web sends its dead refresh
+    token along — registering the same key again then is refused (no key back, nothing bound). Signed in again, it comes back."""
+    async with _client() as c:
+        rt = await _login(OWNER)
+        key, _der = _phone_key()
+        made = await c.post(PHONES, json={"label": "폰", "public_key": key, "refresh_token": rt}, headers=_person(OWNER))
+        phone = made.json()["id"]
+        assert (await c.delete(f"{PHONES}/{phone}", headers=_person(OWNER))).json()["session"] == "ended"
+        again = await c.post(PHONES, json={"label": "폰", "public_key": key, "refresh_token": rt}, headers=_person(OWNER))
+        assert again.status_code == 401 and again.json()["error"]["code"] == "session_ended", again.text
+        assert (await _sql(fetch=f"SELECT revoked_at IS NOT NULL FROM remote_devices WHERE id = '{phone}'"))[0][0], "the key stays removed"
+        fresh = await _login(OWNER)  # signed in again on the phone: the same key comes back, bound to the new login
+        back = await c.post(PHONES, json={"label": "폰", "public_key": key, "refresh_token": fresh}, headers=_person(OWNER))
+        assert back.status_code == 201 and back.json()["id"] == phone, back.text
+        assert (await c.delete(f"{PHONES}/{phone}", headers=_person(OWNER))).json()["session"] == "ended"
+        assert (await _refresh(c, fresh)).status_code == 401
