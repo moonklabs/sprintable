@@ -183,10 +183,16 @@ describe('DesktopRemoteDevices (story #4533)', () => {
       await flush();
     };
     await removeWith({ removed: true, session: 'ended' });
+    expect(result().querySelector('a')).toBeNull(); // only the not_found line carries the link
     expect(status()).toBe('뺐어요 · Galaxy S24 — 원격 기기 자리 하나가 비었어요. 그 폰은 이제 승인 · 멈춤 · 지시를 못 하고, 길어야 1시간 안에 로그아웃돼요');
     expect(result().className).toContain('text-muted-foreground');
     await removeWith({ removed: true, session: 'not_found' });
-    expect(status()).toBe('뺐어요 · Galaxy S24 — 원격 기기 자리 하나가 비었어요. 그 폰의 로그인은 찾지 못했어요(이미 로그아웃됐을 수 있어요) — 그 폰으로 승인 · 멈춤 · 지시는 더는 못 해요');
+    expect(status()).toBe('뺐어요 · Galaxy S24 — 원격 기기 자리 하나가 비었어요. 그 폰의 로그인은 찾지 못했어요(이미 로그아웃됐을 수 있어요) — 그 폰으로 승인 · 멈춤 · 지시는 더는 못 하고, 로그인이 남았을까 걱정되면 다른 기기에서 모두 로그아웃');
+    // story #4630 AC3 (Yuna «4630» ③): the tail is a link to «로그인한 다른 기기» (settings › account) — it runs nothing here
+    const tail = result().querySelector('a[data-testid="desktop-remote-devices-sign-out-elsewhere"]') as HTMLAnchorElement;
+    expect(tail.textContent).toBe('다른 기기에서 모두 로그아웃');
+    const to = new URL(tail.getAttribute('href')!, 'http://x');
+    expect(to.pathname + '?tab=' + to.searchParams.get('tab')).toBe('/settings?tab=profile'); // settings › account (the card under 2FA)
     expect(result().className).toContain('text-foreground');
     expect(result().className).not.toContain('text-muted-foreground');
     expect(result().className).not.toMatch(/warning|destructive|amber|red/);
@@ -194,7 +200,8 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(status()).toBe('뺐어요 · Galaxy S24 — 원격 기기 자리 하나가 비었어요');
     expect(result().className).toContain('text-muted-foreground');
     await removeWith({ removed: true, session: 'not_found' }, 'en');
-    expect(status()).toBe("Removed · Galaxy S24 — one remote device place is free. Its sign-in wasn't found (it may already be signed out) — that phone can no longer approve, stop or instruct");
+    expect(status()).toBe("Removed · Galaxy S24 — one remote device place is free. Its sign-in wasn't found (it may already be signed out) — it can no longer approve, stop or instruct; if you're worried a sign-in is left, Sign out everywhere else");
+    expect(result().querySelector('a')?.textContent).toBe('Sign out everywhere else');
     await removeWith({ removed: true, session: 'ended' }, 'en');
     expect(status()).toBe('Removed · Galaxy S24 — one remote device place is free. That phone can no longer approve, stop or instruct, and it will be signed out within an hour');
   });

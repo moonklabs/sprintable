@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import Link from 'next/link';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -8,6 +9,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { useOrgRemoteControl } from '@/lib/org-remote-control';
 import { isPhoneApp } from '@/lib/phone-bridge';
 import { PhonePairEntry } from './phone-pairing';
@@ -43,9 +45,10 @@ export function DesktopRemoteDevices() {
   const [remoteControl] = useOrgRemoteControl(orgId);
   const remoteControlOn = remoteControl ? remoteControl.enabled : null;
   const inPhoneApp = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
+  const flatHref = useFlatHref(); // story #4630 AC3 — the settings link carries this project (`?p=` · #4231)
   const [phones, setPhones] = useState<Phone[] | null>(null);
   const [asking, setAsking] = useState<Asking>(null);
-  const [result, setResult] = useState('');
+  const [result, setResult] = useState<ReactNode>('');
   // story #4629 (Yuna «4629»): a removal whose phone login could not be ended reads in the text colour (not a warning — nothing to do next)
   const [resultStrong, setResultStrong] = useState(false);
   // where the focus goes when the in-line confirmation closes (Yuna 15:38Z · as 4935's web confirmation): [취소] → that row's
@@ -73,7 +76,7 @@ export function DesktopRemoteDevices() {
   useEffect(() => { void load(); }, [load]);
 
   /** one DELETE, then the result line and the list read again */
-  const ask = useCallback(async (url: string, said: (answer: RemoveAnswer) => string) => {
+  const ask = useCallback(async (url: string, said: (answer: RemoveAnswer) => ReactNode) => {
     setResultStrong(false);
     try {
       const res = await fetchWithAuth(url, { method: 'DELETE' });
@@ -97,7 +100,14 @@ export function DesktopRemoteDevices() {
   const removePhone = (phone: Phone) => ask(`/api/remote-devices/${phone.id}`, ({ removed, session }) => {
     if (!removed) return t('alreadyRemoved', { phone: phone.label });
     if (session === 'ended') return t('phoneRemovedSignedOut', { phone: phone.label });
-    if (session === 'not_found') return t('phoneRemovedSessionNotFound', { phone: phone.label });
+    // story #4630 AC3 (Yuna «4630» ③): the next hand when its login was not found — a link to «로그인한 다른 기기» (settings ›
+    // account), never run from here: that card's own confirmation goes first
+    if (session === 'not_found') {
+      return t.rich('phoneRemovedSessionNotFound', {
+        phone: phone.label,
+        lk: (chunks) => <Link href={flatHref('/settings?tab=profile')} className="underline underline-offset-2" data-testid="desktop-remote-devices-sign-out-elsewhere">{chunks}</Link>,
+      });
+    }
     return t('phoneRemoved', { phone: phone.label });
   });
 
