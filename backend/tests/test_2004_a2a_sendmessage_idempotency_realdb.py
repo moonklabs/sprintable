@@ -332,3 +332,38 @@ async def test_mutation_self_check_dedup_bypass_goes_red_then_restored_green():
             assert len(tasks_for_id2) == 1
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_4632_root_message_is_stamped_when_it_is_written_not_at_the_transaction_start():
+    """story #4632 (Codex 5022 probe): the send writes its root message from inside a long transaction. The message's created_at is
+    the write moment (clock_timestamp), not the start of that transaction — a flood-block velocity window counts by it. Here the
+    transaction is held open 2.5s before the send; the root message must be stamped after that. Mutant: `created_at=func.now()` in
+    `_handle_send_message` → RED."""
+    from datetime import timedelta as _td
+
+    from sqlalchemy import text as _text
+
+    from app.models.a2a_task import A2ATask
+    from app.models.conversation import ConversationMessage
+    from app.routers.a2a import _handle_send_message
+
+    engine, Session = await _engine_and_sessionmaker()
+    try:
+        async with Session() as s:
+            member_id = await _seed_agent_member(s)
+
+        with patch("app.routers.a2a.wake_agent"):
+            async with Session() as s:
+                member = await _load_member(s, member_id)
+                txn_start = (await s.execute(_text("SELECT now()"))).scalar_one()
+                await s.execute(_text("SELECT pg_sleep(2.5)"))
+                result = await _handle_send_message(s, member, _send_params(str(uuid.uuid4()), "late in a long transaction"))
+
+        task_id = uuid.UUID(result["task"]["id"])
+        async with Session() as s:
+            root_id = (await s.execute(select(A2ATask.root_message_id).where(A2ATask.id == task_id))).scalar_one()
+            created_at = (await s.execute(select(ConversationMessage.created_at).where(ConversationMessage.id == root_id))).scalar_one()
+        assert created_at - txn_start >= _td(seconds=2.5), (created_at, txn_start)
+    finally:
+        await engine.dispose()
