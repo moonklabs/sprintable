@@ -357,6 +357,10 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     const clip = { x: Math.max(0, s.x - 6), y: Math.max(0, s.y - 6), width: s.width + 12, height: s.height + 12 };
     const focused = await page.screenshot({ clip });
     await page.screenshot({ path: path.join(outDir(), `4583-web-5c-arrive-owner-${tag}.png`) });
+    // Kadir (5021): the arrival holds the focus for 1.5 s (ARRIVAL_HOLD_MS) and an org read that lands inside that hold renews it. The
+    // person leaves only after the reads have settled and the hold has run out — the ring then has to go, as the assertion says.
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1700);
     await sw.evaluate((el) => (el as HTMLElement).blur());
     await frames(page);
     const blurred = await page.screenshot({ clip });
