@@ -5103,7 +5103,7 @@
   "chats": {
     "agentsPaused": {
       "title": "Agent messages in this conversation are paused",
-      "since": "since {time}",
+      "since": "started {time}",
       "why": "Agents sent each other too many messages in a short time. Messages from people still go through.",
       "untilAdmin": "They stay paused until an admin resumes them.",
       "askAdmin": "They stay paused until an admin resumes them — ask an organization admin.",

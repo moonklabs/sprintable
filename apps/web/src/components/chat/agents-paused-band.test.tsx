@@ -159,6 +159,7 @@ describe('AgentsPausedBand (story #4631)', () => {
     await render(auto(false, 10), 'en');
     expect(q('agents-paused-band')!.textContent).toContain('Agent messages in this conversation are paused');
     expect(q('agents-paused-release')!.textContent).toBe('Once the conversation has been quiet for about 10 minutes, agents can send again.');
-    expect(q('agents-paused-since')!.textContent).toMatch(/^since /);
+    // Yuna 10:33Z: «started 12 minutes ago» — «since» + a relative time read «since 12 minutes ago», not English
+    expect(q('agents-paused-since')!.textContent).toMatch(/^started \d+ minutes ago$/);
   });
 });
