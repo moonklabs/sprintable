@@ -105,6 +105,7 @@ async def test_record_api_key_usage_writes_a_row_with_expected_fields():
             url = type("_U", (), {"path": "/api/v2/agents/x/stream"})()
             method = "GET"
             client = _FakeClient()
+            headers: dict = {}  # story #4546: the writer reads headers (client IP · MCP transport · tool)
 
         async with _PatchedSessionFactory(Session):
             await record_api_key_usage(
@@ -240,6 +241,7 @@ async def test_resolve_api_key_success_records_usage_log():
                 url = type("_U", (), {"path": "/api/v2/agents/stream"})()
                 method = "GET"
                 client = _FakeClient()
+                headers: dict = {}  # story #4546
 
             async with _PatchedSessionFactory(Session):
                 await _resolve_api_key(plaintext, s, request=_FakeRequest())
@@ -276,5 +278,82 @@ async def test_resolve_api_key_failure_does_not_record_usage_log():
             from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog
             count = (await s.execute(select(AgentApiKeyUsageLog))).scalars().all()
         assert count == []
+    finally:
+        await _drop_all(engine)
+
+
+# ── story #4546 — where a call came from (AC1 · AC2) ─────────────────────────
+
+
+def _starlette_request(headers: dict[str, str], *, peer: str = "169.254.1.1", path: str = "/api/v2/stories"):
+    """A real Starlette request — the writer reads its headers like any route's (client IP · MCP transport · tool)."""
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http", "method": "GET", "path": path, "raw_path": path.encode(), "query_string": b"",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()], "client": (peer, 443), "server": ("test", 80),
+        "scheme": "https",
+    }
+    return Request(scope)
+
+
+async def _record_and_read(Session, request):
+    from app.services.agent_api_key_usage import list_api_key_usage, record_api_key_usage
+
+    api_key_id = uuid.uuid4()
+    async with _PatchedSessionFactory(Session):
+        await record_api_key_usage(api_key_id=api_key_id, org_id=None, member_id=None, request=request)
+    async with Session() as s:
+        [row] = await list_api_key_usage(s, api_key_id)
+    return row
+
+
+@pytest.mark.anyio
+async def test_4546_remote_ip_is_the_real_client_on_cloud_run_not_the_front_end(monkeypatch):
+    """AC1: on Cloud Run the ledger keeps the address the front end appended (XFF's right end) — not request.client.host (the
+    front end's own 169.254.x.x), and never the caller's own XFF left items."""
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend")
+    engine, Session = await _session()
+    try:
+        row = await _record_and_read(Session, _starlette_request({"X-Forwarded-For": "192.0.2.66, 203.0.113.50"}))
+        assert row.remote_ip == "203.0.113.50", "the connecting address — the forged left item is not taken"
+        row = await _record_and_read(Session, _starlette_request({}))
+        assert row.remote_ip == "169.254.1.1", "no XFF → the socket address (as before)"
+    finally:
+        await _drop_all(engine)
+
+
+@pytest.mark.anyio
+async def test_4546_the_web_front_s_ip_only_with_the_edge_secret(monkeypatch):
+    """AC1 (the shared rule · #4398): the BFF's X-Sprintable-Client-IP is taken only with the right edge secret; a guessed secret
+    falls back to the connecting address."""
+    from app.core.config import settings
+
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend")
+    monkeypatch.setattr(settings, "edge_client_ip_secret", "edge-secret")
+    engine, Session = await _session()
+    try:
+        ok = {"X-Sprintable-Client-IP": "198.51.100.9", "X-Sprintable-Edge-Key": "edge-secret", "X-Forwarded-For": "34.1.2.3"}
+        assert (await _record_and_read(Session, _starlette_request(ok))).remote_ip == "198.51.100.9"
+        guessed = {**ok, "X-Sprintable-Edge-Key": "guess"}
+        assert (await _record_and_read(Session, _starlette_request(guessed))).remote_ip == "34.1.2.3"
+    finally:
+        await _drop_all(engine)
+
+
+@pytest.mark.anyio
+async def test_4546_each_row_says_whether_through_mcp_and_which_tool():
+    """AC2: X-MCP-Transport (lowercased) and X-Sprintable-Tool per row · absent or blank → NULL (a direct call) · capped (an
+    unbounded header never grows the ledger)."""
+    engine, Session = await _session()
+    try:
+        via_mcp = await _record_and_read(Session, _starlette_request({"X-MCP-Transport": " HTTP ", "X-Sprintable-Tool": "sprintable_send_chat_message"}))
+        assert (via_mcp.mcp_transport, via_mcp.tool_name) == ("http", "sprintable_send_chat_message")
+        direct = await _record_and_read(Session, _starlette_request({}))
+        assert (direct.mcp_transport, direct.tool_name) == (None, None)
+        blank = await _record_and_read(Session, _starlette_request({"X-MCP-Transport": "  ", "X-Sprintable-Tool": ""}))
+        assert (blank.mcp_transport, blank.tool_name) == (None, None)
+        huge = await _record_and_read(Session, _starlette_request({"X-MCP-Transport": "x" * 500, "X-Sprintable-Tool": "t" * 5000}))
+        assert (len(huge.mcp_transport), len(huge.tool_name)) == (16, 128)
     finally:
         await _drop_all(engine)

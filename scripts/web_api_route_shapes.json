@@ -456,6 +456,11 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/api-keys/{}/usage-summary",
+"kind": "object"
+},
+{
+"method": "GET",
 "path": "/api/v2/assets",
 "kind": "object"
 },

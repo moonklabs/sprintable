@@ -40,18 +40,89 @@ async def record_api_key_usage(
         from app.core.database import async_session_factory
         from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog
 
+        from app.core.client_ip import client_ip
+
         endpoint = request.url.path if request is not None else "unknown"
         method = request.method if request is not None else "unknown"
-        remote_ip = request.client.host if request is not None and request.client else None
+        # story #4546 AC1: the real client (the one shared rule · #4398) — `request.client.host` on Cloud Run is the front end's own
+        # 169.254.x.x for every call, so a Mac and the hosted MCP server looked the same
+        remote_ip = client_ip(request) if request is not None else None
+        # story #4546 AC2: per row, whether through our MCP client (its X-MCP-Transport) and which tool (X-Sprintable-Tool) — the
+        # client's own words, capped (an unbounded header never grows the ledger), absent → NULL
+        mcp_transport = _header(request, "x-mcp-transport", 16, lower=True)
+        tool_name = _header(request, "x-sprintable-tool", 128)
 
         async with async_session_factory() as s:
             s.add(AgentApiKeyUsageLog(
                 id=uuid.uuid4(), api_key_id=api_key_id, org_id=org_id, member_id=member_id,
                 endpoint=endpoint, method=method, remote_ip=remote_ip,
+                mcp_transport=mcp_transport, tool_name=tool_name,
             ))
             await s.commit()
     except Exception:
         logger.warning("record_api_key_usage failed api_key_id=%s", api_key_id, exc_info=True)
+
+
+def _header(request: "Request | None", name: str, cap: int, *, lower: bool = False) -> str | None:
+    """A request header as the ledger keeps it — trimmed, capped, NULL when absent or blank."""
+    if request is None:
+        return None
+    value = (request.headers.get(name) or "").strip()
+    if not value:
+        return None
+    value = value[:cap]
+    return value.lower() if lower else value
+
+
+DEFAULT_SUMMARY_DAYS = 7
+MAX_SUMMARY_DAYS = 90
+SUMMARY_TOP = 10
+_UUID_RE = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+
+
+async def summarize_api_key_usage(session: AsyncSession, api_key_id: uuid.UUID, *, days: int = DEFAULT_SUMMARY_DAYS) -> dict:
+    """story #4546 AC3 — one key's calls over the last `days`: through our MCP client (by transport) vs direct, and the top paths
+    (ids folded to {id}), tools and client addresses, each with its count. Read only, on the caller's session (an owner opens it)."""
+    from datetime import timedelta
+
+    from sqlalchemy import func
+
+    from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog as L
+
+    days = min(max(days, 1), MAX_SUMMARY_DAYS)
+    in_window = (L.api_key_id == api_key_id, L.occurred_at >= func.now() - timedelta(days=days))
+    via_mcp = func.count().filter(L.mcp_transport.is_not(None))
+
+    by_transport = (await session.execute(
+        select(L.mcp_transport, func.count()).where(*in_window).group_by(L.mcp_transport)
+    )).all()
+    path = func.regexp_replace(L.endpoint, _UUID_RE, "{id}", "g").label("path")
+    paths = (await session.execute(
+        select(L.method, path, func.count().label("n"), via_mcp).where(*in_window)
+        .group_by(L.method, path).order_by(func.count().desc(), L.method, path).limit(SUMMARY_TOP)
+    )).all()
+    tools = (await session.execute(
+        select(L.tool_name, func.count().label("n")).where(*in_window, L.tool_name.is_not(None))
+        .group_by(L.tool_name).order_by(func.count().desc(), L.tool_name).limit(SUMMARY_TOP)
+    )).all()
+    addresses = (await session.execute(
+        select(L.remote_ip, func.count().label("n"), via_mcp).where(*in_window)
+        .group_by(L.remote_ip).order_by(func.count().desc(), L.remote_ip).limit(SUMMARY_TOP)
+    )).all()
+
+    mcp_by_transport = {t: n for t, n in by_transport if t is not None}
+    direct = sum(n for t, n in by_transport if t is None)
+    return {
+        "api_key_id": api_key_id,
+        "days": days,
+        "total": direct + sum(mcp_by_transport.values()),
+        "direct": direct,
+        "via_mcp": sum(mcp_by_transport.values()),
+        "via_mcp_by_transport": mcp_by_transport,
+        "top_paths": [{"method": m, "path": p, "count": n, "via_mcp": v} for m, p, n, v in paths],
+        "top_tools": [{"tool": t, "count": n} for t, n in tools],
+        "top_remote_ips": [{"remote_ip": ip, "count": n, "via_mcp": v} for ip, n, v in addresses],
+    }
 
 
 async def list_api_key_usage(session: AsyncSession, api_key_id: uuid.UUID, *, limit: int = DEFAULT_LIST_LIMIT):

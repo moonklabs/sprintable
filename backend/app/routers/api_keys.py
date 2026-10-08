@@ -11,10 +11,17 @@ from app.schemas.api_key import (
     ApiKeyCreatedResponse,
     ApiKeyResponse,
     ApiKeyUsageLogResponse,
+    ApiKeyUsageSummaryResponse,
     CreateApiKeyRequest,
     RotateApiKeyRequest,
 )
-from app.services.agent_api_key_usage import DEFAULT_LIST_LIMIT, list_api_key_usage
+from app.services.agent_api_key_usage import (
+    DEFAULT_LIST_LIMIT,
+    DEFAULT_SUMMARY_DAYS,
+    MAX_SUMMARY_DAYS,
+    list_api_key_usage,
+    summarize_api_key_usage,
+)
 from app.services.recruit_service import acquire_agent_mutation_lock
 
 router = APIRouter(prefix="/api/v2", tags=["api-keys", "Organization"])
@@ -76,6 +83,25 @@ async def list_api_key_logs(
     await assert_agent_owner(existing.team_member_id, session, org_id, uuid.UUID(auth.user_id))
     logs = await list_api_key_usage(session, key_id, limit=limit)
     return [ApiKeyUsageLogResponse.model_validate(log) for log in logs]
+
+
+@router.get("/api-keys/{key_id}/usage-summary", response_model=ApiKeyUsageSummaryResponse)
+async def api_key_usage_summary(
+    key_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    repo: ApiKeyRepository = Depends(_get_repo),
+    days: int = Query(DEFAULT_SUMMARY_DAYS, ge=1, le=MAX_SUMMARY_DAYS),
+) -> ApiKeyUsageSummaryResponse:
+    """story #4546 AC3 — where one key's calls came from: through our MCP client vs direct, top paths · tools · client addresses.
+    The same gate as the row list above (assert_agent_owner: the caller's org + the agent's creator or an org owner/admin) — it
+    summarises exactly the rows that list already shows them."""
+    existing = await repo.get(key_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    await assert_agent_owner(existing.team_member_id, session, org_id, uuid.UUID(auth.user_id))
+    return ApiKeyUsageSummaryResponse(**await summarize_api_key_usage(session, key_id, days=days))
 
 
 @router.get("/agents/{agent_id}/api-keys", response_model=list[ApiKeyResponse])
