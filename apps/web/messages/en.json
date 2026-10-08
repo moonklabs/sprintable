@@ -6723,7 +6723,10 @@
     "versionLabel": "Version {version}",
     "buildLabel": "Build {sha}",
     "notarizationNotice": "For internal use before Apple notarization.",
-    "gatekeeperNotice": "The first time you open it, right-click the file and choose \"Open\".",
+    "gatekeeperTitle": "macOS blocks the first open — open it once like this",
+    "installStepDrag": "Open the downloaded file and drag the app into the Applications folder",
+    "installStepOpen": "Try opening the app once, then go to System Settings → Privacy & Security → \"Open Anyway\"",
+    "installOldMac": "On macOS 12, right-click the app → \"Open\"",
     "downloadCta": "Download",
     "unavailable": "Not available right now.",
     "setup": {

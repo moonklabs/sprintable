@@ -59,39 +59,51 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
       .toBe(koMessages.desktop.unavailable);
   });
 
-  it('⭐매니페스트 수신 — 대상·버전·공증 문구·Gatekeeper 안내·다운로드 링크(GCS url)가 정확히 뜬다(빌드 sha 없는 순수 semver)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
-      version: '0.3.1', pub_date: '2026-09-11T00:00:00Z',
-      platforms: { 'darwin-aarch64': { url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos/0.3.1/app.tar.gz', signature: 'sig' } },
-    })));
+  // [SID:4619] — the card reads the Electron app's manifest (/desktop/downloads/macos.json), never the old Tauri updater's
+  const MANIFEST = {
+    product: 'Sprintable Dev Setup', bundle_id: 'ai.sprintable.desktop.dev.setup', version: '0.2.0', build: 'abc123def',
+    url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/0.2.0/Sprintable-Dev-Setup-abc123def-arm64.dmg',
+    sha256: 'f'.repeat(64), size: 1, signed_team: 'JN798BC4KC', notarized: false, pub_date: '2026-10-08T03:00:00.000Z',
+  };
+
+  it('⭐[SID:4619] 매니페스트 수신 — 대상 · 버전 · 빌드 · 첫 열기 안내(유나 정본: 제목 · 순서 두 줄 · macOS 12 덧줄 · 공증 전) · DMG 링크', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(MANIFEST));
+    vi.stubGlobal('fetch', fetchMock);
     await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
     await flush();
 
-    const card = container.querySelector('[data-testid="desktop-download-card"]');
-    expect(card).not.toBeNull();
-    // 페드루 PO 정정 2(2026-09-11 16:13Z) — 대상 플랫폼·Gatekeeper 우회 안내.
-    expect(container.querySelector('[data-testid="desktop-download-target"]')?.textContent)
-      .toBe(koMessages.desktop.targetLabel);
-    expect(container.querySelector('[data-testid="desktop-download-gatekeeper-notice"]')?.textContent)
-      .toBe(koMessages.desktop.gatekeeperNotice);
-    expect(container.querySelector('[data-testid="desktop-download-version"]')?.textContent).toBe('버전 0.3.1');
-    expect(container.querySelector('[data-testid="desktop-download-build-sha"]')).toBeNull();
-    expect(container.querySelector('[data-testid="desktop-download-notarization-notice"]')?.textContent)
-      .toBe(koMessages.desktop.notarizationNotice);
+    // the Electron app's manifest, not the old Tauri updater's (installed old apps keep updating from that one)
+    expect(fetchMock.mock.calls.map((c) => String((c as unknown[])[0]))).toEqual(['/desktop/downloads/macos.json']);
+    expect(container.querySelector('[data-testid="desktop-download-target"]')?.textContent).toBe(koMessages.desktop.targetLabel);
+    expect(container.querySelector('[data-testid="desktop-download-version"]')?.textContent).toBe('버전 0.2.0');
+    expect(container.querySelector('[data-testid="desktop-download-build-sha"]')?.textContent).toBe(' · 빌드 abc123def');
+    expect(container.querySelector('[data-testid="desktop-download-gatekeeper-title"]')?.textContent)
+      .toBe('처음 열면 macOS가 막아요 — 한 번만 이렇게 열어 주세요');
+    expect([...container.querySelectorAll('[data-testid="desktop-download-install-steps"] > li')].map((e) => e.textContent)).toEqual([
+      '받은 파일을 열어 앱을 「응용 프로그램」 폴더로 끌어 놓아요',
+      '앱을 한 번 열어 본 뒤 시스템 설정 → 개인정보 보호 및 보안 → 「그래도 열기」',
+    ]);
+    expect(container.querySelector('[data-testid="desktop-download-old-mac"]')?.textContent).toBe('macOS 12에서는 앱을 우클릭 → 「열기」');
+    // no block inside a <p> (Yuna 5004: AlertDescription is a <p>) — the list and its lines sit in a div
+    expect(container.querySelector('p ol, p p')).toBeNull();
+    expect(container.querySelector('[data-testid="desktop-download-notarization-notice"]')?.textContent).toBe('Apple 공증 전 내부용이에요.');
     const link = container.querySelector('[data-testid="desktop-download-button"]') as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe('https://storage.googleapis.com/sprintable-desktop-releases-dev/macos/0.3.1/app.tar.gz');
+    expect(link.getAttribute('href')).toBe(MANIFEST.url);
     expect(link.hasAttribute('download')).toBe(true);
   });
 
-  it('version이 semver+build 형식(예: "0.3.1+a1b2c3d")이면 「+」 뒤를 빌드 sha로 따로 보인다', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
-      version: '0.3.1+a1b2c3d', pub_date: '2026-09-11T00:00:00Z',
-      platforms: { 'darwin-aarch64': { url: 'https://storage.googleapis.com/x/app.tar.gz', signature: 'sig' } },
-    })));
+  it('[SID:4619] the old right-click line is gone — its key in neither locale, nothing reads it', async () => {
+    const en = (await import('../../../messages/en.json')).default as { desktop: Record<string, unknown> };
+    expect('gatekeeperNotice' in koMessages.desktop).toBe(false);
+    expect('gatekeeperNotice' in en.desktop).toBe(false);
+    expect(en.desktop.installStepOpen).toBe('Try opening the app once, then go to System Settings → Privacy & Security → "Open Anyway"');
+  });
+
+  it('[SID:4619] a manifest without a url (or the old Tauri shape) is «지금은 받을 수 없어요», not a broken button', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ version: '0.1.2', platforms: { 'darwin-aarch64': { url: 'https://x/Sprintable.app.tar.gz', signature: 's' } } })));
     await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
     await flush();
-
-    expect(container.querySelector('[data-testid="desktop-download-version"]')?.textContent).toBe('버전 0.3.1+a1b2c3d');
-    expect(container.querySelector('[data-testid="desktop-download-build-sha"]')?.textContent).toBe(' · 빌드 a1b2c3d');
+    expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent).toBe(koMessages.desktop.unavailable);
+    expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
   });
 });
