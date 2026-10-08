@@ -1,9 +1,10 @@
 """story #4535 (E-DESKTOP-2 B-4 · AC1) — an organization's «원격 제어» switch. Contract 02d2cf71 §2 (v1.5).
 
 Off by default; only an owner turns it on or off. While off the device line is off as a whole (PO 08:55Z ⓐ): every relay call
-is refused (403 remote_control_off — the device token stays valid), an open relay stream ends with
-`access_revoked {reason: remote_control_off}`, no command is made (409), and turning it off rejects the devices' open
-commands in the same transaction. The daemon then waits without knocking; turning it on sends each of the org's live devices
+is refused with **409** `remote_control_off` (routers/desktop_relay.py — the device token stays valid), an open relay stream ends
+with its own `event: remote_control_off` frame — never `access_revoked` and never a 401/403, which the daemon takes as revoked
+for good (story #4589 · PO 00:42Z: this text once said 403 · access_revoked, contract v1.5; the code is v1.8) — no command is
+made (409), and turning it off rejects the devices' open commands in the same transaction. The daemon then waits without knocking; turning it on sends each of the org's live devices
 one `desktop.remote_control` Event down its agents' own streams (the daemon acks it and opens the relay again), and the app's
 `GET /desktop/remote-control` read is the floor when that Event is missed (PO 08:55Z).
 """
