@@ -4,7 +4,7 @@
 // (to `/desktop#remote-control` — it never flips the switch), anyone else the owner's name in «조직 소유자({owners})». Nothing while
 // it is on. The approvals line only with a connected computer. The chat line stays only while the agent works or waits (PO 04:11Z).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -22,6 +22,7 @@ const { formatOwners, markArrival, holdArrivalFocus } = await import('./remote-o
 const { AgentPermissionRequests } = await import('@/components/inbox/agent-permission-requests');
 const { DesktopRemoteControlCard } = await import('./desktop-remote-control-card');
 const { AgentSessionStrip } = await import('@/components/chat/agent-session-strip');
+const { useOrgRemoteControl } = await import('@/lib/org-remote-control');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -241,6 +242,133 @@ describe('arrival by an in-app link press (client navigation)', () => {
     expect(sw()?.className).toContain('data-[arrived]:ring-3');
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' })); });
     expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+  });
+
+  it('[4595] a value change inside the hold runs the arrival again — the cleanup is not the end of it, the switch keeps its mark', async () => {
+    org = { ...OFF, can_change: true };
+    window.history.replaceState(null, '', '/desktop#remote-control');
+    Element.prototype.scrollIntoView = vi.fn();
+    // a second reader of the same org value: its setter publishes a change, as another part of the page would
+    let change: ReturnType<typeof useOrgRemoteControl>[1] | undefined;
+    function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
+    });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+    await act(async () => { change?.({ ...org, enabled: true, can_change: true, enabled_at: '2026-10-08T00:00:00Z' }); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(sw()?.hasAttribute('data-arrived')).toBe(true); // the change came inside the hold: the card holds the focus again
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' })); });
+    expect(sw()?.hasAttribute('data-arrived')).toBe(false); // the person's first key still ends it
+  });
+
+  // story 4595 (design Yuna on 5ecb3f9da): the person moves the focus to another control inside the hold, then a value changes in those
+  // 1.5 s — the retake must not take the focus back to the switch (the cleanup only leaves a retake while the focus is still the arrival's).
+  it('[4595 · Yuna] the person moves the focus away inside the hold, then a value changes: the focus stays where the person put it', async () => {
+    vi.useFakeTimers();
+    try {
+      org = { ...OFF, can_change: true };
+      window.history.replaceState(null, '', '/desktop#remote-control');
+      Element.prototype.scrollIntoView = vi.fn();
+      let change: ReturnType<typeof useOrgRemoteControl>[1] | undefined;
+      function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
+      });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+      const other = document.createElement('button');
+      container.append(other);
+      await act(async () => { other.focus(); }); // still inside the hold
+      await act(async () => { vi.advanceTimersByTime(10); });
+      for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(other);
+      await act(async () => { change?.({ ...org, enabled: true, can_change: true, enabled_at: '2026-10-08T00:00:00Z' }); });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(other);
+      expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // story 4595 (Kadir 5021 survivor): once the hold has run out, a later value change must not move the focus back to the switch — a
+  // person may be elsewhere by then. Pinned with a fake clock (the hold is 1.5 s).
+  it('[4595 · Kadir] after the hold ran out, a later value change does not take the focus back', async () => {
+    vi.useFakeTimers();
+    try {
+      org = { ...OFF, can_change: true };
+      window.history.replaceState(null, '', '/desktop#remote-control');
+      Element.prototype.scrollIntoView = vi.fn();
+      let change: ReturnType<typeof useOrgRemoteControl>[1] | undefined;
+      function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
+      });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+      const other = document.createElement('button');
+      container.append(other); // after the first render: the render takes over the container
+      // the hold runs out while the person has not touched anything
+      await act(async () => { vi.advanceTimersByTime(1600); });
+      // the person moves to another control: the hold ends at once
+      await act(async () => { other.focus(); });
+      await act(async () => { vi.advanceTimersByTime(10); }); // the hold's focus-out check runs on the next tick
+      for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(other);
+      // a value changes later, after the hold: the focus stays where the person put it
+      await act(async () => { change?.({ ...org, enabled: true, can_change: true, enabled_at: '2026-10-08T00:00:00Z' }); });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(other);
+      expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // story 4595 (codex on 5021): a change inside the hold leaves a retake; then the card has no state for a while (state null), the hold
+  // runs out, the person moves on, and the value comes back. The old retake must not fire then.
+  it('[4595 · codex] state → null → the value back after the hold: a leftover retake does not take the focus', async () => {
+    vi.useFakeTimers();
+    try {
+      org = { ...OFF, can_change: true };
+      window.history.replaceState(null, '', '/desktop#remote-control');
+      Element.prototype.scrollIntoView = vi.fn();
+      const base = fetchWithAuth.getMockImplementation()!;
+      fetchWithAuth.mockImplementation(async (url: string) => (url.includes('org-pending') ? new Promise(() => {}) : base(url)));
+      const home = orgId;
+      let change: ((next: { enabled: boolean; can_change: boolean; owner_names: string[]; connected_computers: number; enabled_at: string | null }) => void) | undefined;
+      function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
+      const page = () => (<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
+      const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+      await act(async () => { root.render(page()); });
+      await settle();
+      const other = document.createElement('button');
+      container.append(other); // after the first render: the render takes over the container
+      expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+      // 1. a change inside the hold: the card's cleanup leaves a retake
+      await act(async () => { change?.({ ...org, enabled: true, can_change: true, enabled_at: '2026-10-08T00:00:00Z' }); });
+      await settle();
+      // 2. no state for a while: the card is pending on another org
+      orgId = 'org-pending';
+      await act(async () => { root.render(page()); });
+      await settle();
+      // 3. the hold runs out, the person moves on
+      await act(async () => { vi.advanceTimersByTime(1600); });
+      await act(async () => { other.focus(); });
+      await act(async () => { vi.advanceTimersByTime(10); });
+      await settle();
+      expect(document.activeElement).toBe(other);
+      // 4. the value comes back after the hold
+      orgId = home;
+      await act(async () => { root.render(page()); });
+      await settle();
+      expect(document.activeElement).toBe(other);
+      expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('the mark stays while the focus stays after the hold ends, and comes off when the focus leaves', async () => {
