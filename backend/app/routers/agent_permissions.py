@@ -138,7 +138,7 @@ async def get_remote_devices(
 ):
     member = await _person(db, auth, org_id, interactive=False)
     if scope == "org":
-        if member.role not in ("owner", "admin"):
+        if not await is_active_org_admin(db, member):  # story #4624 (PO 08:5xZ): an inactive owner/admin sees no one else's phones
             raise HTTPException(status_code=403, detail={"code": "not_org_admin", "message": "owners and admins only"})
         return {"devices": await agent_permissions.list_phones(db, member_id=None, org_id=org_id)}
     return {"devices": await agent_permissions.list_phones(db, member_id=uuid.UUID(str(member.id)), org_id=org_id)}

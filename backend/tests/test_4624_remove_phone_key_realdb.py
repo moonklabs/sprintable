@@ -137,13 +137,17 @@ async def test_03b_a_deactivated_owner_or_admin_is_no_admin_here_for_the_key_or_
         owners, owner_der = await _register(c)
         await _pair(c, token, plain_der, owner_der)
 
-        # ① the org's owner, deactivated: PLAIN's key and its pair are not theirs to remove
+        # ① the org's owner, deactivated: PLAIN's key and its pair are not theirs to remove — nor to see (PO 08:48Z: the same
+        # rule for the org list, scope=org → the answer a non-admin gets) · their own list is still theirs
         await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")
         try:
             for url, code in ((f"{PHONES}/{plains}/pairs/{sid}", "pairing_not_found"), (f"{PHONES}/{plains}", "phone_not_found")):
                 r = await c.delete(url, headers=_person(OWNER))
                 assert (r.status_code, r.json()["error"]["code"]) == (404, code), r.text
             assert await _live(plains) and await _pair_live(plains, sid)
+            org = await c.get(f"{PHONES}?scope=org", headers=_person(OWNER))
+            assert (org.status_code, org.json()["error"]["code"]) == (403, "not_org_admin"), org.text
+            assert [d["id"] for d in (await c.get(PHONES, headers=_person(OWNER))).json()["devices"]] == [owners]
         finally:
             await _sql(f"UPDATE members SET is_active = true WHERE id = '{OWNER_TM}'")
 
@@ -155,12 +159,32 @@ async def test_03b_a_deactivated_owner_or_admin_is_no_admin_here_for_the_key_or_
                 r = await c.delete(url, headers=_person(PLAIN))
                 assert (r.status_code, r.json()["error"]["code"]) == (404, code), r.text
             assert await _live(owners) and await _pair_live(owners, sid)
+            org = await c.get(f"{PHONES}?scope=org", headers=_person(PLAIN))
+            assert (org.status_code, org.json()["error"]["code"]) == (403, "not_org_admin"), org.text
+            assert [d["id"] for d in (await c.get(PHONES, headers=_person(PLAIN))).json()["devices"]] == [plains]
         finally:
             await _sql(f"UPDATE members SET is_active = true WHERE id = '{plain_tm}'")
 
         # the same two, active again: yes (the refusals above were the inactive row, not the role)
+        assert sorted(d["id"] for d in (await c.get(f"{PHONES}?scope=org", headers=_person(PLAIN))).json()["devices"]) == sorted([owners, plains])
         assert (await c.delete(f"{PHONES}/{owners}/pairs/{sid}", headers=_person(PLAIN))).json() == {"removed": True}
         assert (await c.delete(f"{PHONES}/{plains}", headers=_person(OWNER))).json() == {"removed": True}
+
+
+async def test_03c_a_deactivated_person_still_removes_their_own_key_and_pair(world):
+    """PO 08:44Z «제 폰은 그대로»: the active check is for another person's only — a deactivated person's own key and pair are
+    still theirs to remove (taking rights away is never blocked)."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4624d")
+        a, a_der = await _register(c, label="A")
+        b, b_der = await _register(c, label="B")
+        await _pair(c, device["device_token"], a_der, b_der)
+        await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")
+        try:
+            assert (await c.delete(f"{PHONES}/{a}/pairs/{device['setup_id']}", headers=_person(OWNER))).json() == {"removed": True}
+            assert (await c.delete(f"{PHONES}/{b}", headers=_person(OWNER))).json() == {"removed": True}
+        finally:
+            await _sql(f"UPDATE members SET is_active = true WHERE id = '{OWNER_TM}'")
 
 
 async def test_04_the_same_key_registered_again_by_its_owner_comes_back(world):
