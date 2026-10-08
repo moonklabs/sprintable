@@ -95,9 +95,14 @@ async def test_off_and_terminal_only_together_on_one_device(world):
         assert (await _post_ask(c, device, _ask(agent))).status_code == 201
         assert (await _post_ask(c, device, _terminal_ask(agent))).status_code == 201
 
-        rows = await _rows()  # on: the ordinary one answerable, the terminal-only one not
-        assert (rows[False]["answerable"], rows[False]["remote_control_off"]) == (True, False)
-        assert (rows[True]["answerable"], rows[True]["remote_control_off"], rows[True]["input_hash"]) == (False, False, None)
+        def on_as_at_first(rows):
+            """on: the ordinary one answerable with its signing values · the terminal-only one not, with none (Kadir 5013 ②)"""
+            ordinary, terminal = rows[False], rows[True]
+            assert (ordinary["answerable"], ordinary["remote_control_off"]) == (True, False)
+            assert ordinary["session_key"] is not None and ordinary["input_hash"] is not None
+            assert (terminal["answerable"], terminal["remote_control_off"], terminal["session_key"], terminal["input_hash"]) == (False, False, None, None)
+
+        on_as_at_first(await _rows())
         assert await _badge() == 1
 
         await _switch(False)  # off: neither answerable · both say off · no signing values · nothing on the badge
@@ -111,7 +116,6 @@ async def test_off_and_terminal_only_together_on_one_device(world):
         assert refused.status_code == 409 and refused.json()["error"]["code"] == "remote_control_off", refused.text
         assert (await _sql(fetch=f"SELECT count(*) FROM desktop_commands WHERE setup_id = '{device['setup_id']}'"))[0][0] == 0
 
-        await _switch(True)  # on again: the ordinary one answerable again, the terminal-only one still not
-        rows = await _rows()
-        assert (rows[False]["answerable"], rows[True]["answerable"]) == (True, False)
+        await _switch(True)  # on again: exactly as at first — off flags false, the ordinary one's signing values back (Kadir 5013 ①)
+        on_as_at_first(await _rows())
         assert await _badge() == 1
