@@ -71,6 +71,23 @@ try {
   check('③ the failure names the module', String(e.message).includes('@/lib/no-stub'), String(e.message).split('\n')[0]);
 }
 
+// ④ — two importers take different names from the same unlisted @/app module: each gets its own stub, the bundle builds and runs
+const pairA = path.join(tmp, 'pair-a.tsx');
+const pairB = path.join(tmp, 'pair-b.tsx');
+const pairEntry = path.join(tmp, 'pair-entry.tsx');
+writeFileSync(pairA, "import { useAlpha } from '@/app/stubcheck/shared';\nexport const A = () => String(useAlpha);\n");
+writeFileSync(pairB, "import { useBeta } from '@/app/stubcheck/shared';\nexport const B = () => String(useBeta);\n");
+writeFileSync(pairEntry, "import { A } from './pair-a';\nimport { B } from './pair-b';\nexport const both = () => [A(), B()];\n");
+try {
+  const out = await build(buildOptions(pairEntry));
+  const mod = { exports: {} };
+  new Function('module', 'exports', out.outputFiles[0].text)(mod, mod.exports);
+  check('④ two importers taking different names from one unlisted @/app module build', true);
+  check('④ both importers get their name and run', typeof mod.exports.both === 'function' && mod.exports.both().length === 2);
+} catch (e) {
+  check('④ two importers taking different names from one unlisted @/app module build', false, String(e.message).split('\n')[0]);
+}
+
 rmSync(tmp, { recursive: true, force: true });
 if (failures.length) {
   console.error(`layout stub check: ${failures.length} failed`);

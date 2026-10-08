@@ -65,13 +65,18 @@ export function layoutStubPlugin(): Plugin {
     setup(b) {
       b.onResolve({ filter: STUB_FILTER }, (a) => {
         const source = a.importer && a.importer !== '<stdin>' ? readFileSync(a.importer, 'utf8') : '';
-        return { path: a.path, namespace: 'stub', pluginData: importsFrom(source, a.path) };
+        // One stub module per importer: esbuild keeps one module per path, so two importers that take different names from the same
+        // unlisted module would otherwise share the first importer's stub (story 4586 review: «No matching export»).
+        return { path: `${a.path}#${a.importer}`, namespace: 'stub', pluginData: { mod: a.path, ...importsFrom(source, a.path) } };
       });
-      b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({
-        contents: STUBS[a.path] ?? generated(a.pluginData as ReturnType<typeof importsFrom>),
-        loader: 'js',
-        resolveDir: path.join(__dirname, '..', '..'),
-      }));
+      b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => {
+        const d = a.pluginData as ReturnType<typeof importsFrom> & { mod: string };
+        return {
+            contents: STUBS[d.mod] ?? generated(d),
+          loader: 'js',
+          resolveDir: path.join(__dirname, '..', '..'),
+        };
+      });
     },
   };
 }
