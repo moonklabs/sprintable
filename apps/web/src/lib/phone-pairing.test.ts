@@ -94,10 +94,12 @@ describe('[4532] sendPairOffer', () => {
     }
   });
 
-  it('the registration refused: three phones already → limit; anything else → failed', async () => {
+  it('the registration refused: three phones already → limit · another account\'s phone → taken (story #4624) · anything else → failed', async () => {
     await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_limit' } }) })))))
       .resolves.toEqual({ kind: 'limit' });
     await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_taken' } }) })))))
+      .resolves.toEqual({ kind: 'taken' });
+    await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'something_new' } }) })))))
       .resolves.toEqual({ kind: 'failed' });
   });
 

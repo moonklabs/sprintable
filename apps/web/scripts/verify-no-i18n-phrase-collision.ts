@@ -211,6 +211,12 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // never a count. The pairs it raised (state.stopped «끝» · button.endSession / endDialog.confirm «세션 끝내기» inside that line)
   // are the line naming the button that stands beside it — the designed copy (Yuna §①), not two counts in one word.
   'folder',
+  // story #4624 — {phone} · {device}: a phone's label and a computer's name. ko.json's uses read directly (2026-10-08): {phone} only in
+  // desktop.remoteDevices (confirmRemove · confirmRemovePhone · phoneRemoved · removed · alreadyRemoved — «뺐어요 · {phone}» etc., the
+  // phone's own label, Yuna 14:15Z «the name in the label place») · {device} in desktop.disconnect* («{device} 연결 끊기» …), the
+  // device head «{device} · {org}», remoteDevices.pairedWith «짝: {device}» / confirmRemove, phonePairing.confirm / paired — always a
+  // computer's name. The `name` · `channel` axis, never a count.
+  'phone', 'device',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
@@ -396,6 +402,12 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story #4624 (Yuna «미르코 범위» 08:0xZ) — [이 폰 빼기]'s confirmation («… 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가
+  // 비고 …» · {n} = the computers that phone is paired with) contains «원격 기기», the section's own title. Not the shape this guard
+  // is for (#2352/#2365: two counted phrases read as one another): the title counts nothing, and the sentence names the remote
+  // device place — the very thing the section lists — on purpose (the two removals, a pair vs the phone itself, are told apart by
+  // that word). Look again if the title ever carries a count («원격 기기 · {n}»).
+  'desktop.remoteDevices.confirmRemovePhone <-> desktop.remoteDevices.title',
   // story #4458 (PO 10:56Z · Yuna 11:00Z) — the held campaign's needs_check sentence («…으로 만들어져 시작하지 않았어요 — …» · {amount}
   // = a money amount) contains «시작», the start dialog's confirm button label. Not the shape
   // this guard is for (#2352/#2365: two counted phrases read as one another): the sentence and the button are never on the card

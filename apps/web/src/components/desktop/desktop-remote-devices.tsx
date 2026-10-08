@@ -13,13 +13,25 @@ import { isPhoneApp } from '@/lib/phone-bridge';
 import { PhonePairEntry } from './phone-pairing';
 
 /**
- * story #4533 AC3 (명세 모음 «B-1 ③ 웹 내 설정 · 원격 기기 — 목록과 [빼기]만») — my phones as pairs, one line per phone ↔ computer:
- * the phone's name · «짝: {computer}» · when paired · the confirmation number (the same six digits the phone app's «이 폰» shows) ·
- * [빼기] with an in-line confirmation. The web never pairs (the QR is the desktop app's) and never adds a phone.
+ * story #4533 AC3 (명세 모음 «B-1 ③ 웹 내 설정 · 원격 기기 — 목록과 [빼기]만») — my phones and their pairs: the phone's name · its
+ * confirmation number (the same six digits the phone app's «이 폰» shows) · when last used · «짝: {computer}» per pair with [빼기]
+ * (that pair only). The web never pairs (the QR is the desktop app's) and never adds a phone.
+ * story #4624 (1선 · Yuna «미르코 범위»): grouped by phone — each phone's head line has [이 폰 빼기] (the key itself: every pair goes
+ * and its place under the three-phone limit is free again). A phone with no pair left is listed too («짝 없음»): before, the list
+ * was one line per pair, so a key holding a place with no pair was invisible and could never be removed. The longest unused first.
  * story #4532 — inside the phone app (its bridge claimed) one more button: [컴퓨터와 짝짓기] → the phone's pairing screen.
  */
 interface Pair { setup_id: string; device_name: string | null; paired_at: string }
-interface Phone { id: string; label: string; confirm_number: string; last_used_at: string | null; pairs: Pair[] }
+interface Phone { id: string; label: string; confirm_number: string; last_used_at: string | null; created_at?: string | null; pairs: Pair[] }
+
+/** what is being confirmed: one pair (`${phone}:${setup}`) or a whole phone (`phone:${id}`) */
+type Asking = string | null;
+
+/** Yuna §③: the phone not used the longest first (never used = oldest) — the one to remove is seen first */
+function byLeastRecentlyUsed(a: Phone, b: Phone): number {
+  const at = (p: Phone) => (p.last_used_at ? Date.parse(p.last_used_at) : -Infinity);
+  return at(a) - at(b) || (a.created_at ?? '').localeCompare(b.created_at ?? '');
+}
 
 export function DesktopRemoteDevices() {
   const t = useTranslations('desktop.remoteDevices');
@@ -30,10 +42,10 @@ export function DesktopRemoteDevices() {
   const remoteControlOn = remoteControl ? remoteControl.enabled : null;
   const inPhoneApp = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
   const [phones, setPhones] = useState<Phone[] | null>(null);
-  const [asking, setAsking] = useState<string | null>(null); // `${phone}:${setup}` being confirmed
+  const [asking, setAsking] = useState<Asking>(null);
   const [result, setResult] = useState('');
   // where the focus goes when the in-line confirmation closes (Yuna 15:38Z · as 4935's web confirmation): [취소] → that row's
-  // [빼기] · after asking the server → the result line (the row may be gone). Applied once the buttons are enabled again.
+  // button · after asking the server → the result line (the row may be gone). Applied once the buttons are enabled again.
   const removeButtons = useRef(new Map<string, HTMLButtonElement>());
   const statusRef = useRef<HTMLParagraphElement>(null);
   const focusNext = useRef<{ row: string } | 'status' | null>(null);
@@ -56,13 +68,13 @@ export function DesktopRemoteDevices() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const remove = useCallback(async (phone: Phone, pair: Pair) => {
+  /** one DELETE, then the result line and the list read again */
+  const ask = useCallback(async (url: string, said: (removed: boolean) => string) => {
     try {
-      const res = await fetchWithAuth(`/api/remote-devices/${phone.id}/pairs/${pair.setup_id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(url, { method: 'DELETE' });
       if (!res.ok) { setResult(t('removeFailed')); return; }
       const body = (await res.json()) as { removed?: boolean };
-      // the name in the label place, no particle after it (Yuna 14:15Z ① — a phone's name is often Latin: «iPhone와» is wrong)
-      setResult(body.removed ? t('removed', { phone: phone.label }) : t('alreadyRemoved', { phone: phone.label }));
+      setResult(said(body.removed === true));
       await load();
     } catch {
       setResult(t('removeFailed'));
@@ -71,9 +83,16 @@ export function DesktopRemoteDevices() {
       setAsking(null);
     }
   }, [load, t]);
+  // the name in the label place, no particle after it (Yuna 14:15Z ① — a phone's name is often Latin: «iPhone와» is wrong)
+  const removePair = (phone: Phone, pair: Pair) => ask(`/api/remote-devices/${phone.id}/pairs/${pair.setup_id}`,
+    (removed) => (removed ? t('removed', { phone: phone.label }) : t('alreadyRemoved', { phone: phone.label })));
+  const removePhone = (phone: Phone) => ask(`/api/remote-devices/${phone.id}`,
+    (removed) => (removed ? t('phoneRemoved', { phone: phone.label }) : t('alreadyRemoved', { phone: phone.label })));
 
   if (phones === null) return null; // not loaded · not an org person: the page goes on without it
-  const rows = phones.flatMap((phone) => phone.pairs.map((pair) => ({ phone, pair })));
+  const keep = (key: string) => (el: HTMLButtonElement | null) => { if (el) removeButtons.current.set(key, el); else removeButtons.current.delete(key); };
+  const open = (key: string) => () => { setResult(''); setAsking(key); };
+  const close = (key: string) => () => { focusNext.current = { row: key }; setAsking(null); };
 
   return (
     <section className="break-keep flex flex-col gap-2" data-testid="desktop-remote-devices" aria-labelledby="desktop-remote-devices-title">
@@ -81,23 +100,34 @@ export function DesktopRemoteDevices() {
       {remoteControlOn === false && orgName ? (
         <p className="text-xs text-muted-foreground">{t('orgOff', { org: orgName })}</p>
       ) : null}
-      {rows.length === 0 ? <p className="text-sm text-muted-foreground">{t('empty')}</p> : (
+      {phones.length === 0 ? <p className="text-sm text-muted-foreground">{t('empty')}</p> : (
         <Card className="p-0">
         <ul className="flex flex-col divide-y divide-border">
-          {rows.map(({ phone, pair }) => {
-            const key = `${phone.id}:${pair.setup_id}`;
+          {[...phones].sort(byLeastRecentlyUsed).map((phone) => {
+            const phoneKey = `phone:${phone.id}`;
             return (
-              <li key={key} className="flex flex-col gap-1 px-4 py-3" data-testid="desktop-remote-device-row">
-                <PairLine
-                  phone={phone} pair={pair} onRemove={() => { setResult(''); setAsking(key); }} disabled={asking !== null}
-                  buttonRef={(el) => { if (el) removeButtons.current.set(key, el); else removeButtons.current.delete(key); }}
-                />
-                {asking === key ? (
-                  <ConfirmRemove
-                    phone={phone} pair={pair} onConfirm={() => void remove(phone, pair)}
-                    onCancel={() => { focusNext.current = { row: key }; setAsking(null); }}
-                  />
+              <li key={phone.id} className="flex flex-col gap-2 px-4 py-3" data-testid="desktop-remote-phone">
+                <PhoneHead phone={phone} onRemove={open(phoneKey)} disabled={asking !== null} buttonRef={keep(phoneKey)} />
+                {asking === phoneKey ? (
+                  <Confirm text={t('confirmRemovePhone', { phone: phone.label, n: phone.pairs.length })}
+                    onConfirm={() => void removePhone(phone)} onCancel={close(phoneKey)} />
                 ) : null}
+                {phone.pairs.length === 0 ? <p className="pl-4 text-xs text-muted-foreground">{t('noPairs')}</p> : (
+                  <ul className="flex flex-col gap-1 pl-4">
+                    {phone.pairs.map((pair) => {
+                      const key = `${phone.id}:${pair.setup_id}`;
+                      return (
+                        <li key={key} className="flex flex-col gap-1" data-testid="desktop-remote-device-row">
+                          <PairLine pair={pair} onRemove={open(key)} disabled={asking !== null} buttonRef={keep(key)} />
+                          {asking === key ? (
+                            <Confirm text={t('confirmRemove', { phone: phone.label, device: pair.device_name ?? t('unknownDevice') })}
+                              onConfirm={() => void removePair(phone, pair)} onCancel={close(key)} />
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </li>
             );
           })}
@@ -113,31 +143,45 @@ export function DesktopRemoteDevices() {
 const noSubscribe = () => () => {};
 const notOnServer = () => false;
 
+/** a phone's head: its name · confirmation number · when last used · [이 폰 빼기] */
+function PhoneHead({ phone, onRemove, disabled, buttonRef }: {
+  phone: Phone; onRemove: () => void; disabled: boolean; buttonRef: (el: HTMLButtonElement | null) => void;
+}) {
+  const t = useTranslations('desktop.remoteDevices');
+  const format = useFormatter();
+  const used = phone.last_used_at ? format.relativeTime(new Date(phone.last_used_at), new Date()) : null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="text-sm font-medium">{phone.label}</span>
+      <span className="text-xs text-muted-foreground" title={t('confirmNumberHint')}>{t('confirmNumber', { number: phone.confirm_number })}</span>
+      {used ? <span className="text-xs text-muted-foreground">{t('lastUsed', { used })}</span> : null}
+      <Button ref={buttonRef} size="sm" variant="outline" className="ml-auto" disabled={disabled} onClick={onRemove}>{t('removePhone')}</Button>
+    </div>
+  );
+}
 
-function PairLine({ phone, pair, onRemove, disabled, buttonRef }: {
-  phone: Phone; pair: Pair; onRemove: () => void; disabled: boolean; buttonRef: (el: HTMLButtonElement | null) => void;
+/** one pair under its phone: «짝: {computer}» · when paired · [빼기] (that pair only) */
+function PairLine({ pair, onRemove, disabled, buttonRef }: {
+  pair: Pair; onRemove: () => void; disabled: boolean; buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
   const t = useTranslations('desktop.remoteDevices');
   const format = useFormatter();
   const tz = useViewerTimeZone() ?? 'UTC';
   const date = format.dateTime(new Date(pair.paired_at), { ...deviceDateOptions(pair.paired_at, new Date(), tz), timeZone: tz });
-  const used = phone.last_used_at ? format.relativeTime(new Date(phone.last_used_at), new Date()) : null;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="text-sm font-medium">{phone.label}</span>
       <span className="text-sm text-muted-foreground">{t('pairedWith', { device: pair.device_name ?? t('unknownDevice') })}</span>
-      <span className="text-xs text-muted-foreground">{used ? t('pairedOnUsed', { date, used }) : t('pairedOn', { date })}</span>
-      <span className="text-xs text-muted-foreground" title={t('confirmNumberHint')}>{t('confirmNumber', { number: phone.confirm_number })}</span>
+      <span className="text-xs text-muted-foreground">{t('pairedOn', { date })}</span>
       <Button ref={buttonRef} size="sm" variant="outline" className="ml-auto" disabled={disabled} onClick={onRemove}>{t('remove')}</Button>
     </div>
   );
 }
 
-function ConfirmRemove({ phone, pair, onConfirm, onCancel }: { phone: Phone; pair: Pair; onConfirm: () => void; onCancel: () => void }) {
+/** the in-line confirmation: the sentence · [빼기] (destructive) · [취소] focused first, as the remote-control card's */
+function Confirm({ text, onConfirm, onCancel }: { text: string; onConfirm: () => void; onCancel: () => void }) {
   const t = useTranslations('desktop.remoteDevices');
   const cancelRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => { cancelRef.current?.focus(); }, []); // [취소] first, as the remote-control card's confirmation
-  const text = t('confirmRemove', { phone: phone.label, device: pair.device_name ?? t('unknownDevice') });
+  useEffect(() => { cancelRef.current?.focus(); }, []);
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-2" role="group" aria-label={text}>
       <p className="text-sm">{text}</p>

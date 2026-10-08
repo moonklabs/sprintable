@@ -30,8 +30,8 @@ type View =
   | { kind: 'alreadyPaired' }
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
-  | { kind: 'limit' }
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'failed' };
+  // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'failed' };
 
 const noSubscribe = () => () => {};
 const notOnServer = () => false;
@@ -70,7 +70,7 @@ function Pairing() {
     known.current = null;
     switch (r.kind) {
       case 'sent': setView({ kind: 'checking', head, phoneKeyId: r.phoneKeyId }); return;
-      case 'alreadyPaired': case 'remoteOff': case 'limit': case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
+      case 'alreadyPaired': case 'remoteOff': case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
       default: setView({ kind: 'retry', line: r.kind });
     }
   };
@@ -107,6 +107,8 @@ function Pairing() {
       case 'setupNotFound': return t('setupNotFound');
       case 'offerUsed': return t('offerUsed');
       case 'registerAgain': return t('registerAgain');
+      case 'limit': return t('limit');
+      case 'taken': return t('taken');
       case 'failed': return t('failed');
     }
   };
@@ -161,8 +163,6 @@ function Pairing() {
       // story #4583 (Yuna copy.md row 1): the owner gets the way to the switch (and may still close) · anyone else the owner's name
       if (remoteOff?.owner) return <Shell><Line focus>{t('remoteOffOwner')}</Line><Actions><RemoteControlLink variant="button" />{close}</Actions></Shell>;
       return <Shell><Line focus>{t('remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</Line><Actions>{close}</Actions></Shell>;
-    case 'limit':
-      return <Shell><Line focus>{t('limit')}</Line></Shell>;
     case 'noScreenLock':
     case 'biometricRequired':
       return (
