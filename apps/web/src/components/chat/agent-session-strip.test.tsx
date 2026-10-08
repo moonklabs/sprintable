@@ -225,4 +225,10 @@ describe('AgentSessionStrip — a permission widened at the terminal (story #464
     await render('en');
     expect(container.querySelector('[data-testid="agent-session-widened"]')?.textContent).toBe('Permissions widened in the terminal · 20:51 · Bypass-permissions mode (widest)');
   });
+
+  it('a mode outside the list (a newer server ahead of this web) draws no line — never the widest one', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'auto', permission_widened_to: 'someNewMode' }));
+    await render('en');
+    expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
+  });
 });
