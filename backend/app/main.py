@@ -14,6 +14,7 @@ from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
+from app.models.conversation import MessageContentTooLong
 
 # story #2179(2026-07-24, 오르테가군 판정) 근본수정 — 예전엔 `APP_ENV` 문자열 비교로 JSON
 # 로그 여부를 갈랐다("development"가 아니면 JSON). 그런데 JSON 로그가 필요한 진짜 조건은
@@ -309,6 +310,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 request, HTTPException(status_code=422, detail=offset_required_detail(".".join(loc), request)),
             )
     return await request_validation_exception_handler(request, exc)
+
+
+@app.exception_handler(MessageContentTooLong)
+async def message_too_long_handler(request: Request, exc: MessageContentTooLong) -> JSONResponse:
+    """story #4605: a chat message past the content bound (any route that writes one) — 422 `message_too_long` with the limit and
+    what came, in UTF-8 bytes; the a2a JSON-RPC route gets its own error envelope through the same handler."""
+    message = f"The message is too long ({exc.got} bytes) — the limit is {exc.limit} bytes"
+    if a2a.is_a2a_rpc_path(request.url.path):
+        return await a2a.build_rpc_error_response(request, 422, f"message_too_long: {message}")
+    return await http_exception_handler(request, HTTPException(status_code=422, detail={
+        "code": "message_too_long", "message": message, "limit": exc.limit, "got": exc.got,
+    }))
 
 
 @app.exception_handler(RateLimitExceeded)

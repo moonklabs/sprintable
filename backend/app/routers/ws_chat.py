@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from app.core.database import async_session_factory
 from app.core.security import JWTError, decode_jwt, hash_token
 from app.models.api_key import ApiKey
-from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant, MessageContentTooLong
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.services.member_resolver import resolve_member_display_name
@@ -284,12 +284,17 @@ async def ws_chat_hub(
 
             # conversation_messages 영속화
             async with async_session_factory() as db:
-                msg = ConversationMessage(
-                    conversation_id=conv_id,
-                    sender_id=caller.id,
-                    content=content,
-                    mentioned_ids=[],
-                )
+                try:
+                    msg = ConversationMessage(
+                        conversation_id=conv_id,
+                        sender_id=caller.id,
+                        content=content,
+                        mentioned_ids=[],
+                    )
+                except MessageContentTooLong as e:
+                    # story #4605: that message is refused (the API's 422 in this socket's words) — the socket stays open
+                    await websocket.send_text(json.dumps({"error": {"code": "message_too_long", "limit": e.limit, "got": e.got}}))
+                    continue
                 db.add(msg)
                 await db.commit()
                 await db.refresh(msg)
