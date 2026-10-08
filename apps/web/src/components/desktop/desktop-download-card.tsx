@@ -31,35 +31,37 @@ import { Card } from '@/components/ui/card';
  * 사실이 빠졌다: ① 대상 플랫폼(현재 매니페스트가 darwin-aarch64뿐 — 다른
  * 아키텍처를 받을 수 있다고 지어내지 않는다) ② 공증 前 Gatekeeper가 처음
  * 실행을 막는다는 사실과 그 우회(우클릭→열기) — 민이 spctl로 실측 확認.
+ *
+ * [SID:4619](2026-10-08 · 선생님 «실행할 수 없음») — 이 카드가 옛 Tauri 업데이터 매니페스트
+ * (`/desktop/updates/macos.json` → 0.1.2 · ad-hoc)의 url을 받는 단추로 쓰고 있었다. 이제 지금 앱
+ * «Sprintable Dev Setup»(Electron DMG · Developer ID · 공증 전)의 매니페스트
+ * `/desktop/downloads/macos.json`(mobile `publish-dev-setup.mjs`가 올린 것 · version · build ·
+ * url · sha256)을 읽는다. 옛 매니페스트는 이미 깔린 옛 앱의 업데이트용이라 그대로 둔다.
+ * 첫 열기 안내는 유나 정본(`~/.sprintable-shared/yuna/4619-download-card-copy.md`): 웹은 macOS 판을
+ * 모르니 13 이상 모두에서 되는 «설정 → 그래도 열기» 길 하나 + macOS 12 덧줄 · 끌어 놓기 한 줄.
  */
 
-interface MacosUpdateManifest {
+/** publish-dev-setup.mjs가 쓰는 매니페스트 중 이 카드가 읽는 칸 */
+interface DesktopDownloadManifest {
+  product: string;
   version: string;
-  pub_date: string;
-  platforms: {
-    'darwin-aarch64': { url: string; signature: string };
-  };
-}
-
-function parseBuildSha(version: string): string | null {
-  const idx = version.indexOf('+');
-  if (idx < 0 || idx === version.length - 1) return null;
-  return version.slice(idx + 1);
+  build: string;
+  url: string;
 }
 
 export function DesktopDownloadCard() {
   const t = useTranslations('desktop');
-  const [manifest, setManifest] = useState<MacosUpdateManifest | null>(null);
+  const [manifest, setManifest] = useState<DesktopDownloadManifest | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
-    fetch('/desktop/updates/macos.json')
+    fetch('/desktop/downloads/macos.json')
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null)
-      .then((json: MacosUpdateManifest | null) => {
+      .then((json: DesktopDownloadManifest | null) => {
         if (!alive) return;
-        setManifest(json?.version && json.platforms?.['darwin-aarch64']?.url ? json : null);
+        setManifest(json?.version && json.url ? json : null);
         setLoading(false);
       });
     return () => { alive = false; };
@@ -88,8 +90,8 @@ export function DesktopDownloadCard() {
     );
   }
 
-  const buildSha = parseBuildSha(manifest.version);
-  const downloadUrl = manifest.platforms['darwin-aarch64'].url;
+  const buildSha = manifest.build || null;
+  const downloadUrl = manifest.url;
 
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-download-card">
@@ -107,11 +109,20 @@ export function DesktopDownloadCard() {
           AlertTitle로 먼저 보이고, 「왜」(공증 전 내부용)는 AlertDescription으로 덧붙인다.
           이전엔 둘 다 위 메타 정보(버전·대상 플랫폼)와 같은 text-xs text-muted-foreground라
           경고라는 게 눈에 안 띄었다(유나 지적). */}
+      {/* [SID:4619] 유나 정본 — 제목 = 지금 할 일 · 손순서 두 줄(번호가 뜻) · macOS 12 덧줄 · 까닭(공증 전) */}
       <Alert variant="warning">
         <AlertTriangle className="h-4 w-4" />
-        <AlertTitle data-testid="desktop-download-gatekeeper-notice">{t('gatekeeperNotice')}</AlertTitle>
-        <AlertDescription data-testid="desktop-download-notarization-notice">
-          {t('notarizationNotice')}
+        <AlertTitle className="break-keep" data-testid="desktop-download-gatekeeper-title">{t('gatekeeperTitle')}</AlertTitle>
+        <AlertDescription className="break-keep">
+          <ol className="list-decimal space-y-1 pl-4" data-testid="desktop-download-install-steps">
+            <li>{t('installStepDrag')}</li>
+            <li>{t('installStepOpen')}</li>
+          </ol>
+          {/* text-xs only — muted on the warning tint is below AA (verify:no-muted-on-tint · story #3839) */}
+          <p className="text-xs" data-testid="desktop-download-old-mac">{t('installOldMac')}</p>
+          <p className="text-xs" data-testid="desktop-download-notarization-notice">
+            {t('notarizationNotice')}
+          </p>
         </AlertDescription>
       </Alert>
       <Button asChild size="sm" data-testid="desktop-download-button">
