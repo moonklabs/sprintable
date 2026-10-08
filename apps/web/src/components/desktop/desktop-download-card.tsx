@@ -6,6 +6,7 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
 import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ourDownloadUrl } from '@/lib/desktop-downloads';
 
 /**
  * story #3807 AC3(페드루 PO 確定 2026-09-11) — dev-app 다운로드 자리(최소 1곳).
@@ -61,7 +62,9 @@ export function DesktopDownloadCard() {
       .catch(() => null)
       .then((json: DesktopDownloadManifest | null) => {
         if (!alive) return;
-        setManifest(json?.version && json.url ? json : null);
+        // [SID:4619 · Kadir 5004 후속 ①] a link only into our bucket — any other url is «지금은 받을 수 없어요», as no manifest
+        const url = ourDownloadUrl(json?.url);
+        setManifest(json?.version && url ? { ...json, url } : null);
         setLoading(false);
       });
     return () => { alive = false; };
@@ -100,6 +103,9 @@ export function DesktopDownloadCard() {
         {t('targetLabel')}
       </p>
       <p className="text-xs text-muted-foreground">
+        {/* [SID:4619] Yuna 04:0xZ: the app's own name first — macOS names it so when it blocks (its «… was blocked to protect
+            your Mac» names «Sprintable Dev Setup»), and the card and System Settings must use the same word. From the manifest; none → the line as before */}
+        {manifest.product ? <span data-testid="desktop-download-product">{manifest.product}{' · '}</span> : null}
         <span data-testid="desktop-download-version">{t('versionLabel', { version: manifest.version })}</span>
         {buildSha ? (
           <span data-testid="desktop-download-build-sha">{' · '}{t('buildLabel', { sha: buildSha })}</span>
@@ -117,7 +123,9 @@ export function DesktopDownloadCard() {
         <div className="col-start-2 space-y-1 text-xs leading-relaxed break-keep [overflow-wrap:anywhere]">
           <ol className="list-decimal space-y-1 pl-4" data-testid="desktop-download-install-steps">
             <li>{t('installStepDrag')}</li>
-            <li>{t('installStepOpen')}</li>
+            {/* the settings panel's name in one piece (it split over two lines at 390; one piece is easier to find in Settings) */}
+            {/* <nw> = «no wrap»: two letters, so the ko value holds no English word (verify:no-ascii-token-in-ko-value) */}
+            <li>{t.rich('installStepOpen', { nw: (chunks) => <span className="whitespace-nowrap" data-testid="desktop-download-settings-panel">{chunks}</span> })}</li>
           </ol>
           {/* text-xs only — muted on the warning tint is below AA (verify:no-muted-on-tint · story #3839) */}
           <p className="text-xs" data-testid="desktop-download-old-mac">{t('installOldMac')}</p>

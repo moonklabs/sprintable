@@ -6725,7 +6725,7 @@
     "notarizationNotice": "For internal use before Apple notarization.",
     "gatekeeperTitle": "macOS blocks the first open — open it once like this",
     "installStepDrag": "Open the downloaded file and drag the app into the Applications folder",
-    "installStepOpen": "Try opening the app once, then go to System Settings → Privacy & Security → \"Open Anyway\"",
+    "installStepOpen": "Try opening the app once, then go to System Settings → <nw>Privacy & Security</nw> → \"Open Anyway\"",
     "installOldMac": "On macOS 12, right-click the app → \"Open\"",
     "downloadCta": "Download",
     "unavailable": "Not available right now.",
