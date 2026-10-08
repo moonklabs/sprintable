@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
-const { useOrgRemoteControl } = await import('./org-remote-control');
+const { useOrgRemoteControl, connectedSetupsOf } = await import('./org-remote-control');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -64,5 +64,22 @@ describe('useOrgRemoteControl', () => {
     await flush();
     expect(fetchWithAuth).toHaveBeenCalledTimes(1);
     expect(seen?.enabled).toBe(true);
+  });
+});
+
+// story 4584 (PO review): either deploy order is safe — a web that reads the new name shows the line when only the old one arrives
+describe('[4584] the live-setups count, old name kept for one deploy', () => {
+  const base = { enabled: false, enabled_at: null, can_change: false };
+
+  it('reads the new name', () => {
+    expect(connectedSetupsOf({ ...base, connected_setups: 2 })).toBe(2);
+  });
+
+  it('a response with only the old name still counts (the web ahead of the backend)', () => {
+    expect(connectedSetupsOf({ ...base, connected_computers: 1 })).toBe(1);
+  });
+
+  it('neither name counts as none', () => {
+    expect(connectedSetupsOf(base)).toBe(0);
   });
 });

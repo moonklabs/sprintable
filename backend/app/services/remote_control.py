@@ -42,14 +42,15 @@ async def is_enabled(db: AsyncSession, org_id: uuid.UUID | None) -> bool:
     )).scalar_one_or_none() is not None
 
 
-def state_view(org: Organization, *, can_change: bool, owner_names: list[str], connected_computers: int) -> dict:
+def state_view(org: Organization, *, can_change: bool, owner_names: list[str], connected_setups: int) -> dict:
     """story #4583: + who can turn it on (owner_names — display names only · no email · no id) and how many of the org's
-    computers are connected (a count only · no device name) — the off state names the owner to everyone else, and the
+    setups are connected (a count only · no device name) — the off state names the owner to everyone else, and the
     approvals line shows only when a computer is connected (Yuna `4583/copy.md` · PO 04:09Z)."""
     at = org.remote_control_enabled_at
     return {
         "enabled": at is not None, "enabled_at": at.isoformat() if at else None, "can_change": can_change,
-        "owner_names": owner_names, "connected_computers": connected_computers,
+        "owner_names": owner_names, "connected_setups": connected_setups,
+        "connected_computers": connected_setups,  # story 4584: the old name, same value, for one deploy — removed next deploy
     }
 
 
@@ -83,15 +84,15 @@ async def owner_names(db: AsyncSession, org_id: uuid.UUID) -> list[str]:
 
 def _live_devices(org_id: uuid.UUID) -> tuple:
     """The org's live devices: keys picked up · not disconnected · in a project. Turning it on wakes exactly these, and
-    story #4583's `connected_computers` counts exactly these (Didi R4) — «≥ 1» means «turning it on reaches a computer»."""
+    story #4583's `connected_setups` counts exactly these (Didi R4) — «≥ 1» means «turning it on reaches a computer»."""
     return (
         DesktopSetup.org_id == org_id, DesktopSetup.exchanged_at.is_not(None), DesktopSetup.revoked_at.is_(None),
         DesktopSetup.project_id.is_not(None),
     )
 
 
-async def connected_computers(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """story #4583: how many of the org's computers turning it on would wake (`_live_devices`). A count only."""
+async def connected_setups(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """story #4583: how many of the org's live setups turning it on would wake (`_live_devices`). A count only."""
     from sqlalchemy import func
 
     return int((await db.execute(select(func.count()).select_from(DesktopSetup).where(*_live_devices(org_id)))).scalar_one())

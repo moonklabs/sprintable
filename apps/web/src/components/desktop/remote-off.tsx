@@ -10,7 +10,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { useOrgRemoteControl } from '@/lib/org-remote-control';
+import { connectedSetupsOf, useOrgRemoteControl } from '@/lib/org-remote-control';
 
 export const REMOTE_CONTROL_ANCHOR = 'remote-control';
 
@@ -89,7 +89,7 @@ export interface RemoteOff {
   owner: boolean;
   /** the values for the `{owners}` / `{hasOwners}` placeholders of every «not owner» line */
   names: { owners: string; hasOwners: 'yes' | 'no' };
-  connectedComputers: number;
+  connectedSetups: number;
 }
 
 /** Yuna's name form: 1 «A» · 2 «A · B» · 3+ «A 외 n명» — always inside «조직 소유자(…)», so no josa depends on the name. */
@@ -109,7 +109,7 @@ export function useRemoteOff(): RemoteOff | null {
   return {
     owner: state.can_change,
     names: { owners, hasOwners: owners ? 'yes' : 'no' },
-    connectedComputers: state.connected_computers ?? 0,
+    connectedSetups: connectedSetupsOf(state),
   };
 }
 
