@@ -2655,8 +2655,10 @@ async def send_message_core(
 
             _locale = await resolve_org_locale(db, org_id)
             _enabled, _window, _threshold, _mode, _release_mode = await _get_org_config(db, org_id)
+            _quiet_minutes = auto_release_after_minutes(_window)
             _cb_hint = (
-                t("conversation.agents_paused_hint_auto", _locale, n=auto_release_after_minutes(_window))
+                t("conversation.agents_paused_hint_auto_one" if _quiet_minutes == 1 else "conversation.agents_paused_hint_auto",
+                  _locale, n=_quiet_minutes)
                 if _release_mode == "auto" else t("conversation.agents_paused_hint_manual", _locale)
             )
             raise HTTPException(

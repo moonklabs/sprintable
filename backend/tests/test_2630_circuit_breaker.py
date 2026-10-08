@@ -561,14 +561,15 @@ async def test_release_endpoint_owner_closes_breaker_idempotently():
 
 # ─── story #4631 (PO 고름 A): auto 해제가 실제로 돈다 — agent 발신의 423 자리에서 ────────────────
 
-async def _blocked_conversation(s, *, release_mode: str | None, opened_seconds_ago: int):
+async def _blocked_conversation(s, *, release_mode: str | None, opened_seconds_ago: int, window_seconds: int | None = None):
     """An agent participant in a human-less conversation whose breaker opened `opened_seconds_ago` (window 300 s by default)."""
     from sqlalchemy import text
     from app.services.chain_escalation import _open_circuit_breaker
 
     org_id, project_id = await _seed_org_project(s)
     if release_mode is not None:
-        await _seed_org_config(s, org_id, circuit_breaker_release_mode=release_mode)
+        extra = {"window_seconds": window_seconds} if window_seconds is not None else {}
+        await _seed_org_config(s, org_id, circuit_breaker_release_mode=release_mode, **extra)
     agent_id = await _seed_agent(s, org_id, project_id)
     conv_id = await _seed_conversation(s, org_id, project_id)
     await _add_participant(s, conv_id, agent_id)
@@ -702,6 +703,31 @@ async def test_4631_the_block_stays_unless_every_condition_holds(case):
             from app.services.i18n_catalog import t
             want = t("conversation.agents_paused_hint_manual", "ko") if case == "manual" else t("conversation.agents_paused_hint_auto", "ko", n=10)
             assert (ei.value.detail["message"], ei.value.detail["hint"]) == (t("conversation.agents_paused_message", "ko"), want)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_one_quiet_minute_reads_minute_not_minutes():
+    """Yuna «4631» 63행: an auto org whose window is 30 s waits about 1 quiet minute — the 423 hint takes the singular key, so the
+    en words read «about 1 minute», never «1 minutes» (the catalog has no plural forms)."""
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=10, window_seconds=30)
+            # an en org (ko reads «1분» either way, so only en tells the two keys apart)
+            with patch("app.services.redis_shared.get_client", return_value=_fakeredis_client()), \
+                 patch("app.services.org_locale.resolve_org_locale", AsyncMock(return_value="en")), \
+                 pytest.raises(HTTPException) as ei:
+                await _agent_send(s, conv_id, agent_id, org_id, "막혀야 하는 한 줄")
+            assert ei.value.status_code == 423
+            assert ei.value.detail["hint"] == (
+                "You can send again once the conversation has been quiet for about 1 minute — sending before then is blocked too"
+            )
+        assert "about 10 minutes —" in t("conversation.agents_paused_hint_auto", "en", n=10)
     finally:
         await engine.dispose()
 

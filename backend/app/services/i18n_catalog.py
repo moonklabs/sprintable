@@ -71,6 +71,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "대화가 {n}분쯤 조용하면 다시 보낼 수 있어요 — 그 전에 보내면 또 막혀요",
         "en": "You can send again once the conversation has been quiet for about {n} minutes — sending before then is blocked too",
     },
+    # n = 1 (an org whose window is 30 s or less): the catalog has no plural forms, so the singular is its own key (Yuna «4631» 63행)
+    "conversation.agents_paused_hint_auto_one": {
+        "ko": "대화가 {n}분쯤 조용하면 다시 보낼 수 있어요 — 그 전에 보내면 또 막혀요",
+        "en": "You can send again once the conversation has been quiet for about {n} minute — sending before then is blocked too",
+    },
     "conversation.agents_paused_notice_title": {"ko": "에이전트 메시지를 멈췄어요 · {conversation}", "en": "Agent messages paused · {conversation}"},
     "conversation.agents_paused_notice_title_bare": {"ko": "에이전트 메시지를 멈췄어요", "en": "Agent messages paused"},
     "conversation.agents_paused_notice_body": {
