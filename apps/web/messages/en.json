@@ -7051,7 +7051,7 @@
       "confirmRemovePhoneUnpaired": "Remove this phone? · {phone} — it isn't paired with any computer. One remote device place is freed; to use it again, pair it again from the phone.",
       "phoneRemoved": "Removed · {phone} — one remote device place is free",
       "phoneRemovedSignedOut": "Removed · {phone} — one remote device place is free. That phone can no longer approve, stop or instruct, and it will be signed out within an hour",
-      "phoneRemovedSessionNotFound": "Removed · {phone} — one remote device place is free. Its sign-in wasn't found (it may already be signed out) — that phone can no longer approve, stop or instruct",
+      "phoneRemovedSessionNotFound": "Removed · {phone} — one remote device place is free. Its sign-in wasn't found (it may already be signed out) — it can no longer approve, stop or instruct; if you're worried a sign-in is left, <lk>Sign out everywhere else</lk>",
       "noPairs": "No paired computers",
       "removed": "Removed · {phone}",
       "alreadyRemoved": "Already removed · {phone}",
