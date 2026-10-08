@@ -15,14 +15,13 @@
 // (`ai.sprintable:/oauth-return` — 단일 슬래시).
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { appReturnUrl } from '@/lib/auth/native-return-app';
 
-const OAUTH_RETURN_SCHEME_URL = 'ai.sprintable:/oauth-return';
-
+// story #4626: the button opens the app the sign-in started in (`app` — closed table · none = `ai.sprintable`, as before)
 export default function NativeOauthReturnPage() {
   const t = useTranslations('nativeOauthReturn');
   const searchParams = useSearchParams();
-  const query = searchParams.toString();
-  const appReturnUrl = query ? `${OAUTH_RETURN_SCHEME_URL}?${query}` : OAUTH_RETURN_SCHEME_URL;
+  const href = appReturnUrl(new URLSearchParams(searchParams.toString()));
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted px-4">
@@ -32,7 +31,7 @@ export default function NativeOauthReturnPage() {
           {t('body')}
         </p>
         <a
-          href={appReturnUrl}
+          href={href}
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
         >
           {t('returnButton')}
