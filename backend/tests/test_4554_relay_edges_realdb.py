@@ -43,7 +43,10 @@ STREAM = "/api/v2/desktop/relay/stream"
 SNAP = "/api/v2/desktop/relay/sessions"
 
 
-def _state(agent, seq, state="working", at="2026-10-07T12:00:00Z"):
+def _state(agent, seq, state="working", at=None):
+    # now, never a fixed date: a stopped report's `at` is its row's ended_at, which ages out after 7 days (a fixed 10-07 broke this
+    # file on 10-14 · the fixed 10-01 below broke it on 10-08)
+    at = at or datetime.now(timezone.utc).isoformat()
     return {"report_seq": seq, "agent_member_id": agent, "runtime": "claude", "state": state, "at": at}
 
 
@@ -169,7 +172,8 @@ async def test_01_rows_are_kept_7_days_and_200_per_device_live_first_in_a_person
         # ended rows: a device fills to 5, the 6th key drops the oldest ended row — never a live one
         for i in range(1, 6):
             assert (await post(f"e{i}", i, "stopped")).status_code == 200
-        await _sql(f"UPDATE desktop_sessions SET ended_at = '2026-10-0{1}T00:00:00Z'::timestamptz + (right(session_key, 1)::int * interval '1 hour') WHERE setup_id = '{sid}'")
+        # ended inside the 7 days (3 days ago + i hours): only the per-device cap decides here, never the retention
+        await _sql(f"UPDATE desktop_sessions SET ended_at = now() - interval '3 days' + (right(session_key, 1)::int * interval '1 hour') WHERE setup_id = '{sid}'")
         assert (await post("e6", 6, "stopped")).status_code == 200
         keys = {r[0] for r in await _rows(sid)}
         assert len(keys) == 5 and "e1" not in keys and "e6" in keys  # the oldest ended went
