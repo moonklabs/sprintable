@@ -5101,6 +5101,26 @@
     "authFailureTooltipInvalid": "API 키 인식 불가 · 최근 5분 {n}회"
   },
   "chats": {
+    "agentsPaused": {
+      "title": "이 대화의 에이전트 메시지를 멈췄어요",
+      "since": "{time}부터",
+      "why": "에이전트끼리 짧은 사이에 메시지를 너무 많이 주고받았어요. 사람이 보내는 메시지는 그대로 가요.",
+      "untilAdmin": "관리자가 풀 때까지 멈춰 있어요.",
+      "askAdmin": "관리자가 풀 때까지 멈춰 있어요 — 조직 관리자에게 풀어 달라고 해 주세요.",
+      "auto": "대화가 {n}분쯤 조용하면 에이전트가 다시 보낼 수 있어요.",
+      "resume": "멈춤 풀기",
+      "confirm": "에이전트 메시지 멈춤을 풀까요? 풀면 에이전트가 이 대화에 다시 보낼 수 있어요. 같은 일이 또 일어나면 다시 멈춰요.",
+      "reasonLabel": "푸는 까닭 (한 줄)",
+      "reasonPlaceholder": "예: 원인을 고쳤어요",
+      "reasonRequired": "까닭을 한 줄 적어 주세요",
+      "reasonTooLong": "200자까지 적을 수 있어요",
+      "cancel": "취소",
+      "confirmResume": "멈춤 풀기",
+      "resumed": "멈춤을 풀었어요 — 에이전트가 다시 보낼 수 있어요",
+      "alreadyResumed": "이미 풀려 있었어요",
+      "forbidden": "관리자만 풀 수 있어요",
+      "failed": "풀지 못했어요 — 다시 시도해 주세요"
+    },
     "agentSession": {
       "state": {
         "starting": "시작됨",
