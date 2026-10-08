@@ -356,7 +356,9 @@ function WidenedLine({ view }: { view: View }) {
     : to === 'plan' ? t('widenedMode.plan') : to === 'auto' ? t('widenedMode.auto')
       : to === 'dontAsk' ? t('widenedMode.dontAsk') : to === 'bypassPermissions' ? t('widenedMode.bypassPermissions') : null;
   if (!at || !mode) return null;
-  const time = new Intl.DateTimeFormat(locale, { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(at));
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return null; // a broken `at` skips the line — it must never throw and take the whole strip with it
+  const time = new Intl.DateTimeFormat(locale, { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(when);
   return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-widened">{t('widened', { time, mode })}</p>;
 }
 

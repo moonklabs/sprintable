@@ -231,4 +231,10 @@ describe('AgentSessionStrip — a permission widened at the terminal (story #464
     await render('en');
     expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
   });
+  it('a broken `at` skips the line and the rest of the strip still draws (no RangeError takes the strip down)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: 'not-a-date', permission_widened_from: 'plan', permission_widened_to: 'auto' }));
+    await render('en');
+    expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
+    expect(chip()).toBe('Working');
+  });
 });
