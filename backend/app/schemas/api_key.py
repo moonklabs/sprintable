@@ -39,6 +39,9 @@ class ApiKeyUsageLogResponse(BaseModel):
     endpoint: str
     method: str
     remote_ip: str | None = None
+    # story #4546: through our MCP client (stdio · http · null = direct) and the tool — the client's own words
+    mcp_transport: str | None = None
+    tool_name: str | None = None
     occurred_at: datetime
 
 

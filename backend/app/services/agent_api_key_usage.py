@@ -40,18 +40,38 @@ async def record_api_key_usage(
         from app.core.database import async_session_factory
         from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog
 
+        from app.core.client_ip import client_ip
+
         endpoint = request.url.path if request is not None else "unknown"
         method = request.method if request is not None else "unknown"
-        remote_ip = request.client.host if request is not None and request.client else None
+        # story #4546 AC1: the real client (the one shared rule · #4398) — `request.client.host` on Cloud Run is the front end's own
+        # 169.254.x.x for every call, so a Mac and the hosted MCP server looked the same
+        remote_ip = client_ip(request) if request is not None else None
+        # story #4546 AC2: per row, whether through our MCP client (its X-MCP-Transport) and which tool (X-Sprintable-Tool) — the
+        # client's own words, capped (an unbounded header never grows the ledger), absent → NULL
+        mcp_transport = _header(request, "x-mcp-transport", 16, lower=True)
+        tool_name = _header(request, "x-sprintable-tool", 128)
 
         async with async_session_factory() as s:
             s.add(AgentApiKeyUsageLog(
                 id=uuid.uuid4(), api_key_id=api_key_id, org_id=org_id, member_id=member_id,
                 endpoint=endpoint, method=method, remote_ip=remote_ip,
+                mcp_transport=mcp_transport, tool_name=tool_name,
             ))
             await s.commit()
     except Exception:
         logger.warning("record_api_key_usage failed api_key_id=%s", api_key_id, exc_info=True)
+
+
+def _header(request: "Request | None", name: str, cap: int, *, lower: bool = False) -> str | None:
+    """A request header as the ledger keeps it — trimmed, capped, NULL when absent or blank."""
+    if request is None:
+        return None
+    value = (request.headers.get(name) or "").strip()
+    if not value:
+        return None
+    value = value[:cap]
+    return value.lower() if lower else value
 
 
 async def list_api_key_usage(session: AsyncSession, api_key_id: uuid.UUID, *, limit: int = DEFAULT_LIST_LIMIT):
