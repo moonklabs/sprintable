@@ -75,6 +75,11 @@ class DesktopSession(Base):
             "(permission_widened_at IS NULL) = (permission_widened_from IS NULL) AND (permission_widened_from IS NULL) = (permission_widened_to IS NULL)",
             name="ck_desktop_sessions_widened_all_or_none",
         ),
+        # story #4641 (lens ② on 5028): from ≠ to in the DB too — the API check alone let ('auto','auto') through a probe
+        CheckConstraint(
+            "permission_widened_from IS NULL OR permission_widened_from IS DISTINCT FROM permission_widened_to",
+            name="ck_desktop_sessions_widened_distinct",
+        ),
         CheckConstraint(f"limit_held IS NULL OR {_in('limit_held', SESSION_LIMIT_HELD)}", name="ck_desktop_sessions_limit_held"),
     )
 

@@ -36,9 +36,14 @@ def upgrade() -> None:
         "ck_desktop_sessions_widened_all_or_none", "desktop_sessions",
         "(permission_widened_at IS NULL) = (permission_widened_from IS NULL) AND (permission_widened_from IS NULL) = (permission_widened_to IS NULL)",
     )
+    op.create_check_constraint(
+        "ck_desktop_sessions_widened_distinct", "desktop_sessions",
+        "permission_widened_from IS NULL OR permission_widened_from IS DISTINCT FROM permission_widened_to",
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("ck_desktop_sessions_widened_distinct", "desktop_sessions", type_="check")
     op.drop_constraint("ck_desktop_sessions_widened_all_or_none", "desktop_sessions", type_="check")
     op.drop_constraint("ck_desktop_sessions_widened_to", "desktop_sessions", type_="check")
     op.drop_constraint("ck_desktop_sessions_widened_from", "desktop_sessions", type_="check")

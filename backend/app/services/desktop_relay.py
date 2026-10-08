@@ -282,6 +282,11 @@ def widened_view(row: DesktopSession) -> dict:
     }
 
 
+def widened_fields(row: DesktopSession, silent: bool) -> dict:
+    """story #4641: the reader's keys — only while the device is heard (a silent device's keys are not said, as the other facts)."""
+    return {} if silent else widened_view(row)
+
+
 def system_view(row: DesktopSession) -> dict | None:
     """story #4599: a `waiting_system` row's why as a reader sees it — `{folder}` (null when not read); None on any other word."""
     if row.state != "waiting_system":
@@ -471,7 +476,7 @@ async def device_sessions_view(
         # story #4599: a held turn's why (the window's folder) — for the new web only, and only while the device is heard
         **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard
-        **(widened_view(r) if not silent else {}),
+        **widened_fields(r, silent),
         # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))
         "instruct_now": None if silent else r.instruct_now,
         # story #4543 (PO 21:12Z): when the session began and ended — the crew's daily ledger reads app coverage from these. Facts, not

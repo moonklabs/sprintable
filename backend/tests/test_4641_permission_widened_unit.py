@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.desktop_relay import SESSION_WIDENED_MODES
-from app.services.desktop_relay import WidenedMode, SessionReport, WIDENED_MAX_AHEAD, _set_widened, widened_view
+from app.services.desktop_relay import WidenedMode, SessionReport, WIDENED_MAX_AHEAD, _set_widened, widened_fields, widened_view
 
 import uuid
 
@@ -85,3 +85,19 @@ def test_the_reader_sees_the_three_keys_only_while_one_is_stored():
     assert widened_view(row) == {
         "permission_widened_at": NOW.isoformat(), "permission_widened_from": "plan", "permission_widened_to": "auto",
     }
+
+
+def test_the_reader_keys_go_only_to_a_device_that_is_heard():
+    row = _row(permission_widened_at=NOW, permission_widened_from="plan", permission_widened_to="auto")
+    assert widened_fields(row, silent=True) == {}  # a stored widening, the device gone quiet: no keys
+    assert widened_fields(row, silent=False) == widened_view(row)
+
+
+def test_the_distinct_check_is_in_the_model_and_the_migration():
+    import pathlib
+    here = pathlib.Path(__file__).resolve().parents[1]
+    from app.models.desktop_relay import DesktopSession
+    names = {c.name for c in DesktopSession.__table__.constraints}
+    assert "ck_desktop_sessions_widened_distinct" in names
+    migration = (here / "alembic" / "versions" / "0449_desktop_session_permission_widened.py").read_text(encoding="utf-8")
+    assert "ck_desktop_sessions_widened_distinct" in migration
