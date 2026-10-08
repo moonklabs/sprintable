@@ -162,4 +162,9 @@ describe('AgentsPausedBand (story #4631)', () => {
     // Yuna 10:33Z: «started 12 minutes ago» — «since» + a relative time read «since 12 minutes ago», not English
     expect(q('agents-paused-since')!.textContent).toMatch(/^started \d+ minutes ago$/);
   });
+
+  it('en auto minutes take the plural form — one minute reads «1 minute» (story #4223 guard)', async () => {
+    await render(auto(false, 1), 'en');
+    expect(q('agents-paused-release')!.textContent).toBe('Once the conversation has been quiet for about 1 minute, agents can send again.');
+  });
 });

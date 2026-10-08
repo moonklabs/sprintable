@@ -5107,7 +5107,7 @@
       "why": "Agents sent each other too many messages in a short time. Messages from people still go through.",
       "untilAdmin": "They stay paused until an admin resumes them.",
       "askAdmin": "They stay paused until an admin resumes them — ask an organization admin.",
-      "auto": "Once the conversation has been quiet for about {n} minutes, agents can send again.",
+      "auto": "Once the conversation has been quiet for about {n, plural, one {# minute} other {# minutes}}, agents can send again.",
       "resume": "Resume agent messages",
       "confirm": "Resume agent messages? Agents will be able to send in this conversation again. If it happens again, they'll be paused again.",
       "reasonLabel": "Why you're resuming (one line)",
