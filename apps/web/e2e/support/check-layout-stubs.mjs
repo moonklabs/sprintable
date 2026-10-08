@@ -49,12 +49,12 @@ writeFileSync(probe, [
 ].join('\n'));
 try {
   const out = await build(buildOptions(probe));
-  const module = { exports: {} };
-  new Function('module', 'exports', out.outputFiles[0].text)(module, module.exports);
+  const mod = { exports: {} };
+  new Function('module', 'exports', out.outputFiles[0].text)(mod, mod.exports);
   check('① bundled component with unlisted next/ and @/app imports builds', true);
-  check('② generated @/app stub exports the imported name', typeof module.exports.Probe === 'function');
+  check('② generated @/app stub exports the imported name', typeof mod.exports.Probe === 'function');
   let threw = null;
-  try { module.exports.Probe(); } catch (e) { threw = e; }
+  try { mod.exports.Probe(); } catch (e) { threw = e; }
   check('② calling the component does not throw with stubs in place', threw === null, threw ? String(threw.message) : '');
 } catch (e) {
   check('① bundled component with unlisted next/ and @/app imports builds', false, String(e.message).split('\n')[0]);
