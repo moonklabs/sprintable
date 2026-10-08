@@ -178,7 +178,9 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(button('이 폰 빼기')).toHaveLength(3);
     expect(container.querySelectorAll('[data-testid="desktop-remote-phone"]')[0].textContent).toContain('짝 없음');
     await act(async () => { button('이 폰 빼기')[0].click(); });
-    expect(text()).toContain('짝지은 컴퓨터 0대와 모두 끊겨요');
+    // Yuna 08:14Z: no pair → its own line, without a cost it does not have
+    expect(text()).toContain('이 폰을 뺄까요? · Galaxy (지운 앱) — 짝지은 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.');
+    expect(text()).not.toContain('0대');
     await act(async () => { button('취소')[0].click(); });
     expect(document.activeElement).toBe(button('이 폰 빼기')[0]);
     expect(fetchWithAuth.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
@@ -213,5 +215,13 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     await render('en');
     await act(async () => { button('Remove this phone')[0].click(); });
     expect(text()).toContain('Remove this phone? · iPhone — it can no longer approve, stop or instruct, and it is disconnected from all 1 paired computer. One remote device place is freed; to use it again, pair it again from the phone.');
+  });
+
+  it('a phone with no pair reads «No paired computers» and its own confirmation in English', async () => {
+    answers([phone({ pairs: [] })]);
+    await render('en');
+    expect(text()).toContain('No paired computers');
+    await act(async () => { button('Remove this phone')[0].click(); });
+    expect(text()).toContain("Remove this phone? · iPhone — it isn't paired with any computer. One remote device place is freed; to use it again, pair it again from the phone.");
   });
 });

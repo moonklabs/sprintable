@@ -109,7 +109,10 @@ export function DesktopRemoteDevices() {
               <li key={phone.id} className="flex flex-col gap-2 px-4 py-3" data-testid="desktop-remote-phone">
                 <PhoneHead phone={phone} onRemove={open(phoneKey)} disabled={asking !== null} buttonRef={keep(phoneKey)} />
                 {asking === phoneKey ? (
-                  <Confirm text={t('confirmRemovePhone', { phone: phone.label, n: phone.pairs.length })}
+                  <Confirm text={phone.pairs.length === 0
+                    // Yuna 08:14Z: no pair → no «승인 · 멈춤 · 지시를 할 수 없고» (a cost it does not have) — its own line
+                    ? t('confirmRemovePhoneUnpaired', { phone: phone.label })
+                    : t('confirmRemovePhone', { phone: phone.label, n: phone.pairs.length })}
                     onConfirm={() => void removePhone(phone)} onCancel={close(phoneKey)} />
                 ) : null}
                 {phone.pairs.length === 0 ? <p className="pl-4 text-xs text-muted-foreground">{t('noPairs')}</p> : (

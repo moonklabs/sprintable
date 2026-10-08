@@ -7036,6 +7036,7 @@
       "confirmRemove": "{phone} ↔ {device} 짝을 뺄까요? 빼면 그 폰에서 이 컴퓨터를 제어할 수 없어요 — 원격 기기 자리는 그대로예요",
       "removePhone": "이 폰 빼기",
       "confirmRemovePhone": "이 폰을 뺄까요? · {phone} — 빼면 그 폰으로는 승인 · 멈춤 · 지시를 할 수 없고, 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.",
+      "confirmRemovePhoneUnpaired": "이 폰을 뺄까요? · {phone} — 짝지은 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.",
       "phoneRemoved": "뺐어요 · {phone} — 원격 기기 자리 하나가 비었어요",
       "noPairs": "짝 없음",
       "removed": "뺐어요 · {phone}",
