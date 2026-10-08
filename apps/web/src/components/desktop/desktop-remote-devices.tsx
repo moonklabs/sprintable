@@ -26,6 +26,8 @@ interface Phone { id: string; label: string; confirm_number: string; last_used_a
 
 /** what is being confirmed: one pair (`${phone}:${setup}`) or a whole phone (`phone:${id}`) */
 type Asking = string | null;
+/** a DELETE's answer — story #4629: removing a phone also says whether its login was ended (`session`; absent from an older server) */
+interface RemoveAnswer { removed: boolean; session: 'ended' | 'not_found' | null }
 
 /** Yuna §③: the phone not used the longest first (never used = oldest) — the one to remove is seen first */
 function byLeastRecentlyUsed(a: Phone, b: Phone): number {
@@ -44,6 +46,8 @@ export function DesktopRemoteDevices() {
   const [phones, setPhones] = useState<Phone[] | null>(null);
   const [asking, setAsking] = useState<Asking>(null);
   const [result, setResult] = useState('');
+  // story #4629 (Yuna «4629»): a removal whose phone login could not be ended reads in the text colour (not a warning — nothing to do next)
+  const [resultStrong, setResultStrong] = useState(false);
   // where the focus goes when the in-line confirmation closes (Yuna 15:38Z · as 4935's web confirmation): [취소] → that row's
   // button · after asking the server → the result line (the row may be gone). Applied once the buttons are enabled again.
   const removeButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -69,12 +73,15 @@ export function DesktopRemoteDevices() {
   useEffect(() => { void load(); }, [load]);
 
   /** one DELETE, then the result line and the list read again */
-  const ask = useCallback(async (url: string, said: (removed: boolean) => string) => {
+  const ask = useCallback(async (url: string, said: (answer: RemoveAnswer) => string) => {
+    setResultStrong(false);
     try {
       const res = await fetchWithAuth(url, { method: 'DELETE' });
       if (!res.ok) { setResult(t('removeFailed')); return; }
-      const body = (await res.json()) as { removed?: boolean };
-      setResult(said(body.removed === true));
+      const body = (await res.json()) as { removed?: boolean; session?: unknown };
+      const answer: RemoveAnswer = { removed: body.removed === true, session: body.session === 'ended' || body.session === 'not_found' ? body.session : null };
+      setResult(said(answer));
+      setResultStrong(answer.removed && answer.session === 'not_found');
       await load();
     } catch {
       setResult(t('removeFailed'));
@@ -85,9 +92,14 @@ export function DesktopRemoteDevices() {
   }, [load, t]);
   // the name in the label place, no particle after it (Yuna 14:15Z ① — a phone's name is often Latin: «iPhone와» is wrong)
   const removePair = (phone: Phone, pair: Pair) => ask(`/api/remote-devices/${phone.id}/pairs/${pair.setup_id}`,
-    (removed) => (removed ? t('removed', { phone: phone.label }) : t('alreadyRemoved', { phone: phone.label })));
-  const removePhone = (phone: Phone) => ask(`/api/remote-devices/${phone.id}`,
-    (removed) => (removed ? t('phoneRemoved', { phone: phone.label }) : t('alreadyRemoved', { phone: phone.label })));
+    ({ removed }) => (removed ? t('removed', { phone: phone.label }) : t('alreadyRemoved', { phone: phone.label })));
+  // story #4629: whether that phone's login was ended too · a server that does not say (older) → the line as before, no claim either way
+  const removePhone = (phone: Phone) => ask(`/api/remote-devices/${phone.id}`, ({ removed, session }) => {
+    if (!removed) return t('alreadyRemoved', { phone: phone.label });
+    if (session === 'ended') return t('phoneRemovedSignedOut', { phone: phone.label });
+    if (session === 'not_found') return t('phoneRemovedSessionNotFound', { phone: phone.label });
+    return t('phoneRemoved', { phone: phone.label });
+  });
 
   if (phones === null) return null; // not loaded · not an org person: the page goes on without it
   const keep = (key: string) => (el: HTMLButtonElement | null) => { if (el) removeButtons.current.set(key, el); else removeButtons.current.delete(key); };
@@ -138,7 +150,8 @@ export function DesktopRemoteDevices() {
         </Card>
       )}
       {inPhoneApp ? <PhonePairEntry /> : null}
-      <p ref={statusRef} tabIndex={-1} className="text-xs text-muted-foreground outline-none" role="status">{result}</p>
+      <p ref={statusRef} tabIndex={-1} className={`text-xs outline-none ${resultStrong ? 'text-foreground' : 'text-muted-foreground'}`} role="status"
+        data-testid="desktop-remote-devices-result">{result}</p>
     </section>
   );
 }

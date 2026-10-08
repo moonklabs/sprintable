@@ -86,7 +86,10 @@ async def post_remote_device(
 ):
     member = await _person(db, auth, org_id, interactive=True)
     try:
-        view, created = await agent_permissions.register_phone(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, body=body)
+        # story #4629: the session it registers from is the caller's own (auth.user_id) — another person's token binds nothing
+        view, created = await agent_permissions.register_phone(
+            db, member_id=uuid.UUID(str(member.id)), org_id=org_id, body=body, user_id=uuid.UUID(auth.user_id),
+        )
     except DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
@@ -154,14 +157,15 @@ async def delete_remote_device(
     """story #4624: the phone key itself (its pairs with it) — its owner, or an active owner/admin of the org."""
     member = await _person(db, auth, org_id, interactive=False)
     try:
-        removed = await agent_permissions.remove_phone(
+        removed, session = await agent_permissions.remove_phone(
             db, phone_id=phone_id, actor_member_id=uuid.UUID(str(member.id)), actor_is_admin=await is_active_org_admin(db, member), org_id=org_id,
         )
     except DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
     await db.commit()
-    return {"removed": removed}
+    # story #4629: whether that phone's own login session was ended too («ended») or none was found («not_found» — key and pairs only)
+    return {"removed": removed, **({"session": session} if removed else {})}
 
 
 @router.delete("/remote-devices/{phone_id}/pairs/{setup_id}")

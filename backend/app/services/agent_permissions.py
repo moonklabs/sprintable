@@ -74,6 +74,24 @@ class RemoteDeviceRegistration(BaseModel):
 
     label: str = Field(min_length=1, max_length=64)
     public_key: str = Field(min_length=1, max_length=2048)
+    # story #4629: the phone's own refresh token, added by the web route from its session cookie (never by the phone) — only
+    # its hash is looked up, to record which session registered the key; never stored, never echoed back
+    refresh_token: str | None = Field(default=None, max_length=4096, repr=False)
+
+
+async def _session_row_id(db: AsyncSession, *, user_id: uuid.UUID, raw: str | None) -> uuid.UUID | None:
+    """story #4629: the live refresh-token row this raw token is — the person's own only (another person's token binds nothing)."""
+    if not raw:
+        return None
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken
+
+    return (await db.execute(
+        select(RefreshToken.id).where(
+            RefreshToken.token_hash == hash_token(raw), RefreshToken.user_id == user_id,
+            RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > func.now(),
+        )
+    )).scalar_one_or_none()
 
 
 def _device_view(d: RemoteDevice, pairs: list[dict] | None = None) -> dict:
@@ -86,15 +104,28 @@ def _device_view(d: RemoteDevice, pairs: list[dict] | None = None) -> dict:
     }
 
 
-async def register_phone(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: RemoteDeviceRegistration) -> tuple[dict, bool]:
+async def register_phone(
+    db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: RemoteDeviceRegistration, user_id: uuid.UUID | None = None,
+) -> tuple[dict, bool]:
     """The phone app registers its key under the person's own login. The same key again → the same row (created False); a
-    fourth live key → 409 remote_device_limit with the three, to choose one to remove (PO B-4)."""
+    fourth live key → 409 remote_device_limit with the three, to choose one to remove (PO B-4). story #4629: the session it
+    registered from is recorded on the key (each registration — the latest login wins; none sent keeps what was there); a token
+    sent that is not a live login of the person → 401 session_ended."""
     der = _decode_public_key(body.public_key)
     fp = fingerprint_of(der)
-    existing = (await db.execute(select(RemoteDevice).where(RemoteDevice.fingerprint == fp).with_for_update())).scalar_one_or_none()
+    session_id = await _session_row_id(db, user_id=user_id, raw=body.refresh_token) if user_id is not None else None
+    # Kadir (5012): a phone whose login was ended with its key still holds an access token for up to an hour, and the web sends its
+    # now-dead refresh token along — that registration would bring the removed key back. A refresh token that is not a live login
+    # of this person (ended · expired · someone else's) → refused: sign in again. None sent (no cookie) records nothing, as before.
+    if body.refresh_token and user_id is not None and session_id is None:
+        raise DesktopRelayError(401, "session_ended", "this login has ended — sign in again to register the phone")
+    existing =(await db.execute(select(RemoteDevice).where(RemoteDevice.fingerprint == fp).with_for_update())).scalar_one_or_none()
     if existing is not None and existing.member_id != member_id:
         raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
     if existing is not None and existing.revoked_at is None:
+        if session_id is not None:
+            existing.session_token_id = session_id
+            await db.flush()
         return _device_view(existing), False
     # count under the person's rows' lock: two registrations at once cannot both be the third
     live = (await db.execute(
@@ -105,9 +136,14 @@ async def register_phone(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
         raise DesktopRelayError(409, "remote_device_limit", "at most three phones", detail={"devices": [_device_view(d) for d in live]})
     if existing is not None:  # the person's own key, removed before — back as it was
         existing.revoked_at, existing.label, existing.org_id = None, body.label, org_id
+        if session_id is not None:
+            existing.session_token_id = session_id
         await db.flush()
         return _device_view(existing), True
-    row = RemoteDevice(id=uuid.uuid4(), member_id=member_id, org_id=org_id, label=body.label, public_key=body.public_key.rstrip("="), fingerprint=fp)
+    row = RemoteDevice(
+        id=uuid.uuid4(), member_id=member_id, org_id=org_id, label=body.label, public_key=body.public_key.rstrip("="), fingerprint=fp,
+        session_token_id=session_id,
+    )
     db.add(row)
     await db.flush()
     return _device_view(row), True
@@ -160,22 +196,56 @@ async def remove_pair(
     return True
 
 
+async def _end_phone_session(db: AsyncSession, phone: RemoteDevice, now: datetime) -> Literal["ended", "not_found"]:
+    """story #4629 (PO 09:02Z: A2): the login session the phone registered its key from — that one only. Its refresh token rotates
+    on every refresh (`replaced_by` · #2449), so the chain is followed to its live end and every live row of it is revoked through
+    the one revoke seam (`_explicit_revoke_values` · #3649 — it also closes the refresh grace window). No recorded session (a key
+    registered before 0446 · no token sent) or a chain with nothing live (already logged out · expired) → nothing is revoked:
+    «not_found» (PO: no other session is ever touched to make up for it)."""
+    from app.models.user import RefreshToken
+    from app.routers.auth import _explicit_revoke_values
+
+    chain: list[uuid.UUID] = []
+    at = phone.session_token_id
+    while at is not None and at not in chain and len(chain) < 10_000:
+        chain.append(at)
+        at = (await db.execute(select(RefreshToken.replaced_by).where(RefreshToken.id == at))).scalar_one_or_none()
+    if not chain:
+        logger.info("phone removed: no session recorded — key and pairs only", extra={"structured": {"event": "phone_removed_session_not_found", "why": "none_recorded"}})
+        return "not_found"
+    live = (await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.id.in_(chain), RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
+        .values(**_explicit_revoke_values(now))
+    )).rowcount
+    # a row rotated out keeps its expiry (#2449: only revoked_at is set), so within the refresh grace window the phone could
+    # present its previous token and fork a new session — every row of the chain is closed too (Min 09:27Z · its revoked_at kept)
+    await db.execute(
+        update(RefreshToken).where(RefreshToken.id.in_(chain), RefreshToken.expires_at > now).values(expires_at=now)
+    )
+    if not live:
+        logger.info("phone removed: its session is no longer live — key and pairs only", extra={"structured": {"event": "phone_removed_session_not_found", "why": "not_live"}})
+        return "not_found"
+    return "ended"
+
+
 async def remove_phone(
     db: AsyncSession, *, phone_id: uuid.UUID, actor_member_id: uuid.UUID | None, actor_is_admin: bool, org_id: uuid.UUID,
-) -> bool:
+) -> tuple[bool, Literal["ended", "not_found"] | None]:
     """story #4624 (1선 · PO 07:58Z): [이 폰 빼기] — the key itself. Before, nothing ever set `revoked_at`: a phone reinstalled three
     times held three live keys for good (`remote_device_limit`), and the product's own advice («원격 기기에서 하나를 빼 주세요») could
     only remove pairs. Now: the key's owner or an owner/admin of its org — anyone else gets the same 404 as a key that does not exist.
     `revoked_at` set (the limit counts live keys only) · every live pair of it removed the [빼기] way (`pairing_removed` goes down to
     each setup until its snapshot drops it) · each of those setups woken. Already removed → False (idempotent). The same key
-    registered again by its owner comes back (register_phone · unchanged)."""
+    registered again by its owner comes back (register_phone · unchanged). story #4629: also that phone's own login session
+    (`_end_phone_session` → «ended» · «not_found»; None when nothing was removed)."""
     phone = (await db.execute(
         select(RemoteDevice).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id).with_for_update()
     )).scalar_one_or_none()
     if phone is None or not (actor_is_admin or phone.member_id == actor_member_id):
         raise DesktopRelayError(404, "phone_not_found", "no such phone")
     if phone.revoked_at is not None:
-        return False
+        return False, None
     now = _now()
     phone.revoked_at = now
     pairs = (await db.execute(
@@ -185,9 +255,10 @@ async def remove_phone(
     for pair in pairs:
         pair.removed_at, pair.removed_by, pair.removal_acked_at = now, actor_member_id, None
     await db.flush()
+    session = await _end_phone_session(db, phone, now)
     for setup_id in {p.setup_id for p in pairs}:
         _wake_device_after_commit(db, setup_id)
-    return True
+    return True, session
 
 
 class PairingReport(BaseModel):

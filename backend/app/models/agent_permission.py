@@ -101,6 +101,12 @@ class RemoteDevice(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4629 (0446): the refresh token the phone was logged in with when it registered this key (the row id — never the
+    # token) · removing the key revokes that session (its rotation chain's live end). NULL: registered before 0446, or no token sent
+    session_token_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("refresh_tokens.id", ondelete="SET NULL", name="fk_remote_devices_session_token_id"),
+        nullable=True,
+    )
 
 
 class RemoteDevicePairing(Base):
