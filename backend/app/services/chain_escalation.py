@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -153,21 +153,24 @@ async def release_if_quiet(db: AsyncSession, *, org_id: uuid.UUID, conversation_
     _enabled, window_seconds, threshold, _cb_mode, release_mode = await _get_org_config(db, org_id)
     if release_mode != "auto":
         return False
-    opened_at = (await db.execute(
-        select(ChainCircuitBreaker.opened_at).where(
+    # Kadir (5015): one clock — the database's, the same that stamped opened_at (no value from the agent, no app-server clock)
+    old_enough = (await db.execute(
+        select(ChainCircuitBreaker.opened_at <= func.now() - timedelta(seconds=window_seconds * 2)).where(
             ChainCircuitBreaker.conversation_id == conversation_id,
             ChainCircuitBreaker.released_at.is_(None),
         )
     )).scalar_one_or_none()
-    if opened_at is None:
-        return False
-    if datetime.now(timezone.utc) - opened_at < timedelta(seconds=window_seconds * 2):
+    if not old_enough:  # none open (None) · under two windows (False)
         return False
     if await _episode_marker_alive(conversation_id):
         return False
     if await _recent_message_velocity(db, conversation_id, window_seconds) > threshold:
         return False
-    return await _auto_close_circuit_breaker(db, conversation_id, reason="auto: quiet since block")
+    if await _auto_close_circuit_breaker(db, conversation_id, reason="auto: quiet since block"):
+        return True
+    # Kadir (5015): two sends racing here — the other one closed it a moment ago (closed once, released_at is never moved); this
+    # send goes through too rather than meeting a 423 for a block that is gone
+    return await get_open_circuit_breaker_id(db, conversation_id) is None
 
 
 async def _recent_message_velocity(
@@ -177,11 +180,11 @@ async def _recent_message_velocity(
     대화임을 확인했으므로(호출부 관례) 발신자 전부 agent라 별도 type 필터 없이 전량 카운트."""
     from app.models.conversation import ConversationMessage
 
-    since = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+    # story #4631 (Kadir 5015): the database's clock — the one that stamps a message and opens a block — not the app server's
     return (await db.execute(
         select(func.count()).select_from(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id,
-            ConversationMessage.created_at >= since,
+            ConversationMessage.created_at >= func.now() - timedelta(seconds=window_seconds),
         )
     )).scalar_one()
 

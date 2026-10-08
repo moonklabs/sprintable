@@ -601,6 +601,35 @@ async def test_4631_auto_org_quiet_past_two_windows_releases_at_the_next_agent_s
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_4631_the_send_that_loses_the_race_to_close_goes_through_too():
+    """Kadir (5015): two sends reach the auto release at once — one closes it (once: the UPDATE is on the open row only), the other
+    finds nothing left to close; it goes through as well instead of meeting a 423 for a block already gone."""
+    from sqlalchemy import update as sa_update
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=660)
+
+            async def _closed_by_the_other(db, conversation_id, *, reason):  # the other send won: it closed the row first
+                await db.execute(sa_update(ChainCircuitBreaker).where(
+                    ChainCircuitBreaker.conversation_id == conversation_id, ChainCircuitBreaker.released_at.is_(None),
+                ).values(released_at=sa_func.now(), release_reason="auto: quiet since block"))
+                return False
+
+            from sqlalchemy import func as sa_func
+            with patch("app.services.redis_shared.get_client", return_value=_fakeredis_client()), \
+                 patch("app.services.chain_escalation._auto_close_circuit_breaker", side_effect=_closed_by_the_other):
+                resp = await _agent_send(s, conv_id, agent_id, org_id, "경주에서 진 쪽")
+            assert resp["data"]["content"] == "경주에서 진 쪽"
+            assert await _open_breaker_count(s, conv_id) == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 @pytest.mark.parametrize("case", ["too_soon", "manual", "marker_alive", "redis_down", "still_busy"])
 async def test_4631_the_block_stays_unless_every_condition_holds(case):
     """The breaker stays (423 · nothing saved) when: opened under two windows ago · the org is manual (the default) · the episode
