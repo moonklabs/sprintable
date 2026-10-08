@@ -290,15 +290,22 @@ async def evaluate_unsupervised_chain_episode(
         if breaker_id is not None:
             # story #4631 (PO 고름 B): reference_id = 그 대화 id — 딥링크(chat_thread)와 해제 API(/conversations/{id}/
             # circuit-breaker/release)가 둘 다 대화 id로 받는다. 전엔 차단 행 id라 알림을 누르면 없는 대화로 갔다.
+            # story #4631 (Yuna «4631» §5-1): what happened and where it is released (the conversation's banner · [멈춤 풀기]) — the
+            # old body promised a release button on the notice that never existed. The org's language, from the shared catalog.
+            from app.models.conversation import Conversation
+            from app.services.i18n_catalog import t
+            from app.services.org_locale import resolve_org_locale
+
+            locale = await resolve_org_locale(db, org_id)
+            conv_title = (await db.execute(
+                select(Conversation.title).where(Conversation.id == conversation_id)
+            )).scalar_one_or_none()
             await dispatch_notification(
                 db, org_id=org_id, event_type="conversation.circuit_breaker_opened",
                 target_member_ids=list(approver_ids),
-                title="무인간 대화 자동 차단(서킷브레이커)",
-                body=(
-                    f"human 참가자가 없는 대화에서 최근 {window_seconds}초간 메시지 {velocity}건"
-                    f"(임계 {threshold})이 발생해 agent 발신이 일시 차단됐어요. "
-                    "이 알림의 «차단 해제»로 즉시 풀 수 있어요."
-                ),
+                title=(t("conversation.agents_paused_notice_title", locale, conversation=conv_title) if conv_title
+                       else t("conversation.agents_paused_notice_title_bare", locale)),
+                body=t("conversation.agents_paused_notice_body", locale),
                 reference_type="conversation", reference_id=conversation_id,
                 source_project_id=project_id,
                 via_outbox=True,
@@ -354,9 +361,19 @@ async def open_circuit_breaker_state(
     )).scalar_one_or_none()
     if opened_at is None:
         return None
-    _enabled, _window, _threshold, _mode, release_mode = await _get_org_config(db, org_id)
+    _enabled, window_seconds, _threshold, _mode, release_mode = await _get_org_config(db, org_id)
     can_release = caller_user_id is not None and await is_org_owner_or_admin(db, caller_user_id, org_id)
-    return {"opened_at": opened_at, "release_mode": release_mode, "can_release": can_release}
+    # Yuna «4631» §2: the way it is really released (release_if_quiet makes «auto» true) and, for auto, after how many quiet
+    # minutes — the server's value (window × 2), never one the web assumes
+    return {
+        "opened_at": opened_at, "release_mode": release_mode, "can_release": can_release,
+        "auto_release_after_minutes": auto_release_after_minutes(window_seconds) if release_mode == "auto" else None,
+    }
+
+
+def auto_release_after_minutes(window_seconds: int) -> int:
+    """story #4631: release_if_quiet's wait (window × 2) in whole minutes, rounded up — what a person and an agent are told."""
+    return -(-(window_seconds * 2) // 60)
 
 
 async def release_circuit_breaker(
@@ -375,4 +392,21 @@ async def release_circuit_breaker(
         )
         .values(released_at=func.now(), released_by=released_by, release_reason=reason)
     )
-    return result.rowcount > 0
+    released = result.rowcount > 0
+    if released:
+        # story #4631 (Yuna «4631» §3 · BE 확인): the episode marker can outlive the block (its TTL is window × 2 after the last
+        # message) — released while it lived, the same burst's next messages read «continuing» and no new block opened until it
+        # died down. Cleared here: a burst after a release is a new episode, and it pauses the conversation again.
+        await _clear_episode_marker(conversation_id)
+    return released
+
+
+async def _clear_episode_marker(conversation_id: uuid.UUID) -> None:
+    from app.services import redis_shared
+
+    key = redis_shared.key("chain_escalation", "episode", str(conversation_id))
+
+    async def _op(client) -> None:
+        await client.delete(key)
+
+    await redis_shared.with_fallback(_op, lambda: None)

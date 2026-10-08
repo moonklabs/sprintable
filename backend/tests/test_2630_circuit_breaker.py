@@ -228,6 +228,9 @@ async def test_block_mode_opens_breaker_and_notification_reflects_it():
                 assert breaker_id is not None
                 # story #4631 (PO 고름 B): the conversation's id — the deep link (chat_thread) and the release API both take it
                 assert kw["reference_id"] == conv_id and kw["reference_type"] == "conversation"
+                # story #4631 (Yuna §5-1): no promise of a button on the notice — where to resume it (an untitled conversation: bare title)
+                from app.services.i18n_catalog import t
+                assert (kw["title"], kw["body"]) == (t("conversation.agents_paused_notice_title_bare", "ko"), t("conversation.agents_paused_notice_body", "ko"))
     finally:
         await engine.dispose()
 
@@ -686,6 +689,10 @@ async def test_4631_the_block_stays_unless_every_condition_holds(case):
                 await _agent_send(s, conv_id, agent_id, org_id, "막혀야 하는 한 줄")
             assert ei.value.status_code == 423 and ei.value.detail["code"] == "CIRCUIT_BREAKER_OPEN"
             assert await _open_breaker_count(s, conv_id) == 1
+            # Yuna «4631» §5: the hint is true to how this org's block is released (the org's language · no users here → ko)
+            from app.services.i18n_catalog import t
+            want = t("conversation.agents_paused_hint_manual", "ko") if case == "manual" else t("conversation.agents_paused_hint_auto", "ko", n=10)
+            assert (ei.value.detail["message"], ei.value.detail["hint"]) == (t("conversation.agents_paused_message", "ko"), want)
     finally:
         await engine.dispose()
 
@@ -751,8 +758,8 @@ async def test_4631_get_conversation_carries_it_owner_may_release_agent_may_not(
                 as_owner = await get_conversation(conv_id, db=s, auth=_human_auth(owner_user_id, org_id), org_id=org_id)
                 as_agent = await get_conversation(conv_id, db=s, auth=_agent_auth(agent_id, org_id), org_id=org_id)
             body = as_owner.model_dump(mode="json")["circuit_breaker"]
-            assert set(body) == {"opened_at", "release_mode", "can_release"}
-            assert (body["release_mode"], body["can_release"]) == ("manual", True)
+            assert set(body) == {"opened_at", "release_mode", "can_release", "auto_release_after_minutes"}
+            assert (body["release_mode"], body["can_release"], body["auto_release_after_minutes"]) == ("manual", True, None)
             assert as_agent.model_dump(mode="json")["circuit_breaker"]["can_release"] is False
     finally:
         await engine.dispose()
@@ -772,6 +779,47 @@ async def test_4631_an_auto_org_says_auto():
             await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
             await s.commit()
             got = await open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=None)
-            assert got["release_mode"] == "auto"
+            # Yuna «4631» §2: the server's minutes (window 300 s × 2 → 10) — the web shows only this value
+            assert (got["release_mode"], got["auto_release_after_minutes"]) == ("auto", 10)
+            manual_conv = await _seed_conversation(s, org_id, project_id)
+            assert await open_circuit_breaker_state(s, conversation_id=manual_conv, org_id=org_id, caller_user_id=None) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_releasing_clears_the_episode_so_a_new_burst_pauses_again():
+    """Yuna «4631» §3 (BE 확인): released while the episode marker still lived, the same burst's next messages read «continuing» and
+    no new block opened. The release clears the marker — the next burst is a new episode and the conversation pauses again."""
+    from app.services import redis_shared
+    from app.services.chain_escalation import (
+        evaluate_unsupervised_chain_episode, get_open_circuit_breaker_id, release_circuit_breaker,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_org_owner(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            conv_id = await _seed_conversation(s, org_id, project_id)
+            await _seed_messages(s, conv_id, agent_id, 20, ages_seconds=10)
+            client = _fakeredis_client()
+            marker = redis_shared.key("chain_escalation", "episode", str(conv_id))
+            with patch("app.services.redis_shared.get_client", return_value=client), \
+                 patch("app.services.notification_dispatch.dispatch_notification", AsyncMock()):
+                await evaluate_unsupervised_chain_episode(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+                first = await get_open_circuit_breaker_id(s, conv_id)
+                assert first is not None and await client.exists(marker)
+
+                assert await release_circuit_breaker(s, conversation_id=conv_id, released_by=uuid.uuid4(), reason="확인") is True
+                await s.commit()
+                assert not await client.exists(marker), "released: the episode is over"
+
+                # the burst goes on (still above the threshold) → a new episode → paused again, a new row
+                await evaluate_unsupervised_chain_episode(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+                second = await get_open_circuit_breaker_id(s, conv_id)
+                assert second is not None and second != first
     finally:
         await engine.dispose()

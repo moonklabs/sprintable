@@ -57,6 +57,26 @@ _CATALOG: dict[str, dict[str, str]] = {
     # no path; a lock screen and a notice history keep them)
     "agent_permission.notice_title": {"ko": "권한 대기 · {agent}", "en": "Waiting for permission · {agent}"},
     "agent_permission.notice_title_bare": {"ko": "권한 대기", "en": "Waiting for permission"},
+    # story #4631 (Yuna «4631» §5 · §5-1) — a conversation whose agent messages are paused (the flood block): what the refused agent
+    # reads (423 · true to how this org's block is released), and the notice to org owners/admins (where to resume it)
+    "conversation.agents_paused_message": {
+        "ko": "이 대화의 에이전트 메시지가 멈춰 있어요(에이전트끼리 짧은 사이에 메시지가 너무 많이 오감)",
+        "en": "Agent messages in this conversation are paused (agents sent each other too many messages in a short time)",
+    },
+    "conversation.agents_paused_hint_manual": {
+        "ko": "조직 관리자가 풀 때까지 이 대화에 보내지 마세요 — 다시 보내도 막혀요",
+        "en": "Don't send to this conversation until an organization admin resumes it — sending again is blocked too",
+    },
+    "conversation.agents_paused_hint_auto": {
+        "ko": "대화가 {n}분쯤 조용하면 다시 보낼 수 있어요 — 그 전에 보내면 또 막혀요",
+        "en": "You can send again once the conversation has been quiet for about {n} minutes — sending before then is blocked too",
+    },
+    "conversation.agents_paused_notice_title": {"ko": "에이전트 메시지를 멈췄어요 · {conversation}", "en": "Agent messages paused · {conversation}"},
+    "conversation.agents_paused_notice_title_bare": {"ko": "에이전트 메시지를 멈췄어요", "en": "Agent messages paused"},
+    "conversation.agents_paused_notice_body": {
+        "ko": "에이전트끼리 짧은 사이에 메시지를 너무 많이 주고받았어요. 대화를 열어 [멈춤 풀기]로 풀 수 있어요.",
+        "en": "Agents sent each other too many messages in a short time. Open the conversation to resume them with [Resume agent messages].",
+    },
     # story #4534 — a phone's [지금 지시] line in the conversation and its turn-end notice (명세 B-3: no instruction text,
     # command or path in the notice; «마쳤어요» is not used — the turn ended, not the work)
     "desktop_command.prompt_line": {"ko": "지시 · 지금 턴에 보냄", "en": "Instruction · sent into the current turn"},
