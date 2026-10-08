@@ -181,6 +181,21 @@ describe('[4547] not a Mac — one line where the warning and [다운로드] wer
     expect(q('desktop-download-card')?.querySelector('a, button')).toBeNull();
   });
 
+  it('a phone never paints the Mac card, not for one frame — every DOM change on the way in is checked (Yuna: the device is known when «loading» ends)', async () => {
+    ua = IPHONE;
+    manifest();
+    let macSeen = false;
+    const seen = new MutationObserver(() => {
+      if (q('desktop-download-button') || q('desktop-download-gatekeeper-notice')) macSeen = true;
+    });
+    seen.observe(container, { childList: true, subtree: true });
+    await show();
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); // a later task too: a device read after «loading» ends shows here
+    seen.disconnect();
+    expect(q('desktop-download-open-on-mac')).not.toBeNull();
+    expect(macSeen).toBe(false);
+  });
+
   it('inside the phone app (its shell) the same, even with a Mac-looking user agent', async () => {
     inPhoneApp = true;
     manifest();

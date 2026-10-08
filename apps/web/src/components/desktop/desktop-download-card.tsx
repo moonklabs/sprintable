@@ -69,12 +69,13 @@ export function DesktopDownloadCard() {
 
   useEffect(() => {
     let alive = true;
-    setElsewhere(notAMac(navigator.userAgent, isPhoneApp()));
     fetch('/desktop/downloads/macos.json')
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null)
       .then((json: DesktopDownloadManifest | null) => {
         if (!alive) return;
+        // story #4547: the device is read in the same update that ends «loading» — a phone never paints the Mac card first.
+        setElsewhere(notAMac(navigator.userAgent, isPhoneApp()));
         // [SID:4619 · Kadir 5004 후속 ①] a link only into our bucket — any other url is «지금은 받을 수 없어요», as no manifest
         const url = ourDownloadUrl(json?.url);
         setManifest(json?.version && url ? { ...json, url } : null);
