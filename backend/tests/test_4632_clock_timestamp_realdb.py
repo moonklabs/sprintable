@@ -233,3 +233,30 @@ async def test_block_held_two_windows_is_released_by_its_write_moment():
                 assert await _release_check(session, org_id, conv_id) is True
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_release_in_a_long_transaction_stamps_the_write_moment_so_earlier_messages_are_not_after_it():
+    """Codex probe (5022): released_at was now() (the transaction start). In a long release transaction a message written before the
+    release then counted as «after the release» and re-opened the block at once. With the release stamped at the write moment, that
+    message is before it and is not counted. Mutant: released_at back to now() → this test is RED."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+    from app.models.conversation import ConversationMessage
+    from app.services.chain_escalation import _auto_close_circuit_breaker, _recent_message_velocity
+
+    engine, factory = await _realdb_session()
+    try:
+        async with factory() as session:
+            org_id, conv_id = await _seed_conversation(session)
+        async with factory() as session:
+            async with session.begin():
+                session.add(ChainCircuitBreaker(id=uuid.uuid4(), org_id=org_id, conversation_id=conv_id))
+                await session.flush()
+                await session.execute(text(f"SELECT pg_sleep({HELD_OPEN_SECONDS})"))
+                session.add(ConversationMessage(id=uuid.uuid4(), conversation_id=conv_id, content="before release", mentioned_ids=[]))
+                await session.flush()
+                await session.execute(text("SELECT pg_sleep(0.5)"))
+                assert await _auto_close_circuit_breaker(session, conv_id, reason="test") is True
+                assert await _recent_message_velocity(session, conv_id, 60) == 0
+    finally:
+        await engine.dispose()

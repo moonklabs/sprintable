@@ -122,7 +122,7 @@ async def _auto_close_circuit_breaker(
     if breaker_id is not None:
         where.append(ChainCircuitBreaker.id == breaker_id)
     result = await db.execute(
-        update(ChainCircuitBreaker).where(*where).values(released_at=func.now(), release_reason=reason)
+        update(ChainCircuitBreaker).where(*where).values(released_at=func.clock_timestamp(), release_reason=reason)
     )
     return result.rowcount > 0
 
@@ -417,7 +417,7 @@ async def release_circuit_breaker(
             ChainCircuitBreaker.conversation_id == conversation_id,
             ChainCircuitBreaker.released_at.is_(None),
         )
-        .values(released_at=func.now(), released_by=released_by, release_reason=reason)
+        .values(released_at=func.clock_timestamp(), released_by=released_by, release_reason=reason)
     )
     released = result.rowcount > 0
     if released:
