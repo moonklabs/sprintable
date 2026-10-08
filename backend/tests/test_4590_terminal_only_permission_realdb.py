@@ -62,7 +62,8 @@ async def test_the_report_carries_a_hash_only_when_it_is_answerable(world):
             r = await _post_ask(c, device, body)
             assert r.status_code == 422, (missing, r.text)  # an answerable question keeps all three
         bare = _terminal_ask(agent)
-        del bare["tool"], bare["summary"]
+        # Mirko ⓐ (the daemon's own body): no summary → no masked · truncated keys either; the model's defaults take them
+        del bare["tool"], bare["summary"], bare["masked"], bare["truncated"]
         assert (await _post_ask(c, device, bare)).status_code == 201  # tool · summary only when read
         assert (await _sql(fetch="SELECT count(*) FROM agent_permission_requests "
                                  f"WHERE setup_id = '{device['setup_id']}'"))[0][0] == 1
@@ -122,6 +123,10 @@ async def test_a_read_tool_is_named_and_the_strip_says_terminal_only(world):
         assert (await _post_ask(c, device, _ask(agent))).status_code == 201
         seen = (await c.get(url, headers=_person(OWNER))).json()
         assert (seen["pending_permission_request_id"] is not None, seen["ask_terminal_only"]) == (True, False), seen
+        # Mirko ⓒ: answerable → terminal-only posts the new row before withdrawing the old one — both pending for a moment, and the
+        # strip already says terminal-only (any pending terminal-only row of the session, not «the one»)
+        assert (await _post_ask(c, device, _terminal_ask(agent))).status_code == 201
+        assert (await c.get(url, headers=_person(OWNER))).json()["ask_terminal_only"] is True
 
 
 async def test_an_answerable_question_withdrawn_as_terminal_only(world):
