@@ -496,6 +496,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_get_project_overview", "sprintable_get_recent_activity",
     "sprintable_get_retro_session_by_sprint", "sprintable_get_sprint_velocity_history",
     "sprintable_get_standup", "sprintable_get_task", "sprintable_get_unassigned_stories",
+    "sprintable_get_story",  # story 4615 — a story by its id, in full
     "sprintable_get_velocity", "sprintable_get_wallet", "sprintable_get_workflow_guide",
     "sprintable_give_reward", "sprintable_list_audit_logs", "sprintable_list_backlog",
     "sprintable_get_chat_message",
