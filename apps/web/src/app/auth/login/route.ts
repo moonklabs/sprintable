@@ -53,6 +53,11 @@ export async function GET(request: Request) {
     else cookieStore.delete(`${name}_${provider}`);
   };
   cookieStore.set(`oauth_state_${provider}`, state, cookieOpts);
+  // story #4628 follow-up (Kadir 01a11ada 2nd line · PO 10:3xZ): a sign-in never carries «link this account» — the connect start
+  // (/auth/link) sets oauth_link_*, and one abandoned before its callback left it for the next sign-in, which the callback then read
+  // as a link (the backend refused it: LINK_SESSION_MISMATCH — no wrong account linked, but a confusing failure). Always dropped
+  // here. A connect flow is never cut by this: a sign-in start replaces oauth_state too, so that flow's callback could not pass anyway.
+  cookieStore.delete(`oauth_link_${provider}`);
   setOrDrop('oauth_tos', tosAccepted ? 'true' : null);
   setOrDrop('oauth_invite_token', inviteToken);
   setOrDrop('oauth_next', next);
