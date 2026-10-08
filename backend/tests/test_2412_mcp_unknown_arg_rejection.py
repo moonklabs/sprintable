@@ -108,7 +108,7 @@ def test_all_registered_tools_share_the_same_lockdown():
     from sprintable_mcp import server as srv
 
     tools = srv.mcp._tool_manager.list_tools()
-    assert len(tools) == 144  # story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: watch · unwatch · list_watches 3종 신설 130→133
+    assert len(tools) == 145  # story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: watch · unwatch · list_watches 3종 신설 130→133
     unlocked = [
         t.name for t in tools
         if t.fn_metadata.arg_model.model_config.get("extra") != "forbid"
