@@ -2,7 +2,7 @@
 
 - desktop_sessions gets three nullable columns: `permission_widened_at` (the daemon's clock), `permission_widened_from` and
   `permission_widened_to` — the mode before and after, each from a closed list (plan · default · acceptEdits · auto ·
-  bypassPermissions). Not a session state word: the state list stays as it is.
+  dontAsk · bypassPermissions). Not a session state word: the state list stays as it is.
 - The three are all set or all null (one CHECK). The server checks the closed lists and from ≠ to only; the order is the daemon's.
 - Additive only: no backfill, no existing row changes.
 """
@@ -15,7 +15,7 @@ down_revision = "0448"
 branch_labels = None
 depends_on = None
 
-_MODES = ("plan", "default", "acceptEdits", "auto", "bypassPermissions")
+_MODES = ("plan", "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:

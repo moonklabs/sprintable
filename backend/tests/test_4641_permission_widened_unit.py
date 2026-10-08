@@ -31,7 +31,7 @@ def _row(**kw) -> SimpleNamespace:
 
 def test_the_closed_list_is_the_model_list_and_the_report_literal():
     assert tuple(get_args(WidenedMode)) == SESSION_WIDENED_MODES
-    assert SESSION_WIDENED_MODES == ("plan", "default", "acceptEdits", "auto", "bypassPermissions")
+    assert SESSION_WIDENED_MODES == ("plan", "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 
 
 def test_a_widening_is_carried_whole_or_not_at_all():

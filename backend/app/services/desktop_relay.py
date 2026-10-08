@@ -164,7 +164,7 @@ class SystemHold(BaseModel):
 
 
 # story #4641 (design 4641 · 0449): a mode a person widened at the terminal — the same closed list as the model (a test holds them together)
-WidenedMode = Literal["plan", "default", "acceptEdits", "auto", "bypassPermissions"]
+WidenedMode = Literal["plan", "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions"]
 # a widening stamped further ahead of the server's clock than this is not believed: the three keys are dropped, never kept (a
 # far-future `at` would pin the newer-wins rule for good)
 WIDENED_MAX_AHEAD = timedelta(minutes=5)

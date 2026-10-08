@@ -30,8 +30,8 @@ SESSION_SELF_RESUME = ("maybe", "no", "unknown")
 SESSION_SYSTEM_FOLDERS = ("documents", "desktop", "downloads", "network_volume", "icloud")
 # story #4641 (0449 · design 4641 · Kadir lens conditional pass): the permission mode a person widened at the terminal — the closed
 # list (the daemon sends only these; a mode it does not know is not sent). The order (plan < default < acceptEdits < auto <
-# bypassPermissions) is the daemon's alone; the server checks the list and from ≠ to.
-SESSION_WIDENED_MODES = ("plan", "default", "acceptEdits", "auto", "bypassPermissions")
+# dontAsk, bypassPermissions — measured on the daemon, 10-08) is the daemon's alone; the server checks the list and from ≠ to.
+SESSION_WIDENED_MODES = ("plan", "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 # story #4560 (0444 · contract v2.1 §5 · PO 14:41Z): the daemon did not touch a session whose limit should be over — the terminal's
 # screen was not the expected one (`screen`), or the one Esc it sent was not taken (`esc_not_taken`)
 SESSION_LIMIT_HELD = ("screen", "esc_not_taken")
