@@ -24,7 +24,6 @@ from app.dependencies.ownership import assert_agent_owner_mutable
 from app.models.agent_allowed_host import AgentAllowedHost
 from app.models.agent_run_profile import AgentRunProfile
 from app.models.member import Member
-from app.models.project import OrgMember
 
 # the runtimes a desktop agent can have, and the name the daemon knows each by (desktop_setup.RUNTIME_TYPES, the other way)
 DESKTOP_RUNTIMES = {"claude-code": "claude", "codex": "codex"}
@@ -133,23 +132,6 @@ def _view(member: Member, profile: AgentRunProfile | None) -> dict:
     }
 
 
-async def is_active_owner(db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    """story #4598 (contract v0.1 §1 · PO: «org owner + is_active만») — who may flip «묻지 않고 일하기»: an owner of the org
-    (`OrgMember.role == "owner"`, the remote-control gate's rule) whose member row is active. The run profile's other fields keep
-    their own rule (`may_change`: creator · owner/admin) — this one is narrower on purpose: it turns a person's questions off."""
-    # Kadir qa:changes (4980 ①): fail closed — an owner row with no members row, a soft-deleted members row, or one that is not
-    # active is not an owner here (an OUTER join with «is not False» let all three through)
-    row = (await db.execute(
-        select(OrgMember.role)
-        .join(Member, Member.id == OrgMember.id)
-        .where(
-            OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None),
-            Member.deleted_at.is_(None), Member.is_active.is_(True),
-        )
-    )).first()
-    return row is not None and row[0] == "owner"
-
-
 async def _agent(db: AsyncSession, *, org_id: uuid.UUID, agent_id: uuid.UUID) -> Member:
     member = (await db.execute(
         select(Member).where(
@@ -195,11 +177,13 @@ async def allowed_hosts(db: AsyncSession, member_id: uuid.UUID) -> list[AgentAll
     )).scalars())
 
 
-async def read_for_person(db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
+async def read_for_person(
+    db: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID, agent_id: uuid.UUID, actor_is_owner: bool,
+) -> dict:
     member = await _agent(db, org_id=org_id, agent_id=agent_id)
     view = _view(member, await _profile(db, member.id))
     view["can_change"] = await may_change(db, org_id=org_id, user_id=user_id, agent_id=agent_id)
-    view["can_change_unattended"] = await is_active_owner(db, org_id=org_id, user_id=user_id)  # story #4598
+    view["can_change_unattended"] = actor_is_owner  # story #4598: `member_resolver.is_active_owner`, as the PUT gates
     # story #4580: the «허용 주소» list (web «실행» group · Yuna ④) — who added it stays on the server
     view["allowed_hosts"] = [{"host": h.host, "added_at": _iso(h.added_at)} for h in await allowed_hosts(db, member.id)]
     return view
@@ -357,7 +341,7 @@ async def change(
     """One agent or many — all or nothing (§3): every agent is checked (rights, then the saved result) before anything is
     written. `KEEP` leaves a field as it is; None means the runtime's default.
 
-    story #4598: `unattended` (a bool, or KEEP) — a change of it is an org owner's only (`actor_is_owner` = `is_active_owner`):
+    story #4598: `unattended` (a bool, or KEEP) — a change of it is an org owner's only (`actor_is_owner` = `member_resolver.is_active_owner`):
     anyone else changing it gets 403 `owner_required` and nothing of the body is written, even its model · effort (all or
     nothing). The current value sent again is not a change of it. The same value moves no version."""
     if not agent_ids or len(agent_ids) > BULK_MAX:

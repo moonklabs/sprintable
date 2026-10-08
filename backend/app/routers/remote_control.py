@@ -17,7 +17,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.organization import Organization
 from app.services import remote_control
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import is_active_owner, resolve_member
 
 router = APIRouter(tags=["remote-control"])
 
@@ -60,18 +60,10 @@ async def _org(db: AsyncSession, org_id: uuid.UUID, *, lock: bool = False) -> Or
 
 
 async def _may_change(db: AsyncSession, member) -> bool:
-    """story #4585 (PO 01:35Z): 4598's rule for «묻지 않고 일하기» — an owner whose member row is active, fail closed (no members
-    row · soft-deleted · inactive = not an owner here). An inactive owner held the whole org's switch while `owner_names` (active
-    people only) never named them. «Owner» stays the resolver's, on the branch in use (members.org_role on the anchor branch ·
-    org_members.role on the legacy one — 4583's test): 4598's `is_active_owner` reads the legacy column only, so it is not reused
-    here (on the legacy branch the two say the same)."""
-    from app.models.member import Member
-
-    if member.role != "owner":
-        return False
-    return (await db.execute(
-        select(Member.id).where(Member.id == member.id, Member.is_active.is_(True), Member.deleted_at.is_(None))
-    )).first() is not None
+    """story #4585 (PO 01:35Z): an owner whose member row is active, fail closed — an inactive owner held the whole org's switch
+    while `owner_names` (active people only) never named them. story #4598: the rule lives in `member_resolver.is_active_owner`,
+    the one the run profile's «묻지 않고 일하기» gates call too."""
+    return await is_active_owner(db, member)
 
 
 @router.get("/api/v2/organizations/{org_id}/remote-control", response_model=RemoteControlState)

@@ -137,6 +137,18 @@ async def resolve_member(
     return await _resolve_member_legacy(auth, org_id, session, project_id)
 
 
+async def is_active_owner(session: AsyncSession, member: ResolvedMember) -> bool:
+    """story #4585 · #4598 (PO 01:42Z): who may flip an org-wide switch — «원격 제어» and «묻지 않고 일하기». An owner by
+    `resolve_member` (the branch in use: members.org_role on the anchor branch · org_members.role on the legacy one — 4583's
+    resolver-branches test) whose members row is active and not deleted. Fail closed: no members row is not an owner either.
+    One rule in one place — the remote-control gate and the run profile's gates both call this."""
+    if member.role != "owner":
+        return False
+    return (await session.execute(
+        select(Member.id).where(Member.id == member.id, Member.is_active.is_(True), Member.deleted_at.is_(None))
+    )).first() is not None
+
+
 async def resolve_member_db_verified(
     auth: AuthContext,
     org_id: uuid.UUID,
