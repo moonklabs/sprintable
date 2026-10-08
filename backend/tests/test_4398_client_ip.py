@@ -4,6 +4,8 @@
 | 프런트(비밀 맞음) | X-Sprintable-Client-IP | 그 값 |
 | 백엔드 run.app 직통 | X-Sprintable-Client-IP · XFF 앞 칸 | XFF 오른쪽 끝(앞단이 붙인 접속 주소) |
 | 비밀 미설정 | 전부 | XFF 오른쪽 끝 |
+| 오른쪽 끝이 Cloudflare 대역(#4546) | XFF 앞 칸 | CF-Connecting-IP(없거나 깨지면 오른쪽 끝) |
+| 오른쪽 끝이 Cloudflare 아님(#4546) | CF-Connecting-IP · XFF 앞 칸의 CF 주소 | XFF 오른쪽 끝 |
 | Cloud Run 밖 | XFF | 소켓 주소 |
 """
 from __future__ import annotations
@@ -82,6 +84,62 @@ def test_a_malformed_rightmost_forwarded_entry_falls_back_to_the_socket(on_cloud
 def test_ipv6_is_normalized(on_cloud_run, with_secret):
     req = _request({CLIENT_IP_HEADER: "2001:DB8::0001", EDGE_KEY_HEADER: _SECRET})
     assert client_ip(req) == "2001:db8::1"
+
+
+# ── story #4546: the backend behind Cloudflare (whether or not prod is — right either way) ──
+
+_CF_EDGE = "172.70.1.2"  # in 172.64.0.0/13
+_CF_EDGE_V6 = "2606:4700:10::1"
+
+
+def test_4546_cloudflare_edge_at_the_right_end_trusts_cf_connecting_ip(on_cloud_run):
+    """① the connecting address is a Cloudflare edge → the user is CF-Connecting-IP (Cloudflare always overwrites it)."""
+    assert client_ip(_request({"X-Forwarded-For": f"192.0.2.9, {_CF_EDGE}", "CF-Connecting-IP": "203.0.113.7"})) == "203.0.113.7"
+    assert client_ip(_request({"X-Forwarded-For": _CF_EDGE_V6, "CF-Connecting-IP": "2001:DB8::7"})) == "2001:db8::7"
+
+
+def test_4546_a_non_cloudflare_right_end_ignores_a_forged_cf_connecting_ip(on_cloud_run):
+    """② run.app direct: the connecting address is not Cloudflare → a CF-Connecting-IP the caller wrote is ignored."""
+    assert client_ip(_request({"X-Forwarded-For": "198.51.100.9", "CF-Connecting-IP": "203.0.113.7"})) == "198.51.100.9"
+
+
+def test_4546_a_forged_cloudflare_address_in_the_left_items_is_not_the_connecting_address(on_cloud_run):
+    """③ a caller writing a Cloudflare address into XFF's left items does not make the request «from Cloudflare»."""
+    forged = {"X-Forwarded-For": f"{_CF_EDGE}, 198.51.100.9", "CF-Connecting-IP": "203.0.113.7"}
+    assert client_ip(_request(forged)) == "198.51.100.9"
+
+
+def test_4546_cloudflare_edge_without_a_usable_cf_connecting_ip_keeps_the_edge(on_cloud_run):
+    assert client_ip(_request({"X-Forwarded-For": _CF_EDGE})) == _CF_EDGE
+    assert client_ip(_request({"X-Forwarded-For": _CF_EDGE, "CF-Connecting-IP": "nope"})) == _CF_EDGE
+
+
+def test_4546_the_front_s_secret_still_wins_over_the_cloudflare_rule(on_cloud_run, with_secret):
+    req = _request({CLIENT_IP_HEADER: "203.0.113.1", EDGE_KEY_HEADER: _SECRET, "X-Forwarded-For": _CF_EDGE, "CF-Connecting-IP": "192.0.2.5"})
+    assert client_ip(req) == "203.0.113.1"
+
+
+def test_4546_outside_cloud_run_cloudflare_headers_change_nothing(monkeypatch):
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    assert client_ip(_request({"X-Forwarded-For": _CF_EDGE, "CF-Connecting-IP": "203.0.113.7"}, peer="127.0.0.1")) == "127.0.0.1"
+
+
+def test_4546_cloudflare_ranges_are_the_web_s_list():
+    """One list: the backend's ranges are exactly the web's (apps/web/src/lib/client-ip.ts) — change one, this fails."""
+    import re
+    from pathlib import Path
+
+    from app.core.client_ip import CLOUDFLARE_IPV4_RANGES, CLOUDFLARE_IPV6_RANGES
+
+    web = (Path(__file__).resolve().parents[2] / "apps/web/src/lib/client-ip.ts").read_text(encoding="utf-8")
+
+    def ranges(name: str) -> list[str]:
+        block = re.search(rf"export const {name} = \[(.*?)\] as const;", web, re.S)
+        assert block, f"{name} not found in client-ip.ts"
+        return re.findall(r"'([^']+)'", block.group(1))
+
+    assert list(CLOUDFLARE_IPV4_RANGES) == ranges("CLOUDFLARE_IPV4_RANGES")
+    assert list(CLOUDFLARE_IPV6_RANGES) == ranges("CLOUDFLARE_IPV6_RANGES")
 
 
 # ── 1단계 적용: resend 전용 limiter의 key_func로 실제 상한을 돌린다(메모리 저장 · 켜 둔 limiter) ──
