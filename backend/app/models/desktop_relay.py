@@ -28,6 +28,10 @@ SESSION_SELF_RESUME = ("maybe", "no", "unknown")
 # story #4599 (0442 · contract v1.13 · Kadir lens ③): the folder a macOS window asks about — a closed list, carried with
 # `waiting_system` only (the daemon read it from tccd's service name; a window seen by owner only carries none)
 SESSION_SYSTEM_FOLDERS = ("documents", "desktop", "downloads", "network_volume", "icloud")
+# story #4641 (0449 · design 4641 · Kadir lens conditional pass): the permission mode a person widened at the terminal — the closed
+# list (the daemon sends only these; a mode it does not know is not sent). The order (plan < default < acceptEdits < auto <
+# bypassPermissions) is the daemon's alone; the server checks the list and from ≠ to.
+SESSION_WIDENED_MODES = ("plan", "default", "acceptEdits", "auto", "bypassPermissions")
 # story #4560 (0444 · contract v2.1 §5 · PO 14:41Z): the daemon did not touch a session whose limit should be over — the terminal's
 # screen was not the expected one (`screen`), or the one Esc it sent was not taken (`esc_not_taken`)
 SESSION_LIMIT_HELD = ("screen", "esc_not_taken")
@@ -65,6 +69,12 @@ class DesktopSession(Base):
         CheckConstraint(_in("runtime", SESSION_RUNTIMES), name="ck_desktop_sessions_runtime"),
         CheckConstraint(f"limit_self_resume IS NULL OR {_in('limit_self_resume', SESSION_SELF_RESUME)}", name="ck_desktop_sessions_limit_self_resume"),
         CheckConstraint(f"system_folder IS NULL OR {_in('system_folder', SESSION_SYSTEM_FOLDERS)}", name="ck_desktop_sessions_system_folder"),
+        CheckConstraint(f"permission_widened_from IS NULL OR {_in('permission_widened_from', SESSION_WIDENED_MODES)}", name="ck_desktop_sessions_widened_from"),
+        CheckConstraint(f"permission_widened_to IS NULL OR {_in('permission_widened_to', SESSION_WIDENED_MODES)}", name="ck_desktop_sessions_widened_to"),
+        CheckConstraint(
+            "(permission_widened_at IS NULL) = (permission_widened_from IS NULL) AND (permission_widened_from IS NULL) = (permission_widened_to IS NULL)",
+            name="ck_desktop_sessions_widened_all_or_none",
+        ),
         CheckConstraint(f"limit_held IS NULL OR {_in('limit_held', SESSION_LIMIT_HELD)}", name="ck_desktop_sessions_limit_held"),
     )
 
@@ -83,6 +93,10 @@ class DesktopSession(Base):
     # story #4534 (0437): a usage limit's why — on a limit word only (services.desktop_relay)
     # story #4599: the folder the macOS window asks about (waiting_system only · a closed list · never a path)
     system_folder: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4641 (0449): the latest widening a person made at the terminal — three columns, all set or none (the CHECK above)
+    permission_widened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    permission_widened_from: Mapped[str | None] = mapped_column(Text, nullable=True)
+    permission_widened_to: Mapped[str | None] = mapped_column(Text, nullable=True)
     limited: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     limit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     limit_again: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

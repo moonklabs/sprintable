@@ -31,6 +31,7 @@ from app.models.desktop_relay import (
     DesktopDeviceToken,
     DesktopSession,
     SESSION_LIMIT_STATES,
+    SESSION_WIDENED_MODES,
 )
 from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_setup import DesktopSetup
@@ -162,6 +163,13 @@ class SystemHold(BaseModel):
     folder: Literal["documents", "desktop", "downloads", "network_volume", "icloud"] | None = None
 
 
+# story #4641 (design 4641 · 0449): a mode a person widened at the terminal — the same closed list as the model (a test holds them together)
+WidenedMode = Literal["plan", "default", "acceptEdits", "auto", "bypassPermissions"]
+# a widening stamped further ahead of the server's clock than this is not believed: the three keys are dropped, never kept (a
+# far-future `at` would pin the newer-wins rule for good)
+WIDENED_MAX_AHEAD = timedelta(minutes=5)
+
+
 class SessionReport(BaseModel):
     """One session's state — nothing else: no terminal bytes, no prompt text, no path, no key (extra fields → 422)."""
 
@@ -177,6 +185,10 @@ class SessionReport(BaseModel):
     limit: SessionLimit | None = None
     # story #4599: the window's folder — with `waiting_system` only (the validator below)
     system: SystemHold | None = None
+    # story #4641: a widening a person made at the terminal — the three together or none; the daemon decides the order (from ≠ to only)
+    permission_widened_at: OffsetDatetime | None = None
+    permission_widened_from: WidenedMode | None = None
+    permission_widened_to: WidenedMode | None = None
     # story #4534 (0438 · PO 06:30Z): whether this session can take an instruction into the running turn — read by the daemon once
     # when the session starts. It only hides [지금 지시] on the web; the daemon decides again when an instruction comes (Kadir 06:31Z)
     instruct_now: StrictBool | None = None  # a boolean only — never «yes» · 1 read as true
@@ -187,6 +199,11 @@ class SessionReport(BaseModel):
             raise ValueError("limit is carried with waiting_input · error · paused_limit only")
         if self.system is not None and self.state != "waiting_system":
             raise ValueError("system is carried with waiting_system only")
+        widened = (self.permission_widened_at, self.permission_widened_from, self.permission_widened_to)
+        if any(v is not None for v in widened) and not all(v is not None for v in widened):
+            raise ValueError("permission widening: the at, from and to come together or not at all")
+        if self.permission_widened_from is not None and self.permission_widened_from == self.permission_widened_to:
+            raise ValueError("permission widening: from and to are the same mode")
         return self
 
 
@@ -234,6 +251,35 @@ def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
 def _set_system(row: DesktopSession, report: SessionReport) -> None:
     """story #4599: the window's folder is the report's — any other word (the hold is over) clears it."""
     row.system_folder = report.system.folder if report.state == "waiting_system" and report.system else None
+
+
+def _set_widened(row: DesktopSession, report: SessionReport, now: datetime) -> None:
+    """story #4641: the latest widening is the report's, by its `at` — a report without one keeps what is stored (its clock is the
+    daemon's and only a newer `at` replaces); a fresh start (`starting`) holds none; an `at` past the bound is dropped with a log line."""
+    if report.state == "starting":
+        row.permission_widened_at = row.permission_widened_from = row.permission_widened_to = None
+        return
+    if report.permission_widened_at is None:
+        return
+    if report.permission_widened_at > now + WIDENED_MAX_AHEAD:
+        logger.info("relay.widened_ahead_dropped", extra={"session_key": row.session_key})
+        return
+    if row.permission_widened_at is not None and report.permission_widened_at <= row.permission_widened_at:
+        return
+    row.permission_widened_at = report.permission_widened_at
+    row.permission_widened_from = report.permission_widened_from
+    row.permission_widened_to = report.permission_widened_to
+
+
+def widened_view(row: DesktopSession) -> dict:
+    """story #4641: the widening as a reader sees it — the three keys, only while one is stored."""
+    if row.permission_widened_at is None:
+        return {}
+    return {
+        "permission_widened_at": row.permission_widened_at.isoformat(),
+        "permission_widened_from": row.permission_widened_from,
+        "permission_widened_to": row.permission_widened_to,
+    }
 
 
 def system_view(row: DesktopSession) -> dict | None:
@@ -326,6 +372,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     row.ended_at = report.at if report.state == "stopped" else None
     _set_limit(row, report.limit)
     _set_system(row, report)  # story #4599
+    _set_widened(row, report, _now())  # story #4641
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
     await touch_device(db, setup.id)
     await db.flush()
@@ -376,6 +423,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         row.ended_at = s.at if s.state == "stopped" else None
         _set_limit(row, s.limit)
         _set_system(row, s)  # story #4599
+        _set_widened(row, s, now)  # story #4641
         row.instruct_now = s.instruct_now
     for row in existing.values():
         row.last_report_seq = snapshot.report_seq
@@ -422,6 +470,8 @@ async def device_sessions_view(
         **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),
         # story #4599: a held turn's why (the window's folder) — for the new web only, and only while the device is heard
         **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
+        # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard
+        **(widened_view(r) if not silent else {}),
         # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))
         "instruct_now": None if silent else r.instruct_now,
         # story #4543 (PO 21:12Z): when the session began and ended — the crew's daily ledger reads app coverage from these. Facts, not
