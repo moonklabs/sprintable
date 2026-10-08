@@ -173,7 +173,12 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                 _agent_connections.pop(relay.wake_key(setup_id), None)
             await sse_lease.release(scope, conn_id)
 
-    return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    # story #4618 (PO 02:24Z): the setup's organization, so the daemon can give a phone paired on one setup to its sibling setups of
+    # the same organization only (it pins only after a person matched the number on that Mac; the server still keeps each setup's
+    # pairs from that setup's own report). Not a secret: the device token already names it. A header, not a frame: an older daemon
+    # never sees an unknown event.
+    return StreamingResponse(generate(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Desktop-Org-Id": str(org_id)})
 
 
 @router.put("/relay/sessions")
