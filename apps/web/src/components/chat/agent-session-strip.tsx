@@ -311,6 +311,8 @@ function ResultLine({ result }: { result: Result }) {
     case 'sent_as_message': return line(t('command.sentAsMessage'));
     case 'sent_as_message_not_now': return line(t('command.sentAsMessageNotNow'));
     case 'too_long': return line(t('sheet.tooLong'));
+    // story 4633 (Yuna 4633-hidden-text-copy.md · web line): refused for invisible characters — nothing went in, nothing was sent as a message
+    case 'hidden_text': return line(t('command.hiddenText'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
     // story #4599 (Yuna ① · PO 14:18Z): a [멈춤] pressed just before the macOS window came up — refused, only [세션 끝내기] works now
     case 'system_wait_end_only': return line(t('command.stopSystemWait'));

@@ -11,6 +11,7 @@
 // no new signature), so nothing goes in twice.
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { hiddenCharsChange } from './instruction-text';
 import type { PhoneAnswer } from './phone-bridge';
 
 export type CommandOutcome =
@@ -21,6 +22,8 @@ export type CommandOutcome =
   | { kind: 'sent_as_message' } // the turn had ended — sent as a message instead (it goes in when its turn comes)
   | { kind: 'sent_as_message_not_now' } // this session could not take it into the turn (the daemon said so) — sent as a message instead
   | { kind: 'too_long' } // over 400 code points — the sheet stops it first; the server refuses it again
+  // story 4633 (contract v0.4 §3 · web): the daemon refused it because the text holds invisible characters — refused, never sent as a message
+  | { kind: 'hidden_text' }
   | { kind: 'unreachable' } // the server refused before making it (409 device_unreachable) — certainly not sent
   | { kind: 'unknown'; pending: Pending } // it may have gone (the post's answer was lost · no end in two minutes) — follow it, never redo it
   | { kind: 'remote_off' } // the organization turned remote control off
@@ -95,6 +98,7 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
   // the turn had ended: an instruction goes in as a message (the person's words are never dropped) · a stop had nothing to stop
   const notWorking = async (text: string): Promise<CommandOutcome> => {
     if (!prompt) return { kind: 'already_stopped' };
+    if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
     return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
   };
 
@@ -138,6 +142,7 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
   const text = typeof pending.body.text === 'string' ? pending.body.text : '';
   const notWorking = async (): Promise<CommandOutcome> => {
     if (!prompt) return { kind: 'already_stopped' };
+    if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
     return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
   };
   let res: Response;
@@ -161,6 +166,7 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
     // story #4599 (PO 14:18Z): a macOS window holds the turn — the stop was refused before anything was made; only an end goes
     if (code === 'system_wait_end_only') return { kind: 'system_wait_end_only' };
     if (code === 'instruct_too_long') return { kind: 'too_long' };
+    if (code === 'instruct_hidden_text') return { kind: 'hidden_text' }; // story 4633: refused before anything was made — never a message
     if (code === 'remote_control_off') return { kind: 'remote_off' };
     if (code === 'conversation_not_found') return { kind: 'conversation_not_found' };
     if (code === 'phone_not_paired') return { kind: 'not_paired' };
@@ -197,12 +203,17 @@ async function follow(agentId: string, pending: Pending, deps: CommandDeps): Pro
     if (r.state === 'rejected' && r.result_code === 'session_not_working') {
       if (!prompt) return { kind: 'already_stopped' };
       const text = typeof pending.body.text === 'string' ? pending.body.text : '';
+      if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
       return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
     }
     // story #4534 (PO 06:20Z · Kadir 06:31Z (a)): the daemon could not put it into this session's turn (refused before anything was
     // pasted) — it goes in as a message, never dropped; its own line says why
+    // story 4633 (contract v0.4 §3): the daemon refused the signed text for its hidden characters — its own line; no «send as a message»
+    // route (the same words would reach the chat unchecked)
+    if (prompt && r.state === 'rejected' && r.result_code === 'instruct_hidden_text') return { kind: 'hidden_text' };
     if (prompt && r.state === 'rejected' && r.result_code === 'instruct_not_now') {
       const text = typeof pending.body.text === 'string' ? pending.body.text : '';
+      if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
       return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message_not_now' } : { kind: 'failed' };
     }
     if (r.state === 'rejected' || r.state === 'failed') return { kind: 'failed' };

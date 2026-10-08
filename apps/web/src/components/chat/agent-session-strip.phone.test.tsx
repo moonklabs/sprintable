@@ -473,4 +473,84 @@ describe('[4534] [지금 지시] only when the daemon can put it into the turn',
     expect(commandLine()?.textContent).toBe(ko.sheet.tooLong);
     expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
   });
+
+  // story 4633 (contract v0.4 §3 · Yuna's web line): a text the daemon refused for its hidden characters gets its own line, and it never
+  // goes into the chat as a message (the same words would arrive unchecked there)
+  it('[4633] the daemon refused it for hidden characters (instruct_hidden_text) → its own line, nothing as a message', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'instruct_hidden_text' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run the tests' });
+    await render();
+    await press(ko.button.instruct);
+    await type('run the tests');
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  it('[4633] the server refuses it for hidden characters (instruct_hidden_text) → its own line, nothing as a message', async () => {
+    const calls = server(res(422, { error: { code: 'instruct_hidden_text' } }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run the tests' });
+    await render();
+    await press(ko.button.instruct);
+    await type('run the tests');
+    await press(ko.sheet.send);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  // story 4633 (PO correction): the «send as a message» route is closed by the same check — a text with a hidden character never goes
+  // into the chat, even when the daemon only said «not now» (the fallback would deliver it unchecked)
+  it('[4633] the daemon said «not now», but the text holds a hidden character → no message; its own line', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'instruct_not_now' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: `run${String.fromCodePoint(0x200b)} the tests` });
+    await render();
+    await press(ko.button.instruct);
+    await type(`run${String.fromCodePoint(0x200b)} the tests`);
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  // story 4633 (Kadir 943fac90f · survivors): the two other message routes are held by the same check — the daemon found the turn ended
+  // (session_not_working) on the poll, and the server found it ended on the post — a hidden character means no message on either
+  it('[4633] the daemon found the turn ended (session_not_working) and the text holds a hidden character → no message; its own line', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'session_not_working' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: `run${String.fromCodePoint(0x200b)} the tests` });
+    await render();
+    await press(ko.button.instruct);
+    await type(`run${String.fromCodePoint(0x200b)} the tests`);
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  it('[4633] the server found the turn ended (409 session_not_working) and the text holds a hidden character → no message; its own line', async () => {
+    const calls = server(res(409, { error: { code: 'session_not_working' } }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: `run${String.fromCodePoint(0x200b)} the tests` });
+    await render();
+    await press(ko.button.instruct);
+    await type(`run${String.fromCodePoint(0x200b)} the tests`);
+    await press(ko.sheet.send);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  it('[4633 · probe] a tab and a CR in the text are not hidden characters — the not-now fallback still sends it as a message', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'instruct_not_now' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run\tthe\rtests' });
+    await render();
+    await press(ko.button.instruct);
+    await type('run\tthe\rtests');
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.sentAsMessageNotNow);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(true);
+  });
 });
