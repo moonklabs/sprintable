@@ -45,33 +45,30 @@ export async function GET(request: Request) {
 
   const cookieStore = await cookies();
   const cookieOpts = oauthCookieOptions(provider);
+  // story #4628: each start says all of its own values — one it does not carry is deleted, not left from an earlier start that
+  // never came back (5 minutes): a web sign-in after an abandoned native start went down the native branch (handoff, no
+  // session) and carried the old `next` / invite token. The callback reads and deletes them all, so only abandoned starts left any.
+  const setOrDrop = (name: string, value: string | null) => {
+    if (value) cookieStore.set(`${name}_${provider}`, value, cookieOpts);
+    else cookieStore.delete(`${name}_${provider}`);
+  };
   cookieStore.set(`oauth_state_${provider}`, state, cookieOpts);
-  if (tosAccepted) {
-    cookieStore.set(`oauth_tos_${provider}`, 'true', cookieOpts);
-  }
-  if (inviteToken) {
-    cookieStore.set(`oauth_invite_token_${provider}`, inviteToken, cookieOpts);
-  }
-  if (next) {
-    cookieStore.set(`oauth_next_${provider}`, next, cookieOpts);
-  }
+  setOrDrop('oauth_tos', tosAccepted ? 'true' : null);
+  setOrDrop('oauth_invite_token', inviteToken);
+  setOrDrop('oauth_next', next);
   // §10.3: code_challenge는 base64url(패딩없음) 43자 이상만 수용 — 형식이 다르면 native
   // 핸드오프 자체를 시작하지 않는다(방어적, 최종 검증은 BE issue가 authoritative).
-  if (native && codeChallenge && /^[A-Za-z0-9_-]{43,}$/.test(codeChallenge)) {
-    cookieStore.set(`oauth_native_challenge_${provider}`, codeChallenge, cookieOpts);
-    // story #3121 AC1 — 형식이 다르면(구버전 클라 미전송 포함) 조용히 기본값(https)으로 유도
-    // 되게 쿠키 자체를 세팅 안 한다(콜백에서 쿠키 부재 = https). 잘못된 값은 저장하지 않는다
-    // (오배선을 그대로 실어 나르지 않는다).
-    if (isOAuthCallbackMode(callbackModeParam)) {
-      cookieStore.set(`oauth_native_callback_mode_${provider}`, callbackModeParam, cookieOpts);
-    }
-    // story #4626 — which desktop app to hand back to: only a value in the closed table is kept (anything else = the default,
-    // no cookie at all — nothing from the URL is carried as it came). Kadir 08:18Z: a start without one also drops a cookie left
-    // by an earlier start that never came back (else the next sign-in from the default app would be sent to the check app)
-    const returnApp = nativeReturnApp(searchParams.get('return_app'));
-    if (returnApp) cookieStore.set(`oauth_native_return_app_${provider}`, returnApp, cookieOpts);
-    else cookieStore.delete(`oauth_native_return_app_${provider}`);
-  }
+  const nativeStart = native && codeChallenge && /^[A-Za-z0-9_-]{43,}$/.test(codeChallenge);
+  setOrDrop('oauth_native_challenge', nativeStart ? codeChallenge : null);
+  // story #3121 AC1 — 형식이 다르면(구버전 클라 미전송 포함) 조용히 기본값(https)으로 유도
+  // 되게 쿠키 자체를 세팅 안 한다(콜백에서 쿠키 부재 = https). 잘못된 값은 저장하지 않는다
+  // (오배선을 그대로 실어 나르지 않는다). #4628: 세팅 안 할 때는 옛 값도 지운다.
+  setOrDrop('oauth_native_callback_mode', nativeStart && isOAuthCallbackMode(callbackModeParam) ? callbackModeParam : null);
+  // story #4626 — which desktop app to hand back to: only a value in the closed table is kept (anything else = the default,
+  // no cookie at all — nothing from the URL is carried as it came); a native start only. #4628: any start without one drops
+  // a cookie left by an earlier start that never came back (Kadir 08:18Z: else the next sign-in from the default app went to
+  // the check app)
+  setOrDrop('oauth_native_return_app', nativeStart ? nativeReturnApp(searchParams.get('return_app')) : null);
 
   return NextResponse.redirect(url);
 }

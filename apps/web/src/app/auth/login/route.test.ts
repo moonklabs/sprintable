@@ -28,6 +28,7 @@ describe('GET /auth/login — native OAuth-start branch', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     h.cookiesSetMock.mockReset();
+    h.cookiesDeleteMock.mockReset();
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { url: 'https://accounts.google.com/o/oauth2/auth', state: 'st' } }) });
   });
 
@@ -127,5 +128,36 @@ describe('GET /auth/login — native OAuth-start branch', () => {
     h.cookiesDeleteMock.mockReset();
     await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', return_app: 'check' }));
     expect(h.cookiesDeleteMock).not.toHaveBeenCalledWith('oauth_native_return_app_google');
+  });
+
+  // story #4628 — each start says all of its own values: one it does not carry is deleted (never left from an earlier start).
+  // The five of 4628 and 4626's return_app (rebased onto 5010: the same rule, a web start drops it too)
+  const SIX = ['oauth_tos', 'oauth_invite_token', 'oauth_next', 'oauth_native_challenge', 'oauth_native_callback_mode', 'oauth_native_return_app'] as const;
+  const setNames = () => h.cookiesSetMock.mock.calls.map((c) => c[0] as string);
+  const deletedNames = () => h.cookiesDeleteMock.mock.calls.map((c) => c[0] as string);
+
+  it('[4628] a start with none of the values deletes each of the six — and sets none', async () => {
+    await GET(makeRequest({ provider: 'google' }));
+    for (const n of SIX) {
+      expect(deletedNames(), n).toContain(`${n}_google`);
+      expect(setNames(), n).not.toContain(`${n}_google`);
+    }
+    expect(setNames()).toContain('oauth_state_google'); // the state is always written
+  });
+
+  it('[4628] a start with all six values sets each (as before, byte for byte) and deletes none', async () => {
+    await GET(makeRequest({ provider: 'google', tos_accepted: 'true', invite_token: 'inv-1', next: '/board', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', return_app: 'check' }));
+    const value = (n: string) => h.cookiesSetMock.mock.calls.find((c) => c[0] === `${n}_google`)?.[1];
+    expect(SIX.map(value)).toEqual(['true', 'inv-1', '/board', VALID_CHALLENGE, 'custom_scheme', 'check']);
+    expect(deletedNames()).toEqual([]);
+  });
+
+  it('[4628] a native start with an invalid mode drops an old mode · a bad challenge drops the old challenge and mode · tos=false drops tos', async () => {
+    await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'android' }));
+    expect(deletedNames()).toContain('oauth_native_callback_mode_google');
+    expect(setNames()).toContain('oauth_native_challenge_google');
+    h.cookiesSetMock.mockReset(); h.cookiesDeleteMock.mockReset();
+    await GET(makeRequest({ provider: 'google', native: '1', code_challenge: 'too-short', callback_mode: 'custom_scheme', tos_accepted: 'false' }));
+    expect(deletedNames()).toEqual(expect.arrayContaining(['oauth_native_challenge_google', 'oauth_native_callback_mode_google', 'oauth_tos_google']));
   });
 });
