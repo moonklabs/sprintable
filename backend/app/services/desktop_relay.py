@@ -253,16 +253,17 @@ def _set_system(row: DesktopSession, report: SessionReport) -> None:
     row.system_folder = report.system.folder if report.state == "waiting_system" and report.system else None
 
 
-def _set_widened(row: DesktopSession, report: SessionReport, now: datetime) -> None:
+def _set_widened(row: DesktopSession, report: SessionReport, now: datetime, *, was_stopped: bool = False) -> None:
     """story #4641: the latest widening is the report's, by its `at` — a report without one keeps what is stored (its clock is the
-    daemon's and only a newer `at` replaces); a fresh start (`starting`) holds none; an `at` past the bound is dropped with a log line."""
-    if report.state == "starting":
+    daemon's and only a newer `at` replaces); a fresh start holds none: a `starting` report, or a live report on a row that had
+    ended (`was_stopped` — a new session under the same key, Kadir's lens ③); an `at` past the bound is dropped with a log line."""
+    if report.state == "starting" or (was_stopped and report.state != "stopped"):
         row.permission_widened_at = row.permission_widened_from = row.permission_widened_to = None
         return
     if report.permission_widened_at is None:
         return
     if report.permission_widened_at > now + WIDENED_MAX_AHEAD:
-        logger.info("relay.widened_ahead_dropped", extra={"session_key": row.session_key})
+        logger.info("relay.widened_ahead_dropped session=%s", row.session_key)
         return
     if row.permission_widened_at is not None and report.permission_widened_at <= row.permission_widened_at:
         return
@@ -372,12 +373,13 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
         await _make_room(db, setup.id, new_rows=1)  # story #4554 ①
         row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=session_key)
         db.add(row)
+    was_stopped = row.state == "stopped"  # captured before the row takes the new word (the new session under the same key)
     row.agent_member_id, row.runtime, row.state = report.agent_member_id, report.runtime, report.state
     row.last_report_seq, row.state_at = report.report_seq, report.at
     row.ended_at = report.at if report.state == "stopped" else None
     _set_limit(row, report.limit)
     _set_system(row, report)  # story #4599
-    _set_widened(row, report, _now())  # story #4641
+    _set_widened(row, report, _now(), was_stopped=was_stopped)  # story #4641
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
     await touch_device(db, setup.id)
     await db.flush()
@@ -423,12 +425,13 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         if row is None:
             row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=s.session_key)
             db.add(row)
+        was_stopped = row.state == "stopped"  # captured before the row takes the new word (a new session under the same key)
         row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, s.at
         row.last_report_seq = snapshot.report_seq
         row.ended_at = s.at if s.state == "stopped" else None
         _set_limit(row, s.limit)
         _set_system(row, s)  # story #4599
-        _set_widened(row, s, now)  # story #4641
+        _set_widened(row, s, now, was_stopped=was_stopped)  # story #4641
         row.instruct_now = s.instruct_now
     for row in existing.values():
         row.last_report_seq = snapshot.report_seq

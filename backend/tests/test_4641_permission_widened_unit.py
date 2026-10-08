@@ -101,3 +101,16 @@ def test_the_distinct_check_is_in_the_model_and_the_migration():
     assert "ck_desktop_sessions_widened_distinct" in names
     migration = (here / "alembic" / "versions" / "0449_desktop_session_permission_widened.py").read_text(encoding="utf-8")
     assert "ck_desktop_sessions_widened_distinct" in migration
+
+
+def test_a_live_report_on_a_row_that_had_ended_is_a_new_session_and_clears_the_widening():
+    # Kadir's lens ③ / codex on 5028: the same session_key coming back alive after a stop is a new session — no `starting` needed
+    row = _row(permission_widened_at=NOW, permission_widened_from="plan", permission_widened_to="auto")
+    _set_widened(row, _report(state="working"), NOW, was_stopped=True)
+    assert row.permission_widened_at is None and row.permission_widened_to is None
+
+
+def test_a_stop_report_on_an_ended_row_keeps_nothing_new_and_a_live_one_on_a_live_row_keeps_the_widening():
+    row = _row(permission_widened_at=NOW, permission_widened_from="plan", permission_widened_to="auto")
+    _set_widened(row, _report(state="working"), NOW, was_stopped=False)
+    assert row.permission_widened_to == "auto"
