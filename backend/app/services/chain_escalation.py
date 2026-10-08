@@ -43,7 +43,7 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -180,13 +180,23 @@ async def _recent_message_velocity(
 ) -> int:
     """최근 window_seconds 안 이 대화의 메시지 수 — 속도축 실축. caller가 이미 human-less
     대화임을 확인했으므로(호출부 관례) 발신자 전부 agent라 별도 type 필터 없이 전량 카운트."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
     from app.models.conversation import ConversationMessage
 
+    # story #4631 (Kadir 5016): only messages after the conversation's last release count — released within the window, the burst
+    # that opened the block was still counted and the first message after the release paused the conversation again at once (the
+    # admin's release undone). Now a new block needs a new burst.
+    last_release = (
+        select(func.max(ChainCircuitBreaker.released_at))
+        .where(ChainCircuitBreaker.conversation_id == conversation_id)
+        .scalar_subquery()
+    )
     # story #4631 (Kadir 5015): the database's clock — the one that stamps a message and opens a block — not the app server's
     return (await db.execute(
         select(func.count()).select_from(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.created_at >= func.now() - timedelta(seconds=window_seconds),
+            or_(last_release.is_(None), ConversationMessage.created_at > last_release),
         )
     )).scalar_one()
 
@@ -345,13 +355,30 @@ async def get_open_circuit_breaker_id(db: AsyncSession, conversation_id: uuid.UU
     )).scalar_one_or_none()
 
 
+async def may_release_circuit_breaker(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID) -> bool:
+    """story #4631 (Kadir 5016): who may release a conversation's flood block — an org owner/admin (human: org_members holds no
+    agent and `is_org_owner_or_admin` excludes one besides) whose members row is active and not deleted — the same rule as removing
+    another person's phone (#4624 · `is_active_org_admin`): a deactivated admin releases nothing. No members row → no (fail closed).
+    The release API and the conversation read's can_release both ask this, so the button and the API never disagree."""
+    from app.models.member import Member
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        return False
+    return (await db.execute(
+        select(Member.id).where(
+            Member.user_id == user_id, Member.org_id == org_id, Member.type == "human",
+            Member.is_active.is_(True), Member.deleted_at.is_(None),
+        ).limit(1)
+    )).first() is not None
+
+
 async def open_circuit_breaker_state(
     db: AsyncSession, *, conversation_id: uuid.UUID, org_id: uuid.UUID, caller_user_id: uuid.UUID | None,
 ) -> dict | None:
-    """story #4631 C: the conversation's open flood block as the web shows it — None when none is open. `can_release` follows the
-    release API's own rule (a human org owner/admin · `caller_user_id` None = not a human session → never)."""
+    """story #4631 C: the conversation's open flood block as the web shows it — None when none is open. `can_release` is the
+    release API's own question (may_release_circuit_breaker · `caller_user_id` None = not a human session → never)."""
     from app.models.chain_circuit_breaker import ChainCircuitBreaker
-    from app.services.project_auth import is_org_owner_or_admin
 
     opened_at = (await db.execute(
         select(ChainCircuitBreaker.opened_at).where(
@@ -362,7 +389,7 @@ async def open_circuit_breaker_state(
     if opened_at is None:
         return None
     _enabled, window_seconds, _threshold, _mode, release_mode = await _get_org_config(db, org_id)
-    can_release = caller_user_id is not None and await is_org_owner_or_admin(db, caller_user_id, org_id)
+    can_release = caller_user_id is not None and await may_release_circuit_breaker(db, user_id=caller_user_id, org_id=org_id)
     # Yuna «4631» §2: the way it is really released (release_if_quiet makes «auto» true) and, for auto, after how many quiet
     # minutes — the server's value (window × 2), never one the web assumes
     return {

@@ -2450,7 +2450,11 @@ async def release_circuit_breaker_endpoint(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    if not await is_org_owner_or_admin(db, uuid.UUID(auth.user_id), org_id):
+    # story #4631 (Kadir 5016): an active owner/admin only — a deactivated one releases nothing (the #4624 rule); the conversation
+    # read's can_release asks the same question, so the band's button and this route never disagree
+    from app.services.chain_escalation import may_release_circuit_breaker
+
+    if not await may_release_circuit_breaker(db, user_id=uuid.UUID(auth.user_id), org_id=org_id):
         raise HTTPException(
             status_code=403,
             detail="서킷브레이커 해제는 org owner/admin만 가능합니다.",

@@ -115,6 +115,15 @@ async def _seed_human(session, org_id, project_id=None, *, role="member"):
         name="human", is_active=True,
     ))
     await session.commit()
+    # story #4631: the members row a person has in production (member-sync — the active-admin rule reads it by user_id). An upsert:
+    # whether team_members is its own table here or the projection view over members, the row ends up with this user_id
+    from sqlalchemy import text
+
+    await session.execute(text(
+        "INSERT INTO members (id, org_id, type, user_id, name, is_active) VALUES (:id, :org, 'human', :uid, 'human', true) "
+        "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id"
+    ), {"id": om.id, "org": org_id, "uid": user_id})
+    await session.commit()
     return user_id, om.id
 
 
@@ -736,6 +745,38 @@ async def test_4631_the_open_block_as_the_web_reads_it_and_who_may_release_it():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_4631_a_deactivated_admin_neither_sees_the_button_nor_releases():
+    """Kadir (5016) · the #4624 rule: an org owner whose members row is deactivated — can_release false and the release API 403,
+    the block stays (the button and the API ask the same question)."""
+    from sqlalchemy import text
+    from app.routers.conversations import CircuitBreakerReleaseRequest, release_circuit_breaker_endpoint
+    from app.services.chain_escalation import _open_circuit_breaker, open_circuit_breaker_state
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            owner_user_id, owner_member = await _seed_human(s, org_id, project_id, role="owner")
+            conv_id = await _seed_conversation(s, org_id, project_id)
+            await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+            await s.commit()
+            assert (await open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=owner_user_id))["can_release"] is True
+
+            await s.execute(text("UPDATE members SET is_active = false WHERE id = :id"), {"id": owner_member})
+            await s.commit()
+            assert (await open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=owner_user_id))["can_release"] is False
+            with pytest.raises(HTTPException) as ei:
+                await release_circuit_breaker_endpoint(
+                    conv_id, CircuitBreakerReleaseRequest(reason="x"), db=s, auth=_human_auth(owner_user_id, org_id), org_id=org_id,
+                )
+            assert ei.value.status_code == 403
+            assert await _open_breaker_count(s, conv_id) == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_4631_get_conversation_carries_it_owner_may_release_agent_may_not():
     """The wiring: GET /conversations/{id} carries the state — the owner's view can_release · the agent's (its own block) cannot ·
     and the JSON keys the web reads. The read rule itself is not this story's (stubbed to «readable»; test_2697 owns it)."""
@@ -790,8 +831,9 @@ async def test_4631_an_auto_org_says_auto():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_4631_releasing_clears_the_episode_so_a_new_burst_pauses_again():
-    """Yuna «4631» §3 (BE 확인): released while the episode marker still lived, the same burst's next messages read «continuing» and
-    no new block opened. The release clears the marker — the next burst is a new episode and the conversation pauses again."""
+    """Yuna «4631» §3 (BE 확인) · Kadir 5016: released while the episode marker still lived, the same burst's next messages read
+    «continuing» and no new block opened. The release clears the marker and the count starts after it: the burst that opened the
+    block no longer counts (the first message after a release does not undo it), and a new burst pauses the conversation again."""
     from app.services import redis_shared
     from app.services.chain_escalation import (
         evaluate_unsupervised_chain_episode, get_open_circuit_breaker_id, release_circuit_breaker,
@@ -817,7 +859,12 @@ async def test_4631_releasing_clears_the_episode_so_a_new_burst_pauses_again():
                 await s.commit()
                 assert not await client.exists(marker), "released: the episode is over"
 
-                # the burst goes on (still above the threshold) → a new episode → paused again, a new row
+                # right after the release: the old burst's 20 messages (inside the window) no longer count — not paused again
+                await evaluate_unsupervised_chain_episode(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+                assert await get_open_circuit_breaker_id(s, conv_id) is None, "the admin's release is not undone by the old burst"
+
+                # a new burst after the release (20 more, stamped after it) → a new episode → paused again, a new row
+                await _seed_messages(s, conv_id, agent_id, 20, ages_seconds=-2)
                 await evaluate_unsupervised_chain_episode(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
                 second = await get_open_circuit_breaker_id(s, conv_id)
                 assert second is not None and second != first
