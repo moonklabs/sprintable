@@ -61,3 +61,14 @@ async def test_03_a_caller_cannot_name_the_org(world):
         # no stream, no header: a refused token says nothing about any org
         bad = await c.get(STREAM, headers=_tok("not-a-token"))
         assert bad.status_code == 401 and "x-desktop-org-id" not in bad.headers
+
+
+async def test_04_remote_control_off_is_409_with_no_org(world):
+    """Didi review 5003 (non-blocking): the 409 path ends in `_device` too — a paused device learns no org either."""
+    async with _client() as c:
+        d = await _device(c, name="d4424 mac 4618f")
+        # the setup's org with its remote control off (ORG2 is never turned on here)
+        await _sql(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG2}'")
+        await _sql(f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE id = '{d['setup_id']}'")
+        off = await c.get(STREAM, headers=_tok(d["device_token"]))
+        assert off.status_code == 409 and "x-desktop-org-id" not in off.headers
