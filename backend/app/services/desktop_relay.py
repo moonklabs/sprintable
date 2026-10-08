@@ -44,6 +44,10 @@ SESSION_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 INT32_MAX = 2_147_483_647  # `desktop_sessions.last_report_seq` · `desktop_commands.device_seq` are int4 — a report past it → 422, never 500
 SESSION_ROWS_PER_DEVICE = 200  # the most recent rows a device keeps (live and ended) — a new key past it drops the oldest ended row first
 ENDED_SESSION_RETENTION = timedelta(days=7)  # an ended session is kept this long, then goes with the next report
+# story #4554 2선 (Kadir 5002 ② · PO 04:03Z): a report's `at` is the device's clock — one past now + this is held down to now. Not
+# refused: a state report's 422 is retried as is (desktop-host relay/client.ts), so a fast clock would freeze that device's board for
+# good. A future `at` stored as is would also keep a stopped row past ENDED_SESSION_RETENTION for ever (2099 measured).
+REPORT_CLOCK_SKEW = timedelta(minutes=5)
 SESSIONS_PAGE_DEFAULT = 50  # a person's read of a device's sessions: live first, newest first — `limit` (default · max)
 SESSIONS_PAGE_MAX = 200
 DISCONNECTED_CODE = "device_disconnected"  # the open commands of a disconnected device · the stream's access_revoked reason
@@ -276,6 +280,11 @@ def _check_seq_range(seq: int) -> None:
         raise DesktopRelayError(422, "report_seq_out_of_range", f"report_seq must be at most {INT32_MAX}")
 
 
+def _reported_at(at: datetime, now: datetime) -> datetime:
+    """story #4554 2선: the device's `at`, or now when it is past now + REPORT_CLOCK_SKEW (see the constant)."""
+    return now if at > now + REPORT_CLOCK_SKEW else at
+
+
 async def _prune_expired(db: AsyncSession, setup_id: uuid.UUID, *, now: datetime) -> None:
     """story #4554 ① (PO 11:45Z): an ended session is kept ENDED_SESSION_RETENTION, then goes with the device's next report (no
     sweep job — the write path cleans its own device, under the device row's lock)."""
@@ -313,7 +322,9 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     latest = await _lock_device_seq(db, setup.id)
     if report.report_seq <= latest:
         raise _stale(report.report_seq, latest)
-    await _prune_expired(db, setup.id, now=_now())  # story #4554 ①
+    now = _now()
+    await _prune_expired(db, setup.id, now=now)  # story #4554 ①
+    at = _reported_at(report.at, now)  # story #4554 2선
     row = (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == session_key)
     )).scalar_one_or_none()
@@ -322,8 +333,8 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
         row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=session_key)
         db.add(row)
     row.agent_member_id, row.runtime, row.state = report.agent_member_id, report.runtime, report.state
-    row.last_report_seq, row.state_at = report.report_seq, report.at
-    row.ended_at = report.at if report.state == "stopped" else None
+    row.last_report_seq, row.state_at = report.report_seq, at
+    row.ended_at = at if report.state == "stopped" else None
     _set_limit(row, report.limit)
     _set_system(row, report)  # story #4599
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
@@ -331,7 +342,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     await db.flush()
     from app.services.desktop_commands import on_session_reported  # story #4534 — a [지금 지시]'s turn end
 
-    await on_session_reported(db, setup, session_key, report.state, report.at)
+    await on_session_reported(db, setup, session_key, report.state, at)
     return row
 
 
@@ -371,9 +382,10 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         if row is None:
             row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=s.session_key)
             db.add(row)
-        row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, s.at
+        at = _reported_at(s.at, now)  # story #4554 2선
+        row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, at
         row.last_report_seq = snapshot.report_seq
-        row.ended_at = s.at if s.state == "stopped" else None
+        row.ended_at = at if s.state == "stopped" else None
         _set_limit(row, s.limit)
         _set_system(row, s)  # story #4599
         row.instruct_now = s.instruct_now
@@ -389,7 +401,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     from app.services.desktop_commands import on_session_reported  # story #4534 — every line of a snapshot is a report too
 
     for s in snapshot.sessions:
-        await on_session_reported(db, setup, s.session_key, s.state, s.at)
+        await on_session_reported(db, setup, s.session_key, s.state, _reported_at(s.at, now))
     for row in existing.values():
         await on_session_reported(db, setup, row.session_key, "stopped", now)
     return len(snapshot.sessions)
