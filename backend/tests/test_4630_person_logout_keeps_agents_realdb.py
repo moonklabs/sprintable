@@ -109,3 +109,23 @@ async def test_ending_the_persons_sign_ins_leaves_agents_device_line_person_keys
             assert (await _sql(fetch=f"SELECT count(*) FROM remote_device_pairings WHERE remote_device_id = '{phone_id}' AND removed_at IS NULL"))[0][0] == 1
     finally:
         await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
+
+
+async def test_a_removed_member_cannot_fork_a_session_from_a_token_rotated_a_moment_ago(world):
+    """story #4630 (PO 09:50Z) — the admin removal (`_revoke_user_refresh_tokens`) revoked live rows only: the token a rotation
+    had just revoked kept its grace window (§2449 · expires_at untouched), and the removed person could fork a new session
+    from it. Now the same seam as a reset closes it — 401. RED on develop (that refresh was 200)."""
+    from tests.test_4424_desktop_setup_realdb import PLAIN
+
+    async with _client() as c:
+        old = await _login(PLAIN)
+        rotated = await c.post("/api/v2/auth/refresh", json={"refresh_token": old})
+        assert rotated.status_code == 200, rotated.text
+        now_held = rotated.json()["data"]["refresh_token"]
+        member_id = (await _sql(fetch=f"SELECT id FROM org_members WHERE org_id = '{ORG}' AND user_id = '{PLAIN}'"))[0][0]
+
+        removed = await c.delete(f"/api/v2/org-members/{member_id}", headers=_person(OWNER))
+        assert removed.status_code == 200, removed.text
+
+        assert (await c.post("/api/v2/auth/refresh", json={"refresh_token": now_held})).status_code == 401
+        assert (await c.post("/api/v2/auth/refresh", json={"refresh_token": old})).status_code == 401, "no fork from the grace window"
