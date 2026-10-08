@@ -196,6 +196,43 @@ async def test_03c_the_owner_is_the_resolvers_on_both_branches_a_demoted_owner_o
             await _sql(f"UPDATE members SET org_role = 'owner' WHERE id = '{OWNER_TM}'")
 
 
+async def test_03d_the_other_way_round_the_two_switches_answer_alike_on_both_branches(world, monkeypatch):
+    """story #4598 (Kadir 05:38Z · 4998 codex 01a119e0): the column the branch in use does not read decides nothing. Only
+    org_members.role demoted (members.org_role still owner): on the anchor branch an owner — «묻지 않고 일하기» 200 · «원격 제어» 200;
+    on the legacy branch not — both 403. One rule: the run profile and the remote-control gate give the same answer each time.
+    Mutation: the run profile's gates back on org_members.role → the anchor half goes RED (403 where remote control says 200)."""
+    from app.core.config import settings
+
+    remote = f"/api/v2/organizations/{ORG}/remote-control"
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4598c4")
+        a = device["agents"][0]["member_id"]
+        await _set_runtime(a, "claude-code")
+        try:
+            await _sql(f"UPDATE members SET org_role = 'owner' WHERE id = '{OWNER_TM}'")
+            await _sql(f"UPDATE org_members SET role = 'member' WHERE id = '{OWNER_TM}'")
+            [(legacy_role,)] = await _sql(fetch=f"SELECT role FROM org_members WHERE id = '{OWNER_TM}'")
+            assert legacy_role == "member", "the legacy column must say member, or this proves nothing"
+
+            # anchor branch: members.org_role is the one read → an owner for both switches
+            monkeypatch.setattr(settings, "member_ssot_resolver_shadow", True)
+            assert (await c.get(_one(a), headers=_person(OWNER))).json()["can_change_unattended"] is True
+            run = await c.put(_one(a), json={"model": None, "effort": None, "unattended": True}, headers=_person(OWNER))
+            assert run.status_code == 200, run.text
+            assert (await c.put(remote, json={"enabled": False}, headers=_person(OWNER))).status_code == 200
+            assert await _flag(a) == (True, 1, None)
+
+            # legacy branch: org_members.role is the one read → not an owner for either
+            monkeypatch.setattr(settings, "member_ssot_resolver_shadow", False)
+            assert (await c.get(_one(a), headers=_person(OWNER))).json()["can_change_unattended"] is False
+            assert _code(await c.put(_one(a), json={"model": None, "effort": None, "unattended": False}, headers=_person(OWNER))) == (403, "owner_required")
+            assert (await c.put(remote, json={"enabled": False}, headers=_person(OWNER))).status_code == 403
+            assert await _flag(a) == (True, 1, None)
+        finally:
+            await _sql(f"UPDATE org_members SET role = 'owner' WHERE id = '{OWNER_TM}'")
+            await _sql(f"UPDATE members SET org_role = 'owner' WHERE id = '{OWNER_TM}'")
+
+
 async def test_04_many_at_once_and_what_keeps_the_flag(world):
     async with _client() as c:
         device = await _device(c, name="d4424 mac 4598d")
