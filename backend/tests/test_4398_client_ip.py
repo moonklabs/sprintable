@@ -124,6 +124,22 @@ def test_4546_outside_cloud_run_cloudflare_headers_change_nothing(monkeypatch):
     assert client_ip(_request({"X-Forwarded-For": _CF_EDGE, "CF-Connecting-IP": "203.0.113.7"}, peer="127.0.0.1")) == "127.0.0.1"
 
 
+def test_4546_every_cloudflare_range_is_used_by_the_check():
+    """Each listed range is one the check really uses (Kadir 5019: the list pin alone let a range drop out of the check) — its
+    first address is Cloudflare; the address just before it is not, unless that one is itself in a listed range."""
+    import ipaddress
+
+    from app.core.client_ip import CLOUDFLARE_IPV4_RANGES, CLOUDFLARE_IPV6_RANGES, is_cloudflare_address
+
+    networks = [ipaddress.ip_network(r) for r in CLOUDFLARE_IPV4_RANGES + CLOUDFLARE_IPV6_RANGES]
+    for net in networks:
+        assert is_cloudflare_address(str(net.network_address)), f"{net} is listed but the check does not use it"
+        assert is_cloudflare_address(str(net.broadcast_address)), f"{net}'s last address is not checked"
+        before = net.network_address - 1
+        if not any(before in other for other in networks):
+            assert not is_cloudflare_address(str(before)), f"the address before {net} is not Cloudflare"
+
+
 def test_4546_cloudflare_ranges_are_the_web_s_list():
     """One list: the backend's ranges are exactly the web's (apps/web/src/lib/client-ip.ts) — change one, this fails."""
     import re
