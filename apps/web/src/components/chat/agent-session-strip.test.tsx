@@ -13,6 +13,8 @@ import enMessages from '../../../messages/en.json';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (p: string) => p }));
+// the widened line's time is the viewer's clock: pinned to Seoul so the expected «20:51» holds on any machine (the CI runner is UTC)
+vi.mock('@/components/viewer-time-zone', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/components/viewer-time-zone')>()), useViewerTimeZone: () => 'Asia/Seoul' }));
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: string; children: unknown }) => <a href={href} {...rest}>{children as never}</a> }));
 let onExtra: ((name: string, data: unknown) => void) | undefined;
 vi.mock('@/hooks/use-sse-notifications', () => ({
