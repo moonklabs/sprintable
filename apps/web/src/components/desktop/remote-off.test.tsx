@@ -263,6 +263,36 @@ describe('arrival by an in-app link press (client navigation)', () => {
     expect(sw()?.hasAttribute('data-arrived')).toBe(false); // the person's first key still ends it
   });
 
+  // story 4595 (design Yuna on 5ecb3f9da): the person moves the focus to another control inside the hold, then a value changes in those
+  // 1.5 s — the retake must not take the focus back to the switch (the cleanup only leaves a retake while the focus is still the arrival's).
+  it('[4595 · Yuna] the person moves the focus away inside the hold, then a value changes: the focus stays where the person put it', async () => {
+    vi.useFakeTimers();
+    try {
+      org = { ...OFF, can_change: true };
+      window.history.replaceState(null, '', '/desktop#remote-control');
+      Element.prototype.scrollIntoView = vi.fn();
+      let change: ReturnType<typeof useOrgRemoteControl>[1] | undefined;
+      function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
+      });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+      const other = document.createElement('button');
+      container.append(other);
+      await act(async () => { other.focus(); }); // still inside the hold
+      await act(async () => { vi.advanceTimersByTime(10); });
+      for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(other);
+      await act(async () => { change?.({ ...org, enabled: true, can_change: true, enabled_at: '2026-10-08T00:00:00Z' }); });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(other);
+      expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // story 4595 (Kadir 5021 survivor): once the hold has run out, a later value change must not move the focus back to the switch — a
   // person may be elsewhere by then. Pinned with a fake clock (the hold is 1.5 s).
   it('[4595 · Kadir] after the hold ran out, a later value change does not take the focus back', async () => {

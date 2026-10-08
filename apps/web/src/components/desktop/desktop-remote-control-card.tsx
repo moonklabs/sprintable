@@ -62,8 +62,11 @@ export function DesktopRemoteControlCard() {
     return () => {
       release();
       // story 4595: a cleanup inside the hold (a development Strict re-run, or the value changing in those 1.5 s) leaves the next run a
-      // retake; after the hold none is left, so a later change does not move the focus
-      if (Date.now() < arrivedHoldEnds.current) arrivalRetake.current = true;
+      // retake — but only while the focus is still where the arrival put it (the switch, or the body after a re-draw). A person who
+      // moved the focus away (Yuna on 5ecb3f9da) keeps it: the retake does not take it back.
+      const active = document.activeElement;
+      const stillArrival = active === null || active === document.body || active === target;
+      if (Date.now() < arrivedHoldEnds.current && stillArrival) arrivalRetake.current = true;
     };
   }, [state]);
 
