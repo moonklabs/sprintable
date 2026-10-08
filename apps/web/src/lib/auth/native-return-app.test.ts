@@ -11,7 +11,9 @@ describe('native-return-app — story #4626', () => {
   });
 
   it('⭐a value outside the table → the default · no free string: another name · a scheme · empty · another case · padded · a list', () => {
-    for (const v of ['evil', 'ai.sprintable.check', 'ai.sprintable.check:', 'CHECK', 'Check', ' check', 'check ', 'check,setup', '', 'setup', 'javascript', null, undefined]) {
+    // Kadir 08:18Z: look-alikes too — full-width letters · a Cyrillic «с» · a zero-width space · a trailing newline
+    for (const v of ['evil', 'ai.sprintable.check', 'ai.sprintable.check:', 'CHECK', 'Check', ' check', 'check ', 'check,setup', '', 'setup', 'javascript',
+      'ｃｈｅｃｋ', 'сheck', 'check​', 'check\n', null, undefined]) {
       expect(nativeReturnApp(v), String(v)).toBeNull();
     }
     // and whatever came in `app`, the link is exactly the default one — nothing of the value is in it

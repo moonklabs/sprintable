@@ -66,9 +66,11 @@ export async function GET(request: Request) {
       cookieStore.set(`oauth_native_callback_mode_${provider}`, callbackModeParam, cookieOpts);
     }
     // story #4626 — which desktop app to hand back to: only a value in the closed table is kept (anything else = the default,
-    // no cookie at all — nothing from the URL is carried as it came)
+    // no cookie at all — nothing from the URL is carried as it came). Kadir 08:18Z: a start without one also drops a cookie left
+    // by an earlier start that never came back (else the next sign-in from the default app would be sent to the check app)
     const returnApp = nativeReturnApp(searchParams.get('return_app'));
     if (returnApp) cookieStore.set(`oauth_native_return_app_${provider}`, returnApp, cookieOpts);
+    else cookieStore.delete(`oauth_native_return_app_${provider}`);
   }
 
   return NextResponse.redirect(url);

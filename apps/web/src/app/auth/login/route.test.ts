@@ -4,10 +4,10 @@
 // 않음(방어적, 형식 오류 유입 자체를 차단).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const h = vi.hoisted(() => ({ cookiesSetMock: vi.fn() }));
+const h = vi.hoisted(() => ({ cookiesSetMock: vi.fn(), cookiesDeleteMock: vi.fn() }));
 
 vi.mock('next/headers', () => ({
-  cookies: vi.fn(async () => ({ set: h.cookiesSetMock })),
+  cookies: vi.fn(async () => ({ set: h.cookiesSetMock, delete: h.cookiesDeleteMock })),
 }));
 vi.mock('@/services/app-url', () => ({ resolveAppUrl: () => 'http://localhost:3108' }));
 
@@ -112,5 +112,20 @@ describe('GET /auth/login — native OAuth-start branch', () => {
     h.cookiesSetMock.mockReset();
     await GET(makeRequest({ provider: 'google', code_challenge: VALID_CHALLENGE, return_app: 'check' }));
     expect(appCookie(), 'not a native start').toBeUndefined();
+  });
+
+  it('[4626 · Kadir 08:18Z] a native start without return_app (or off the table) drops a return_app cookie an earlier start left', async () => {
+    const starts: Record<string, string>[] = [{}, { return_app: 'evil' }, { return_app: 'Check' }];
+    for (const q of starts) {
+      h.cookiesSetMock.mockReset();
+      h.cookiesDeleteMock.mockReset();
+      await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', ...q }));
+      expect(h.cookiesDeleteMock, JSON.stringify(q)).toHaveBeenCalledWith('oauth_native_return_app_google');
+      expect(h.cookiesSetMock.mock.calls.some((c) => c[0] === 'oauth_native_return_app_google'), JSON.stringify(q)).toBe(false);
+    }
+    // a start with it sets, never deletes
+    h.cookiesDeleteMock.mockReset();
+    await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', return_app: 'check' }));
+    expect(h.cookiesDeleteMock).not.toHaveBeenCalledWith('oauth_native_return_app_google');
   });
 });
