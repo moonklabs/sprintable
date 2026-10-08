@@ -10,7 +10,7 @@ import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgRemoteControl, type OrgRemoteControl } from '@/lib/org-remote-control';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
-import { formatOwners, holdArrivalFocus, REMOTE_CONTROL_ANCHOR, takeArrival } from '@/components/desktop/remote-off';
+import { ARRIVAL_HOLD_MS, formatOwners, holdArrivalFocus, REMOTE_CONTROL_ANCHOR, takeArrival } from '@/components/desktop/remote-off';
 
 /**
  * story #4535 AC1 (명세 모음 B-1 ① · 유나 09:24Z 자리 확정) — /desktop의 «데스크톱 앱» 카드와 «연결된 기기» 사이 카드 하나.
@@ -34,6 +34,8 @@ export function DesktopRemoteControlCard() {
   const cardRef = useRef<HTMLDivElement>(null);
   const wasAsking = useRef(false);
   const arrived = useRef(false);
+  const arrivedHoldEnds = useRef(0); // story 4595: when the arrival's hold runs out
+  const arrivalRetake = useRef(false); // story 4595: the next run takes the arrival again (a cleanup inside the hold)
 
   // story #4583: every «원격 제어 켜러 가기» lands here (`/desktop#remote-control`) — once the card is drawn, bring it into view and put
   // the focus on the switch (an owner) or on the card (anyone else). It only moves; turning it on stays one press on the switch.
@@ -41,12 +43,22 @@ export function DesktopRemoteControlCard() {
   // effect, and the `#` may not be on the address yet; `takeArrival` and `holdArrivalFocus` (remote-off.tsx) cover both.
   useEffect(() => {
     if (!state || arrived.current || typeof window === 'undefined') return;
+    const retake = arrivalRetake.current;
+    arrivalRetake.current = false;
     const byHash = window.location.hash === `#${REMOTE_CONTROL_ANCHOR}`;
-    if (!takeArrival() && !byHash) return;
+    if (!retake && !takeArrival() && !byHash) return;
     arrived.current = true;
     cardRef.current?.scrollIntoView({ block: 'center' });
     const target = state.can_change ? switchRef.current : cardRef.current;
-    if (target) return holdArrivalFocus(target, cardRef.current);
+    if (!target) return;
+    const release = holdArrivalFocus(target, cardRef.current);
+    arrivedHoldEnds.current = Date.now() + ARRIVAL_HOLD_MS;
+    return () => {
+      release();
+      // story 4595: a cleanup inside the hold (a development Strict re-run, or the value changing in those 1.5 s) lets the next run
+      // take the arrival again; after the hold it stays taken, so a later change does not move the focus
+      if (Date.now() < arrivedHoldEnds.current) { arrived.current = false; arrivalRetake.current = true; }
+    };
   }, [state]);
 
   // the in-line confirmation closed ([끄기] or [취소]): the focus it held goes back to the switch, not to the page

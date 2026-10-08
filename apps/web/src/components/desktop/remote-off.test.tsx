@@ -4,7 +4,7 @@
 // (to `/desktop#remote-control` — it never flips the switch), anyone else the owner's name in «조직 소유자({owners})». Nothing while
 // it is on. The approvals line only with a connected computer. The chat line stays only while the agent works or waits (PO 04:11Z).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -22,6 +22,7 @@ const { formatOwners, markArrival, holdArrivalFocus } = await import('./remote-o
 const { AgentPermissionRequests } = await import('@/components/inbox/agent-permission-requests');
 const { DesktopRemoteControlCard } = await import('./desktop-remote-control-card');
 const { AgentSessionStrip } = await import('@/components/chat/agent-session-strip');
+const { useOrgRemoteControl } = await import('@/lib/org-remote-control');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -241,6 +242,25 @@ describe('arrival by an in-app link press (client navigation)', () => {
     expect(sw()?.className).toContain('data-[arrived]:ring-3');
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' })); });
     expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+  });
+
+  it('[4595] a value change inside the hold runs the arrival again — the cleanup is not the end of it, the switch keeps its mark', async () => {
+    org = { ...OFF, can_change: true };
+    window.history.replaceState(null, '', '/desktop#remote-control');
+    Element.prototype.scrollIntoView = vi.fn();
+    // a second reader of the same org value: its setter publishes a change, as another part of the page would
+    let change: ReturnType<typeof useOrgRemoteControl>[1] | undefined;
+    function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
+    });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+    await act(async () => { change?.({ ...org, enabled: true, can_change: true, enabled_at: '2026-10-08T00:00:00Z' }); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(sw()?.hasAttribute('data-arrived')).toBe(true); // the change came inside the hold: the card holds the focus again
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' })); });
+    expect(sw()?.hasAttribute('data-arrived')).toBe(false); // the person's first key still ends it
   });
 
   it('the mark stays while the focus stays after the hold ends, and comes off when the focus leaves', async () => {

@@ -42,6 +42,8 @@ export function takeArrival(): boolean {
 }
 
 export const ARRIVED_ATTR = 'data-arrived';
+/** how long the arrival holds the focus while the person has not pressed a key or a pointer (story 4595: the card reads it too) */
+export const ARRIVAL_HOLD_MS = 1500;
 
 /**
  * Focus `target`, mark it `data-arrived` (its ring is drawn from that mark — `:focus-visible` is the browser's guess and is false
@@ -51,7 +53,7 @@ export const ARRIVED_ATTR = 'data-arrived';
  * leaves after the hold — never only because the hold's time ran out (the ring vanishing while the focus stays would be a change
  * on screen). Returns the cleanup.
  */
-export function holdArrivalFocus(target: HTMLElement, card: HTMLElement | null, holdMs = 1500): () => void {
+export function holdArrivalFocus(target: HTMLElement, card: HTMLElement | null, holdMs = ARRIVAL_HOLD_MS): () => void {
   target.setAttribute(ARRIVED_ATTR, '');
   target.focus();
   let holding = true;
