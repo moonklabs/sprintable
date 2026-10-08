@@ -2,7 +2,9 @@
 // the copy turns this RED. When the mobile table changes: change it there first (mobile desktop-protocol/invisible.ts), copy it here,
 // then set PINNED to the new hash (`node -e "console.log(require('crypto').createHash('sha256').update(require('fs').readFileSync('invisible.ts')).digest('hex'))"`
 // run in this folder). The mobile side is compared byte for byte by a daily run (디디 몫).
-// Limit: a drift between the two repos is seen by this check at the next web CI run, not in the mobile repo's own run — up to a day late.
+// Limit: this test does NOT read the mobile repo. It pins this copy to one hash, so a copy change that also moves PINNED passes here
+// (the review catches that). The byte comparison with the mobile table is the mobile repo's daily check (mobile #442), which catches
+// a drift between the two repos — up to a day late.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
