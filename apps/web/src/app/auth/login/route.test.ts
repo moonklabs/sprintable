@@ -149,7 +149,16 @@ describe('GET /auth/login — native OAuth-start branch', () => {
     await GET(makeRequest({ provider: 'google', tos_accepted: 'true', invite_token: 'inv-1', next: '/board', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', return_app: 'check' }));
     const value = (n: string) => h.cookiesSetMock.mock.calls.find((c) => c[0] === `${n}_google`)?.[1];
     expect(SIX.map(value)).toEqual(['true', 'inv-1', '/board', VALID_CHALLENGE, 'custom_scheme', 'check']);
-    expect(deletedNames()).toEqual([]);
+    expect(deletedNames()).toEqual(['oauth_link_google']); // only the connect flag, which a sign-in never carries (below)
+  });
+
+  it('[4628 follow-up] every sign-in start drops oauth_link_* (set by /auth/link · a sign-in never carries it) and never sets it', async () => {
+    for (const provider of ['google', 'apple'] as const) {
+      h.cookiesSetMock.mockReset(); h.cookiesDeleteMock.mockReset();
+      await GET(makeRequest({ provider }));
+      expect(deletedNames()).toContain(`oauth_link_${provider}`);
+      expect(setNames()).not.toContain(`oauth_link_${provider}`);
+    }
   });
 
   it('[4628] a native start with an invalid mode drops an old mode · a bad challenge drops the old challenge and mode · tos=false drops tos', async () => {

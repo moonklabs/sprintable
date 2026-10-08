@@ -61,6 +61,19 @@ describe('[4628] an abandoned native start, then a web sign-in in the same brows
     expect(new URL(res.headers.get('location')!).pathname).not.toBe('/old-place');
   });
 
+  it('[follow-up · Kadir 01a11ada] an abandoned «connect account» start, then a sign-in: the callback signs in — not the connect way', async () => {
+    // A, signed in, starts «connect Google» from settings (/auth/link leaves oauth_link_google) and never comes back; then signs in
+    jar.set('sp_at', 'a-session');
+    jar.set('oauth_link_google', 'true');
+    await loginStart(url('/auth/login', { provider: 'google' }));
+    expect(jar.has('oauth_link_google'), 'a sign-in drops the connect flag').toBe(false);
+
+    const res = await callback(url('/api/auth/callback/google', { code: 'c', state: 'st' }), { params: Promise.resolve({ provider: 'google' }) });
+    expect(calls.some((c) => c.url.includes('/link/callback')), 'not sent to the connect endpoint').toBe(false);
+    expect(calls.some((c) => c.url.includes('/api/v2/auth/oauth/callback')), 'the sign-in endpoint').toBe(true);
+    expect(res.headers.get('location')).not.toContain('link_error');
+  });
+
   it('control: the native start itself, finished, still goes the native way (nothing of this change in its path)', async () => {
     await loginStart(url('/auth/login', { provider: 'google', native: '1', code_challenge: 'a'.repeat(43), callback_mode: 'custom_scheme' }));
     const res = await callback(url('/api/auth/callback/google', { code: 'c', state: 'st' }), { params: Promise.resolve({ provider: 'google' }) });
