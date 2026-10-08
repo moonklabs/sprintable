@@ -148,10 +148,10 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
 });
 
 describe('[4547] not a Mac — one line where the warning and [다운로드] were (Yuna 4547-phone-download-card.md · spec «4524 곁»)', () => {
-  // [SID:4619] the Electron app's manifest shape (/desktop/downloads/macos.json)
+  // [SID:4619] the Electron app's manifest shape (/desktop/downloads/macos.json) — the url inside our bucket (5005's link guard)
   const manifest = () => vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
     product: 'Sprintable Dev Setup', version: '0.3.1', build: 'abc123def',
-    url: 'https://storage.googleapis.com/x/Sprintable-Dev-Setup-abc123def-arm64.dmg',
+    url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/0.3.1/Sprintable-Dev-Setup-abc123def-arm64.dmg',
   })));
   /** 4619's first-open guide box (its title · its two steps) and the button — the Mac-only part of the card */
   const macPart = () => ({ title: !!q('desktop-download-gatekeeper-title'), steps: !!q('desktop-download-install-steps'),
