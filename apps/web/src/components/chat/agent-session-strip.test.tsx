@@ -13,6 +13,8 @@ import enMessages from '../../../messages/en.json';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (p: string) => p }));
+// the widened line's time is the viewer's clock: pinned to Seoul so the expected «20:51» holds on any machine (the CI runner is UTC)
+vi.mock('@/components/viewer-time-zone', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/components/viewer-time-zone')>()), useViewerTimeZone: () => 'Asia/Seoul' }));
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: string; children: unknown }) => <a href={href} {...rest}>{children as never}</a> }));
 let onExtra: ((name: string, data: unknown) => void) | undefined;
 vi.mock('@/hooks/use-sse-notifications', () => ({
@@ -186,5 +188,55 @@ describe('AgentSessionStrip — a word it does not know', () => {
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'working' }));
     await render();
     expect(chip()).toBe('작업 중');
+  });
+});
+
+// story #4641 (Yuna's copy): the widened line — under the session, plain, the mode it became; a mode with no name yet shows nothing
+describe('AgentSessionStrip — a permission widened at the terminal (story #4641)', () => {
+  beforeEach(() => { onExtra = undefined; });
+
+  it('shows the mode it became, with the time of day (24h) — in Korean', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'default', permission_widened_to: 'auto' }));
+    await render();
+    const w = container.querySelector('[data-testid="agent-session-widened"]');
+    expect(w?.textContent).toBe('터미널에서 권한을 넓힘 · 20:51 · 자동 모드');
+    expect(w?.className).toContain('text-muted-foreground');
+    expect(w?.className).not.toMatch(/text-(warning|destructive)/);
+  });
+
+  it('reads in English with the English mode name', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'plan', permission_widened_to: 'acceptEdits' }));
+    await render('en');
+    expect(container.querySelector('[data-testid="agent-session-widened"]')?.textContent).toBe('Permissions widened in the terminal · 20:51 · Accept-edits mode');
+  });
+
+  it('shows nothing without a widening, or for a mode with no name yet (bypassPermissions)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working' }));
+    await render();
+    expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
+  });
+
+  it('dontAsk draws its line in Korean with its own name', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'default', permission_widened_to: 'dontAsk' }));
+    await render();
+    expect(container.querySelector('[data-testid="agent-session-widened"]')?.textContent).toBe('터미널에서 권한을 넓힘 · 20:51 · 묻지 않는 모드');
+  });
+
+  it('the two modes Yuna named (dontAsk, bypassPermissions) draw their line; the widest says so in its name', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'auto', permission_widened_to: 'bypassPermissions' }));
+    await render('en');
+    expect(container.querySelector('[data-testid="agent-session-widened"]')?.textContent).toBe('Permissions widened in the terminal · 20:51 · Bypass-permissions mode (widest)');
+  });
+
+  it('a mode outside the list (a newer server ahead of this web) draws no line — never the widest one', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'auto', permission_widened_to: 'someNewMode' }));
+    await render('en');
+    expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
+  });
+  it('a broken `at` skips the line and the rest of the strip still draws (no RangeError takes the strip down)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: 'not-a-date', permission_widened_from: 'plan', permission_widened_to: 'auto' }));
+    await render('en');
+    expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
+    expect(chip()).toBe('Working');
   });
 });

@@ -15,6 +15,7 @@ import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
 import { limitHeld, limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #4534 (명세 모음 B-3 · «상태 칩 ↔ 서버 세션 상태») — the agent's session in its DM: the desktop bar's words and shapes
@@ -43,6 +44,10 @@ interface View {
   limit?: SessionLimit | null;
   // story #4599: a held turn's why — the folder the macOS window asks about, when the daemon read it (a closed list; null = not read)
   system?: { folder?: SystemFolder | null } | null;
+  // story #4641: a permission widening a person made at the terminal — the three keys, only while one is stored (the server's)
+  permission_widened_at?: string | null;
+  permission_widened_from?: string | null;
+  permission_widened_to?: string | null;
   remote_control: boolean;
   can_command?: boolean;
   pending_permission_request_id: string | null;
@@ -240,6 +245,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
         </span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
+      <WidenedLine view={view} />
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
         <DialogContent showCloseButton={false} initialFocus={endCancelRef}>
           <DialogHeader>
@@ -334,6 +340,26 @@ function ResultLine({ result }: { result: Result }) {
     case 'no_screen_lock': return line(stop ? t('command.stop.noScreenLock') : t('command.send.noScreenLock'), settings);
     default: return line(stop ? t('command.stop.failed') : t('command.send.failed'));
   }
+}
+
+// story #4641 (Yuna's copy, 2026-10-08): one plain muted line under the session, only when a person widened the mode at the terminal —
+// the mode it became (to), never the one it was. A mode outside the list shows no line.
+function WidenedLine({ view }: { view: View }) {
+  const t = useTranslations('chats.agentSession');
+  const locale = useLocale();
+  const tz = useViewerTimeZone() ?? undefined;
+  const at = view.permission_widened_at;
+  const to = view.permission_widened_to;
+  // each name by its own literal call (the dead-key guard reads the literals); a mode outside the list has no name here and no line —
+  // an unknown mode must never read as the widest one (a newer server ahead of this web)
+  const mode = to === 'default' ? t('widenedMode.default') : to === 'acceptEdits' ? t('widenedMode.acceptEdits')
+    : to === 'plan' ? t('widenedMode.plan') : to === 'auto' ? t('widenedMode.auto')
+      : to === 'dontAsk' ? t('widenedMode.dontAsk') : to === 'bypassPermissions' ? t('widenedMode.bypassPermissions') : null;
+  if (!at || !mode) return null;
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return null; // a broken `at` skips the line — it must never throw and take the whole strip with it
+  const time = new Intl.DateTimeFormat(locale, { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(when);
+  return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-widened">{t('widened', { time, mode })}</p>;
 }
 
 function Line({ view, now, phone, href }: { view: View & { state: SessionState }; now: number; phone: boolean; href: string }) {
