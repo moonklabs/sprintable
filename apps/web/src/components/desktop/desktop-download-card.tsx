@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AlertTriangle, Loader2 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
@@ -113,7 +113,8 @@ export function DesktopDownloadCard() {
       <Alert variant="warning">
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle className="break-keep" data-testid="desktop-download-gatekeeper-title">{t('gatekeeperTitle')}</AlertTitle>
-        <AlertDescription className="break-keep">
+        {/* AlertDescription is a <p> — an <ol> and <p>s inside it are invalid nesting (Yuna 5004): a div with its classes */}
+        <div className="col-start-2 space-y-1 text-xs leading-relaxed break-keep [overflow-wrap:anywhere]">
           <ol className="list-decimal space-y-1 pl-4" data-testid="desktop-download-install-steps">
             <li>{t('installStepDrag')}</li>
             <li>{t('installStepOpen')}</li>
@@ -123,7 +124,7 @@ export function DesktopDownloadCard() {
           <p className="text-xs" data-testid="desktop-download-notarization-notice">
             {t('notarizationNotice')}
           </p>
-        </AlertDescription>
+        </div>
       </Alert>
       <Button asChild size="sm" data-testid="desktop-download-button">
         <a href={downloadUrl} download>{t('downloadCta')}</a>

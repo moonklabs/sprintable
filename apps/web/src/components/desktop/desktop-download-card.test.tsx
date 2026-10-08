@@ -84,6 +84,8 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
       '앱을 한 번 열어 본 뒤 시스템 설정 → 개인정보 보호 및 보안 → 「그래도 열기」',
     ]);
     expect(container.querySelector('[data-testid="desktop-download-old-mac"]')?.textContent).toBe('macOS 12에서는 앱을 우클릭 → 「열기」');
+    // no block inside a <p> (Yuna 5004: AlertDescription is a <p>) — the list and its lines sit in a div
+    expect(container.querySelector('p ol, p p')).toBeNull();
     expect(container.querySelector('[data-testid="desktop-download-notarization-notice"]')?.textContent).toBe('Apple 공증 전 내부용이에요.');
     const link = container.querySelector('[data-testid="desktop-download-button"]') as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe(MANIFEST.url);
