@@ -24,7 +24,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.member import Member
 from app.services import agent_run_profile as profiles
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import is_active_owner, resolve_member
 
 router = APIRouter(prefix="/api/v2", tags=["agent-run-profiles"])
 
@@ -95,7 +95,9 @@ async def get_agent_profile(
     person = await resolve_member(auth, org_id, db)
     if person.type != "human":
         raise HTTPException(status_code=403, detail={"code": "person_session_required"})
-    return await profiles.read_for_person(db, org_id=org_id, user_id=uuid.UUID(auth.user_id), agent_id=agent_id)
+    return await profiles.read_for_person(
+        db, org_id=org_id, user_id=uuid.UUID(auth.user_id), agent_id=agent_id, actor_is_owner=await is_active_owner(db, person),
+    )
 
 
 @router.put("/agents/run-profile")
@@ -112,7 +114,7 @@ async def put_many_profiles(
         db, org_id=org_id, user_id=uuid.UUID(auth.user_id), updated_by=uuid.UUID(str(person.id)),
         agent_ids=body.agent_ids, runtime=_keep(body.runtime), model=_keep(body.model), effort=_keep(body.effort),
         unattended=_keep(body.unattended),
-        actor_is_owner=await profiles.is_active_owner(db, org_id=org_id, user_id=uuid.UUID(auth.user_id)),
+        actor_is_owner=await is_active_owner(db, person),  # story #4598: the resolver's owner, as «원격 제어» (4585)
     )
     await db.commit()
     return {"profiles": views}
@@ -127,7 +129,7 @@ async def put_agent_profile(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     person = await _person_session(db, auth, org_id)
-    actor_is_owner = await profiles.is_active_owner(db, org_id=org_id, user_id=uuid.UUID(auth.user_id))
+    actor_is_owner = await is_active_owner(db, person)  # story #4598: the resolver's owner, as «원격 제어» (4585)
     views = await profiles.change(
         db, org_id=org_id, user_id=uuid.UUID(auth.user_id), updated_by=uuid.UUID(str(person.id)),
         agent_ids=[agent_id], runtime=profiles.KEEP if body.runtime is None else body.runtime,

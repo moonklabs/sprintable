@@ -160,6 +160,42 @@ async def test_03b_an_owner_row_without_a_live_members_row_is_not_an_owner_for_t
             await _sql(f"DELETE FROM members WHERE id = '{plain_tm}'", f"UPDATE org_members SET role = '{plain_role}' WHERE id = '{plain_tm}'")
 
 
+async def test_03c_the_owner_is_the_resolvers_on_both_branches_a_demoted_owner_on_the_anchor_branch_is_refused(world, monkeypatch):
+    """story #4598 (4585 곁 · PO 01:42Z): «owner» is `resolve_member`'s on the branch in use — the same rule as «원격 제어»
+    (`member_resolver.is_active_owner`). On the anchor branch an owner demoted in members.org_role (org_members.role still says
+    owner) is refused: 403 owner_required one and many · nothing written · `can_change_unattended` false. Mutation: the gates back on
+    org_members.role (the old `agent_run_profile.is_active_owner`) → RED here (the demoted owner gets 200)."""
+    from app.core.config import settings
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4598c3")
+        a, b = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+        await _set_runtime(a, "claude-code")
+        await _set_runtime(b, "claude-code")
+        on = {"model": None, "effort": None, "unattended": True}
+        try:
+            # anchor branch, an owner in members.org_role → an owner for this (proven first, so the 403 below is the demotion)
+            monkeypatch.setattr(settings, "member_ssot_resolver_shadow", True)
+            await _sql(f"UPDATE members SET org_role = 'owner' WHERE id = '{OWNER_TM}'")
+            assert (await c.get(_one(a), headers=_person(OWNER))).json()["can_change_unattended"] is True
+            ok = await c.put(_one(a), json=on, headers=_person(OWNER))
+            assert ok.status_code == 200 and ok.json()["can_change_unattended"] is True, ok.text
+            assert await _flag(a) == (True, 1, None)
+
+            # demoted on the branch in use — org_members.role still says owner
+            await _sql(f"UPDATE members SET org_role = 'member' WHERE id = '{OWNER_TM}'")
+            [(legacy_role,)] = await _sql(fetch=f"SELECT role FROM org_members WHERE id = '{OWNER_TM}'")
+            assert legacy_role == "owner", "the legacy column must still say owner, or this proves nothing"
+            assert (await c.get(_one(a), headers=_person(OWNER))).json()["can_change_unattended"] is False
+            off = await c.put(_one(a), json={**on, "unattended": False}, headers=_person(OWNER))
+            assert _code(off) == (403, "owner_required")
+            many = await c.put(MANY, json={"agent_ids": [a, b], "unattended": False}, headers=_person(OWNER))
+            assert _code(many) == (403, "owner_required")
+            assert await _flag(a) == (True, 1, None) and await _flag(b) is None
+        finally:
+            await _sql(f"UPDATE members SET org_role = 'owner' WHERE id = '{OWNER_TM}'")
+
+
 async def test_04_many_at_once_and_what_keeps_the_flag(world):
     async with _client() as c:
         device = await _device(c, name="d4424 mac 4598d")
