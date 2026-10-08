@@ -109,19 +109,65 @@ async def _open_circuit_breaker(
     return breaker_id
 
 
-async def _auto_close_circuit_breaker(db: AsyncSession, conversation_id: uuid.UUID) -> None:
+async def _auto_close_circuit_breaker(
+    db: AsyncSession, conversation_id: uuid.UUID, *, reason: str = "auto: episode resolved+cooldown",
+) -> bool:
     """story #2630: release_mode='auto' org 전용 — 에피소드 자연 해소 시 열린 breaker를 닫는다.
-    released_by는 NULL로 남긴다(사람이 안 눌렀다는 사실 자체가 감사 대상)."""
+    released_by는 NULL로 남긴다(사람이 안 눌렀다는 사실 자체가 감사 대상). story #4631: 닫았으면 True."""
     from app.models.chain_circuit_breaker import ChainCircuitBreaker
 
-    await db.execute(
+    result = await db.execute(
         update(ChainCircuitBreaker)
         .where(
             ChainCircuitBreaker.conversation_id == conversation_id,
             ChainCircuitBreaker.released_at.is_(None),
         )
-        .values(released_at=func.now(), release_reason="auto: episode resolved+cooldown")
+        .values(released_at=func.now(), release_reason=reason)
     )
+    return result.rowcount > 0
+
+
+async def _episode_marker_alive(conversation_id: uuid.UUID) -> bool:
+    """story #4631: 이 대화의 에피소드 마커가 아직 살아 있는지. Redis 불가 → True(살아 있다고 봄 — 차단을 푸는 쪽의
+    판단이라 모르면 풀지 않는다, fail-closed)."""
+    from app.services import redis_shared
+
+    key = redis_shared.key("chain_escalation", "episode", str(conversation_id))
+
+    async def _op(client) -> bool:
+        return bool(await client.exists(key))
+
+    return await redis_shared.with_fallback(_op, lambda: True)
+
+
+async def release_if_quiet(db: AsyncSession, *, org_id: uuid.UUID, conversation_id: uuid.UUID) -> bool:
+    """story #4631 (PO 고름 A): release_mode='auto'의 자동 해제가 실제로 돌게 — agent 발신의 423 자리에서 부른다.
+
+    원래 자동 닫기는 메시지 저장 뒤의 평가(evaluate_unsupervised_chain_episode의 «resolved»)에서만 불렸는데, 차단이 열리면
+    agent 발신은 저장 전에 423이라 평가가 다시 돌 기회가 없었고(마커도 TTL로 사라지면 «resolved»가 오지 않음) — auto org도
+    한 번 막히면 사람이 풀 때까지 영원히 막혔다. 여기서: auto org이고, 차단이 열린 지 창×2(마커 TTL과 같은 길이)가 지났고,
+    에피소드 마커가 없고, 최근 창의 속도가 임계 이하면 → 닫고 True(그 발신은 통과). manual · 조건 미달 · Redis 불가 → False
+    (차단 유지 · 무변)."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+
+    _enabled, window_seconds, threshold, _cb_mode, release_mode = await _get_org_config(db, org_id)
+    if release_mode != "auto":
+        return False
+    opened_at = (await db.execute(
+        select(ChainCircuitBreaker.opened_at).where(
+            ChainCircuitBreaker.conversation_id == conversation_id,
+            ChainCircuitBreaker.released_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if opened_at is None:
+        return False
+    if datetime.now(timezone.utc) - opened_at < timedelta(seconds=window_seconds * 2):
+        return False
+    if await _episode_marker_alive(conversation_id):
+        return False
+    if await _recent_message_velocity(db, conversation_id, window_seconds) > threshold:
+        return False
+    return await _auto_close_circuit_breaker(db, conversation_id, reason="auto: quiet since block")
 
 
 async def _recent_message_velocity(
@@ -237,6 +283,8 @@ async def evaluate_unsupervised_chain_episode(
         # 아니면 "감싸는 함수의 파라미터"만 해석). 그래서 분기별로 event_type이 리터럴로 보이는
         # 별도 호출 2개를 둔다(공유 로직 추출 대신 — 스캐너가 요구하는 형태, PR #3022 CI 적발).
         if breaker_id is not None:
+            # story #4631 (PO 고름 B): reference_id = 그 대화 id — 딥링크(chat_thread)와 해제 API(/conversations/{id}/
+            # circuit-breaker/release)가 둘 다 대화 id로 받는다. 전엔 차단 행 id라 알림을 누르면 없는 대화로 갔다.
             await dispatch_notification(
                 db, org_id=org_id, event_type="conversation.circuit_breaker_opened",
                 target_member_ids=list(approver_ids),
@@ -246,7 +294,7 @@ async def evaluate_unsupervised_chain_episode(
                     f"(임계 {threshold})이 발생해 agent 발신이 일시 차단됐어요. "
                     "이 알림의 «차단 해제»로 즉시 풀 수 있어요."
                 ),
-                reference_type="conversation", reference_id=breaker_id,
+                reference_type="conversation", reference_id=conversation_id,
                 source_project_id=project_id,
                 via_outbox=True,
             )

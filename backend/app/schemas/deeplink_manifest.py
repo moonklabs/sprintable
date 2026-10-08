@@ -815,10 +815,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         # story #2630: 서킷브레이커 open — 위 unsupervised_chain_expired와 달리 «관측»이
         # 아니라 agent 발신이 실제로 막힌 상태다. org owner/admin이 해제(release) 액션을
         # 취할 수 있어야 풀리므로(manual release_mode가 기본) A2(조치 필요·비긴급) —
-        # SLA성 즉시대응은 아니라 A1은 과함. reference_id는 conversation_id가 아니라
-        # chain_circuit_breaker.id(release 엔드포인트가 그 id로 타겟팅, chain_escalation.py
-        # evaluate_unsupervised_chain_episode 참조) — target은 그래도 chat_thread(탭하면
-        # 그 대화로 이동, 해제 액션 자체는 알림 카드에서).
+        # SLA성 즉시대응은 아니라 A1은 과함. story #4631: reference_id = conversation_id —
+        # target(chat_thread)과 해제 엔드포인트(/conversations/{id}/circuit-breaker/release)가 둘 다
+        # 대화 id로 받는다(전엔 chain_circuit_breaker.id라 탭하면 없는 대화로 갔다). 해제 단추는
+        # 그 대화 머리의 차단 띠(웹 · 4631 C).
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="conversation.circuit_breaker_opened", target="chat_thread",

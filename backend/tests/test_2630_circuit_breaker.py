@@ -4,7 +4,7 @@
 위에 얹은 «집행»(chain_circuit_breaker 테이블 + send_message 발신 차단 + 수동/자동 해제)을
 검증한다:
 - circuit_breaker_mode='block'(기본): 에피소드 시작 시 서킷 open, 알림 event_type이
-  conversation.circuit_breaker_opened로 바뀐다(reference_id=breaker.id).
+  conversation.circuit_breaker_opened로 바뀐다(reference_id=그 대화 id · story #4631 — 전엔 breaker.id).
 - circuit_breaker_mode='notify_only': #2626 원 계약(서킷 안 열림·event_type 그대로) 보존.
 - 서킷 open은 멱등 — 이미 열려 있는 대화에 재폭주가 와도 중복 행이 안 생긴다(부분 unique
   index, 마이그레이션 0244).
@@ -226,7 +226,8 @@ async def test_block_mode_opens_breaker_and_notification_reflects_it():
                 from app.services.chain_escalation import get_open_circuit_breaker_id
                 breaker_id = await get_open_circuit_breaker_id(s, conv_id)
                 assert breaker_id is not None
-                assert kw["reference_id"] == breaker_id
+                # story #4631 (PO 고름 B): the conversation's id — the deep link (chat_thread) and the release API both take it
+                assert kw["reference_id"] == conv_id and kw["reference_type"] == "conversation"
     finally:
         await engine.dispose()
 
@@ -542,5 +543,85 @@ async def test_release_endpoint_owner_closes_breaker_idempotently():
                 auth=_human_auth(owner_user_id, org_id), org_id=org_id,
             )
             assert resp2["released"] is False, "중복 해제 호출은 에러 없이 no-op"
+    finally:
+        await engine.dispose()
+
+
+# ─── story #4631 (PO 고름 A): auto 해제가 실제로 돈다 — agent 발신의 423 자리에서 ────────────────
+
+async def _blocked_conversation(s, *, release_mode: str | None, opened_seconds_ago: int):
+    """An agent participant in a human-less conversation whose breaker opened `opened_seconds_ago` (window 300 s by default)."""
+    from sqlalchemy import text
+    from app.services.chain_escalation import _open_circuit_breaker
+
+    org_id, project_id = await _seed_org_project(s)
+    if release_mode is not None:
+        await _seed_org_config(s, org_id, circuit_breaker_release_mode=release_mode)
+    agent_id = await _seed_agent(s, org_id, project_id)
+    conv_id = await _seed_conversation(s, org_id, project_id)
+    await _add_participant(s, conv_id, agent_id)
+    await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+    await s.execute(
+        text("UPDATE chain_circuit_breaker SET opened_at = now() - make_interval(secs => :secs) WHERE conversation_id = :c"),
+        {"secs": opened_seconds_ago, "c": conv_id},
+    )
+    await s.commit()
+    return org_id, agent_id, conv_id
+
+
+async def _agent_send(s, conv_id, agent_id, org_id, content):
+    from app.routers.conversations import SendMessageRequest, send_message
+
+    return await send_message(
+        conv_id, SendMessageRequest(content=content), BackgroundTasks(), db=s,
+        auth=_agent_auth(agent_id, org_id), org_id=org_id,
+    )
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_auto_org_quiet_past_two_windows_releases_at_the_next_agent_send():
+    """auto org · opened 11 min ago (window 5 min ×2 passed) · no episode marker · quiet → the next agent send closes the breaker
+    (released_by NULL · reason «auto: quiet since block») and goes through. Before, nothing ever closed it."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=660)
+            with patch("app.services.redis_shared.get_client", return_value=_fakeredis_client()):
+                resp = await _agent_send(s, conv_id, agent_id, org_id, "조용해진 뒤 한 줄")
+            assert resp["data"]["content"] == "조용해진 뒤 한 줄"
+            assert await _open_breaker_count(s, conv_id) == 0
+            from sqlalchemy import select
+            from app.models.chain_circuit_breaker import ChainCircuitBreaker
+            row = (await s.execute(select(ChainCircuitBreaker).where(ChainCircuitBreaker.conversation_id == conv_id))).scalar_one()
+            assert (row.released_by, row.release_reason) == (None, "auto: quiet since block")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+@pytest.mark.parametrize("case", ["too_soon", "manual", "marker_alive", "redis_down", "still_busy"])
+async def test_4631_the_block_stays_unless_every_condition_holds(case):
+    """The breaker stays (423 · nothing saved) when: opened under two windows ago · the org is manual (the default) · the episode
+    marker is still alive · Redis cannot be read (fail-closed: not knowing never releases) · the window is still above the threshold."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            mode = None if case == "manual" else "auto"
+            ago = 60 if case == "too_soon" else 3600
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode=mode, opened_seconds_ago=ago)
+            if case == "still_busy":
+                await _seed_messages(s, conv_id, agent_id, 20, ages_seconds=10)
+            client = _fakeredis_client()
+            if case == "marker_alive":
+                from app.services import redis_shared
+                await client.set(redis_shared.key("chain_escalation", "episode", str(conv_id)), "1", ex=600)
+            # Redis down = no client (redis_shared.with_fallback → the domain's fallback)
+            with patch("app.services.redis_shared.get_client", return_value=None if case == "redis_down" else client), \
+                 pytest.raises(HTTPException) as ei:
+                await _agent_send(s, conv_id, agent_id, org_id, "막혀야 하는 한 줄")
+            assert ei.value.status_code == 423 and ei.value.detail["code"] == "CIRCUIT_BREAKER_OPEN"
+            assert await _open_breaker_count(s, conv_id) == 1
     finally:
         await engine.dispose()

@@ -2601,9 +2601,13 @@ async def send_message_core(
     # 대화 안에서 가능). breaker 행은 human-less 대화에서만 열리므로(open 호출부 조건) 이
     # 조회 결과가 있다는 것 자체가 "이 대화는 human-less"를 함의 — 별도 human 유무 쿼리 불요.
     if sender.type == "agent":
-        from app.services.chain_escalation import get_open_circuit_breaker_id
+        from app.services.chain_escalation import get_open_circuit_breaker_id, release_if_quiet
 
         open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
+        # story #4631 (PO 고름 A): release_mode='auto'의 자동 해제는 여기서 — 차단 중엔 저장 뒤 평가가 돌지 않아 전엔 영영
+        # 안 풀렸다. 조용해진 auto org의 차단이면 닫고 이 발신은 통과(manual · 조건 미달은 그대로 423).
+        if open_breaker_id is not None and await release_if_quiet(db, org_id=org_id, conversation_id=conversation_id):
+            open_breaker_id = None
         if open_breaker_id is not None:
             # story #3933 AC3 — 이 자리는 사람이 아니라 «차단된 에이전트 자신»이 읽는다
             # (MCP send_chat_message 호출자). `error` 키를 `code`로 바꿔 api_client.py::
