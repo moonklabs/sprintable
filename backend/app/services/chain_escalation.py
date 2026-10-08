@@ -155,7 +155,7 @@ async def release_if_quiet(db: AsyncSession, *, org_id: uuid.UUID, conversation_
         return False
     # Kadir (5015): one clock — the database's, the same that stamped opened_at (no value from the agent, no app-server clock)
     checked = (await db.execute(
-        select(ChainCircuitBreaker.id, ChainCircuitBreaker.opened_at <= func.now() - timedelta(seconds=window_seconds * 2)).where(
+        select(ChainCircuitBreaker.id, ChainCircuitBreaker.opened_at <= func.clock_timestamp() - timedelta(seconds=window_seconds * 2)).where(
             ChainCircuitBreaker.conversation_id == conversation_id,
             ChainCircuitBreaker.released_at.is_(None),
         )
@@ -195,7 +195,7 @@ async def _recent_message_velocity(
     return (await db.execute(
         select(func.count()).select_from(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id,
-            ConversationMessage.created_at >= func.now() - timedelta(seconds=window_seconds),
+            ConversationMessage.created_at >= func.clock_timestamp() - timedelta(seconds=window_seconds),
             or_(last_release.is_(None), ConversationMessage.created_at > last_release),
         )
     )).scalar_one()

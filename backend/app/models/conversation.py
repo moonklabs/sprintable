@@ -96,6 +96,11 @@ class ConversationMessage(Base, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "conversation_messages"
 
+    # story #4632: the moment of the write (clock_timestamp), not the start of the transaction (now()) — the flood-block velocity
+    # window counts by this stamp. See 0448.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("clock_timestamp()"), nullable=False
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
