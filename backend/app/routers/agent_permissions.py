@@ -144,6 +144,26 @@ async def get_remote_devices(
     return {"devices": await agent_permissions.list_phones(db, member_id=uuid.UUID(str(member.id)), org_id=org_id)}
 
 
+@router.delete("/remote-devices/{phone_id}")
+async def delete_remote_device(
+    phone_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4624: the phone key itself (its pairs with it) — its owner, or an owner/admin of the org."""
+    member = await _person(db, auth, org_id, interactive=False)
+    try:
+        removed = await agent_permissions.remove_phone(
+            db, phone_id=phone_id, actor_member_id=uuid.UUID(str(member.id)), actor_is_admin=member.role in ("owner", "admin"), org_id=org_id,
+        )
+    except DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"removed": removed}
+
+
 @router.delete("/remote-devices/{phone_id}/pairs/{setup_id}")
 async def delete_remote_device_pair(
     phone_id: uuid.UUID,
