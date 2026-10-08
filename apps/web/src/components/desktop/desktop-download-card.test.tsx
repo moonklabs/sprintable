@@ -76,6 +76,12 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
     expect(fetchMock.mock.calls.map((c) => String((c as unknown[])[0]))).toEqual(['/desktop/downloads/macos.json']);
     expect(container.querySelector('[data-testid="desktop-download-target"]')?.textContent).toBe(koMessages.desktop.targetLabel);
     expect(container.querySelector('[data-testid="desktop-download-version"]')?.textContent).toBe('버전 0.2.0');
+    // Yuna 04:0xZ: the app's name (as macOS says it when it blocks) leads the line — «Sprintable Dev Setup · 버전 0.2.0 · 빌드 …»
+    expect(container.querySelector('[data-testid="desktop-download-version"]')?.parentElement?.textContent).toBe('Sprintable Dev Setup · 버전 0.2.0 · 빌드 abc123def');
+    // the settings panel's name in one piece (nowrap) — the step reads whole
+    const panel = container.querySelector('[data-testid="desktop-download-settings-panel"]');
+    expect(panel?.textContent).toBe('개인정보 보호 및 보안');
+    expect(panel?.className.split(' ')).toContain('whitespace-nowrap');
     expect(container.querySelector('[data-testid="desktop-download-build-sha"]')?.textContent).toBe(' · 빌드 abc123def');
     expect(container.querySelector('[data-testid="desktop-download-gatekeeper-title"]')?.textContent)
       .toBe('처음 열면 macOS가 막아요 — 한 번만 이렇게 열어 주세요');
@@ -92,11 +98,20 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
     expect(link.hasAttribute('download')).toBe(true);
   });
 
+  it('[SID:4619] a manifest without a product name: the line as before («버전 … · 빌드 …», no name)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ...MANIFEST, product: '' })));
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="desktop-download-product"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desktop-download-version"]')?.parentElement?.textContent).toBe('버전 0.2.0 · 빌드 abc123def');
+  });
+
   it('[SID:4619] the old right-click line is gone — its key in neither locale, nothing reads it', async () => {
     const en = (await import('../../../messages/en.json')).default as { desktop: Record<string, unknown> };
     expect('gatekeeperNotice' in koMessages.desktop).toBe(false);
     expect('gatekeeperNotice' in en.desktop).toBe(false);
-    expect(en.desktop.installStepOpen).toBe('Try opening the app once, then go to System Settings → Privacy & Security → "Open Anyway"');
+    expect(en.desktop.installStepOpen).toBe('Try opening the app once, then go to System Settings → <panel>Privacy & Security</panel> → "Open Anyway"');
+    expect(koMessages.desktop.installStepOpen).toBe('앱을 한 번 열어 본 뒤 시스템 설정 → <panel>개인정보 보호 및 보안</panel> → 「그래도 열기」');
   });
 
   it('[SID:4619 · Kadir 5004 후속 ①] a manifest whose url is not our bucket is «지금은 받을 수 없어요» — no link to it', async () => {

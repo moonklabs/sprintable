@@ -103,6 +103,9 @@ export function DesktopDownloadCard() {
         {t('targetLabel')}
       </p>
       <p className="text-xs text-muted-foreground">
+        {/* [SID:4619] Yuna 04:0xZ: the app's own name first — macOS names it so when it blocks («‘Sprintable Dev Setup’을(를)
+            차단했습니다»), and the card and System Settings must use the same word. From the manifest; none → the line as before */}
+        {manifest.product ? <span data-testid="desktop-download-product">{manifest.product}{' · '}</span> : null}
         <span data-testid="desktop-download-version">{t('versionLabel', { version: manifest.version })}</span>
         {buildSha ? (
           <span data-testid="desktop-download-build-sha">{' · '}{t('buildLabel', { sha: buildSha })}</span>
@@ -120,7 +123,8 @@ export function DesktopDownloadCard() {
         <div className="col-start-2 space-y-1 text-xs leading-relaxed break-keep [overflow-wrap:anywhere]">
           <ol className="list-decimal space-y-1 pl-4" data-testid="desktop-download-install-steps">
             <li>{t('installStepDrag')}</li>
-            <li>{t('installStepOpen')}</li>
+            {/* the settings panel's name in one piece (it split over two lines at 390; one piece is easier to find in Settings) */}
+            <li>{t.rich('installStepOpen', { panel: (chunks) => <span className="whitespace-nowrap" data-testid="desktop-download-settings-panel">{chunks}</span> })}</li>
           </ol>
           {/* text-xs only — muted on the warning tint is below AA (verify:no-muted-on-tint · story #3839) */}
           <p className="text-xs" data-testid="desktop-download-old-mac">{t('installOldMac')}</p>
