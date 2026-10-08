@@ -110,8 +110,8 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
     const en = (await import('../../../messages/en.json')).default as { desktop: Record<string, unknown> };
     expect('gatekeeperNotice' in koMessages.desktop).toBe(false);
     expect('gatekeeperNotice' in en.desktop).toBe(false);
-    expect(en.desktop.installStepOpen).toBe('Try opening the app once, then go to System Settings → <panel>Privacy & Security</panel> → "Open Anyway"');
-    expect(koMessages.desktop.installStepOpen).toBe('앱을 한 번 열어 본 뒤 시스템 설정 → <panel>개인정보 보호 및 보안</panel> → 「그래도 열기」');
+    expect(en.desktop.installStepOpen).toBe('Try opening the app once, then go to System Settings → <nw>Privacy & Security</nw> → "Open Anyway"');
+    expect(koMessages.desktop.installStepOpen).toBe('앱을 한 번 열어 본 뒤 시스템 설정 → <nw>개인정보 보호 및 보안</nw> → 「그래도 열기」');
   });
 
   it('[SID:4619 · Kadir 5004 후속 ①] a manifest whose url is not our bucket is «지금은 받을 수 없어요» — no link to it', async () => {
