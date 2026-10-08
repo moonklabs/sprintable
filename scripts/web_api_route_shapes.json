@@ -3016,6 +3016,11 @@
 },
 {
 "method": "DELETE",
+"path": "/api/v2/remote-devices/{}",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
 "path": "/api/v2/remote-devices/{}/pairs/{}",
 "kind": "unknown"
 },
