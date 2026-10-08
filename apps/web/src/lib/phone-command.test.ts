@@ -111,8 +111,9 @@ describe('[4534] commandOnPhone — the ends', () => {
   it('the turn had ended — the instruction goes in as a message (the shell\'s text, once): the shell · the server (409) · the daemon (rejected)', async () => {
     let d = deps({ id: 'w', ok: false, code: 'not_working' });
     server(json(201, {}));
-    await expect(commandOnPhone(prompt, d)).resolves.toEqual({ kind: 'sent_as_message' });
-    expect(d.sent).toEqual([prompt.text]); // the shell gave no text back — the typed one, never lost
+    // story 4633: the typed text holds a bidi override (U+202E) — the same check that the daemon runs refuses it; nothing goes to the chat
+    await expect(commandOnPhone(prompt, d)).resolves.toEqual({ kind: 'hidden_text' });
+    expect(d.sent).toEqual([]);
 
     d = deps(signedPrompt);
     server(json(409, { error: { code: 'session_not_working' } }));

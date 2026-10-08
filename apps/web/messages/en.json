@@ -5224,7 +5224,8 @@
           "biometricRequired": "This phone can send only with a fingerprint — add one in the phone's settings, then press again",
           "noScreenLock": "Sending needs a screen lock on this phone — turn one on in the phone's settings"
         },
-        "sentAsMessageNotNow": "It couldn't go into the current turn, so it went in as a message — it's read when its turn comes"
+        "sentAsMessageNotNow": "It couldn't go into the current turn, so it went in as a message — it's read when its turn comes",
+        "hiddenText": "Not sent: the text contains invisible characters. Please paste the text again or type it out, then send."
       }
     },
     "entityTypeStory": "Story",
