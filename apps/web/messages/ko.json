@@ -1682,6 +1682,7 @@
     "otherSessionsButton": "다른 기기에서 모두 로그아웃",
     "otherSessionsConfirm": "다른 기기의 로그인을 모두 끝낼까요? 지금 이 브라우저만 남아요. 다른 기기(폰 앱 · 맥 앱 화면 포함)는 길어야 1시간 안에 로그아웃돼요. 데스크톱 앱의 에이전트는 그대로 일하고, 폰은 다시 로그인하면 짝이 그대로예요.",
     "otherSessionsConfirmButton": "로그아웃",
+    "otherSessionsWorking": "로그아웃하는 중…",
     "otherSessionsDone": "다른 로그인 {n}개를 끝냈어요 — 길어야 1시간 안에 로그아웃되고, 이 브라우저는 그대로예요",
     "otherSessionsNone": "다른 곳의 로그인이 없었어요 — 이 브라우저는 그대로예요",
     "otherSessionsDoneUnknown": "다른 기기의 로그인을 모두 끝냈어요 — 길어야 1시간 안에 로그아웃되고, 이 브라우저는 그대로예요",

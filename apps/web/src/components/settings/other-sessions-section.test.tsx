@@ -100,6 +100,18 @@ describe('[SID:4630] «로그인한 다른 기기»', () => {
     expect(location.href).toBe('/login');
   });
 
+  it('while it runs, the confirm button says «로그아웃하는 중…» (Yuna — not a raw «...»)', async () => {
+    let answer!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { answer = r; })));
+    await mount();
+    await act(async () => { q('other-sessions-open')!.click(); });
+    await flush();
+    await act(async () => { q('other-sessions-confirm')!.click(); });
+    expect(q('other-sessions-confirm')!.textContent).toBe('로그아웃하는 중…');
+    await act(async () => { answer(new Response(JSON.stringify({ data: { sessions_ended: 0, kept_this: true } }), { status: 200 })); });
+    await flush();
+  });
+
   it('a failure is said inside the dialog, which stays for another try; no result line', async () => {
     await confirmWith(new Response(JSON.stringify({ error: { code: 'X' } }), { status: 502 }));
     expect(q('other-sessions-failed')!.textContent).toBe('로그아웃하지 못했어요 — 다시 시도해 주세요');

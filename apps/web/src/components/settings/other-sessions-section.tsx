@@ -89,7 +89,7 @@ export function OtherSessionsSection() {
           <DialogFooter>
             <Button ref={cancelRef} variant="outline" disabled={busy} onClick={() => setAsking(false)}>{tc('cancel')}</Button>
             <Button disabled={busy} onClick={() => void signOutOthers()} data-testid="other-sessions-confirm">
-              {busy ? '...' : t('otherSessionsConfirmButton')}
+              {busy ? t('otherSessionsWorking') : t('otherSessionsConfirmButton')}
             </Button>
           </DialogFooter>
         </DialogContent>

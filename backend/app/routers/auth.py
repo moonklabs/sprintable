@@ -245,8 +245,6 @@ class ResetPasswordRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
-    # story #4630 — this session's refresh token (the web BFF sends its sp_rt): this session stays signed in, every other ends
-    refresh_token: str | None = None
 
     @field_validator("new_password")
     @classmethod
@@ -1953,6 +1951,10 @@ async def change_password(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
+    # story #4630 (Kadir qa:changes · codex 01a11afd) — #3649 as at logout-others: a session already ended by an earlier password
+    # change does not get to change it again
+    if _is_session_stale_after_password_change(user, auth.claims.get("session_started_at")):
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
     if not verify_password(body.current_password, user.hashed_password):
         return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
 
@@ -1960,34 +1962,13 @@ async def change_password(
     await session.execute(
         update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password), password_set_at=now)
     )
-    # story #4630 — every other session ends now; this one is kept. Before, password_set_at (#3649) stopped every session
-    # at its next refresh — this one included, so the person who changed it was signed out too.
-    ended, keep_id = await _revoke_other_sessions(
-        session, user.id, hash_token(body.refresh_token) if body.refresh_token else None,
-    )
-    if keep_id is None:
-        await session.commit()
-        return _ok({"message": "Password changed successfully", "sessions_ended": ended, "kept_this": False})
-    # This session gets a new pair whose session starts now — the person has just proved the password (as at a login), so
-    # the #3649 check (a session started before the password was set) does not apply to it. Its old token goes the way of a
-    # rotation (revoked · replaced_by), so a request still holding it is the browser's own race, not another device.
-    kept = (await session.execute(
-        update(RefreshToken).where(RefreshToken.id == keep_id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=now).returning(RefreshToken.org_id, RefreshToken.project_id)
-    )).first()
-    if kept is None:  # taken by a rotation in between — that request has its own pair; this session ends at its next refresh
-        await session.commit()
-        return _ok({"message": "Password changed successfully", "sessions_ended": ended, "kept_this": False})
-    _md = await _refresh_session_context(user, session, kept.org_id, kept.project_id)
-    started = int(now.timestamp())
-    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=started)
-    _, refresh_exp = create_refresh_token(
-        str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS), session_started_at=started,
-    )
-    new_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
-    await session.execute(update(RefreshToken).where(RefreshToken.id == keep_id).values(replaced_by=new_id))
+    # story #4630 (PO 10:18Z · option (b) after Kadir qa:changes · codex 01a11afd) — every session ends now, this one too (as
+    # a reset). A new pair for this session would need a session start of now, and #3649 (refresh) and #3247 (disabling TOTP
+    # with the password) read that same start: a stolen session holding the current password could then change it and turn
+    # 2FA off. Before, password_set_at alone stopped the sessions at their next refresh and no token row was revoked.
+    ended, _ = await _revoke_other_sessions(session, user.id, None)
     await session.commit()
-    return _ok({"message": "Password changed successfully", "sessions_ended": ended, "kept_this": True, **tokens})
+    return _ok({"message": "Password changed successfully", "sessions_ended": ended})
 
 
 class LogoutOthersRequest(BaseModel):

@@ -51,9 +51,6 @@ _KNOWN = {
     "app/routers/agent_gateway.py::agent_stream",
     "app/routers/agent_inbox.py::receive_inbox_webhook",
     "app/routers/assets.py::storage_usage",
-    # story #4630 — the person's own refresh token (its session org/project, as refresh_token below) to hand this session a new
-    # pair after the password changed; no project entity is read
-    "app/routers/auth.py::change_password",
     "app/routers/auth.py::confirm_set_password",
     "app/routers/auth.py::logout",
     "app/routers/auth.py::refresh_token",

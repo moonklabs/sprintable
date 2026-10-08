@@ -121,12 +121,13 @@ async def _rows(Session, user_id):
         return (await s.execute(select(RefreshToken).where(RefreshToken.user_id == user_id))).scalars().all()
 
 
-# ── AC1 change-password: others end now · this session kept ─────────────────────────
+# ── AC1 change-password: every session ends now, this one too (PO 10:18Z · option (b)) ─────────────────────────
 
 
 @pytest.mark.anyio
-async def test_change_password_ends_other_sessions_and_keeps_this_one():
-    """RED on develop: no tokens came back and this session's refresh → 401 SESSION_INVALIDATED (#3649 caught it too)."""
+async def test_change_password_ends_every_session_this_one_too_and_hands_out_no_new_pair():
+    """RED on b52f4ba87 (Kadir qa:changes · codex 01a11afd): it handed this session a new pair whose session started now —
+    with it, disabling TOTP with the new password passed (#3247 reads that same start). No pair now; the token sent is ignored."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -146,11 +147,10 @@ async def test_change_password_ends_other_sessions_and_keeps_this_one():
             })
             assert resp.status_code == 200, resp.text
             data = resp.json()["data"]
-            assert data["kept_this"] is True and data["sessions_ended"] == 1, data
-            assert (await _refresh(client, data["refresh_token"])).status_code == 200  # this session goes on
-            other = await _refresh(client, other_rt)
-            assert other.status_code == 401, other.text
-            assert other.json()["error"]["code"] == "TOKEN_REVOKED"  # revoked now, not only stale at its next refresh
+            assert data["sessions_ended"] == 2 and "refresh_token" not in data and "access_token" not in data, data
+            for rt in (this_rt, other_rt):
+                r = await _refresh(client, rt)
+                assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # revoked now
         finally:
             await client.aclose()
     finally:
@@ -159,26 +159,32 @@ async def test_change_password_ends_other_sessions_and_keeps_this_one():
 
 
 @pytest.mark.anyio
-async def test_change_password_without_this_sessions_token_ends_every_session():
+async def test_after_a_password_change_this_session_cannot_disable_totp_with_the_new_password():
+    """Kadir's chain, closed: a stolen session that knows the current password changes it — the same session then tries to turn
+    2FA off with the new password → 403 PASSWORD_TOO_RECENT (#3247), as on develop."""
     from app.main import app
+    from app.models.user import User
 
     engine, Session = await _session_factory()
     try:
         started = _started()
         async with Session() as s:
             user_id = await _seed_user(s)
-            await _seed_rt(s, user_id, started=started)
-            await _seed_rt(s, user_id, started=started)
+            user = await s.get(User, user_id)
+            user.totp_enabled = True
+            user.totp_secret = "JBSWY3DPEHPK3PXP"
+            await s.commit()
 
         await _setup_db_override(app, Session)
         _override_auth(app, user_id=user_id, session_started_at=started)
         client = _client_for(app)
         try:
-            resp = await client.patch("/api/v2/auth/change-password", json={"current_password": OLD_PW, "new_password": NEW_PW})
-            assert resp.status_code == 200, resp.text
-            data = resp.json()["data"]
-            assert data["kept_this"] is False and data["sessions_ended"] == 2 and "refresh_token" not in data, data
-            assert all(r.revoked_at is not None for r in await _rows(Session, user_id))
+            changed = await client.patch("/api/v2/auth/change-password", json={"current_password": OLD_PW, "new_password": NEW_PW})
+            assert changed.status_code == 200, changed.text
+            off = await client.post("/api/v2/auth/totp/disable", json={"password": NEW_PW})
+            assert off.status_code == 403 and off.json()["error"]["code"] == "PASSWORD_TOO_RECENT", off.text
+            async with Session() as s:
+                assert (await s.get(User, user_id)).totp_enabled is True
         finally:
             await client.aclose()
     finally:
@@ -346,6 +352,62 @@ async def test_logout_others_keeps_this_sessions_own_rotation_race():
             resp = await client.post("/api/v2/auth/logout-others", json={"refresh_token": this_now})
             assert resp.json()["data"] == {"sessions_ended": 0, "kept_this": True}
             assert (await _refresh(client, this_old)).status_code == 200
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_logout_others_keeps_only_one_step_back_of_this_sessions_chain():
+    """Kadir ③: the kept token's predecessor keeps its window — one step only. T0 → T1 → T2 (this browser holds T2): T1 forks
+    (its own race), T0 does not."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        started = _started()
+        async with Session() as s:
+            user_id = await _seed_user(s)
+            t0 = await _seed_rt(s, user_id, started=started)
+
+        await _setup_db_override(app, Session)
+        _override_auth(app, user_id=user_id, session_started_at=started)
+        client = _client_for(app)
+        try:
+            t1 = (await _refresh(client, t0)).json()["data"]["refresh_token"]
+            t2 = (await _refresh(client, t1)).json()["data"]["refresh_token"]
+            resp = await client.post("/api/v2/auth/logout-others", json={"refresh_token": t2})
+            assert resp.json()["data"] == {"sessions_ended": 0, "kept_this": True}
+            assert (await _refresh(client, t0)).status_code == 401  # two steps back: closed
+            assert (await _refresh(client, t1)).status_code == 200  # one step back: this browser's race
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_change_password_from_a_session_older_than_the_password_401_and_ends_nothing():
+    """Kadir qa:changes: a session already ended by an earlier password change (#3649 stale) cannot change it again."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_user(s)  # password set 2 h ago
+            other = await _seed_rt(s, user_id, started=_started())
+
+        await _setup_db_override(app, Session)
+        stale = int((datetime.now(timezone.utc) - timedelta(hours=3)).timestamp())
+        _override_auth(app, user_id=user_id, session_started_at=stale)
+        client = _client_for(app)
+        try:
+            resp = await client.patch("/api/v2/auth/change-password", json={"current_password": OLD_PW, "new_password": NEW_PW})
+            assert resp.status_code == 401 and resp.json()["error"]["code"] == "SESSION_INVALIDATED", resp.text
+            assert (await _refresh(client, other)).status_code == 200  # nothing ended
         finally:
             await client.aclose()
     finally:

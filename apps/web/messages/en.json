@@ -1682,6 +1682,7 @@
     "otherSessionsButton": "Sign out everywhere else",
     "otherSessionsConfirm": "End the sign-in on every other device? Only this browser stays signed in. Other devices (the phone app and the Mac app's screens too) will be signed out within an hour. Agents in the desktop app keep working, and a phone keeps its pairing once it signs in again.",
     "otherSessionsConfirmButton": "Sign out",
+    "otherSessionsWorking": "Signing out…",
     "otherSessionsDone": "Ended {n} other {n, plural, one {sign-in} other {sign-ins}} — {n, plural, one {it} other {they}}'ll be signed out within an hour; this browser stays signed in",
     "otherSessionsNone": "There were no other sign-ins — this browser stays signed in",
     "otherSessionsDoneUnknown": "Ended the sign-in on every other device — they'll be signed out within an hour; this browser stays signed in",
