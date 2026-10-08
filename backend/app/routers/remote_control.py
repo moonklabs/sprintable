@@ -28,7 +28,7 @@ class RemoteControlState(BaseModel):
     can_change: bool
     # story #4583: display names only (no email · no id) · a count only (no device name)
     owner_names: list[str]
-    connected_computers: int
+    connected_setups: int
 
 
 class RemoteControlChange(BaseModel):
@@ -75,7 +75,7 @@ async def get_remote_control(org_id: uuid.UUID, db: AsyncSession = Depends(get_d
 async def _view(db: AsyncSession, org: Organization, *, can_change: bool) -> dict:
     return remote_control.state_view(
         org, can_change=can_change, owner_names=await remote_control.owner_names(db, org.id),
-        connected_computers=await remote_control.connected_computers(db, org.id),
+        connected_setups=await remote_control.connected_setups(db, org.id),
     )
 
 

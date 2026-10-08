@@ -26,8 +26,8 @@ const { useOrgRemoteControl } = await import('@/lib/org-remote-control');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-interface Org { enabled: boolean; can_change: boolean; owner_names: string[]; connected_computers: number }
-const OFF: Org = { enabled: false, can_change: false, owner_names: ['송윤재'], connected_computers: 1 };
+interface Org { enabled: boolean; can_change: boolean; owner_names: string[]; connected_setups: number }
+const OFF: Org = { enabled: false, can_change: false, owner_names: ['송윤재'], connected_setups: 1 };
 let org: Org = OFF;
 let session: Record<string, unknown> = {};
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -106,7 +106,7 @@ describe('결재함 line (Yuna row 4 · only off + a connected computer)', () =>
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     orgId = `org-${++n}`;
-    org = { ...OFF, connected_computers: 0 };
+    org = { ...OFF, connected_setups: 0 };
     await render(<AgentPermissionRequests />);
     expect(q('agent-permission-remote-off')).toBeNull();
   });
@@ -338,7 +338,7 @@ describe('arrival by an in-app link press (client navigation)', () => {
       const base = fetchWithAuth.getMockImplementation()!;
       fetchWithAuth.mockImplementation(async (url: string) => (url.includes('org-pending') ? new Promise(() => {}) : base(url)));
       const home = orgId;
-      let change: ((next: { enabled: boolean; can_change: boolean; owner_names: string[]; connected_computers: number; enabled_at: string | null }) => void) | undefined;
+      let change: ((next: { enabled: boolean; can_change: boolean; owner_names: string[]; connected_setups: number; enabled_at: string | null }) => void) | undefined;
       function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
       const page = () => (<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
       const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };

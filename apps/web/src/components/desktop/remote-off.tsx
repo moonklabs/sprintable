@@ -89,7 +89,7 @@ export interface RemoteOff {
   owner: boolean;
   /** the values for the `{owners}` / `{hasOwners}` placeholders of every «not owner» line */
   names: { owners: string; hasOwners: 'yes' | 'no' };
-  connectedComputers: number;
+  connectedSetups: number;
 }
 
 /** Yuna's name form: 1 «A» · 2 «A · B» · 3+ «A 외 n명» — always inside «조직 소유자(…)», so no josa depends on the name. */
@@ -109,7 +109,7 @@ export function useRemoteOff(): RemoteOff | null {
   return {
     owner: state.can_change,
     names: { owners, hasOwners: owners ? 'yes' : 'no' },
-    connectedComputers: state.connected_computers ?? 0,
+    connectedSetups: state.connected_setups ?? 0,
   };
 }
 

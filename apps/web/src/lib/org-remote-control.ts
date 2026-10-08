@@ -18,8 +18,8 @@ export interface OrgRemoteControl {
   can_change: boolean;
   /** story #4583: the owners' display names (no email · no id) — named to everyone else while it is off */
   owner_names?: string[];
-  /** story #4583: how many of the org's computers are connected (a count) — the approvals line shows only with one */
-  connected_computers?: number;
+  /** story #4583: how many of the org's live setups are connected (a count) — the approvals line shows only with one */
+  connected_setups?: number;
 }
 
 interface Entry { value: OrgRemoteControl | null; listeners: Set<() => void>; asked: boolean; reading: boolean; gen: number }

@@ -162,7 +162,7 @@ export function AgentPermissionRequests() {
   // one muted line says why, above the list (web and the phone's approvals list are this component). Only with a connected computer:
   // an org that never connected one gets no line (it would be noise). story #4589: «새» requests — the ones waiting when it was turned
   // off stay below, each with its own line (the words stay true with the list empty or not)
-  const offLine = remoteOff && remoteOff.connectedComputers > 0 ? (
+  const offLine = remoteOff && remoteOff.connectedSetups > 0 ? (
     <div className="mb-4 flex flex-col gap-1" data-testid="agent-permission-remote-off">
       <p className="break-keep text-sm text-muted-foreground">
         {remoteOff.owner ? t('remoteOffOwner') : t('remoteOffOthers', remoteOff.names)}

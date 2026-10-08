@@ -155,10 +155,10 @@ async function linkOnItsOwnRow(line: Locator, link: Locator) {
 // ── fixtures (Yuna's list) ──────────────────────────────────────────────────────────────────────────────────────────────────
 const NAMES3 = ['송윤재', '윤도선', '김하나'];
 const NAMES3_EN = ['Song Yunjae', 'Yun Doseon', 'Kim Hana'];
-const org = (o: { owner: boolean; names?: string[]; computers?: number; on?: boolean }) => ({
+const org = (o: { owner: boolean; names?: string[]; setups?: number; on?: boolean }) => ({
   'GET /api/organizations/org-1/remote-control': { data: {
     enabled: !!o.on, enabled_at: o.on ? '2026-10-07T01:00:00Z' : null, can_change: o.owner,
-    owner_names: o.names ?? NAMES3, connected_computers: o.computers ?? 1,
+    owner_names: o.names ?? NAMES3, connected_setups: o.setups ?? 1,
   } },
 });
 const REQUEST = {
@@ -293,7 +293,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
       await expect(page.getByTestId('agent-permission-remote-off')).toHaveText(KO.inboxMember(THREE));
       await shot(page, page.locator('#root'), `4583-web-4b-inbox-${where}-member-${tag}`);
     }
-    await open(page, { kind: 'inbox', width, theme, api: inboxApi({ owner: true, computers: 0 }) });
+    await open(page, { kind: 'inbox', width, theme, api: inboxApi({ owner: true, setups: 0 }) });
     await expect(page.getByTestId('agent-permission-requests')).toBeVisible();
     await expect(page.getByTestId('agent-permission-remote-off')).toHaveCount(0);
     await shot(page, page.locator('#root'), `4583-web-4c-inbox-no-computer-owner-${tag}`);

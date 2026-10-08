@@ -45,8 +45,8 @@ async def test_it_starts_off_and_only_an_owner_changes_it(world):
         device = await _device(c, name="d4424 mac 4535a")
         key = {"Authorization": f"Bearer {device['agents'][0]['api_key']}"}
         owner = await c.get(URL, headers=_person(OWNER))
-        assert owner.status_code == 200 and owner.json() == {  # story #4583: + owner_names · connected_computers
-            "enabled": False, "enabled_at": None, "can_change": True, "owner_names": ["Owner"], "connected_computers": 1,
+        assert owner.status_code == 200 and owner.json() == {  # story #4583: + owner_names · connected_setups
+            "enabled": False, "enabled_at": None, "can_change": True, "owner_names": ["Owner"], "connected_setups": 1,
         }
         plain = await c.get(URL, headers=_person(PLAIN))
         assert plain.status_code == 200 and plain.json()["can_change"] is False
