@@ -63,6 +63,32 @@ async def test_03_a_caller_cannot_name_the_org(world):
         assert bad.status_code == 401 and "x-desktop-org-id" not in bad.headers
 
 
+async def test_05_the_stream_names_who_confirmed_the_setup_never_what_the_caller_sends(world):
+    """Kadir 420 ③ · PO 05:36Z: the daemon gives a phone only to setups the same person confirmed — `X-Desktop-Confirmed-By` is the
+    setup row's confirmed_by (another person's setup on the same Mac names that person) · absent when the row has none · a caller's
+    value is ignored · nothing on a refused token."""
+    import uuid
+
+    async with _client() as c:
+        mine = await _device(c, name="d4424 mac 4618g")
+        theirs = await _device(c, name="d4424 mac 4618h")
+        rows = {r[0]: r[1] for r in await _sql(fetch=f"SELECT id::text, confirmed_by::text FROM desktop_setups WHERE id IN ('{mine['setup_id']}', '{theirs['setup_id']}')")}
+        assert rows[mine["setup_id"]], "the fixture's setups are confirmed by someone"
+        a = await c.get(STREAM, headers={**_tok(mine["device_token"]), "x-desktop-confirmed-by": str(uuid.uuid4())})
+        assert a.status_code == 200 and a.headers.get("x-desktop-confirmed-by") == rows[mine["setup_id"]]
+        # the same Mac's other setup was confirmed by another person of the same org
+        other_person = str(uuid.uuid4())
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{other_person}' WHERE id = '{theirs['setup_id']}'")
+        b = await c.get(STREAM, headers=_tok(theirs["device_token"]))
+        assert (b.headers.get("x-desktop-org-id"), b.headers.get("x-desktop-confirmed-by")) == (str(ORG), other_person)
+        # a row with no confirmer: no header (the daemon gives that setup nothing)
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = NULL WHERE id = '{theirs['setup_id']}'")
+        n = await c.get(STREAM, headers=_tok(theirs["device_token"]))
+        assert n.status_code == 200 and "x-desktop-confirmed-by" not in n.headers
+        bad = await c.get(STREAM, headers=_tok("not-a-token"))
+        assert bad.status_code == 401 and "x-desktop-confirmed-by" not in bad.headers
+
+
 async def test_04_remote_control_off_is_409_with_no_org(world):
     """Didi review 5003 (non-blocking): the 409 path ends in `_device` too — a paused device learns no org either."""
     async with _client() as c:

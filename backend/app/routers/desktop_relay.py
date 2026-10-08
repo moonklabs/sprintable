@@ -79,6 +79,7 @@ async def _device(
 @router.get("/relay/stream")
 async def device_stream(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> StreamingResponse:
     setup_id, org_id = setup.id, setup.org_id
+    confirmed_by = setup.confirmed_by  # story #4618 (Kadir 420 ③ · PO 05:36Z): read with the org, from the same token row
     # story #4554 ② (PO 11:45Z) — `Last-Event-ID` is a device_seq this device was given: not a number (letters · a sign · empty
     # after trimming) → 400 before the stream opens (the daemon drops its cursor and reconnects); a number past the device's
     # latest (or past int32) → «from after the latest»: nothing is sent again (before: a bad cursor meant «from the start» — every
@@ -177,8 +178,13 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
     # the same organization only (it pins only after a person matched the number on that Mac; the server still keeps each setup's
     # pairs from that setup's own report). Not a secret: the device token already names it. A header, not a frame: an older daemon
     # never sees an unknown event.
-    return StreamingResponse(generate(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Desktop-Org-Id": str(org_id)})
+    # Kadir 420 ③ · PO 05:36Z: one Mac's daemon can hold setups of different people of the same organization (two people share the
+    # Mac) — the phone goes only to setups the SAME person confirmed. `X-Desktop-Confirmed-By` = the setup's confirmed_by (the user who
+    # confirmed it), from the token row like the org; absent when the row has none (the daemon then gives that setup nothing).
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Desktop-Org-Id": str(org_id)}
+    if confirmed_by is not None:
+        headers["X-Desktop-Confirmed-By"] = str(confirmed_by)
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=headers)
 
 
 @router.put("/relay/sessions")
