@@ -84,9 +84,14 @@ async def test_02_after_the_phone_refreshed_twice_the_live_end_of_its_chain_is_e
         assert r1.status_code == 200
         r2 = await _refresh(c, r1.json()["data"]["refresh_token"])
         assert r2.status_code == 200
+        middle = r1.json()["data"]["refresh_token"]
         live = r2.json()["data"]["refresh_token"]
         assert (await c.delete(f"{PHONES}/{phone}", headers=_person(OWNER))).json()["session"] == "ended"
         assert (await _refresh(c, live)).status_code == 401, "the token it holds now — two rotations after the one it registered with"
+        # the two it rotated out of seconds ago are inside the refresh grace window (#2449: a rotated row keeps its expiry) —
+        # presented again they must not fork a new session either (Min 09:27Z)
+        for old in (first, middle):
+            assert (await _refresh(c, old)).status_code == 401, "a token rotated out within the grace window forks nothing"
 
 
 async def test_03_a_key_with_no_recorded_session_ends_nothing_and_says_so(world):

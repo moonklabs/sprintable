@@ -207,12 +207,17 @@ async def _end_phone_session(db: AsyncSession, phone: RemoteDevice, now: datetim
     if not chain:
         logger.info("phone removed: no session recorded — key and pairs only", extra={"structured": {"event": "phone_removed_session_not_found", "why": "none_recorded"}})
         return "not_found"
-    result = await db.execute(
+    live = (await db.execute(
         update(RefreshToken)
         .where(RefreshToken.id.in_(chain), RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
         .values(**_explicit_revoke_values(now))
+    )).rowcount
+    # a row rotated out keeps its expiry (#2449: only revoked_at is set), so within the refresh grace window the phone could
+    # present its previous token and fork a new session — every row of the chain is closed too (Min 09:27Z · its revoked_at kept)
+    await db.execute(
+        update(RefreshToken).where(RefreshToken.id.in_(chain), RefreshToken.expires_at > now).values(expires_at=now)
     )
-    if not result.rowcount:
+    if not live:
         logger.info("phone removed: its session is no longer live — key and pairs only", extra={"structured": {"event": "phone_removed_session_not_found", "why": "not_live"}})
         return "not_found"
     return "ended"
