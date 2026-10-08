@@ -26,6 +26,7 @@ import { StandupDeadlineSection } from '@/components/settings/standup-deadline-s
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
 import { OrgGatePolicySection } from '@/components/settings/org-gate-policy-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
+import { OtherSessionsSection } from '@/components/settings/other-sessions-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -892,6 +893,7 @@ export default function SettingsPage() {
                   <SetPasswordSection onLoadError={handleProfileSectionLoadError} />
                   <LinkedAccountsSection onLoadError={handleProfileSectionLoadError} />
                   <TwoFactorSection onLoadError={handleProfileSectionLoadError} />
+                  <OtherSessionsSection />
                 </div>
                 {currentProjectId && (
                   <MyNotificationChannelSection

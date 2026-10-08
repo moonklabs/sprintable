@@ -408,6 +408,11 @@ export const EXEMPT_PAIRS = new Set<string>([
   // device place — the very thing the section lists — on purpose (the two removals, a pair vs the phone itself, are told apart by
   // that word). Look again if the title ever carries a count («원격 기기 · {n}»).
   'desktop.remoteDevices.confirmRemovePhone <-> desktop.remoteDevices.title',
+  // story #4630 (Yuna «4630» ①) — the result line «다른 로그인 {n}개를 끝냈어요 — 길어야 1시간 안에 로그아웃되고, …» contains
+  // «로그아웃», the confirmation dialog's button. Not the shape this guard is for (#2352/#2365: two counted phrases read as one
+  // another): the button is a verb inside the dialog, the line a sentence under the card's own button; «로그아웃» is the same act on
+  // purpose (Yuna split «끝냈어요» now · «로그아웃» within an hour). Look again if the line ever becomes a label or a count title.
+  'settings.otherSessionsConfirmButton <-> settings.otherSessionsDone',
   // story #4458 (PO 10:56Z · Yuna 11:00Z) — the held campaign's needs_check sentence («…으로 만들어져 시작하지 않았어요 — …» · {amount}
   // = a money amount) contains «시작», the start dialog's confirm button label. Not the shape
   // this guard is for (#2352/#2365: two counted phrases read as one another): the sentence and the button are never on the card

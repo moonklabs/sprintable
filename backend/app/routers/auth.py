@@ -367,6 +367,45 @@ def _explicit_revoke_values(now: datetime) -> dict:
     return {"revoked_at": now, "expires_at": now}
 
 
+async def _revoke_other_sessions(
+    session: AsyncSession, user_id: uuid.UUID, keep_token_hash: str | None,
+) -> tuple[int, uuid.UUID | None]:
+    """story #4630 — end every session of this person except this one (password change · reset · «sign out everywhere else»).
+
+    Returns (sessions ended, this session's live token id or None). «This session» is the live refresh token of THIS person
+    whose hash is `keep_token_hash` — a token of someone else, a dead one or none at all keeps nothing (every session ends):
+    the token can only narrow what stays, never reach another person's rows.
+
+    Two passes, both through `_explicit_revoke_values`:
+    ① live tokens → revoked (each one a signed-in device);
+    ② tokens already revoked by a rotation but still inside the refresh grace window (§2449 — `expires_at` untouched by the
+       rotation) → their window is closed too. Without it a device's previous token, rotated a moment ago, could fork a new
+       session from that window after its live token was revoked. The kept token's own predecessor (`replaced_by` = it) keeps
+       its window: that is this browser's own rotation race."""
+    now = datetime.now(timezone.utc)
+    keep_id: uuid.UUID | None = None
+    if keep_token_hash:
+        keep_id = (await session.execute(
+            select(RefreshToken.id).where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.token_hash == keep_token_hash,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+        )).scalar_one_or_none()
+    # a live sign-in = not revoked and not expired (an expired row never revoked is a sign-in already over — counting it
+    # made «다른 로그인 {n}개» larger than what the person knows · Didi · Yuna 09:2xZ)
+    live = [RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now]
+    if keep_id is not None:
+        live.append(RefreshToken.id != keep_id)
+    ended = await session.execute(update(RefreshToken).where(*live).values(**_explicit_revoke_values(now)))
+    window = [RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_not(None), RefreshToken.expires_at > now]
+    if keep_id is not None:
+        window.append(or_(RefreshToken.replaced_by.is_(None), RefreshToken.replaced_by != keep_id))
+    await session.execute(update(RefreshToken).where(*window).values(expires_at=now))
+    return ended.rowcount or 0, keep_id
+
+
 _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
 
 
@@ -1896,7 +1935,10 @@ async def reset_password(
             password_set_at=datetime.now(timezone.utc),
         )
     )
-    return _ok({"message": "Password reset successfully"})
+    # story #4630 — the reset comes from a mailed link, signed out: every session of the person ends (password_set_at
+    # alone only stopped them at their next refresh; their tokens and the refresh grace window stayed open)
+    ended, _ = await _revoke_other_sessions(session, user.id, None)
+    return _ok({"message": "Password reset successfully", "sessions_ended": ended})
 
 
 @router.patch("/change-password")
@@ -1909,16 +1951,53 @@ async def change_password(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
+    # story #4630 (Kadir qa:changes · codex 01a11afd) — #3649 as at logout-others: a session already ended by an earlier password
+    # change does not get to change it again
+    if _is_session_stale_after_password_change(user, auth.claims.get("session_started_at")):
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
     if not verify_password(body.current_password, user.hashed_password):
         return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
 
+    now = datetime.now(timezone.utc)
     await session.execute(
-        update(User).where(User.id == user.id).values(
-            hashed_password=hash_password(body.new_password),
-            password_set_at=datetime.now(timezone.utc),
-        )
+        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password), password_set_at=now)
     )
-    return _ok({"message": "Password changed successfully"})
+    # story #4630 (PO 10:18Z · option (b) after Kadir qa:changes · codex 01a11afd) — every session ends now, this one too (as
+    # a reset). A new pair for this session would need a session start of now, and #3649 (refresh) and #3247 (disabling TOTP
+    # with the password) read that same start: a stolen session holding the current password could then change it and turn
+    # 2FA off. Before, password_set_at alone stopped the sessions at their next refresh and no token row was revoked.
+    ended, _ = await _revoke_other_sessions(session, user.id, None)
+    await session.commit()
+    return _ok({"message": "Password changed successfully", "sessions_ended": ended})
+
+
+class LogoutOthersRequest(BaseModel):
+    # story #4630 — this session's refresh token (the web BFF sends its sp_rt)
+    refresh_token: str | None = None
+
+
+@router.post("/logout-others")
+async def logout_others(
+    body: LogoutOthersRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """story #4630 — «sign out everywhere else»: every refresh token of this person ends except this session's.
+
+    Only refresh tokens (people's signed-in browsers and the phone app's web sign-in) — API keys, a desktop setup's device
+    token and paired phone keys are other tables and stay. A token sent that is not this person's live one keeps nothing:
+    every session ends, this one too (`kept_this: false`)."""
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+    # #3649 — an old access token of a session ended by a password change does not get to act as «this session»
+    if _is_session_stale_after_password_change(user, auth.claims.get("session_started_at")):
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
+    ended, keep_id = await _revoke_other_sessions(
+        session, user.id, hash_token(body.refresh_token) if body.refresh_token else None,
+    )
+    await session.commit()
+    return _ok({"sessions_ended": ended, "kept_this": keep_id is not None})
 
 
 # ─── POST /api/v2/auth/set-password/request, GET /api/v2/auth/set-password/confirm ──
