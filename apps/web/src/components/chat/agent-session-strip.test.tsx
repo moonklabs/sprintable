@@ -188,3 +188,35 @@ describe('AgentSessionStrip — a word it does not know', () => {
     expect(chip()).toBe('작업 중');
   });
 });
+
+// story #4641 (Yuna's copy): the widened line — under the session, plain, the mode it became; a mode with no name yet shows nothing
+describe('AgentSessionStrip — a permission widened at the terminal (story #4641)', () => {
+  beforeEach(() => { onExtra = undefined; });
+
+  it('shows the mode it became, with the time of day (24h) — in Korean', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'default', permission_widened_to: 'auto' }));
+    await render();
+    const w = container.querySelector('[data-testid="agent-session-widened"]');
+    expect(w?.textContent).toBe('터미널에서 권한을 넓힘 · 20:51 · 자동 모드');
+    expect(w?.className).toContain('text-muted-foreground');
+    expect(w?.className).not.toMatch(/text-(warning|destructive)/);
+  });
+
+  it('reads in English with the English mode name', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'plan', permission_widened_to: 'acceptEdits' }));
+    await render('en');
+    expect(container.querySelector('[data-testid="agent-session-widened"]')?.textContent).toBe('Permissions widened in the terminal · 20:51 · Accept-edits mode');
+  });
+
+  it('shows nothing without a widening, or for a mode with no name yet (bypassPermissions)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working' }));
+    await render();
+    expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
+  });
+
+  it('a mode with no name yet (bypassPermissions) draws no line', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', permission_widened_at: '2026-10-08T11:51:00Z', permission_widened_from: 'auto', permission_widened_to: 'bypassPermissions' }));
+    await render();
+    expect(container.querySelector('[data-testid="agent-session-widened"]')).toBeNull();
+  });
+});

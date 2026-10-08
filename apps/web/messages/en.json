@@ -5122,6 +5122,13 @@
       "failed": "Couldn't resume — please try again"
     },
     "agentSession": {
+      "widened": "Permissions widened in the terminal · {time} · {mode}",
+      "widenedMode": {
+        "default": "Default mode",
+        "acceptEdits": "Accept-edits mode",
+        "plan": "Plan mode",
+        "auto": "Auto mode"
+      },
       "state": {
         "starting": "Started",
         "working": "Working",
