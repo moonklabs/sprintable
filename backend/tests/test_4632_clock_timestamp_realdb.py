@@ -260,3 +260,29 @@ async def test_release_in_a_long_transaction_stamps_the_write_moment_so_earlier_
                 assert await _recent_message_velocity(session, conv_id, 60) == 0
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_manual_release_in_a_long_transaction_stamps_the_write_moment_too():
+    """Codex (5022): the person's release (release_circuit_breaker) also stamps released_at. Same probe as the automatic release: a
+    message written before a manual release, in one long transaction, must not count as after it. Mutant: that stamp back to now() → RED."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+    from app.models.conversation import ConversationMessage
+    from app.services.chain_escalation import _recent_message_velocity, release_circuit_breaker
+
+    engine, factory = await _realdb_session()
+    try:
+        async with factory() as session:
+            org_id, conv_id = await _seed_conversation(session)
+        async with factory() as session:
+            async with session.begin():
+                session.add(ChainCircuitBreaker(id=uuid.uuid4(), org_id=org_id, conversation_id=conv_id))
+                await session.flush()
+                await session.execute(text(f"SELECT pg_sleep({HELD_OPEN_SECONDS})"))
+                session.add(ConversationMessage(id=uuid.uuid4(), conversation_id=conv_id, content="before release", mentioned_ids=[]))
+                await session.flush()
+                await session.execute(text("SELECT pg_sleep(0.5)"))
+                assert await release_circuit_breaker(session, conversation_id=conv_id, released_by=uuid.uuid4(), reason=None) is True
+                assert await _recent_message_velocity(session, conv_id, 60) == 0
+    finally:
+        await engine.dispose()
