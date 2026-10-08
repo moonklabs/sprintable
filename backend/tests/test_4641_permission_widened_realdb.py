@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     OWNER,
+    _addresses,
     _client,
     _dispose_global_engine_after_test,
     _person,
@@ -17,7 +18,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     anyio_backend,
     world,
 )
-from tests.test_4529_desktop_relay_realdb import _device, _tok
+from tests.test_4529_desktop_relay_realdb import _device, _remote_control_on, _tok  # noqa: F401 — _remote_control_on is autouse there
 
 STATE = "/api/v2/desktop/relay/sessions/s-1/state"
 
