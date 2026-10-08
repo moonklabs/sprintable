@@ -2846,6 +2846,11 @@ jobs:
       - name: Install Playwright chromium
         run: pnpm --filter web exec playwright install --with-deps chromium
 
+      # story #4586 — the shared stub plugin of the layout specs, checked by esbuild alone (no browser): an unlisted next/ or
+      # @/app import still bundles and runs, and an unlisted module fails by name. A red step fails this job.
+      - name: "Layout stub check (esbuild · story #4586)"
+        run: pnpm --filter web exec node e2e/support/check-layout-stubs.mjs
+
       # story #4557 — layout specs (`*.layout.spec.ts`): the page is built from a component's own class strings and the real
       # Tailwind build, measured in chromium (jsdom computes no layout). No server or sign-in, so it runs before the app starts.
       - name: Run layout e2e (no server · story #4557)
