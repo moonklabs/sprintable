@@ -675,8 +675,14 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     rows = [(r, s) for r, s in rows if state is None or shown_state(r, now) == state]
     if not rows:
         return []
+    from app.services import remote_control
+
     setup_ids = {s.id for _r, s in rows}
     reachable = await _reachable(db, setup_ids, now)
+    # story #4589 (PO 00:37Z): with the org's «원격 제어» off no answer can go down (the command is refused 409) — read here, never
+    # withdrawn: turned on again, the same rows are answerable again (a withdrawn row could never be: the daemon's same request_id
+    # finds it). The card says why in place of its buttons; «unknown» would call it a lost connection
+    off = not await remote_control.is_enabled(db, org_id)
     paired_setups = set((await db.execute(
         select(RemoteDevicePairing.setup_id).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
         .where(RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None), RemoteDevicePairing.removed_at.is_(None),
@@ -691,7 +697,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     for r, s in rows:
         shown = shown_state(r, now)
         # story #4590: a terminal-only question is never answerable here (no button · no signing values · the answer route refuses it)
-        answerable = shown == "pending" and s.id in reachable and s.id in paired_setups and not r.terminal_only
+        # story #4589: nor anything while the org's «원격 제어» is off
+        answerable = shown == "pending" and s.id in reachable and s.id in paired_setups and not r.terminal_only and not off
         role = next((m.get("role") for m in (s.members or []) if m.get("member_id") == str(r.agent_member_id)), None)
         out.append({
             "id": str(r.id), "request_id": str(r.request_id), "setup_id": str(s.id), "device_name": s.device_name,
@@ -706,7 +713,7 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,
-            "answerable": answerable,
+            "answerable": answerable, "remote_control_off": off,
             # story 4532 (PO 21:39Z · 까디르 1선): the values the phone signs, read by the phone's own shell from here — never handed
             # over by the web page (a page that passes them could have the phone sign another request of the same tool). Only on a
             # row the person can answer now (까디르 ② · PO 01:40Z): `input_hash` is an unsalted sha256 of the raw input, so a short
@@ -722,14 +729,20 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
 
 def open_requests_count(*, member_id, org_id: uuid.UUID):
     """A scalar subquery: the requests sent to this person still open — pending and inside the window (an expired one is still
-    shown for a while, but waits for no answer). For the approvals badge's one statement (routers.gates)."""
+    shown for a while, but waits for no answer). For the approvals badge's one statement (routers.gates). story #4589: none while
+    the org's «원격 제어» is off — nothing can be answered here then (the list still shows them, with why)."""
+    from app.models.organization import Organization
+
     return (
         select(func.count()).select_from(AgentPermissionRequest)
         .join(DesktopSetup, DesktopSetup.id == AgentPermissionRequest.setup_id)
+        .join(Organization, Organization.id == DesktopSetup.org_id)
         .where(AgentPermissionRequest.recipient_member_id == member_id, AgentPermissionRequest.state == "pending",
                AgentPermissionRequest.expires_at > func.now(), DesktopSetup.org_id == org_id,
                # story #4590 (Yuna §3): a terminal-only question is on the list but never on the badge — nothing to do here
-               AgentPermissionRequest.terminal_only.is_(False))
+               AgentPermissionRequest.terminal_only.is_(False),
+               # story #4589: nor anything while the org's «원격 제어» is off
+               Organization.remote_control_enabled_at.is_not(None))
         .scalar_subquery()
     )
 
