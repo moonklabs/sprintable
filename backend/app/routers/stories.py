@@ -1113,7 +1113,9 @@ async def get_story(
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     story = await repo.get(id)
-    if story is None:
+    # story 4615 (Kadir qa:changes · PO): a deleted story reads as one that does not exist — the same 404, nothing of it (repo.get
+    # does not filter deleted_at, and the MCP get_story reads through here)
+    if story is None or story.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     await _attach_list_fields(repo.session, repo.org_id, [story])

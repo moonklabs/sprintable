@@ -9,6 +9,7 @@ agent with its own API key (the caller this is for) — the real response shape,
   02 · another org's story id → 404, and nothing of that story in the answer
   03 · an id that does not exist → 404
   04 · the id is a UUID: a free string (a path that would normalize elsewhere) is refused before any request leaves the client
+  05 · a deleted story → the same 404, nothing of it (Kadir qa:changes)
 """
 from __future__ import annotations
 
@@ -182,3 +183,36 @@ async def test_04_the_id_is_a_uuid_never_a_free_string_in_the_path(monkeypatch):
         with pytest.raises(pydantic.ValidationError):
             st.GetStoryInput(story_id=bad)
     assert seen == []
+
+
+async def test_05_a_deleted_story_is_404_and_nothing_of_it_comes_back(monkeypatch):
+    """Kadir qa:changes (PO): GET /api/v2/stories/{id} read through repo.get, which does not filter deleted_at — a soft-deleted
+    story came back 200 with its title and description. It is now the same 404 as one that does not exist."""
+    from datetime import datetime, timezone
+
+    from app.models.pm import Story
+
+    import sprintable_mcp.tools.stories as st
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as session:
+            org = await _make_org(session)
+            project = await _make_project(session, org.id)
+            _agent_id, raw_key = await _agent_with_key(session, org.id, project.id)
+            secret = f"deleted-secret-{uuid.uuid4().hex[:8]}"
+            deleted_id = await _story(session, org.id, project.id, title=secret, description="gone with it")
+            row = await session.get(Story, deleted_id)
+            row.deleted_at = datetime.now(timezone.utc)
+            await session.commit()
+
+        from app.main import app
+
+        app.dependency_overrides.clear()
+        _wire_client_to_app(monkeypatch, app, api_key=raw_key)
+
+        text = (await st.get_story(st.GetStoryInput(story_id=str(deleted_id))))[0].text
+        assert text.startswith("Error") and ("NOT_FOUND" in text or "404" in text), text
+        assert secret not in text and "gone with it" not in text
+    finally:
+        await engine.dispose()
