@@ -68,3 +68,54 @@ async def test_a_waiting_request_while_off_is_listed_unanswerable_and_off_the_ba
         assert (back["id"], back["answerable"], back["remote_control_off"]) == (off["id"], True, False)
         assert back["input_hash"] is not None
         assert (await c.get(BADGE, headers=_person(OWNER))).json()["count"] == 1
+
+
+async def test_off_and_terminal_only_together_on_one_device(world):
+    """Kadir 2선 (4996 codex 01a11ace · PO 09:29Z ①): the place 4996's rebase merged by hand — `answerable` needs both «not terminal
+    only» and «not off», and the badge counts neither — pinned in one run: an ordinary and a terminal-only question on the same
+    paired, reachable device, through on → off → on. The answer route refuses terminal-only first (it is never answerable here,
+    on or off), then off."""
+    def _terminal_ask(agent):
+        body = _ask(agent, terminal_only=True)
+        del body["input_hash"]
+        return body
+
+    async def _rows():
+        listed = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        return {r["terminal_only"]: r for r in listed}
+
+    async def _badge():
+        return (await c.get(BADGE, headers=_person(OWNER))).json()["count"]
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4589b")
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, device["device_token"], der)
+        assert (await _post_ask(c, device, _ask(agent))).status_code == 201
+        assert (await _post_ask(c, device, _terminal_ask(agent))).status_code == 201
+
+        def on_as_at_first(rows):
+            """on: the ordinary one answerable with its signing values · the terminal-only one not, with none (Kadir 5013 ②)"""
+            ordinary, terminal = rows[False], rows[True]
+            assert (ordinary["answerable"], ordinary["remote_control_off"]) == (True, False)
+            assert ordinary["session_key"] is not None and ordinary["input_hash"] is not None
+            assert (terminal["answerable"], terminal["remote_control_off"], terminal["session_key"], terminal["input_hash"]) == (False, False, None, None)
+
+        on_as_at_first(await _rows())
+        assert await _badge() == 1
+
+        await _switch(False)  # off: neither answerable · both say off · no signing values · nothing on the badge
+        rows = await _rows()
+        for r in rows.values():
+            assert (r["state"], r["answerable"], r["remote_control_off"], r["session_key"], r["input_hash"]) == ("pending", False, True, None, None)
+        assert await _badge() == 0
+        refused = await c.post(f"{REQS}/{rows[True]['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert refused.status_code == 409 and refused.json()["error"]["code"] == "terminal_only", refused.text
+        refused = await c.post(f"{REQS}/{rows[False]['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert refused.status_code == 409 and refused.json()["error"]["code"] == "remote_control_off", refused.text
+        assert (await _sql(fetch=f"SELECT count(*) FROM desktop_commands WHERE setup_id = '{device['setup_id']}'"))[0][0] == 0
+
+        await _switch(True)  # on again: exactly as at first — off flags false, the ordinary one's signing values back (Kadir 5013 ①)
+        on_as_at_first(await _rows())
+        assert await _badge() == 1
