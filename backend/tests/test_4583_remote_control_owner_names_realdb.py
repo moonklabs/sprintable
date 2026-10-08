@@ -52,7 +52,9 @@ async def test_the_answer_carries_exactly_five_keys_and_names_the_owner_to_every
     async with _client() as c:
         for who, can in ((OWNER, True), (PLAIN, False)):
             body = (await c.get(URL, headers=_person(who))).json()
-            assert set(body) == {"enabled", "enabled_at", "can_change", "owner_names", "connected_setups"}, body
+            # story 4584: the old name rides along for one deploy, with the same value (the web reads connected_setups only)
+            assert set(body) == {"enabled", "enabled_at", "can_change", "owner_names", "connected_setups", "connected_computers"}, body
+            assert body["connected_computers"] == body["connected_setups"]
             assert body["can_change"] is can
             assert body["owner_names"] == ["Owner"], "a person who is not an owner reads the owner's name"
             _no_identity(body["owner_names"])

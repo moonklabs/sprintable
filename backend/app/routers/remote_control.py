@@ -29,6 +29,8 @@ class RemoteControlState(BaseModel):
     # story #4583: display names only (no email · no id) · a count only (no device name)
     owner_names: list[str]
     connected_setups: int
+    # story 4584: the old name, the same value, for one deploy (the backend ships before the web that reads connected_setups) — remove next deploy
+    connected_computers: int
 
 
 class RemoteControlChange(BaseModel):

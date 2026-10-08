@@ -50,6 +50,7 @@ def state_view(org: Organization, *, can_change: bool, owner_names: list[str], c
     return {
         "enabled": at is not None, "enabled_at": at.isoformat() if at else None, "can_change": can_change,
         "owner_names": owner_names, "connected_setups": connected_setups,
+        "connected_computers": connected_setups,  # story 4584: the old name, same value, for one deploy — removed next deploy
     }
 
 
