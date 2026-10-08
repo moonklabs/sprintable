@@ -19,30 +19,12 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
+import { layoutStubPlugin } from './support/layout-stubs';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
 const APP = path.join(WEB, 'src', 'app');
 
-const STUBS: Record<string, string> = {
-  '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i);',
-  '@/hooks/use-sse-notifications': 'export function useSseNotifications() {}',
-  '@/hooks/use-flat-href': 'export function useFlatHref() { return (h) => h; }',
-  '@/lib/phone-bridge': `export const isPhoneApp = () => !!window.__phone;
-    export const phoneCall = async (k) => {
-      if (k === 'pair.scan') return { ok: true, offer_id: '0f3c2a1e-1111-4222-8333-944455556666', setup_id: '12345678-9abc-4def-8123-456789abcdef', device_name: 'SYJ-MacBook-Pro', expires_at: new Date(Date.now() + 300000).toISOString() };
-      if (k === 'device.key.info') return { ok: true, public_key: 'pk' };
-      if (k === 'pair.mac') return { ok: true, mac: 'mac' };
-      if (k === 'device.auth') return { id: 'x', ok: true, auth: 'biometric' };
-      return { id: 'x', ok: false };
-    };`,
-  '@/lib/phone-answer': 'export async function answerOnPhone(id, decision) { return { kind: "answered", decision }; }',
-  '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1' }; }",
-  '@/components/viewer-time-zone': "export function useViewerTimeZone() { return 'Asia/Seoul'; }",
-  // a client navigation like Next's: the link's own onClick first, then (unless prevented) no page load — the harness swaps the view
-  'next/link': "import React from 'react'; export default function Link({ href, children, onClick, ...rest }) { return React.createElement('a', { href, ...rest, onClick: (e) => { onClick && onClick(e); if (!e.defaultPrevented && window.__clientNav) { e.preventDefault(); window.__clientNav(href); } } }, children); }",
-};
-const STUB_FILTER = /^(@\/lib\/db\/client|@\/hooks\/use-sse-notifications|@\/hooks\/use-flat-href|@\/lib\/phone-bridge|@\/lib\/phone-answer|@\/app\/dashboard\/dashboard-shell|@\/components\/viewer-time-zone|next\/link)$/;
 
 let built: { js: string; css: string } | null = null;
 async function build() {
@@ -73,10 +55,7 @@ async function build() {
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
     tsconfig: path.join(WEB, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' },
-    plugins: [{ name: 'stubs', setup(b) {
-      b.onResolve({ filter: STUB_FILTER }, (a) => ({ path: a.path, namespace: 'stub' }));
-      b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path]!, loader: 'js', resolveDir: WEB }));
-    } }],
+    plugins: [layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
   // every class the bundle can render — no length cap (PR 4972: a cut Button base string drew the wrong border and ring)
