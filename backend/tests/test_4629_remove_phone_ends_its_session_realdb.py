@@ -186,3 +186,20 @@ async def test_08_the_removed_phone_cannot_bring_its_key_back_without_signing_in
         assert back.status_code == 201 and back.json()["id"] == phone, back.text
         assert (await c.delete(f"{PHONES}/{phone}", headers=_person(OWNER))).json()["session"] == "ended"
         assert (await _refresh(c, fresh)).status_code == 401
+
+
+async def test_09_a_token_already_rotated_out_is_not_a_live_login(world):
+    """Kadir (5012 · surviving mutant): a refresh token rotated out keeps its expiry (#2449) — registering with it binds nothing
+    and is refused like an ended one; the token it was rotated into registers and is the one bound."""
+    async with _client() as c:
+        old = await _login(OWNER)
+        r = await _refresh(c, old)
+        assert r.status_code == 200
+        live = r.json()["data"]["refresh_token"]
+        key, _der = _phone_key()
+        refused = await c.post(PHONES, json={"label": "폰", "public_key": key, "refresh_token": old}, headers=_person(OWNER))
+        assert refused.status_code == 401 and refused.json()["error"]["code"] == "session_ended", refused.text
+        made = await c.post(PHONES, json={"label": "폰", "public_key": key, "refresh_token": live}, headers=_person(OWNER))
+        assert made.status_code == 201, made.text
+        bound = (await _sql(fetch=f"SELECT t.revoked_at IS NULL FROM remote_devices d JOIN refresh_tokens t ON t.id = d.session_token_id WHERE d.id = '{made.json()['id']}'"))
+        assert bound == [(True,)], "the live row is the one bound"
