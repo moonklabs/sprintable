@@ -20,6 +20,17 @@ import pytest
 sys.path.insert(0, ".")
 
 
+@pytest.fixture(autouse=True)
+def _no_real_wrapper_calls():
+    """PO 22:51Z (Minh's catch_test_host): a registered tool runs through `_flat()`, which loads the key's scope (GET …/mcp/manifest)
+    and fires a heartbeat (PATCH …/heartbeat) — real requests to whatever base URL an earlier test left on the MCP client singleton
+    (`http://x` · `http://test`), a sandbox network question every run. Neither is what these tests check."""
+    from unittest.mock import AsyncMock, patch
+    with patch("sprintable_mcp.server._load_scope_for", new=AsyncMock(return_value=[])), \
+         patch("sprintable_mcp.server._heartbeat_fire_forget", new=AsyncMock()):
+        yield
+
+
 @pytest.mark.anyio
 async def test_baseline_unpatched_arg_model_silently_drops_unknown_kwarg():
     """positive control — 패치 전 FastMCP 기본 동작 자체가 조용히 삼킨다는 것을 직접 재현.
@@ -71,8 +82,15 @@ async def test_registered_standup_history_tool_still_accepts_known_args():
     from sprintable_mcp import server as srv
 
     tool = srv.mcp._tool_manager.get_tool("sprintable_standup_history")
-    result = await tool.run({"limit": 5, "days": 7}, Context())
+    # PO 22:51Z (Minh's catch_test_host): the tool's own API call went out for real (GET <whatever base an earlier test left on the
+    # client singleton>/api/v2/standups/history) — the arguments reaching it is the point, not the network
+    from unittest.mock import AsyncMock, patch
+    with patch("sprintable_mcp.tools.standup.client") as mock_client:
+        mock_client.get = AsyncMock(return_value=[])
+        result = await tool.run({"limit": 5, "days": 7}, Context())
     assert isinstance(result, list)
+    mock_client.get.assert_awaited_once()
+    assert mock_client.get.await_args.kwargs["params"]["days"] == "7"  # the declared argument reaches the API call (as the query string)
 
 
 def test_all_registered_tools_share_the_same_lockdown():

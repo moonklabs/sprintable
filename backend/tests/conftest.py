@@ -56,6 +56,22 @@ from unittest.mock import AsyncMock, MagicMock
 # 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
 os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
 
+# PO 2026-10-07 22:51Z (Minh's catch_test_host · «사람 손 없이»): no test looks for cloud credentials on a metadata server — google-auth
+# (google.auth.default() — embedding · firebase · admin auth) and boto (the S3 storage provider) each asked 169.254.169.254, a sandbox
+# network question every run. Set before anything imports them: google-auth reads NO_GCE_CHECK once, when its metadata module loads.
+os.environ.setdefault("NO_GCE_CHECK", "true")
+os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+# …and a request to a made-up host or a metadata address is refused before a socket opens (tests/_no_real_network.py); the test that
+# made it fails, naming it (the autouse fixture `_no_real_network_requests` below)
+try:
+    from tests import _no_real_network  # noqa: E402
+except ImportError:
+    # a copy of this conftest run outside the tests package — the pytester-based guards (test_3186 · test_2643 · test_4152 ·
+    # test_a05da51b) copy it into a temp dir and run an inner session there: no guard module beside it, so no guard (not a real run)
+    _no_real_network = None
+else:
+    _no_real_network.install()
+
 
 # story #4319(AC5) — CI 정지 감지기(scripts/run-with-stall-detection.sh)가 죽이기 전에 보내는 신호로 스택을 남긴다.
 # STALL_EVIDENCE_DIR이 있을 때만(CI destructive 샤드). 모듈 최상위에서 등록해 수집(collection) 중 멈춤도 잡힌다.
@@ -295,6 +311,22 @@ def _resolve_global_engine_test_tag(app_name: str) -> str | None:
         return None
     node_hash = app_name[len(GLOBAL_ENGINE_TEST_TAG_PREFIX):].split("|", 1)[0]
     return _DESTRUCTIVE_TAG["nodeids"].get(node_hash)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network_requests():
+    """PO 2026-10-07 22:51Z: a test that sent a request to a made-up host or a metadata address (refused by tests/_no_real_network.py)
+    fails here, naming it — mock the call (MockTransport · respx · patch the client), never let it go out. A request a background task
+    of an earlier test makes shows under the test running then: still a leak to fix."""
+    if _no_real_network is None:  # a copied conftest outside the tests package (see its import)
+        yield
+        return
+    _no_real_network.CAUGHT.clear()
+    yield
+    if _no_real_network.CAUGHT:
+        caught = "; ".join(f"{what} (at {where})" for where, what in _no_real_network.CAUGHT)
+        _no_real_network.CAUGHT.clear()
+        pytest.fail(f"a real request left the test — mock it (tests/_no_real_network.py): {caught}", pytrace=False)
 
 
 @pytest.fixture(autouse=True)

@@ -30,6 +30,16 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _no_real_wrapper_calls():
+    """PO 22:51Z (Minh's catch_test_host): a registered tool runs through `_flat()`, which loads the key's scope (GET …/mcp/manifest)
+    and fires a heartbeat (PATCH …/heartbeat) — real requests to whatever base URL an earlier test left on the MCP client singleton
+    (`http://x` · `http://test`), a sandbox network question every run. Neither is what these tests check."""
+    with patch("sprintable_mcp.server._load_scope_for", new=AsyncMock(return_value=[])), \
+         patch("sprintable_mcp.server._heartbeat_fire_forget", new=AsyncMock()):
+        yield
+
+
 # ─── 스키마 레벨 — conversation_id/thread_id 해소 ────────────────────────────
 
 class TestConversationIdResolution:

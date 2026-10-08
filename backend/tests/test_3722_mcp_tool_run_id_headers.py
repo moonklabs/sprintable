@@ -3,7 +3,7 @@ X-Sprintable-Run-Id(env) 두 헤더가 BE tool_call_recording 미들웨어의 to
 ⓐ를 태운다. test_mcp_per_call_project_85429ee0.py(_project_override)와 동형 harness."""
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -133,7 +133,10 @@ async def test_flat_wrapper_sets_and_resets_tool_name_override():
 
     w = _flat("my_tool_name", "doc", _Input, _fn)
     assert _tool_name_override.get() is None  # 호출 전
-    with patch("sprintable_mcp.server._load_scope_for", return_value=[]):
+    # PO 22:51Z (Minh's catch_test_host): the wrapper's fire-and-forget heartbeat went out for real (PATCH http://x/…/heartbeat —
+    # a sandbox network question every run); it is not what this test checks
+    with patch("sprintable_mcp.server._load_scope_for", return_value=[]), \
+         patch("sprintable_mcp.server._heartbeat_fire_forget", new=AsyncMock()):
         await w(x=1)
     assert seen["during"] == "my_tool_name"  # fn 실행 중엔 실린다
     assert _tool_name_override.get() is None  # 끝나면 리셋(finally)
