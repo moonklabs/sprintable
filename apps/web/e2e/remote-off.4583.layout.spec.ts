@@ -357,12 +357,16 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     const clip = { x: Math.max(0, s.x - 6), y: Math.max(0, s.y - 6), width: s.width + 12, height: s.height + 12 };
     const focused = await page.screenshot({ clip });
     await page.screenshot({ path: path.join(outDir(), `4583-web-5c-arrive-owner-${tag}.png`) });
-    // Kadir (5021): the arrival holds the focus for 1.5 s (ARRIVAL_HOLD_MS) and an org read that lands inside that hold renews it. The
-    // person leaves only after the reads have settled and the hold has run out — the ring then has to go, as the assertion says.
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1700);
+    // 4595 (PO, 5021 L-390): diagnosis first — where the focus is when the test blurs the switch, and where it is after (the log shows it;
+    // no wait is added here until that is known)
+    const focusOf = () => page.evaluate(() => {
+      const a = document.activeElement as HTMLElement | null;
+      return { tag: a?.tagName ?? null, testid: a?.getAttribute('data-testid') ?? null, slot: a?.getAttribute('data-slot') ?? null, arrived: a?.hasAttribute('data-arrived') ?? null, state: document.querySelector('[data-testid="desktop-remote-control"]')?.getAttribute('data-arrived') ?? null };
+    });
+    console.log(`[4595 L-390 focus before blur] ${JSON.stringify(await focusOf())}`);
     await sw.evaluate((el) => (el as HTMLElement).blur());
     await frames(page);
+    console.log(`[4595 L-390 focus after blur] ${JSON.stringify(await focusOf())}`);
     const blurred = await page.screenshot({ clip });
     expect(focused.equals(blurred), 'the focus ring shows in pixels').toBe(false);
 
