@@ -24,6 +24,7 @@ import {
   type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst,
   moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 
 /**
  * story #4427(E-DESKTOP P2) — 웹 설정 페이지. 데스크톱 앱이 이 페이지를 설정 코드 + 찾은 에이전트 목록과 함께 연다.
@@ -31,11 +32,18 @@ import { formatViewerRelativeTime } from '@/lib/storage/format';
  * 실패는 «무엇이 · 왜 · 할 일 하나»(빨강 X · 설명 링크 0 · 요금제 말 0). 앱을 부르는 단추는 `ai.sprintable:/desktop/setup`
  * 링크로만(웹 쪽 preload 0 — 셸이 그 링크를 받아 새 코드로 다시 연다).
  */
-export const SETUP_APP_LINK = 'ai.sprintable:/desktop/setup';
+export const SETUP_APP_LINK = appSetupLink(null);
 /** story 4504 AC2 (PO 14:47Z): «앱 열기» on the page that came without values — «take me back to my setup», not «start another».
  * The app opens the setup it already launched for the same account (a new one for another account); every other button keeps
  * SETUP_APP_LINK (a new setup), the disconnected card's «앱에서 다시 시작» among them. Only the web knows which button it was. */
-export const SETUP_REOPEN_LINK = `${SETUP_APP_LINK}?intent=reopen`;
+export const SETUP_REOPEN_LINK = appSetupLink(null, 'reopen');
+
+/** story #4626: the links for the app that opened this page — `?app=` through the closed table (none · anything else = the
+ *  default above, byte for byte; a typed address has none) */
+function useAppSetupLinks(): { open: string; reopen: string } {
+  const app = nativeReturnApp(useSearchParams()?.get(RETURN_APP_PARAM));
+  return { open: appSetupLink(app), reopen: appSetupLink(app, 'reopen') };
+}
 const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
 // each provider's recommended install (no Node.js needed; fixed provider addresses with no version in them — PO 13:10Z from
 // code.claude.com/docs/en/setup and github.com/openai/codex)
@@ -891,6 +899,7 @@ function startNote(t: ReturnType<typeof useTranslations<'desktop.setup'>>, made:
  * no install command to copy (it is installed) · «다시 찾기» as on the no-agent card. */
 export function TooOldCard({ old }: { old: OldRuntime[] }) {
   const t = useTranslations('desktop.setup');
+  const links = useAppSetupLinks();
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-too-old">
       {old.map((o) => (
@@ -899,7 +908,7 @@ export function TooOldCard({ old }: { old: OldRuntime[] }) {
           <p className="text-sm text-muted-foreground">{t('tooOld.body', { min: o.min })}</p>
         </div>
       ))}
-      <div className="flex gap-2"><Button asChild><a href={SETUP_APP_LINK}>{t('failure.no-agent.action')}</a></Button></div>
+      <div className="flex gap-2"><Button asChild><a href={links.open}>{t('failure.no-agent.action')}</a></Button></div>
     </Card>
   );
 }
@@ -908,7 +917,8 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onRel
   const t = useTranslations('desktop.setup');
   const flatHref = useFlatHref();
   const key = (part: 'title' | 'body' | 'action') => FAILURE_KEY[`${failure}.${part}`]!;
-  const appButton = (label: string) => <Button asChild><a href={SETUP_APP_LINK}>{label}</a></Button>;
+  const links = useAppSetupLinks();
+  const appButton = (label: string) => <Button asChild><a href={links.open}>{label}</a></Button>;
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
       <h1 className="text-lg font-semibold">{t(key('title'))}</h1>
@@ -1101,11 +1111,12 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */
 export function OpenInDesktopApp() {
   const t = useTranslations('desktop.setup');
+  const links = useAppSetupLinks();
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
       <h1 className="text-lg font-semibold">{t('direct.title')}</h1>
       <p className="text-sm text-muted-foreground">{t('direct.body')}</p>
-      <div><Button asChild><a href={SETUP_REOPEN_LINK}>{t('direct.action')}</a></Button></div>
+      <div><Button asChild><a href={links.reopen}>{t('direct.action')}</a></Button></div>
     </Card>
   );
 }

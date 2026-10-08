@@ -98,4 +98,19 @@ describe('GET /auth/login — native OAuth-start branch', () => {
     const cookieNames = h.cookiesSetMock.mock.calls.map((c) => c[0] as string);
     expect(cookieNames).not.toContain('oauth_native_callback_mode_google');
   });
+
+  // story #4626 — which desktop app to hand back to: only the closed table's value is kept
+  it('[4626] return_app=check (native) → the return_app cookie «check» · off the table → no cookie · not native → no cookie', async () => {
+    const appCookie = () => h.cookiesSetMock.mock.calls.find((c) => c[0] === 'oauth_native_return_app_google');
+    await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', return_app: 'check' }));
+    expect(appCookie()?.[1]).toBe('check');
+    for (const off of ['evil', 'CHECK', 'ai.sprintable.check', ' check', '']) {
+      h.cookiesSetMock.mockReset();
+      await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', return_app: off }));
+      expect(appCookie(), off).toBeUndefined();
+    }
+    h.cookiesSetMock.mockReset();
+    await GET(makeRequest({ provider: 'google', code_challenge: VALID_CHALLENGE, return_app: 'check' }));
+    expect(appCookie(), 'not a native start').toBeUndefined();
+  });
 });

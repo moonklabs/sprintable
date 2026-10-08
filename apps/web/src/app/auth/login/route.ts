@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { resolveAppUrl } from '@/services/app-url';
 import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 import { isOAuthCallbackMode } from '@/lib/auth/oauth-callback-mode';
+import { nativeReturnApp } from '@/lib/auth/native-return-app';
 
 const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -64,6 +65,10 @@ export async function GET(request: Request) {
     if (isOAuthCallbackMode(callbackModeParam)) {
       cookieStore.set(`oauth_native_callback_mode_${provider}`, callbackModeParam, cookieOpts);
     }
+    // story #4626 — which desktop app to hand back to: only a value in the closed table is kept (anything else = the default,
+    // no cookie at all — nothing from the URL is carried as it came)
+    const returnApp = nativeReturnApp(searchParams.get('return_app'));
+    if (returnApp) cookieStore.set(`oauth_native_return_app_${provider}`, returnApp, cookieOpts);
   }
 
   return NextResponse.redirect(url);

@@ -161,6 +161,29 @@ describe('GET /api/auth/callback/[provider] — native OAuth-handoff branch', ()
     expect(res.headers.get('referrer-policy')).toBe('no-referrer');
   });
 
+  // story #4626 — the desktop app that started the sign-in (closed table): the return page is told which app to open
+  it('[4626] return_app cookie «check» → the return page gets app=check · off the table → nothing added · the cookie is single-use', async () => {
+    process.env['MOBILE_APP_LINK_ORIGIN'] = 'https://dev-app.sprintable.ai';
+    const run = async (cookie: string | null) => {
+      stubCookies({ oauth_native_challenge_google: 'a'.repeat(43), oauth_native_callback_mode_google: 'custom_scheme', ...(cookie === null ? {} : { oauth_native_return_app_google: cookie }) });
+      mockFetch.mockReset();
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { access_token: fakeJwt({ sub: 'user-123' }), refresh_token: 'legacy-rt' } }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ code: 'handoff-code-xyz' }) });
+      const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+      const [, issueOpts] = mockFetch.mock.calls[1] as [string, RequestInit];
+      return { location: res.headers.get('location'), returnUri: (JSON.parse(issueOpts.body as string) as { return_uri: string }).return_uri };
+    };
+    const check = await run('check');
+    expect(check.location).toBe('https://dev-app.sprintable.ai/native/oauth-return?code=handoff-code-xyz&app=check');
+    expect(check.returnUri, 'BE binding unchanged — the app only picks which button opens').toBe('ai.sprintable:/oauth-return');
+    expect(h.cookiesDeleteMock).toHaveBeenCalledWith('oauth_native_return_app_google');
+    for (const off of ['evil', 'CHECK', 'ai.sprintable.check', '']) {
+      expect((await run(off)).location, off).toBe('https://dev-app.sprintable.ai/native/oauth-return?code=handoff-code-xyz');
+    }
+    expect((await run(null)).location).toBe('https://dev-app.sprintable.ai/native/oauth-return?code=handoff-code-xyz');
+  });
+
   it('with a native challenge cookie: sends the internal secret header on the issue call', async () => {
     stubCookies({ oauth_native_challenge_google: 'a'.repeat(43) });
     process.env['FIREBASE_BFF_INTERNAL_SECRET'] = 'shared-secret';

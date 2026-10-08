@@ -14,7 +14,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => c
 // the query the router reports (the dashboard shell adds ?p= with a router replace)
 vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next/navigation')>()), useSearchParams: () => sp.value }));
 
-import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -382,6 +382,26 @@ describe('[SID:4427] desktop setup page', () => {
     expect((container.querySelector(`a[href="${SETUP_REOPEN_LINK}"]`) as HTMLAnchorElement).textContent).toBe('앱 열기');
     expect(SETUP_REOPEN_LINK).toBe('ai.sprintable:/desktop/setup?intent=reopen');
     expect(container.querySelector(`a[href="${SETUP_APP_LINK}"]`)).toBeNull();
+  });
+
+  // story #4626 — the page the check app opened (`?app=check`) sends its buttons back to the check app; a typed address
+  // (no `app`) or a value off the closed table keeps the default links byte for byte
+  it('[4626] ?app=check → the buttons open ai.sprintable.check: · off the table → the default links', async () => {
+    stub(() => new Response('{}'));
+    const hrefs = () => [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    try {
+      sp.value = new URLSearchParams('app=check');
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable.check:/desktop/setup?intent=reopen']);
+      await mount(<Failure failure="expired" />);
+      expect(hrefs()).toContain('ai.sprintable.check:/desktop/setup');
+      expect(hrefs()).not.toContain(SETUP_APP_LINK);
+      for (const off of ['evil', 'CHECK', 'ai.sprintable.check', '']) {
+        sp.value = new URLSearchParams({ app: off });
+        await mount(<OpenInDesktopApp />);
+        expect(hrefs(), off).toEqual([SETUP_REOPEN_LINK]);
+      }
+    } finally { sp.value = null; }
   });
 });
 
