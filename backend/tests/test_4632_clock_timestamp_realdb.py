@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import text
@@ -155,5 +156,80 @@ async def test_two_messages_in_one_transaction_keep_their_order():
                 ), {"a": first.id, "b": second.id})).scalars().all()
                 assert len(stamps) == 2 and stamps[0] < stamps[1]
                 assert rows == [first.id, second.id]
+    finally:
+        await engine.dispose()
+
+
+# Kadir's surviving mutants (codex, 5022): with only the two column defaults pinned, the comparisons in chain_escalation.py could
+# go back to now() and nothing failed. These pin the comparisons themselves, through the real functions.
+
+
+@pytest.mark.anyio
+async def test_velocity_window_counts_by_write_moment_not_transaction_start():
+    """Mutant: the velocity window's start taken with now(). A message written 2.5s into a transaction is older than a 1s window
+    by the clock; counting it would mean the window started at the transaction's beginning."""
+    from app.models.conversation import ConversationMessage
+    from app.services.chain_escalation import _recent_message_velocity
+
+    engine, factory = await _realdb_session()
+    try:
+        async with factory() as session:
+            _org_id, conv_id = await _seed_conversation(session)
+        async with factory() as session:
+            async with session.begin():
+                session.add(ConversationMessage(id=uuid.uuid4(), conversation_id=conv_id, content="early", mentioned_ids=[]))
+                await session.flush()
+                await session.execute(text(f"SELECT pg_sleep({HELD_OPEN_SECONDS})"))
+                assert await _recent_message_velocity(session, conv_id, 1) == 0
+    finally:
+        await engine.dispose()
+
+
+async def _release_check(session, org_id, conv_id) -> bool:
+    """release_if_quiet with the config and the episode marker fixed: auto mode, a 1s window (so two windows is 2s), no marker."""
+    from app.services import chain_escalation
+
+    with patch.object(chain_escalation, "_get_org_config", AsyncMock(return_value=(True, 1, 10**9, "block", "auto"))), \
+            patch.object(chain_escalation, "_episode_marker_alive", AsyncMock(return_value=False)):
+        return await chain_escalation.release_if_quiet(session, org_id=org_id, conversation_id=conv_id)
+
+
+@pytest.mark.anyio
+async def test_block_opened_moments_ago_is_not_released():
+    """AC2 (age check): a block written 2.5s into a transaction and checked 0.5s later is not two windows old. With the transaction-start
+    stamp it looked two windows old and was released early. Mutant: the age check against now() also fails this."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+
+    engine, factory = await _realdb_session()
+    try:
+        async with factory() as session:
+            org_id, conv_id = await _seed_conversation(session)
+        async with factory() as session:
+            async with session.begin():
+                await session.execute(text(f"SELECT pg_sleep({HELD_OPEN_SECONDS})"))
+                session.add(ChainCircuitBreaker(id=uuid.uuid4(), org_id=org_id, conversation_id=conv_id))
+                await session.flush()
+                await session.execute(text("SELECT pg_sleep(0.5)"))
+                assert await _release_check(session, org_id, conv_id) is False
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_block_held_two_windows_is_released_by_its_write_moment():
+    """The age check's positive side: a block written, then held 2.5s (two 1s windows) in the same transaction, is released.
+    Mutant: the check against now() (the transaction start) never sees it as old enough and keeps it blocked."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+
+    engine, factory = await _realdb_session()
+    try:
+        async with factory() as session:
+            org_id, conv_id = await _seed_conversation(session)
+        async with factory() as session:
+            async with session.begin():
+                session.add(ChainCircuitBreaker(id=uuid.uuid4(), org_id=org_id, conversation_id=conv_id))
+                await session.flush()
+                await session.execute(text(f"SELECT pg_sleep({HELD_OPEN_SECONDS})"))
+                assert await _release_check(session, org_id, conv_id) is True
     finally:
         await engine.dispose()
