@@ -6728,6 +6728,7 @@
     "installStepOpen": "앱을 한 번 열어 본 뒤 시스템 설정 → <nw>개인정보 보호 및 보안</nw> → 「그래도 열기」",
     "installOldMac": "macOS 12에서는 앱을 우클릭 → 「열기」",
     "downloadCta": "다운로드",
+    "openOnMac": "Mac에서 이 화면을 열어 받아 주세요",
     "unavailable": "지금은 받을 수 없어요.",
     "setup": {
       "loading": "설정을 불러오고 있어요",

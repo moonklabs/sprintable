@@ -6728,6 +6728,7 @@
     "installStepOpen": "Try opening the app once, then go to System Settings → <nw>Privacy & Security</nw> → \"Open Anyway\"",
     "installOldMac": "On macOS 12, right-click the app → \"Open\"",
     "downloadCta": "Download",
+    "openOnMac": "Open this page on your Mac to download",
     "unavailable": "Not available right now.",
     "setup": {
       "loading": "Loading setup",
