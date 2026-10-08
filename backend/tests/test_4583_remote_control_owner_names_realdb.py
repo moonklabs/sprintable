@@ -121,12 +121,14 @@ async def test_an_owner_without_a_name_row_or_inactive_is_left_out_never_shown_a
         _no_identity(names)
         await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")
         assert (await c.get(URL, headers=_person(PLAIN))).json()["owner_names"] == [], "an inactive owner is not named"
-        # the edge pinned as the meant behaviour (Kadir 4973 · PO 06:06Z): the gate still lets both turn it on — the list names
-        # only those it can show, it does not decide who may change it (an inactive member at the gate is 4535's, not this card's)
-        assert (await c.put(URL, json={"enabled": True}, headers=_person(OWNER))).status_code == 200, "inactive owner: the gate as today"
-        assert (await c.put(URL, json={"enabled": False}, headers=_person(nameless))).status_code == 200, "nameless owner: the gate as today"
+        # story #4585 (PO 01:35Z): the gate is 4598's one rule now (`is_active_owner` · fail closed) — the two it never names cannot
+        # change it either (was pinned 200 here as «the gate as today», Kadir 4973 · PO 06:06Z, until 4585 decided it)
+        for who, what in ((OWNER, "inactive owner"), (nameless, "owner with no members row")):
+            r = await c.put(URL, json={"enabled": True}, headers=_person(who))
+            assert r.status_code == 403 and r.json()["error"]["code"] == "owner_required", (what, r.text)
+            assert (await c.get(URL, headers=_person(who))).json()["can_change"] is False, what
         body = (await c.get(URL, headers=_person(PLAIN))).json()
-        assert body["owner_names"] == [] and body["can_change"] is False
+        assert body["owner_names"] == [] and body["can_change"] is False and body["enabled"] is False  # nothing changed
 
 
 async def test_the_device_reads_only_its_own_orgs_owner_names(world):

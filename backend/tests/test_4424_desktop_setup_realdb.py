@@ -113,6 +113,9 @@ _CLEAN = [
     f"DELETE FROM projects WHERE org_id IN ('{ORG}','{ORG2}')",
     f"DELETE FROM org_members WHERE org_id IN ('{ORG}','{ORG2}')",
     f"DELETE FROM users WHERE id IN ('{OWNER}','{PLAIN}','{OUTSIDER}')",
+    # story #4585: the users the 4583 tests add with fresh ids (`…@d4583.test`) — left behind, the next run on the same DB hit
+    # ix_users_email (their org rows go with the org; the user row did not)
+    "DELETE FROM users WHERE email LIKE '%@d4583.test'",
     f"DELETE FROM organizations WHERE id IN ('{ORG}','{ORG2}')",
 ]
 

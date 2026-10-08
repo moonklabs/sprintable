@@ -59,10 +59,25 @@ async def _org(db: AsyncSession, org_id: uuid.UUID, *, lock: bool = False) -> Or
     return org
 
 
+async def _may_change(db: AsyncSession, member) -> bool:
+    """story #4585 (PO 01:35Z): 4598's rule for «묻지 않고 일하기» — an owner whose member row is active, fail closed (no members
+    row · soft-deleted · inactive = not an owner here). An inactive owner held the whole org's switch while `owner_names` (active
+    people only) never named them. «Owner» stays the resolver's, on the branch in use (members.org_role on the anchor branch ·
+    org_members.role on the legacy one — 4583's test): 4598's `is_active_owner` reads the legacy column only, so it is not reused
+    here (on the legacy branch the two say the same)."""
+    from app.models.member import Member
+
+    if member.role != "owner":
+        return False
+    return (await db.execute(
+        select(Member.id).where(Member.id == member.id, Member.is_active.is_(True), Member.deleted_at.is_(None))
+    )).first() is not None
+
+
 @router.get("/api/v2/organizations/{org_id}/remote-control", response_model=RemoteControlState)
 async def get_remote_control(org_id: uuid.UUID, db: AsyncSession = Depends(get_db), auth: AuthContext = Depends(get_current_user)):
     member = await _person_of(db, auth, org_id)
-    return await _view(db, await _org(db, org_id), can_change=member.role == "owner")
+    return await _view(db, await _org(db, org_id), can_change=await _may_change(db, member))
 
 
 async def _view(db: AsyncSession, org: Organization, *, can_change: bool) -> dict:
@@ -83,7 +98,7 @@ async def put_remote_control(
     if _requires_interactive_session(auth):
         raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
     member = await _person_of(db, auth, org_id)
-    if member.role != "owner":
+    if not await _may_change(db, member):  # story #4585: an inactive owner too — the same 403 code as 4598's
         raise HTTPException(status_code=403, detail={"code": "owner_required", "message": "only an owner of this organization can change it"})
     org = await _org(db, org_id, lock=True)
     await remote_control.set_enabled(db, org=org, actor_id=member.id, enabled=body.enabled)
