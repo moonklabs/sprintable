@@ -43,6 +43,9 @@ function readAppMetadataClaims(payload: Record<string, unknown>): Pick<ServerSes
   };
 }
 
+// FastAPI `GET /api/v2/auth/me` (backend/app/routers/auth.py `AuthMeResponse`) — the fields read here. `member_id` there is
+// users.id for a person's session. (`GET /api/v2/me` is a different shape — `MeResponse`: `id` = the team member, no
+// `member_id` — story 4493.) The test reads a body pinned to the backend schema: lib/db/__fixtures__/auth-me.firebase-session.json.
 interface AuthMeResponse {
   member_id: string;
   org_id: string | null;
@@ -55,7 +58,8 @@ interface AuthMeResponse {
  * Sprintable user_id/org_id/project_id 해석. 로컬 firebaseUid만으로는 이 값들을 알 수 없다 —
  * 디디군 dual-verifier 설계(PR#2197)가 custom claims를 신뢰하지 않고 매번 live DB에서
  * 재조회하기 때문(§3.3 resource-actual 원칙, staleness 방지). 그래서 legacy 경로(순수 로컬
- * JWT 디코드)와 달리 이 경로는 FastAPI `GET /api/v2/me` 왕복 1회가 필연적이다.
+ * JWT 디코드)와 달리 이 경로는 FastAPI `GET /api/v2/auth/me` 왕복 1회가 필연적이다(story 4493 — 처음엔 `/api/v2/me`를 불러
+ * 늘 null이었다).
  *
  * `React.cache()`로 요청 스코프 memoize(오르테가군 권고) — 같은 요청 내 getServerSession()이
  * 여러 번 호출돼도 /me 왕복은 1회로 묶인다.
@@ -82,7 +86,9 @@ export const resolveFirebaseServerSession = cache(async (sessionCookie: string):
   // 읽는다(backend/app/dependencies/auth.py — Cookie 추출 경로 자체가 존재하지 않음). 세션
   // 쿠키 값을 Cookie 헤더로 보내면 BE가 아예 못 읽어 항상 401 — Authorization: Bearer로
   // 그대로 전달해야 _resolve_firebase_session(token, db)가 검증할 수 있다.
-  const res = await backendFetch(`${FASTAPI_URL()}/api/v2/me`, {
+  // story 4493 — `/api/v2/auth/me`, not `/api/v2/me`: only the former answers with `member_id` (= users.id); the latter has
+  // no such field, so every Firebase session here came back null.
+  const res = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/me`, {
     // story #4320 — 서버 세션 조회(요청 객체 없음 · next/headers 쿠키) — 시간 제한만.
     
     headers: { Authorization: `Bearer ${sessionCookie}` },

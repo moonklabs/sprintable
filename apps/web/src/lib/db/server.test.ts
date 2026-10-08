@@ -3,6 +3,7 @@
 // 검증. malformed/missing claim은 null(fail-closed) — 호출부가 /me fallback으로 넘어가게.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignJWT } from 'jose';
+import authMeFirebaseSession from './__fixtures__/auth-me.firebase-session.json';
 
 const { cookiesGetMock, verifySprintableSessionMock } = vi.hoisted(() => ({
   cookiesGetMock: vi.fn(),
@@ -143,7 +144,7 @@ describe('getServerSession — JWT app_metadata org_id/project_id claim', () => 
 });
 
 // story 360dcdf9(E-AUTH-REBUILD Phase2-FE-S2·doc §4.1/§4.3): __Host-sp_fs 존재 시 Firebase
-// 경로만 시도(legacy 폴백 절대 금지) → 성공하면 FastAPI GET /api/v2/me로 user_id/org_id/
+// 경로만 시도(legacy 폴백 절대 금지) → 성공하면 FastAPI GET /api/v2/auth/me로 user_id/org_id/
 // project_id 해석. React.cache()의 요청스코프 dedup 자체는 Next.js 렌더 디스패처가 있어야
 // 동작하는 프로퍼티라(실측: 순수 node/vitest 환경에서 cache()는 매 호출마다 재실행됨 — 이
 // 저장소의 기존 선례 auth-helpers.ts::getAuthContext도 동일 이유로 dedup을 유닛테스트하지
@@ -172,31 +173,32 @@ describe('getServerSession — Firebase 세션쿠키(__Host-sp_fs) 라우팅', (
       email: 'fb-user@test.com',
       authTime: 1700000000,
     });
-    const fetchSpy = vi.fn(async () => new Response(
-      JSON.stringify({ member_id: 'sprintable-user-1', org_id: 'org-9', project_id: 'proj-9', resolved_default_project_id: null }),
-      { status: 200 },
-    ));
+    // story 4493 — the body is the backend's own shape (AuthMeResponse of a Firebase person session), pinned to the schema by
+    // backend/tests/test_4493_auth_me_fixture_contract.py — a hand-written mock here once read a field the server never sends.
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify(authMeFirebaseSession), { status: 200 }));
     global.fetch = fetchSpy as unknown as typeof fetch;
 
     const { getServerSession } = await import('./server');
     const session = await getServerSession();
 
     expect(session).toEqual({
-      user_id: 'sprintable-user-1',
+      user_id: authMeFirebaseSession.member_id,
       email: 'fb-user@test.com',
       // S4 재검증에서 발견: BE get_current_user는 HTTPBearer로만 자격을 읽는다(Cookie 추출
       // 경로 없음) — 세션쿠키 값 자체가 Bearer 자격이라 access_token에도 그대로 채운다.
       access_token: 'fs-cookie-value',
-      org_id: 'org-9',
-      project_id: 'proj-9',
+      org_id: authMeFirebaseSession.org_id,
+      // a Firebase session carries no project claim — null here, and callers fall back to /me as for a legacy token without one
+      project_id: null,
     });
     // legacy jwtVerify 경로로 안 샜는지 확인 — sp_at 쿠키가 아예 안 읽혔어야 함은 라우팅 순서로 보장.
     expect(verifySprintableSessionMock).toHaveBeenCalledWith('fs-cookie-value', 'test-project');
-    // BE에 Cookie 헤더가 아니라 Authorization: Bearer로 자격이 전달되는지 계약 고정(S4 재검증 핵심).
-    expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining('/api/v2/me'),
-      expect.objectContaining({ headers: { Authorization: 'Bearer fs-cookie-value' } }),
-    );
+    // BE에 Cookie 헤더가 아니라 Authorization: Bearer로 자격이 전달되는지 계약 고정(S4 재검증 핵심) — and to /api/v2/auth/me,
+    // the endpoint whose shape this is (story 4493: /api/v2/me answers MeResponse, which has no member_id).
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/api/v2/auth/me');
+    expect(init).toEqual(expect.objectContaining({ headers: { Authorization: 'Bearer fs-cookie-value' } }));
   });
 
   it('Firebase 검증 실패 시 legacy 폴백 없이 null을 반환한다(다운그레이드 금지)', async () => {
@@ -218,7 +220,7 @@ describe('getServerSession — Firebase 세션쿠키(__Host-sp_fs) 라우팅', (
     expect(fetchSpy).not.toHaveBeenCalled(); // 검증 실패면 /me도 호출 안 함(불필요 왕복 방지).
   });
 
-  it('GET /api/v2/me 호출이 실패(!ok)하면 null을 반환한다', async () => {
+  it('GET /api/v2/auth/me 호출이 실패(!ok)하면 null을 반환한다', async () => {
     mockCookies({ '__Host-sp_fs': 'fs-cookie-value' });
     verifySprintableSessionMock.mockResolvedValue({
       issuer: 'https://session.firebase.google.com/test-project',
