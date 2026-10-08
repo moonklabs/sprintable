@@ -32,18 +32,18 @@ def _table() -> dict:
 
 
 def tool_name(runtime: str | None, tool: str, lang: str) -> str:
-    """mcp__{server}__{tool} → the file's `mcp` words · Claude's own tools as Claude shows them (but a daemon value in table.claude by
-    exact key · story 4580) · others by exact key in the table, else
+    """mcp__{server}__{tool} → the file's `mcp` words · a value of the daemon's own (`own` · story 4580 SandboxNetwork) by exact key,
+    whatever the runtime (story 4591) · Claude's own tools as Claude shows them · others by exact key in the table, else
     «작업\u2060({value})» (the value never hidden) · a runtime not known → the value as it is."""
     lang = "en" if lang == "en" else "ko"
     m = _MCP.match(tool)
     if m:
         return _doc()["mcp"][lang].replace("{server}", m[1]).replace("{tool}", m[2])
+    own = _doc()["own"]
+    if tool in own:  # story 4580 · 4591: a value of the daemon's own, before any runtime — the title names the question its summary asks
+        return own[tool][lang]
     table = _table()
-    if runtime == "claude":  # story 4580: its own names as they are — but a value of the daemon's own in the table (SandboxNetwork)
-        own = table["claude"]["names"] if "claude" in table else {}
-        return own[tool][lang] if tool in own else tool
-    if runtime is None:
+    if runtime == "claude" or runtime is None:  # Claude's own names as they are · a runtime not known: as it is
         return tool
     names = table[runtime]["names"] if runtime in table else {}
     if tool in names:  # a dict from JSON: exact keys, no prototype
