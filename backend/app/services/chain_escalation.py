@@ -111,18 +111,18 @@ async def _open_circuit_breaker(
 
 async def _auto_close_circuit_breaker(
     db: AsyncSession, conversation_id: uuid.UUID, *, reason: str = "auto: episode resolved+cooldown",
+    breaker_id: uuid.UUID | None = None,
 ) -> bool:
     """story #2630: release_mode='auto' org 전용 — 에피소드 자연 해소 시 열린 breaker를 닫는다.
-    released_by는 NULL로 남긴다(사람이 안 눌렀다는 사실 자체가 감사 대상). story #4631: 닫았으면 True."""
+    released_by는 NULL로 남긴다(사람이 안 눌렀다는 사실 자체가 감사 대상). story #4631: 닫았으면 True · `breaker_id`면 그 행만
+    (Kadir 5015: the block that was checked — never one opened in between)."""
     from app.models.chain_circuit_breaker import ChainCircuitBreaker
 
+    where = [ChainCircuitBreaker.conversation_id == conversation_id, ChainCircuitBreaker.released_at.is_(None)]
+    if breaker_id is not None:
+        where.append(ChainCircuitBreaker.id == breaker_id)
     result = await db.execute(
-        update(ChainCircuitBreaker)
-        .where(
-            ChainCircuitBreaker.conversation_id == conversation_id,
-            ChainCircuitBreaker.released_at.is_(None),
-        )
-        .values(released_at=func.now(), release_reason=reason)
+        update(ChainCircuitBreaker).where(*where).values(released_at=func.now(), release_reason=reason)
     )
     return result.rowcount > 0
 
@@ -154,19 +154,21 @@ async def release_if_quiet(db: AsyncSession, *, org_id: uuid.UUID, conversation_
     if release_mode != "auto":
         return False
     # Kadir (5015): one clock — the database's, the same that stamped opened_at (no value from the agent, no app-server clock)
-    old_enough = (await db.execute(
-        select(ChainCircuitBreaker.opened_at <= func.now() - timedelta(seconds=window_seconds * 2)).where(
+    checked = (await db.execute(
+        select(ChainCircuitBreaker.id, ChainCircuitBreaker.opened_at <= func.now() - timedelta(seconds=window_seconds * 2)).where(
             ChainCircuitBreaker.conversation_id == conversation_id,
             ChainCircuitBreaker.released_at.is_(None),
         )
-    )).scalar_one_or_none()
-    if not old_enough:  # none open (None) · under two windows (False)
+    )).one_or_none()
+    if checked is None or not checked[1]:  # none open · under two windows
         return False
     if await _episode_marker_alive(conversation_id):
         return False
     if await _recent_message_velocity(db, conversation_id, window_seconds) > threshold:
         return False
-    if await _auto_close_circuit_breaker(db, conversation_id, reason="auto: quiet since block"):
+    # Kadir (5015): close the block that was checked, by its id — a block opened in between (the old one closed by another send,
+    # a new burst) was never checked and stays open
+    if await _auto_close_circuit_breaker(db, conversation_id, reason="auto: quiet since block", breaker_id=checked[0]):
         return True
     # Kadir (5015): two sends racing here — the other one closed it a moment ago (closed once, released_at is never moved); this
     # send goes through too rather than meeting a 423 for a block that is gone

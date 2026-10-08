@@ -612,7 +612,7 @@ async def test_4631_the_send_that_loses_the_race_to_close_goes_through_too():
         async with Session() as s:
             org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=660)
 
-            async def _closed_by_the_other(db, conversation_id, *, reason):  # the other send won: it closed the row first
+            async def _closed_by_the_other(db, conversation_id, *, reason, breaker_id=None):  # the other send won: it closed the row first
                 await db.execute(sa_update(ChainCircuitBreaker).where(
                     ChainCircuitBreaker.conversation_id == conversation_id, ChainCircuitBreaker.released_at.is_(None),
                 ).values(released_at=sa_func.now(), release_reason="auto: quiet since block"))
@@ -624,6 +624,40 @@ async def test_4631_the_send_that_loses_the_race_to_close_goes_through_too():
                 resp = await _agent_send(s, conv_id, agent_id, org_id, "경주에서 진 쪽")
             assert resp["data"]["content"] == "경주에서 진 쪽"
             assert await _open_breaker_count(s, conv_id) == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_a_block_opened_in_between_is_never_closed_by_the_send_that_checked_another():
+    """Kadir (5015 · codex 01a11b12): one send checks the old block (old enough · quiet); before its close, another send closes that
+    block and a new burst opens a new one. The close is by the checked block's id — the new block stays open and this send meets
+    its 423. (Before: «every open row of the conversation» was closed, the unchecked new block too.)"""
+    from sqlalchemy import func as sa_func, select as sa_select, update as sa_update
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+    from app.services.chain_escalation import _open_circuit_breaker, get_open_circuit_breaker_id
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=660)
+            old = await get_open_circuit_breaker_id(s, conv_id)
+            project_id = (await s.execute(sa_select(ChainCircuitBreaker.project_id).where(ChainCircuitBreaker.id == old))).scalar_one()
+
+            async def _in_between(db, conversation_id, window_seconds):  # after the age check, before the close
+                await db.execute(sa_update(ChainCircuitBreaker).where(ChainCircuitBreaker.id == old).values(
+                    released_at=sa_func.now(), release_reason="auto: quiet since block"))
+                await _open_circuit_breaker(db, org_id=org_id, conversation_id=conversation_id, project_id=project_id)
+                return 0
+
+            with patch("app.services.redis_shared.get_client", return_value=_fakeredis_client()), \
+                 patch("app.services.chain_escalation._recent_message_velocity", side_effect=_in_between), \
+                 pytest.raises(HTTPException) as ei:
+                await _agent_send(s, conv_id, agent_id, org_id, "새 차단에 막혀야 하는 한 줄")
+            assert ei.value.status_code == 423
+            new = await get_open_circuit_breaker_id(s, conv_id)
+            assert new is not None and new != old, "the block opened in between is still open"
     finally:
         await engine.dispose()
 
