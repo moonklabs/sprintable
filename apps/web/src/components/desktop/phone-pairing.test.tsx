@@ -219,13 +219,24 @@ describe('[4532] phone pairing screen', () => {
     expect(sent.some((s) => s.type === 'pair.mac')).toBe(false);
   });
 
-  it('three phones already → the B-4 phone line', async () => {
+  it('three phones already → the B-4 phone line pointing at [이 폰 빼기] (story #4624) + [다시 찍기]', async () => {
     registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
     installShell();
     await render();
     await press('QR 찍기');
     await press('짝짓기');
-    expect(line()).toBe('이 계정의 원격 기기가 이미 3대예요 — 컴퓨터의 Sprintable 앱이나 웹 «데스크톱 앱 › 원격 기기»에서 하나를 빼 주세요');
+    expect(line()).toBe('이 계정의 원격 기기가 이미 3대예요 — 웹 «데스크톱 앱 › 원격 기기»에서 쓰지 않는 폰의 [이 폰 빼기]를 누른 뒤 다시 찍어 주세요');
+    expect(buttons()).toEqual(['다시 찍기']);
+  });
+
+  it('this phone registered to another account → its own line (never who) + [다시 찍기] (story #4624)', async () => {
+    registerPost = () => res(409, { error: { code: 'remote_device_taken' } });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('짝짓기');
+    expect(line()).toBe('이 폰은 다른 Sprintable 계정에 등록돼 있어 짝지을 수 없어요 — 그 계정으로 로그인해 짝짓거나, 그 계정의 웹 «데스크톱 앱 › 원격 기기»에서 이 폰을 뺀 뒤 다시 찍어 주세요');
+    expect(buttons()).toEqual(['다시 찍기']);
   });
 
   it('a phone with no screen lock → the line + [설정 열기] (the shell opens the settings) + [다시 찍기]', async () => {

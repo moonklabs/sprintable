@@ -160,6 +160,36 @@ async def remove_pair(
     return True
 
 
+async def remove_phone(
+    db: AsyncSession, *, phone_id: uuid.UUID, actor_member_id: uuid.UUID | None, actor_is_admin: bool, org_id: uuid.UUID,
+) -> bool:
+    """story #4624 (1선 · PO 07:58Z): [이 폰 빼기] — the key itself. Before, nothing ever set `revoked_at`: a phone reinstalled three
+    times held three live keys for good (`remote_device_limit`), and the product's own advice («원격 기기에서 하나를 빼 주세요») could
+    only remove pairs. Now: the key's owner or an owner/admin of its org — anyone else gets the same 404 as a key that does not exist.
+    `revoked_at` set (the limit counts live keys only) · every live pair of it removed the [빼기] way (`pairing_removed` goes down to
+    each setup until its snapshot drops it) · each of those setups woken. Already removed → False (idempotent). The same key
+    registered again by its owner comes back (register_phone · unchanged)."""
+    phone = (await db.execute(
+        select(RemoteDevice).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id).with_for_update()
+    )).scalar_one_or_none()
+    if phone is None or not (actor_is_admin or phone.member_id == actor_member_id):
+        raise DesktopRelayError(404, "phone_not_found", "no such phone")
+    if phone.revoked_at is not None:
+        return False
+    now = _now()
+    phone.revoked_at = now
+    pairs = (await db.execute(
+        select(RemoteDevicePairing).where(RemoteDevicePairing.remote_device_id == phone_id, RemoteDevicePairing.removed_at.is_(None))
+        .with_for_update()
+    )).scalars().all()
+    for pair in pairs:
+        pair.removed_at, pair.removed_by, pair.removal_acked_at = now, actor_member_id, None
+    await db.flush()
+    for setup_id in {p.setup_id for p in pairs}:
+        _wake_device_after_commit(db, setup_id)
+    return True
+
+
 class PairingReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

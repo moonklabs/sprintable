@@ -21,6 +21,7 @@ export type OfferOutcome =
   | { kind: 'sent'; phoneKeyId: string }
   | { kind: 'alreadyPaired' }
   | { kind: 'limit' } // 409 remote_device_limit — three phones already
+  | { kind: 'taken' } // 409 remote_device_taken — this phone's key is registered to another account (story #4624)
   | { kind: 'noScreenLock' }
   | { kind: 'biometricRequired' }
   | { kind: 'offerUsed' } // 409 — another phone (or an earlier send) took this QR
@@ -105,7 +106,11 @@ export async function sendPairOffer(head: OfferHead, label: string, deps: PairDe
   try {
     const res = await fetchWithAuth('/api/remote-devices', { method: 'POST', headers: json, body: JSON.stringify({ label, public_key: key.public_key }) });
     const { code, body } = await read(res);
-    if (!res.ok) return code === 'remote_device_limit' ? { kind: 'limit' } : { kind: 'failed' };
+    if (!res.ok) {
+      if (code === 'remote_device_limit') return { kind: 'limit' };
+      if (code === 'remote_device_taken') return { kind: 'taken' }; // story #4624: its own line, not the general «보내지 못했어요»
+      return { kind: 'failed' };
+    }
     if (typeof body.id !== 'string') return { kind: 'failed' };
     phoneKeyId = body.id;
   } catch {

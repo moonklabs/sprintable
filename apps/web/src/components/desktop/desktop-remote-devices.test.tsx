@@ -75,6 +75,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(text()).toContain('폰 확인 숫자 482 917'); // v1.11: the fixed number has its own name (유나 21:00Z)
     expect(container.querySelector('[title="폰 앱 설정 › 이 폰의 폰 확인 숫자와 같으면 그 폰이 맞아요"]')).not.toBeNull();
     expect(button('빼기')).toHaveLength(2);
+    expect(button('이 폰 빼기')).toHaveLength(1); // story #4624: one per phone, on its head line
     expect(text()).not.toContain('짝짓기]로'); // the empty line only when empty
     expect(text()).not.toContain('원격 제어가 꺼져 있어요');
   });
@@ -83,7 +84,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     answers([phone({ label: '내 아이폰' })]);
     await render();
     await act(async () => { button('빼기')[0].click(); });
-    expect(text()).toContain('내 아이폰 ↔ SYJ-MacBook-Pro 짝을 뺄까요? 빼면 그 폰에서 이 컴퓨터를 제어할 수 없어요');
+    expect(text()).toContain('내 아이폰 ↔ SYJ-MacBook-Pro 짝을 뺄까요? 빼면 그 폰에서 이 컴퓨터를 제어할 수 없어요 — 원격 기기 자리는 그대로예요');
     expect(document.activeElement?.textContent).toBe('취소');
 
     fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
@@ -95,7 +96,10 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(del?.[0]).toBe('/api/remote-devices/p1/pairs/s1');
     expect(status()).toBe('뺐어요 · 내 아이폰');
     expect(document.activeElement).toBe(container.querySelector('[role="status"]')); // the row is gone: the result line
-    expect(text()).toContain('아직 짝지은 폰이 없어요');
+    // story #4624: the phone stays listed with no pair (its key still holds a place) — only [이 폰 빼기] frees it
+    expect(text()).toContain('짝 없음');
+    expect(text()).not.toContain('아직 짝지은 폰이 없어요');
+    expect(button('이 폰 빼기')).toHaveLength(1);
   });
 
   it('a pair already gone says so, [취소] closes without asking the server', async () => {
@@ -136,6 +140,88 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     await render('en');
     expect(text()).toContain('Paired with SYJ-MacBook-Pro');
     await act(async () => { button('Remove')[0].click(); });
-    expect(text()).toContain('Remove the pairing iPhone ↔ SYJ-MacBook-Pro? That phone will no longer be able to control this computer');
+    expect(text()).toContain('Remove the iPhone ↔ SYJ-MacBook-Pro pair? That phone can no longer control this computer — its remote device place stays taken');
+    expect(button('Remove this phone')).toHaveLength(1);
+  });
+
+  // story #4624 (1선 · Yuna «미르코 범위»)
+  it('[이 폰 빼기] asks in line ([취소] first) with the pair count, removes the key itself, and says the place is free', async () => {
+    answers([phone({ label: 'Galaxy S24', pairs: [...phone().pairs, { setup_id: 's2', device_name: 'Studio', paired_at: '2026-09-30T03:00:00Z' }] })]);
+    await render();
+    await act(async () => { button('이 폰 빼기')[0].click(); });
+    expect(text()).toContain('이 폰을 뺄까요? · Galaxy S24 — 빼면 그 폰으로는 승인 · 멈춤 · 지시를 할 수 없고, 짝지은 컴퓨터 2대와 모두 끊겨요. 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.');
+    expect(document.activeElement?.textContent).toBe('취소');
+    expect(button('빼기').every((b) => b.disabled || b.closest('[role="group"]'))).toBe(true); // the pair buttons wait while it asks
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
+      init?.method === 'DELETE' ? json({ removed: true }) : url === '/api/remote-devices' ? json({ devices: [] }) : json({ data: { enabled: true } })
+    ));
+    const confirm = container.querySelector('[role="group"] button') as HTMLButtonElement;
+    expect(confirm.textContent).toBe('빼기');
+    await act(async () => { confirm.click(); });
+    await flush();
+    const dels = fetchWithAuth.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE').map(([u]) => u);
+    expect(dels).toEqual(['/api/remote-devices/p1']); // the key itself — not its pairs one by one
+    expect(status()).toBe('뺐어요 · Galaxy S24 — 원격 기기 자리 하나가 비었어요');
+    expect(document.activeElement).toBe(container.querySelector('[role="status"]'));
+    expect(text()).toContain('아직 짝지은 폰이 없어요');
+  });
+
+  it('a phone with no pair left is still listed («짝 없음» + [이 폰 빼기]) · phones sorted by the longest unused first · [취소] returns to the button', async () => {
+    answers([
+      phone({ id: 'new', label: 'Pixel', last_used_at: '2026-10-08T07:00:00Z' }),
+      phone({ id: 'dead', label: 'Galaxy (지운 앱)', last_used_at: null, pairs: [] }),
+      phone({ id: 'mid', label: 'iPad', last_used_at: '2026-10-01T07:00:00Z', pairs: [] }),
+    ]);
+    await render();
+    const heads = Array.from(container.querySelectorAll('[data-testid="desktop-remote-phone"]')).map((li) => li.querySelector('span')?.textContent);
+    expect(heads).toEqual(['Galaxy (지운 앱)', 'iPad', 'Pixel']); // never used first, then the oldest use
+    expect(button('이 폰 빼기')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-testid="desktop-remote-phone"]')[0].textContent).toContain('짝 없음');
+    await act(async () => { button('이 폰 빼기')[0].click(); });
+    // Yuna 08:14Z: no pair → its own line, without a cost it does not have
+    expect(text()).toContain('이 폰을 뺄까요? · Galaxy (지운 앱) — 짝지은 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.');
+    expect(text()).not.toContain('0대');
+    await act(async () => { button('취소')[0].click(); });
+    expect(document.activeElement).toBe(button('이 폰 빼기')[0]);
+    expect(fetchWithAuth.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
+  });
+
+  it('a key already removed says so', async () => {
+    answers([phone({ label: 'Galaxy' })]);
+    await render();
+    await act(async () => { button('이 폰 빼기')[0].click(); });
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
+      init?.method === 'DELETE' ? json({ removed: false }) : url === '/api/remote-devices' ? json({ devices: [] }) : json({ data: { enabled: true } })
+    ));
+    await act(async () => { (container.querySelector('[role="group"] button') as HTMLButtonElement).click(); });
+    await flush();
+    expect(status()).toBe('이미 빠져 있었어요 · Galaxy');
+  });
+
+  it('a failed removal says so, and the phone stays', async () => {
+    answers([phone({ label: 'Galaxy' })]);
+    await render();
+    await act(async () => { button('이 폰 빼기')[0].click(); });
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
+      init?.method === 'DELETE' ? json({}, 500) : url === '/api/remote-devices' ? json({ devices: [phone()] }) : json({ data: { enabled: true } })
+    ));
+    await act(async () => { (container.querySelector('[role="group"] button') as HTMLButtonElement).click(); });
+    await flush();
+    expect(status()).toBe('빼지 못했어요 — 다시 시도해 주세요');
+  });
+
+  it('[Remove this phone] reads in English with the computer count', async () => {
+    answers([phone()]);
+    await render('en');
+    await act(async () => { button('Remove this phone')[0].click(); });
+    expect(text()).toContain('Remove this phone? · iPhone — it can no longer approve, stop or instruct, and it is disconnected from all 1 paired computer. One remote device place is freed; to use it again, pair it again from the phone.');
+  });
+
+  it('a phone with no pair reads «No paired computers» and its own confirmation in English', async () => {
+    answers([phone({ pairs: [] })]);
+    await render('en');
+    expect(text()).toContain('No paired computers');
+    await act(async () => { button('Remove this phone')[0].click(); });
+    expect(text()).toContain("Remove this phone? · iPhone — it isn't paired with any computer. One remote device place is freed; to use it again, pair it again from the phone.");
   });
 });
