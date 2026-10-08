@@ -10,7 +10,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { useOrgRemoteControl } from '@/lib/org-remote-control';
+import { connectedSetupsOf, useOrgRemoteControl } from '@/lib/org-remote-control';
 
 export const REMOTE_CONTROL_ANCHOR = 'remote-control';
 
@@ -109,7 +109,7 @@ export function useRemoteOff(): RemoteOff | null {
   return {
     owner: state.can_change,
     names: { owners, hasOwners: owners ? 'yes' : 'no' },
-    connectedSetups: state.connected_setups ?? 0,
+    connectedSetups: connectedSetupsOf(state),
   };
 }
 

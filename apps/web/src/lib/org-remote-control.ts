@@ -20,6 +20,13 @@ export interface OrgRemoteControl {
   owner_names?: string[];
   /** story #4583: how many of the org's live setups are connected (a count) — the approvals line shows only with one */
   connected_setups?: number;
+  /** story 4584: the old name, the same value, sent by the backend for one deploy — removed with the next deploy (card 4642) */
+  connected_computers?: number;
+}
+
+/** story 4584: the count of live setups, read from the new name and — for one deploy — the old one (either backend order is safe). */
+export function connectedSetupsOf(s: OrgRemoteControl): number {
+  return s.connected_setups ?? s.connected_computers ?? 0;
 }
 
 interface Entry { value: OrgRemoteControl | null; listeners: Set<() => void>; asked: boolean; reading: boolean; gen: number }
