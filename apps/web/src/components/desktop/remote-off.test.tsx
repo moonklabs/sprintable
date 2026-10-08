@@ -263,6 +263,40 @@ describe('arrival by an in-app link press (client navigation)', () => {
     expect(sw()?.hasAttribute('data-arrived')).toBe(false); // the person's first key still ends it
   });
 
+  // story 4595 (Kadir 5021 survivor): once the hold has run out, a later value change must not move the focus back to the switch — a
+  // person may be elsewhere by then. Pinned with a fake clock (the hold is 1.5 s).
+  it('[4595 · Kadir] after the hold ran out, a later value change does not take the focus back', async () => {
+    vi.useFakeTimers();
+    try {
+      org = { ...OFF, can_change: true };
+      window.history.replaceState(null, '', '/desktop#remote-control');
+      Element.prototype.scrollIntoView = vi.fn();
+      let change: ReturnType<typeof useOrgRemoteControl>[1] | undefined;
+      function Changer() { const [, set] = useOrgRemoteControl(orgId); useEffect(() => { change = set; }); return null; }
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopRemoteControlCard /><Changer /></NextIntlClientProvider>);
+      });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(sw()?.hasAttribute('data-arrived')).toBe(true);
+      const other = document.createElement('button');
+      container.append(other); // after the first render: the render takes over the container
+      // the hold runs out while the person has not touched anything
+      await act(async () => { vi.advanceTimersByTime(1600); });
+      // the person moves to another control: the hold ends at once
+      await act(async () => { other.focus(); });
+      await act(async () => { vi.advanceTimersByTime(10); }); // the hold's focus-out check runs on the next tick
+      for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(other);
+      // a value changes later, after the hold: the focus stays where the person put it
+      await act(async () => { change?.({ ...org, enabled: true, can_change: true, enabled_at: '2026-10-08T00:00:00Z' }); });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(other);
+      expect(sw()?.hasAttribute('data-arrived')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('the mark stays while the focus stays after the hold ends, and comes off when the focus leaves', async () => {
     const a = document.createElement('button'); const b = document.createElement('button');
     container.append(a, b);
