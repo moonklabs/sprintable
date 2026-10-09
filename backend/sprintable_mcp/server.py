@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # import 경로만 이동.
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.tools.base import Tool as _FastMCPTool
-from mcp.types import TextContent
+from mcp.types import ImageContent, TextContent
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.fields import PydanticUndefined
@@ -273,6 +273,16 @@ def _denied(name: str) -> list[TextContent]:
     ))]
 
 
+def _output_annotation(fn) -> object:
+    """도구 출력 스키마 주석. 도구가 ImageContent(사진)를 돌려주면 그 주석을 따르고(story 4646 AC4 —
+    list[TextContent]로 고정하면 사진 항목이 출력 검증에서 거부된다), 그 밖의 도구는 전부 종전대로 둔다."""
+    try:
+        hint = get_type_hints(fn).get("return")
+    except Exception:
+        hint = None
+    return hint if hint is not None and "ImageContent" in repr(hint) else list[TextContent]
+
+
 def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     """BaseModel → flat inspect.Signature so FastMCP emits top-level params."""
     try:
@@ -350,7 +360,7 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     wrapper.__qualname__ = name
     wrapper.__doc__ = doc
     wrapper.__signature__ = inspect.Signature(
-        params, return_annotation=list[TextContent]
+        params, return_annotation=_output_annotation(fn)
     )
     return wrapper
 
