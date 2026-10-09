@@ -119,6 +119,7 @@ from .tools.meetings import (
     create_meeting, delete_meeting, get_meeting, list_meetings,
     trigger_ai_summary, update_meeting,
 )
+from .tools.chat_attachment import GetChatAttachmentInput, get_chat_attachment  # story 4646
 from .tools.chat import (
     CreateConversationInput, GetChatMessageInput, ListChatMessagesInput, ListConversationsInput,
     SendChatInput, create_conversation, get_chat_message, list_chat_messages,
@@ -967,6 +968,10 @@ _TOOL_DEFS: list[tuple] = [
      "[조직] conversation thread 메시지 목록 조회. conversation_id로 대화를 지정(thread_id는"
      " 폐기 예정 별칭 — 응답의 thread_id는 대화 ID가 아니라 각 메시지의 회신 스레드 ID, story #2427).",
      ListChatMessagesInput, list_chat_messages),
+    ("sprintable_get_chat_attachment",
+     "[조직] 채팅 메시지 첨부 하나의 내용 읽기(story 4646). message_id + index(0부터)로 지정 — 이미지는 사진으로 보이고,"
+     " 텍스트는 본문으로 나온다. 크기가 크거나 읽을 수 없는 첨부는 메타(이름·형식·크기·이유)만. 첨부를 읽을 때는 이 도구를 쓴다.",
+     GetChatAttachmentInput, get_chat_attachment),
     ("sprintable_get_chat_message",
      "[조직] conversation thread 내 메시지 단건 원문 조회(message_id로 즉시 픽업). ⭐웹훅 payload가"
      " 잘렸거나 원문이 의심될 때 재발신 요청 대신 이걸로 먼저 확인 — conversation_id=대화 id"
