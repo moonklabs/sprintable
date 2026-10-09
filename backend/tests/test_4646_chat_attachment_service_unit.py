@@ -127,10 +127,25 @@ def test_unknown_extension_is_meta_only(allow, monkeypatch):
     assert r.kind == "meta" and r.reason == "unsupported" and st.downloads == 0
 
 
-def test_message_of_another_conversation_is_not_found(allow, monkeypatch):
-    # (e) 내가 참가한 대화 A의 URL + 대화 B의 message_id → 404: 조회가 id AND conversation_id로 맞아야 한다
+class _CapturingDB:
+    """메시지 조회 SQL을 기록하고 행을 주지 않는다 — WHERE 절이 id와 conversation_id를 함께 거는지 본다."""
+
+    def __init__(self):
+        self.sql = ""
+
+    async def execute(self, stmt):
+        self.sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        return _Res(None)
+
+
+def test_message_query_binds_both_message_id_and_conversation_id(allow, monkeypatch):
+    # (e) 내가 참가한 대화 A의 URL + 대화 B의 message_id → 404: 조회가 id AND conversation_id로 맞아야 한다.
+    # conversation_id 조건을 빼는 뮤턴트는 이 WHERE 검사에서 RED. (실 DB 경로는 test_4646_chat_attachment_realdb.py)
     st = _Storage(10)
     monkeypatch.setattr(svc, "get_storage_provider", lambda: st)
+    db = _CapturingDB()
     with pytest.raises(HTTPException) as e:
-        asyncio.run(svc.read_message_attachment(_DB(None), None, ORG, CONV, MSG, 0))
+        asyncio.run(svc.read_message_attachment(db, None, ORG, CONV, MSG, 0))
     assert e.value.status_code == 404 and st.downloads == 0
+    assert "chat_messages.id" in db.sql or "conversation_messages.id" in db.sql, db.sql
+    assert "conversation_id = " in db.sql, db.sql
