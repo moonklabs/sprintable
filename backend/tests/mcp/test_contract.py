@@ -61,6 +61,7 @@ EXPECTED_TOOLS = {
     "sprintable_list_conversations",
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
     "sprintable_get_chat_message",
+    "sprintable_get_chat_attachment",  # story 4646 — 채팅 첨부 읽기
     # story #4430: an agent's own block list (list · remove)
     "sprintable_list_user_blocks", "sprintable_remove_user_block",
     # meetings (6)
@@ -171,7 +172,7 @@ def test_total_tool_count():
     # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127. story #3769:
     # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128. story #4430:
     # sprintable_list_user_blocks · sprintable_remove_user_block 2종 신설(에이전트 자기 차단 목록) — 128→130.
-    assert len(_TOOLS) == 145  # story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    assert len(_TOOLS) == 146  # story 4646: sprintable_get_chat_attachment 144→145→146 (이전 주석 체인 그대로) · story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():

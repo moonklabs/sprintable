@@ -574,6 +574,11 @@ def _msg_payload(
     # 여기서 빈 배열로 덮는다(실제 근본은 attachments.py authorize의 belongs 쿼리에 deleted_at
     # 필터를 추가한 것 — 이 payload 필터는 FE가 애초에 못 보게 하는 2차 방어).
     attachments = (msg.attachments if isinstance(msg.attachments, list) else []) if msg.deleted_at is None else []
+    # story 4646 — 읽는 길을 응답에 안내(저장 데이터는 안 바꿈): 각 첨부 항목에 index와 읽는 도구 이름
+    attachments = [
+        {**a, "index": i, "read_with": "sprintable_get_chat_attachment"} if isinstance(a, dict) else a
+        for i, a in enumerate(attachments)
+    ]
     payload = {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
@@ -1284,7 +1289,7 @@ ConversationResponse.model_rebuild()
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
 _MAX_ATTACHMENTS = 10
-_MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
+from app.services.attachment_limits import HUMAN_ATTACHMENT_MAX_BYTES as _MAX_ATTACHMENT_SIZE  # 100MB · 한 곳 정의(story 4646)
 
 # E-MCP-OPT S2(bbfd24ba)/S6: MCP(비-브라우저) 클라이언트용 JSON/base64 업로드 공용 프리미티브
 # (S6 부터 story/doc 도 공유 — `app/services/mcp_attachment_upload.py` 참조).

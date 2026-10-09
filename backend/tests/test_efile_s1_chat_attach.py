@@ -69,7 +69,8 @@ def _fake_msg(attachments):
 def test_msg_payload_includes_attachments():
     atts = [_GOOD]
     payload = _msg_payload(_fake_msg(atts), sender=None)
-    assert payload["attachments"] == atts
+    # story 4646: each item also carries its index and the tool that reads it (response only)
+    assert payload["attachments"] == [{**a, "index": i, "read_with": "sprintable_get_chat_attachment"} for i, a in enumerate(atts)]
 
 
 def test_msg_payload_non_list_attachments_safe():
