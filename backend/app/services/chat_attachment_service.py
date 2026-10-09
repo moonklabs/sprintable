@@ -61,7 +61,7 @@ async def read_message_attachment(
     if index < 0 or index >= len(items) or not isinstance(items[index], dict):  # 3
         raise HTTPException(status_code=404, detail="Attachment not found")
     a = items[index]
-    name = (a.get("name") or "첨부").strip() or "첨부"
+    name = (a.get("name") or "attachment").strip() or "attachment"  # 빈 이름 표시 — 사람 문장이 아니라 중립값
     ctype = (a.get("content_type") or "").strip().lower()
     ext = _ext(name)
     obj = canonical_object_path(a.get("url") or "")
