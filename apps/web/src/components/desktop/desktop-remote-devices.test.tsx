@@ -137,6 +137,20 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(text()).toContain('폰 페어링은 데스크톱 앱 아래쪽 띠의 [폰 페어링]에서 해요');
   });
 
+  // design CHANGES (Yuna): the pointer shows only when the org's remote control is known on — unknown and off both leave it out
+  it('empty with the org state unknown: no pointer line', async () => {
+    answers([], null);
+    await render();
+    expect(text()).toContain('아직 페어링된 폰이 없어요');
+    expect(text()).not.toContain('폰 페어링은 데스크톱 앱 아래쪽 띠');
+  });
+
+  it('empty with the org off: no pointer line', async () => {
+    answers([], false);
+    await render();
+    expect(text()).not.toContain('폰 페어링은 데스크톱 앱 아래쪽 띠');
+  });
+
   it('a failed list read draws nothing', async () => {
     fetchWithAuth.mockResolvedValue(json({}, 500));
     await render();

@@ -125,9 +125,9 @@ export function DesktopRemoteDevices() {
       {phones.length === 0 ? (
         <>
           <p className="text-sm text-muted-foreground">{t('empty')}</p>
-          {/* story 4645 AC7: the web cannot open the app's pairing window — say where it is. Only with the org's remote control on: with it off the
-              tail names no pairing (PO · Yuna 19:00Z) */}
-          {remoteControlOn === false && orgName ? null : <p className="text-xs text-muted-foreground">{t('pairHint')}</p>}
+          {/* story 4645 AC7: the web cannot open the app's pairing window — say where it is. Only when the org's remote control is known on: off or not yet
+              known, the tail names no pairing (PO · Yuna 19:00Z · design CHANGES) */}
+          {remoteControlOn === true ? <p className="text-xs text-muted-foreground">{t('pairHint')}</p> : null}
         </>
       ) : (
         <Card className="p-0">
