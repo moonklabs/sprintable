@@ -21,8 +21,10 @@ _PAYLOAD = {
 
 
 async def _call_through_registered_tool():
-    # wrapper는 호출 뒤 _heartbeat_fire_forget을 create_task로 띄운다(진짜 네트워크) — 막고, 그 task가 끝나게 한다.
+    # 진짜 네트워크를 막는다: 키 scope 조회(/api/v2/mcp/manifest)는 fail-open 값으로, wrapper가 띄우는 heartbeat는 패치로.
+    # heartbeat task는 호출 뒤 끝나도록 한 번 양보한다.
     with patch("sprintable_mcp.tools.chat_attachment.client") as client, \
+            patch.object(srv, "_load_scope_for", AsyncMock(return_value=srv._SCOPE_FAILOPEN)), \
             patch.object(srv, "_heartbeat_fire_forget", AsyncMock()):
         client.get = AsyncMock(return_value=_PAYLOAD)
         result = await srv.mcp.call_tool(_TOOL, {
