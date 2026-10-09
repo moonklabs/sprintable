@@ -9,6 +9,17 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_sender_org_lookup(monkeypatch):
+    """story 4649: the stream's backfill looks its senders' orgs up in one query of its own. These tests script the
+    session's query results in order, so that lookup answers nothing here (its own tests cover it)."""
+
+    async def _no_orgs(ids, session):
+        return {}
+
+    monkeypatch.setattr("app.routers.events.lookup_members_by_ids", _no_orgs)
 from httpx import ASGITransport, AsyncClient
 
 from app.models.event import Event

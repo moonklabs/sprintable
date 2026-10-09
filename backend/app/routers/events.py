@@ -46,7 +46,7 @@ from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck
 from app.services.org_locale import resolve_org_locale
 from app.services.i18n_catalog import t
-from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
+from app.services.member_resolver import assert_caller_is_member, lookup_members_by_ids, resolve_member_identity
 
 
 def _access_revoked_frame(reason: str) -> str:
@@ -327,6 +327,9 @@ def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
 
 def _event_to_payload(event: "Event") -> dict:
     return {
+        # story 4649 — 백필은 배치 조회 결과(_backfill_frame_data가 넣는다)로 채운다. 여기서는 모른다고 둔다.
+        # 행의 org_id는 만든 곳이라 쓰지 않고, 저장된 payload의 값은 신뢰하지 않는다.
+        "sender_org_id": None,
         "event_id": str(event.id),
         "event_type": event.event_type,
         "source": {"type": event.source_entity_type, "id": str(event.source_entity_id) if event.source_entity_id else None},
@@ -341,7 +344,42 @@ def _event_to_payload(event: "Event") -> dict:
     }
 
 
-def _backfill_frame_data(event: "Event") -> dict:
+def _uuid_text_or_none(value: object) -> str | None:
+    """story 4649 — a UUID as text, or None when the value is not one (never passed through as is)."""
+    if value is None:
+        return None
+    try:
+        parsed = uuid.UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return None if parsed == uuid.UUID(int=0) else str(parsed)
+
+
+def _with_stream_org(frame: dict, stream_org_id: "uuid.UUID | str | None") -> dict:
+    """story 4649 — two fields lead every agent-stream frame: `stream_org_id` (the org that authenticated this stream — the
+    daemon has no org of its own to compare with) and `sender_org_id` (the sender's org — the server's value from the chat
+    message, null when none or not a UUID). The stream's org is always the authenticated one; a frame's own value of either
+    name is replaced for the stream and validated for the sender."""
+    rest = {k: v for k, v in frame.items() if k not in ("stream_org_id", "sender_org_id")}
+    return {
+        "stream_org_id": str(stream_org_id) if stream_org_id is not None else None,
+        "sender_org_id": _uuid_text_or_none(frame.get("sender_org_id")),
+        **rest,
+    }
+
+
+async def _sender_orgs_for(db: "AsyncSession", events: list) -> dict[str, str | None]:
+    """story 4649 — the senders' orgs for one backfill batch: ONE lookup for the whole batch (not per event, not per frame).
+    Keys are sender ids as text; the value is the sender's own org as a UUID text, or None (orphan · sentinel · not a UUID)."""
+    ids = {e.sender_id for e in events if e.sender_id is not None}
+    if not ids:
+        return {}
+    members = await lookup_members_by_ids(ids, db)
+    return {str(mid): _uuid_text_or_none(getattr(m, "org_id", None)) for mid, m in members.items()}
+
+
+def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = None,
+                         sender_orgs: "dict[str, str | None] | None" = None) -> dict:
     """story #4505 (Mirko live 00:51Z · PO 01:06Z) — a backfill frame in the shape of the live one. A live frame is the pushed
     dict, whose payload keys are top-level (`gate_id`, `status`, `conversation_id` …); a backfill frame was `_event_to_payload`,
     where they sit only under `payload` — so a handler reading the live shape (the approvals inbox `payload.gate_id`, the chat
@@ -350,8 +388,9 @@ def _backfill_frame_data(event: "Event") -> dict:
     has (event_id · event_type · source · sender_id · payload · content · created_at · created_xid). Backfill only — the live
     dispatch (`dispatch_router`) and the agent gateway build their own frames and are unchanged."""
     data = _event_to_payload(event)
+    data["sender_org_id"] = (sender_orgs or {}).get(str(event.sender_id)) if event.sender_id is not None else None
     flat = {k: v for k, v in (event.payload or {}).items() if k not in data}
-    return {**flat, **data}
+    return _with_stream_org({**flat, **data}, stream_org_id)
 
 
 # ─── SSE endpoint ─────────────────────────────────────────────────────────────
@@ -626,7 +665,8 @@ async def agent_event_stream(
                         yield _access_revoked_frame(_why)
                         return
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
-                    batch_data = [_backfill_frame_data(evt) for evt in batch]  # story #4505: the live frame's shape
+                    sender_orgs = await _sender_orgs_for(db, batch)  # story 4649: one lookup for the batch's senders
+                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch]  # story #4505: the live frame's shape
                     # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
                     # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
@@ -726,7 +766,7 @@ async def agent_event_stream(
                         # 대체돼 나가므로 원본 dict에서 제거(클라에 내부 키 노출 방지).
                         _transient_id = event_data.pop("_sse_transient_id", None)
                         _live_id = eid or _transient_id or str(uuid.uuid4())
-                        _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
+                        _sse_data = json.dumps({**_with_stream_org(event_data, org_id), 'event_id': _live_id, 'is_backfill': False})
                         # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
                         if event_type == "conversation.message_created":
                             yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
