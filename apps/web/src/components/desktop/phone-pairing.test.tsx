@@ -114,7 +114,7 @@ describe('[4532] phone pairing screen', () => {
   it('start → scan → «이 컴퓨터와 페어링할까요?» (no number) → [페어링] → checking → the number → paired', async () => {
     installShell();
     await render();
-    expect(text()).toContain('컴퓨터와 페어링 — 컴퓨터의 Sprintable 앱에서 [폰 페어링]를 눌러 나온 QR을 찍어 주세요');
+    expect(text()).toContain('컴퓨터와 페어링 — 컴퓨터의 Sprintable 앱에서 [폰 페어링]을 눌러 나온 QR을 찍어 주세요');
     await press('QR 찍기');
     expect(line()).toBe('이 컴퓨터와 페어링할까요? · SYJ-MacBook-Pro');
     expect(text()).not.toMatch(/\d{3} \d{3}/); // no number before the computer takes the offer

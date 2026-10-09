@@ -7074,8 +7074,9 @@
       "confirmNumber": "폰 확인 숫자 {number}",
       "confirmNumberHint": "폰 앱 설정 › 이 폰의 폰 확인 숫자와 같으면 그 폰이 맞아요",
       "remove": "빼기",
+      "unpair": "해제",
       "cancel": "취소",
-      "confirmRemove": "{phone} ↔ {device} 페어링을 해제할까요? 빼면 그 폰에서 이 컴퓨터를 제어할 수 없어요 — 원격 기기 자리는 그대로예요",
+      "confirmRemove": "{phone} ↔ {device} 페어링을 해제할까요? 해제하면 그 폰에서 이 컴퓨터를 제어할 수 없어요 — 원격 기기 자리는 그대로예요",
       "removePhone": "이 폰 빼기",
       "confirmRemovePhone": "이 폰을 뺄까요? · {phone} — 빼면 그 폰으로는 승인 · 멈춤 · 지시를 할 수 없고, 페어링된 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 페어링을 새로 해요.",
       "confirmRemovePhoneUnpaired": "이 폰을 뺄까요? · {phone} — 페어링된 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 페어링을 새로 해요.",
@@ -7149,7 +7150,7 @@
     "remoteOffOthers": "원격 제어가 꺼져 있어 데스크톱 에이전트의 새 권한 요청이 여기로 오지 않아요 — 조직 소유자{hasOwners, select, yes {({owners})} other {}}가 켤 수 있어요"
   },
   "phonePairing": {
-    "start": "컴퓨터와 페어링 — 컴퓨터의 Sprintable 앱에서 [폰 페어링]를 눌러 나온 QR을 찍어 주세요",
+    "start": "컴퓨터와 페어링 — 컴퓨터의 Sprintable 앱에서 [폰 페어링]을 눌러 나온 QR을 찍어 주세요",
     "entry": "컴퓨터와 페어링",
     "scan": "QR 찍기",
     "rescan": "다시 찍기",

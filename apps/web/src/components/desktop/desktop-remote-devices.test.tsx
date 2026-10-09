@@ -84,13 +84,13 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     answers([phone({ label: '내 아이폰' })]);
     await render();
     await act(async () => { button('빼기')[0].click(); });
-    expect(text()).toContain('내 아이폰 ↔ SYJ-MacBook-Pro 페어링을 해제할까요? 빼면 그 폰에서 이 컴퓨터를 제어할 수 없어요 — 원격 기기 자리는 그대로예요');
+    expect(text()).toContain('내 아이폰 ↔ SYJ-MacBook-Pro 페어링을 해제할까요? 해제하면 그 폰에서 이 컴퓨터를 제어할 수 없어요 — 원격 기기 자리는 그대로예요');
     expect(document.activeElement?.textContent).toBe('취소');
 
     fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
       init?.method === 'DELETE' ? json({ removed: true }) : url === '/api/remote-devices' ? json({ devices: [phone({ pairs: [] })] }) : json({ data: { enabled: true } })
     ));
-    await act(async () => { button('빼기')[1].click(); });
+    await act(async () => { button('해제')[0].click(); });
     await flush();
     const del = fetchWithAuth.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
     expect(del?.[0]).toBe('/api/remote-devices/p1/pairs/s1');
@@ -115,7 +115,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
       init?.method === 'DELETE' ? json({ removed: false }) : url === '/api/remote-devices' ? json({ devices: [] }) : json({ data: { enabled: true } })
     ));
-    await act(async () => { button('빼기')[1].click(); });
+    await act(async () => { button('해제')[0].click(); });
     await flush();
     expect(status()).toBe('이미 빠져 있었어요 · 갤럭시');
   });

@@ -145,7 +145,7 @@ export function DesktopRemoteDevices() {
                         <li key={key} className="flex flex-col gap-1" data-testid="desktop-remote-device-row">
                           <PairLine pair={pair} onRemove={open(key)} disabled={asking !== null} buttonRef={keep(key)} />
                           {asking === key ? (
-                            <Confirm text={t('confirmRemove', { phone: phone.label, device: pair.device_name ?? t('unknownDevice') })}
+                            <Confirm text={t('confirmRemove', { phone: phone.label, device: pair.device_name ?? t('unknownDevice') })} confirmLabel={t('unpair')}
                               onConfirm={() => void removePair(phone, pair)} onCancel={close(key)} />
                           ) : null}
                         </li>
@@ -204,7 +204,7 @@ function PairLine({ pair, onRemove, disabled, buttonRef }: {
 }
 
 /** the in-line confirmation: the sentence · [빼기] (destructive) · [취소] focused first, as the remote-control card's */
-function Confirm({ text, onConfirm, onCancel }: { text: string; onConfirm: () => void; onCancel: () => void }) {
+function Confirm({ text, confirmLabel, onConfirm, onCancel }: { text: string; confirmLabel?: string; onConfirm: () => void; onCancel: () => void }) {
   const t = useTranslations('desktop.remoteDevices');
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { cancelRef.current?.focus(); }, []);
@@ -212,7 +212,7 @@ function Confirm({ text, onConfirm, onCancel }: { text: string; onConfirm: () =>
     <div className="flex flex-col gap-2 border-t border-border pt-2" role="group" aria-label={text}>
       <p className="text-sm">{text}</p>
       <div className="flex gap-2">
-        <Button size="sm" variant="destructive" onClick={onConfirm}>{t('remove')}</Button>
+        <Button size="sm" variant="destructive" onClick={onConfirm}>{confirmLabel ?? t('remove')}</Button>
         <Button size="sm" variant="outline" ref={cancelRef} onClick={onCancel}>{t('cancel')}</Button>
       </div>
     </div>
