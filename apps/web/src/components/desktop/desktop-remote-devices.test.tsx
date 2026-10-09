@@ -134,7 +134,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     answers([], true);
     await render();
     expect(text()).toContain('아직 페어링된 폰이 없어요');
-    expect(text()).toContain('폰 페어링은 데스크톱 앱 위쪽 [폰 페어링]에서 해요');
+    expect(text()).toContain('폰 페어링은 데스크톱 앱 아래쪽 띠의 [폰 페어링]에서 해요');
   });
 
   it('a failed list read draws nothing', async () => {
