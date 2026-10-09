@@ -327,6 +327,8 @@ def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
 
 def _event_to_payload(event: "Event") -> dict:
     return {
+        # story 4649 — 보낸 이의 조직. 발신자 없는 이벤트는 null. 값은 발신 때 payload에 실린 것(행의 org_id는 만든 곳이라 쓰지 않는다).
+        "sender_org_id": (event.payload or {}).get("sender_org_id") if event.sender_id else None,
         "event_id": str(event.id),
         "event_type": event.event_type,
         "source": {"type": event.source_entity_type, "id": str(event.source_entity_id) if event.source_entity_id else None},

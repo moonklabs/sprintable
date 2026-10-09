@@ -562,6 +562,14 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
     return f"{name}: {preview}" if preview else name
 
 
+def sender_org_id_of(sender: "ResolvedMember | TeamMember | None") -> str | None:
+    """story 4649 — 보낸 이가 속한 조직(사람·에이전트 모두). 없거나 주인 없는 sentinel(uuid 0)이면 None."""
+    org = getattr(sender, "org_id", None)
+    if org is None or org == uuid.UUID(int=0):
+        return None
+    return str(org)
+
+
 def _msg_payload(
     msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None",
     *, references: list[dict[str, str]] | None = None,
@@ -592,6 +600,8 @@ def _msg_payload(
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
         # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
         "attachments": attachments,
+        # story 4649 — 데몬이 자기 조직과 대조하는 칸. 프레임 최상위로 올라온다(라이브 푸시 · 백필 둘 다).
+        "sender_org_id": sender_org_id_of(sender),
         "sender": {
             "id": str(sender.id),
             "name": sender.name,
