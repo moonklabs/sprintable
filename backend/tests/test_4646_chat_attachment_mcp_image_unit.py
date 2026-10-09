@@ -20,14 +20,22 @@ _PAYLOAD = {
 }
 
 
-def test_registered_tool_returns_image_content_through_mcp_call_path():
-    with patch("sprintable_mcp.tools.chat_attachment.client") as client:
+async def _call_through_registered_tool():
+    # wrapper는 호출 뒤 _heartbeat_fire_forget을 create_task로 띄운다(진짜 네트워크) — 막고, 그 task가 끝나게 한다.
+    with patch("sprintable_mcp.tools.chat_attachment.client") as client, \
+            patch.object(srv, "_heartbeat_fire_forget", AsyncMock()):
         client.get = AsyncMock(return_value=_PAYLOAD)
-        result = asyncio.run(srv.mcp.call_tool(_TOOL, {
+        result = await srv.mcp.call_tool(_TOOL, {
             "conversation_id": "97ee5509-0000-4000-8000-000000000000",
             "message_id": "22350474-c98f-46d0-9ec4-1aeb28dd606a",
             "index": 0,
-        }))
+        })
+        await asyncio.sleep(0)
+        return result
+
+
+def test_registered_tool_returns_image_content_through_mcp_call_path():
+    result = asyncio.run(_call_through_registered_tool())
     content = result.content if hasattr(result, "content") else result[0]
     images = [c for c in content if isinstance(c, ImageContent)]
     assert len(images) == 1, content
