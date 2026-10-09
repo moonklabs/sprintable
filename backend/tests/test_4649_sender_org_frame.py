@@ -25,12 +25,6 @@ def _event(sender_id, payload, org=ORG_A):
     )
 
 
-def test_backfill_frame_carries_the_senders_org_at_the_top():
-    frame = _event_to_payload(_event(SENDER, {"sender_org_id": str(ORG_B), "content": "hi"}))
-    assert frame["sender_org_id"] == str(ORG_B), "the sender's org, not the row's org (ORG_A)"
-    assert list(frame)[0] == "sender_org_id", "first key of the frame"
-
-
 def test_no_sender_means_null_even_if_the_payload_carries_a_value():
     frame = _event_to_payload(_event(None, {"sender_org_id": str(ORG_B)}))
     assert frame["sender_org_id"] is None
@@ -44,6 +38,7 @@ def test_an_old_row_without_the_field_is_null_not_the_row_org():
 def test_sender_org_of_a_real_member_and_of_the_orphan_sentinel():
     assert sender_org_id_of(SimpleNamespace(org_id=ORG_A)) == str(ORG_A)
     assert sender_org_id_of(SimpleNamespace(org_id=uuid.UUID(int=0))) is None
+    assert sender_org_id_of(SimpleNamespace(org_id="not-a-uuid")) is None
     assert sender_org_id_of(None) is None
 
 
@@ -61,11 +56,28 @@ def test_chat_message_payload_names_the_sender_org_once():
 def test_backfill_frame_leads_with_the_stream_org_and_the_sender_org():
     from app.routers.events import _backfill_frame_data
 
-    frame = _backfill_frame_data(_event(SENDER, {"sender_org_id": str(ORG_A), "gate_id": "g1"}), ORG_B)
+    frame = _backfill_frame_data(_event(SENDER, {"gate_id": "g1"}), ORG_B)
     assert list(frame)[:2] == ["stream_org_id", "sender_org_id"], "both fields lead the frame"
     assert frame["stream_org_id"] == str(ORG_B), "the org that authenticated this stream"
-    assert frame["sender_org_id"] == str(ORG_A)
+    assert frame["sender_org_id"] is None, "a backfill frame does not look the sender up: null"
     assert frame["gate_id"] == "g1", "the payload keys still lift to the top"
+
+
+def test_a_forged_sender_org_in_a_stored_payload_is_never_used():
+    from app.routers.events import _backfill_frame_data
+
+    frame = _backfill_frame_data(_event(SENDER, {"sender_org_id": str(ORG_B), "stream_org_id": str(ORG_B)}, org=ORG_A), ORG_A)
+    assert frame["sender_org_id"] is None, "the payload's value is not trusted, even for another org"
+    assert frame["stream_org_id"] == str(ORG_A), "the stream's own org, not the payload's"
+
+
+def test_a_live_frame_keeps_only_a_real_uuid_sender_org():
+    from app.routers.events import _with_stream_org
+
+    assert _with_stream_org({"sender_org_id": str(ORG_A)}, ORG_B)["sender_org_id"] == str(ORG_A)
+    assert _with_stream_org({"sender_org_id": "not-a-uuid"}, ORG_B)["sender_org_id"] is None
+    assert _with_stream_org({"sender_org_id": ["list"]}, ORG_B)["sender_org_id"] is None
+    assert _with_stream_org({"sender_org_id": str(uuid.UUID(int=0))}, ORG_B)["sender_org_id"] is None, "the sentinel is no org"
 
 
 def test_a_payload_or_frame_cannot_fake_the_stream_org():

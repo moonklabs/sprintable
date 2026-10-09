@@ -327,8 +327,9 @@ def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
 
 def _event_to_payload(event: "Event") -> dict:
     return {
-        # story 4649 — 보낸 이의 조직. 발신자 없는 이벤트는 null. 값은 발신 때 payload에 실린 것(행의 org_id는 만든 곳이라 쓰지 않는다).
-        "sender_org_id": (event.payload or {}).get("sender_org_id") if event.sender_id else None,
+        # story 4649 — 백필은 발신자 조직을 아직 조회하지 않는다(hot path 밖이라도 새 조회를 열지 않는다): null로 둔다.
+        # 데몬은 null을 「조직 모름」으로 다룬다(데이터 틀). 행의 org_id는 만든 곳이라 쓰지 않고, payload의 값은 신뢰하지 않는다.
+        "sender_org_id": None,
         "event_id": str(event.id),
         "event_type": event.event_type,
         "source": {"type": event.source_entity_type, "id": str(event.source_entity_id) if event.source_entity_id else None},
@@ -343,14 +344,26 @@ def _event_to_payload(event: "Event") -> dict:
     }
 
 
+def _uuid_text_or_none(value: object) -> str | None:
+    """story 4649 — a UUID as text, or None when the value is not one (never passed through as is)."""
+    if value is None:
+        return None
+    try:
+        parsed = uuid.UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return None if parsed == uuid.UUID(int=0) else str(parsed)
+
+
 def _with_stream_org(frame: dict, stream_org_id: "uuid.UUID | str | None") -> dict:
     """story 4649 — two fields lead every agent-stream frame: `stream_org_id` (the org that authenticated this stream — the
-    daemon has no org of its own to compare with) and `sender_org_id` (the sender's org, null when none). A value the frame or
-    its payload already carries under either name is replaced, never trusted."""
+    daemon has no org of its own to compare with) and `sender_org_id` (the sender's org — the server's value from the chat
+    message, null when none or not a UUID). The stream's org is always the authenticated one; a frame's own value of either
+    name is replaced for the stream and validated for the sender."""
     rest = {k: v for k, v in frame.items() if k not in ("stream_org_id", "sender_org_id")}
     return {
         "stream_org_id": str(stream_org_id) if stream_org_id is not None else None,
-        "sender_org_id": frame.get("sender_org_id"),
+        "sender_org_id": _uuid_text_or_none(frame.get("sender_org_id")),
         **rest,
     }
 

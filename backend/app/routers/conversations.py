@@ -563,9 +563,10 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
 
 
 def sender_org_id_of(sender: "ResolvedMember | TeamMember | None") -> str | None:
-    """story 4649 — 보낸 이가 속한 조직(사람·에이전트 모두). 없거나 주인 없는 sentinel(uuid 0)이면 None."""
+    """story 4649 — 보낸 이가 속한 조직(사람·에이전트 모두). 없거나 주인 없는 sentinel(uuid 0)이면 None.
+    발신 때 서버가 이 행에서 만든 값만 쓴다 — 이벤트 payload에 실린 같은 이름의 값은 읽지 않는다."""
     org = getattr(sender, "org_id", None)
-    if org is None or org == uuid.UUID(int=0):
+    if not isinstance(org, uuid.UUID) or org == uuid.UUID(int=0):
         return None
     return str(org)
 
