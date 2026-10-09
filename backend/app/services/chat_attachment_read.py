@@ -24,6 +24,7 @@ MAX_TEXT_BYTES = 200 * 1024
 # 압축 폭탄 가드 — 약 8천만 화소를 넘으면 열지 않는다(폰 48MP 사진은 통과).
 Image.MAX_IMAGE_PIXELS = 80_000_000
 
+IMAGE_FORMATS = frozenset({"JPEG", "PNG", "GIF", "WEBP"})
 IMAGE_EXTS = frozenset({"jpg", "jpeg", "png", "gif", "webp"})
 TEXT_EXTS = frozenset({"txt", "md", "csv", "json", "log"})
 
@@ -42,7 +43,8 @@ def prepare_image(raw: bytes) -> PreparedImage | None:
     if len(raw) > MAX_IMAGE_READ_BYTES:  # 읽기 상한을 넘으면 열지 않고 정보만
         return None
     try:
-        with Image.open(io.BytesIO(raw)) as im:
+        # 허용 목록을 명시 — PIL은 BMP·TIFF·ICO·PSD·EPS(Ghostscript 경유)까지 여므로 그 밖은 열지도 않는다(까디르 렌즈 ④)
+        with Image.open(io.BytesIO(raw), formats=list(IMAGE_FORMATS)) as im:
             im.load()
             im = ImageOps.exif_transpose(im)  # 방향을 픽셀에 반영한 뒤 EXIF는 버린다
             im = im.convert("RGB") if im.mode not in ("RGB", "L") else im

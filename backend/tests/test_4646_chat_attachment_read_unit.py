@@ -48,3 +48,15 @@ def test_limits_pinned_to_the_human_upload_cap():
     from app.routers.conversations import _MAX_ATTACHMENT_SIZE
     assert HUMAN_ATTACHMENT_MAX_BYTES == _MAX_ATTACHMENT_SIZE
     assert MAX_IMAGE_READ_BYTES == 25 * 1024 * 1024
+
+
+def test_only_the_allowed_raster_formats_are_opened():
+    # 까디르 렌즈 ④: PIL이 여는 모든 형식이 아니라 허용 목록만 — 그 밖은 열지도 않고 메타만
+    tiff = io.BytesIO(); Image.new("RGB", (8, 8), (1, 2, 3)).save(tiff, format="TIFF")
+    bmp = io.BytesIO(); Image.new("RGB", (8, 8), (1, 2, 3)).save(bmp, format="BMP")
+    eps = b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 8 8\n" + b"showpage\n"
+    assert prepare_image(tiff.getvalue()) is None
+    assert prepare_image(bmp.getvalue()) is None
+    assert prepare_image(eps) is None
+    png = io.BytesIO(); Image.new("RGB", (8, 8), (1, 2, 3)).save(png, format="PNG")
+    assert prepare_image(png.getvalue()) is not None  # the allowed one still reads
