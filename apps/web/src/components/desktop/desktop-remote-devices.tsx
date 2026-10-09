@@ -122,7 +122,14 @@ export function DesktopRemoteDevices() {
       {remoteControlOn === false && orgName ? (
         <p className="text-xs text-muted-foreground">{t('orgOff', { org: orgName })}</p>
       ) : null}
-      {phones.length === 0 ? <p className="text-sm text-muted-foreground">{t('empty')}</p> : (
+      {phones.length === 0 ? (
+        <>
+          <p className="text-sm text-muted-foreground">{t('empty')}</p>
+          {/* story 4645 AC7: the web cannot open the app's pairing window — say where it is. Only with the org's remote control on: with it off the
+              tail names no pairing (PO · Yuna 19:00Z) */}
+          {remoteControlOn === false && orgName ? null : <p className="text-xs text-muted-foreground">{t('pairHint')}</p>}
+        </>
+      ) : (
         <Card className="p-0">
         <ul className="flex flex-col divide-y divide-border">
           {[...phones].sort(byLeastRecentlyUsed).map((phone) => {

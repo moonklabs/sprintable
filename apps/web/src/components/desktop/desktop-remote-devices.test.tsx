@@ -129,6 +129,14 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
+  // story 4645 AC7: with the org's remote control on, the empty card says where to pair (the app's top button) — in the app or a browser alike
+  it('empty with the org on: the one line that says where pairing is', async () => {
+    answers([], true);
+    await render();
+    expect(text()).toContain('아직 페어링된 폰이 없어요');
+    expect(text()).toContain('폰 페어링은 데스크톱 앱 위쪽 [폰 페어링]에서 해요');
+  });
+
   it('a failed list read draws nothing', async () => {
     fetchWithAuth.mockResolvedValue(json({}, 500));
     await render();
