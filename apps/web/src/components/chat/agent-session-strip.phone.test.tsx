@@ -357,7 +357,7 @@ describe('[4534] the strip inside the phone app', () => {
     expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value).toBe('x');
   });
 
-  it('refusals keep the button\'s verb and their way out: signed out → [다시 로그인] · key lost → [다시 짝짓기] · no screen lock → [설정 열기]', async () => {
+  it('refusals keep the button\'s verb and their way out: signed out → [다시 로그인] · key lost → [다시 페어링] · no screen lock → [설정 열기]', async () => {
     server(res(201, {}));
     for (const [code, stopLine, sendLine, action] of [
       ['signed_out', ko.command.stop.signedOut, ko.command.send.signedOut, ko.command.signInAgain],

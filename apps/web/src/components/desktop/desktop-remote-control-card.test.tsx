@@ -72,11 +72,11 @@ describe('DesktopRemoteControlCard (story #4535)', () => {
     fetchWithAuth.mockResolvedValueOnce(ok({ enabled: true, enabled_at: '2026-10-03T09:00:00Z', can_change: true }));
     await render();
     await act(async () => { sw()!.click(); });
-    expect(text()).toContain('끄면 짝지은 기기에서 이 조직의 에이전트를 바로 제어할 수 없어요 — 짝은 그대로 남아요');
+    expect(text()).toContain('끄면 페어링된 기기에서 이 조직의 에이전트를 바로 제어할 수 없어요 — 페어링은 그대로 남아요');
     expect(document.activeElement?.textContent).toBe('취소');
     expect(fetchWithAuth).toHaveBeenCalledTimes(1);
     await act(async () => { button('취소').click(); });
-    expect(text()).not.toContain('끄면 짝지은');
+    expect(text()).not.toContain('끄면 페어링된');
     expect(fetchWithAuth).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(sw()); // the confirmation closed — focus back on the switch (Yuna 12:43Z)
 

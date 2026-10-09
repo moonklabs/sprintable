@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// story #4532 (명세 b0713c54 «짝짓기 화면 · 짝짓기 숫자 · 폰 확인 숫자» 폰 표) — the pairing screen inside the phone app: start →
+// story #4532 (명세 b0713c54 «페어링 화면 · 페어링 숫자 · 폰 확인 숫자» 폰 표) — the pairing screen inside the phone app: start →
 // confirm (no number yet) → checking → the pairing number (big) → paired · each refusal's line and button · nothing outside the app.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -111,15 +111,15 @@ describe('[4532] phone pairing screen', () => {
     expect(buttons()).toEqual([]);
   });
 
-  it('start → scan → «이 컴퓨터와 짝지을까요?» (no number) → [짝짓기] → checking → the number → paired', async () => {
+  it('start → scan → «이 컴퓨터와 페어링할까요?» (no number) → [페어링] → checking → the number → paired', async () => {
     installShell();
     await render();
-    expect(text()).toContain('컴퓨터와 짝짓기 — 컴퓨터의 Sprintable 앱에서 [폰 짝짓기]를 눌러 나온 QR을 찍어 주세요');
+    expect(text()).toContain('컴퓨터와 페어링 — 컴퓨터의 Sprintable 앱에서 [폰 페어링]를 눌러 나온 QR을 찍어 주세요');
     await press('QR 찍기');
-    expect(line()).toBe('이 컴퓨터와 짝지을까요? · SYJ-MacBook-Pro');
+    expect(line()).toBe('이 컴퓨터와 페어링할까요? · SYJ-MacBook-Pro');
     expect(text()).not.toMatch(/\d{3} \d{3}/); // no number before the computer takes the offer
-    expect(buttons()).toEqual(['짝짓기', '취소']);
-    await press('짝짓기');
+    expect(buttons()).toEqual(['페어링', '취소']);
+    await press('페어링');
     expect(sent.map((s) => s.type)).toEqual(['pair.scan', 'device.key.info', 'pair.mac']);
     expect(line()).toBe('컴퓨터 화면을 확인하는 중…');
     await tick();
@@ -129,9 +129,9 @@ describe('[4532] phone pairing screen', () => {
     // Yuna 07:48Z ②: three lines in the one status — the lead · the number alone · what to do (no «·» / «—» joins)
     const lineEl = container.querySelector('[data-testid="phone-pairing-line"]')!;
     const parts = ['pairing-number-lead', 'pairing-number', 'pairing-number-hint'].map((id) => lineEl.querySelector(`[data-testid="${id}"]`));
-    expect(parts.map((p) => p?.textContent)).toEqual(['짝짓기 숫자', '296 843', '컴퓨터 화면에서 이 숫자를 골라 주세요']);
+    expect(parts.map((p) => p?.textContent)).toEqual(['페어링 숫자', '296 843', '컴퓨터 화면에서 이 숫자를 골라 주세요']);
     expect(parts.every((p) => p?.classList.contains('block'))).toBe(true);
-    expect(line()).toBe('짝짓기 숫자296 843컴퓨터 화면에서 이 숫자를 골라 주세요'); // nothing else in that status
+    expect(line()).toBe('페어링 숫자296 843컴퓨터 화면에서 이 숫자를 골라 주세요'); // nothing else in that status
     // Yuna 07:48Z ①: a Korean line breaks between words, never inside one («주세 / 요»)
     expect(lineEl.className).toMatch(/\bbreak-keep\b/);
     expect(sent.filter((s) => s.type === 'pair.number')).toEqual([{ type: 'pair.number', args: { offer_id: HEAD.offer_id, reveal: 'R' } }]);
@@ -139,7 +139,7 @@ describe('[4532] phone pairing screen', () => {
     expect(sent.filter((s) => s.type === 'pair.number')).toHaveLength(1); // asked once
     pairs = [{ setup_id: HEAD.setup_id }];
     await tick();
-    expect(line()).toBe('짝지었어요 · SYJ-MacBook-Pro — 이제 이 폰에서 그 컴퓨터의 에이전트에 답하고, 멈추거나 지시할 수 있어요');
+    expect(line()).toBe('페어링했어요 · SYJ-MacBook-Pro — 이제 이 폰에서 그 컴퓨터의 에이전트에 답하고, 멈추거나 지시할 수 있어요');
     expect(buttons()).toEqual(['닫기']);
     const looks = fetchWithAuth.mock.calls.length;
     await tick();
@@ -147,14 +147,14 @@ describe('[4532] phone pairing screen', () => {
     expect(fetchWithAuth.mock.calls.length).toBe(looks); // no more looks after paired
   });
 
-  it('the computer said «different» or the QR ran out while waiting → «짝짓지 못했어요» + [다시 찍기]', async () => {
+  it('the computer said «different» or the QR ran out while waiting → «페어링하지 못했어요» + [다시 찍기]', async () => {
     installShell();
     await render();
     await press('QR 찍기');
-    await press('짝짓기');
+    await press('페어링');
     offerState = { state: 'expired', reveal: null };
     await tick();
-    expect(line()).toBe('짝짓지 못했어요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요');
+    expect(line()).toBe('페어링하지 못했어요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요');
     expect(buttons()).toEqual(['다시 찍기']);
   });
 
@@ -162,9 +162,9 @@ describe('[4532] phone pairing screen', () => {
     installShell();
     await render();
     await press('QR 찍기');
-    await press('짝짓기');
+    await press('페어링');
     await press('취소');
-    expect(text()).toContain('[폰 짝짓기]');
+    expect(text()).toContain('[폰 페어링]');
     const before = fetchWithAuth.mock.calls.length;
     await tick();
     await tick();
@@ -172,7 +172,7 @@ describe('[4532] phone pairing screen', () => {
   });
 
   it.each([
-    [{ ok: false, code: 'not_ours' }, 'Sprintable 짝짓기 QR이 아니에요'],
+    [{ ok: false, code: 'not_ours' }, 'Sprintable 페어링 QR이 아니에요'],
     [{ ok: false, code: 'expired' }, '이 QR은 시간이 지났어요 — 컴퓨터에서 새 QR을 만들어 주세요'],
   ])('the scan says %j → its line + [다시 찍기]', async (answer, expected) => {
     shell['pair.scan'] = answer;
@@ -197,24 +197,24 @@ describe('[4532] phone pairing screen', () => {
     [404, 'setup_not_found', '이 QR의 컴퓨터를 찾지 못했어요 — 같은 조직의 컴퓨터인지 확인해 주세요', ['다시 찍기']],
     [404, 'phone_key_not_found', '이 폰을 다시 등록해야 해요 — [다시 찍기]를 누르면 등록부터 해요', ['다시 찍기']],
     [422, 'invalid_expiry', '이 QR은 시간이 지났어요 — 컴퓨터에서 새 QR을 만들어 주세요', ['다시 찍기']],
-    [409, 'remote_control_off', '원격 제어가 꺼져 있어 짝지을 수 없어요 — 조직 소유자가 켜면 다시 할 수 있어요', ['닫기']], // story #4583 (no org read here: no names)
+    [409, 'remote_control_off', '원격 제어가 꺼져 있어 페어링할 수 없어요 — 조직 소유자가 켜면 다시 할 수 있어요', ['닫기']], // story #4583 (no org read here: no names)
   ])('the offer refused %i %s → its line', async (status, code, expected, left) => {
     offerPost = () => res(status, { error: { code } });
     installShell();
     await render();
     await press('QR 찍기');
-    await press('짝짓기');
+    await press('페어링');
     expect(line()).toBe(expected);
     expect(buttons()).toEqual(left);
   });
 
-  it('already paired with that computer → «이미 짝지은 컴퓨터예요» + [닫기], nothing offered', async () => {
+  it('already paired with that computer → «이미 페어링된 컴퓨터예요» + [닫기], nothing offered', async () => {
     pairs = [{ setup_id: HEAD.setup_id }];
     installShell();
     await render();
     await press('QR 찍기');
-    await press('짝짓기');
-    expect(line()).toBe('이미 짝지은 컴퓨터예요');
+    await press('페어링');
+    expect(line()).toBe('이미 페어링된 컴퓨터예요');
     expect(buttons()).toEqual(['닫기']);
     expect(sent.some((s) => s.type === 'pair.mac')).toBe(false);
   });
@@ -224,7 +224,7 @@ describe('[4532] phone pairing screen', () => {
     installShell();
     await render();
     await press('QR 찍기');
-    await press('짝짓기');
+    await press('페어링');
     expect(line()).toBe('이 계정의 원격 기기가 이미 3대예요 — 웹 «데스크톱 앱 › 원격 기기»에서 쓰지 않는 폰의 [이 폰 빼기]를 누른 뒤 다시 찍어 주세요');
     expect(buttons()).toEqual(['다시 찍기']);
   });
@@ -234,8 +234,8 @@ describe('[4532] phone pairing screen', () => {
     installShell();
     await render();
     await press('QR 찍기');
-    await press('짝짓기');
-    expect(line()).toBe('이 폰은 다른 Sprintable 계정에 등록돼 있어 짝지을 수 없어요 — 그 계정으로 로그인해 짝짓거나, 그 계정의 웹 «데스크톱 앱 › 원격 기기»에서 이 폰을 뺀 뒤 다시 찍어 주세요');
+    await press('페어링');
+    expect(line()).toBe('이 폰은 다른 Sprintable 계정에 등록돼 있어 페어링할 수 없어요 — 그 계정으로 로그인해 페어링하거나, 그 계정의 웹 «데스크톱 앱 › 원격 기기»에서 이 폰을 뺀 뒤 다시 찍어 주세요');
     expect(buttons()).toEqual(['다시 찍기']);
   });
 
@@ -244,7 +244,7 @@ describe('[4532] phone pairing screen', () => {
     installShell();
     await render();
     await press('QR 찍기');
-    await press('짝짓기');
+    await press('페어링');
     expect(line()).toBe('화면 잠금이 없는 폰에서는 답할 수 없어요 — 폰 설정에서 화면 잠금을 켜 주세요');
     expect(buttons()).toEqual(['설정 열기', '다시 찍기']);
     await press('설정 열기');

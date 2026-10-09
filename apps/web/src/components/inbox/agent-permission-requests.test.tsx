@@ -74,7 +74,7 @@ describe('AgentPermissionRequests (story #4533)', () => {
       'npm install --save ••••(가림) …', '비밀처럼 보이는 값은 가려서 보냈어요 · 앞 200자만 보여요', '작업 폴더 · ~/Sprintable/블로그 글']) {
       expect(text()).toContain(piece);
     }
-    expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
+    expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
@@ -95,7 +95,7 @@ describe('AgentPermissionRequests (story #4533)', () => {
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     await render();
-    expect(line()).toBe('그 컴퓨터와 짝지은 폰이 없어 여기서는 답할 수 없어요 — 그 컴퓨터의 터미널에서 답해 주세요');
+    expect(line()).toBe('그 컴퓨터와 페어링된 폰이 없어 여기서는 답할 수 없어요 — 그 컴퓨터의 터미널에서 답해 주세요');
   });
 
   it('nothing waiting (answered · withdrawn · long expired · empty · a failed read) draws nothing', async () => {
@@ -119,7 +119,7 @@ describe('AgentPermissionRequests (story #4533)', () => {
     await act(async () => { vi.advanceTimersByTime(15_000); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
-    expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
+    expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
   });
 
   // PO 11:23Z ③(나) — dev E2E: with the group empty, a new request did not show on the phone until the tab was opened again (its
@@ -157,7 +157,7 @@ describe('AgentPermissionRequests (story #4533)', () => {
     await act(async () => { onNotice?.({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } }); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
-    expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
+    expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
   });
 
   // story #4607: the server sends the notice as a NAMED frame `event: dispatched` (backend routers/events.py) — the hook passes it to
@@ -174,7 +174,7 @@ describe('AgentPermissionRequests (story #4533)', () => {
     });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
-    expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
+    expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
   });
 
   it('reads in English', async () => {

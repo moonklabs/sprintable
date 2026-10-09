@@ -78,7 +78,7 @@ describe('[SID:4630] «로그인한 다른 기기»', () => {
     await act(async () => { q('other-sessions-open')!.click(); });
     await flush();
     expect(document.body.textContent).toContain(
-      '다른 기기의 로그인을 모두 끝낼까요? 지금 이 브라우저만 남아요. 다른 기기(폰 앱 · 맥 앱 화면 포함)는 길어야 1시간 안에 로그아웃돼요. 데스크톱 앱의 에이전트는 그대로 일하고, 폰은 다시 로그인하면 짝이 그대로예요.',
+      '다른 기기의 로그인을 모두 끝낼까요? 지금 이 브라우저만 남아요. 다른 기기(폰 앱 · 맥 앱 화면 포함)는 길어야 1시간 안에 로그아웃돼요. 데스크톱 앱의 에이전트는 그대로 일하고, 폰은 다시 로그인하면 페어링이 그대로예요.',
     );
     expect(document.activeElement?.textContent).toBe('취소');
     expect(fetchMock).not.toHaveBeenCalled();
