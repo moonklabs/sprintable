@@ -104,6 +104,10 @@ Key points:
   are at the **top level of `data`**; the original event fields (e.g. `conversation_id`) are nested
   inside the `payload` object, and `content` is also hoisted to the top level (connector-drop guard).
   `sender_id` is the sender's member id — a flat UUID, not a nested object.
+- Every agent-stream frame also starts with two org fields (story 4649): `stream_org_id` is the org that
+  authenticated this stream (the same on every frame of it), and `sender_org_id` is the sender's org —
+  `null` when the event has no sender, and absent on non-chat live frames. Compare the two to tell
+  whether a sender belongs to your org.
 - **The SSE `id:` field is the `recipient_seq` integer — NOT the `event_id` UUID.** Send it back
   verbatim as `Last-Event-ID` on reconnect. Sending a UUID there fails integer parsing and
   silently degrades the reconnect to `header_seq=0` (full-history replay) — fixed at the root in
