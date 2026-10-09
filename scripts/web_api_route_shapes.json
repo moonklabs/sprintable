@@ -766,6 +766,11 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/conversations/{}/messages/{}/attachments/{}/content",
+"kind": "unknown"
+},
+{
+"method": "GET",
 "path": "/api/v2/conversations/{}/messages/{}/replies",
 "kind": "envelope"
 },

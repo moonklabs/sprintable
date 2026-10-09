@@ -30,6 +30,8 @@ async def get_chat_attachment(args: GetChatAttachmentInput) -> list[TextContent 
         )
     except Exception as exc:
         return err(exc)
+    if not isinstance(data, dict):  # an empty success body is not an error (story 4441 guard)
+        data = {}
     meta = {k: data.get(k) for k in ("name", "content_type", "size", "kind", "reason")}
     if data.get("kind") == "image" and data.get("data_base64"):
         note = f"{meta['name']} · {meta['content_type']} · 원본 {meta['size']}바이트 → 줄여서 보임 {data.get('width')}×{data.get('height')}"
