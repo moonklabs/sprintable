@@ -105,4 +105,43 @@ def test_the_stream_stamps_its_own_org_on_both_live_and_backfill_frames():
 
     source = inspect.getsource(ev_module.agent_event_stream)
     assert "_with_stream_org(event_data, org_id)" in source, "the live frame carries the stream's org"
-    assert "_backfill_frame_data(evt, org_id) for evt in batch" in source, "the backfill frame carries it too"
+    assert "_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch" in source, "the backfill frame carries it too"
+    assert "sender_orgs = await _sender_orgs_for(db, batch)" in source, "the backfill batch looks its senders up once"
+
+
+def test_a_backfill_batch_looks_the_senders_up_once_and_names_their_own_org():
+    import asyncio
+    from unittest.mock import patch
+
+    from app.routers import events as ev_module
+
+    other = uuid.UUID("44444444-4444-4444-8444-444444444444")
+    members = {
+        SENDER: SimpleNamespace(org_id=ORG_B),       # a sender of another org
+        other: SimpleNamespace(org_id=uuid.UUID(int=0)),  # orphan sentinel: no org
+    }
+    calls: list[set] = []
+
+    async def fake_lookup(ids, session):
+        calls.append(set(ids))
+        return {i: members[i] for i in ids if i in members}
+
+    batch = [_event(SENDER, {}, org=ORG_A), _event(SENDER, {}, org=ORG_A), _event(other, {}, org=ORG_A), _event(None, {}, org=ORG_A)]
+    with patch.object(ev_module, "lookup_members_by_ids", side_effect=fake_lookup):
+        orgs = asyncio.run(ev_module._sender_orgs_for(object(), batch))
+    assert len(calls) == 1, "one lookup for the whole batch, not one per event"
+    assert calls[0] == {SENDER, other}, "distinct senders only, none for the sender-less event"
+    assert orgs == {str(SENDER): str(ORG_B), str(other): None}
+
+    frame = ev_module._backfill_frame_data(batch[0], ORG_A, orgs)
+    assert frame["sender_org_id"] == str(ORG_B), "the sender's own org, not the stream's or the row's"
+    assert frame["stream_org_id"] == str(ORG_A)
+    assert ev_module._backfill_frame_data(batch[2], ORG_A, orgs)["sender_org_id"] is None, "orphan: null"
+    assert ev_module._backfill_frame_data(batch[3], ORG_A, orgs)["sender_org_id"] is None, "no sender: null"
+
+
+def test_a_forged_payload_is_ignored_even_when_the_lookup_has_an_answer():
+    from app.routers.events import _backfill_frame_data
+
+    frame = _backfill_frame_data(_event(SENDER, {"sender_org_id": str(ORG_A)}, org=ORG_A), ORG_A, {str(SENDER): str(ORG_B)})
+    assert frame["sender_org_id"] == str(ORG_B), "the lookup's answer wins over the stored payload"

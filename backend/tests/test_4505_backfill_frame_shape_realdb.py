@@ -154,5 +154,5 @@ def test_the_stream_builds_its_backfill_frames_with_the_live_shape():
 
     source = inspect.getsource(ev_module.agent_event_stream)
     # story 4649: the stream passes its own org (the frame's stream_org_id) — same builder, same shape
-    assert "_backfill_frame_data(evt, org_id) for evt in batch" in source
+    assert "_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch" in source
     assert "_event_to_payload(evt) for evt in batch" not in source

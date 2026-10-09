@@ -46,7 +46,7 @@ from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck
 from app.services.org_locale import resolve_org_locale
 from app.services.i18n_catalog import t
-from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
+from app.services.member_resolver import assert_caller_is_member, lookup_members_by_ids, resolve_member_identity
 
 
 def _access_revoked_frame(reason: str) -> str:
@@ -327,8 +327,8 @@ def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
 
 def _event_to_payload(event: "Event") -> dict:
     return {
-        # story 4649 — 백필은 발신자 조직을 아직 조회하지 않는다(hot path 밖이라도 새 조회를 열지 않는다): null로 둔다.
-        # 데몬은 null을 「조직 모름」으로 다룬다(데이터 틀). 행의 org_id는 만든 곳이라 쓰지 않고, payload의 값은 신뢰하지 않는다.
+        # story 4649 — 백필은 배치 조회 결과(_backfill_frame_data가 넣는다)로 채운다. 여기서는 모른다고 둔다.
+        # 행의 org_id는 만든 곳이라 쓰지 않고, 저장된 payload의 값은 신뢰하지 않는다.
         "sender_org_id": None,
         "event_id": str(event.id),
         "event_type": event.event_type,
@@ -368,7 +368,18 @@ def _with_stream_org(frame: dict, stream_org_id: "uuid.UUID | str | None") -> di
     }
 
 
-def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = None) -> dict:
+async def _sender_orgs_for(db: "AsyncSession", events: list) -> dict[str, str | None]:
+    """story 4649 — the senders' orgs for one backfill batch: ONE lookup for the whole batch (not per event, not per frame).
+    Keys are sender ids as text; the value is the sender's own org as a UUID text, or None (orphan · sentinel · not a UUID)."""
+    ids = {e.sender_id for e in events if e.sender_id is not None}
+    if not ids:
+        return {}
+    members = await lookup_members_by_ids(ids, db)
+    return {str(mid): _uuid_text_or_none(getattr(m, "org_id", None)) for mid, m in members.items()}
+
+
+def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = None,
+                         sender_orgs: "dict[str, str | None] | None" = None) -> dict:
     """story #4505 (Mirko live 00:51Z · PO 01:06Z) — a backfill frame in the shape of the live one. A live frame is the pushed
     dict, whose payload keys are top-level (`gate_id`, `status`, `conversation_id` …); a backfill frame was `_event_to_payload`,
     where they sit only under `payload` — so a handler reading the live shape (the approvals inbox `payload.gate_id`, the chat
@@ -377,6 +388,7 @@ def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = Non
     has (event_id · event_type · source · sender_id · payload · content · created_at · created_xid). Backfill only — the live
     dispatch (`dispatch_router`) and the agent gateway build their own frames and are unchanged."""
     data = _event_to_payload(event)
+    data["sender_org_id"] = (sender_orgs or {}).get(str(event.sender_id)) if event.sender_id is not None else None
     flat = {k: v for k, v in (event.payload or {}).items() if k not in data}
     return _with_stream_org({**flat, **data}, stream_org_id)
 
@@ -653,7 +665,8 @@ async def agent_event_stream(
                         yield _access_revoked_frame(_why)
                         return
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
-                    batch_data = [_backfill_frame_data(evt, org_id) for evt in batch]  # story #4505: the live frame's shape
+                    sender_orgs = await _sender_orgs_for(db, batch)  # story 4649: one lookup for the batch's senders
+                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch]  # story #4505: the live frame's shape
                     # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
                     # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
