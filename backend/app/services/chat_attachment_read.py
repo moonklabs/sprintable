@@ -14,8 +14,10 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageOps
 
-from app.services.mcp_attachment_upload import MAX_JSON_ATTACHMENT_UPLOAD_SIZE
-
+# 사람이 올리는 첨부의 전체 상한 — conversations.py `_MAX_ATTACHMENT_SIZE`(100MB)와 같은 값(시험이 둘을 맞춘다).
+HUMAN_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
+# 이미지를 **읽는** 상한(서버 메모리 기준). 폰 사진(3~8MB)은 읽고, 이보다 크면 정보만. 상수에 이유가 있다.
+MAX_IMAGE_READ_BYTES = 25 * 1024 * 1024
 MAX_EDGE_PX = 1568
 MAX_OUT_BYTES = int(1.5 * 1024 * 1024)
 MAX_TEXT_BYTES = 200 * 1024
@@ -37,7 +39,7 @@ class PreparedImage:
 
 def prepare_image(raw: bytes) -> PreparedImage | None:
     """원본 이미지 바이트 → 모델용 축소본. 못 열면 None."""
-    if len(raw) > MAX_JSON_ATTACHMENT_UPLOAD_SIZE * 8:  # 아주 큰 원본은 열기 전에 거른다(상한 × 8)
+    if len(raw) > MAX_IMAGE_READ_BYTES:  # 읽기 상한을 넘으면 열지 않고 정보만
         return None
     try:
         with Image.open(io.BytesIO(raw)) as im:
