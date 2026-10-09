@@ -12,10 +12,10 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 
+from app.services.attachment_limits import HUMAN_ATTACHMENT_MAX_BYTES  # noqa: F401 — 전체 상한(한 곳 정의)
+
 from PIL import Image, ImageOps
 
-# 사람이 올리는 첨부의 전체 상한 — conversations.py `_MAX_ATTACHMENT_SIZE`(100MB)와 같은 값(시험이 둘을 맞춘다).
-HUMAN_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
 # 이미지를 **읽는** 상한(서버 메모리 기준). 폰 사진(3~8MB)은 읽고, 이보다 크면 정보만. 상수에 이유가 있다.
 MAX_IMAGE_READ_BYTES = 25 * 1024 * 1024
 MAX_EDGE_PX = 1568
@@ -36,6 +36,11 @@ class PreparedImage:
     width: int
     height: int
     original_bytes: int
+
+
+def should_download(stored_size: int | None) -> bool:
+    """내려받기 **前** 게이트: 저장소 객체 크기(head) — 모르면(None) 또는 읽기 상한을 넘으면 내려받지 않는다."""
+    return stored_size is not None and 0 < stored_size <= MAX_IMAGE_READ_BYTES
 
 
 def prepare_image(raw: bytes) -> PreparedImage | None:

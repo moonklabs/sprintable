@@ -1284,7 +1284,7 @@ ConversationResponse.model_rebuild()
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
 _MAX_ATTACHMENTS = 10
-_MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
+from app.services.attachment_limits import HUMAN_ATTACHMENT_MAX_BYTES as _MAX_ATTACHMENT_SIZE  # 100MB · 한 곳 정의(story 4646)
 
 # E-MCP-OPT S2(bbfd24ba)/S6: MCP(비-브라우저) 클라이언트용 JSON/base64 업로드 공용 프리미티브
 # (S6 부터 story/doc 도 공유 — `app/services/mcp_attachment_upload.py` 참조).

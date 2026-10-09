@@ -1,6 +1,6 @@
 import io
 from PIL import Image
-from app.services.chat_attachment_read import (HUMAN_ATTACHMENT_MAX_BYTES, MAX_EDGE_PX, MAX_IMAGE_READ_BYTES, MAX_OUT_BYTES, prepare_image, text_body)
+from app.services.chat_attachment_read import (MAX_EDGE_PX, MAX_IMAGE_READ_BYTES, MAX_OUT_BYTES, prepare_image, text_body)
 
 def _jpeg(size, orientation=None, mode="RGB"):
     im = Image.new(mode, size, (200, 30, 30))
@@ -44,10 +44,17 @@ def test_phone_photo_of_8mb_is_read_and_26mb_is_info_only():
     assert prepare_image(big) is not None
     assert prepare_image(b"\xff" * (26 * 1024 * 1024)) is None  # over the read limit: not even opened
 
-def test_limits_pinned_to_the_human_upload_cap():
-    from app.routers.conversations import _MAX_ATTACHMENT_SIZE
-    assert HUMAN_ATTACHMENT_MAX_BYTES == _MAX_ATTACHMENT_SIZE
+def test_limits_are_one_definition_shared_with_the_upload_path():
+    from app.routers import conversations
+    from app.services import attachment_limits
+    assert conversations._MAX_ATTACHMENT_SIZE is attachment_limits.HUMAN_ATTACHMENT_MAX_BYTES  # same object, not a copy
     assert MAX_IMAGE_READ_BYTES == 25 * 1024 * 1024
+
+def test_size_gate_runs_before_any_download():
+    from app.services.chat_attachment_read import should_download
+    assert should_download(8 * 1024 * 1024) is True
+    assert should_download(26 * 1024 * 1024) is False   # never downloaded
+    assert should_download(None) is False                # size unknown: not downloaded
 
 
 def test_only_the_allowed_raster_formats_are_opened():
