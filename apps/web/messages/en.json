@@ -7088,6 +7088,7 @@
       "alreadyRemoved": "Already removed · {phone}",
       "removeFailed": "Couldn't remove it — please try again",
       "empty": "No paired phone yet",
+      "pairHint": "Pair a phone with [Pair phone] in the bar at the bottom of the desktop app",
       "orgOff": "Remote control is off for this organization ({org}) — paired devices show the state but can't control anything"
     }
   },
