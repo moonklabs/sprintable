@@ -574,6 +574,11 @@ def _msg_payload(
     # 여기서 빈 배열로 덮는다(실제 근본은 attachments.py authorize의 belongs 쿼리에 deleted_at
     # 필터를 추가한 것 — 이 payload 필터는 FE가 애초에 못 보게 하는 2차 방어).
     attachments = (msg.attachments if isinstance(msg.attachments, list) else []) if msg.deleted_at is None else []
+    # story 4646 — 읽는 길을 응답에 안내(저장 데이터는 안 바꿈): 각 첨부 항목에 index와 읽는 도구 이름
+    attachments = [
+        {**a, "index": i, "read_with": "sprintable_get_chat_attachment"} if isinstance(a, dict) else a
+        for i, a in enumerate(attachments)
+    ]
     payload = {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
