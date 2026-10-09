@@ -7074,6 +7074,7 @@
       "confirmNumber": "Phone check number {number}",
       "confirmNumberHint": "If it matches the phone check number in the phone app's settings › This phone, it's that phone",
       "remove": "Remove",
+      "unpair": "Unpair",
       "cancel": "Cancel",
       "confirmRemove": "Remove the {phone} ↔ {device} pair? That phone can no longer control this computer — its remote device place stays taken",
       "removePhone": "Remove this phone",

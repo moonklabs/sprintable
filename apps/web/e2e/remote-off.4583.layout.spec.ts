@@ -190,8 +190,8 @@ const inboxApi = (o: Parameters<typeof org>[0]) => ({ ...org(o), 'GET /api/agent
 
 // ── the copy (Yuna `4583/copy.md`) ───────────────────────────────────────────────────────────────────────────────────────────
 const KO = {
-  pairOwner: '원격 제어가 꺼져 있어 짝지을 수 없어요 — 켜면 이 폰에서 에이전트에 답하고, 멈추거나 지시할 수 있어요',
-  pairMember: (o: string) => `원격 제어가 꺼져 있어 짝지을 수 없어요 — 조직 소유자${o}가 켜면 다시 할 수 있어요`,
+  pairOwner: '원격 제어가 꺼져 있어 페어링할 수 없어요 — 켜면 이 폰에서 에이전트에 답하고, 멈추거나 지시할 수 있어요',
+  pairMember: (o: string) => `원격 제어가 꺼져 있어 페어링할 수 없어요 — 조직 소유자${o}가 켜면 다시 할 수 있어요`,
   remoteOwner: '이 조직은 원격 제어가 꺼져 있어 이 컴퓨터를 켤 수 없어요 — 조직의 원격 제어를 먼저 켜 주세요',
   remoteMember: (o: string) => `이 조직은 원격 제어가 꺼져 있어 이 컴퓨터를 켤 수 없어요 — 조직 소유자${o}가 켜면 다시 할 수 있어요`,
   stripOwner: '원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요',
@@ -204,7 +204,7 @@ const KO = {
   link: '원격 제어 켜러 가기',
 };
 const THREE = '(송윤재 외 2명)';
-const NEW_LINES = [KO.pairOwner, KO.remoteOwner, KO.stripOwner, KO.inboxOwner, KO.offEffect, KO.link, '오지 않아요', '켤 수 없어요', '짝지을 수 없어요'];
+const NEW_LINES = [KO.pairOwner, KO.remoteOwner, KO.stripOwner, KO.inboxOwner, KO.offEffect, KO.link, '오지 않아요', '켤 수 없어요', '페어링할 수 없어요'];
 
 for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
   const tag = `${theme}-${width}`;
@@ -213,7 +213,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     if (width === 390) { // ① is the phone's page: 390 only
       await open(page, { kind: 'pair', width, theme, phone: true, api: pairApi({ owner: true }, OFFER_OFF) });
       await page.getByRole('button', { name: 'QR 찍기' }).click();
-      await page.getByRole('button', { name: '짝짓기' }).click();
+      await page.getByRole('button', { name: '페어링' }).click();
       const card = page.getByTestId('phone-pairing');
       const line = page.getByTestId('phone-pairing-line');
       await expect(line).toHaveText(KO.pairOwner);
@@ -224,14 +224,14 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
 
       await open(page, { kind: 'pair', width, theme, phone: true, api: pairApi({ owner: false }, OFFER_OFF) });
       await page.getByRole('button', { name: 'QR 찍기' }).click();
-      await page.getByRole('button', { name: '짝짓기' }).click();
+      await page.getByRole('button', { name: '페어링' }).click();
       await expect(page.getByTestId('phone-pairing-line')).toHaveText(KO.pairMember(THREE));
       await expect(page.getByTestId('phone-pairing').locator('a, button')).toHaveText(['닫기']);
       await shot(page, page.getByTestId('phone-pairing'), `4583-web-1b-pair-refused-member-${tag}`);
 
       await open(page, { kind: 'pair', width, theme, phone: true, api: pairApi({ owner: false, names: [] }, OFFER_OFF) });
       await page.getByRole('button', { name: 'QR 찍기' }).click();
-      await page.getByRole('button', { name: '짝짓기' }).click();
+      await page.getByRole('button', { name: '페어링' }).click();
       await expect(page.getByTestId('phone-pairing-line')).toHaveText(KO.pairMember(''));
       await shot(page, page.getByTestId('phone-pairing'), `4583-web-6-pair-no-names-member-${tag}`);
     }

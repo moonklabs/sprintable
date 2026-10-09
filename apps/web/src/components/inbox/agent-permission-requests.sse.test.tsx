@@ -112,7 +112,7 @@ describe('AgentPermissionRequests · the named `dispatched` frame through the re
     await send('dispatched', noticeFrame('agent.permission_request', 'e1'));
     await settle();
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
-    expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
+    expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
   });
 
   it('[4612] own EventSource: a request\'s change frame `agent.permission_request.changed` reads at once (the transient frame\'s shape)', async () => {
@@ -141,6 +141,6 @@ describe('AgentPermissionRequests · the named `dispatched` frame through the re
     await act(async () => { for (const h of mux.named.get('dispatched') ?? []) h(noticeFrame('agent.permission_request', 'm1')); });
     await settle();
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
-    expect(line()).toBe('짝지은 폰에서 답할 수 있어요');
+    expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
   });
 });

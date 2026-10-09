@@ -49,7 +49,7 @@ const line = () => container.querySelector('[data-testid="agent-session-line"]')
 describe('AgentSessionStrip (story #4534)', () => {
   it.each([
     ['starting', '시작됨', null],
-    ['working', '작업 중', '짝지은 폰에서 멈추거나 지시할 수 있어요'],
+    ['working', '작업 중', '페어링된 폰에서 멈추거나 지시할 수 있어요'],
     ['idle', '다음 일 기다림', null],
     ['waiting_permission', '권한 대기', '권한 요청은 결재함에 있어요'],
     ['stopped', '끝', null],

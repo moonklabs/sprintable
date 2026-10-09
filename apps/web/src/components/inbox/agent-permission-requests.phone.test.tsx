@@ -184,7 +184,7 @@ describe('[4532] approvals card inside the phone app', () => {
   it('outside the phone app, or a request this phone cannot answer → the read-only line, no button', async () => {
     await render([req()]);
     expect(buttons()).toEqual([]);
-    expect(container.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe('짝지은 폰에서 답할 수 있어요');
+    expect(container.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe('페어링된 폰에서 답할 수 있어요');
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     installShell();
@@ -230,9 +230,9 @@ describe('[4532] approvals card inside the phone app', () => {
 
   it.each([
     [{ ok: false, code: 'cancelled' }, '보내지 않았어요 — 요청은 그대로예요', ['허용', '거부']],
-    [{ ok: false, code: 'key_invalidated' }, '이 폰의 잠금 설정이 바뀌어 이 폰으로는 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요', ['다시 짝짓기']],
+    [{ ok: false, code: 'key_invalidated' }, '이 폰의 잠금 설정이 바뀌어 이 폰으로는 답할 수 없어요 — 이 폰을 컴퓨터와 다시 페어링해 주세요', ['다시 페어링']],
     // PO 07:47Z ①: the emulator's dead end — a key the server never knew was «보내지 못했어요 — 다시 눌러 주세요» forever
-    [{ ok: false, code: 'not_registered' }, '이 폰은 이제 등록되어 있지 않아 답할 수 없어요 — 이 폰을 컴퓨터와 다시 짝지어 주세요', ['다시 짝짓기']], // Yuna 07:58Z
+    [{ ok: false, code: 'not_registered' }, '이 폰은 이제 등록되어 있지 않아 답할 수 없어요 — 이 폰을 컴퓨터와 다시 페어링해 주세요', ['다시 페어링']], // Yuna 07:58Z
     // Kadir · PO 09:31Z ②: the shell's read had no session — sign in again; the request stays
     [{ ok: false, code: 'signed_out' }, '로그인이 풀려 보내지 못했어요 — 요청은 그대로예요. 다시 로그인한 뒤 눌러 주세요', ['다시 로그인']],
     [{ ok: false, code: 'biometric_required' }, '이 폰은 지문으로만 답할 수 있어요 — 폰 설정에서 지문을 등록한 뒤 다시 눌러 주세요', ['설정 열기']],
@@ -284,7 +284,7 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(buttons()).toEqual(['설정 열기']);
   });
 
-  it('[다시 짝짓기] goes to the pairing screen', async () => {
+  it('[다시 페어링] goes to the pairing screen', async () => {
     signAnswer = { ok: false, code: 'key_invalidated' };
     installShell();
     await render([req()]);
@@ -293,7 +293,7 @@ describe('[4532] approvals card inside the phone app', () => {
   });
 
   it.each([
-    [409, { error: { code: 'phone_not_paired' } }, '이 폰은 그 컴퓨터와 짝지어 있지 않아 보내지 못했어요 — 요청은 그대로예요. 짝지은 폰이나 그 컴퓨터의 터미널에서 답해 주세요'],
+    [409, { error: { code: 'phone_not_paired' } }, '이 폰은 그 컴퓨터와 페어링되어 있지 않아 보내지 못했어요 — 요청은 그대로예요. 페어링된 폰이나 그 컴퓨터의 터미널에서 답해 주세요'],
     [409, { error: { code: 'already_answered' }, detail: { answered_by_name: 'Jay', decision: 'deny' } }, 'Jay님이 거부함'],
     [409, { error: { code: 'already_answered' } }, '이미 다른 곳에서 답한 요청이에요'],
     [410, { error: { code: 'expired' } }, '시간이 지나 여기서는 답할 수 없어요 — 그 컴퓨터의 터미널에서 답해 주세요'],
@@ -577,7 +577,7 @@ describe('[4590] a question only that computer\'s terminal answers (Yuna 4590-te
     expect(container.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('권한 요청');
     expect(container.querySelector('[data-testid="agent-permission-waited"]')?.textContent).toBe('1분째 기다림');
     expect(line()).toBe('이 물음은 그 컴퓨터의 터미널에서만 답할 수 있어요');
-    expect(container.textContent).not.toContain('짝지은 폰');
+    expect(container.textContent).not.toContain('페어링된 폰');
     expect(container.querySelector('[data-testid="agent-permission-tool"]')?.textContent).toBe('Bash'); // read: named as ever
     expect(container.querySelector('[data-testid="agent-permission-tool-unread"]')).toBeNull();
   });
