@@ -56,3 +56,41 @@ def test_chat_message_payload_names_the_sender_org_once():
     payload = _msg_payload(msg, sender)
     assert payload["sender_org_id"] == str(ORG_A)
     assert payload["sender"]["id"] == str(SENDER)
+
+
+def test_backfill_frame_leads_with_the_stream_org_and_the_sender_org():
+    from app.routers.events import _backfill_frame_data
+
+    frame = _backfill_frame_data(_event(SENDER, {"sender_org_id": str(ORG_A), "gate_id": "g1"}), ORG_B)
+    assert list(frame)[:2] == ["stream_org_id", "sender_org_id"], "both fields lead the frame"
+    assert frame["stream_org_id"] == str(ORG_B), "the org that authenticated this stream"
+    assert frame["sender_org_id"] == str(ORG_A)
+    assert frame["gate_id"] == "g1", "the payload keys still lift to the top"
+
+
+def test_a_payload_or_frame_cannot_fake_the_stream_org():
+    from app.routers.events import _backfill_frame_data, _with_stream_org
+
+    frame = _backfill_frame_data(_event(SENDER, {"stream_org_id": str(ORG_A)}), ORG_B)
+    assert frame["stream_org_id"] == str(ORG_B), "the stream's org wins over a payload's own key"
+    live = _with_stream_org({"stream_org_id": str(ORG_A), "event_id": "e1", "content": "hi"}, ORG_B)
+    assert live["stream_org_id"] == str(ORG_B)
+    assert live["sender_org_id"] is None, "a live frame with no sender org says null, not nothing"
+    assert list(live)[:2] == ["stream_org_id", "sender_org_id"]
+
+
+def test_no_stream_org_is_null_not_missing():
+    from app.routers.events import _with_stream_org
+
+    frame = _with_stream_org({"event_id": "e2"}, None)
+    assert frame["stream_org_id"] is None and "stream_org_id" in frame
+
+
+def test_the_stream_stamps_its_own_org_on_both_live_and_backfill_frames():
+    import inspect
+
+    from app.routers import events as ev_module
+
+    source = inspect.getsource(ev_module.agent_event_stream)
+    assert "_with_stream_org(event_data, org_id)" in source, "the live frame carries the stream's org"
+    assert "_backfill_frame_data(evt, org_id) for evt in batch" in source, "the backfill frame carries it too"

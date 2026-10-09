@@ -343,7 +343,19 @@ def _event_to_payload(event: "Event") -> dict:
     }
 
 
-def _backfill_frame_data(event: "Event") -> dict:
+def _with_stream_org(frame: dict, stream_org_id: "uuid.UUID | str | None") -> dict:
+    """story 4649 — two fields lead every agent-stream frame: `stream_org_id` (the org that authenticated this stream — the
+    daemon has no org of its own to compare with) and `sender_org_id` (the sender's org, null when none). A value the frame or
+    its payload already carries under either name is replaced, never trusted."""
+    rest = {k: v for k, v in frame.items() if k not in ("stream_org_id", "sender_org_id")}
+    return {
+        "stream_org_id": str(stream_org_id) if stream_org_id is not None else None,
+        "sender_org_id": frame.get("sender_org_id"),
+        **rest,
+    }
+
+
+def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = None) -> dict:
     """story #4505 (Mirko live 00:51Z · PO 01:06Z) — a backfill frame in the shape of the live one. A live frame is the pushed
     dict, whose payload keys are top-level (`gate_id`, `status`, `conversation_id` …); a backfill frame was `_event_to_payload`,
     where they sit only under `payload` — so a handler reading the live shape (the approvals inbox `payload.gate_id`, the chat
@@ -353,7 +365,7 @@ def _backfill_frame_data(event: "Event") -> dict:
     dispatch (`dispatch_router`) and the agent gateway build their own frames and are unchanged."""
     data = _event_to_payload(event)
     flat = {k: v for k, v in (event.payload or {}).items() if k not in data}
-    return {**flat, **data}
+    return _with_stream_org({**flat, **data}, stream_org_id)
 
 
 # ─── SSE endpoint ─────────────────────────────────────────────────────────────
@@ -628,7 +640,7 @@ async def agent_event_stream(
                         yield _access_revoked_frame(_why)
                         return
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
-                    batch_data = [_backfill_frame_data(evt) for evt in batch]  # story #4505: the live frame's shape
+                    batch_data = [_backfill_frame_data(evt, org_id) for evt in batch]  # story #4505: the live frame's shape
                     # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
                     # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
@@ -728,7 +740,7 @@ async def agent_event_stream(
                         # 대체돼 나가므로 원본 dict에서 제거(클라에 내부 키 노출 방지).
                         _transient_id = event_data.pop("_sse_transient_id", None)
                         _live_id = eid or _transient_id or str(uuid.uuid4())
-                        _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
+                        _sse_data = json.dumps({**_with_stream_org(event_data, org_id), 'event_id': _live_id, 'is_backfill': False})
                         # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
                         if event_type == "conversation.message_created":
                             yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
