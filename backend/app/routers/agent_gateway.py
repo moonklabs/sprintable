@@ -31,7 +31,8 @@ from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import TeamMember
-from app.routers.events import _agent_connections, _event_to_payload
+from app.routers.events import _agent_connections, _event_to_payload, _uuid_text_or_none, _with_stream_org
+from app.services.member_resolver import lookup_members_by_ids
 from app.services.agent_onboarding_config import DEFAULT_RUNTIME
 
 logger = logging.getLogger(__name__)
@@ -435,6 +436,27 @@ def _row_to_payload(row: object) -> dict:
         "expects_response": (_payload or {}).get("expects_response"),
         "recipient_id": getattr(row, "recipient_id", None),
     }
+
+
+async def _sender_orgs_for_rows(db: AsyncSession, rows: list) -> dict[str, str | None]:
+    """story 4649 — the senders' orgs for one backfill batch of stream rows: ONE lookup for the whole batch (not per row).
+    Keys are sender ids as text; the value is the sender's own org as a UUID text, or None (orphan · sentinel · not a UUID)."""
+    ids = {uuid.UUID(str(r.sender_id)) for r in rows if r.sender_id is not None}
+    if not ids:
+        return {}
+    members = await lookup_members_by_ids(ids, db)
+    return {str(mid): _uuid_text_or_none(getattr(m, "org_id", None)) for mid, m in members.items()}
+
+
+async def _sender_org_of(sender_id: object) -> str | None:
+    """story 4649 — one sender's org for a frame of the direct push (its signal carries no org): the same lookup, that frame only."""
+    try:
+        sid = uuid.UUID(str(sender_id))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    async with async_session_factory() as db:
+        members = await lookup_members_by_ids({sid}, db)
+    return _uuid_text_or_none(getattr(members.get(sid), "org_id", None))
 
 
 # âââ backward compat: êµ¬ _push_to_agent í¸í ëí¼ ââââââââââââââââââââââââââââ
@@ -847,6 +869,7 @@ async def agent_stream(
                 while True:
                     async with async_session_factory() as db:
                         rows = await _fetch_events(db, agent_id, floor, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
+                        sender_orgs = await _sender_orgs_for_rows(db, rows) if rows else {}
                     if not rows:
                         return
                     _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
@@ -861,7 +884,11 @@ async def agent_stream(
                         floor = gseq
                         if gseq not in _sent_unacked:
                             _sent_unacked.add(gseq)
-                            data = _row_to_payload(row)
+                            # story 4649: the stream's org and the sender's org lead every frame (the daemon compares them)
+                            data = _with_stream_org(
+                                {**_row_to_payload(row), "sender_org_id": sender_orgs.get(str(row.sender_id)) if row.sender_id is not None else None},
+                                uuid.UUID(org_id_str),
+                            )
                             _sse = _frame_data({**data, "is_backfill": is_backfill})
                             # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
                             yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
@@ -959,7 +986,8 @@ async def agent_stream(
                             yield _access_revoked_frame(_revoked)
                             return
                         event_type = signal.get("event_type", "message")
-                        _sse = _frame_data({**signal, "is_backfill": False})
+                        # story 4649: the direct push's frame leads with the same two keys (one lookup for this sender)
+                        _sse = _frame_data({**_with_stream_org({**signal, "sender_org_id": await _sender_org_of(signal.get("sender_id"))}, uuid.UUID(org_id_str)), "is_backfill": False})
                         yield f"event: {event_type}\ndata: {_sse}\n\n"
                 finally:
                     for t in (get_task, shutdown_task):

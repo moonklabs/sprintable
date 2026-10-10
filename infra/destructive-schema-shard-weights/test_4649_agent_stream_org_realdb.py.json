@@ -1,0 +1,1 @@
+{"file": "tests/test_4649_agent_stream_org_realdb.py", "sec": 4.0, "source": "story #4649 (신규 파일) — 로컬 실 PG(realdb-env · 네이티브) 실측 wall 3.1s(4개 중 3 pass · 드리프트 가드 등록 전 실행). CI 실측 전 provisional — 첫 CI shard-durations 실측으로 교체. 파괴 가드 등록 근거: 이 파일이 _session_factory(create_all)로 스키마를 만든다."}
