@@ -194,3 +194,128 @@ async def test_backfill_batch_looks_up_its_senders_once(monkeypatch):
         await engine.dispose()
         from app.core import shutdown as _shutdown_module
         _shutdown_module.reset_shutdown_event()
+
+
+@pytest.mark.anyio
+async def test_live_direct_push_frame_overwrites_forged_org_keys_with_server_values(monkeypatch):
+    """the direct push (no recipient_seq — the legacy path) carries whatever its payload says: a forged stream_org_id and
+    sender_org_id must not reach the daemon — the stream's org is the authenticated one, the sender's is the server's."""
+    import app.routers.agent_gateway as ag
+
+    _patch_side_effects(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        ids = await _seed(Session)
+        monkeypatch.setattr(ag, "async_session_factory", lambda: Session())
+
+        resp = await _open_stream(ag, Session, ids["agent"], ids["org_a"])
+        agen = resp.body_iterator
+        try:
+            first = await agen.__anext__()
+            assert "event: heartbeat" in first
+            next_frame = asyncio.create_task(_next_event_frame(agen))
+            await asyncio.sleep(0.05)
+            forged = str(uuid.uuid4())
+            ag._push_to_agent_v2(str(ids["agent"]), {
+                "event_type": "message", "sender_id": str(ids["sender_b"]), "content": "live",
+                "stream_org_id": forged, "sender_org_id": forged,
+            })
+            frame = await asyncio.wait_for(next_frame, timeout=5.0)
+            _assert_leading_org_keys(frame, stream_org=ids["org_a"], sender_org=ids["org_b"])
+            assert frame["is_backfill"] is False
+        finally:
+            await agen.aclose()
+    finally:
+        ag._agent_connections.pop(str(ids["agent"]), None)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
+
+
+async def _seed_http_key(Session, agent_id: uuid.UUID) -> str:
+    """a real agent key: the raw `sk_live_…` string goes to the client, its hash is what the row keeps (as issuance does)."""
+    from app.core.security import hash_token
+    from app.models.api_key import ApiKey
+
+    raw = "sk_live_" + uuid.uuid4().hex
+    async with Session() as s:
+        s.add(ApiKey(id=uuid.uuid4(), team_member_id=agent_id, key_prefix=raw[:12], key_hash=hash_token(raw)))
+        await s.commit()
+    return raw
+
+
+async def _stream_over_http(raw_key: str, want) -> dict:
+    """GET /api/v2/agent/stream through the real ASGI app — routing, DI and the key's own check all run. The body never ends,
+    so the request is disconnected once the frame `want` accepts has come. Returns that frame's parsed JSON."""
+    from app.main import app
+
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET", "scheme": "http",
+        "path": "/api/v2/agent/stream", "raw_path": b"/api/v2/agent/stream", "query_string": b"", "root_path": "",
+        "headers": [(b"x-agent-api-key", raw_key.encode()), (b"accept", b"text/event-stream")],
+        "client": ("127.0.0.1", 50000), "server": ("test", 80),
+    }
+    sent: asyncio.Queue = asyncio.Queue()
+    requested = False
+    disconnect = asyncio.Event()
+
+    async def receive():
+        nonlocal requested
+        if not requested:
+            requested = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        await sent.put(message)
+
+    task = asyncio.create_task(app(scope, receive, send))
+    try:
+        start = await asyncio.wait_for(sent.get(), timeout=10.0)
+        assert start["type"] == "http.response.start"
+        assert start["status"] == 200, f"the stream route refused the key: {start}"
+        buf = b""
+        while True:
+            msg = await asyncio.wait_for(sent.get(), timeout=10.0)
+            buf += msg.get("body", b"")
+            while b"\n\n" in buf:
+                block, buf = buf.split(b"\n\n", 1)
+                text_block = block.decode("utf-8")
+                if text_block.startswith("event: heartbeat") or not text_block.strip():
+                    continue
+                data_line = next(line for line in text_block.splitlines() if line.startswith("data: "))
+                frame = json.loads(data_line[len("data: "):])
+                if want(frame):
+                    return frame
+    finally:
+        disconnect.set()
+        try:
+            await asyncio.wait_for(task, timeout=10.0)
+        except asyncio.TimeoutError:
+            task.cancel()
+
+
+@pytest.mark.anyio
+async def test_http_agent_stream_route_frame_names_both_orgs_with_a_forged_payload(monkeypatch):
+    """the daemon's own door: GET /api/v2/agent/stream with the agent's key header, through the real app — the backfill frame
+    of a cross-org sender whose payload forges both keys comes out with the server's values, leading the frame."""
+    import app.routers.agent_gateway as ag
+
+    _patch_side_effects(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        ids = await _seed(Session)
+        forged = str(uuid.uuid4())
+        await _dispatch(Session, ids, sender_id=ids["sender_b"],
+                        payload={"content": "hi", "stream_org_id": forged, "sender_org_id": forged})
+        raw_key = await _seed_http_key(Session, ids["agent"])
+
+        frame = await _stream_over_http(raw_key, want=lambda f: f.get("event_type") == "dispatched")
+        _assert_leading_org_keys(frame, stream_org=ids["org_a"], sender_org=ids["org_b"])
+        assert frame["is_backfill"] is True
+    finally:
+        ag._agent_connections.pop(str(ids["agent"]), None)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
