@@ -1143,9 +1143,13 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
 
     if not await is_org_owner_or_admin(db, user_id, org_id):
         raise DesktopSetupError("not_org_admin")
+    # story 4660 — a line the same machine's new setup replaced is the same computer, not another one: it is left out here.
+    # A line a person disconnected (reason null) stays, as before.
     rows = (await db.execute(
-        select(DesktopSetup).where(DesktopSetup.org_id == org_id, DesktopSetup.confirmed_at.isnot(None))
-        .order_by(DesktopSetup.confirmed_at.desc()).limit(200)
+        select(DesktopSetup).where(
+            DesktopSetup.org_id == org_id, DesktopSetup.confirmed_at.isnot(None),
+            DesktopSetup.revoked_reason.is_distinct_from("replaced_by_new_setup"),
+        ).order_by(DesktopSetup.confirmed_at.desc()).limit(200)
     )).scalars().all()
     # story 4660 — newest heard-from time per setup (over its tokens; a setup never heard from has none)
     from app.models.desktop_relay import DesktopDeviceToken
