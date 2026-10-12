@@ -58,7 +58,9 @@ async function build() {
       resolveDir: WEB, loader: 'tsx',
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
-    tsconfig: path.join(WEB, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' },
+    tsconfig: path.join(WEB, 'tsconfig.json'),
+    // story #4654: the store target reads the public app address at load — the build inlines it as Next does (production = app.sprintable.ai)
+    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://app.sprintable.ai"' },
     plugins: [layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
