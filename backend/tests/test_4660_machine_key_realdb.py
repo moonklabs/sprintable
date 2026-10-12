@@ -133,18 +133,20 @@ async def test_an_app_that_sends_no_device_id_gets_the_old_behaviour(world, secr
         assert second_key is None
 
 
-async def test_the_list_reports_the_replaced_reason_and_the_last_heard_time(world, secret):
+async def test_the_list_leaves_out_the_replaced_line_and_the_row_keeps_its_reason(world, secret):
+    # PO 2026-10-13: the same computer's replaced line is not shown (its own test is in test_4660_hide_replaced_realdb.py);
+    # the row itself keeps the reason and the closed time
     async with _client() as c:
         first = await _device(c, "d4660 list first", SAME_MACHINE)
         assert (await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 1, "sessions": []}, headers=_tok(first["device_token"]))).status_code == 200
-        await _device(c, "d4660 list second", SAME_MACHINE)
+        second = await _device(c, "d4660 list second", SAME_MACHINE)
 
         r = await c.get("/api/v2/desktop/setups", headers=_person(OWNER, ORG))
         assert r.status_code == 200, r.text
-        item = next(s for s in r.json()["setups"] if s["setup_id"] == first["setup_id"])
-        assert item["state"] == "disconnected"
-        assert item["revoked_reason"] == "replaced_by_new_setup"
-        assert item["last_used_at"] is not None
+        ids = [s["setup_id"] for s in r.json()["setups"]]
+        assert first["setup_id"] not in ids and second["setup_id"] in ids
+        row = (await _sql(fetch=f"SELECT revoked_reason, revoked_at IS NOT NULL FROM desktop_setups WHERE id = '{first['setup_id']}'"))[0]
+        assert row[0] == "replaced_by_new_setup" and row[1] is True
 
 
 # --- the gaps the design named (4660 design §7 · §9 ② ④): another org, the log, the setup request ---
