@@ -20,8 +20,8 @@ export function PhoneAppCard({ elsewhere: forced }: { elsewhere?: boolean }) {
   if (elsewhere !== true || phoneAppStoreLinks(PHONE_APP_PUBLISHED).length === 0) return null;
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="phone-app-card">
+      <PhoneAppGet body={t('needPhoneAppBody')} />
       <p className="text-xs text-muted-foreground">{t('macAppAux')}</p>
-      <PhoneAppGet />
     </Card>
   );
 }
