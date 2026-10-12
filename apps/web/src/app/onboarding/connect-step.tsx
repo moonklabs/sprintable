@@ -295,25 +295,6 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
     handleDashboard();
   };
 
-  const [desktopKeyCopied, setDesktopKeyCopied] = useState(false);
-  // story #3986 — 실패 시 마스킹판(maskApiKey) 대신 실 키를 선택 가능하게
-  // 보여야 「직접 선택」 지시가 실행 가능하다(유나 2026-09-17 02:47Z).
-  const [desktopKeyCopyFailed, setDesktopKeyCopyFailed] = useState(false);
-  const handleCopyKeyForDesktop = async () => {
-    if (!apiKey) return;
-    const result = await copyTextSafely(apiKey);
-    if (!result.ok) {
-      setDesktopKeyCopyFailed(true);
-      return;
-    }
-    setDesktopKeyCopyFailed(false);
-    setDesktopKeyCopied(true);
-    setTimeout(() => setDesktopKeyCopied(false), 2000);
-    // story #3983 CHANGES r2(페드루 PO 2026-09-17 02:23Z) — config_copied는
-    // 웹 경로 이벤트(verify rail 첫 상태)라 재사용하면 퍼널이 섞인다 — 별도 이름.
-    emitOnboardingEvent('desktop_key_copied', { agent_id: agentId, flow: 'onboarding' });
-  };
-
   // story #3201(activation·절벽 처방) — 1차 깔때기 "연결까지 온 사람 중 첫 왕복 0%" 절벽.
   // PO 확定(2026-08-29): verified 무관 상시 노출(미연결인 채 눌러도 새 DM에서 #3194 침묵
   // 배너가 다음 행동을 안내하는 자기정합 구조). 생성 실패 시 onFinish()로 폴백(제3경로
@@ -378,44 +359,11 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         {/* story #4656: the org's remote control, once, for its owner — before the desktop steps that need it (no flash: it draws only when read) */}
         <OnboardingRemoteControl orgId={orgId} />
         <DesktopDownloadCard />
-        {/* CHANGES ①: 데스크톱 앱은 이 화면 밖이라 키를 붙여 넣을 곳이 없다 —
-            웹 경로 쪽(재시작 안내 옆)에 있던 핸드오프 문구+복사 칸을 여기로
-            옮긴다(그쪽엔 데스크톱에 줄 키가 필요 없다 — 그 자리와 안 부딪힘). */}
-        <div className="rounded-md border border-border bg-muted/40 p-3">
-          <p className="text-xs text-muted-foreground" data-testid="connect-step-desktop-key-handoff">
-            {t('desktopKeyHandoffTitle')} — {t('desktopKeyHandoffCanonicalNote')}
-          </p>
-          <div className="mt-2 flex items-center justify-between gap-2 rounded border border-border bg-background px-2.5 py-1.5">
-            {/* story #3986 — 실패했을 때만 마스킹판 대신 실 키를 선택 가능한
-                input으로 보인다(유나 지시 — 실패 문구가 이미 "직접 선택" 지시). */}
-            {desktopKeyCopyFailed ? (
-              <input
-                readOnly
-                value={apiKey}
-                onFocus={(e) => e.currentTarget.select()}
-                className="min-w-0 flex-1 truncate bg-transparent font-mono text-base lg:text-xs text-foreground"
-                data-testid="connect-step-desktop-key-raw"
-              />
-            ) : (
-              <code className="truncate font-mono text-xs text-foreground">{maskApiKey(apiKey)}</code>
-            )}
-            <Button
-              variant="outline" size="sm"
-              onClick={() => void handleCopyKeyForDesktop()}
-              className="shrink-0"
-              data-testid="connect-step-desktop-key-copy"
-            >
-              {desktopKeyCopied ? (
-                <><Check className="h-3.5 w-3.5" />{t('copied')}</>
-              ) : (
-                <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>
-              )}
-            </Button>
-          </div>
-          {desktopKeyCopyFailed ? (
-            <p role="alert" className="mt-1.5 text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
-          ) : null}
-        </div>
+        {/* 키 붙여 넣기 입구는 데스크톱 앱에 없다(카드 4542 · 까디르 확인). 앱은 첫 실행 때 웹 setup 페이지를 열어 연결을 가져간다 —
+            그래서 키 칸 대신 그 흐름을 한 줄로 안내한다. */}
+        <p className="text-xs text-muted-foreground" data-testid="connect-step-desktop-open-note">
+          {t('desktopOpenAppNote')}
+        </p>
         {/* CHANGES ②: 낱말 = 착지와 같이(ON이면 「오늘」 낱말·OFF면 현행
             dashboardCta). variant도 outline(이 절의 주 행동은 내려받기 —
             hero는 화면에 하나만, 웹 경로 「첫 지시 보내기」가 그 자리). */}
