@@ -1198,6 +1198,15 @@ def _agents_ended(setup: DesktopSetup, rows) -> list[dict]:
     return out
 
 
+async def is_setup_agent(db: AsyncSession, setup_id: uuid.UUID, member_id: object) -> bool:
+    """story #4658 — the member is one of this setup's own agents (its members list). Another organization's agent, or an agent of
+    this organization that is not in the setup, is not — the sign-in steps are refused for it at the entrance."""
+    setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id))).scalar_one_or_none()
+    if setup is None:
+        return False
+    return any(m.get("kind") == "agent" and str(m.get("member_id") or "") == str(member_id) for m in (setup.members or []))
+
+
 def _agents_sign_in(setup: DesktopSetup, rows) -> list[dict]:
     """story #4658 (PO 17072 (a)) — per agent of this setup that asks for a sign-in now: its last ask (the runtime when it is claude
     or codex, else None). A later «signed in» for that agent clears it. Only this setup's agents; the order is the setup's."""

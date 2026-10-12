@@ -95,8 +95,10 @@ GOOD = [
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("event,meta", GOOD)
-async def test_the_shapes_the_app_sends_are_stored(event, meta):
+async def test_the_shapes_the_app_sends_are_stored(event, meta, monkeypatch):
     db = _db()
+    # story #4658: the sign-in steps are refused unless the member is this setup's agent — the shape is what this test is about
+    monkeypatch.setattr("app.services.desktop_setup.is_setup_agent", AsyncMock(return_value=True))
     await post_onboarding_event(OnboardingEventBody(event=event, session_id=uuid.uuid4(), meta=meta), db=db, credentials=None, x_agent_api_key=None)
     assert db.add.called
 

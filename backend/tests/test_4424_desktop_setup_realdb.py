@@ -752,7 +752,7 @@ async def test_the_setup_status_reads_its_signals_and_the_mcp_manifest_marks_too
         assert status["signals"] == {
             "tools_connected": [], "first_task_handed_at": None, "first_result_at": None, "first_result_member_id": None,
             "first_screen_human_input_at": None,
-            "workdir_fallback_at": None, "blocked": None, "agents_ended": [], "agents_start_failed": [],
+            "workdir_fallback_at": None, "blocked": None, "agents_ended": [], "agents_start_failed": [], "agents_sign_in": [],
         }
 
         # the MCP server fetches the manifest at tools/list with the agent's key: marked once for that member (a second
