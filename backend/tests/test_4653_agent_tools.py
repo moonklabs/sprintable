@@ -21,3 +21,19 @@ def test_not_a_list_gives_nothing():
 def test_the_list_is_capped():
     raw = [f"tool{i:02d}" for i in range(AGENT_TOOLS_CAP + 5)]
     assert len(clean_agent_tools(raw)) == AGENT_TOOLS_CAP
+
+
+from app.services.desktop_setup import RoleChoice, bind_setup_roles  # noqa: E402
+
+
+def test_the_binder_keeps_each_agent_roles_cleaned_tools():
+    rows = [{"role": "pm", "kind": "agent", "stages": ["s1"]}, {"role": "dev", "kind": "agent", "stages": ["s2"]}]
+    roles = [RoleChoice(role="pm", runtime="claude", tools=["gcloud", "AWS", "gh"]), RoleChoice(role="dev", runtime="codex")]
+    binding = bind_setup_roles(rows, roles)
+    assert binding.agent_tools == {"pm": ["gcloud", "gh"]}  # a role sent no tools has no entry (the member gets [])
+
+
+def test_a_role_sent_with_an_empty_list_keeps_nothing():
+    rows = [{"role": "pm", "kind": "agent", "stages": ["s1"]}]
+    binding = bind_setup_roles(rows, [RoleChoice(role="pm", runtime="claude", tools=[])])
+    assert binding.agent_tools == {"pm": []}

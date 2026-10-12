@@ -138,6 +138,8 @@ class RoleIn(BaseModel):
     owner: str | None = Field(default=None, max_length=32)
     # story #4565: `{role, agent_id}` — an agent the organization already has, attached to this computer for the role
     agent_id: str | None = Field(default=None, max_length=64)
+    # story 4653 (PO 14015): the CLI names this agent uses (cleaned server-side · at most 8 kept · a list only)
+    tools: list[str] | None = Field(default=None, max_length=32)
 
 
 # Qadir 4825 (PO 09:45Z) — the setup code travels in bodies only, never in a URL: a path is written to the access log and the
@@ -205,7 +207,7 @@ async def post_confirm(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     user_id = _human_only(auth)
-    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id) for r in body.roles]
+    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id, tools=r.tools) for r in body.roles]
     made_project: uuid.UUID | None = None
     try:
         if body.project_id is None and not body.project_name:
@@ -302,7 +304,7 @@ async def post_confirm_new_org(
     try:
         setup_id, members, work_item_id, org_id, project_id = await confirm_setup_new_org(
             db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, recipe_id=body.recipe_id,
-            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id, tools=r.tools) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
             background_tasks=background_tasks,
         )
     except DesktopSetupError as e:
