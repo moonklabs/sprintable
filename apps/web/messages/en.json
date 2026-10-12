@@ -5113,6 +5113,7 @@
       "since": "started {time}",
       "why": "Agents sent each other too many messages in a short time. Messages from people still go through.",
       "untilAdmin": "They stay paused until an admin resumes them.",
+      "noReleaseAdmin": "No admin can resume this right now — the organization owner needs to give an admin permission again.",
       "askAdmin": "They stay paused until an admin resumes them — ask an organization admin.",
       "auto": "Once the conversation has been quiet for about {n, plural, one {# minute} other {# minutes}}, agents can send again.",
       "resume": "Resume agent messages",

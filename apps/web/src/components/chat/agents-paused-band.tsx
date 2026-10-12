@@ -19,6 +19,7 @@ export interface AgentsPausedState {
   release_mode: string;
   can_release: boolean;
   auto_release_after_minutes?: number | null;
+  no_release_admin?: boolean;
 }
 
 const REASON_MAX = 200;
@@ -106,7 +107,7 @@ export function AgentsPausedBand({ conversationId, state, onResumed }: {
         </p>
         <p className="text-sm text-foreground">{t('why')}</p>
         <p className="text-sm text-foreground" data-testid="agents-paused-release">
-          {auto ? t('auto', { n: state.auto_release_after_minutes as number }) : state.can_release ? t('untilAdmin') : t('askAdmin')}
+          {auto ? t('auto', { n: state.auto_release_after_minutes as number }) : state.can_release ? t('untilAdmin') : state.no_release_admin ? t('noReleaseAdmin') : t('askAdmin')}
         </p>
         {state.can_release && phase === 'band' ? (
           <div>
