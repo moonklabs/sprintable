@@ -58,6 +58,8 @@ jobs:
       # tests read · infra/destructive-fe-deps.txt) — for a PR (base...head) and for a push (before..after) alike
       destructive_relevant: ${{ steps.scope.outputs.destructive_relevant }}
       gateway_relevant: ${{ steps.scope.outputs.gateway_relevant }}
+      # [SID:4659 · PO 06:57Z] apps/web/ 밖 변경만이면 false — contrast-guard-e2e(웹 시각 e2e)가 그때 건너뛴다.
+      web_changed: ${{ steps.web.outputs.web_changed }}
       # story #4152(CI·결정성) — backend/tests/*.py 변경분만 공백 구분 단일 줄로(테스트
       # 파일 경로는 `_FILE_RE`(shard_destructive_tests.py)가 이미 `tests/[a-zA-Z0-9_]+\.py`
       # 로 좁혀 두므로 공백·쉼표 등 특수문자가 절대 안 낀다 — 멀티라인 GITHUB_OUTPUT
@@ -185,6 +187,31 @@ jobs:
           else
             echo "gateway_relevant=false" >> "$GITHUB_OUTPUT"
             echo "support-gateway/ 밖 변경만 있음 — gateway pytest skip 대상."
+          fi
+
+      # [SID:4659 · PO 06:57Z] 웹 축 판정 — apps/web/ 이 바뀌었는지. PR은 base..head(세 점 diff), push는 before..after.
+      # 비교 기준을 못 찾으면 true(웹 e2e 실행 — 안전측).
+      - name: Determine web-UI change (apps/web/ touched?)
+        id: web
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA}" ] && [ -n "${HEAD_SHA}" ]; then A="${BASE_SHA}"; B="${HEAD_SHA}"; else A="${PUSH_BEFORE_SHA}"; B="${PUSH_AFTER_SHA}"; fi
+          if [ -z "${A}" ] || printf '%s' "${A}" | grep -qE '^0+$' || ! git cat-file -e "${A}^{commit}" 2>/dev/null; then
+            echo "web_changed=true" >> "$GITHUB_OUTPUT"
+            echo "비교 기준 없음 — 웹 e2e 실행(fail-closed)."
+            exit 0
+          fi
+          if git diff --name-only "${A}...${B}" | grep -q '^apps/web/'; then
+            echo "web_changed=true" >> "$GITHUB_OUTPUT"
+            echo "apps/web/ 변경 있음 — 웹 e2e 실행."
+          else
+            echo "web_changed=false" >> "$GITHUB_OUTPUT"
+            echo "apps/web/ 밖 변경만 — 웹 e2e skip."
           fi
 
   alembic-fresh-db:
@@ -432,18 +459,18 @@ jobs:
           test -n "$cur"
           diff <(echo "$cur") <(echo "$heads")
 
-  # story #2401(결함·CI) — #2397(PR #2777·#2781)이 develop 기준 같은 `0221`을 각자 새
-  # 리비전으로 만들었는데도 위 #2330 게이트를 둘 다 통과했다: 그 게이트는 자기 브랜치의
-  # alembic.ini만 보고, 형제 PR을 전혀 참조하지 않기 때문이다(dual-head는 머지 «후»에야
-  # 드러났다). 이 잡은 그 시야를 메운다 — 자세한 검사 축·시간 축 한계 선언은
-  # `ci_alembic_sibling_pr_collision_check.py` docstring 참고.
-  alembic-sibling-pr-collision-check:
-    name: Alembic sibling-PR revision collision (guard, story #2401)
+  # [SID:4659 · PO 06:57Z] 가드 24개를 한 잡으로 묶었다(잡 기동 24번 → 1번). 각 가드는 아래 스텝으로 그대로 옮겼고(검사 내용 불변)
+  #   스텝 앞 주석 `# ── <옛 잡 id> ──`이 출처를 가리킨다. 필수 이름 bind parameter cast lint는 이 잡 안 스텝이 된다 — 보호 규칙 교체는 병합 순간 PO가 함께.
+  guards:
+    name: Guards (static scans — backend · web contract · cloudbuild · alembic files)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: github.event_name == 'pull_request'
+    timeout-minutes: 20
     permissions:
-      pull-requests: read
+      contents: read
+      pull-requests: read   # alembic-sibling-pr-collision (옛 job-level 권한)
+    env:
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -456,9 +483,14 @@ jobs:
       # 실 CI에서 재현, 바쁜 밤처럼 develop이 자주 움직일 때만 터지는 타이밍 의존 버그).
       # checkout이 이미 전체 히스토리를 갖고 있으므로 이 fetch는 "최신 tip 반영"만이
       # 목적 — depth 제한 없이 다시 받는다(얕은 경계를 새로 심지 않음).
+
+      # ── alembic-sibling-pr-collision-check ──
       - name: Fetch base branch (current tip, not PR-open-time)
+        if: github.event_name == 'pull_request'
         run: git fetch origin "${{ github.event.pull_request.base.ref }}"
+      # ── alembic-sibling-pr-collision-check ──
       - name: Check alembic revision collisions against base + sibling open PRs
+        if: github.event_name == 'pull_request'
         working-directory: backend
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -475,13 +507,7 @@ jobs:
   # 아니다(docs/pk-triage-orm-unmodeled.md, story a74bdc84 — 별도 SaaS 제품이 같은 물리
   # DB를 라이브로 쓰는 중). OSS 정본은 org_subscriptions뿐 — 이 lint는 「참조 0」을 계수
   # 가능하게 유지한다(새 코드가 legacy 테이블을 다시 끌어오면 즉시 빨강).
-  legacy-subscriptions-reuse-lint:
-    name: legacy subscriptions reuse lint (guard, story #2476)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── legacy-subscriptions-reuse-lint ──
       - name: Scan backend/app for legacy subscriptions table reuse
         working-directory: backend
         run: python3 scripts/lint_legacy_subscriptions_reuse.py
@@ -491,26 +517,14 @@ jobs:
   # .date())을 막는다. 3665(#4020)가 UTC 고정으로 한 클래스(환경마다 다른 오늘)를
   # 닫았지만, 그 UTC 고정 자체가 "조직의 오늘"(org.timezone)을 무시하는 다음 결함
   # 클래스였다 — org_time.py 헬퍼(org_today 등)로만 계산하도록 강제한다.
-  org-today-direct-call-lint:
-    name: org today direct call lint (guard, story #3674)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── org-today-direct-call-lint ──
       - name: Scan backend/app for org-tz-unaware "today" calls
         working-directory: backend
         run: python3 scripts/lint_org_today_direct_call.py
 
   # story #4407 AC5 — `:name::type` in SQL text. SQLAlchemy's text() does not bind a `:name` directly followed by `::`, so the
   # statement fails on every call (account/delete until #4400; seed_builtin_personas). Write CAST(:name AS type).
-  bind-param-cast-lint:
-    name: bind parameter cast lint (guard, story #4407)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── bind-param-cast-lint ──
       - name: Scan backend app/ ee/ alembic/ for ':name::type'
         working-directory: backend
         run: python3 scripts/lint_no_bind_param_cast.py
@@ -521,24 +535,12 @@ jobs:
   # 등재 도중 이 가드로 5개가 «독립적으로 또» 새 있던 것도 같이 적발돼 함께 정리됨). 정적
   # AST 스캔뿐(런타임 import 0회) — 정상 경로 오버헤드 없음. story #2662의 실패-시점 진단
   # 가드와 보완 관계(겹치지 않음, 각 스크립트 docstring 참고).
-  model-registration-completeness-lint:
-    name: model registration completeness lint (guard, story #2255)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── model-registration-completeness-lint ──
       - name: Scan app/models for unregistered __tablename__ models
         working-directory: backend
         run: python3 scripts/lint_model_registration_completeness.py
 
-  alembic-no-autocommit-block:
-    name: Alembic migrations — no autocommit_block() (guard)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── alembic-no-autocommit-block ──
       - name: grep for autocommit_block() calls in migration files
         run: |
           # 실제 호출(`op.get_context().autocommit_block()`)만 잡는다 — docstring 산문에서
@@ -562,15 +564,7 @@ jobs:
   # grandfather 베이스라인(scripts/query_sentinel_baseline.txt): lint 도입 시점 develop에
   # 이미 있던 위반은 실패시키지 않는다(41건 개별 수리는 이 판이 아니라는 AC6 판정 그대로) —
   # 베이스라인에 없는 **새** 위반만 여기서 빨개진다.
-  query-sentinel-direct-call-lint:
-    name: Query(None) sentinel direct-call lint (guard)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # ── query-sentinel-direct-call-lint ──
       - name: Scan for Query(...) params missing at router direct-call sites
         working-directory: backend
         run: python3 scripts/lint_query_sentinel_direct_calls.py
@@ -578,6 +572,7 @@ jobs:
       # 여기 한 줄 더 넣고 넘어가도 된다"가 아니다 — 그러면 이 가드를 우회하는 «합법적인 문»이
       # 된다. 베이스라인 파일은 «줄기만» 허용한다: base 브랜치(보통 develop) 대비 새로 추가된
       # 줄이 있으면 실패시킨다(제거는 자유 — 사이트를 고쳐서 줄어드는 것은 언제나 환영).
+      # ── query-sentinel-direct-call-lint ──
       - name: "Verify baseline can only shrink (story #2335 — no new grandfather entries)"
         working-directory: backend
         run: |
@@ -640,15 +635,7 @@ jobs:
   # 늘지 않게 얼린다. grandfather 베이스라인(scripts/korean_user_strings_baseline.txt):
   # 이 lint 도입 시점 develop에 이미 있던 1308건은 실패시키지 않는다 — 베이스라인에 없는
   # **새** 한글 문자열만 여기서 빨개진다(story #2335 query-sentinel과 동일 계약).
-  be-korean-user-strings-lint:
-    name: BE 한글 사용자 문장 재발 가드 (guard, story #3779)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # ── be-korean-user-strings-lint ──
       - name: Scan app/ for new hardcoded Korean user-facing strings
         working-directory: backend
         run: python3 scripts/verify_no_new_korean_user_strings.py
@@ -656,6 +643,7 @@ jobs:
       # 집합 diff(구현, comm -13)는 기존 항목의 "문구만 바뀐" rename을 신규 추가로
       # 오판했다(실 사고, PR#4316) — 판정 자체를 verify_no_new_korean_user_strings.py의
       # --check-growth(파일 단위+전역 비증가)로 옮겨 로컬 스캐너와 같은 코드로 판정한다.
+      # ── be-korean-user-strings-lint ──
       - name: "Verify baseline can only shrink (story #3779/#3924/#4113 — no new grandfather entries, rename-aware, merge-base compared)"
         working-directory: backend
         run: |
@@ -724,24 +712,17 @@ jobs:
       # 대상, 새 위반은 즉시 RED). 기존 잡("BE 한글 사용자 문장 재발 가드")에 스텝만
       # 추가한다(새 job 신설 금지, AC5 明示 — 1층·2층이 서로 다른 잡이면 병렬 스케줄링에
       # 따라 "1층은 초록인데 2층 결과가 아직 안 보인다" 류 착시가 생길 수 있다).
+      # ── be-korean-user-strings-lint ──
       - name: "Verify user-facing tone (story #3931 2층 — 4 surfaces, no baseline)"
         working-directory: backend
         run: python3 scripts/verify_user_facing_tone.py
-
-  project-access-403-lint:
-    name: has_project_access 403 lint (guard, story #2342)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # ── project-access-403-lint ──
       - name: Scan for has_project_access denial raising 403 (should be 404)
         working-directory: backend
         run: python3 scripts/lint_project_access_403.py
       # story #2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다(2026-07-30 발견: #2342
       # 스코프 밖에 22곳이 더 있어 지금 당장 못 고친다 — 새로 늘리는 것만 막는다).
+      # ── project-access-403-lint ──
       - name: "Verify baseline can only shrink (story #2342 — no new grandfather entries)"
         working-directory: backend
         run: |
@@ -778,16 +759,7 @@ jobs:
           else
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 project_access_403_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2342 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
-
-  dependency-override-get-read-db-lint:
-    name: dependency_overrides get_read_db lint (guard, story #2451)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # ── dependency-override-get-read-db-lint ──
       - name: Scan for raw dependency_overrides[get_db] (must use override_db_and_read)
         working-directory: backend
         run: python3 scripts/lint_dependency_override_get_read_db.py
@@ -795,6 +767,7 @@ jobs:
       # tests/ 전역에 이미 253곳 — 대부분 read-route 무관이라 당장 안 고친다. 새로 늘리는
       # 것만 막는다. 카디르 QA 3차 재발: 이 게이트가 없으면 다음 슬라이스(Phase B 등)에서
       # 네 번째로 같은 클래스가 샌다).
+      # ── dependency-override-get-read-db-lint ──
       - name: "Verify baseline can only shrink (story #2451 — no new grandfather entries)"
         working-directory: backend
         run: |
@@ -831,14 +804,7 @@ jobs:
           else
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 dependency_override_get_read_db_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2451 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
-
-  candidate-source-ownership-lint:
-    name: candidate_id source_id ownership lint (guard, story #2363)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── candidate-source-ownership-lint ──
       - name: Scan reference_semantic_candidates.py for candidate_id lookups missing source_id ownership check
         working-directory: backend
         run: python3 scripts/lint_candidate_source_ownership.py
@@ -846,13 +812,7 @@ jobs:
   # story #2459 회귀(2026-08-05, PR #2851/#2461) — commit() 後 model_validate() 前 refresh
   # 누락 클래스를 원천봉쇄. 스크립트 docstring(scripts/lint_commit_before_validate.py) 참조 —
   # baseline 없음(도입 시점 위반 0건, app/routers·app/services·ee 전 스윕 후 확認).
-  commit-before-validate-lint:
-    name: commit-then-model_validate refresh lint (guard, story #2459)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── commit-before-validate-lint ──
       - name: Scan for model_validate() after commit() without intervening refresh
         working-directory: backend
         run: python3 scripts/lint_commit_before_validate.py
@@ -862,13 +822,7 @@ jobs:
   # 흘러드는 클래스를 원천봉쇄. 스크립트 docstring(scripts/lint_raw_auth_id_into_member_field.py)
   # 참조 — baseline 없음(도입 시점 사후감사로 발견된 14건 전부 정정 또는 인라인
   # `# member-id-lint: user-id-field` 예외 처리 완료, app/routers·app/services·ee 전 스윕 후 확認).
-  raw-auth-id-into-member-field-lint:
-    name: raw auth.user_id → member-id kwarg lint (guard, story #3370)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── raw-auth-id-into-member-field-lint ──
       - name: Scan for raw auth.user_id flowing into *_member_id/resolver_id/actor_id kwargs
         working-directory: backend
         run: python3 scripts/lint_raw_auth_id_into_member_field.py
@@ -878,13 +832,7 @@ jobs:
   # DROP SCHEMA·DROP TABLE·TRUNCATE)을 커밋 시점에 잡는다. 스크립트 docstring(scripts/
   # lint_destructive_test_sql.py) 참조 — baseline 없음(도입 시점 위반 0건, destructive_schema
   # 마커 파일은 story #2293 격리 shard에서 돌아 스캔 대상에서 제외).
-  destructive-test-sql-lint:
-    name: destructive test SQL lint (guard, story #2786)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── destructive-test-sql-lint ──
       - name: Scan tests/ for shared-DB-destroying SQL literals (bare DELETE/DROP/TRUNCATE)
         working-directory: backend
         run: python3 scripts/lint_destructive_test_sql.py
@@ -893,6 +841,7 @@ jobs:
       # 위 코멘트가 짚은 것과 동형 결함) 도는 자리가 없었다. 둘 다 Postgres/uv 불요·순수
       # bash 자기완결 스모크라 이 job(같은 성격의 정적 스캔)에 얹는다 — DB 필요한
       # backend-test-destructive 본체와 분리해 매 PR에 값싸게 상시 돈다.
+      # ── destructive-test-sql-lint ──
       - name: Self-test stall-detection wrapper + loop errexit-survival (story #3944)
         run: |
           bash scripts/run-with-stall-detection.test.sh
@@ -905,24 +854,17 @@ jobs:
   # +load_weights+unweighted_files_in을 shard_destructive_tests.py에서 그대로 재사용,
   # 신규 로직 발명 0). Postgres 불요(--collect-only는 DB 연결 없음, 스크립트 docstring
   # 실측 확認) — uv 설치+더미 JWT_SECRET/SECRET_KEY만으로 끝난다.
-  destructive-schema-weights-registered-lint:
-    name: destructive schema weights registered (guard, story 23bf1913)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      JWT_SECRET: ci-test-secret-at-least-32-chars-long
-      SECRET_KEY: ci-test-secret-at-least-32-chars-long
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── destructive-schema-weights-registered-lint ──
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           version: 'latest'
+      # ── destructive-schema-weights-registered-lint ──
       - name: Check every destructive_schema test file is registered in shard-weights.json
         working-directory: backend
         run: python3 scripts/lint_destructive_schema_weights_registered.py
       # story 4566: the FE files destructive tests read are exactly infra/destructive-fe-deps.txt (the shards' FE-only relevance)
+      # ── destructive-schema-weights-registered-lint ──
       - name: Check the FE paths destructive tests read are exactly infra/destructive-fe-deps.txt
         working-directory: backend
         run: python3 scripts/lint_destructive_fe_deps_listed.py
@@ -936,24 +878,11 @@ jobs:
   # 없음 — PO 판정: "썩는 목록"). non-destructive 파일은 이 가드 대상이 아니다(story #3330의
   # conftest.py 전역 autouse가 이미 구조적으로 커버 — test_a05da51b_dispose_fixture_
   # guards.py가 그 메커니즘 자체의 회귀가드).
-  destructive-publish-path-dispose-fixture-lint:
-    name: destructive publish-path dispose fixture lint (guard, story a05da51b)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── destructive-publish-path-dispose-fixture-lint ──
       - name: Scan tests/ for destructive files that publish without the global-engine dispose fixture
         working-directory: backend
         run: python3 scripts/lint_destructive_publish_path_dispose_fixture.py
-
-  no-script-output-artifacts-lint:
-    name: no script output artifacts lint (guard, story #3008)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── no-script-output-artifacts-lint ──
       - name: Scan backend/scripts/ for committed ad-hoc diagnostic output (prod IP/PII residue — fk_null_survey_result.json class)
         working-directory: backend
         run: python3 scripts/lint_no_script_output_artifacts.py
@@ -968,17 +897,13 @@ jobs:
   # 검산부의 소문자 셸 변수(served/expected/names)를 거짓 양성으로 baseline에 올렸었다.
   # 실 dev 배포 로그로 소문자는 Cloud Build 치환 문법과 무관함을 확認 — 대문자만 스캔하도록
   # 정정하고 baseline은 제거(정정된 판정으로는 실 위반 0건).
-  cloudbuild-shell-var-escaping-lint:
-    name: cloudbuild.yaml shell var escaping lint (guard, story #4012)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── cloudbuild-shell-var-escaping-lint ──
       - name: Install PyYAML
         run: pip install --quiet pyyaml
+      # ── cloudbuild-shell-var-escaping-lint ──
       - name: Self-test (positive/negative controls, including this PR's original bug + PO's lowercase evidence)
         run: python3 scripts/verify-cloudbuild-shell-var-escaping.py --self-test
+      # ── cloudbuild-shell-var-escaping-lint ──
       - name: Scan cloudbuild.yaml for unescaped uppercase shell variables
         run: python3 scripts/verify-cloudbuild-shell-var-escaping.py
 
@@ -986,13 +911,7 @@ jobs:
   # 푸터의 회사정보(email.py 수동 사본)가 FE business-info.ts(전자상거래법 §10 SSOT)와
   # 크로스파일이라 정본이 바뀌어도 조용히 낡던 구멍. 자구(문자열 그대로) 대조만, baseline
   # 없음(도입 시점 위반 0건 — 두 파일이 이미 일치, 스크립트 docstring 참조).
-  business-info-email-footer-drift-lint:
-    name: business-info.ts ↔ email.py footer drift lint (guard, story #3216)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── business-info-email-footer-drift-lint ──
       - name: Compare business-info.ts SSOT fields against email.py footer constants
         working-directory: backend
         run: python3 scripts/lint_business_info_email_footer_drift.py
@@ -1007,25 +926,13 @@ jobs:
   # Joins the backend's shapes (scripts/web_api_route_shapes.json, kept fresh by backend/tests/test_4445_web_route_shapes_
   # snapshot.py) × each BFF handler (pass-through / wrapped) × each web call site's read. Lenient two-shape reads are frozen
   # per file (scripts/web_api_lenient_reads_baseline.json). What it can't see is declared at the top of the script.
-  web-api-response-shape-lint:
-    name: 웹 응답 모양 × 백엔드 계약 가드 (guard, story #4445)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── web-api-response-shape-lint ──
       - name: Self-test (seeded mismatches are caught, lenient growth and shrink are caught)
         run: python3 scripts/verify_web_api_response_shapes.py --self-test
+      # ── web-api-response-shape-lint ──
       - name: Web call sites read the shape the backend sends
         run: python3 scripts/verify_web_api_response_shapes.py
-
-  no-hardcoded-iso-timestamp-lint:
-    name: backend/app ISO 절대 일시 하드코딩 lint (guard, story #3528)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── no-hardcoded-iso-timestamp-lint ──
       - name: Scan backend/app for hardcoded ISO absolute timestamps
         working-directory: backend
         run: python3 scripts/lint_no_hardcoded_iso_timestamp.py
@@ -1035,13 +942,7 @@ jobs:
   # manual-only) 매 PR에 실제로 도는 자리가 없었다("만들어졌는데 도는 자리 없음" 결함).
   # PG 불요 정적 스캔이라 여기서 독립 job으로 배선한다 — 로직은 scripts/lint_migrations_
   # nontx_allowlist.sh 하나만 두고 이 job과 .test.sh [9] 양쪽이 그걸 공유 호출한다.
-  migrations-nontx-allowlist-lint:
-    name: migrations NONTX_ALLOWLIST lint (guard, story #3219)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── migrations-nontx-allowlist-lint ──
       - name: Scan packages/db/supabase/migrations for unclassified CONCURRENTLY usage
         run: sh scripts/lint_migrations_nontx_allowlist.sh
 
@@ -1052,19 +953,15 @@ jobs:
   # (GCP/gcloud 호출 0, 파일만 읽음) — 만료 14일 이내 항목을 GitHub Actions 주석으로 PR
   # 화면에 직접 띄운다. exit 0 고정(report-only, 실패로 안 막음 — 만료 자체의 FAIL 판정은
   # 각 가드 본체 몫).
-  expiring-declarations-warning:
-    name: Self-expiring declarations — 14-day warning (guard, story #4023)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ── expiring-declarations-warning ──
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # ── expiring-declarations-warning ──
       - name: Install deps
         run: pip install --quiet pyyaml
+      # ── expiring-declarations-warning ──
       - name: Warn on declarations expiring within 14 days
         run: python3 infra/check_expiring_declarations.py
 
@@ -1625,7 +1522,9 @@ jobs:
   backend-test-work:
     name: "Backend pytest work (non-destructive) — internal, not required"
     runs-on: ubuntu-latest
-    if: github.event.action != 'edited' || github.event.changes.base != null
+    # [SID:4659 · PO 06:57Z] 백엔드 바뀐 PR에서만 돈다(웹만 바뀐 PR은 건너뜀). 건너뛰면 아래 Require 스텝이 skipped를 통과시킨다.
+    needs: [detect-changed-scope]
+    if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
     # the suite's own ceiling as before (story #2285 AC4: body 7~8 min then, 10~15 now)
     timeout-minutes: 25
 
@@ -1849,7 +1748,7 @@ jobs:
       # the destructive shards, instead of here after the slowest shard (it made every run shard + pytest long). This job keeps
       # the required check: it is red unless that job succeeded too (skipped ≠ success — a cancel-cascade or a failure there).
       - name: Require the non-destructive pytest job to have succeeded (story #4475)
-        if: needs.backend-test-work.result != 'success' && (github.event.action != 'edited' || github.event.changes.base != null)
+        if: needs.backend-test-work.result != 'success' && !(needs.backend-test-work.result == 'skipped' && needs.detect-changed-scope.outputs.backend_relevant == 'false') && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
           echo "backend-test-work result=${{ needs.backend-test-work.result }} — the non-destructive pytest (its only runner) failed or did not run"
           exit 1
@@ -2655,25 +2554,13 @@ jobs:
       - name: "Verify ci.yml wires every package.json verify:* script (story #3739 meta guard)"
         run: pnpm --filter web verify:ci-wires-all-verify-scripts
 
-  ci-work:
-    name: "CI work (Lint/Type Check/Test/Build/verify:*) — internal, not required"
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    needs: [ci-web-lint-type, ci-web-test, ci-web-build, ci-web-verify]
-    # !cancelled(): a failed job below still reaches this step, so ci-work itself is red (not skipped) and says which one
-    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base != null) }}
-    steps:
-      - name: Require every web CI job to have succeeded (story #4467)
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: |
-          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key) = \(.value.result)"'
-          echo "$NEEDS" | jq -e 'length == 4 and all(.[]; .result == "success")' > /dev/null
-
   contrast-guard-e2e:
     name: "Contrast guard (axe runtime · story #2590 B)"
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # [SID:4659 · PO 06:57Z] 웹 UI 경로가 바뀔 때만(필수 아님). 나머지 PR에서는 건너뛴다.
+    needs: [detect-changed-scope]
+    if: needs.detect-changed-scope.outputs.web_changed != 'false'
 
     # story #2590 (B): (A) 정적 프리필터(ci 잡)가 원리적으로 못 재는 교차-요소·교차-계열·알파·
     # 상태(hover) 대비를 실제 렌더된 픽셀에서 axe-core color-contrast로 전수한다(최종 authority).
@@ -2933,7 +2820,8 @@ jobs:
   # always() 잡들과 동일 처방(!cancelled()).
   ci:
     name: Lint, Type Check, Test, Build
-    needs: [ci-work]
+    # [SID:4659 · PO 06:57Z] ci-work 집계를 없앴다 — 웹 잡 4개를 여기서 직접 기다린다(이름 `ci`는 그대로 필수 이름).
+    needs: [ci-web-lint-type, ci-web-test, ci-web-build, ci-web-verify]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # story #4099 CHANGES-1(페드루 PO, 2026-09-21) — ci-work 자신의 timeout-minutes(20분)에
@@ -2962,8 +2850,12 @@ jobs:
       # backend-test의 "Require all destructive-schema shards to have succeeded"와 동형 —
       # ci-work가 자신의 if:(edited-only 아닐 때만 실행)로 정상 skip된 경우(result=skipped)는
       # 이 카드가 막으려는 클래스가 아니므로 통과, 그 밖의 모든 non-success(진짜 실패)만 잡는다.
-      - name: Require ci-work to have succeeded
-        if: needs.ci-work.result != 'success' && (github.event.action != 'edited' || github.event.changes.base != null)
+      # 옛 ci-work 집계(story #4467)를 여기로 옮겼다. 웹 잡 4개 중 하나라도 non-success면 빨강 — 단 edited-only(base 무변)에서는
+      # 웹 잡이 정상 skip이라 통과(옛 ci-work의 if와 같은 조건).
+      - name: Require every web CI job to have succeeded (story #4467)
+        if: github.event.action != 'edited' || github.event.changes.base != null
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          echo "ci-work result=${{ needs.ci-work.result }} — Lint/Type Check/Test/Build/verify:* 실행처(ci-work)가 실패했거나 안 돎"
-          exit 1
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key) = \(.value.result)"'
+          echo "$NEEDS" | jq -e 'length == 4 and all(.[]; .result == "success")' > /dev/null
