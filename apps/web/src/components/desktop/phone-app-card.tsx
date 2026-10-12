@@ -6,7 +6,7 @@ import { useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
-import { PHONE_APP_PUBLISHED, phoneAppStoreLinks } from '@/lib/phone-app-store';
+import { PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, phoneAppStoreLinks } from '@/lib/phone-app-store';
 import { notAMac } from '@/components/desktop/desktop-download-card';
 import { PhoneAppGet } from '@/components/desktop/phone-pairing';
 
@@ -19,7 +19,7 @@ export function PhoneAppCard({ elsewhere: forced }: { elsewhere?: boolean }) {
   const { inPhoneApp } = usePhoneBridge();
   const detected = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
   const elsewhere = forced ?? detected;
-  if (elsewhere !== true || phoneAppStoreLinks(PHONE_APP_PUBLISHED).length === 0) return null;
+  if (elsewhere !== true || phoneAppStoreLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET).length === 0) return null;
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="phone-app-card">
       <PhoneAppGet body={t('needPhoneAppBody')} />
