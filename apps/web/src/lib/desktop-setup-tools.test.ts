@@ -6,6 +6,8 @@ import { addAgentTool, agentToolNames, confirmBody, hasSignInCheck, type SetupRo
 describe('[4653] adding a tool name to an agent row', () => {
   it('a short lowercase name is added; upper case is lowered; repeats and the runtime are refused', () => {
     expect(addAgentTool([], 'claude', 'AWS')).toEqual({ ok: true, tools: ['aws'] });
+    // the web trims and lowers before it sends (PO 17032): the body carries the clean name, the server takes it as it is
+    expect(addAgentTool([], 'claude', ' AWS ')).toEqual({ ok: true, tools: ['aws'] });
     expect(addAgentTool(['aws'], 'claude', 'aws')).toEqual({ ok: false, reason: 'duplicate' });
     expect(addAgentTool([], 'claude', 'claude')).toEqual({ ok: false, reason: 'duplicate' });
   });

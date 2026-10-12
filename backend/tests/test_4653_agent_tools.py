@@ -65,3 +65,11 @@ def test_a_name_ending_in_a_newline_or_padded_is_refused_not_trimmed():
     with pytest.raises(ValidationError) as e:
         RoleIn(role="pm", runtime="claude", tools=["aws\n"])
     assert "aws" in str(e.value)
+
+
+def test_a_padded_or_uppercase_name_is_refused_by_the_server_not_trimmed(  ):
+    # PO 17032: the web trims and lowers before it sends; the server takes the text as it is and refuses what is not on the rule
+    for bad in [' aws', '"aws"', 'AWS', 'aws ']:
+        with pytest.raises(ValidationError) as e:
+            RoleIn(role="pm", runtime="claude", tools=[bad])
+        assert bad.strip('"') in str(e.value) or bad in str(e.value)

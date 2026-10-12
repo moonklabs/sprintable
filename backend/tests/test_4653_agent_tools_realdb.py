@@ -40,15 +40,18 @@ async def _member_tools(setup_id: str) -> dict[str, list[str]]:
 
 @pytest.mark.anyio
 async def test_another_organizations_setup_is_not_touched(movable):
-    """A setup confirmed by one organization is refused to another: its members and their tools stay as they were."""
+    """Another organization's admin confirming with a NEW code against this organization's project is refused with exactly 404
+    (the project is not theirs — the same answer as any project they cannot see); this organization's setup stays as it was."""
     async with _client() as c:
-        code, _verifier, setup_id = await _move_code(c, "d4653 org isolation")
+        code, _verifier, setup_id = await _move_code(c, "d4653 org isolation ours")
         r = await _confirm(c, code, body=_move_with_tools(["gcloud"], ["aws"]))
         assert r.status_code == 200, r.text
         before = await _member_tools(setup_id)
-        r2 = await _confirm(c, code, who=OUTSIDER, org=ORG2, body=_move_with_tools(["gh"], ["gh"]))
-        assert r2.status_code >= 400, r2.text
+        code2, _v2, setup2_id = await _move_code(c, "d4653 org isolation theirs")
+        r2 = await _confirm(c, code2, who=OUTSIDER, org=ORG2, body=_move_with_tools(["gh"], ["gh"]))
+        assert r2.status_code == 404, r2.text
     assert await _member_tools(setup_id) == before
+    assert (await _sql(fetch=f"SELECT confirmed_at FROM desktop_setups WHERE id='{setup2_id}'"))[0][0] is None
 
 
 @pytest.mark.anyio
