@@ -74,3 +74,20 @@ async def test_the_exchange_hands_each_agent_its_own_tools(movable):
         assert ex.status_code == 200, ex.text
         by_id = {a["member_id"]: a["tools"] for a in ex.json()["agents"]}
     assert by_id == {str(EXISTING): ["gcloud"], str(EXISTING_B): ["aws"]}
+
+
+@pytest.mark.anyio
+async def test_a_padded_name_is_refused_over_http_and_a_clean_one_is_stored(movable):
+    """PO 17033: over the real route — a padded name is a 422 that names it (nothing stored); the clean name the web sends is a
+    200 and is stored on the member."""
+    async with _client() as c:
+        code, _verifier, setup_id = await _move_code(c, "d4653 http padded")
+        padded = {"project_id": str(PROJ), "roles": [{"role": "Agent", "agent_id": str(EXISTING), "tools": [" aws"]}]}
+        r = await _confirm(c, code, body=padded)
+        assert r.status_code == 422, r.text
+        assert " aws" in r.text
+        assert (await _sql(fetch=f"SELECT confirmed_at FROM desktop_setups WHERE id='{setup_id}'"))[0][0] is None
+        clean = {"project_id": str(PROJ), "roles": [{"role": "Agent", "agent_id": str(EXISTING), "tools": ["aws"]}]}
+        r2 = await _confirm(c, code, body=clean)
+        assert r2.status_code == 200, r2.text
+    assert (await _member_tools(setup_id))[str(EXISTING)] == ["aws"]
