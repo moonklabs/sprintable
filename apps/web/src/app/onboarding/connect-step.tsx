@@ -17,6 +17,7 @@ import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemet
 import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { OnboardingRemoteControl } from '@/components/desktop/onboarding-remote-control';
 import { copyTextSafely } from '@/lib/clipboard';
 import { withProjectParam } from '@/hooks/use-flat-href';
@@ -359,6 +360,8 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         {/* story #4656: the org's remote control, once, for its owner — before the desktop steps that need it (no flash: it draws only when read) */}
         <OnboardingRemoteControl orgId={orgId} />
         <DesktopDownloadCard />
+        {/* story 4654: a device that is not a Mac gets the phone app's store links under the download card (Yuna §1) */}
+        <PhoneAppCard />
         {/* 키 붙여 넣기 입구는 데스크톱 앱에 없다(카드 4542 · 까디르 확인). 앱은 첫 실행 때 웹 setup 페이지를 열어 연결을 가져간다 —
             그래서 키 칸 대신 그 흐름을 한 줄로 안내한다. */}
         <p className="text-xs text-muted-foreground" data-testid="connect-step-desktop-open-note">

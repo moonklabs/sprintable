@@ -7197,6 +7197,8 @@
     "failed": "Couldn't send the pairing — please scan again",
     "notInApp": "Open this screen in the Sprintable app on your phone",
     "getApp": "Get the phone app",
+    "macAppAux": "The Mac app is downloaded on a Mac.",
+    "needPhoneAppBody": "To reply to this computer's agents, or stop or instruct them, from your phone, you need the phone app.",
     "getAppAndroid": "Android · Google Play",
     "getAppIos": "iPhone · App Store",
     "remoteOffOwner": "Remote control is off, so this phone can't be paired — turn it on to answer, stop and instruct agents from this phone",
