@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
-import { phoneAppStoreLinks } from '@/lib/phone-app-store';
+import { PHONE_APP_PUBLISHED, phoneAppStoreLinks } from '@/lib/phone-app-store';
 import { QRCodeSVG } from 'qrcode.react';
 import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
 
@@ -41,7 +41,8 @@ const notOnServer = () => false;
 /** story 4654 (AC2): the phone app's two store links, each with its QR (the address itself, from phone-app-store) */
 function PhoneAppGet() {
   const t = useTranslations('phonePairing');
-  const links = phoneAppStoreLinks();
+  const links = phoneAppStoreLinks(PHONE_APP_PUBLISHED);
+  if (links.length === 0) return null; // nothing published yet: the page keeps its one line (story 4654 · Yuna 5048)
   return (
     <div className="flex flex-col gap-3" data-testid="phone-app-get">
       <p className="text-sm">{t('getApp')}</p>
