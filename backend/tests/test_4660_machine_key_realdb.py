@@ -39,7 +39,7 @@ async def _remote_control_on(world):
 
 @pytest.fixture
 def secret(monkeypatch):
-    monkeypatch.setattr(settings, "desktop_machine_key_secret", SECRET)
+    monkeypatch.setattr(settings, "channel_oauth_state_secret", SECRET)
     return SECRET
 
 
@@ -98,7 +98,7 @@ async def test_a_different_machine_in_the_same_org_leaves_the_line_open(world, s
 
 async def test_no_secret_means_no_key_and_no_line_is_closed(world, monkeypatch):
     # PO ①·까디르 ③: the secret is empty → no key is made, nothing is closed, the new line is added as before
-    monkeypatch.setattr(settings, "desktop_machine_key_secret", "")
+    monkeypatch.setattr(settings, "channel_oauth_state_secret", "")
     async with _client() as c:
         first = await _device(c, "d4660 no-secret a", SAME_MACHINE)
         second = await _device(c, "d4660 no-secret b", SAME_MACHINE)

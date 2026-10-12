@@ -21,13 +21,13 @@ SECRET = "test-desktop-machine-key-secret-value"
 
 @pytest.fixture
 def secret(monkeypatch):
-    monkeypatch.setattr(settings, "desktop_machine_key_secret", SECRET)
+    monkeypatch.setattr(settings, "channel_oauth_state_secret", SECRET)
     return SECRET
 
 
 def test_no_secret_means_no_key_and_no_hmac_call(monkeypatch):
     # PO 결정 ① · 까디르 ③: with no secret the key is not made — and HMAC is never called with an empty key
-    monkeypatch.setattr(settings, "desktop_machine_key_secret", "")
+    monkeypatch.setattr(settings, "channel_oauth_state_secret", "")
 
     def boom(*args, **kwargs):
         raise AssertionError("HMAC must not run without a secret")
@@ -48,7 +48,8 @@ def test_missing_or_malformed_device_id_means_no_key(secret):
 def test_key_is_hmac_of_org_and_device_and_never_the_device_id(secret):
     org = uuid.UUID("11111111-1111-1111-1111-111111111111")
     key = ds.machine_key_for(org, GOOD_DEVICE_ID)
-    expected = hmac.new(SECRET.encode(), f"{org}|{GOOD_DEVICE_ID}".encode(), hashlib.sha256).hexdigest()
+    derived = ds._hkdf_sha256(SECRET.encode(), info=ds.MACHINE_KEY_INFO)
+    expected = hmac.new(derived, f"{org}|{GOOD_DEVICE_ID}".encode(), hashlib.sha256).hexdigest()
     assert key == expected
     assert key != GOOD_DEVICE_ID
 
@@ -58,6 +59,13 @@ def test_same_machine_in_two_orgs_gets_two_keys(secret):
     a = ds.machine_key_for(uuid.uuid4(), GOOD_DEVICE_ID)
     b = ds.machine_key_for(uuid.uuid4(), GOOD_DEVICE_ID)
     assert a != b
+
+
+def test_changing_the_info_label_changes_the_key(secret, monkeypatch):
+    org = uuid.uuid4()
+    before = ds.machine_key_for(org, GOOD_DEVICE_ID)
+    monkeypatch.setattr(ds, "MACHINE_KEY_INFO", b"sprintable/desktop-machine-key/v2")
+    assert ds.machine_key_for(org, GOOD_DEVICE_ID) != before
 
 
 def test_same_machine_same_org_gets_the_same_key(secret):

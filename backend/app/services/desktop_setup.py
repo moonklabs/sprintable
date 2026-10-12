@@ -900,14 +900,26 @@ async def list_attachable_agents(db: AsyncSession, *, user_id: uuid.UUID, org_id
 _DEVICE_ID_RE = re.compile(r"^[0-9a-f]{64}$")  # sha256 hex of the app's machine id
 
 
+MACHINE_KEY_INFO = b"sprintable/desktop-machine-key/v1"
+
+
+def _hkdf_sha256(ikm: bytes, *, info: bytes, length: int = 32) -> bytes:
+    """RFC 5869 HKDF with SHA-256 and no salt: extract, then expand (32 bytes = one block). Stdlib only."""
+    prk = hmac.new(b"\x00" * hashlib.sha256().digest_size, ikm, hashlib.sha256).digest()
+    return hmac.new(prk, info + b"\x01", hashlib.sha256).digest()[:length]
+
+
 def machine_key_for(org_id: uuid.UUID, device_id: str | None) -> str | None:
     """story 4660 — the org-scoped key of a machine: HMAC(server secret, org_id|device_id). None (fail-safe) when the app sent
     no valid device_id or the server has no secret — then nothing is stored and no old line is closed. Never HMAC with an
     empty key."""
-    secret = settings.desktop_machine_key_secret
+    # the secret is the one the channel OAuth state already signs with (bound in dev and prod). Rotating it only changes
+    # the machine keys — the old lines then stay open as new ones; no login or stored credential depends on it.
+    secret = settings.channel_oauth_state_secret
     if not secret or not device_id or not _DEVICE_ID_RE.match(device_id):
         return None
-    return hmac.new(secret.encode(), f"{org_id}|{device_id}".encode(), hashlib.sha256).hexdigest()
+    key = _hkdf_sha256(secret.encode(), info=MACHINE_KEY_INFO)
+    return hmac.new(key, f"{org_id}|{device_id}".encode(), hashlib.sha256).hexdigest()
 
 
 async def _retire_same_machine(db: AsyncSession, *, machine_key: str, others: list[DesktopSetup], now: datetime) -> int:
