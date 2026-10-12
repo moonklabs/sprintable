@@ -7196,7 +7196,9 @@
       "title": "All three remote device places are taken",
       "why": "This account already has three phones connected.",
       "todo": "Press [Remove this phone] next to a phone you no longer use.",
-      "after": "A removed phone has to pair again from the phone before it can connect. Once a place is free, pairing continues right here.",
+      "listHead": "Name · last used",
+      "neverUsed": "Not used yet",
+      "after": "One place is free now. Press [Scan again] to continue pairing with a new QR.",
       "webLink": "Remove on the web instead"
     },
     "taken": "This phone is registered to another Sprintable account, so it can't be paired — sign in with that account and pair, or remove this phone in that account's web «Desktop app › Remote devices», then scan again",

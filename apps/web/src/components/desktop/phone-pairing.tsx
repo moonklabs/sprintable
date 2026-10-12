@@ -237,6 +237,7 @@ function Pairing() {
           <Line focus>{t('limit.title')}</Line>
           <Line>{t('limit.why')}</Line>
           <Line>{t('limit.todo')}</Line>
+          <p className="text-xs text-muted-foreground">{t('limit.listHead')}</p>
           {phones === null ? <Loader2 className="size-4 animate-spin" aria-label={t('checking')} /> : (
             <ul className="flex flex-col gap-3">
               {phones.map((p) => {
@@ -249,7 +250,7 @@ function Pairing() {
                         <Button variant="outline" size="sm" onClick={() => setView({ ...view, asking: p.id })}>{tr('removePhone')}</Button>
                       )}
                     </div>
-                    {p.last_used_at ? <span className="text-xs text-muted-foreground">{tr('lastUsed', { used: new Date(p.last_used_at).toLocaleDateString() })}</span> : null}
+                    <span className="text-xs text-muted-foreground">{p.last_used_at ? tr('lastUsed', { used: new Date(p.last_used_at).toLocaleDateString() }) : t('limit.neverUsed')}</span>
                     {view.asking === p.id ? (
                       <div className="flex flex-col gap-2">
                         <p className="text-sm">{pairs > 0 ? tr('confirmRemovePhone', { phone: p.label, n: pairs }) : tr('confirmRemovePhoneUnpaired', { phone: p.label })}</p>
