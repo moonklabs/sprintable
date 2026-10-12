@@ -503,6 +503,26 @@ async def _check_confirmable(
     await require_project_access(db, user_id, project_id, org_id, not_found_detail="Project not found")
 
 
+# story 4653 (PO 14015 (가)-a): the CLIs an agent of this setup uses — names only, kept on its member. The app checks these
+# (and claude · codex always); a name that is not a short plain word is dropped, and the list is capped.
+AGENT_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
+AGENT_TOOLS_CAP = 8
+
+
+def clean_agent_tools(raw: object) -> list[str]:
+    """The tool names of one member, cleaned: a list of short lowercase names, no duplicates, at most AGENT_TOOLS_CAP.
+    Anything else (not a list, a non-string, a name with a space or a path) is dropped, never raised on."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, str) and AGENT_TOOL_NAME.match(item) and item not in out:
+            out.append(item)
+        if len(out) >= AGENT_TOOLS_CAP:
+            break
+    return out
+
+
 def setup_kind(setup: DesktopSetup) -> str | None:
     """story #4576 — which kind of setup this is (the web's progress: a move has two steps, ready → Sprintable connected, and no
     first task or result · the app attaches a move's agents with no recipe role or stages): «move» = confirmed with no recipe ·
@@ -883,9 +903,10 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
         if kind == "move":
             # story #4576 (PO 04:24Z): a move's agent — its id and runtime (its name is added with its new key below); no recipe
             # role or stages, there is no recipe
-            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "existing": True})
+            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "existing": True, "tools": clean_agent_tools(m.get("tools"))})
             continue
         entry = per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "role": m.get("role") or m["stage"], "stages": [], "runtime": m["runtime"]})
+        entry.setdefault("tools", clean_agent_tools(m.get("tools")))
         if m.get("existing"):
             entry["existing"] = True
         entry["stages"].append(m["stage"])
