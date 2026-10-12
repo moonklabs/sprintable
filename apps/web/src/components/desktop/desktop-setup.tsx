@@ -1148,7 +1148,7 @@ function AgentToolsLine({ runtime, tools, onChange }: { runtime: DesktopRuntime;
       {tools.map((name) => (
         <span key={name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-foreground">
           {name}
-          <button type="button" aria-label={t('tools.remove', { tool: name })} className="text-muted-foreground" onClick={() => onChange(tools.filter((x) => x !== name))}>×</button>
+          <Button type="button" variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" aria-label={t('tools.remove', { tool: name })} onClick={() => onChange(tools.filter((x) => x !== name))}>×</Button>
         </span>
       ))}
       <input
@@ -1161,7 +1161,7 @@ function AgentToolsLine({ runtime, tools, onChange }: { runtime: DesktopRuntime;
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
       />
       <datalist id="agent-tool-suggestions">{JUDGED_AGENT_TOOLS.map((x) => <option key={x} value={x} />)}</datalist>
-      <button type="button" className="rounded-full border px-2 py-0.5 text-xs" onClick={add}>{t('tools.add')}</button>
+      <Button type="button" variant="outline" size="sm" className="h-6 rounded-full px-2 text-xs" onClick={add}>{t('tools.add')}</Button>
       {error ? <span role="alert" className="text-xs text-destructive">{error === 'invalid' ? t('tools.error.invalid') : error === 'duplicate' ? t('tools.error.duplicate') : t('tools.error.max')}</span> : null}
       {tools.length === 0 ? <span className="basis-full text-xs text-muted-foreground">{t('tools.hint')}</span> : null}
       {extraWithoutCheck.length > 0 ? <span className="basis-full text-xs text-muted-foreground">{t('tools.noSignInLine')}</span> : null}
