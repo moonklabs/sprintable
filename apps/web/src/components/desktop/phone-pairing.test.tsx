@@ -236,6 +236,58 @@ describe('[4532] phone pairing screen', () => {
     expect(row?.textContent).not.toContain('아직 안 씀');
   });
 
+  it('a removal that fails shows no «자리가 하나 비었어요» line (story #4624 · 까디르)', async () => {
+    registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+    const phones = [{ id: 'p-1', label: '내 폰 A', last_used_at: null, pairs: [] }];
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: phones });
+      if (url === '/api/remote-devices/p-1' && init?.method === 'DELETE') return res(500, { error: { code: 'internal' } });
+      return base(url, init);
+    });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    await press('이 폰 빼기');
+    await press('이 폰 빼기');
+    expect(document.body.textContent).not.toContain('자리가 하나 비었어요');
+    expect(document.body.textContent).not.toContain('뺐어요');
+  });
+
+  it('three phones → one [이 폰 빼기] → confirm → the place is free → [다시 찍기] starts the scan again (story #4624 · 까디르)', async () => {
+    registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+    const phones = [
+      { id: 'p-1', label: '폰 하나', last_used_at: '2026-10-01T00:00:00Z', pairs: [] },
+      { id: 'p-2', label: '폰 둘', last_used_at: null, pairs: [] },
+      { id: 'p-3', label: '폰 셋', last_used_at: '2026-10-02T00:00:00Z', pairs: [] },
+    ];
+    let removed = false;
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: removed ? phones.slice(1) : phones });
+      if (url === '/api/remote-devices/p-2' && init?.method === 'DELETE') { removed = true; return res(200, { removed: true }); }
+      return base(url, init);
+    });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    expect(container.querySelectorAll('[data-testid="pairing-limit-phone"]').length).toBe(3);
+    const row = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')][1] as HTMLElement;
+    await act(async () => { [...row.querySelectorAll('button')].find((b) => b.textContent === '이 폰 빼기')!.click(); });
+    await settle();
+    const askedRow = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')][1] as HTMLElement;
+    await act(async () => { [...askedRow.querySelectorAll('button')].find((b) => b.textContent === '이 폰 빼기')!.click(); });
+    await settle();
+    expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-2' && init?.method === 'DELETE')).toBe(true);
+    expect(document.body.textContent).toContain('자리가 하나 비었어요');
+    expect(container.querySelectorAll('[data-testid="pairing-limit-phone"]').length).toBe(2);
+    sent.length = 0;
+    await press('다시 찍기');
+    expect(sent.some((m) => m.type === 'pair.scan')).toBe(true);
+  });
+
   it('three phones already → the limit screen lists this account\'s phones; one confirm removes one, then the rescan (story #4624)', async () => {
     registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
     const phones = [
