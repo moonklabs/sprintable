@@ -16,7 +16,26 @@
       "required": false
     }
   },
+  "desktop_agent_needs_sign_in": {
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    },
+    "runtime": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "required": false
+    }
+  },
   "desktop_agent_restarted": {
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    }
+  },
+  "desktop_agent_signed_in": {
     "member_id": {
       "required": true,
       "type": "uuid"
