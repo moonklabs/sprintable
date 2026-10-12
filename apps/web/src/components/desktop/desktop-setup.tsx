@@ -22,6 +22,7 @@ import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email
 import {
   agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
   type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst,
+  addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
   moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
@@ -823,6 +824,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 </div>
                 {/* story #4565 (Yuna 02:32Z ② · 02:39Z): an existing agent with a live key — what moving it does, then when it was last seen */}
                 {r.owner.kind === 'existing' ? <MovedAgentNote agent={attachable.find((a) => r.owner.kind === 'existing' && a.id === r.owner.agentId)} /> : null}
+                {/* story 4653 (Yuna ⑤ design:pass): the CLIs this agent uses — under the owner select, one line */}
+                {r.owner.kind === 'agent' || r.owner.kind === 'existing' ? (
+                  <AgentToolsLine runtime={r.owner.runtime} tools={r.tools ?? []} onChange={(next) => setRows((rs) => rs.map((x) => (x.role === r.role ? { ...x, tools: next } : x)))} />
+                ) : null}
               </li>
             ))}
           </ul>
@@ -1122,6 +1127,48 @@ export function OpenInDesktopApp() {
 }
 
 /** 레시피 카드 아래 줄 «역할 {n} · {역할 목록}»(유나 표). */
+/** story 4653 (Yuna ⑤): the runtime chip (fixed) · the names added (removable) · one add input. A name outside the judged list shows
+ *  «no sign-in line». Nothing added: the hint says only Claude Code and Codex are checked. */
+function AgentToolsLine({ runtime, tools, onChange }: { runtime: DesktopRuntime; tools: string[]; onChange: (next: string[]) => void }) {
+  const t = useTranslations('desktop.setup');
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<'invalid' | 'duplicate' | 'max' | null>(null);
+  const add = () => {
+    const res = addAgentTool(tools, runtime, draft);
+    if (!res.ok) { setError(res.reason); return; }
+    onChange(res.tools);
+    setDraft('');
+    setError(null);
+  };
+  const extraWithoutCheck = tools.filter((x) => !hasSignInCheck(x, runtime));
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="agent-tools">
+      <span className="text-xs text-muted-foreground">{t('tools.label')}</span>
+      <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">{runtime}</span>
+      {tools.map((name) => (
+        <span key={name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-foreground">
+          {name}
+          <button type="button" aria-label={t('tools.remove', { tool: name })} className="text-muted-foreground" onClick={() => onChange(tools.filter((x) => x !== name))}>×</button>
+        </span>
+      ))}
+      <input
+        aria-label={t('tools.label')}
+        list="agent-tool-suggestions"
+        className="h-6 w-40 rounded-md border bg-background px-2 text-xs"
+        placeholder={t('tools.placeholder')}
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); setError(null); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+      />
+      <datalist id="agent-tool-suggestions">{JUDGED_AGENT_TOOLS.map((x) => <option key={x} value={x} />)}</datalist>
+      <button type="button" className="rounded-full border px-2 py-0.5 text-xs" onClick={add}>{t('tools.add')}</button>
+      {error ? <span role="alert" className="text-xs text-destructive">{t(`tools.error.${error}`)}</span> : null}
+      {tools.length === 0 ? <span className="basis-full text-xs text-muted-foreground">{t('tools.hint')}</span> : null}
+      {extraWithoutCheck.length > 0 ? <span className="basis-full text-xs text-muted-foreground">{t('tools.noSignInLine')}</span> : null}
+    </div>
+  );
+}
+
 function RecipeRolesLine({ recipe, runtimes }: { recipe: SetupRecipe; runtimes: DesktopRuntime[] }) {
   const t = useTranslations('desktop.setup');
   const tOrg = useTranslations('organization');
