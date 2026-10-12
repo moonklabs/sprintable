@@ -6,18 +6,25 @@ tokens (the old token is then refused by the relay). The agents and their keys s
 """
 from __future__ import annotations
 
+import logging
+import uuid
+
 import pytest
 
 from app.core.config import settings
 from app.services.desktop_setup import machine_key_for
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
+    ORG2,
+    OUTSIDER,
     OWNER,
+    RECIPE,
     _client,
     _code,
     _confirm,
     _dispose_global_engine_after_test,
     _person,
+    _pkce,
     _sql,
     anyio_backend,
     world,
@@ -138,3 +145,94 @@ async def test_the_list_reports_the_replaced_reason_and_the_last_heard_time(worl
         assert item["state"] == "disconnected"
         assert item["revoked_reason"] == "replaced_by_new_setup"
         assert item["last_used_at"] is not None
+
+
+# --- the gaps the design named (4660 design §7 · §9 ② ④): another org, the log, the setup request ---
+
+ORG2_PROJECT = uuid.UUID("e4660000-0000-0000-0000-000000000031")
+ORG2_RECIPE = uuid.UUID("e4660000-0000-0000-0000-000000000033")
+EXCHANGE = "/api/v2/desktop/setup-codes/exchange"
+RELAY = "/api/v2/desktop/relay/sessions"
+# a value no other test in this file uses, so the log check cannot match anything else
+EXCHANGE_DEVICE = "7a3c" * 16
+
+
+@pytest.fixture
+async def other_org(world):
+    """The other org of the 4424 world (ORG2, its admin OUTSIDER) gets its own project, member and recipe to confirm into."""
+    await _sql(
+        f"INSERT INTO projects (id,org_id,name,slug,violation_level) VALUES ('{ORG2_PROJECT}','{ORG2}','P2','d4660-proj2','warn')",
+        "INSERT INTO event_definitions (id,key,org_id,name,description,payload_schema,routing,block_template,stage_metadata,"
+        "role_actor_kinds,enabled,version) SELECT "
+        f"'{ORG2_RECIPE}','org.d4424-org2.desktop_recipe','{ORG2}',name,description,payload_schema,routing,block_template,"
+        f"stage_metadata,role_actor_kinds,enabled,version FROM event_definitions WHERE id='{RECIPE}'",
+    )
+    yield
+
+
+async def _other_org_device(c, name: str, device_id: str) -> dict:
+    """A device set up on the other org, confirmed by its admin, exchanged with the device id."""
+    code, verifier = await _code(c, name)
+    body = {
+        "project_id": str(ORG2_PROJECT), "recipe_id": str(ORG2_RECIPE),
+        "roles": [{"role": "Writer", "runtime": "claude"}, {"role": "Reviewer", "runtime": "codex"}],
+    }
+    assert (await _confirm(c, code, who=OUTSIDER, org=ORG2, body=body)).status_code == 200
+    r = await c.post(EXCHANGE, json={"code": code, "verifier": verifier, "device_id": device_id})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def test_the_same_machine_in_another_org_leaves_this_orgs_line_open(other_org, secret):
+    # 4660 §7: the same device id under another org never matches this org's line (the key is org-scoped)
+    async with _client() as c:
+        mine = await _device(c, "d4660 org-a mac", SAME_MACHINE)
+        assert (await c.put(RELAY, json={"report_seq": 1, "sessions": []}, headers=_tok(mine["device_token"]))).status_code == 200
+        theirs = await _other_org_device(c, "d4660 org-b mac", SAME_MACHINE)
+
+        closed, reason, mine_key = await _line(mine["setup_id"])
+        assert closed is False and reason is None
+        assert mine_key == machine_key_for(ORG, SAME_MACHINE)
+        _, _, theirs_key = await _line(theirs["setup_id"])
+        assert theirs_key == machine_key_for(ORG2, SAME_MACHINE) and theirs_key != mine_key
+        # this org's device token still passes the relay
+        still = await c.put(RELAY, json={"report_seq": 2, "sessions": []}, headers=_tok(mine["device_token"]))
+        assert still.status_code == 200, still.text
+
+
+async def test_the_device_id_is_in_no_log_and_no_record_of_the_exchange(world, secret, caplog):
+    # 4660 §9 ④: the exchange body's device id never reaches the logs (a good and a refused exchange) or a recorded tool call
+    caplog.set_level(logging.DEBUG)
+    async with _client() as c:  # importing the app sets up logging, which clears the root handlers: put caplog back
+        if caplog.handler not in logging.getLogger().handlers:
+            logging.getLogger().addHandler(caplog.handler)
+        code, verifier = await _code(c, "d4660 log mac")
+        assert (await _confirm(c, code)).status_code == 200
+        refused = await c.post(EXCHANGE, json={"code": code, "verifier": "w" * 43, "device_id": EXCHANGE_DEVICE})
+        assert refused.status_code == 403, refused.text
+        ok = await c.post(EXCHANGE, json={"code": code, "verifier": verifier, "device_id": EXCHANGE_DEVICE})
+        assert ok.status_code == 200, ok.text
+    assert EXCHANGE_DEVICE not in caplog.text
+    hits = (await _sql(fetch=(
+        f"SELECT count(*) FROM agent_run_tool_calls WHERE path LIKE '%{EXCHANGE_DEVICE}%' "
+        f"OR input_summary::text LIKE '%{EXCHANGE_DEVICE}%'"
+    )))[0][0]
+    assert hits == 0
+
+
+async def test_a_device_id_on_the_setup_request_is_ignored(world, secret):
+    # 4660 §7: only the exchange carries the device id; the setup request's copy never reaches a line
+    async with _client() as c:
+        verifier, challenge = _pkce()
+        r = await c.post(
+            "/api/v2/desktop/setup-codes",
+            json={"challenge": challenge, "device_name": "d4660 ignored", "device_id": SAME_MACHINE},
+        )
+        assert r.status_code == 201, r.text
+        code, setup_id = r.json()["code"], r.json()["setup_id"]
+        assert (await _line(setup_id))[2] is None
+        assert (await _confirm(c, code)).status_code == 200
+        assert (await _line(setup_id))[2] is None
+        ok = await c.post(EXCHANGE, json={"code": code, "verifier": verifier})
+        assert ok.status_code == 200, ok.text
+        assert (await _line(setup_id))[2] is None
