@@ -8,6 +8,8 @@ import { Card } from '@/components/ui/card';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
+import { PHONE_APP_PUBLISHED, phoneAppStoreLinks } from '@/lib/phone-app-store';
+import { QRCodeSVG } from 'qrcode.react';
 import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
 
 /**
@@ -36,11 +38,36 @@ type View =
 const noSubscribe = () => () => {};
 const notOnServer = () => false;
 
+/** story 4654 (AC2): the phone app's two store links, each with its QR (the address itself, from phone-app-store) */
+function PhoneAppGet() {
+  const t = useTranslations('phonePairing');
+  const links = phoneAppStoreLinks(PHONE_APP_PUBLISHED);
+  if (links.length === 0) return null; // nothing published yet: the page keeps its one line (story 4654 · Yuna 5048)
+  return (
+    <div className="flex flex-col gap-3" data-testid="phone-app-get">
+      <p className="text-sm">{t('getApp')}</p>
+      {links.map((l) => (
+        <div key={l.store} className="flex items-center gap-3">
+          <QRCodeSVG value={l.url} size={72} />
+          <a className="text-sm underline" href={l.url} target="_blank" rel="noreferrer">
+            {l.store === 'android' ? t('getAppAndroid') : t('getAppIos')}
+          </a>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function PhonePairing() {
   const t = useTranslations('phonePairing');
   const phone = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
   if (!phone) {
-    return <Card className="break-keep p-6"><p className="text-sm text-muted-foreground">{t('notInApp')}</p></Card>;
+    return (
+      <Card className="break-keep flex flex-col gap-4 p-6">
+        <p className="text-sm text-muted-foreground">{t('notInApp')}</p>
+        <PhoneAppGet />
+      </Card>
+    );
   }
   return <Pairing />;
 }

@@ -7196,6 +7196,9 @@
     "taken": "This phone is registered to another Sprintable account, so it can't be paired — sign in with that account and pair, or remove this phone in that account's web «Desktop app › Remote devices», then scan again",
     "failed": "Couldn't send the pairing — please scan again",
     "notInApp": "Open this screen in the Sprintable app on your phone",
+    "getApp": "Get the phone app",
+    "getAppAndroid": "Android · Google Play",
+    "getAppIos": "iPhone · App Store",
     "remoteOffOwner": "Remote control is off, so this phone can't be paired — turn it on to answer, stop and instruct agents from this phone",
     "remoteOffOthers": "Remote control is off, so this phone can't be paired — you can try again once an organization owner{hasOwners, select, yes { ({owners})} other {}} turns it on"
   },
