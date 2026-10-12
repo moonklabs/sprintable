@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
@@ -51,9 +52,9 @@ afterEach(async () => {
 async function render(locale: 'ko' | 'en' = 'ko') {
   await act(async () => {
     root.render(
-      <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
+      <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
         <DesktopRemoteDevices />
-      </NextIntlClientProvider>,
+      </NextIntlClientProvider></PhoneBridgeClaim>,
     );
   });
   await flush();

@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 
 const AGENT = '22222222-3333-4444-8555-666666666666';
 const CONV = '33333333-4444-4555-8666-777777777777';
@@ -21,7 +22,12 @@ vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: str
 vi.mock('@/hooks/use-sse-notifications', () => ({ useSseNotifications: () => {} }));
 let phone = true;
 const phoneCall = vi.fn();
-vi.mock('@/lib/phone-bridge', () => ({ isPhoneApp: () => phone, phoneCall: (...a: unknown[]) => phoneCall(...a) }));
+vi.mock('@/lib/phone-bridge', () => ({
+  isPhoneApp: () => phone,
+  phoneCall: (...a: unknown[]) => phoneCall(...a),
+  claimPhoneBridge: () => {},
+  subscribePhoneApp: () => () => {},
+}));
 const { AgentSessionStrip } = await import('./agent-session-strip');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -59,9 +65,9 @@ async function settle(n = 6) { for (let i = 0; i < n; i++) await act(async () =>
 async function render(locale: 'ko' | 'en' = 'ko') {
   await act(async () => {
     root.render(
-      <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
+      <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
         <AgentSessionStrip agentId={AGENT} conversationId={CONV} />
-      </NextIntlClientProvider>,
+      </NextIntlClientProvider></PhoneBridgeClaim>,
     );
   });
   await settle();

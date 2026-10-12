@@ -86,7 +86,7 @@ export default async function RootLayout({
         <link rel="preload" href="/fonts/pretendard-korean-core.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
       </head>
       <body className="h-full">
-        <PhoneBridgeClaim />
+        <PhoneBridgeClaim>
         <GoogleAnalytics />
         <FetchGateInstaller />
         <ContentPaintedSignal />
@@ -100,6 +100,7 @@ export default async function RootLayout({
             <ViewerTimeZoneProvider serverTimeZone={viewerTimeZone}>{children}</ViewerTimeZoneProvider>
           </NextIntlClientProvider>
         </ThemeProvider>
+        </PhoneBridgeClaim>
       </body>
     </html>
   );

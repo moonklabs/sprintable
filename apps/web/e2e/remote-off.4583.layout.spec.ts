@@ -40,13 +40,17 @@ async function build() {
         import { AgentSessionStrip } from './src/components/chat/agent-session-strip';
         import { AgentPermissionRequests } from './src/components/inbox/agent-permission-requests';
         import { DesktopRemoteControlCard } from './src/components/desktop/desktop-remote-control-card';
+        import { PhoneBridgeContext } from './src/components/providers/phone-bridge-context';
+        import { phoneCall } from '@/lib/phone-bridge';
         const h = React.createElement;
         const pick = (kind) => kind === 'pair' ? h(PhonePairing) : kind === 'remote' ? h(DesktopRemoteConfirm)
           : kind === 'strip' ? h(AgentSessionStrip, { agentId: 'a1', conversationId: 'c1' }) : kind === 'inbox' ? h(AgentPermissionRequests)
           : kind === 'card-far' ? h(React.Fragment, null, h('div', { style: { height: 1600 } }), h(DesktopRemoteControlCard)) : h(DesktopRemoteControlCard);
         window.__mount = (kind, locale) => {
           const root = createRoot(document.getElementById('root'));
-          const wrap = (k) => h(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' }, pick(k));
+          // story #4661: the screens read the phone state from the bridge context — the harness plays the claim's provider
+          const wrap = (k) => h(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' },
+            h(PhoneBridgeContext.Provider, { value: { inPhoneApp: !!window.__phone, phoneCall } }, pick(k)));
           // story #4583 (Yuna 4974): the link → card path as an in-app navigation (no reload) — pushState, then the card
           window.__clientNav = (href) => { history.pushState(null, '', href); root.render(wrap('card-far')); };
           root.render(wrap(kind));

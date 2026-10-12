@@ -9,6 +9,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { __resetPhoneBridgeForTest, claimPhoneBridge } from '@/lib/phone-bridge';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
@@ -86,9 +87,9 @@ const settle = async () => { for (let i = 0; i < 10; i++) await act(async () => 
 async function render(locale: 'ko' | 'en' = 'ko') {
   await act(async () => {
     root.render(
-      <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
+      <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
         <PhonePairing />
-      </NextIntlClientProvider>,
+      </NextIntlClientProvider></PhoneBridgeClaim>,
     );
   });
   await settle();
@@ -105,6 +106,14 @@ const press = async (label: string) => {
 const tick = async () => { await act(async () => { vi.advanceTimersByTime(1_500); }); await settle(); };
 
 describe('[4532] phone pairing screen', () => {
+  it('the handle comes after the first render → the screen flips to the phone path without a reload (story #4661)', async () => {
+    await render();
+    expect(buttons()).not.toContain('QR 찍기');
+    await act(async () => { installShell(); });
+    await settle();
+    expect(buttons()).toContain('QR 찍기');
+  });
+
   it('outside the phone app: one line, no button', async () => {
     await render();
     expect(text()).toBe('폰의 Sprintable 앱에서 이 화면을 열어 주세요');

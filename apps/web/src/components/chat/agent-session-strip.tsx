@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, Check, Circle, CircleDashed, CircleDot, Loader2, SquareX, type LucideIcon } from 'lucide-react';
@@ -11,7 +11,7 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { useFieldDraft } from '@/hooks/use-field-draft';
-import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
 import { limitHeld, limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
@@ -91,8 +91,6 @@ const INSTRUCTION_MAX = 8000;
 export const INSTRUCT_NOW_MAX = 400;
 const codePoints = (text: string) => [...text].length;
 
-const noSubscribe = () => () => {};
-const notOnServer = () => false;
 
 async function readView(agentId: string): Promise<View | null> {
   try {
@@ -140,7 +138,7 @@ type Result = { verb: Verb; busy: true } | { verb: Verb; busy: false; outcome: C
 function Strip({ view, readAt, agentId, conversationId, reread }: { view: View & { state: SessionState }; readAt: number; agentId: string; conversationId: string; reread: () => void }) {
   const t = useTranslations('chats.agentSession');
   const flatHref = useFlatHref();
-  const phone = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
+  const { inPhoneApp: phone, phoneCall } = usePhoneBridge();
   const [result, setResult] = useState<Result | null>(null);
   // Kadir 4955 · Yuna · PO 13:27Z: a command whose end is not known — [결과 확인] follows it (never a second one). While it is
   // unknown: an instruction → [지금 지시] becomes [결과 확인] ([멈춤] stays — the safety handle) · a stop → both become [결과 확인]
@@ -293,6 +291,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
 }
 
 function ResultLine({ result }: { result: Result }) {
+  const { phoneCall } = usePhoneBridge();
   const t = useTranslations('chats.agentSession');
   const flatHref = useFlatHref();
   const remoteOff = useRemoteOff(); // story #4583: a command refused while off says who turns it on

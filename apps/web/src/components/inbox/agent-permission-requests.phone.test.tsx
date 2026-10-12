@@ -11,6 +11,7 @@ import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import type { PermissionRequest } from '@/lib/agent-permissions';
 import { __resetPhoneBridgeForTest, claimPhoneBridge } from '@/lib/phone-bridge';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
@@ -81,9 +82,9 @@ async function render(rows: PermissionRequest[], locale: 'ko' | 'en' = 'ko') {
   });
   await act(async () => {
     root.render(
-      <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
+      <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
         <AgentPermissionRequests />
-      </NextIntlClientProvider>,
+      </NextIntlClientProvider></PhoneBridgeClaim>,
     );
   });
   await settle();

@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { PHONE_APP_STORE_ANDROID } from '@/lib/phone-app-store';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 
 vi.mock('@/lib/phone-app-store', async (orig) => ({
   ...(await orig<typeof import('@/lib/phone-app-store')>()),
@@ -29,7 +30,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); setUA(REAL_UA); });
 // no forced flag: the device is read from navigator.userAgent, as the page does (the Mac check is the card's own)
 async function draw(elsewhere?: boolean) {
   await act(async () => {
-    root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><PhoneAppCard {...(elsewhere === undefined ? {} : { elsewhere })} /></NextIntlClientProvider>);
+    root.render(<PhoneBridgeClaim><NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><PhoneAppCard {...(elsewhere === undefined ? {} : { elsewhere })} /></NextIntlClientProvider></PhoneBridgeClaim>);
   });
   return host;
 }
