@@ -378,7 +378,7 @@ export interface SetupStatus {
     /** story 4452 — 셸이 시작하지 못한 에이전트마다 마지막 보고(이유 · 데몬 code · 상한 · 기다린 첫 에이전트). 그 뒤 연결되거나
      *  다시 시작되면 BE가 뺀다. 없으면 아무것도 안 바뀐다. */
     agents_start_failed?: AgentStartFailure[];
-    /** story 4658 — the agents that ask for a sign-in now (cleared by their «signed in»); runtime is claude · codex or null. Absent = none. */
+    /** story 4658 — the agents whose sign-in question is open now (cleared when the question is over: the agent moved on, or its session ended); runtime is claude · codex or null. Absent = none. */
     agents_sign_in?: { member_id: string; at: string; runtime: DesktopRuntime | null }[];
   };
 }
