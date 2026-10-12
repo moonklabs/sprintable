@@ -30,7 +30,7 @@ export function LimitPhoneRow({ phone, asking, onAsk, onConfirm, onCancel }: {
         <span className="text-sm font-medium">{phone.label}</span>
         {asking ? null : <Button variant="outline" size="sm" onClick={onAsk}>{tr('removePhone')}</Button>}
       </div>
-      <span className="text-xs text-muted-foreground">{phone.last_used_at ? tr('lastUsed', { used: formatViewerRelativeTime(phone.last_used_at, locale, viewerTz) }) : t('limit.neverUsed')}</span>
+      <span className="text-xs text-muted-foreground">{typeof phone.last_used_at === 'string' ? tr('lastUsed', { used: formatViewerRelativeTime(phone.last_used_at, locale, viewerTz) }) : t('limit.neverUsed')}</span>
       {asking ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm">{pairs > 0 ? tr('confirmRemovePhone', { phone: phone.label, n: pairs }) : tr('confirmRemovePhoneUnpaired', { phone: phone.label })}</p>

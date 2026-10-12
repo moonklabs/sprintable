@@ -251,7 +251,7 @@ function Pairing() {
             </ul>
           )}
           {view.freed ? <Line>{tr('phoneRemoved', { phone: view.freed })}</Line> : null}
-          <Line>{t('limit.after')}</Line>
+          {view.freed ? <Line>{t('limit.after')}</Line> : null}
           <Actions>{rescan}<a href={flat('/desktop')} className="text-sm underline underline-offset-2" data-testid="pairing-limit-web-link">{t('limit.webLink')}</a></Actions>
         </Shell>
       );
