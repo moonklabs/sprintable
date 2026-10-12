@@ -60,6 +60,19 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
     branches-ignore: [main, develop]
+    # 프론트·백엔드 실행 경로가 바뀔 때만 돈다(docs·스토리 파일만 바뀐 PR은 스킵).
+    # 비필수 체크라 스킵돼도 병합을 막지 않는다. job 안 backend 스텝도 있어 backend/도 포함.
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "backend/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - "tsconfig.json"
+      - "vitest*.ts"
+      - ".github/workflows/stack-pr-frontend-preview.yml"
 
 concurrency:
   group: stack-pr-frontend-preview-${{ github.event.pull_request.number }}

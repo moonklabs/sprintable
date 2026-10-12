@@ -14,6 +14,14 @@ name: ee_pricing Fork Guard
 on:
   pull_request:
     branches: [develop]
+    # 감시 대상 4개 파일(아래 WATCHED_FILES)과 이 워크플로 자신이 바뀔 때만 돈다.
+    # 필수 체크가 아니라서(advisory) 안 도는 PR도 병합을 막지 않는다.
+    paths:
+      - "backend/alembic/versions/0146_pricing_versions.py"
+      - "backend/alembic/versions/0147_pricing_versions_live_seed.py"
+      - "backend/alembic/versions/0162_merge_ee_pricing_core_heads.py"
+      - "backend/alembic/versions/0163_strip_stale_runtime_note_from_role_behaviors.py"
+      - ".github/workflows/ee-pricing-fork-guard.yml"
 
 # story #2912(2899 그라운딩 갈래B 처방) — 구head 런이 캐파를 계속 붙들지 않게 신 커밋이
 # 오면 즉시 취소(다른 gate들과 동형 패턴).

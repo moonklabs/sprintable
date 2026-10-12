@@ -3,8 +3,27 @@ name: Lighthouse CI
 on:
   pull_request:
     branches: [main]
+    # 웹·백엔드 실행 경로와 lighthouse 설정이 바뀔 때만 돈다. 비필수 체크(병합 비차단).
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "backend/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "lighthouserc.json"
+      - ".github/workflows/lighthouse-ci.yml"
   push:
     branches: [main]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "backend/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "lighthouserc.json"
+      - ".github/workflows/lighthouse-ci.yml"
 
 # story #2912(2899 그라운딩 갈래B 처방) — pull_request+push 혼합 트리거라 PR번호가 없는
 # push 이벤트도 커버해야 해서 ci.yml과 동형으로 github.ref 기반 그룹을 쓴다(pull_request
