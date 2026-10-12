@@ -35,7 +35,7 @@
       "type": "uuid"
     }
   },
-  "desktop_agent_signed_in": {
+  "desktop_agent_sign_in_cleared": {
     "member_id": {
       "required": true,
       "type": "uuid"

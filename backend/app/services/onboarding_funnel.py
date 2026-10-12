@@ -51,9 +51,9 @@ DESKTOP_SHELL_EMIT_EVENTS = frozenset({
     # story #4452 (선생님 check A · PO 04:35Z) — an agent of the setup could not be started (meta member_id · reason · code ·
     # runtime · limit · first_member_id); the setup status reads it as signals.agents_start_failed
     "desktop_agent_start_failed",
-    # story #4658 (PO 17072 (a)) — an agent asks for a sign-in (meta member_id · runtime?) and works again (meta member_id); the setup
+    # story #4658 (PO 17072 (a) · 17077) — an agent asks for a sign-in (meta member_id · runtime?) and the question is over (meta member_id); the setup
     # status reads them as signals.agents_sign_in
-    "desktop_agent_needs_sign_in", "desktop_agent_signed_in",
+    "desktop_agent_needs_sign_in", "desktop_agent_sign_in_cleared",
 })
 # story #4438 (PO 18:42Z) — the meta of each name the desktop app sends, one closed shape per name, checked at the entrance
 # (POST /onboarding/events): a known field of the wrong kind or with an unknown value → 422 `invalid_meta`, nothing stored; a
@@ -128,7 +128,7 @@ DESKTOP_SHELL_META_SHAPES: dict[str, dict[str, dict]] = {
         "member_id": _field(True, type="uuid"),
         "runtime": _field(False, enum=sorted(AGENT_RUNTIMES)),
     },
-    "desktop_agent_signed_in": {"member_id": _field(True, type="uuid")},
+    "desktop_agent_sign_in_cleared": {"member_id": _field(True, type="uuid")},
 }
 
 

@@ -27,7 +27,7 @@ M = str(uuid.uuid4())
 # The contract file is byte-for-byte the same in sprintable-mobile (desktop-electron/src/shell-meta-shapes.json), and both
 # repos pin this sha256 in the same letters (Kadir 228 · PO 19:45Z): changing the file on one side turns that side red, and
 # the fix — a new pin — says in its PR that the other repo's copy goes with it.
-CONTRACT_SHA256 = "63ee0084e9134cc1fde976445ba2832a77cb1c74b9b448743a03edf9d70e3932"  # story #4658: + desktop_agent_needs_sign_in · desktop_agent_sign_in_cleared  # story #4452: + desktop_agent_start_failed
+CONTRACT_SHA256 = "7d9fd39fbc16548f44a7cf118d13802a9325e2e15946b5bb1383f2bb662b8b78"  # story #4658: + desktop_agent_needs_sign_in · desktop_agent_sign_in_cleared  # story #4452: + desktop_agent_start_failed
 
 
 def test_every_name_the_app_sends_has_one_shape_and_the_contract_file_matches_values_included():
