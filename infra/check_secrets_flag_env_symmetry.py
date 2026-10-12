@@ -32,6 +32,11 @@ _DEV_ONLY_EXCEPTIONS: dict[str, str] = {
         "SUPPORT_GATEWAY_OPERATOR_REPLY_URL 등)에서 `_DEPLOY_ENV != prod`로 걸려 있어 "
         "prod 백엔드는 이 값을 쓸 코드 경로 자체가 배선 안 됨 — 값 누락이 아니라 기능 자체가 dev 전용."
     ),
+    "DESKTOP_MACHINE_KEY_SECRET": (
+        "story 4660 — dev부터 배선(PO · Secret Manager DESKTOP_MACHINE_KEY_SECRET_DEV는 PO가 만든다), prod는 승격 때 "
+        "PO가 _PROD 시크릿을 만들어 prod 갈래에 넣고 이 예외를 걷는다. 그 전 prod에 키가 없으면 안전: "
+        "backend/app/services/desktop_setup.py `machine_key_for()`가 비밀이 비면 None을 돌려 옛 줄을 닫지도 않는다(fail-safe)."
+    ),
     "EDGE_CLIENT_IP_SECRET": (
         "story #4398 — dev부터 배선(PO 2026-09-29 · Secret Manager EDGE_CLIENT_IP_SECRET_DEV), prod는 승격 때 "
         "PO가 _PROD 시크릿을 만들어 prod 갈래에 넣고 이 예외를 걷는다. 그 전 prod의 부재는 안전: "
