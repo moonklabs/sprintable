@@ -49,6 +49,8 @@ interface DesktopDownloadManifest {
   version: string;
   build: string;
   url: string;
+  /** story 4655 (PO 14405): the first-open guide follows this flag — only an un-notarized build is blocked by macOS. Absent = treated as not notarized. */
+  notarized?: boolean;
 }
 
 /**
@@ -136,6 +138,8 @@ export function DesktopDownloadCard() {
       ) : (
       <>
       {/* [SID:4619] 유나 정본 — 제목 = 지금 할 일 · 손순서 두 줄(번호가 뜻) · macOS 12 덧줄 · 까닭(공증 전) */}
+      {/* story 4655 (PO 14405): the guide is for an un-notarized build only; a notarized one opens without it (the button stays) */}
+      {manifest.notarized === true ? null : (
       <Alert variant="warning">
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle className="break-keep" data-testid="desktop-download-gatekeeper-title">{t('gatekeeperTitle')}</AlertTitle>
@@ -154,6 +158,7 @@ export function DesktopDownloadCard() {
           </p>
         </div>
       </Alert>
+      )}
       <Button asChild size="sm" data-testid="desktop-download-button">
         <a href={downloadUrl} download>{t('downloadCta')}</a>
       </Button>

@@ -227,3 +227,38 @@ describe('[4547] not a Mac — one line where the warning and [다운로드] wer
     expect(q('desktop-download-open-on-mac')?.textContent).toBe('Open this page on your Mac to download');
   });
 });
+
+// [SID:4655 · PO 14405 (A)] the first-open guide follows the manifest's `notarized` flag: a notarized build opens without it,
+// an un-notarized one (and a manifest with no flag) keeps the guide. The button is there either way.
+describe('[4655] the guide follows notarized', () => {
+  const BASE = {
+    product: 'Sprintable Dev Setup', version: '0.2.0', build: 'b1363923d',
+    url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/0.2.0/Sprintable-Dev-Setup-b1363923d-arm64.dmg',
+  };
+  const q = (id: string) => container.querySelector(`[data-testid="${id}"]`);
+  async function show(manifest: Record<string, unknown>) {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(manifest)));
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+    await flush();
+  }
+
+  it('notarized: true → no first-open guide and no «공증 전» line; the button stays', async () => {
+    await show({ ...BASE, notarized: true });
+    expect(q('desktop-download-gatekeeper-title')).toBeNull();
+    expect(q('desktop-download-install-steps')).toBeNull();
+    expect(q('desktop-download-notarization-notice')).toBeNull();
+    expect(q('desktop-download-button')?.getAttribute('href')).toBe(BASE.url);
+  });
+
+  it('notarized: false → the guide and the «공증 전» line are there', async () => {
+    await show({ ...BASE, notarized: false });
+    expect(q('desktop-download-gatekeeper-title')?.textContent).toBe(koMessages.desktop.gatekeeperTitle);
+    expect(q('desktop-download-notarization-notice')?.textContent).toBe(koMessages.desktop.notarizationNotice);
+    expect(q('desktop-download-button')).not.toBeNull();
+  });
+
+  it('no flag at all → treated as not notarized: the guide stays (never hide a block that may be there)', async () => {
+    await show({ ...BASE });
+    expect(q('desktop-download-gatekeeper-title')).not.toBeNull();
+  });
+});
