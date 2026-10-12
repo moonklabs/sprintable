@@ -10,9 +10,9 @@ name: Serving Reality Guard
 # 주기: 6시간마다. 일 1회로 두면 실패한 배포를 최대 24시간 모른다 — 이 가드를 만들게 한
 # 표본 B 가 **5일**이었고, 표본 A 가 **22시간**이었다. 검사 비용은 서비스 11개 describe 라
 # 사실상 0 이므로 주기를 짧게 잡는 쪽의 손해가 없다.
+# 2026-10-12 (story 4659): 6시간 cron 제거. 배포 직후에만 돈다 — cloud-build.yml 배포 job 뒤 workflow_call + 수동 dispatch.
 on:
-  schedule:
-    - cron: '15 */6 * * *'  # 00:15·06:15·12:15·18:15 UTC (env-drift-guard 와 시각 분리)
+  workflow_call: {}
   workflow_dispatch: {}     # 배포 직후 온디맨드 확認용
 
 concurrency:
