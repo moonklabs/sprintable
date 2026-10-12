@@ -21,3 +21,26 @@ describe('[SID:4654] phone app store addresses', () => {
     for (const l of phoneAppStoreLinks({ android: true, ios: true })) expect(l.url.startsWith('https://')).toBe(true);
   });
 });
+
+// story 4654 — the web build decides by its own public address: dev shows the dev package, production shows nothing
+import { phoneAppTarget, PHONE_APP_STORE_ANDROID_DEV } from './phone-app-store';
+
+describe('[SID:4654] the store the web build shows, by its address', () => {
+  it('the dev web (dev-app) shows the dev Android package only; iOS stays off', () => {
+    const t = phoneAppTarget('https://dev-app.sprintable.ai');
+    expect(t.published).toEqual({ android: true, ios: false });
+    expect(t.android).toBe('https://play.google.com/store/apps/details?id=com.moonklabs.sprintable.dev');
+    expect(phoneAppStoreLinks(t.published, t.android).map((l) => l.url)).toEqual([PHONE_APP_STORE_ANDROID_DEV]);
+  });
+
+  it('the production web (app) shows nothing: no card, no link', () => {
+    const t = phoneAppTarget('https://app.sprintable.ai');
+    expect(t.published).toEqual({ android: false, ios: false });
+    expect(phoneAppStoreLinks(t.published, t.android)).toEqual([]);
+  });
+
+  it('no address or a broken one shows nothing (fail closed)', () => {
+    expect(phoneAppTarget(undefined).published).toEqual({ android: false, ios: false });
+    expect(phoneAppTarget('not a url').published).toEqual({ android: false, ios: false });
+  });
+});

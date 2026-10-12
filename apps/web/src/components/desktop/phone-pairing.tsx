@@ -10,7 +10,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { LimitPhoneRow, type LimitPhone } from '@/components/desktop/limit-phone-row';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
-import { PHONE_APP_PUBLISHED, phoneAppStoreLinks } from '@/lib/phone-app-store';
+import { PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, phoneAppStoreLinks } from '@/lib/phone-app-store';
 import { QRCodeSVG } from 'qrcode.react';
 import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
 
@@ -42,7 +42,7 @@ type View =
 /** story 4654 (AC2): the phone app's two store links, each with its QR (the address itself, from phone-app-store) */
 export function PhoneAppGet({ body }: { body?: string }) {
   const t = useTranslations('phonePairing');
-  const links = phoneAppStoreLinks(PHONE_APP_PUBLISHED);
+  const links = phoneAppStoreLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET);
   if (links.length === 0) return null; // nothing published yet: the page keeps its one line (story 4654 · Yuna 5048)
   return (
     <div className="flex flex-col gap-3" data-testid="phone-app-get">
