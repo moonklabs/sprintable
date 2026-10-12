@@ -37,6 +37,16 @@ describe('[SID:4654] the phone app card under the onboarding download card', () 
     expect([...h.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([PHONE_APP_STORE_ANDROID]);
   });
 
+  // Yuna 5049 CHANGES: the body line sits under the title, in the words of phonePairing.needPhoneAppBody (fixed here)
+  it('the body line under the title reads exactly the Yuna words (ko)', async () => {
+    const h = await draw(true);
+    const body = h.querySelector('[data-testid="phone-app-body"]');
+    expect(body?.textContent).toBe('폰에서 이 컴퓨터의 에이전트에 답하고, 멈추거나 지시하려면 폰 앱이 필요해요.');
+    const title = h.querySelector('[data-testid="phone-app-get"] p');
+    expect(title?.textContent).toBe('폰 앱 받기');
+    expect(title!.compareDocumentPosition(body!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('a Mac: nothing is drawn (the Mac app card stays alone on the page)', async () => {
     const h = await draw(false);
     expect(h.innerHTML).toBe('');
