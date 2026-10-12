@@ -60,6 +60,8 @@ EVENT_DOC_OPENED = "desktop_doc_opened"
 EVENT_AGENT_ENDED_EARLY = "desktop_agent_ended_early"
 EVENT_AGENT_RESTARTED = "desktop_agent_restarted"
 EVENT_AGENT_START_FAILED = "desktop_agent_start_failed"  # story #4452
+EVENT_AGENT_NEEDS_SIGN_IN = "desktop_agent_needs_sign_in"  # story #4658
+EVENT_AGENT_SIGNED_IN = "desktop_agent_signed_in"  # story #4658
 from app.services.onboarding_funnel import START_FAILED_CODES, START_FAILED_REASONS  # noqa: E402
 from app.services.onboarding_funnel import EXIT_CODE_RANGE as _EXIT_CODE_RANGE  # noqa: E402
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
@@ -1196,6 +1198,32 @@ def _agents_ended(setup: DesktopSetup, rows) -> list[dict]:
     return out
 
 
+def _agents_sign_in(setup: DesktopSetup, rows) -> list[dict]:
+    """story #4658 (PO 17072 (a)) — per agent of this setup that asks for a sign-in now: its last ask (the runtime when it is claude
+    or codex, else None). A later «signed in» for that agent clears it. Only this setup's agents; the order is the setup's."""
+    order: list[str] = []
+    for m in setup.members or []:
+        mid = str(m.get("member_id") or "")
+        if m.get("kind") == "agent" and mid and mid not in order:
+            order.append(mid)
+    asking: dict[str, tuple[dict, datetime]] = {}
+    for e, meta, at in rows:  # oldest first — the last write wins
+        mid = str((meta or {}).get("member_id") or "")
+        if mid not in order:
+            continue
+        if e == EVENT_AGENT_NEEDS_SIGN_IN:
+            asking[mid] = (meta or {}, at)
+        elif e == EVENT_AGENT_SIGNED_IN:
+            asking.pop(mid, None)
+    out = []
+    for mid in order:
+        if mid not in asking:
+            continue
+        meta, at = asking[mid]
+        out.append({"member_id": mid, "at": at, "runtime": meta.get("runtime") if meta.get("runtime") in BLOCKED_RUNTIMES else None})
+    return out
+
+
 def _agents_start_failed(setup: DesktopSetup, rows) -> list[dict]:
     """story #4452 (선생님 check A · PO 04:35Z) — per agent of this setup that the shell could not start: its last such report
     (reason · the daemon's code · runtime · a session cap · the agent it waited on), unless the agent connected its tools or was
@@ -1273,6 +1301,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     recipe = await _recipe_ref(db, setup)
     agents_ended = _agents_ended(setup, rows)
     agents_start_failed = _agents_start_failed(setup, rows)
+    agents_sign_in = _agents_sign_in(setup, rows)
     return {
         "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
         "recipe_name": recipe["name"] if recipe else None,
@@ -1292,6 +1321,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             "first_screen_human_input_at": screen_input[1] if screen_input else None,
             "agents_ended": agents_ended,
             "agents_start_failed": agents_start_failed,
+            "agents_sign_in": agents_sign_in,
             "blocked": {
                 "at": blocked[1],
                 "reason": reason if reason in BLOCKED_REASONS else None,
