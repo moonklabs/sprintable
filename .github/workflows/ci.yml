@@ -206,7 +206,14 @@ jobs:
             echo "비교 기준 없음 — 웹 e2e 실행(fail-closed)."
             exit 0
           fi
-          if git diff --name-only "${A}...${B}" | grep -q '^apps/web/'; then
+          # diff 자체가 실패하면(B 없음 · 얕은 경계 등) 「변경 없음」으로 읽지 않고 실행으로 간다(fail-closed).
+          # 파이프(`git diff | grep -q`)로 쓰면 pipefail 때문에 실패가 조용히 false가 된다 — 그래서 변수로 받는다.
+          if ! CHANGED="$(git diff --name-only "${A}...${B}")"; then
+            echo "web_changed=true" >> "$GITHUB_OUTPUT"
+            echo "git diff 실패 — 웹 e2e 실행(fail-closed)."
+            exit 0
+          fi
+          if grep -q '^apps/web/' <<< "${CHANGED}"; then
             echo "web_changed=true" >> "$GITHUB_OUTPUT"
             echo "apps/web/ 변경 있음 — 웹 e2e 실행."
           else

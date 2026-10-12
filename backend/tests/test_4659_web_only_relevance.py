@@ -99,3 +99,47 @@ def test_message_file_in_destructive_list_brings_the_shards_back(tmp_path):
     _write(repo, "apps/web/messages/ko.json", '{"a": "c"}\n')
     _git(repo, "commit", "-q", "-am", "copy with the file listed")
     assert _decide(repo, base, destructive=True) == 0
+
+
+_CI_YML = os.path.join(os.path.dirname(__file__), "..", "..", ".github", "workflows", "ci.yml")
+
+
+def _web_step_output(repo, base_sha, head_sha):
+    # ci.yml의 detect-changed-scope → 「web」 스텝 run 본문을 그대로 꺼내 돌린다(사본을 따로 두지 않는다)
+    import yaml
+
+    with open(_CI_YML) as f:
+        ci = yaml.safe_load(f)
+    step = next(s for s in ci["jobs"]["detect-changed-scope"]["steps"] if s.get("id") == "web")
+    out = repo / "github_output"
+    out.write_text("")
+    env = {
+        **os.environ,
+        "BASE_SHA": base_sha, "HEAD_SHA": head_sha,
+        "PUSH_BEFORE_SHA": "", "PUSH_AFTER_SHA": "",
+        "GITHUB_OUTPUT": str(out),
+    }
+    subprocess.run(["bash", "-c", step["run"]], cwd=str(repo), env=env, capture_output=True, text=True)
+    return out.read_text()
+
+
+def test_web_step_fails_closed_when_the_diff_itself_errors(tmp_path):
+    # HEAD 자리에 없는 커밋을 넣으면 git diff가 실패한다 — 그때 「변경 없음」(false)이 아니라 실행(true)이어야 한다
+    repo, base = _init_repo(tmp_path)
+    assert "web_changed=true" in _web_step_output(repo, base, "f" * 40)
+
+
+def test_web_step_reports_web_change_when_diff_works(tmp_path):
+    repo, base = _init_repo(tmp_path)
+    _write(repo, "apps/web/src/components/unrelated.tsx", "export const X = 2\n")
+    _git(repo, "commit", "-q", "-am", "web change")
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    assert "web_changed=true" in _web_step_output(repo, base, head)
+
+
+def test_web_step_reports_no_web_change_for_backend_only_diff(tmp_path):
+    repo, base = _init_repo(tmp_path)
+    _write(repo, "backend/app/routers/other.py", "x = 2\n")
+    _git(repo, "commit", "-q", "-am", "backend change")
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    assert "web_changed=false" in _web_step_output(repo, base, head)
