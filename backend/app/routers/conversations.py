@@ -1293,6 +1293,8 @@ class CircuitBreakerState(BaseModel):
     can_release: bool
     # auto only: after how many quiet minutes agents may send again (window × 2 · the server's value)
     auto_release_after_minutes: int | None = None
+    # story #4657: nobody in the org may release it (no active owner/admin) — the band says so instead of «ask an admin»
+    no_release_admin: bool = False
 
 
 ConversationResponse.model_rebuild()

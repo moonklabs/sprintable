@@ -43,7 +43,7 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -283,13 +283,8 @@ async def evaluate_unsupervised_chain_episode(
         from app.models.project import OrgMember
         from app.services.notification_dispatch import dispatch_notification
 
-        approver_ids = (await db.execute(
-            select(OrgMember.id).where(
-                OrgMember.org_id == org_id,
-                OrgMember.role.in_(("owner", "admin")),
-                OrgMember.deleted_at.is_(None),
-            )
-        )).scalars().all()
+        # story #4657: the notice goes to exactly the people who may release (one rule with may_release_circuit_breaker)
+        approver_ids = [om_id for om_id, _user_id in await release_admin_rows(db, org_id)]
         if not approver_ids:
             return
 
@@ -355,22 +350,36 @@ async def get_open_circuit_breaker_id(db: AsyncSession, conversation_id: uuid.UU
     )).scalar_one_or_none()
 
 
+async def release_admin_rows(db: AsyncSession, org_id: uuid.UUID) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """story #4657: the one rule for who may release an org's flood block — an org owner/admin (org_members role) whose person
+    also has an active, undeleted human members row. The notice's recipients and the release check both read this; a second
+    rule would send a notice to someone who cannot press the button (or leave a person with the button and no notice).
+    Returns (org_members.id, user_id) pairs."""
+    from app.models.member import Member
+    from app.models.project import OrgMember
+
+    active_human = exists().where(
+        Member.org_id == org_id, Member.user_id == OrgMember.user_id, Member.type == "human",
+        Member.is_active.is_(True), Member.deleted_at.is_(None),
+    )
+    rows = (await db.execute(
+        select(OrgMember.id, OrgMember.user_id).where(
+            OrgMember.org_id == org_id,
+            OrgMember.role.in_(("owner", "admin")),
+            OrgMember.deleted_at.is_(None),
+            active_human,
+        )
+    )).all()
+    return [(om_id, user_id) for om_id, user_id in rows]
+
+
 async def may_release_circuit_breaker(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID) -> bool:
     """story #4631 (Kadir 5016): who may release a conversation's flood block — an org owner/admin (human: org_members holds no
     agent and `is_org_owner_or_admin` excludes one besides) whose members row is active and not deleted — the same rule as removing
     another person's phone (#4624 · `is_active_org_admin`): a deactivated admin releases nothing. No members row → no (fail closed).
     The release API and the conversation read's can_release both ask this, so the button and the API never disagree."""
     from app.models.member import Member
-    from app.services.project_auth import is_org_owner_or_admin
-
-    if not await is_org_owner_or_admin(db, user_id, org_id):
-        return False
-    return (await db.execute(
-        select(Member.id).where(
-            Member.user_id == user_id, Member.org_id == org_id, Member.type == "human",
-            Member.is_active.is_(True), Member.deleted_at.is_(None),
-        ).limit(1)
-    )).first() is not None
+    return any(uid == user_id for _om_id, uid in await release_admin_rows(db, org_id))
 
 
 async def open_circuit_breaker_state(
@@ -392,9 +401,12 @@ async def open_circuit_breaker_state(
     can_release = caller_user_id is not None and await may_release_circuit_breaker(db, user_id=caller_user_id, org_id=org_id)
     # Yuna «4631» §2: the way it is really released (release_if_quiet makes «auto» true) and, for auto, after how many quiet
     # minutes — the server's value (window × 2), never one the web assumes
+    # story #4657: no one in the org may release it → say so (the band names the reason; the block is never silent)
+    no_release_admin = not await release_admin_rows(db, org_id)
     return {
         "opened_at": opened_at, "release_mode": release_mode, "can_release": can_release,
         "auto_release_after_minutes": auto_release_after_minutes(window_seconds) if release_mode == "auto" else None,
+        "no_release_admin": no_release_admin,
     }
 
 
