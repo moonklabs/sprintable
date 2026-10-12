@@ -1551,6 +1551,14 @@
     "returnButton": "Return to Sprintable app"
   },
   "onboarding": {
+      "remoteControl": {
+        "title": "Turn on remote control to handle your agents from your phone",
+        "body": "Once on, you can approve agent permission requests, stop agents, and send them instructions from your phone. You can turn it off anytime.",
+        "enable": "Turn on remote control",
+        "later": "Later",
+        "enabled": "Remote control is on",
+        "failed": "Couldn't turn on remote control — please try again"
+      },
     "slugCharsHint": "Only lowercase letters, numbers, and hyphens are allowed",
     "verifyStatusDone": "Done",
     "verifyStatusActive": "In progress",
