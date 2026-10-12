@@ -17,11 +17,9 @@ name: sprintable-mcp PyPI smoke test
 # match) — both reproduced against real installs (PyPI for broken, a local wheel build for
 # fixed) before this workflow was written. See the PR body for the transcripts.
 
+# 2026-10-12 (story 4659): 매일 cron 제거. 발행 뒤(publish-mcp.yml smoke job)와 수동 dispatch에서만 돈다.
 on:
-  schedule:
-    # mcp SDK majors aren't frequent — daily is enough to catch drift within a day, not
-    # the 4-day blind spot this story found.
-    - cron: "0 3 * * *"
+  workflow_call: {}
   workflow_dispatch: {}
 
 jobs:

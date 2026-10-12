@@ -695,3 +695,9 @@ jobs:
             --substitutions=COMMIT_SHA="${{ github.sha }}",${{ steps.subst.outputs.substitutions }} \
             --suppress-logs \
             .
+
+  # 2026-10-12 (story 4659): 배포 뒤에만 실서버 도달 확인. 예약 cron은 두지 않는다.
+  serving-reality:
+    needs: cloud-build
+    uses: ./.github/workflows/serving-reality-guard.yml
+    secrets: inherit
