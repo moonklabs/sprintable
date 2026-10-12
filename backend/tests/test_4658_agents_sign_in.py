@@ -28,12 +28,12 @@ def test_an_ask_is_listed_with_its_runtime_then_cleared_by_signed_in():
     rows = [_row("desktop_agent_needs_sign_in", M1, 1, runtime="claude")]
     out = _agents_sign_in(_setup(), rows)
     assert [(r["member_id"], r["runtime"], r["at"]) for r in out] == [(M1, "claude", T0 + timedelta(seconds=1))]
-    rows.append(_row("desktop_agent_signed_in", M1, 2))
+    rows.append(_row("desktop_agent_sign_in_cleared", M1, 2))
     assert _agents_sign_in(_setup(), rows) == []
 
 
 def test_a_new_ask_after_a_release_is_listed_again():
-    rows = [_row("desktop_agent_needs_sign_in", M1, 1, runtime="claude"), _row("desktop_agent_signed_in", M1, 2),
+    rows = [_row("desktop_agent_needs_sign_in", M1, 1, runtime="claude"), _row("desktop_agent_sign_in_cleared", M1, 2),
             _row("desktop_agent_needs_sign_in", M1, 3, runtime="claude")]
     assert [r["member_id"] for r in _agents_sign_in(_setup(), rows)] == [M1]
 
