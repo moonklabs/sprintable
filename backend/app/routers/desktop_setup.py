@@ -518,6 +518,13 @@ class AgentEnded(BaseModel):
     restarted_at: datetime | None = None
 
 
+class AgentSignIn(BaseModel):
+    """story #4658 — an agent that asks for a sign-in now (cleared by its «signed in»): when it asked, and the runtime's name when known."""
+    member_id: str
+    at: datetime
+    runtime: Literal["claude", "codex"] | None = None
+
+
 class AgentStartFailed(BaseModel):
     """story #4452 — an agent the shell could not start: its last report (cleared once it connects or is restarted after it).
     `reason`/`code` are closed sets (onboarding_funnel START_FAILED_*) — the web words them; None = not one it knows."""
@@ -543,6 +550,7 @@ class SetupSignals(BaseModel):
     blocked: SetupBlocked | None
     agents_ended: list[AgentEnded] = []  # story #4433 — one row per agent whose session ended early
     agents_start_failed: list[AgentStartFailed] = []  # story #4452 — one row per agent the shell could not start
+    agents_sign_in: list[AgentSignIn] = []  # story #4658 — one row per agent asking for a sign-in now
 
 
 class SetupStatusRecipe(BaseModel):

@@ -30,7 +30,8 @@ def test_event_catalog_has_canonical_28():
     # story #4427 — 24 → 25: the desktop setup page's desktop_doc_opened (the login hand is the shell's — PO 09:58Z)
     # story #4433 — 25 → 27: the desktop app's agent ended early · agent restarted (Min 11:55Z · signals.agents_ended)
     # story #4452 — 27 → 28: the desktop app's agent start failed (선생님 check A · signals.agents_start_failed)
-    assert len(f.EVENT_CATALOG) == 28
+    # story #4658 — 28 → 30: the desktop app's agent asks for a sign-in · signed in again (signals.agents_sign_in)
+    assert len(f.EVENT_CATALOG) == 30
     assert "config_generated" in f.EVENT_CATALOG and "verified" in f.EVENT_CATALOG
     assert len(f.BE_EMIT_EVENTS) == 13
     assert len(f.FAILURE_REASONS) == 8

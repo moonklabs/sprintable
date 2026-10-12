@@ -119,12 +119,15 @@ async def post_onboarding_event(
         except Exception:
             person_id = None
 
-    from app.services.desktop_setup import EVENT_FIRST_TASK_HANDED, is_move_setup, verify_setup_event
+    from app.services.desktop_setup import EVENT_AGENT_NEEDS_SIGN_IN, EVENT_AGENT_SIGN_IN_CLEARED, EVENT_FIRST_TASK_HANDED, is_move_setup, is_setup_agent, verify_setup_event
 
     # story #4576 (PO 04:24Z): a move hands its agents no first task — the step is refused for it (the app does not send it either)
     if body.event == EVENT_FIRST_TASK_HANDED and await is_move_setup(db, body.session_id):
         raise HTTPException(status_code=409, detail={"code": "not_for_move", "message": "a move hands no first task"})
 
+    # story #4658 (Kadir 5045 ④): a sign-in step names one of this setup's own agents — another organization's, or one not in the setup, is refused
+    if body.event in (EVENT_AGENT_NEEDS_SIGN_IN, EVENT_AGENT_SIGN_IN_CLEARED) and not await is_setup_agent(db, body.session_id, body.meta.get("member_id")):
+        raise HTTPException(status_code=422, detail={"code": "not_this_setups_agent", "message": "the member is not an agent of this setup", "event": body.event})
     verified = await verify_setup_event(
         db, event=body.event, setup_id=body.session_id, event_token=x_setup_event_token, user_id=person_id,
     )

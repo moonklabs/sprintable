@@ -27,7 +27,7 @@ M = str(uuid.uuid4())
 # The contract file is byte-for-byte the same in sprintable-mobile (desktop-electron/src/shell-meta-shapes.json), and both
 # repos pin this sha256 in the same letters (Kadir 228 · PO 19:45Z): changing the file on one side turns that side red, and
 # the fix — a new pin — says in its PR that the other repo's copy goes with it.
-CONTRACT_SHA256 = "94da7a35399a3a0c4d91cbb87add87413c8f2c0e9c747832711573d373509ddd"  # story #4452: + desktop_agent_start_failed
+CONTRACT_SHA256 = "7d9fd39fbc16548f44a7cf118d13802a9325e2e15946b5bb1383f2bb662b8b78"  # story #4658: + desktop_agent_needs_sign_in · desktop_agent_sign_in_cleared  # story #4452: + desktop_agent_start_failed
 
 
 def test_every_name_the_app_sends_has_one_shape_and_the_contract_file_matches_values_included():
@@ -86,13 +86,19 @@ GOOD = [
     ("desktop_agent_start_failed", {"member_id": M, "reason": "start_refused", "code": "session_limit", "limit": 3}),
     ("desktop_agent_start_failed", {"member_id": M, "reason": "first_not_ready", "code": "timeout", "first_member_id": M}),
     ("desktop_agent_start_failed", {"member_id": M, "reason": "runtime_missing", "runtime": "claude"}),
+    # story #4658 — a sign-in the agent asks for (runtime's name only) and its release
+    ("desktop_agent_needs_sign_in", {"member_id": M, "runtime": "claude"}),
+    ("desktop_agent_needs_sign_in", {"member_id": M}),
+    ("desktop_agent_sign_in_cleared", {"member_id": M}),
 ]
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("event,meta", GOOD)
-async def test_the_shapes_the_app_sends_are_stored(event, meta):
+async def test_the_shapes_the_app_sends_are_stored(event, meta, monkeypatch):
     db = _db()
+    # story #4658: the sign-in steps are refused unless the member is this setup's agent — the shape is what this test is about
+    monkeypatch.setattr("app.services.desktop_setup.is_setup_agent", AsyncMock(return_value=True))
     await post_onboarding_event(OnboardingEventBody(event=event, session_id=uuid.uuid4(), meta=meta), db=db, credentials=None, x_agent_api_key=None)
     assert db.add.called
 
