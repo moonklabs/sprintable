@@ -1825,3 +1825,29 @@ async def test_an_error_in_the_access_recheck_that_is_not_the_db_is_not_swallowe
             await agen.aclose()
             ag._agent_connections.clear()
             shutdown_module.reset_shutdown_event()
+
+
+# ─── story #4658 (PO 17072 (a) · Kadir 5045 ④) — the sign-in steps name only this setup's own agents, refused at the entrance ──────
+
+
+@pytest.mark.anyio
+async def test_4658_a_sign_in_step_is_refused_for_a_member_that_is_not_this_setups_agent(world):
+    foreign = uuid.UUID("d4424000-0000-0000-0000-000000000030")  # an agent of ANOTHER organization
+    await _sql(f"INSERT INTO members (id,org_id,user_id,type,name,is_active) VALUES ('{foreign}','{ORG2}',NULL,'agent','Foreign',true)")
+    async with _client() as c:
+        code, _verifier = await _code(c, "d4658 sign-in")
+        confirmed = (await _confirm(c, code)).json()
+        setup_id = confirmed["setup_id"]
+        writer = {m["role"]: m["member_id"] for m in confirmed["members"] if m["kind"] == "agent"}["Writer"]
+        status = lambda: c.get(f"/api/v2/desktop/setups/{setup_id}", headers=_person(OWNER))
+        for event in ("desktop_agent_needs_sign_in", "desktop_agent_sign_in_cleared"):
+            # another organization's agent · an agent of this organization that is not in this setup → refused, nothing kept
+            for not_ours in (str(foreign), str(EXISTING)):
+                r = await _app_event(c, setup_id, event, {"member_id": not_ours, "runtime": "claude"} if "needs" in event else {"member_id": not_ours})
+                assert r.status_code == 422, (event, not_ours, r.text)
+        assert (await status()).json()["signals"]["agents_sign_in"] == []
+        # this setup's own agent: accepted, and the status reads the open question until it is over
+        assert (await _app_event(c, setup_id, "desktop_agent_needs_sign_in", {"member_id": writer, "runtime": "claude"})).status_code == 202
+        assert [a["member_id"] for a in (await status()).json()["signals"]["agents_sign_in"]] == [writer]
+        assert (await _app_event(c, setup_id, "desktop_agent_sign_in_cleared", {"member_id": writer})).status_code == 202
+        assert (await status()).json()["signals"]["agents_sign_in"] == []
