@@ -219,14 +219,122 @@ describe('[4532] phone pairing screen', () => {
     expect(sent.some((s) => s.type === 'pair.mac')).toBe(false);
   });
 
-  it('three phones already → the B-4 phone line pointing at [이 폰 빼기] (story #4624) + [다시 찍기]', async () => {
+  it('an empty last-use value reads the relative time, never «아직 안 씀» (story #4624 · Yuna)', async () => {
     registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') {
+        return res(200, { devices: [{ id: 'p-9', label: '빈 값 폰', last_used_at: '', pairs: [] }] });
+      }
+      return base(url, init);
+    });
     installShell();
     await render();
     await press('QR 찍기');
     await press('페어링');
-    expect(line()).toBe('이 계정의 원격 기기가 이미 3대예요 — 웹 «데스크톱 앱 › 원격 기기»에서 쓰지 않는 폰의 [이 폰 빼기]를 누른 뒤 다시 찍어 주세요');
-    expect(buttons()).toEqual(['다시 찍기']);
+    const row = container.querySelector('[data-testid="pairing-limit-phone"]');
+    expect(row?.textContent).not.toContain('아직 안 씀');
+  });
+
+  it('a removal that fails shows no «자리가 하나 비었어요» line (story #4624 · 까디르)', async () => {
+    registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+    const phones = [{ id: 'p-1', label: '내 폰 A', last_used_at: null, pairs: [] }];
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: phones });
+      if (url === '/api/remote-devices/p-1' && init?.method === 'DELETE') return res(500, { error: { code: 'internal' } });
+      return base(url, init);
+    });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    await press('이 폰 빼기');
+    await press('이 폰 빼기');
+    expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-1' && init?.method === 'DELETE')).toBe(true);
+    expect(document.body.textContent).not.toContain('자리가 하나 비었어요');
+    expect(document.body.textContent).not.toContain('뺐어요');
+  });
+
+  it('three phones → one [이 폰 빼기] → confirm → the place is free → [다시 찍기] starts the scan again (story #4624 · 까디르)', async () => {
+    registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+    const phones = [
+      { id: 'p-1', label: '폰 하나', last_used_at: '2026-10-01T00:00:00Z', pairs: [] },
+      { id: 'p-2', label: '폰 둘', last_used_at: null, pairs: [] },
+      { id: 'p-3', label: '폰 셋', last_used_at: '2026-10-02T00:00:00Z', pairs: [] },
+    ];
+    let removed = false;
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: removed ? phones.filter((p) => p.id !== 'p-2') : phones });
+      if (url === '/api/remote-devices/p-2' && init?.method === 'DELETE') { removed = true; return res(200, { removed: true }); }
+      return base(url, init);
+    });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    expect(container.querySelectorAll('[data-testid="pairing-limit-phone"]').length).toBe(3);
+    const row = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')][1] as HTMLElement;
+    await act(async () => { [...row.querySelectorAll('button')].find((b) => b.textContent === '이 폰 빼기')!.click(); });
+    await settle();
+    const askedRow = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')][1] as HTMLElement;
+    await act(async () => { [...askedRow.querySelectorAll('button')].find((b) => b.textContent === '이 폰 빼기')!.click(); });
+    await settle();
+    expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-2' && init?.method === 'DELETE')).toBe(true);
+    expect(document.body.textContent).toContain('자리가 하나 비었어요');
+    const left = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')].map((r) => r.textContent ?? '');
+    expect(left.length).toBe(2);
+    expect(left.some((t) => t.includes('폰 둘'))).toBe(false);
+    expect(left.some((t) => t.includes('폰 하나'))).toBe(true);
+    expect(left.some((t) => t.includes('폰 셋'))).toBe(true);
+    sent.length = 0;
+    await press('다시 찍기');
+    expect(sent.some((m) => m.type === 'pair.scan')).toBe(true);
+  });
+
+  it('three phones already → the limit screen lists this account\'s phones; one confirm removes one, then the rescan (story #4624)', async () => {
+    registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+    const phones = [
+      { id: 'p-1', label: '내 폰 A', last_used_at: new Date(Date.now() - 2 * 86_400_000).toISOString(), pairs: [{ device_name: 'SYJ-MacBook-Pro' }] },
+      { id: 'p-2', label: '내 폰 B', last_used_at: null, pairs: [] },
+    ];
+    const base = fetchWithAuth.getMockImplementation()!;
+    let removed = false;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') {
+        return res(200, { devices: removed ? [phones[1]] : phones });
+      }
+      if (url === '/api/remote-devices/p-1' && init?.method === 'DELETE') {
+        removed = true;
+        return res(200, { removed: true });
+      }
+      return base(url, init);
+    });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    expect(line()).toBe('원격 기기가 셋 다 찼어요');
+    expect(document.body.textContent).toContain('내 폰 A');
+    expect(document.body.textContent).toContain('내 폰 B');
+    expect(buttons()).toContain('웹에서 빼 주세요');
+    expect(document.body.textContent).toContain('이름 · 마지막 쓴 때');
+    expect(document.body.textContent).toContain('아직 안 씀');
+    // story #4624 (유나 조건): 「아직 안 씀」 only where last_used_at is null — a phone with a last use reads its relative time
+    const rows = container.querySelectorAll('[data-testid="pairing-limit-phone"]');
+    expect(rows[0].textContent).not.toContain('아직 안 씀');
+    expect(rows[0].textContent).toContain('그저께');
+    expect(rows[1].textContent).toContain('아직 안 씀');
+    expect(document.body.textContent).not.toContain('자리가 하나 비었어요');
+    await press('이 폰 빼기');
+    expect(document.body.textContent).toContain('이 폰을 뺄까요?');
+    await press('이 폰 빼기');
+    expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-1' && init?.method === 'DELETE')).toBe(true);
+    expect(document.body.textContent).toContain('뺐어요 · 내 폰 A');
+    expect(container.querySelectorAll('[data-testid="pairing-limit-phone"]').length).toBe(1);
+    expect(document.body.textContent).toContain('자리가 하나 비었어요. [다시 찍기]를 누르면 새 QR로 이어서 짝지어요');
+    expect(buttons()).toContain('다시 찍기');
   });
 
   it('this phone registered to another account → its own line (never who) + [다시 찍기] (story #4624)', async () => {
