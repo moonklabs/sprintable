@@ -1845,9 +1845,35 @@ async def test_4658_a_sign_in_step_is_refused_for_a_member_that_is_not_this_setu
             for not_ours in (str(foreign), str(EXISTING)):
                 r = await _app_event(c, setup_id, event, {"member_id": not_ours, "runtime": "claude"} if "needs" in event else {"member_id": not_ours})
                 assert r.status_code == 422, (event, not_ours, r.text)
+                assert r.json()["error"]["code"] == "not_this_setups_agent", (event, not_ours, r.text)
         assert (await status()).json()["signals"]["agents_sign_in"] == []
         # this setup's own agent: accepted, and the status reads the open question until it is over
         assert (await _app_event(c, setup_id, "desktop_agent_needs_sign_in", {"member_id": writer, "runtime": "claude"})).status_code == 202
         assert [a["member_id"] for a in (await status()).json()["signals"]["agents_sign_in"]] == [writer]
         assert (await _app_event(c, setup_id, "desktop_agent_sign_in_cleared", {"member_id": writer})).status_code == 202
         assert (await status()).json()["signals"]["agents_sign_in"] == []
+
+
+@pytest.mark.anyio
+async def test_4658_a_foreign_agent_listed_in_the_setup_is_still_refused_by_its_organization(world):
+    """Kadir 5045 ①②: a member listed in the setup's members but owned by ANOTHER organization is refused with the same code —
+    the organization check is what refuses it (the list alone would let it through)."""
+    foreign = uuid.UUID("d4424000-0000-0000-0000-000000000031")
+    await _sql(f"INSERT INTO members (id,org_id,user_id,type,name,is_active) VALUES ('{foreign}','{ORG2}',NULL,'agent','Listed foreign',true)")
+    async with _client() as c:
+        code, _verifier = await _code(c, "d4658 listed foreign")
+        confirmed = (await _confirm(c, code)).json()
+        setup_id = confirmed["setup_id"]
+        writer = {m["role"]: m["member_id"] for m in confirmed["members"] if m["kind"] == "agent"}["Writer"]
+        # the foreign agent is written into this setup's members list (as a bad row could be)
+        await _sql(
+            f"UPDATE desktop_setups SET members = members || CAST(:m AS jsonb) WHERE id = '{setup_id}'",
+            params={"m": json.dumps([{"member_id": str(foreign), "kind": "agent", "role": "Foreign", "runtime": "claude"}])},
+        )
+        for event in ("desktop_agent_needs_sign_in", "desktop_agent_sign_in_cleared"):
+            meta = {"member_id": str(foreign), "runtime": "claude"} if "needs" in event else {"member_id": str(foreign)}
+            r = await _app_event(c, setup_id, event, meta)
+            assert r.status_code == 422, (event, r.text)
+            assert r.json()["error"]["code"] == "not_this_setups_agent", (event, r.text)
+        # this setup's own writer is still accepted
+        assert (await _app_event(c, setup_id, "desktop_agent_needs_sign_in", {"member_id": writer, "runtime": "claude"})).status_code == 202

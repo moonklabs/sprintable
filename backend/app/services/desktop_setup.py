@@ -1199,12 +1199,21 @@ def _agents_ended(setup: DesktopSetup, rows) -> list[dict]:
 
 
 async def is_setup_agent(db: AsyncSession, setup_id: uuid.UUID, member_id: object) -> bool:
-    """story #4658 — the member is one of this setup's own agents (its members list). Another organization's agent, or an agent of
-    this organization that is not in the setup, is not — the sign-in steps are refused for it at the entrance."""
+    """story #4658 — the member is one of this setup's own agents: listed in its members AND belonging to the setup's organization.
+    Another organization's agent, or an agent of this organization that is not in the setup, is not — refused at the entrance."""
+    from app.models.member import Member
+
     setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id))).scalar_one_or_none()
     if setup is None:
         return False
-    return any(m.get("kind") == "agent" and str(m.get("member_id") or "") == str(member_id) for m in (setup.members or []))
+    listed = any(m.get("kind") == "agent" and str(m.get("member_id") or "") == str(member_id) for m in (setup.members or []))
+    if not listed:
+        return False
+    # the member itself must belong to the setup's own organization (a foreign id listed by mistake is still refused)
+    own = (await db.execute(select(Member.id).where(
+        Member.id == uuid.UUID(str(member_id)), Member.org_id == setup.org_id, Member.type == "agent",
+    ))).scalar_one_or_none()
+    return own is not None
 
 
 def _agents_sign_in(setup: DesktopSetup, rows) -> list[dict]:
