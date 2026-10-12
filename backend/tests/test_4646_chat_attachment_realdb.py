@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -159,6 +160,41 @@ async def test_message_id_from_another_conversation_is_not_found():
                 r = await client.get(f"/api/v2/conversations/{conv_a}/messages/{msg_b_id}/attachments/0/content")
                 assert r.status_code == 404, r.text
                 assert r.json()["error"]["message"] == "Message not found"
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_a_deleted_message_gives_no_attachment_content_and_answers_as_a_missing_one():
+    """④ tombstone — 지운 메시지의 첨부 본문은 없는 메시지와 같은 404 "Message not found"로 막힌다.
+    (get_chat_message 단건 GET은 tombstone을 200으로 준다 — 같은 오류 코드가 아니라 본문이 새지 않는 것이 기준.)
+    뮤턴트(deleted_at 검사 제거)면 첨부 본문이 200으로 새어 나와 이 테스트가 RED."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            proj = await _make_project(s, org.id)
+            caller_id, caller_user = await _make_human_member(s, org.id, proj.id)
+            conv = await _make_conversation(s, org.id, proj.id, [caller_id], created_by=caller_id, conv_type="dm")
+            path = f"org/{org.id}/project/{proj.id}/chat/{conv}/note.txt"
+            msg = await _add_message(s, conv, caller_id, "지운 메시지", _t(1))
+            msg.attachments = [{"name": "note.txt", "content_type": "text/plain", "url": _url_of(path)}]
+            msg.deleted_at = datetime.now(timezone.utc)
+            await s.commit()
+            msg_id = msg.id
+
+        client = _client_for(app)
+        try:
+            with patch("app.services.chat_attachment_service.get_storage_provider", return_value=_FakeStorage()):
+                await _setup_app_human(app, Session, caller_user, org.id)
+                r = await client.get(f"/api/v2/conversations/{conv}/messages/{msg_id}/attachments/0/content")
+                assert r.status_code == 404, r.text
+                assert r.json()["error"]["message"] == "Message not found"
+                assert "data_base64" not in r.text  # no attachment body in a refused answer
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
