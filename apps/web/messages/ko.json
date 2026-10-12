@@ -1551,6 +1551,14 @@
     "returnButton": "Sprintable 앱으로 돌아가기"
   },
   "onboarding": {
+      "remoteControl": {
+        "title": "이 조직에서 폰으로 에이전트를 다루려면 원격 제어를 켜요",
+        "body": "켜면 폰에서 에이전트의 권한 요청을 승인하고, 멈추고, 지시할 수 있어요. 나중에 언제든 끌 수 있어요.",
+        "enable": "원격 제어 켜기",
+        "later": "나중에 하기",
+        "enabled": "원격 제어가 켜졌어요",
+        "failed": "원격 제어를 켜지 못했어요 — 다시 시도해 주세요"
+      },
     "slugCharsHint": "영소문자, 숫자, 하이픈만 사용 가능해요",
     "verifyStatusDone": "완료",
     "verifyStatusActive": "진행 중",

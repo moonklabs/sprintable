@@ -17,6 +17,7 @@ import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemet
 import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { OnboardingRemoteControl } from '@/components/desktop/onboarding-remote-control';
 import { copyTextSafely } from '@/lib/clipboard';
 import { withProjectParam } from '@/hooks/use-flat-href';
 import { VerifyPromptCopyFailedPanel } from './verify-prompt-copy-failed-panel';
@@ -42,6 +43,8 @@ interface ConnectStepProps {
   agentId: string | null;
   apiKey: string | null;
   projectId: string | null;
+  /** story #4656: the org the onboarding made — its owner may turn remote control on here */
+  orgId?: string | null;
   onFinish: () => void;
   // story #3983 CHANGES(페드루 PO 2026-09-17 02:11Z) — 데스크톱 절 완료 버튼
   // 낱말이 실제 착지와 같아야 한다(온보딩 원칙). 기본값 false = 기존 테스트
@@ -104,7 +107,7 @@ export function HighlightedJson({ text }: { text: string }) {
   );
 }
 
-export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabled = false }: ConnectStepProps) {
+export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish, todayV3Enabled = false }: ConnectStepProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
 
@@ -372,6 +375,8 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
           갖는다 — 두 제목이 부딪힌다). 부제만 남긴다. */}
       <section className={cn(cardVariants(), 'space-y-3 p-4')} data-testid="connect-step-desktop-primary">
         <p className="text-xs text-muted-foreground">{t('desktopHandoffSubtitle')}</p>
+        {/* story #4656: the org's remote control, once, for its owner — before the desktop steps that need it (no flash: it draws only when read) */}
+        <OnboardingRemoteControl orgId={orgId} />
         <DesktopDownloadCard />
         {/* CHANGES ①: 데스크톱 앱은 이 화면 밖이라 키를 붙여 넣을 곳이 없다 —
             웹 경로 쪽(재시작 안내 옆)에 있던 핸드오프 문구+복사 칸을 여기로
