@@ -5,7 +5,7 @@ name: Env Drift Guard
 # 워크플로우로 둬야 PR/배포 예산과 안 섞인다(설계 doc "운영축" 그대로).
 on:
   schedule:
-    - cron: '0 0 * * *'  # 매일 00:00 UTC(=09:00 KST) 1회
+    - cron: '0 0 * * 1'  # 매주 월 00:00 UTC(=09:00 KST) 1회 (2026-10-12 story 4659: 일 1회 → 주 1회)
   workflow_dispatch: {}  # prod 승격 직전 등 온디맨드 수동 트리거
 
 concurrency:

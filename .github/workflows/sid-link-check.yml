@@ -5,9 +5,10 @@ name: SID Link Check
 # It must never be added to required status checks. The real linking is done by the
 # GitHub webhook (app/routers/verdict_capture.py); this just nudges contributors to tag.
 
+# 2026-10-12 (story 4659): PR 자동 실행을 껐다. 경고만 내는 검사라 막는 효과가 없고, 실제
+# 스토리 연결은 GitHub webhook(verdict_capture)과 스토리 게이트가 한다. 필요할 때만 수동 실행.
 on:
-  pull_request:
-    branches: [main, develop]
+  workflow_dispatch: {}
 
 # story #2912(2899 그라운딩 갈래B 처방) — 구head 런이 캐파를 계속 붙들지 않게 신 커밋이
 # 오면 즉시 취소(다른 gate들과 동형 패턴).
