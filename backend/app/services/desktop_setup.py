@@ -274,6 +274,26 @@ def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
     return RoleBinding(order=order, person_roles=person, agent_runtimes=runtimes, existing_agents=existing, agent_tools=agent_tools)
 
 
+def group_exchange_agents(members: list[dict], kind: str) -> dict[str, dict]:
+    """The agents an exchange hands over, one entry per agent (pure — story 4653 ④). A recipe's agent appears once per stage, so
+    its tools are the union of its rows' tools (cleaned, the runtime left out); a move's agent is its id, runtime and tools."""
+    per_agent: dict[str, dict] = {}
+    for m in members:
+        if m["kind"] != "agent":
+            continue
+        if kind == "move":
+            # story #4576 (PO 04:24Z): a move's agent — its id and runtime (its name is added with its new key below); no recipe
+            # role or stages, there is no recipe
+            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "existing": True, "tools": clean_agent_tools(m.get("tools"), m.get("runtime"))})
+            continue
+        entry = per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "role": m.get("role") or m["stage"], "stages": [], "runtime": m["runtime"], "tools": []})
+        entry["tools"] = clean_agent_tools([*entry["tools"], *(clean_agent_tools(m.get("tools"), m.get("runtime")))], m.get("runtime"))
+        if m.get("existing"):
+            entry["existing"] = True
+        entry["stages"].append(m["stage"])
+    return per_agent
+
+
 def stage_role(definition, stage: str) -> str:
     """A stage's role (`stage_metadata[stage].role`); an older definition without one: the stage is its own role."""
     role = (definition.stage_metadata.get(stage) or {}).get("role")
@@ -510,18 +530,28 @@ async def _check_confirmable(
 
 # story 4653 (PO 14015 (가)-a): the CLIs an agent of this setup uses — names only, kept on its member. The app checks these
 # (and claude · codex always); a name that is not a short plain word is dropped, and the list is capped.
-AGENT_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
-AGENT_TOOLS_CAP = 8
+# ONE rule for the names (PO 17027 ②): a short lowercase word of 1–24 characters. The web's setup screen keeps the same rule
+# (apps/web lib/desktop-setup.ts AGENT_TOOL_NAME_RE + AGENT_TOOL_NAME_MAX), and the request refuses a name outside it with a 422.
+AGENT_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,23}$")
+AGENT_TOOL_NAME_MAX = 24
+AGENT_TOOLS_CAP = 8  # the list in all, the runtime included
 
 
-def clean_agent_tools(raw: object) -> list[str]:
-    """The tool names of one member, cleaned: a list of short lowercase names, no duplicates, at most AGENT_TOOLS_CAP.
-    Anything else (not a list, a non-string, a name with a space or a path) is dropped, never raised on."""
+def bad_agent_tool_names(raw: list) -> list[str]:
+    """The names in a request list that are not on the rule (PO 17027 ②: the request refuses them with a 422 that names them)."""
+    return [str(x) for x in raw if not (isinstance(x, str) and AGENT_TOOL_NAME.match(x))]
+
+
+def clean_agent_tools(raw: object, runtime: str | None = None) -> list[str]:
+    """The tool names one member keeps, for what is stored and handed to the app: names on the rule, no repeat, the runtime
+    NOT among them (the runtime's own sign-in is always checked — PO 17027 ④ «런타임 칩 중복 제거»), at most AGENT_TOOLS_CAP.
+    Anything else (not a list, a non-string, a name off the rule) is dropped here, never raised on — the request is refused
+    before it gets this far (RoleIn)."""
     if not isinstance(raw, list):
         return []
     out: list[str] = []
     for item in raw:
-        if isinstance(item, str) and AGENT_TOOL_NAME.match(item) and item not in out:
+        if isinstance(item, str) and AGENT_TOOL_NAME.match(item) and item != runtime and item not in out:
             out.append(item)
         if len(out) >= AGENT_TOOLS_CAP:
             break
@@ -571,7 +601,7 @@ async def confirm_move_setup(
     if len(roles) > SETUP_MAX_ROLES:
         raise DesktopSetupError("recipe_too_large", f"{len(roles)} agents (at most {SETUP_MAX_ROLES})")
     agent_ids: list[uuid.UUID] = []
-    tools_by_agent: dict[uuid.UUID, list[str]] = {}
+    tools_by_agent: dict[uuid.UUID, list[str] | None] = {}
     for r in roles:
         if r.runtime is not None or r.owner is not None or not r.agent_id:
             raise DesktopSetupError("move_needs_existing_agents", "every row of a move is an agent the organization already has")
@@ -582,7 +612,7 @@ async def confirm_move_setup(
         if agent_id in agent_ids:
             raise DesktopSetupError("roles_invalid", "the same agent twice")
         agent_ids.append(agent_id)
-        tools_by_agent[agent_id] = clean_agent_tools(r.tools)
+        tools_by_agent[agent_id] = r.tools
 
     members: list[dict] = []
     for agent_id in agent_ids:
@@ -590,7 +620,7 @@ async def confirm_move_setup(
         name = (await db.execute(select(Member.name).where(Member.id == agent_id))).scalar_one_or_none() or ""
         # PO 04:24Z — a move's agent is its id, its runtime and its own name: no recipe role, no stages
         members.append({"member_id": str(agent_id), "kind": "agent", "runtime": runtime, "existing": True, "name": " ".join(name.split())[:120],
-                        "tools": tools_by_agent.get(agent_id, [])})  # story 4653
+                        "tools": clean_agent_tools(tools_by_agent.get(agent_id), runtime)})  # story 4653
 
     setup.org_id = org_id
     setup.project_id = project_id
@@ -698,7 +728,7 @@ async def confirm_setup(
             # story #4565: attached, not made by this setup — its old keys are revoked at the exchange; «disconnect» never stops it
             **({"existing": True} if role in existing else {}),
             # story 4653: the CLI names this agent uses (the exchange hands them to the app; none for a person's row)
-            **({} if human else {"tools": clean_agent_tools(binding.agent_tools.get(role))}),
+            **({} if human else {"tools": clean_agent_tools(binding.agent_tools.get(role), choices[role])}),
         })
         await upsert_role_binding(
             db, org_id=org_id, project_id=project_id, definition_key=definition.key, stage=stage, target="agent",
@@ -905,21 +935,7 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
         raise DesktopSetupError("service_unavailable", "the MCP or API address is not configured")
 
     # one key per agent (a role's agent appears once per stage in `members`)
-    per_agent: dict[str, dict] = {}
-    kind = setup_kind(setup)
-    for m in setup.members or []:
-        if m["kind"] != "agent":
-            continue
-        if kind == "move":
-            # story #4576 (PO 04:24Z): a move's agent — its id and runtime (its name is added with its new key below); no recipe
-            # role or stages, there is no recipe
-            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "existing": True, "tools": clean_agent_tools(m.get("tools"))})
-            continue
-        entry = per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "role": m.get("role") or m["stage"], "stages": [], "runtime": m["runtime"]})
-        entry.setdefault("tools", clean_agent_tools(m.get("tools")))
-        if m.get("existing"):
-            entry["existing"] = True
-        entry["stages"].append(m["stage"])
+    per_agent = group_exchange_agents(setup.members or [], setup_kind(setup))
     agents: list[dict] = []
     for entry in per_agent.values():
         member_id = uuid.UUID(entry["member_id"])

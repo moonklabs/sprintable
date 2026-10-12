@@ -205,6 +205,7 @@ export interface ConfirmBody {
 export const JUDGED_AGENT_TOOLS = ['gcloud', 'gh', 'aws'] as const;
 export const AGENT_TOOLS_MAX = 8;
 export const AGENT_TOOL_NAME_MAX = 24;
+// the same rule as the server's (backend desktop_setup.py AGENT_TOOL_NAME: 1–24 characters, lowercase, the first a letter)
 export const AGENT_TOOL_NAME_RE = /^[a-z][a-z0-9_-]*$/;
 
 export type AddToolResult = { ok: true; tools: string[] } | { ok: false; reason: 'invalid' | 'duplicate' | 'max' };
