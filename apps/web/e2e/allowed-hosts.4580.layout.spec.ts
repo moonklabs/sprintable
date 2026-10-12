@@ -33,10 +33,14 @@ async function build() {
         import ko from './messages/ko.json'; import en from './messages/en.json';
         import { AgentRunProfileSection } from './src/components/agents/agent-run-profile-section';
         import { AgentPermissionRequests } from './src/components/inbox/agent-permission-requests';
+        import { PhoneBridgeContext } from './src/components/providers/phone-bridge-context';
+        import { phoneCall } from '@/lib/phone-bridge';
         window.__mount = (kind, locale) => createRoot(document.getElementById('root')).render(
           React.createElement(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' },
-            kind === 'profile' ? React.createElement(AgentRunProfileSection, { agentId: 'a1', runtimeType: 'claude-code' })
-              : React.createElement(AgentPermissionRequests)));`,
+            // story #4661: the screens read the phone state from the bridge context (the claim's provider) — the harness plays the claim
+            React.createElement(PhoneBridgeContext.Provider, { value: { inPhoneApp: !!window.__phone, phoneCall } },
+              kind === 'profile' ? React.createElement(AgentRunProfileSection, { agentId: 'a1', runtimeType: 'claude-code' })
+                : React.createElement(AgentPermissionRequests))));`,
       resolveDir: WEB, loader: 'tsx',
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',

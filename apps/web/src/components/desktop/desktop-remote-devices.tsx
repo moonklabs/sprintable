@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useOrgRemoteControl } from '@/lib/org-remote-control';
-import { isPhoneApp } from '@/lib/phone-bridge';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { PhonePairEntry } from './phone-pairing';
 
 /**
@@ -44,7 +44,7 @@ export function DesktopRemoteDevices() {
   // the switch card's own value (story #4535 · PO 18:58Z): turned on or off there, the «꺼져 있어요» line follows at once
   const [remoteControl] = useOrgRemoteControl(orgId);
   const remoteControlOn = remoteControl ? remoteControl.enabled : null;
-  const inPhoneApp = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
+  const { inPhoneApp } = usePhoneBridge();
   const flatHref = useFlatHref(); // story #4630 AC3 — the settings link carries this project (`?p=` · #4231)
   const [phones, setPhones] = useState<Phone[] | null>(null);
   const [asking, setAsking] = useState<Asking>(null);
@@ -173,8 +173,6 @@ export function DesktopRemoteDevices() {
   );
 }
 
-const noSubscribe = () => () => {};
-const notOnServer = () => false;
 
 /** a phone's head: its name · confirmation number · when last used · [이 폰 빼기] */
 function PhoneHead({ phone, onRemove, disabled, buttonRef }: {

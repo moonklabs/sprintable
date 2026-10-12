@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 
 // story #4547: the card tells a Mac from anything else — jsdom's own user agent («(darwin|linux) … jsdom») is no Mac's, so each case
 // says which device it is (a Mac by default: the suite below is the Mac card)
@@ -14,7 +15,14 @@ const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KH
 const WINDOWS = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36';
 let ua = MAC;
 let inPhoneApp = false;
-vi.mock('@/lib/phone-bridge', () => ({ isPhoneApp: () => inPhoneApp }));
+// story #4661: the phone state is subscribable — a test plays the claim by flipping it and telling the listeners
+const phoneListeners = vi.hoisted(() => new Set<() => void>());
+vi.mock('@/lib/phone-bridge', () => ({
+  isPhoneApp: () => inPhoneApp,
+  claimPhoneBridge: () => {},
+  phoneCall: async () => ({ id: '', ok: false, code: 'not_phone_app' }),
+  subscribePhoneApp: (listen: () => void) => { phoneListeners.add(listen); return () => { phoneListeners.delete(listen); }; },
+}));
 const { DesktopDownloadCard, notAMac } = await import('./desktop-download-card');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -23,7 +31,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 function wrap(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
-  return <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="UTC">{node}</NextIntlClientProvider>;
+  return <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="UTC">{node}</NextIntlClientProvider></PhoneBridgeClaim>;
 }
 
 beforeEach(() => {
@@ -200,6 +208,16 @@ describe('[4547] not a Mac — one line where the warning and [다운로드] wer
     inPhoneApp = true;
     manifest();
     await show();
+    expect(q('desktop-download-button')).toBeNull();
+    expect(q('desktop-download-open-on-mac')).not.toBeNull();
+  });
+
+  it('a claim that comes after the manifest was read still turns the card into the phone line (story #4661)', async () => {
+    manifest();
+    await show();
+    expect(q('desktop-download-button')).not.toBeNull();
+    await act(async () => { inPhoneApp = true; phoneListeners.forEach((listen) => listen()); });
+    await flush();
     expect(q('desktop-download-button')).toBeNull();
     expect(q('desktop-download-open-on-mac')).not.toBeNull();
   });

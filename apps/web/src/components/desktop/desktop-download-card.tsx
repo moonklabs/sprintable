@@ -7,7 +7,7 @@ import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ourDownloadUrl } from '@/lib/desktop-downloads';
-import { isPhoneApp } from '@/lib/phone-bridge';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 
 /**
  * story #3807 AC3(페드루 PO 確定 2026-09-11) — dev-app 다운로드 자리(최소 1곳).
@@ -67,7 +67,9 @@ export function DesktopDownloadCard() {
   const t = useTranslations('desktop');
   const [manifest, setManifest] = useState<DesktopDownloadManifest | null>(null);
   const [loading, setLoading] = useState(true);
-  const [elsewhere, setElsewhere] = useState(false); // story #4547: read after mount (the server render has no device)
+  // story #4547/#4661: the device is read after mount, and a claim that comes later reaches this card (subscribed)
+  const { inPhoneApp } = usePhoneBridge();
+  const elsewhere = typeof navigator !== 'undefined' && notAMac(navigator.userAgent, inPhoneApp);
 
   useEffect(() => {
     let alive = true;
@@ -76,8 +78,6 @@ export function DesktopDownloadCard() {
       .catch(() => null)
       .then((json: DesktopDownloadManifest | null) => {
         if (!alive) return;
-        // story #4547: the device is read in the same update that ends «loading» — a phone never paints the Mac card first.
-        setElsewhere(notAMac(navigator.userAgent, isPhoneApp()));
         // [SID:4619 · Kadir 5004 후속 ①] a link only into our bucket — any other url is «지금은 받을 수 없어요», as no manifest
         const url = ourDownloadUrl(json?.url);
         setManifest(json?.version && url ? { ...json, url } : null);

@@ -28,6 +28,8 @@ declare global {
 export const PHONE_CALL_MAX_MS = 5 * 60 * 1000;
 
 let send: Send | null = null;
+// story #4661 — whoever shows the phone's state subscribes here: the claim is the one change that flips isPhoneApp()
+const phoneAppListeners = new Set<() => void>();
 let seq = 0;
 const waiting = new Map<string, (answer: PhoneAnswer) => void>();
 
@@ -52,11 +54,18 @@ export function claimPhoneBridge(): void {
   if (typeof s !== 'function') return;
   send = s;
   window.addEventListener('pagehide', endAll);
+  for (const listen of [...phoneAppListeners]) listen();
 }
 
 /** True only inside the phone app, once the handle was claimed. */
 export function isPhoneApp(): boolean {
   return send !== null;
+}
+
+/** story #4661 — tell me when the phone state changes (a claim that comes after the first render). For useSyncExternalStore. */
+export function subscribePhoneApp(listen: () => void): () => void {
+  phoneAppListeners.add(listen);
+  return () => { phoneAppListeners.delete(listen); };
 }
 
 /** Ask the shell; the answer comes back under the same id (once). Outside the phone app → `{ ok: false, code: 'not_phone_app' }`. */

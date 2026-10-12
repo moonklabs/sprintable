@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { agentOnDevice, permissionLine, requestAge, shownToolName, stillShown, type PermissionRequest } from '@/lib/agent-permissions';
-import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
@@ -36,13 +36,12 @@ const EMPTY_REFRESH_MS = 30_000;
 type PhoneAuth = 'biometric' | 'screen_lock' | 'biometric_required' | 'no_screen_lock';
 type Answer = { kind: 'sending'; decision: 'allow' | 'deny' } | AnswerOutcome;
 
-const noSubscribe = () => () => {};
-const notOnServer = () => false;
 
 const canConfirm = (auth: PhoneAuth) => auth === 'biometric' || auth === 'screen_lock';
 
 /** Re-read how the phone confirms — on mount and when the person comes back (from the phone's settings). `onRead` hears each read. */
 function usePhoneAuth(phone: boolean, onRead: (auth: PhoneAuth) => void): PhoneAuth | null {
+  const { phoneCall } = usePhoneBridge();
   const [auth, setAuth] = useState<PhoneAuth | null>(null);
   const heard = useRef(onRead);
   useEffect(() => { heard.current = onRead; });
@@ -58,7 +57,7 @@ function usePhoneAuth(phone: boolean, onRead: (auth: PhoneAuth) => void): PhoneA
     const onVisible = () => { if (document.visibilityState === 'visible') read(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { off = true; document.removeEventListener('visibilitychange', onVisible); };
-  }, [phone]);
+  }, [phone, phoneCall]);
   return phone ? auth : null;
 }
 
@@ -81,7 +80,7 @@ export function AgentPermissionRequests() {
   const remoteOff = useRemoteOff(); // story #4583: why none come — only while off and with a connected computer
   const [requests, setRequests] = useState<PermissionRequest[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const phone = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
+  const { inPhoneApp: phone, phoneCall } = usePhoneBridge();
   // answers given on this page: the card stays with its line until the next read (story #4596 — the list is what waits; `at` = when its
   // answer was given)
   const [answers, setAnswers] = useState<ReadonlyMap<string, Kept>>(new Map());
@@ -301,6 +300,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
   /** story #4580 AC2 F2 (Yuna 2-7): the host could not be read — the request ended with nothing allowed */
   hostUnread?: boolean;
 }) {
+  const { phoneCall } = usePhoneBridge();
   const t = useTranslations('agentPermissions');
   const flat = useFlatHref();
   const a = answer;

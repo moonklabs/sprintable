@@ -5,17 +5,19 @@
 import { useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/card';
-import { isPhoneApp } from '@/lib/phone-bridge';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { PHONE_APP_PUBLISHED, phoneAppStoreLinks } from '@/lib/phone-app-store';
 import { notAMac } from '@/components/desktop/desktop-download-card';
 import { PhoneAppGet } from '@/components/desktop/phone-pairing';
 
 const noSubscribe = () => () => undefined;
 
+
 export function PhoneAppCard({ elsewhere: forced }: { elsewhere?: boolean }) {
   const t = useTranslations('phonePairing');
   // read as a snapshot, not set in an effect (no cascading render): null on the server and before the first read
-  const detected = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, isPhoneApp()), () => null);
+  const { inPhoneApp } = usePhoneBridge();
+  const detected = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
   const elsewhere = forced ?? detected;
   if (elsewhere !== true || phoneAppStoreLinks(PHONE_APP_PUBLISHED).length === 0) return null;
   return (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/card';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { LimitPhoneRow, type LimitPhone } from '@/components/desktop/limit-phone-row';
-import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { PHONE_APP_PUBLISHED, phoneAppStoreLinks } from '@/lib/phone-app-store';
 import { QRCodeSVG } from 'qrcode.react';
 import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
@@ -38,8 +38,6 @@ type View =
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
   | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'failed' };
 
-const noSubscribe = () => () => {};
-const notOnServer = () => false;
 
 /** story 4654 (AC2): the phone app's two store links, each with its QR (the address itself, from phone-app-store) */
 export function PhoneAppGet({ body }: { body?: string }) {
@@ -64,7 +62,7 @@ export function PhoneAppGet({ body }: { body?: string }) {
 
 export function PhonePairing() {
   const t = useTranslations('phonePairing');
-  const phone = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
+  const { inPhoneApp: phone } = usePhoneBridge();
   if (!phone) {
     return (
       <Card className="break-keep flex flex-col gap-4 p-6">
@@ -77,6 +75,7 @@ export function PhonePairing() {
 }
 
 function Pairing() {
+  const { phoneCall } = usePhoneBridge();
   const t = useTranslations('phonePairing');
   const tp = useTranslations('agentPermissions.phone');
   const tr = useTranslations('desktop.remoteDevices');
@@ -113,7 +112,7 @@ function Pairing() {
   const look = useCallback(async (w: { head: OfferHead; phoneKeyId: string }) => {
     if (Date.now() > Date.parse(w.head.expires_at) + POLL_MS * 2) return { kind: 'notPaired' } as const;
     return checkPairOffer(w.head, w.phoneKeyId, known.current, { phoneCall });
-  }, []);
+  }, [phoneCall]);
   useEffect(() => {
     if (!waiting) return;
     let off = false;
