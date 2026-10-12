@@ -897,7 +897,38 @@ async def list_attachable_agents(db: AsyncSession, *, user_id: uuid.UUID, org_id
     ]
 
 
-async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Exchanged | None:
+_DEVICE_ID_RE = re.compile(r"^[0-9a-f]{64}$")  # sha256 hex of the app's machine id
+
+
+def machine_key_for(org_id: uuid.UUID, device_id: str | None) -> str | None:
+    """story 4660 — the org-scoped key of a machine: HMAC(server secret, org_id|device_id). None (fail-safe) when the app sent
+    no valid device_id or the server has no secret — then nothing is stored and no old line is closed. Never HMAC with an
+    empty key."""
+    secret = settings.desktop_machine_key_secret
+    if not secret or not device_id or not _DEVICE_ID_RE.match(device_id):
+        return None
+    return hmac.new(secret.encode(), f"{org_id}|{device_id}".encode(), hashlib.sha256).hexdigest()
+
+
+async def _retire_same_machine(db: AsyncSession, *, machine_key: str, others: list[DesktopSetup], now: datetime) -> int:
+    """story 4660 — a new setup on the same machine (same org, same machine key) replaces the older lines: each is closed with
+    the reason and its device tokens are revoked. The agents and their keys stay — the new setup exchanges its own keys."""
+    from app.models.desktop_relay import DesktopDeviceToken
+
+    old = [o for o in others if o.machine_key == machine_key and o.revoked_at is None]
+    for o in old:
+        o.revoked_at = now
+        o.revoked_reason = "새 셋업으로 대체"
+    if old:
+        await db.execute(
+            update(DesktopDeviceToken)
+            .where(DesktopDeviceToken.setup_id.in_([o.id for o in old]), DesktopDeviceToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+    return len(old)
+
+
+async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_id: str | None = None) -> Exchanged | None:
     """None = not confirmed yet (pending). Checks the verifier before anything else about the code, so a code seen in an
     address bar tells nothing without it. A wrong verifier does not burn the code (256-bit verifier: nothing to guess, and
     burning would let anyone who saw the address cancel the person's setup)."""
@@ -912,12 +943,13 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
     # story #4565 (PO 02:51Z): the locks in the one order — the attached agents' member rows, then this setup and the other
     # live, handed-over setups of the org, by id — and everything below is read again under them
     attached = _attached_agents(setup)
+    # story 4660: always read — the machine key of this exchange may close a line with no attached agent
     other_ids = set((await db.execute(
         select(DesktopSetup.id).where(
             DesktopSetup.org_id == setup.org_id, DesktopSetup.id != setup.id, DesktopSetup.revoked_at.is_(None),
             DesktopSetup.exchanged_at.is_not(None),
         )
-    )).scalars().all()) if attached else set()
+    )).scalars().all())
     locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
@@ -951,6 +983,10 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
             team_member_id=member_id, scope=list(ALL_GROUPS), expires_at=None, desktop_setup_id=setup.id,
         )
         agents.append({**entry, "api_key": plaintext})
+    mkey = machine_key_for(setup.org_id, device_id)
+    if mkey:
+        await _retire_same_machine(db, machine_key=mkey, others=others, now=_now())
+        setup.machine_key = mkey
     setup.exchanged_at = _now()
     setup.keys_issued = len(agents)
     await db.flush()
@@ -1099,6 +1135,14 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         select(DesktopSetup).where(DesktopSetup.org_id == org_id, DesktopSetup.confirmed_at.isnot(None))
         .order_by(DesktopSetup.confirmed_at.desc()).limit(200)
     )).scalars().all()
+    # story 4660 — newest heard-from time per setup (over its tokens; a setup never heard from has none)
+    from app.models.desktop_relay import DesktopDeviceToken
+
+    heard = dict((await db.execute(
+        select(DesktopDeviceToken.setup_id, func.max(DesktopDeviceToken.last_used_at)).where(
+            DesktopDeviceToken.setup_id.in_([r.id for r in rows]),
+        ).group_by(DesktopDeviceToken.setup_id)
+    )).all()) if rows else {}
     active = dict((await db.execute(
         select(ApiKey.desktop_setup_id, func.count()).where(
             ApiKey.desktop_setup_id.in_([r.id for r in rows]), ApiKey.revoked_at.is_(None),
@@ -1112,6 +1156,7 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         "recipe_key": r.event_definition_key, "confirmed_by": r.confirmed_by, "confirmed_at": r.confirmed_at,
         "confirmed_by_name": names.get(r.confirmed_by), "revoked_by_name": names.get(r.revoked_by),
         "exchanged_at": r.exchanged_at, "revoked_at": r.revoked_at, "keys_issued": r.keys_issued,
+        "last_used_at": heard.get(r.id), "revoked_reason": r.revoked_reason,
         "active_keys": active.get(r.id, 0),
         "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime", "name")} for m in (r.members or [])],
         "setup_kind": setup_kind(r),  # story #4576

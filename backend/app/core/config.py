@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     # 분리**(별도 값) — 이 시크릿이 유출돼도 fleet JWT_SECRET과는 무관(반대도 동일). Support
     # Gateway는 이 시크릿의 검증만 하고 jwt_secret은 아예 모른다(support-gateway/app/config.py).
     support_gateway_token_secret: str = ""
+    # story 4660 (PO 설계 · 까디르 렌즈) — 셋업 기기 식별값을 org별로 감싸는 HMAC 비밀. 기본값 없음: 비어 있으면
+    # machine_key를 만들지 않고 옛 줄 정리도 하지 않는다(fail-safe · 빈 키로 HMAC 금지).
+    desktop_machine_key_secret: str = ""
     support_gateway_token_ttl_seconds: int = 300
 
     # story #3279(지원v1·후속) — 운영자 회신 배달(backend→support-gateway). escalation_events
