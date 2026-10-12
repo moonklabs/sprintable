@@ -19,12 +19,17 @@ const { PhoneAppCard } = await import('./phone-app-card');
 
 let host: HTMLDivElement;
 let root: Root;
+const REAL_UA = navigator.userAgent;
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const setUA = (ua: string) => Object.defineProperty(navigator, 'userAgent', { value: ua, configurable: true });
 beforeEach(() => { host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
-afterEach(() => { act(() => root.unmount()); host.remove(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); setUA(REAL_UA); });
 
-async function draw(elsewhere: boolean) {
+// no forced flag: the device is read from navigator.userAgent, as the page does (the Mac check is the card's own)
+async function draw(elsewhere?: boolean) {
   await act(async () => {
-    root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><PhoneAppCard elsewhere={elsewhere} /></NextIntlClientProvider>);
+    root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><PhoneAppCard {...(elsewhere === undefined ? {} : { elsewhere })} /></NextIntlClientProvider>);
   });
   return host;
 }
@@ -50,5 +55,19 @@ describe('[SID:4654] the phone app card under the onboarding download card', () 
   it('a Mac: nothing is drawn (the Mac app card stays alone on the page)', async () => {
     const h = await draw(false);
     expect(h.innerHTML).toBe('');
+  });
+
+  // Kadir 5049: the device comes from the user agent the page reads (no forced flag) — a Mac draws nothing, a phone draws the line and the link
+  it('no forced flag: a Mac user agent draws nothing', async () => {
+    setUA(MAC);
+    const h = await draw();
+    expect(h.innerHTML).toBe('');
+  });
+
+  it('no forced flag: a phone user agent draws the aux line and the published link', async () => {
+    setUA(IPHONE);
+    const h = await draw();
+    expect(h.textContent).toContain('맥 앱은 맥에서 받아 주세요');
+    expect([...h.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([PHONE_APP_STORE_ANDROID]);
   });
 });
