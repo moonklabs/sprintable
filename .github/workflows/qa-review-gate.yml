@@ -72,7 +72,7 @@ name: QA Review Gate
 # 2026-10-12 (story 4659): 라벨 이벤트만 트리거. 새 push는 게이트를 다시 돌리지 않으므로 라벨을 다시 붙여야 한다.
 on:
   pull_request:
-    types: [labeled]
+    types: [labeled, unlabeled]
     branches: [main, develop]
 
 concurrency:
