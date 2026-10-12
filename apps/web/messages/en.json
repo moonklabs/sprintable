@@ -6929,6 +6929,7 @@
       "wayOutNote": "You can leave — setup continues on this computer, and the first result will be in Work.",
       "stopped": "{count, plural, one {The {roles} agent stopped} other {The {roles} agents stopped}} — select it in the «Agents on this computer» bar at the bottom of the window and press Start again.",
       "stoppedTrust": "It may ask again whether to trust the working folder — if it does, use the arrow keys to put ❯ on \"Yes, I trust this folder\", then Enter.",
+      "signInBody": "The agent isn't signed in — sign in with this command",
       "startFailed": {
         "title": "Couldn't start the {role} agent",
         "titleBare": "Couldn't start the {role}",
