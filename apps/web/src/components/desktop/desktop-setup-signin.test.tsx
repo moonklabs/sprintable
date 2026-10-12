@@ -44,6 +44,14 @@ describe('[SID:4658] the sign-in band is drawn', () => {
     expect(h.querySelector('[data-testid="setup-agent-sign-in"] p')!.textContent).toBe("The agent isn't signed in — sign in with this command");
   });
 
+  it('a long command is not cut: the line wraps (no truncate), so the whole command can be read and copied', async () => {
+    const h = await draw(['claude', 'codex']);
+    for (const code of h.querySelectorAll('[data-testid="setup-agent-sign-in"] code')) {
+      expect(code.className, code.textContent!).not.toContain('truncate');
+      expect(code.className, code.textContent!).toContain('break-all');
+    }
+  });
+
   it('none → nothing is drawn: no band, no command', async () => {
     const h = await draw([]);
     expect(h.querySelector('[data-testid="setup-agent-sign-in"]')).toBeNull();
