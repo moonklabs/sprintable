@@ -493,11 +493,12 @@ jobs:
 
       # ── alembic-sibling-pr-collision-check ──
       - name: Fetch base branch (current tip, not PR-open-time)
-        if: github.event_name == 'pull_request'
+        id: fetch-base
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: git fetch origin "${{ github.event.pull_request.base.ref }}"
       # ── alembic-sibling-pr-collision-check ──
       - name: Check alembic revision collisions against base + sibling open PRs
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.fetch-base.outcome == 'success' }}
         working-directory: backend
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -516,6 +517,7 @@ jobs:
   # 가능하게 유지한다(새 코드가 legacy 테이블을 다시 끌어오면 즉시 빨강).
       # ── legacy-subscriptions-reuse-lint ──
       - name: Scan backend/app for legacy subscriptions table reuse
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_legacy_subscriptions_reuse.py
 
@@ -526,6 +528,7 @@ jobs:
   # 클래스였다 — org_time.py 헬퍼(org_today 등)로만 계산하도록 강제한다.
       # ── org-today-direct-call-lint ──
       - name: Scan backend/app for org-tz-unaware "today" calls
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_org_today_direct_call.py
 
@@ -533,6 +536,7 @@ jobs:
   # statement fails on every call (account/delete until #4400; seed_builtin_personas). Write CAST(:name AS type).
       # ── bind-param-cast-lint ──
       - name: Scan backend app/ ee/ alembic/ for ':name::type'
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_no_bind_param_cast.py
 
@@ -544,11 +548,13 @@ jobs:
   # 가드와 보완 관계(겹치지 않음, 각 스크립트 docstring 참고).
       # ── model-registration-completeness-lint ──
       - name: Scan app/models for unregistered __tablename__ models
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_model_registration_completeness.py
 
       # ── alembic-no-autocommit-block ──
       - name: grep for autocommit_block() calls in migration files
+        if: ${{ !cancelled() }}
         run: |
           # 실제 호출(`op.get_context().autocommit_block()`)만 잡는다 — docstring 산문에서
           # backtick으로 `autocommit_block()`을 «설명」하는 것(이 파일들에도 있다, 0217의
@@ -573,6 +579,7 @@ jobs:
   # 베이스라인에 없는 **새** 위반만 여기서 빨개진다.
       # ── query-sentinel-direct-call-lint ──
       - name: Scan for Query(...) params missing at router direct-call sites
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_query_sentinel_direct_calls.py
       # ⭐PO 판정(2026-07-30): grandfather 베이스라인은 "지금 있는 걸 봐준다"이지 "앞으로도
@@ -581,6 +588,7 @@ jobs:
       # 줄이 있으면 실패시킨다(제거는 자유 — 사이트를 고쳐서 줄어드는 것은 언제나 환영).
       # ── query-sentinel-direct-call-lint ──
       - name: "Verify baseline can only shrink (story #2335 — no new grandfather entries)"
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: |
           set -e
@@ -644,6 +652,7 @@ jobs:
   # **새** 한글 문자열만 여기서 빨개진다(story #2335 query-sentinel과 동일 계약).
       # ── be-korean-user-strings-lint ──
       - name: Scan app/ for new hardcoded Korean user-facing strings
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/verify_no_new_korean_user_strings.py
       # story #2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다. story #3924 — 순수
@@ -652,6 +661,7 @@ jobs:
       # --check-growth(파일 단위+전역 비증가)로 옮겨 로컬 스캐너와 같은 코드로 판정한다.
       # ── be-korean-user-strings-lint ──
       - name: "Verify baseline can only shrink (story #3779/#3924/#4113 — no new grandfather entries, rename-aware, merge-base compared)"
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: |
           set -e
@@ -721,16 +731,19 @@ jobs:
       # 따라 "1층은 초록인데 2층 결과가 아직 안 보인다" 류 착시가 생길 수 있다).
       # ── be-korean-user-strings-lint ──
       - name: "Verify user-facing tone (story #3931 2층 — 4 surfaces, no baseline)"
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/verify_user_facing_tone.py
       # ── project-access-403-lint ──
       - name: Scan for has_project_access denial raising 403 (should be 404)
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_project_access_403.py
       # story #2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다(2026-07-30 발견: #2342
       # 스코프 밖에 22곳이 더 있어 지금 당장 못 고친다 — 새로 늘리는 것만 막는다).
       # ── project-access-403-lint ──
       - name: "Verify baseline can only shrink (story #2342 — no new grandfather entries)"
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: |
           set -e
@@ -768,6 +781,7 @@ jobs:
           fi
       # ── dependency-override-get-read-db-lint ──
       - name: Scan for raw dependency_overrides[get_db] (must use override_db_and_read)
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_dependency_override_get_read_db.py
       # story #2342/#2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다(2026-08-04 도입 시점
@@ -776,6 +790,7 @@ jobs:
       # 네 번째로 같은 클래스가 샌다).
       # ── dependency-override-get-read-db-lint ──
       - name: "Verify baseline can only shrink (story #2451 — no new grandfather entries)"
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: |
           set -e
@@ -813,6 +828,7 @@ jobs:
           fi
       # ── candidate-source-ownership-lint ──
       - name: Scan reference_semantic_candidates.py for candidate_id lookups missing source_id ownership check
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_candidate_source_ownership.py
 
@@ -821,6 +837,7 @@ jobs:
   # baseline 없음(도입 시점 위반 0건, app/routers·app/services·ee 전 스윕 후 확認).
       # ── commit-before-validate-lint ──
       - name: Scan for model_validate() after commit() without intervening refresh
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_commit_before_validate.py
 
@@ -831,6 +848,7 @@ jobs:
   # `# member-id-lint: user-id-field` 예외 처리 완료, app/routers·app/services·ee 전 스윕 후 확認).
       # ── raw-auth-id-into-member-field-lint ──
       - name: Scan for raw auth.user_id flowing into *_member_id/resolver_id/actor_id kwargs
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_raw_auth_id_into_member_field.py
 
@@ -841,6 +859,7 @@ jobs:
   # 마커 파일은 story #2293 격리 shard에서 돌아 스캔 대상에서 제외).
       # ── destructive-test-sql-lint ──
       - name: Scan tests/ for shared-DB-destroying SQL literals (bare DELETE/DROP/TRUNCATE)
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_destructive_test_sql.py
       # story #3944(페드루 PO CHANGES②) — run-with-stall-detection.test.sh·
@@ -850,6 +869,7 @@ jobs:
       # backend-test-destructive 본체와 분리해 매 PR에 값싸게 상시 돈다.
       # ── destructive-test-sql-lint ──
       - name: Self-test stall-detection wrapper + loop errexit-survival (story #3944)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/run-with-stall-detection.test.sh
           bash scripts/ci-loop-errexit-survival.test.sh
@@ -863,16 +883,19 @@ jobs:
   # 실측 확認) — uv 설치+더미 JWT_SECRET/SECRET_KEY만으로 끝난다.
       # ── destructive-schema-weights-registered-lint ──
       - name: Install uv
+        if: ${{ !cancelled() }}
         uses: astral-sh/setup-uv@v5
         with:
           version: 'latest'
       # ── destructive-schema-weights-registered-lint ──
       - name: Check every destructive_schema test file is registered in shard-weights.json
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_destructive_schema_weights_registered.py
       # story 4566: the FE files destructive tests read are exactly infra/destructive-fe-deps.txt (the shards' FE-only relevance)
       # ── destructive-schema-weights-registered-lint ──
       - name: Check the FE paths destructive tests read are exactly infra/destructive-fe-deps.txt
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_destructive_fe_deps_listed.py
 
@@ -887,10 +910,12 @@ jobs:
   # guards.py가 그 메커니즘 자체의 회귀가드).
       # ── destructive-publish-path-dispose-fixture-lint ──
       - name: Scan tests/ for destructive files that publish without the global-engine dispose fixture
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_destructive_publish_path_dispose_fixture.py
       # ── no-script-output-artifacts-lint ──
       - name: Scan backend/scripts/ for committed ad-hoc diagnostic output (prod IP/PII residue — fk_null_survey_result.json class)
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_no_script_output_artifacts.py
 
@@ -906,12 +931,15 @@ jobs:
   # 정정하고 baseline은 제거(정정된 판정으로는 실 위반 0건).
       # ── cloudbuild-shell-var-escaping-lint ──
       - name: Install PyYAML
+        if: ${{ !cancelled() }}
         run: pip install --quiet pyyaml
       # ── cloudbuild-shell-var-escaping-lint ──
       - name: Self-test (positive/negative controls, including this PR's original bug + PO's lowercase evidence)
+        if: ${{ !cancelled() }}
         run: python3 scripts/verify-cloudbuild-shell-var-escaping.py --self-test
       # ── cloudbuild-shell-var-escaping-lint ──
       - name: Scan cloudbuild.yaml for unescaped uppercase shell variables
+        if: ${{ !cancelled() }}
         run: python3 scripts/verify-cloudbuild-shell-var-escaping.py
 
   # story #3216(위생·가드, 2026-08-29 · #3206 design 리뷰 유나 비차단 기록) — 메일 셸
@@ -920,6 +948,7 @@ jobs:
   # 없음(도입 시점 위반 0건 — 두 파일이 이미 일치, 스크립트 docstring 참조).
       # ── business-info-email-footer-drift-lint ──
       - name: Compare business-info.ts SSOT fields against email.py footer constants
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_business_info_email_footer_drift.py
 
@@ -935,12 +964,15 @@ jobs:
   # per file (scripts/web_api_lenient_reads_baseline.json). What it can't see is declared at the top of the script.
       # ── web-api-response-shape-lint ──
       - name: Self-test (seeded mismatches are caught, lenient growth and shrink are caught)
+        if: ${{ !cancelled() }}
         run: python3 scripts/verify_web_api_response_shapes.py --self-test
       # ── web-api-response-shape-lint ──
       - name: Web call sites read the shape the backend sends
+        if: ${{ !cancelled() }}
         run: python3 scripts/verify_web_api_response_shapes.py
       # ── no-hardcoded-iso-timestamp-lint ──
       - name: Scan backend/app for hardcoded ISO absolute timestamps
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: python3 scripts/lint_no_hardcoded_iso_timestamp.py
 
@@ -951,6 +983,7 @@ jobs:
   # nontx_allowlist.sh 하나만 두고 이 job과 .test.sh [9] 양쪽이 그걸 공유 호출한다.
       # ── migrations-nontx-allowlist-lint ──
       - name: Scan packages/db/supabase/migrations for unclassified CONCURRENTLY usage
+        if: ${{ !cancelled() }}
         run: sh scripts/lint_migrations_nontx_allowlist.sh
 
   # story #4023(PO CHANGES 1) — check_env_drift.py/check_serving_reality.py/
@@ -962,14 +995,17 @@ jobs:
   # 각 가드 본체 몫).
       # ── expiring-declarations-warning ──
       - name: Set up Python
+        if: ${{ !cancelled() }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       # ── expiring-declarations-warning ──
       - name: Install deps
+        if: ${{ !cancelled() }}
         run: pip install --quiet pyyaml
       # ── expiring-declarations-warning ──
       - name: Warn on declarations expiring within 14 days
+        if: ${{ !cancelled() }}
         run: python3 infra/check_expiring_declarations.py
 
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
