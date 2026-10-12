@@ -1154,7 +1154,7 @@ function AgentToolsLine({ runtime, tools, onChange }: { runtime: DesktopRuntime;
       <input
         aria-label={t('tools.label')}
         list="agent-tool-suggestions"
-        className="h-6 w-40 rounded-md border bg-background px-2 text-xs"
+        className="h-7 w-40 rounded-md border bg-background px-2 text-base lg:text-sm"
         placeholder={t('tools.placeholder')}
         value={draft}
         onChange={(e) => { setDraft(e.target.value); setError(null); }}
@@ -1162,7 +1162,7 @@ function AgentToolsLine({ runtime, tools, onChange }: { runtime: DesktopRuntime;
       />
       <datalist id="agent-tool-suggestions">{JUDGED_AGENT_TOOLS.map((x) => <option key={x} value={x} />)}</datalist>
       <button type="button" className="rounded-full border px-2 py-0.5 text-xs" onClick={add}>{t('tools.add')}</button>
-      {error ? <span role="alert" className="text-xs text-destructive">{t(`tools.error.${error}`)}</span> : null}
+      {error ? <span role="alert" className="text-xs text-destructive">{error === 'invalid' ? t('tools.error.invalid') : error === 'duplicate' ? t('tools.error.duplicate') : t('tools.error.max')}</span> : null}
       {tools.length === 0 ? <span className="basis-full text-xs text-muted-foreground">{t('tools.hint')}</span> : null}
       {extraWithoutCheck.length > 0 ? <span className="basis-full text-xs text-muted-foreground">{t('tools.noSignInLine')}</span> : null}
     </div>

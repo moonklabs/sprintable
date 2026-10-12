@@ -935,7 +935,8 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
         raise DesktopSetupError("service_unavailable", "the MCP or API address is not configured")
 
     # one key per agent (a role's agent appears once per stage in `members`)
-    per_agent = group_exchange_agents(setup.members or [], setup_kind(setup))
+    kind = setup_kind(setup)
+    per_agent = group_exchange_agents(setup.members or [], kind)
     agents: list[dict] = []
     for entry in per_agent.values():
         member_id = uuid.UUID(entry["member_id"])
