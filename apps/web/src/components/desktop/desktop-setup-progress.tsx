@@ -24,6 +24,18 @@ import { Failure, ToolsNotConnected } from './desktop-setup';
 // story 4658: the login command each runtime names for itself (the app's AUTH_COMMAND — the same two strings)
 const SIGN_IN_COMMAND: Record<'claude' | 'codex', string> = { claude: 'claude auth login', codex: 'codex login' };
 
+/** story 4658 (Yuna 4658-design.md · 480 CHANGES ①): the sentence, then the command of each runtime on its own line — the CLI's own (the app's AUTH_COMMAND) */
+export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {
+  const t = useTranslations('desktop.setup');
+  if (runtimes.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-sign-in">
+      <p>{t('signInBody')}</p>
+      {runtimes.map((r) => <code key={r} className="block truncate text-xs">{SIGN_IN_COMMAND[r]}</code>)}
+    </div>
+  );
+}
+
 export function SetupProgressView({ setupId, recipeName }: { setupId: string | null; recipeName: string }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
@@ -198,13 +210,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
           <p className="text-muted-foreground">{t('startFailed.where')}</p>
         </div>
       ) : null}
-      {progress.signIn ? (
-        // story 4658 (Yuna 4658-design.md · 480 CHANGES ①): the sentence, then the command on its own line — the CLI's own (the app's AUTH_COMMAND)
-        <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-sign-in">
-          <p>{t('signInBody')}</p>
-          {progress.signIn.runtimes.map((r) => <code key={r} className="block truncate text-xs">{SIGN_IN_COMMAND[r]}</code>)}
-        </div>
-      ) : null}
+      {progress.signIn ? <SignInBand runtimes={progress.signIn.runtimes} /> : null}
       {progress.stopped ? (
         // story 4433 (Yuna v26): one block under the steps, above «결과 보기» · the roles on one line · body colour (there is
         // something to do), never red (the cause can be a person's own choice) · no cause guessed: «멈췄어요» covers both

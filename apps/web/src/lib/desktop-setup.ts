@@ -457,8 +457,8 @@ export interface SetupProgress {
    * 그 뒤 첫 결과가 없는 에이전트만 · 없으면 null. `claude` = Claude Code가 섞임(다시 켜면 믿기를 다시 물을 수 있다는 둘째 문장).
    */
   stopped: { roles: string[]; claude: boolean } | null;
-  /** story 4658 — the agents asking for a sign-in now: their roles (the flow's order) and the runtimes (claude · codex). null = none. */
-  signIn: { roles: string[]; runtimes: DesktopRuntime[] } | null;
+  /** story 4658 — the runtimes (claude · codex) of the agents asking for a sign-in now. null = none. */
+  signIn: { runtimes: DesktopRuntime[] } | null;
   /**
    * story 4433 (Yuna v29 · PO 15:59Z): a step spins only while something moves. ① gets the still ring when every agent not
    * connected yet is stopped; ② when the agent to receive the first task is stopped (③ as before: any stopped agent). A step
@@ -546,7 +546,7 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     expired: s.state === 'not_handed_over',
     disconnected: s.state === 'disconnected',
     stopped,
-    signIn: signInOf(s, agents),
+    signIn: signInOf(s),
     readyPaused: !(ready === 'done' || handed === 'done') && agentIds.some((id) => !connected.has(id))
       && agentIds.filter((id) => !connected.has(id)).every((id) => stoppedMembers.has(id) || failedIds.has(id)),
     handedPaused: handed === 'running' && !!agents[0] && (stoppedMembers.has(agents[0].member_id) || failedIds.has(agents[0].member_id)),
@@ -629,17 +629,15 @@ export function moveProgress(s: SetupStatus, now: number, handedOverSeenAt: numb
   };
 }
 
-/** story 4452 — the failures in the flow's order (one per agent), with the role names the copy needs (the agent it waited on). */
-/** story 4658: who asks for a sign-in now, by role (the flow's order, each once) and by runtime (claude · codex). */
-function signInOf(s: SetupStatus, agents: SetupStatus['members']): SetupProgress['signIn'] {
+/** story 4658: who asks for a sign-in now, by runtime (claude · codex) — the band names the command of each runtime. null = none. */
+function signInOf(s: SetupStatus): SetupProgress['signIn'] {
   const asking = s.signals.agents_sign_in ?? [];
   if (asking.length === 0) return null;
-  const ids = new Set(asking.map((a) => a.member_id));
-  const roles = [...new Set(agents.filter((m) => ids.has(m.member_id) && m.role).map((m) => m.role as string))];
   const runtimes = [...new Set(asking.map((a) => a.runtime).filter((r): r is DesktopRuntime => r === 'claude' || r === 'codex'))];
-  return { roles, runtimes };
+  return { runtimes };
 }
 
+/** story 4452 — the failures in the flow's order (one per agent), with the role names the copy needs (the agent it waited on). */
 function startFailedAgents(rows: AgentStartFailure[], agents: SetupStatus['members']): SetupProgress['startFailed'] {
   const out: SetupProgress['startFailed'] = [];
   const roleOf = (id: string | null) => (id ? agents.find((m) => m.member_id === id)?.role ?? null : null);
