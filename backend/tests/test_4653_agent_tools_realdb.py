@@ -12,6 +12,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures us
     OUTSIDER,
     OWNER,
     PROJ,
+    _addresses,
     _client,
     _confirm,
     _dispose_global_engine_after_test,
@@ -65,7 +66,7 @@ async def test_a_confirmation_records_each_agents_own_tools_on_its_member(movabl
 
 
 @pytest.mark.anyio
-async def test_the_exchange_hands_each_agent_its_own_tools(movable):
+async def test_the_exchange_hands_each_agent_its_own_tools(movable, _addresses):
     async with _client() as c:
         code, verifier, _setup_id = await _move_code(c, "d4653 exchange")
         r = await _confirm(c, code, body=_move_with_tools(["gcloud"], ["aws"]))
