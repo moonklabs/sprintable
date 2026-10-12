@@ -17,3 +17,14 @@ def test_every_guard_step_still_runs_after_an_earlier_guard_fails():
     steps = ci["jobs"]["guards"]["steps"]
     unguarded = [s.get("name") for s in steps if s.get("name") != "Checkout" and "!cancelled()" not in str(s.get("if", ""))]
     assert unguarded == [], f"guards steps that would skip after an earlier failure: {unguarded}"
+
+
+def test_no_guard_step_shallows_the_pr_base_fetch():
+    # 한 스텝의 `git fetch origin <base> --depth=1`이 .git/shallow 경계를 심으면 뒤의 baseline 스텝
+    # merge-base가 공통 조상을 못 찾는다(CI run 38225139375: «merge-base를 못 세웠습니다»). 옛 독립
+    # 잡은 각자 checkout을 받아 이 문제가 없었고, 묶음 잡에서는 앞 스텝이 이 경계를 남긴다.
+    with open(_CI_YML) as f:
+        ci = yaml.safe_load(f)
+    steps = ci["jobs"]["guards"]["steps"]
+    shallowing = [s.get("name") for s in steps if 'PR_BASE_REF" --depth=1' in str(s.get("run", ""))]
+    assert shallowing == [], f"guards steps that shallow the PR base fetch: {shallowing}"

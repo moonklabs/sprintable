@@ -610,7 +610,7 @@ jobs:
           COMPARE_REF=""
           COMPARE_LABEL=""
           if [ -n "$PR_BASE_REF" ]; then
-            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            git fetch origin "$PR_BASE_REF" 2>&1 | tail -3 || true
             COMPARE_REF="FETCH_HEAD"
             COMPARE_LABEL="PR base:$PR_BASE_REF"
           elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
@@ -752,7 +752,7 @@ jobs:
           COMPARE_REF=""
           COMPARE_LABEL=""
           if [ -n "$PR_BASE_REF" ]; then
-            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            git fetch origin "$PR_BASE_REF" 2>&1 | tail -3 || true
             COMPARE_REF="FETCH_HEAD"
             COMPARE_LABEL="PR base:$PR_BASE_REF"
           elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
@@ -799,7 +799,7 @@ jobs:
           COMPARE_REF=""
           COMPARE_LABEL=""
           if [ -n "$PR_BASE_REF" ]; then
-            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            git fetch origin "$PR_BASE_REF" 2>&1 | tail -3 || true
             COMPARE_REF="FETCH_HEAD"
             COMPARE_LABEL="PR base:$PR_BASE_REF"
           elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
