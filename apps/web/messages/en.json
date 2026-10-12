@@ -6785,6 +6785,19 @@
       "whoEither": "An agent on this computer · or me",
       "me": "Me · {name}",
       "onThisComputer": "{runtime} · on this computer",
+      "tools": {
+        "label": "Tools this agent uses",
+        "add": "+ Add tool",
+        "placeholder": "e.g. aws · gcloud · kubectl",
+        "hint": "Leave empty to check only Claude Code and Codex sign-in",
+        "remove": "Remove {tool}",
+        "noSignInLine": "We can't check sign-in for this tool here — no sign-in line will show",
+        "error": {
+        "invalid": "Short lowercase (letters, digits, - or _), up to 24 characters",
+        "duplicate": "Already added",
+        "max": "Up to 8 tools"
+        }
+      },
       "ownerFor": "Who takes {role}",
       "humanNote": "Person roles don't get a new agent — whoever presses Start takes them. Roles open to either start with an agent — pick Me to take one yourself.",
       "folder": "Working folder",

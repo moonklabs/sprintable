@@ -97,6 +97,8 @@ export interface SetupRoleRow {
   /** 고를 수 있는 쪽: human → 나만 · agent → 에이전트만 · either → 에이전트 + 나. */
   choices: RowOwner[];
   owner: RowOwner;
+  /** story 4653: the extra CLI names this agent uses (the runtime's own is not here). Only read for an agent row. */
+  tools?: string[];
 }
 
 /** One row the server worked out for the setup (4831 `setup_role_rows` — the same function the confirmation checks with). */
@@ -193,8 +195,44 @@ export interface ConfirmBody {
   /** 에이전트 단위 = 역할(PO 08:31Z · 4825 CHANGES): 한 역할이 여러 stage를 맡아도 에이전트 하나. */
   /** `{role, runtime}` = a new agent · `{role, owner: 'me'}` = the person confirming holds an either row (PO 05:21Z ⒜) ·
    * `{role, agent_id}` = an existing agent moved to this computer (4565). Human rows are not sent (the server binds them). */
-  roles: ({ role: string; runtime: DesktopRuntime } | { role: string; owner: 'me' } | { role: string; agent_id: string })[];
+  roles: ({ role: string; runtime: DesktopRuntime; tools?: string[] } | { role: string; owner: 'me' } | { role: string; agent_id: string; tools?: string[] })[];
   workdir_hint: string;
+}
+
+/** story 4653 (Yuna ⑤ design:pass · PO 15017): the CLIs an agent uses beyond its runtime. The runtime chip is always there
+ *  (claude · codex sign-in always checked); these are the names the judging table knows (gcloud · gh · aws). A name it does not
+ *  know is kept, but its sign-in gets no line (the server checks the same list). */
+export const JUDGED_AGENT_TOOLS = ['gcloud', 'gh', 'aws'] as const;
+export const AGENT_TOOLS_MAX = 8;
+export const AGENT_TOOL_NAME_MAX = 24;
+// the same rule as the server's (backend desktop_setup.py AGENT_TOOL_NAME: 1–24 characters, lowercase, the first a letter)
+export const AGENT_TOOL_NAME_RE = /^[a-z][a-z0-9_-]*$/;
+
+export type AddToolResult = { ok: true; tools: string[] } | { ok: false; reason: 'invalid' | 'duplicate' | 'max' };
+
+/** The extra names of one agent row, with one more name added: short lowercase, no repeat, the runtime's own name not again,
+ *  at most AGENT_TOOLS_MAX in all (the runtime counts as one). */
+export function addAgentTool(tools: readonly string[], runtime: DesktopRuntime, raw: string): AddToolResult {
+  const name = raw.trim().toLowerCase();
+  if (!AGENT_TOOL_NAME_RE.test(name) || name.length > AGENT_TOOL_NAME_MAX) return { ok: false, reason: 'invalid' };
+  if (name === runtime || tools.includes(name)) return { ok: false, reason: 'duplicate' };
+  if (tools.length + 1 >= AGENT_TOOLS_MAX) return { ok: false, reason: 'max' };
+  return { ok: true, tools: [...tools, name] };
+}
+
+/** Whether the server will check this name's sign-in (the runtime's own, or one of the judged names). */
+export function hasSignInCheck(name: string, runtime: DesktopRuntime): boolean {
+  return name === runtime || (JUDGED_AGENT_TOOLS as readonly string[]).includes(name);
+}
+
+/** story 4653: `tools` is sent only when the person added names — the runtime's own sign-in is checked either way. */
+function extraTools(r: SetupRoleRow): { tools?: string[] } {
+  return r.tools && r.tools.length > 0 ? { tools: agentToolNames(r.owner.kind === 'agent' || r.owner.kind === 'existing' ? r.owner.runtime : 'claude', r.tools) } : {};
+}
+
+/** The tool names sent for an agent row: its runtime first, then the names the person added (never repeated). */
+export function agentToolNames(runtime: DesktopRuntime, extra: readonly string[] = []): string[] {
+  return [runtime, ...extra.filter((x) => x !== runtime)];
 }
 
 /** 확인 요청(4424 confirm) — 에이전트가 맡는 역할마다 {role, runtime}(역할 하나 = 에이전트 하나), «나»를 고른 either 줄은
@@ -211,9 +249,9 @@ export function confirmBody(code: string, rows: readonly SetupRoleRow[], project
     code,
     project_id: projectId,
     recipe_id: recipeId,
-    roles: rows.flatMap<ConfirmBody['roles'][number]>((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime }]
+    roles: rows.flatMap<ConfirmBody['roles'][number]>((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime, ...extraTools(r) }]
       // story #4565: an existing agent moved to this computer — its id; the server checks it is this org's and takes its runtime
-      : r.owner.kind === 'existing' ? [{ role: r.role, agent_id: r.owner.agentId }]
+      : r.owner.kind === 'existing' ? [{ role: r.role, agent_id: r.owner.agentId, ...extraTools(r) }]
         : r.actor === 'either' ? [{ role: r.role, owner: 'me' as const }] : [])),
     workdir_hint: workdirHint.trim(),
   };

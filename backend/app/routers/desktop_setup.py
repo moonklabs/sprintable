@@ -21,8 +21,10 @@ from app.dependencies.auth import AuthContext, bearer_scheme, get_current_user, 
 from app.dependencies.database import get_db
 from app.services import desktop_device_token_codes as device_codes
 from app.services.desktop_setup import (
+    AGENT_TOOLS_CAP,
     DesktopSetupError,
     RoleChoice,
+    bad_agent_tool_names,
     list_attachable_agents,
     confirm_move_setup,
     confirm_setup,
@@ -138,6 +140,18 @@ class RoleIn(BaseModel):
     owner: str | None = Field(default=None, max_length=32)
     # story #4565: `{role, agent_id}` — an agent the organization already has, attached to this computer for the role
     agent_id: str | None = Field(default=None, max_length=64)
+    # story 4653 (PO 14015 · 17027 ②): the CLI names this agent uses — the runtime's own included or not; a name off the rule, or a
+    # list longer than the cap, is refused with a 422 that names it (never dropped silently)
+    tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+
+    @field_validator("tools")
+    @classmethod
+    def _tools_on_the_rule(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            bad = bad_agent_tool_names(v)
+            if bad:
+                raise ValueError(f"tool names outside the rule (lowercase letters, digits, - or _, 1-24 characters): {bad}")
+        return v
 
 
 # Qadir 4825 (PO 09:45Z) — the setup code travels in bodies only, never in a URL: a path is written to the access log and the
@@ -205,7 +219,7 @@ async def post_confirm(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     user_id = _human_only(auth)
-    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id) for r in body.roles]
+    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id, tools=r.tools) for r in body.roles]
     made_project: uuid.UUID | None = None
     try:
         if body.project_id is None and not body.project_name:
@@ -302,7 +316,7 @@ async def post_confirm_new_org(
     try:
         setup_id, members, work_item_id, org_id, project_id = await confirm_setup_new_org(
             db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, recipe_id=body.recipe_id,
-            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id, tools=r.tools) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
             background_tasks=background_tasks,
         )
     except DesktopSetupError as e:

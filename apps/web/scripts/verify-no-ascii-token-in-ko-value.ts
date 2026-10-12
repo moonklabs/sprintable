@@ -302,6 +302,11 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // story #4427 (유나 v24 · PO 11:19Z) — Claude Code 터미널이 영어로 띄우는 믿기 선택지를 그대로 인용(«Yes, I trust this folder»):
   // 사용자가 화살표로 **그 글자를 찾아 고르는** 자리라 옮기면 화면과 어긋난다(CLI 출력 리터럴 · 위 «stderr 로그 문자열» 부류).
   // Claude Code 2.1.x 폴더 믿기 물음 선택지 원문 · CLI 문구가 바뀌면 같이 고침. PO 승인 2026-09-30 11:24Z.
+  // story 4653 (PO 17040 · 승인 2026-10-12): the CLI command names a person types as they are — not translated (the placeholder of the
+  // setup row's tools field: «예: aws · gcloud · kubectl»). Exact words only, one per entry.
+  'desktop.setup.tools.placeholder::aws',
+  'desktop.setup.tools.placeholder::gcloud',
+  'desktop.setup.tools.placeholder::kubectl',
   'desktop.setup.trustHint::trust',
   'desktop.setup.trustHint::this',
   'desktop.setup.trustHint::folder',
