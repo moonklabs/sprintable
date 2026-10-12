@@ -7192,7 +7192,13 @@
     "setupNotFound": "Couldn't find this QR's computer — check that it belongs to the same organization",
     "offerUsed": "This QR has already been used — make a new one on the computer and scan again",
     "registerAgain": "This phone needs to be registered again — press [Scan again] to start with registration",
-    "limit": "This account already has 3 remote devices — on the web, open «Desktop app › Remote devices», press [Remove this phone] on one you no longer use, then scan again",
+    "limit": {
+      "title": "All three remote device places are taken",
+      "why": "This account already has three phones connected.",
+      "todo": "Press [Remove this phone] next to a phone you no longer use.",
+      "after": "A removed phone has to pair again from the phone before it can connect. Once a place is free, pairing continues right here.",
+      "webLink": "Remove on the web instead"
+    },
     "taken": "This phone is registered to another Sprintable account, so it can't be paired — sign in with that account and pair, or remove this phone in that account's web «Desktop app › Remote devices», then scan again",
     "failed": "Couldn't send the pairing — please scan again",
     "notInApp": "Open this screen in the Sprintable app on your phone",

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
+import { fetchWithAuth } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -22,8 +23,12 @@ import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead }
  */
 const POLL_MS = 1_500;
 
+// story #4624 (유나 확정): the phones on the person's account, for the limit screen
+interface LimitPhone { id: string; label: string; last_used_at: string | null; pairs?: { device_name: string | null }[] }
+
 type View =
   | { kind: 'start' }
+  | { kind: 'limitFull'; phones: LimitPhone[] | null; asking: string | null; freed: string | null }
   | { kind: 'busy' } // the camera or the server is working — no line yet
   | { kind: 'confirm'; head: OfferHead }
   | { kind: 'checking'; head: OfferHead; phoneKeyId: string }
@@ -76,6 +81,7 @@ export function PhonePairing() {
 function Pairing() {
   const t = useTranslations('phonePairing');
   const tp = useTranslations('agentPermissions.phone');
+  const tr = useTranslations('desktop.remoteDevices');
   const flat = useFlatHref();
   const remoteOff = useRemoteOff(); // story #4583: who can turn it on — read now, shown only on the refusal
   const [view, setView] = useState<View>({ kind: 'start' });
@@ -99,6 +105,7 @@ function Pairing() {
     switch (r.kind) {
       case 'sent': setView({ kind: 'checking', head, phoneKeyId: r.phoneKeyId }); return;
       case 'alreadyPaired': case 'remoteOff': case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
+      case 'limit': void enterLimit(); return;
       default: setView({ kind: 'retry', line: r.kind });
     }
   };
@@ -124,6 +131,30 @@ function Pairing() {
     return () => { off = true; clearTimeout(id); };
   }, [waiting, look]);
 
+  // story #4624 — the limit screen: the person's phones, one confirm to remove one, then the rescan
+  const loadLimitPhones = async () => {
+    try {
+      const res = await fetchWithAuth('/api/remote-devices');
+      const body = res.ok ? ((await res.json()) as { devices?: LimitPhone[] }) : null;
+      setView((v) => (v.kind === 'limitFull' ? { ...v, phones: Array.isArray(body?.devices) ? body.devices : [] } : v));
+    } catch {
+      setView((v) => (v.kind === 'limitFull' ? { ...v, phones: [] } : v));
+    }
+  };
+  const enterLimit = async () => {
+    setView({ kind: 'limitFull', phones: null, asking: null, freed: null });
+    await loadLimitPhones();
+  };
+  const removeLimitPhone = async (phone: LimitPhone) => {
+    try {
+      const res = await fetchWithAuth(`/api/remote-devices/${phone.id}`, { method: 'DELETE' });
+      setView({ kind: 'limitFull', phones: null, asking: null, freed: res.ok ? phone.label : null });
+    } catch {
+      setView((v) => (v.kind === 'limitFull' ? { ...v, asking: null } : v));
+    }
+    await loadLimitPhones();
+  };
+
   const cancel = () => { known.current = null; setView({ kind: 'start' }); };
   // each refusal's line — one literal key per case (the i18n guards read literal keys)
   const retryLine = (line: RetryLine): string => {
@@ -135,7 +166,7 @@ function Pairing() {
       case 'setupNotFound': return t('setupNotFound');
       case 'offerUsed': return t('offerUsed');
       case 'registerAgain': return t('registerAgain');
-      case 'limit': return t('limit');
+      case 'limit': return t('limit.title');
       case 'taken': return t('taken');
       case 'failed': return t('failed');
     }
@@ -199,6 +230,46 @@ function Pairing() {
           <Actions>{settings}{rescan}</Actions>
         </Shell>
       );
+    case 'limitFull': {
+      const phones = view.phones;
+      return (
+        <Shell>
+          <Line focus>{t('limit.title')}</Line>
+          <Line>{t('limit.why')}</Line>
+          <Line>{t('limit.todo')}</Line>
+          {phones === null ? <Loader2 className="size-4 animate-spin" aria-label={t('checking')} /> : (
+            <ul className="flex flex-col gap-3">
+              {phones.map((p) => {
+                const pairs = p.pairs?.length ?? 0;
+                return (
+                  <li key={p.id} className="flex flex-col gap-1" data-testid="pairing-limit-phone">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{p.label}</span>
+                      {view.asking === p.id ? null : (
+                        <Button variant="outline" size="sm" onClick={() => setView({ ...view, asking: p.id })}>{tr('removePhone')}</Button>
+                      )}
+                    </div>
+                    {p.last_used_at ? <span className="text-xs text-muted-foreground">{tr('lastUsed', { used: new Date(p.last_used_at).toLocaleDateString() })}</span> : null}
+                    {view.asking === p.id ? (
+                      <div className="flex flex-col gap-2">
+                        <p className="text-sm">{pairs > 0 ? tr('confirmRemovePhone', { phone: p.label, n: pairs }) : tr('confirmRemovePhoneUnpaired', { phone: p.label })}</p>
+                        <div className="flex gap-2">
+                          <Button variant="destructive" size="sm" onClick={() => void removeLimitPhone(p)}>{tr('removePhone')}</Button>
+                          <Button variant="outline" size="sm" onClick={() => setView({ ...view, asking: null })}>{tr('cancel')}</Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {view.freed ? <Line>{tr('phoneRemoved', { phone: view.freed })}</Line> : null}
+          <Line>{t('limit.after')}</Line>
+          <Actions>{rescan}<a href={flat('/desktop')} className="text-sm underline underline-offset-2" data-testid="pairing-limit-web-link">{t('limit.webLink')}</a></Actions>
+        </Shell>
+      );
+    }
     case 'retry':
       return <Shell><Line focus={pressed}>{retryLine(view.line)}</Line><Actions>{rescan}</Actions></Shell>;
   }

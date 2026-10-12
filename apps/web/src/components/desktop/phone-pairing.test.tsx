@@ -219,14 +219,39 @@ describe('[4532] phone pairing screen', () => {
     expect(sent.some((s) => s.type === 'pair.mac')).toBe(false);
   });
 
-  it('three phones already → the B-4 phone line pointing at [이 폰 빼기] (story #4624) + [다시 찍기]', async () => {
+  it('three phones already → the limit screen lists this account\'s phones; one confirm removes one, then the rescan (story #4624)', async () => {
     registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+    const phones = [
+      { id: 'p-1', label: '내 폰 A', last_used_at: '2026-10-01T00:00:00Z', pairs: [{ device_name: 'SYJ-MacBook-Pro' }] },
+      { id: 'p-2', label: '내 폰 B', last_used_at: null, pairs: [] },
+    ];
+    const base = fetchWithAuth.getMockImplementation()!;
+    let removed = false;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') {
+        return res(200, { devices: removed ? [phones[1]] : phones });
+      }
+      if (url === '/api/remote-devices/p-1' && init?.method === 'DELETE') {
+        removed = true;
+        return res(200, { removed: true });
+      }
+      return base(url, init);
+    });
     installShell();
     await render();
     await press('QR 찍기');
     await press('페어링');
-    expect(line()).toBe('이 계정의 원격 기기가 이미 3대예요 — 웹 «데스크톱 앱 › 원격 기기»에서 쓰지 않는 폰의 [이 폰 빼기]를 누른 뒤 다시 찍어 주세요');
-    expect(buttons()).toEqual(['다시 찍기']);
+    expect(line()).toBe('원격 기기가 셋 다 찼어요');
+    expect(document.body.textContent).toContain('내 폰 A');
+    expect(document.body.textContent).toContain('내 폰 B');
+    expect(buttons()).toContain('웹에서 빼 주세요');
+    await press('이 폰 빼기');
+    expect(document.body.textContent).toContain('이 폰을 뺄까요?');
+    await press('이 폰 빼기');
+    expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-1' && init?.method === 'DELETE')).toBe(true);
+    expect(document.body.textContent).toContain('뺐어요 · 내 폰 A');
+    expect(container.querySelectorAll('[data-testid="pairing-limit-phone"]').length).toBe(1);
+    expect(buttons()).toContain('다시 찍기');
   });
 
   it('this phone registered to another account → its own line (never who) + [다시 찍기] (story #4624)', async () => {
