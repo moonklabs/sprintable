@@ -116,13 +116,17 @@ _DESKTOP_META = {
     "desktop_setup_signed_in": {},
     "desktop_agent_ended_early": {"member_id": str(uuid.uuid4()), "runtime": "claude", "exit_code": 1},
     "desktop_agent_restarted": {"member_id": str(uuid.uuid4())},
+    "desktop_agent_needs_sign_in": {"member_id": str(uuid.uuid4()), "runtime": "claude"},  # story #4658
+    "desktop_agent_sign_in_cleared": {"member_id": str(uuid.uuid4())},  # story #4658
     "desktop_agent_start_failed": {"member_id": str(uuid.uuid4()), "reason": "start_refused", "code": "adapter_prepare_failed", "runtime": "codex"},  # story #4452
 }
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("event", sorted(f.DESKTOP_SHELL_EMIT_EVENTS))
-async def test_every_name_the_desktop_app_sends_is_accepted(event):
+async def test_every_name_the_desktop_app_sends_is_accepted(event, monkeypatch):
     # each with the meta the app really sends (the shapes are story 4438's — tests/test_4438_desktop_meta_shapes.py)
+    # story #4658: the sign-in steps are refused unless the member is this setup's agent (realdb: tests/test_4424_desktop_setup_realdb.py)
+    monkeypatch.setattr("app.services.desktop_setup.is_setup_agent", AsyncMock(return_value=True))
     body = OnboardingEventBody(event=event, session_id=uuid.uuid4(), meta=_DESKTOP_META[event])
     db = _db()
     await post_onboarding_event(body, db=db, credentials=None, x_agent_api_key=None)
