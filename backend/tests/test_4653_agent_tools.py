@@ -57,3 +57,11 @@ def test_a_move_agent_keeps_its_own_tools_in_the_exchange():
     members = [{"member_id": "A", "kind": "agent", "runtime": "claude", "tools": ["gcloud"]}, {"member_id": "B", "kind": "agent", "runtime": "codex", "tools": ["aws"]}]
     per = group_exchange_agents(members, "move")
     assert per["A"]["tools"] == ["gcloud"] and per["B"]["tools"] == ["aws"]
+
+
+def test_a_name_ending_in_a_newline_or_padded_is_refused_not_trimmed():
+    # Python's `$` accepts a trailing newline: the rule is the whole original text, nothing trimmed (PO 17028 ②)
+    assert clean_agent_tools(["aws\n", " aws", "gh\t"]) == []
+    with pytest.raises(ValidationError) as e:
+        RoleIn(role="pm", runtime="claude", tools=["aws\n"])
+    assert "aws" in str(e.value)

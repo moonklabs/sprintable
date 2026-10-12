@@ -539,7 +539,7 @@ AGENT_TOOLS_CAP = 8  # the list in all, the runtime included
 
 def bad_agent_tool_names(raw: list) -> list[str]:
     """The names in a request list that are not on the rule (PO 17027 ②: the request refuses them with a 422 that names them)."""
-    return [str(x) for x in raw if not (isinstance(x, str) and AGENT_TOOL_NAME.match(x))]
+    return [str(x) for x in raw if not (isinstance(x, str) and AGENT_TOOL_NAME.fullmatch(x))]
 
 
 def clean_agent_tools(raw: object, runtime: str | None = None) -> list[str]:
@@ -551,7 +551,7 @@ def clean_agent_tools(raw: object, runtime: str | None = None) -> list[str]:
         return []
     out: list[str] = []
     for item in raw:
-        if isinstance(item, str) and AGENT_TOOL_NAME.match(item) and item != runtime and item not in out:
+        if isinstance(item, str) and AGENT_TOOL_NAME.fullmatch(item) and item != runtime and item not in out:
             out.append(item)
         if len(out) >= AGENT_TOOLS_CAP:
             break
