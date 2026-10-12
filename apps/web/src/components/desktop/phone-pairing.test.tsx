@@ -105,10 +105,13 @@ const press = async (label: string) => {
 const tick = async () => { await act(async () => { vi.advanceTimersByTime(1_500); }); await settle(); };
 
 describe('[4532] phone pairing screen', () => {
-  it('outside the phone app: one line, no button', async () => {
+  // story 4654 (AC2): outside the phone app the line stays, and the get-app block (both store links, QR) comes under it — no button
+  it('outside the phone app: the line, the get-app block, no button', async () => {
     await render();
-    expect(text()).toBe('폰의 Sprintable 앱에서 이 화면을 열어 주세요');
-    expect(buttons()).toEqual([]);
+    expect(text()).toContain('폰의 Sprintable 앱에서 이 화면을 열어 주세요');
+    expect(text()).toContain('폰 앱 받기');
+    // the only links are the two store links (no button of ours)
+    expect(buttons()).toEqual(['안드로이드 · 구글 플레이', '아이폰 · 앱스토어']);
   });
 
   it('start → scan → «이 컴퓨터와 페어링할까요?» (no number) → [페어링] → checking → the number → paired', async () => {
