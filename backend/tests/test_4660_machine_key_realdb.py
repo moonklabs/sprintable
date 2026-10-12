@@ -1,7 +1,7 @@
 """story 4660 (design 4660 · PO 결정 · 까디르 렌즈) — a new setup on the same machine closes the old «연결된 기기» lines.
 
 Real database. The app sends `device_id` (its salted hash of the machine id) with the exchange; the server keeps an org-scoped
-HMAC of it and, for the same org and key, closes the older lines with the reason «새 셋업으로 대체» and revokes their device
+HMAC of it and, for the same org and key, closes the older lines with the reason replaced_by_new_setup and revokes their device
 tokens (the old token is then refused by the relay). The agents and their keys stay.
 """
 from __future__ import annotations
@@ -28,6 +28,13 @@ pytestmark = pytest.mark.anyio
 SECRET = "test-desktop-machine-key-secret-value-4660"
 SAME_MACHINE = "b" * 64
 OTHER_MACHINE = "c" * 64
+
+
+@pytest.fixture(autouse=True)
+def _addresses(monkeypatch):
+    """The exchange hands over the API and MCP addresses; a deployment sets them, a test sets its own (as in 4424)."""
+    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.d4660.test/mcp")
+    monkeypatch.setenv("FASTAPI_URL", "https://api.d4660.test")
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +79,7 @@ async def test_the_same_machine_twice_closes_the_old_line_and_its_old_token_is_r
         second = await _device(c, "d4660 mac second", SAME_MACHINE)
 
         closed, reason, first_key = await _line(first["setup_id"])
-        assert closed is True and reason == "새 셋업으로 대체"
+        assert closed is True and reason == "replaced_by_new_setup"
         assert first_key == machine_key_for(ORG, SAME_MACHINE)
         open_now, _, second_key = await _line(second["setup_id"])
         assert open_now is False and second_key == first_key
@@ -129,5 +136,5 @@ async def test_the_list_reports_the_replaced_reason_and_the_last_heard_time(worl
         assert r.status_code == 200, r.text
         item = next(s for s in r.json()["setups"] if s["setup_id"] == first["setup_id"])
         assert item["state"] == "disconnected"
-        assert item["revoked_reason"] == "새 셋업으로 대체"
+        assert item["revoked_reason"] == "replaced_by_new_setup"
         assert item["last_used_at"] is not None

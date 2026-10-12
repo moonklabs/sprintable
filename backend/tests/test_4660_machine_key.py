@@ -96,7 +96,7 @@ def test_retire_closes_only_the_same_key_lines_with_the_reason():
 
     assert count == 1
     assert same_old.revoked_at == now
-    assert same_old.revoked_reason == "새 셋업으로 대체"
+    assert same_old.revoked_reason == "replaced_by_new_setup"
     assert other_machine.revoked_at is None and other_machine.revoked_reason is None
     assert already_closed.revoked_reason is None  # an earlier close is left as it was
     assert len(db.statements) == 1  # one statement revokes the device tokens of the closed line

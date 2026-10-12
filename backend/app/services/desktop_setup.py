@@ -930,7 +930,7 @@ async def _retire_same_machine(db: AsyncSession, *, machine_key: str, others: li
     old = [o for o in others if o.machine_key == machine_key and o.revoked_at is None]
     for o in old:
         o.revoked_at = now
-        o.revoked_reason = "새 셋업으로 대체"
+        o.revoked_reason = "replaced_by_new_setup"
     if old:
         await db.execute(
             update(DesktopDeviceToken)
