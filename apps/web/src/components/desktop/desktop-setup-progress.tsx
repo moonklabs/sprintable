@@ -21,6 +21,21 @@ import { Failure, ToolsNotConnected } from './desktop-setup';
  * settled가 참이 되면 멈춘다(story 4464): 막힘 · 만료, 또는 첫 결과 뒤 모든 에이전트가 정해짐(붙음 · 시작 실패 · 멈춤 · 문턱 넘긴
  * 안 붙음 = ⑦ 블록). 설정 id가 없으면(옛 앱) 임시 한 장만.
  */
+// story 4658: the login command each runtime names for itself (the app's AUTH_COMMAND — the same two strings)
+const SIGN_IN_COMMAND: Record<'claude' | 'codex', string> = { claude: 'claude auth login', codex: 'codex login' };
+
+/** story 4658 (Yuna 4658-design.md · 480 CHANGES ①): the sentence, then the command of each runtime on its own line — the CLI's own (the app's AUTH_COMMAND) */
+export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {
+  const t = useTranslations('desktop.setup');
+  if (runtimes.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-sign-in">
+      <p>{t('signInBody')}</p>
+      {runtimes.map((r) => <code key={r} className="block truncate text-xs">{SIGN_IN_COMMAND[r]}</code>)}
+    </div>
+  );
+}
+
 export function SetupProgressView({ setupId, recipeName }: { setupId: string | null; recipeName: string }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
@@ -195,6 +210,7 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
           <p className="text-muted-foreground">{t('startFailed.where')}</p>
         </div>
       ) : null}
+      {progress.signIn ? <SignInBand runtimes={progress.signIn.runtimes} /> : null}
       {progress.stopped ? (
         // story 4433 (Yuna v26): one block under the steps, above «결과 보기» · the roles on one line · body colour (there is
         // something to do), never red (the cause can be a person's own choice) · no cause guessed: «멈췄어요» covers both
