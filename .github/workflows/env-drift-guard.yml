@@ -3,9 +3,8 @@ name: Env Drift Guard
 # ⓒ 라이브 env 드리프트 가드 — 설계 doc env-drift-guard-design(26c673c2) 구현 순서 3단계.
 # 기존 ci.yml(PR 게이트)/cloud-build.yml(배포 트리거) 안에 넣지 않는다 — 독립 스케줄
 # 워크플로우로 둬야 PR/배포 예산과 안 섞인다(설계 doc "운영축" 그대로).
+# 2026-10-12 (story 4659): 자동 스케줄 제거. prod 승격 직전 수동 실행만.
 on:
-  schedule:
-    - cron: '0 0 * * 1'  # 매주 월 00:00 UTC(=09:00 KST) 1회 (2026-10-12 story 4659: 일 1회 → 주 1회)
   workflow_dispatch: {}  # prod 승격 직전 등 온디맨드 수동 트리거
 
 concurrency:

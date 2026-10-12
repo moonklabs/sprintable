@@ -69,9 +69,10 @@ name: QA Review Gate
 # (새 커밋 push로 synchronize 이벤트를 유발하거나, PR을 close 후 재오픈)뿐이었다 — 아래
 # edited 추가로 이 케이스는 이제 자동 재트리거된다(#3317 실사고 재발 방지).
 
+# 2026-10-12 (story 4659): 라벨 이벤트만 트리거. 새 push는 게이트를 다시 돌리지 않으므로 라벨을 다시 붙여야 한다.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+    types: [labeled]
     branches: [main, develop]
 
 concurrency:
