@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
-import { PHONE_APP_STORE_ANDROID, PHONE_APP_STORE_IOS } from '@/lib/phone-app-store';
+import { PHONE_APP_STORE_ANDROID, PHONE_APP_STORE_IOS, phoneAppStoreLinks } from '@/lib/phone-app-store';
 
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: () => Promise.reject(new Error('not used here')) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
@@ -28,14 +28,12 @@ async function draw(locale: 'ko' | 'en' = 'ko') {
 }
 
 describe('[SID:4654] the pairing step outside the phone app: how to get the app', () => {
-  it('shows the get-app line, a link to each store, and a QR for each address', async () => {
+  // nothing is published yet (PHONE_APP_PUBLISHED both false): no get-app block, no link, no QR — the page keeps its one line
+  it('nothing published: no get-app block, no store link, no QR', async () => {
     const h = await draw();
-    const block = h.querySelector('[data-testid="phone-app-get"]');
-    expect(block, 'the get-app block is drawn').not.toBeNull();
-    expect(block!.querySelector('p')!.textContent).toBe('폰 앱 받기');
-    const links = [...block!.querySelectorAll('a')];
-    expect(links.map((a) => a.getAttribute('href'))).toEqual([PHONE_APP_STORE_ANDROID, PHONE_APP_STORE_IOS]);
-    expect(block!.querySelectorAll('svg').length, 'one QR per store').toBe(2);
+    expect(h.querySelector('[data-testid="phone-app-get"]')).toBeNull();
+    expect(h.querySelectorAll('a').length).toBe(0);
+    expect(h.querySelectorAll('svg').length).toBe(0);
   });
 
   it('the old «open it in the phone app» line stays', async () => {
