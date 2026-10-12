@@ -1,5 +1,6 @@
 {
   "file": "tests/test_4657_release_admins.py",
   "sec": 19.0,
-  "source": "story #4657 신규 realdb 파일(3 시험, 같은 harness·seed as test_2630) — CI 미실측 추정치(2630 실측 19.0s 기준). CI 실측 뒤 재등재 갱신."
+  "source": "story #4657 신규 realdb 파일(3 시험, 같은 harness·seed as test_2630) — CI 미실측 추정치(2630 실측 19.0s 기준). CI 실측 뒤 재등재 갱신.",
+  "provisional": true
 }

@@ -144,10 +144,23 @@ async def _add_participant(session, conversation_id, member_id):
 
 
 async def _seed_org_owner(session, org_id, *, role="owner"):
-    from app.models.project import OrgMember
+    """story #4657: the production shape — a users row, the org member, and its active human members anchor (members.id = org member
+    id; ensure_human_member writes the same). The release rule reads the anchor, so a bare OrgMember is not an owner in production."""
+    from sqlalchemy import text
 
-    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=uuid.uuid4(), role=role)
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=f"{user_id.hex[:8]}@test.local", hashed_password="x"))
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role=role)
     session.add(om)
+    await session.commit()
+    await session.execute(text(
+        "INSERT INTO members (id, org_id, type, user_id, name, is_active) VALUES (:id, :org, 'human', :uid, 'owner', true) "
+        "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id"
+    ), {"id": om.id, "org": org_id, "uid": user_id})
     await session.commit()
     return om.id
 
@@ -825,7 +838,7 @@ async def test_4631_get_conversation_carries_it_owner_may_release_agent_may_not(
                 as_owner = await get_conversation(conv_id, db=s, auth=_human_auth(owner_user_id, org_id), org_id=org_id)
                 as_agent = await get_conversation(conv_id, db=s, auth=_agent_auth(agent_id, org_id), org_id=org_id)
             body = as_owner.model_dump(mode="json")["circuit_breaker"]
-            assert set(body) == {"opened_at", "release_mode", "can_release", "auto_release_after_minutes"}
+            assert set(body) == {"opened_at", "release_mode", "can_release", "auto_release_after_minutes", "no_release_admin"}  # story #4657: + no_release_admin
             assert (body["release_mode"], body["can_release"], body["auto_release_after_minutes"]) == ("manual", True, None)
             assert as_agent.model_dump(mode="json")["circuit_breaker"]["can_release"] is False
     finally:

@@ -84,10 +84,23 @@ async def _seed_conversation(session, org_id, project_id, *, conv_type="group"):
 
 
 async def _seed_org_owner(session, org_id, *, role="owner"):
-    from app.models.project import OrgMember
+    """story #4657: the production shape — a users row, the org member, and its active human members anchor (members.id = org member
+    id; ensure_human_member writes the same). The release rule reads the anchor, so a bare OrgMember is not an owner in production."""
+    from sqlalchemy import text
 
-    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=uuid.uuid4(), role=role)
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=f"{user_id.hex[:8]}@test.local", hashed_password="x"))
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role=role)
     session.add(om)
+    await session.commit()
+    await session.execute(text(
+        "INSERT INTO members (id, org_id, type, user_id, name, is_active) VALUES (:id, :org, 'human', :uid, 'owner', true) "
+        "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id"
+    ), {"id": om.id, "org": org_id, "uid": user_id})
     await session.commit()
     return om.id
 

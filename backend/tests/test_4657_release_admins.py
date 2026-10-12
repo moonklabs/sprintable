@@ -31,30 +31,35 @@ def anyio_backend():
     return "asyncio"
 
 
-async def _seed_admin_person(session, org_id, *, role: str, member_active: bool) -> tuple[uuid.UUID, uuid.UUID]:
-    """an org member of `role` and their human members row (active or not). Returns (org_members.id, user_id)."""
-    from app.models.member import Member
+async def _seed_person(session, org_id, *, role: str, anchor_active: bool) -> tuple[uuid.UUID, uuid.UUID]:
+    """the production shape (story #4657): a users row, the org member of `role`, and its human members anchor with
+    members.id = org member id (ensure_human_member writes the same). `anchor_active` False = a deactivated person.
+    Returns (org_members.id, user_id)."""
+    from sqlalchemy import text
+
     from app.models.project import OrgMember
+    from app.models.user import User
 
     user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=f"{user_id.hex[:8]}@test.local", hashed_password="x"))
+    await session.commit()
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role=role)
     session.add(om)
-    session.add(Member(
-        id=uuid.uuid4(), org_id=org_id, type="human", user_id=user_id,
-        is_active=member_active, deleted_at=None,
-    ))
+    await session.commit()
+    await session.execute(text(
+        "INSERT INTO members (id, org_id, type, user_id, name, is_active) VALUES (:id, :org, 'human', :uid, :name, :active) "
+        "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id, is_active = EXCLUDED.is_active"
+    ), {"id": om.id, "org": org_id, "uid": user_id, "name": role, "active": anchor_active})
     await session.commit()
     return om.id, user_id
 
 
-async def _seed_plain_member(session, org_id) -> None:
-    from app.models.member import Member
-    from app.models.project import OrgMember
+async def _seed_admin_person(session, org_id, *, role: str, member_active: bool) -> tuple[uuid.UUID, uuid.UUID]:
+    return await _seed_person(session, org_id, role=role, anchor_active=member_active)
 
-    user_id = uuid.uuid4()
-    session.add(OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role="member"))
-    session.add(Member(id=uuid.uuid4(), org_id=org_id, type="human", user_id=user_id, is_active=True, deleted_at=None))
-    await session.commit()
+
+async def _seed_plain_member(session, org_id) -> None:
+    await _seed_person(session, org_id, role="member", anchor_active=True)
 
 
 async def _open_block(s, org_id, project_id) -> uuid.UUID:
