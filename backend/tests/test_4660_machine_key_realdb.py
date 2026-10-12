@@ -86,7 +86,7 @@ async def test_the_same_machine_twice_closes_the_old_line_and_its_old_token_is_r
 
         old = await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 2, "sessions": []}, headers=_tok(first["device_token"]))
         assert old.status_code == 401, old.text
-        assert old.json()["detail"]["code"] == "DEVICE_TOKEN_INVALID"
+        assert old.json()["error"]["code"] == "DEVICE_TOKEN_INVALID"  # the error envelope: the dict detail passes through as error
         new = await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 1, "sessions": []}, headers=_tok(second["device_token"]))
         assert new.status_code == 200, new.text
 
