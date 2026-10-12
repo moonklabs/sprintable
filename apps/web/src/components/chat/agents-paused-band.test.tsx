@@ -86,7 +86,7 @@ describe('AgentsPausedBand (story #4631)', () => {
   // story #4657: nobody in the org may resume it → the band says so (not «ask an admin», which would send the person to nobody)
   it('manual · no active owner/admin: the reason line, no button — never the ask-an-admin line', async () => {
     await render({ ...manual(false), no_release_admin: true });
-    expect(q('agents-paused-release')!.textContent).toBe('풀 수 있는 관리자가 없어요 — 조직 소유자가 관리자를 다시 켜야 해요.');
+    expect(q('agents-paused-release')!.textContent).toBe('풀 수 있는 관리자가 없어요 — 조직 소유자가 관리자 권한을 다시 줘야 해요.');
     expect(button('멈춤 풀기')).toBeUndefined();
   });
 
