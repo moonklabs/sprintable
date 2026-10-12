@@ -39,7 +39,7 @@ const noSubscribe = () => () => {};
 const notOnServer = () => false;
 
 /** story 4654 (AC2): the phone app's two store links, each with its QR (the address itself, from phone-app-store) */
-function PhoneAppGet() {
+export function PhoneAppGet() {
   const t = useTranslations('phonePairing');
   const links = phoneAppStoreLinks(PHONE_APP_PUBLISHED);
   if (links.length === 0) return null; // nothing published yet: the page keeps its one line (story 4654 · Yuna 5048)
