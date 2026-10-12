@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
+import { LimitPhoneRow, type LimitPhone } from '@/components/desktop/limit-phone-row';
 import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
 import { PHONE_APP_PUBLISHED, phoneAppStoreLinks } from '@/lib/phone-app-store';
 import { QRCodeSVG } from 'qrcode.react';
@@ -22,9 +23,6 @@ import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead }
  * (the computer took the offer) → «짝지었어요» (the pair stood on the computer). Waiting is read every 1.5 s up to the QR's time.
  */
 const POLL_MS = 1_500;
-
-// story #4624 (유나 확정): the phones on the person's account, for the limit screen
-interface LimitPhone { id: string; label: string; last_used_at: string | null; pairs?: { device_name: string | null }[] }
 
 type View =
   | { kind: 'start' }
@@ -240,29 +238,16 @@ function Pairing() {
           <p className="text-xs text-muted-foreground">{t('limit.listHead')}</p>
           {phones === null ? <Loader2 className="size-4 animate-spin" aria-label={t('checking')} /> : (
             <ul className="flex flex-col gap-3">
-              {phones.map((p) => {
-                const pairs = p.pairs?.length ?? 0;
-                return (
-                  <li key={p.id} className="flex flex-col gap-1" data-testid="pairing-limit-phone">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{p.label}</span>
-                      {view.asking === p.id ? null : (
-                        <Button variant="outline" size="sm" onClick={() => setView({ ...view, asking: p.id })}>{tr('removePhone')}</Button>
-                      )}
-                    </div>
-                    <span className="text-xs text-muted-foreground">{p.last_used_at ? tr('lastUsed', { used: new Date(p.last_used_at).toLocaleDateString() }) : t('limit.neverUsed')}</span>
-                    {view.asking === p.id ? (
-                      <div className="flex flex-col gap-2">
-                        <p className="text-sm">{pairs > 0 ? tr('confirmRemovePhone', { phone: p.label, n: pairs }) : tr('confirmRemovePhoneUnpaired', { phone: p.label })}</p>
-                        <div className="flex gap-2">
-                          <Button variant="destructive" size="sm" onClick={() => void removeLimitPhone(p)}>{tr('removePhone')}</Button>
-                          <Button variant="outline" size="sm" onClick={() => setView({ ...view, asking: null })}>{tr('cancel')}</Button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
+              {phones.map((p) => (
+                <LimitPhoneRow
+                  key={p.id}
+                  phone={p}
+                  asking={view.asking === p.id}
+                  onAsk={() => setView({ ...view, asking: p.id })}
+                  onConfirm={() => void removeLimitPhone(p)}
+                  onCancel={() => setView({ ...view, asking: null })}
+                />
+              ))}
             </ul>
           )}
           {view.freed ? <Line>{tr('phoneRemoved', { phone: view.freed })}</Line> : null}
