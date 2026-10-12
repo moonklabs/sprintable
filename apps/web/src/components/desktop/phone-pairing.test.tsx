@@ -251,6 +251,7 @@ describe('[4532] phone pairing screen', () => {
     await press('페어링');
     await press('이 폰 빼기');
     await press('이 폰 빼기');
+    expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-1' && init?.method === 'DELETE')).toBe(true);
     expect(document.body.textContent).not.toContain('자리가 하나 비었어요');
     expect(document.body.textContent).not.toContain('뺐어요');
   });
@@ -265,7 +266,7 @@ describe('[4532] phone pairing screen', () => {
     let removed = false;
     const base = fetchWithAuth.getMockImplementation()!;
     fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: removed ? phones.slice(1) : phones });
+      if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: removed ? phones.filter((p) => p.id !== 'p-2') : phones });
       if (url === '/api/remote-devices/p-2' && init?.method === 'DELETE') { removed = true; return res(200, { removed: true }); }
       return base(url, init);
     });
@@ -282,7 +283,11 @@ describe('[4532] phone pairing screen', () => {
     await settle();
     expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-2' && init?.method === 'DELETE')).toBe(true);
     expect(document.body.textContent).toContain('자리가 하나 비었어요');
-    expect(container.querySelectorAll('[data-testid="pairing-limit-phone"]').length).toBe(2);
+    const left = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')].map((r) => r.textContent ?? '');
+    expect(left.length).toBe(2);
+    expect(left.some((t) => t.includes('폰 둘'))).toBe(false);
+    expect(left.some((t) => t.includes('폰 하나'))).toBe(true);
+    expect(left.some((t) => t.includes('폰 셋'))).toBe(true);
     sent.length = 0;
     await press('다시 찍기');
     expect(sent.some((m) => m.type === 'pair.scan')).toBe(true);
