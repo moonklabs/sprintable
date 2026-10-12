@@ -31,7 +31,7 @@ export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {
   return (
     <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-sign-in">
       <p>{t('signInBody')}</p>
-      {runtimes.map((r) => <code key={r} className="block truncate text-xs">{SIGN_IN_COMMAND[r]}</code>)}
+      {runtimes.map((r) => <code key={r} className="block break-all text-xs">{SIGN_IN_COMMAND[r]}</code>)}
     </div>
   );
 }
