@@ -16,6 +16,7 @@ class DesktopSetup(Base):
         CheckConstraint("exchanged_at IS NULL OR confirmed_at IS NOT NULL", name="ck_desktop_setups_exchange_after_confirm"),
         Index("uq_desktop_setups_code_hash", "code_hash", unique=True),
         Index("ix_desktop_setups_org_id", "org_id"),
+        Index("ix_desktop_setups_org_machine_key", "org_id", "machine_key"),
         Index("ix_desktop_setups_work_item_id", "work_item_id"),
     )
 
@@ -48,4 +49,9 @@ class DesktopSetup(Base):
     relay_command_seq: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story 4660 — why the server closed it (a closed text, e.g. «새 셋업으로 대체»); null for a person's disconnect
+    revoked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story 4660 — HMAC(server secret, org_id || device_id) of the machine this setup was exchanged on; null when the
+    # app sent no device_id or the server has no secret
+    machine_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

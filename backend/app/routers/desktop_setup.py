@@ -332,6 +332,8 @@ async def post_confirm_new_org(
 class ExchangeRequest(BaseModel):
     code: str = SETUP_CODE_FIELD
     verifier: str = Field(min_length=43, max_length=128)
+    # story 4660 — the app's stable machine id (sha256 of the hardware UUID with the app's fixed salt); optional
+    device_id: str | None = None
 
 
 @router.post("/setup-codes/exchange")
@@ -341,7 +343,7 @@ class ExchangeRequest(BaseModel):
 async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSession = Depends(get_db)):
     headers = {"Cache-Control": "no-store"}
     try:
-        done = await exchange_setup(db, code=body.code, verifier=body.verifier)
+        done = await exchange_setup(db, code=body.code, verifier=body.verifier, device_id=body.device_id)
     except DesktopSetupError as e:
         await db.rollback()  # returned, not raised: nothing may be committed on the way out
         err = _error(e)
@@ -384,6 +386,10 @@ class SetupItem(BaseModel):
     device_name: str
     state: Literal["waiting_for_app", "handed_over", "not_handed_over", "disconnected"]
     project_id: uuid.UUID | None
+    # story 4660 — the newest heard-from time of this device's tokens (the «오래됨» rule reads it); null if never heard
+    last_used_at: datetime | None = None
+    # story 4660 — the closed reason the server closed this line, if it did
+    revoked_reason: str | None = None
     recipe_key: str | None
     confirmed_by: uuid.UUID | None
     confirmed_at: datetime | None
