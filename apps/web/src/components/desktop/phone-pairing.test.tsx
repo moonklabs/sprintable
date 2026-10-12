@@ -222,7 +222,7 @@ describe('[4532] phone pairing screen', () => {
   it('three phones already → the limit screen lists this account\'s phones; one confirm removes one, then the rescan (story #4624)', async () => {
     registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
     const phones = [
-      { id: 'p-1', label: '내 폰 A', last_used_at: '2026-10-01T00:00:00Z', pairs: [{ device_name: 'SYJ-MacBook-Pro' }] },
+      { id: 'p-1', label: '내 폰 A', last_used_at: new Date(Date.now() - 2 * 86_400_000).toISOString(), pairs: [{ device_name: 'SYJ-MacBook-Pro' }] },
       { id: 'p-2', label: '내 폰 B', last_used_at: null, pairs: [] },
     ];
     const base = fetchWithAuth.getMockImplementation()!;
@@ -247,6 +247,11 @@ describe('[4532] phone pairing screen', () => {
     expect(buttons()).toContain('웹에서 빼 주세요');
     expect(document.body.textContent).toContain('이름 · 마지막 쓴 때');
     expect(document.body.textContent).toContain('아직 안 씀');
+    // story #4624 (유나 조건): 「아직 안 씀」 only where last_used_at is null — a phone with a last use reads its relative time
+    const rows = container.querySelectorAll('[data-testid="pairing-limit-phone"]');
+    expect(rows[0].textContent).not.toContain('아직 안 씀');
+    expect(rows[0].textContent).toContain('그저께');
+    expect(rows[1].textContent).toContain('아직 안 씀');
     await press('이 폰 빼기');
     expect(document.body.textContent).toContain('이 폰을 뺄까요?');
     await press('이 폰 빼기');

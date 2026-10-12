@@ -1,7 +1,8 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 
 /** story #4624 — one phone of the person's account on the limit screen (its pairs are the computers it is paired to now). */
 export interface LimitPhone { id: string; label: string; last_used_at: string | null; pairs?: { device_name: string | null }[] }
@@ -18,6 +19,9 @@ export function LimitPhoneRow({ phone, asking, onAsk, onConfirm, onCancel }: {
   onCancel: () => void;
 }) {
   const tr = useTranslations('desktop.remoteDevices');
+  const locale = useLocale();
+  // the viewer's own zone: a last use past a week is a date there (never UTC, never blank)
+  const viewerTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const t = useTranslations('phonePairing');
   const pairs = phone.pairs?.length ?? 0;
   return (
@@ -26,7 +30,7 @@ export function LimitPhoneRow({ phone, asking, onAsk, onConfirm, onCancel }: {
         <span className="text-sm font-medium">{phone.label}</span>
         {asking ? null : <Button variant="outline" size="sm" onClick={onAsk}>{tr('removePhone')}</Button>}
       </div>
-      <span className="text-xs text-muted-foreground">{phone.last_used_at ? tr('lastUsed', { used: new Date(phone.last_used_at).toLocaleDateString() }) : t('limit.neverUsed')}</span>
+      <span className="text-xs text-muted-foreground">{phone.last_used_at ? tr('lastUsed', { used: formatViewerRelativeTime(phone.last_used_at, locale, viewerTz) }) : t('limit.neverUsed')}</span>
       {asking ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm">{pairs > 0 ? tr('confirmRemovePhone', { phone: phone.label, n: pairs }) : tr('confirmRemovePhoneUnpaired', { phone: phone.label })}</p>
