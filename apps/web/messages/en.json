@@ -6954,6 +6954,7 @@
       "phoneCard": {
         "title": "To handle agents from your phone too",
         "body": "Scan the QR with your phone's camera to get the phone app, then [Open phone pairing] to pair it with this computer.",
+        "bodyNoApp": "If you already have the phone app, [Open phone pairing] pairs it with this computer.",
         "openPairing": "Open phone pairing",
         "memberNote": "Pairing is done from [Pair phone] in the Sprintable app's band on this computer."
       },

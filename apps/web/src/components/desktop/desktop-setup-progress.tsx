@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { Check, Circle, Info, Loader2 } from 'lucide-react';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM, type NativeReturnApp } from '@/lib/auth/native-return-app';
 import { PhoneAppGet } from './phone-pairing';
+import { PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET, phoneAppLinks } from '@/lib/phone-app-store';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -270,15 +271,20 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
  * remote-control line (§E ③e · [켜기]) joins with the switch pieces after the security lens.
  */
 export function PhoneHandoffCard({ isAdmin, app }: { isAdmin: boolean; app: NativeReturnApp | null }) {
-  const t = useTranslations('desktop.setup.phoneCard');
+  // the file's namespace with dotted keys (the repo's i18n key check binds one namespace per hook name in a file — story #2371)
+  const t = useTranslations('desktop.setup');
+  // PO 5066 ① · Yuna §E ③f: whether the phone app can be got here at all — the same reading PhoneAppGet makes (it draws nothing without
+  // a way in); then the body names no QR, and a member (no button either) gets no card at all — nothing to do on that screen
+  const hasApp = phoneAppLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET).length > 0;
+  if (!hasApp && !isAdmin) return null;
   return (
-    <section className="flex flex-col gap-3 rounded-md border p-3" aria-labelledby="setup-phone-card-title" data-testid="setup-phone-card">
-      <h2 id="setup-phone-card-title" className="text-sm font-medium">{t('title')}</h2>
-      <p className="text-sm text-muted-foreground">{t('body')}</p>
-      <PhoneAppGet />
+    <section className="flex flex-col gap-3 rounded-md border p-3" aria-labelledby="setup-phone-card-title" data-testid="setup-phone-card" data-app={hasApp ? 'yes' : 'no'}>
+      <h2 id="setup-phone-card-title" className="text-sm font-medium">{t('phoneCard.title')}</h2>
+      <p className="text-sm text-muted-foreground">{hasApp ? t('phoneCard.body') : t('phoneCard.bodyNoApp')}</p>
+      {hasApp ? <PhoneAppGet /> : null}
       {isAdmin
-        ? <div><Button asChild variant="outline"><a href={appSetupLink(app, 'pair')} data-testid="setup-phone-pair">{t('openPairing')}</a></Button></div>
-        : <p className="text-xs text-muted-foreground" data-testid="setup-phone-member">{t('memberNote')}</p>}
+        ? <div><Button asChild variant="outline"><a href={appSetupLink(app, 'pair')} data-testid="setup-phone-pair">{t('phoneCard.openPairing')}</a></Button></div>
+        : <p className="text-xs text-muted-foreground" data-testid="setup-phone-member">{t('phoneCard.memberNote')}</p>}
     </section>
   );
 }
