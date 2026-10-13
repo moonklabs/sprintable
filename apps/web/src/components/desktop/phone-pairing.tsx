@@ -10,7 +10,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { LimitPhoneRow, type LimitPhone } from '@/components/desktop/limit-phone-row';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
-import { PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, phoneAppStoreLinks } from '@/lib/phone-app-store';
+import { PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET, phoneAppLinks } from '@/lib/phone-app-store';
 import { QRCodeSVG } from 'qrcode.react';
 import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
 
@@ -39,23 +39,39 @@ type View =
   | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'failed' };
 
 
-/** story 4654 (AC2): the phone app's two store links, each with its QR (the address itself, from phone-app-store) */
-export function PhoneAppGet({ body }: { body?: string }) {
+/**
+ * story 4654 (AC2): the phone app's store links, each with its QR (the address itself, from phone-app-store).
+ * [SID:4671]: the link and «is the store open» are apart — Android draws the store when open, else the two-step way in (① the
+ * testers' group page ② the internal-test opt-in page — two rows, each QR + link); iOS draws the store when open, else one «준비 중»
+ * line (no link · no QR). Nothing to get at all → nothing drawn (phoneAppLinks · the page keeps its one line, story 4654 · Yuna 5048).
+ */
+export function PhoneAppGet({ body, scanHint = false }: { body?: string; scanHint?: boolean }) {
   const t = useTranslations('phonePairing');
-  const links = phoneAppStoreLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET);
-  if (links.length === 0) return null; // nothing published yet: the page keeps its one line (story 4654 · Yuna 5048)
+  const links = phoneAppLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET);
+  if (links.length === 0) return null;
+  const row = (key: string, url: string, label: string, kind: string) => (
+    <div key={key} className="flex items-center gap-3" data-testid={`phone-app-link-${key}`} data-kind={kind}>
+      {/* Yuna 5060: the QR is decoration for a camera — the link's words are the row's name */}
+      <QRCodeSVG value={url} size={72} aria-hidden="true" />
+      <a className="text-sm underline" href={url} target="_blank" rel="noreferrer">{label}</a>
+    </div>
+  );
   return (
     <div className="flex flex-col gap-3" data-testid="phone-app-get">
       <p className="text-sm">{t('getApp')}</p>
       {body ? <p className="text-xs text-muted-foreground" data-testid="phone-app-body">{body}</p> : null}
-      {links.map((l) => (
-        <div key={l.store} className="flex items-center gap-3">
-          <QRCodeSVG value={l.url} size={72} />
-          <a className="text-sm underline" href={l.url} target="_blank" rel="noreferrer">
-            {l.store === 'android' ? t('getAppAndroid') : t('getAppIos')}
-          </a>
-        </div>
-      ))}
+      {/* Yuna §D (ux1-copy-1013): on a Mac, how the QR is used — right under the body, before the rows */}
+      {scanHint ? <p className="text-xs text-muted-foreground" data-testid="phone-app-scan-hint">{t('scanWithPhone')}</p> : null}
+      {links.flatMap((l) => {
+        if (l.kind === 'soon') return [<p key={l.store} className="text-sm text-muted-foreground" data-testid="phone-app-ios-soon">{t('getAppIosSoon')}</p>];
+        // Yuna §D: the two-step note right above the two rows — scanning ② alone is a dead end at Play until ① is joined
+        if (l.kind === 'invite') return [
+          <p key="android-note" className="text-xs text-muted-foreground" data-testid="phone-app-invite-note">{t('getAppInviteNote')}</p>,
+          row('android-group', l.group, t('getAppGroupJoin'), 'invite'),
+          row('android', l.url, t('getAppAndroidInvite'), 'invite'),
+        ];
+        return [row(l.store, l.url, l.store === 'ios' ? t('getAppIos') : t('getAppAndroid'), 'store')];
+      })}
     </div>
   );
 }

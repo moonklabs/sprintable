@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-// story 4654 (AC2): outside the phone app the pairing step says how to get it — one line, both store links, and a QR of each address
+// story 4654 (AC2): outside the phone app the pairing step says how to get it — one line, the store links, and a QR of each address.
+// [SID:4671]: nothing published and no opt-in page → still nothing (no dead «준비 중» line alone); the opt-in case is phone-pairing-get-app-invite.test.tsx
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
-import { PHONE_APP_STORE_ANDROID, PHONE_APP_STORE_IOS, phoneAppStoreLinks } from '@/lib/phone-app-store';
 
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: () => Promise.reject(new Error('not used here')) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
@@ -28,10 +28,11 @@ async function draw(locale: 'ko' | 'en' = 'ko') {
 }
 
 describe('[SID:4654] the pairing step outside the phone app: how to get the app', () => {
-  // nothing is published yet (PHONE_APP_PUBLISHED both false): no get-app block, no link, no QR — the page keeps its one line
-  it('nothing published: no get-app block, no store link, no QR', async () => {
+  // nothing is published yet (PHONE_APP_PUBLISHED both false) and no opt-in page is set: no get-app block, no link, no QR — the page keeps its one line
+  it('nothing published, no opt-in page: no get-app block, no store link, no QR, no «준비 중» line', async () => {
     const h = await draw();
     expect(h.querySelector('[data-testid="phone-app-get"]')).toBeNull();
+    expect(h.querySelector('[data-testid="phone-app-ios-soon"]')).toBeNull();
     expect(h.querySelectorAll('a').length).toBe(0);
     expect(h.querySelectorAll('svg').length).toBe(0);
   });

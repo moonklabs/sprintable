@@ -7233,6 +7233,11 @@
     "needPhoneAppBody": "To reply to this computer's agents, or stop or instruct them, from your phone, you need the phone app.",
     "getAppAndroid": "Android · Google Play",
     "getAppIos": "iPhone · App Store",
+    "getAppGroupJoin": "Android ① · Join the testers' group",
+    "getAppAndroidInvite": "Android ② · Join the Google Play test, then install",
+    "getAppInviteNote": "Before the store opens it takes two steps — ② opens only after you join ①",
+    "getAppIosSoon": "iPhone · coming soon",
+    "scanWithPhone": "Scan a QR with your phone's camera — it opens on the phone",
     "remoteOffOwner": "Remote control is off, so this phone can't be paired — turn it on to answer, stop and instruct agents from this phone",
     "remoteOffOthers": "Remote control is off, so this phone can't be paired — you can try again once an organization owner{hasOwners, select, yes { ({owners})} other {}} turns it on"
   },
