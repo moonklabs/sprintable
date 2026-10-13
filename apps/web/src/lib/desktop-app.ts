@@ -18,7 +18,8 @@ export interface SprintableDesktop {
   pickFolder(): Promise<string | null>;
   /** start that agent on this computer: the app opens its setup page (with `agent=` in the fragment) — no link round trip */
   startHere(a: { agentId: string }): Promise<{ ok: true } | { ok: false; code: string }>;
-  /** keep a project's folder on this computer — the app checks the folder again (inside home · not its own folder) */
+  /** keep a project's folder on this computer — `path` must be one pickFolder returned in this page (else `problem: 'not_picked'`);
+   *  the app checks the folder again (inside home · not its own folder). A page never names a folder itself. */
   setProjectFolder(a: { projectId: string; path: string }): Promise<{ ok: true } | { problem: string }>;
 }
 
