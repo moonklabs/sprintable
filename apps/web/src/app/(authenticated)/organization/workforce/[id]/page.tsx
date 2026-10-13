@@ -25,6 +25,7 @@ import { Avatar } from '@/components/shared/avatar';
 import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 import { MemberNotificationPreferencesSummary } from '@/components/agents/member-notification-preferences-summary';
 import { useToast } from '@/components/ui/toast';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   RUNTIME_REGISTRY,
   getRuntimeDef,
@@ -130,6 +131,10 @@ export default function AgentDetailPage() {
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
   const tSession = useTranslations('chats.agentSession'); // story 4675 — the session's word, the DM strip's table
+  // story 4675 (Yuna 5068): /desktop redirects to Today while DESKTOP_DOWNLOAD_ENABLED is off (prod now) — the link follows the
+  // same flag the sidebar and /more read (navV3Flags); off, or not known → no link, the line stays
+  const { navV3Flags } = useDashboardContext();
+  const desktopPageOn = navV3Flags?.desktopDownloadEnabled === true;
   const tc = useTranslations('common');
   const to = useTranslations('organization');
   const locale = useLocale();
@@ -504,7 +509,7 @@ export default function AgentDetailPage() {
                       : desk?.bound_device_name ? ta('boundNotRunYet', { name: desk.bound_device_name }) : null;
                     if (!line) return null;
                     const setupId = desk?.setup_id ?? desk?.bound_setup_id ?? null;
-                    const manage = orgRole === 'admin' || orgRole === 'owner';
+                    const manage = (orgRole === 'admin' || orgRole === 'owner') && desktopPageOn;
                     return (
                       <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 break-keep text-xs text-muted-foreground" data-testid="agent-running-on">
                         <span>{line}</span>

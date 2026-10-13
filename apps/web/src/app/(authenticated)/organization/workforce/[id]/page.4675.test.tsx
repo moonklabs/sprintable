@@ -9,8 +9,16 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 
-const { routerMock } = vi.hoisted(() => ({ routerMock: { replace: vi.fn(), push: vi.fn() } }));
+const { routerMock, dashboardCtx } = vi.hoisted(() => ({
+  routerMock: { replace: vi.fn(), push: vi.fn() },
+  // story 4675 (Yuna 5068): the shell's flags — /desktop only exists while desktopDownloadEnabled (the sidebar's own switch)
+  dashboardCtx: { value: { navV3Flags: { desktopDownloadEnabled: true } } as { navV3Flags?: { desktopDownloadEnabled?: boolean } } },
+}));
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'agent-1' }), useRouter: () => routerMock }));
+vi.mock('@/app/dashboard/dashboard-shell', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/app/dashboard/dashboard-shell')>()),
+  useDashboardContext: () => dashboardCtx.value,
+}));
 vi.mock('@/components/agents/agent-api-key-manager', () => ({ AgentApiKeyManager: () => null }));
 vi.mock('@/components/agents/agent-connection-settings-section', () => ({ AgentConnectionSettingsSection: () => null }));
 vi.mock('@/components/agents/messaging-policy-section', () => ({ MessagingPolicySection: () => null }));
@@ -22,7 +30,7 @@ vi.mock('@/components/settings/agent-project-access-section', () => ({ AgentProj
 
 let container: HTMLDivElement;
 let root: Root;
-beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); dashboardCtx.value = { navV3Flags: { desktopDownloadEnabled: true } }; });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); });
 
 const AGENT = { id: 'agent-1', name: '조사', type: 'agent', role: 'member', project_id: 'proj-1', is_active: true, webhook_url: null, created_by: 'human-1', fakechat_port: null, runtime_type: 'claude-code' };
@@ -63,6 +71,21 @@ describe('[SID:4675] AgentDetailPage — «지금 도는 컴퓨터»', () => {
     stub({ setup_id: null, device_name: null, state: null, bound_setup_id: SETUP, bound_device_name: '스튜디오 맥' }, 'member');
     await mount();
     expect(line()?.textContent).toBe('스튜디오 맥에 연결됨 · 아직 안 돌았어요');
+    expect(line()?.querySelector('[data-testid=agent-see-devices]')).toBeNull();
+  }, SLOW);
+
+  // Yuna 5068: /desktop redirects to Today while DESKTOP_DOWNLOAD_ENABLED is off — the link follows the shell's flag; the line stays
+  it('the desktop page switched off (or the flag unknown) → the line without the link, even for an admin', async () => {
+    dashboardCtx.value = { navV3Flags: { desktopDownloadEnabled: false } };
+    stub({ setup_id: SETUP, device_name: 'yoonjae의 맥', state: 'working', activity: 'working', limit: null, bound_setup_id: SETUP, bound_device_name: 'yoonjae의 맥' });
+    await mount();
+    expect(line()?.textContent).toBe('지금 도는 컴퓨터: yoonjae의 맥 · 작업 중');
+    expect(line()?.querySelector('[data-testid=agent-see-devices]')).toBeNull(); // reverted (role alone) → the link
+    await act(async () => { root.unmount(); }); root = createRoot(container); vi.resetModules();
+    dashboardCtx.value = {}; // a shell that says nothing → no link (fail closed)
+    stub({ setup_id: SETUP, device_name: 'yoonjae의 맥', state: 'working', activity: 'working', limit: null, bound_setup_id: SETUP, bound_device_name: 'yoonjae의 맥' });
+    await mount();
+    expect(line()).not.toBeNull();
     expect(line()?.querySelector('[data-testid=agent-see-devices]')).toBeNull();
   }, SLOW);
 
