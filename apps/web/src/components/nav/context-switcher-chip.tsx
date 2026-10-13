@@ -20,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
 import { ProjectAccessPicker } from '@/components/nav/project-access-picker';
+import { ProjectFolderField } from '@/components/nav/project-folder-field';
 import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { useAccountSwitcher } from '@/hooks/use-account-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
@@ -385,6 +386,8 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                 onChange={(e) => s.setNewProjectDesc(e.target.value)}
               />
             </div>
+            {/* [SID:4681] (D3 · piece ③): the same folder field as the sidebar dialog — inside the desktop app only */}
+            <ProjectFolderField value={s.newProjectFolder} onChange={s.setNewProjectFolder} disabled={s.creating} idPrefix="chip" />
             {/* [SID:4681] (D3 · piece ②): the same check list as the sidebar dialog — the web too (AC3) */}
             {/* Kadir codex · PO (나): an org member may not grant (the server's rule) — no list, no call */}
             {s.canGrantAccess && <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="chip" />}
@@ -405,6 +408,10 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
       {/* [SID:4681]: the project was made but some grants failed — said under the chip (the sheet closed and the switch happened) */}
       {s.createProjectNotice && (
         <p role="alert" className="px-1 text-xs text-destructive lg:hidden" data-testid="context-switcher-chip-create-project-notice">{s.createProjectNotice}</p>
+      )}
+      {/* [SID:4681] ③: the folder could not be kept on this Mac — its own line (Yuna §H) */}
+      {s.createProjectFolderNotice && (
+        <p role="alert" className="px-1 text-xs text-destructive lg:hidden" data-testid="context-switcher-chip-create-project-folder-notice">{s.createProjectFolderNotice}</p>
       )}
     </>
   );

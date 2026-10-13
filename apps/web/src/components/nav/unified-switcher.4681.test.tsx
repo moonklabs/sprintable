@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // [SID:4681] (D3 · piece ② · AC3): the sidebar's new-project dialog, on the web (not in the app), has the «접근 줄 에이전트» check list
-// and no folder field (the folder field is the app's — piece ③ · D1). The mobile chip shares the hook and the same picker.
+// and no folder field; inside the desktop app (piece ③ · D1 bridge) the folder field is there too, above the check list (Yuna §H).
+// The mobile chip shares the hook and the same two pieces.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -17,6 +18,9 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/components/nav/create-organization-dialog', () => ({ CreateOrganizationDialog: () => null }));
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...a: unknown[]) => fetchWithAuth(...a) }));
+// [SID:4681] ③ — the desktop app's bridge: null = a browser
+const { appRef } = vi.hoisted(() => ({ appRef: { current: null as null | { pickFolder: () => Promise<string | null>; setProjectFolder: () => Promise<{ ok: true }> } } }));
+vi.mock('@/lib/desktop-app', () => ({ desktopApp: () => appRef.current ?? undefined }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,6 +33,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  appRef.current = null;
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
   fetchWithAuth.mockClear(); // each test counts its own reads
   fetchWithAuth.mockImplementation(async (url: string) => (url === '/api/team-members?type=agent' ? { ok: true, json: async () => ({ data: AGENTS }) } : { ok: true, json: async () => ({ data: [] }) }));
@@ -92,5 +97,34 @@ describe('UnifiedSwitcher — 새 프로젝트 창의 접근 체크 목록 (stor
     expect(dialog.querySelectorAll('[data-testid="project-access-checkbox"]').length).toBe(0);
     expect(fetchWithAuth.mock.calls.some((c) => c[0] === '/api/team-members?type=agent')).toBe(false);
     expect(dialog.querySelector('#unified-proj-name')).not.toBeNull(); // the dialog itself is there as before
+  });
+
+  it('[piece ③] inside the desktop app: the folder field is there, above the check list; a pick shows the path as ~/…', async () => {
+    const pickFolder = vi.fn(async () => '/Users/t/work/a');
+    appRef.current = { pickFolder, setProjectFolder: async () => ({ ok: true as const }) };
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <SidebarProvider>
+            <UnifiedSwitcher orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />
+          </SidebarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await openNewProject();
+    const dialog = document.body.querySelector('[role="dialog"]')!;
+    const field = dialog.querySelector('[data-testid="project-folder-field"]');
+    expect(field).not.toBeNull();
+    expect(field!.textContent).toContain(nav.switcherFolderLabel);
+    // order: description → folder → check list (Yuna §H)
+    const desc = dialog.querySelector('#unified-proj-desc')!;
+    const picker = dialog.querySelector('[data-testid="project-access-picker"]')!;
+    expect(desc.compareDocumentPosition(field!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(field!.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dialog.querySelector('[data-testid="project-folder-path"]')).toBeNull();
+    await act(async () => { (dialog.querySelector('[data-testid="project-folder-pick"]') as HTMLButtonElement).click(); });
+    await settle();
+    expect(pickFolder).toHaveBeenCalledTimes(1);
+    expect(dialog.querySelector('[data-testid="project-folder-path"]')!.textContent).toBe('~/work/a');
   });
 });
