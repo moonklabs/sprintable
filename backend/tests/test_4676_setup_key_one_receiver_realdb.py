@@ -223,6 +223,29 @@ async def test_takeover_header_ends_the_other_receiver_and_takes_the_slot(lease_
             assert await sse_lease.taken_by(f"perkey:{agent}") is None
 
 
+async def test_redis_path_a_second_takeover_keeps_its_mark_when_the_first_taker_ends(lease_path):
+    """까디르 4676 ①: R2 takes over from R1, then R3 takes over from R2 — R2's stream ends and clears only ITS mark: R3's stays
+    (otherwise a stream pushed off on another instance would find no mark on its heartbeat and live again). R3's own end clears it."""
+    if lease_path != "redis":
+        pytest.skip("the mark is the Redis lease's")
+    from app.services import sse_lease
+
+    R3 = "rcv_" + "c" * 22
+    async with _world(setup=True, limit=5) as (gw, auth, agent):
+        scope = f"perkey:{agent}"
+        first = await gw.agent_stream(request=_Req(R1), auth=auth)
+        second = await gw.agent_stream(request=_Req(R2, takeover=True), auth=auth)
+        third = await gw.agent_stream(request=_Req(R3, takeover=True), auth=auth)
+        assert await sse_lease.taken_by(scope) == f"rcv:{R3}"
+        assert (await _drain(first.body_iterator))[-1] == "event: superseded\ndata: {}\n\n"
+        assert (await _drain(second.body_iterator))[-1] == "event: superseded\ndata: {}\n\n"  # the first taker's stream ended …
+        assert await sse_lease.taken_by(scope) == f"rcv:{R3}", "… and the second taker's mark is still there"
+        assert await sse_lease.members(scope) == [f"rcv:{R3}"]
+        await anext(third.body_iterator)
+        await third.body_iterator.aclose()
+        assert await sse_lease.taken_by(scope) is None, "the taker's own end clears its mark"
+
+
 @pytest.mark.parametrize("receiver", [None, R1], ids=["headerless", "receiver"])
 async def test_redis_path_a_stream_on_another_instance_ends_on_its_heartbeat_when_taken_over(lease_path, receiver):
     """the taker is on another instance: it released this stream's member and left the mark — this stream (a receiver, or an old app

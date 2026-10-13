@@ -184,15 +184,23 @@ async def taken_by(scope: str) -> "str | None":
         return None
 
 
+# KEYS[1]=mark key · ARGV[1]=member — delete the mark only while it is this member's (compare and delete in one step: a later
+# taker's mark, set between a read and a delete, must not go — 까디르 4676 ①)
+_CLEAR_TAKEN_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+
 async def clear_taken(scope: str, member: str) -> None:
-    """story #4676: the taker's stream ended — its mark goes with it (only its own: a later taker's stays)."""
+    """story #4676: the taker's stream ended — its mark goes with it (only its own: a later taker's stays — one atomic step)."""
     if not _enabled():
         return
 
     async def _op(client) -> None:
-        v = await client.get(_taken_key(scope))
-        if v is not None and _text(v) == member:
-            await client.delete(_taken_key(scope))
+        await client.eval(_CLEAR_TAKEN_LUA, 1, _taken_key(scope), member)
 
     await redis_shared.with_fallback(_op, lambda: None)
 
