@@ -386,7 +386,8 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               />
             </div>
             {/* [SID:4681] (D3 · piece ②): the same check list as the sidebar dialog — the web too (AC3) */}
-            <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="chip" />
+            {/* Kadir codex · PO (나): an org member may not grant (the server's rule) — no list, no call */}
+            {s.canGrantAccess && <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="chip" />}
             {/* story #2468(b) — 실패를 침묵하지 않는다("버튼 무반응"의 정체가 이 자리였다). */}
             {s.createProjectError && (
               <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>

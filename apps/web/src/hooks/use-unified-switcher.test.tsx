@@ -32,7 +32,8 @@ let container: HTMLDivElement;
 let root: Root;
 
 const ORGS: OrgSwitcherItem[] = [
-  { orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs' },
+  // [SID:4681] (PO (나)): an org admin — the grants of the 4681 tests below are allowed; a member's case sets its own orgs
+  { orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs', role: 'admin' },
   { orgId: 'org-dogfood', orgName: 'HITL Dogfood Test', orgSlug: 'hitl-dogfood-test' },
 ];
 // 서버 /me/memberships — 계정 상태(JWT "현재 org"=Dogfood)로 스코프된 값. currentOrgId(URL,
@@ -478,6 +479,28 @@ describe('useUnifiedSwitcher — 새 프로젝트의 에이전트 접근 grant (
     await act(async () => { result!.setNewProjectAgentIds(['a-1']); });
     await act(async () => { result!.setCreateProjectOpen(true); });
     expect(result!.newProjectAgentIds).toEqual([]);
+  });
+
+  it('[Kadir codex · PO (나)] an org member (not owner/admin): canGrantAccess is false and no grant is sent even with ids — the server would refuse each one (403) and the notice would name a screen the member cannot open', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    const MEMBER_ORGS: OrgSwitcherItem[] = [{ orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs', role: 'member' }];
+    function MemberComp() {
+      const hook = useUnifiedSwitcher({ orgs: MEMBER_ORGS, currentOrgId: 'org-moonklabs', projects: STALE_PROJECTS, currentProjectId: undefined });
+      useEffect(() => { result = hook; });
+      return null;
+    }
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><MemberComp /></NextIntlClientProvider>); });
+    expect(result!.canGrantAccess).toBe(false);
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1', 'a-2'] }); });
+    expect(calls).toEqual([]);
+    expect(result!.createProjectOpen).toBe(false); // the project itself is made and switched to, as before
+    expect(result!.createProjectNotice).toBeNull();
+  });
+
+  it('an org admin: canGrantAccess is true (the list is drawn · the grants go)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(<TestComp />); });
+    expect(result!.canGrantAccess).toBe(true);
   });
 
   it('a failed make (403) grants nothing', async () => {

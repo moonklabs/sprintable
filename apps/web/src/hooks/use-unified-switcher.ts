@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { beginPendingProjectTarget, endPendingProjectTarget } from '@/lib/pending-project-switch';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { canGrantProjectAccess } from '@/lib/project-access-role';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 export interface OrgSwitcherItem {
@@ -180,6 +181,9 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
 
   const currentOrg = orgs.find((o) => o.orgId === localOrgId);
   const otherOrgs = orgs.filter((o) => o.orgId !== localOrgId);
+  // [SID:4681] (Kadir codex · PO (나)): only an org owner/admin may grant (the server's rule) — a member sees no check list and no grant
+  // is sent (every one would be a 403, and the «접근 권한» screen the notice names is owner/admin only too)
+  const canGrantAccess = canGrantProjectAccess(currentOrg?.role);
 
   const displayOrg = currentOrg?.orgName ?? 'Organization';
 
@@ -402,7 +406,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const newId = data.id ?? data.data?.id;
       // [SID:4681]: the grants before the dialog closes (the person sees «만드는 중» until the agents are in)
       const agentIds = opts.agentIds ?? newProjectAgentIds;
-      if (newId && agentIds.length > 0) {
+      if (newId && canGrantAccess && agentIds.length > 0) {
         const r = await grantAgents(newId, agentIds);
         if (r.failed > 0) setCreateProjectNotice(tSwitcher('switcherAccessPartial', { failed: r.failed }));
       }
@@ -452,6 +456,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     newProjectName, setNewProjectName,
     newProjectDesc, setNewProjectDesc,
     newProjectAgentIds, setNewProjectAgentIds, // [SID:4681]
+    canGrantAccess, // [SID:4681] (PO (나)): the check list is drawn only for an owner/admin
     clearNewProjectDraft,
     creating,
     searchQuery, setSearchQuery,

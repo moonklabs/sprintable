@@ -242,7 +242,8 @@ export function UnifiedSwitcher({
             </div>
             {/* [SID:4681] (D3 · piece ②): who may work in the new project — the organization's agents, all off to start; the web too (AC3).
                 The folder field (app only · D1 4679 lib/desktop-app) comes in the next piece. */}
-            <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="unified" />
+            {/* Kadir codex · PO (나): an org member may not grant (the server's rule) — no list, no call */}
+            {s.canGrantAccess && <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="unified" />}
             {/* story #2468(b) — 실패를 침묵하지 않는다("버튼 무반응"의 정체가 이 자리였다). */}
             {s.createProjectError && (
               <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>

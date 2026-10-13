@@ -30,6 +30,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+  fetchWithAuth.mockClear(); // each test counts its own reads
   fetchWithAuth.mockImplementation(async (url: string) => (url === '/api/team-members?type=agent' ? { ok: true, json: async () => ({ data: AGENTS }) } : { ok: true, json: async () => ({ data: [] }) }));
   const mem = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -72,5 +73,24 @@ describe('UnifiedSwitcher — 새 프로젝트 창의 접근 체크 목록 (stor
     // the two inputs that were there stay
     expect(dialog.querySelector('#unified-proj-name')).not.toBeNull();
     expect(dialog.querySelector('#unified-proj-desc')).not.toBeNull();
+    expect(fetchWithAuth.mock.calls.some((c) => c[0] === '/api/team-members?type=agent')).toBe(true); // an admin: the list is read
+  });
+
+  it('[Kadir codex · PO (나)] an org member (not owner/admin): no check list at all, the agent list is never read — the server would refuse every grant', async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <SidebarProvider>
+            <UnifiedSwitcher orgs={[{ ...ORGS[0]!, role: 'member' }]} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />
+          </SidebarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await openNewProject();
+    const dialog = document.body.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector('[data-testid="project-access-picker"]')).toBeNull();
+    expect(dialog.querySelectorAll('[data-testid="project-access-checkbox"]').length).toBe(0);
+    expect(fetchWithAuth.mock.calls.some((c) => c[0] === '/api/team-members?type=agent')).toBe(false);
+    expect(dialog.querySelector('#unified-proj-name')).not.toBeNull(); // the dialog itself is there as before
   });
 });
