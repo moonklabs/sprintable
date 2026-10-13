@@ -55,6 +55,7 @@ async def test_legacy_direct_push_frame_has_no_id_line(monkeypatch):
     init_db.execute = AsyncMock(side_effect=[
         _scalar_result(tm),          # TeamMember lookup
         _scalar_result("free"),     # Organization.plan
+        _scalar_result(None),       # story #4676: ApiKey.desktop_setup_id (a hand-made key)
         _scalar_result(None),       # AgentEventCursor (acked_seq=0)
     ])
 

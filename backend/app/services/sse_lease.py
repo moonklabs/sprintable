@@ -132,6 +132,71 @@ async def count(scope: str) -> "int | None":
         return None
 
 
+def _text(m: object) -> str:
+    return m.decode() if isinstance(m, (bytes, bytearray)) else str(m)
+
+
+async def members(scope: str) -> "list[str] | None":
+    """story #4676 (UX-1 F4): the live members of a scope (expired ones evicted first) — `rcv:<receiver>` for a desktop install,
+    a connection id for anything without the header. A setup key's stream reads who else receives this agent, across instances.
+    None = Redis unavailable (the caller reads its in-process view instead)."""
+    if not _enabled():
+        return None
+    client = redis_shared.get_client()
+    if client is None:
+        return None
+    try:
+        await client.zremrangebyscore(_key(scope), "-inf", time.time())
+        return [_text(m) for m in await client.zrange(_key(scope), 0, -1)]
+    except Exception:
+        logger.warning("sse_lease.members failed", exc_info=True)
+        return None
+
+
+def _taken_key(scope: str) -> str:
+    return redis_shared.key(_DOMAIN, "sse_lease_taken", scope)
+
+
+async def mark_taken(scope: str, member: str) -> None:
+    """story #4676: a person's [여기서 받기] took the scope over for `member` — the other receivers' streams on OTHER instances read
+    this on their heartbeat and end `superseded` (this instance's are told directly). TTL = the lease TTL: a taker that dies leaves
+    the mark for no longer than its lease would have lived."""
+    if not _enabled():
+        return
+
+    async def _op(client) -> None:
+        await client.set(_taken_key(scope), member, ex=_TTL_SEC)
+
+    await redis_shared.with_fallback(_op, lambda: None)
+
+
+async def taken_by(scope: str) -> "str | None":
+    """story #4676: the member a person's take-over gave the scope to, or None (no take-over · Redis unavailable)."""
+    if not _enabled():
+        return None
+    client = redis_shared.get_client()
+    if client is None:
+        return None
+    try:
+        v = await client.get(_taken_key(scope))
+        return None if v is None else _text(v)
+    except Exception:
+        return None
+
+
+async def clear_taken(scope: str, member: str) -> None:
+    """story #4676: the taker's stream ended — its mark goes with it (only its own: a later taker's stays)."""
+    if not _enabled():
+        return
+
+    async def _op(client) -> None:
+        v = await client.get(_taken_key(scope))
+        if v is not None and _text(v) == member:
+            await client.delete(_taken_key(scope))
+
+    await redis_shared.with_fallback(_op, lambda: None)
+
+
 async def earliest_expiry(scope: str) -> "float | None":
     """story #2582: 그 scope에서 가장 먼저 만료될 lease의 score(epoch 초) — acquire()가 False를
     반환했을 때 호출부가 정확한 Retry-After를 계산하는 용도(현재 agent_gateway의 flat
