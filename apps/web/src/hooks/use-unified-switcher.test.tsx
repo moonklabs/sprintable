@@ -581,7 +581,7 @@ describe('useUnifiedSwitcher — 새 프로젝트의 이 컴퓨터 폴더 (story
     expect(result!.createProjectOpen).toBe(false);
     expect(result!.createProjectError).toBeNull();
     expect(result!.createProjectFolderNotice).toBe('프로젝트는 만들었지만 폴더는 이 컴퓨터에 남기지 못했어요 — 에이전트를 시작할 때 앱에서 폴더를 고를 수 있어요.');
-    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개에게 접근을 주지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.');
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.');
     // a throw
     const t = stub();
     t.setProjectFolder.mockImplementationOnce(async () => { throw new Error('bridge gone'); });
