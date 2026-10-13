@@ -1559,6 +1559,25 @@
         "enabled": "원격 제어가 켜졌어요",
         "failed": "원격 제어를 켜지 못했어요 — 다시 시도해 주세요"
       },
+      "where": {
+        "title": "에이전트를 어디서 돌릴까요?",
+        "subtitle": "고른 쪽으로 다음 화면이 달라져요. 다른 쪽은 나중에 언제든 할 수 있어요.",
+        "app": "이 컴퓨터의 앱",
+        "appDesc": "맥 앱을 받아 열면 프로젝트와 에이전트까지 한 번에 만들어요. 이 컴퓨터에 Claude Code나 Codex가 있어야 해요.",
+        "web": "웹에서 직접 연결하기",
+        "webDesc": "이미 돌고 있는 에이전트에 설정 한 개를 붙여 넣어 연결해요. 프로젝트 · 에이전트 · 연결 세 단계.",
+        "continue": "계속",
+        "notMacNote": "맥 앱은 맥에서 받아요 — 다음 화면에 받는 자리를 알려 드려요."
+      },
+      "download": {
+        "title": "데스크톱 앱 받기",
+        "lead": "설치해 열면 브라우저가 이 계정으로 이어서 열려요 — 프로젝트와 에이전트는 거기서 만들어요.",
+        "afterNote": "받은 뒤엔 앱을 열기만 하면 돼요. 이 창은 닫아도 돼요.",
+        "more": "더 보기 — 원격 제어 · 다른 길",
+        "switchToWeb": "웹에서 직접 연결하려면 →",
+        "backToChoice": "갈림으로 돌아가기",
+        "laterNote": "지금 받지 않아도 돼요 — 이 화면은 설정에서 «데스크톱 앱 받기»로 다시 열 수 있어요."
+      },
     "slugCharsHint": "영소문자, 숫자, 하이픈만 사용 가능해요",
     "verifyStatusDone": "완료",
     "verifyStatusActive": "진행 중",
@@ -1652,6 +1671,9 @@
     "firstInstructionTooLongHint": "대화만 열어 둘게요. 대화 화면에서 직접 적어 주세요.",
     "firstInstructionOpenConversation": "대화 열기",
     "connectFooterHint": "확인되면 준비 완료 — 지금 건너뛰어도 돼요.",
+    "connectNoAgent": "에이전트 없이 연결 단계로 왔어요 — 데스크톱 앱을 받거나, 돌아가서 에이전트를 만들어요.",
+    "connectNeedsAgent": "웹에서 연결하려면 에이전트가 필요해요 →",
+    "connectMakeAgent": "에이전트 만들기",
     "transportHosted": "호스팅",
     "transportLocal": "로컬 (uvx)",
     "transportRecommended": "권장",
@@ -1948,6 +1970,7 @@
     "tabDisplay": "화면",
     "tabApiKeys": "API 키",
     "tabNotifications": "알림",
+    "desktopTab": "데스크톱 앱 받기",
     "tabSupport": "문의·고객지원",
     "tabProjects": "프로젝트",
     "tabMembers": "접근 권한",
