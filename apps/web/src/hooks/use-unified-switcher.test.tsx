@@ -465,8 +465,11 @@ describe('useUnifiedSwitcher — 새 프로젝트의 에이전트 접근 grant (
     await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-ok', 'a-dup', 'a-bad'] }); });
     expect(calls.length).toBe(3);
     expect(result!.createProjectOpen).toBe(false); // the project is real — closed and switched as on success
-    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1명에게 접근을 주지 못했어요 — 프로젝트 설정 › 접근에서 다시 해 주세요.');
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개에게 접근을 주지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.'); // Yuna §F: «개» · the tab's own name
     expect(result!.createProjectError).toBeNull();
+    // Yuna §F (non-blocking): the notice goes the next time the dialog opens
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    expect(result!.createProjectNotice).toBeNull();
   });
 
   it('opening the dialog clears the checked ids (every box off each time)', async () => {

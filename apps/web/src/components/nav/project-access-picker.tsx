@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 
 export interface OrgAgentOption {
@@ -32,7 +33,9 @@ export function ProjectAccessPicker({ selected, onChange, disabled = false, idPr
   const tCommon = useTranslations('common');
   const [agents, setAgents] = useState<OrgAgentOption[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [attempt, setAttempt] = useState(0); // Yuna §F (non-blocking): [다시 시도] on the failed read — one more read, nothing else
 
+  // the read itself; the «loading» state is set where a read is asked for (the first render · the retry press), not in the effect
   useEffect(() => {
     let alive = true;
     fetchWithAuth('/api/team-members?type=agent')
@@ -40,7 +43,7 @@ export function ProjectAccessPicker({ selected, onChange, disabled = false, idPr
       .then((json: { data?: OrgAgentOption[] }) => { if (alive) setAgents(grantableAgents(json.data ?? [])); })
       .catch(() => { if (alive) { setAgents([]); setLoadError(true); } });
     return () => { alive = false; };
-  }, []);
+  }, [attempt]);
 
   const toggle = (id: string, on: boolean) => onChange(on ? [...selected.filter((x) => x !== id), id] : selected.filter((x) => x !== id));
 
@@ -56,7 +59,10 @@ export function ProjectAccessPicker({ selected, onChange, disabled = false, idPr
           <span>{tCommon('loading')}</span>
         </div>
       ) : loadError ? (
-        <p role="alert" className="text-xs text-destructive" data-testid="project-access-load-error">{t('switcherAccessLoadError')}</p>
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-xs text-destructive" data-testid="project-access-load-error">
+          <span>{t('switcherAccessLoadError')}</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => { setAgents(null); setLoadError(false); setAttempt((n) => n + 1); }} data-testid="project-access-retry">{tCommon('retry')}</Button>
+        </p>
       ) : agents.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="project-access-empty">{t('switcherAccessEmpty')}</p>
       ) : (

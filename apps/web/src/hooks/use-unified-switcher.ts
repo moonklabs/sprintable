@@ -437,7 +437,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 성공 뒤 다시 열었을 때(취소→재오픈) 낡은 에러가 새 시도처럼 보일 수 있다.
   function setCreateProjectOpenAndClearError(nextOpen: boolean) {
     setCreateProjectError(null);
-    if (nextOpen) setNewProjectAgentIds([]); // [SID:4681]: every box off each time the dialog opens
+    if (nextOpen) { setNewProjectAgentIds([]); setCreateProjectNotice(null); } // [SID:4681]: every box off each time the dialog opens · the last make's notice goes (Yuna §F)
     setCreateProjectOpen(nextOpen);
   }
 
