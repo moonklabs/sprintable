@@ -133,7 +133,6 @@ async def test_another_organizations_agent_never_carries_a_computer(conversation
         other = next(p for p in r.json()["participants"] if p["member_id"] == str(OTHER_ORG_AGENT))
         assert other["device_name"] is None
         # and the helper itself, asked with this org, finds nothing for it
-        from app.core.database import get_session_factory  # noqa: F401 — real session below
         from app.services.desktop_commands import bound_devices
         from tests.test_4424_desktop_setup_realdb import _ASYNC
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
