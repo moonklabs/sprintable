@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 //
-// story #2750 — 디디 라이브 재현(2748 재실측, 2026-08-18): 온보딩 1/4에서 조직 이름을
-// 한국어로만 입력(예: 「우리팀」)하면 handleOrgNameChange의 자동 slug 파생 정규식
-// (`[^a-z0-9\s-]` 제거)이 한글을 전부 걸러내 orgSlug가 빈 문자열로 남는다. 그 상태에서
-// 「조직 만들기」 버튼이 disabled인데 왜 막혔는지 화면에 안내가 0이었다(무설명 disabled) —
-// 한국 시장 제품의 온보딩 첫 화면 이탈 직결. 실제로 폼을 마운트하고 한글만 입력해
-// 안내 문구가 뜨는지·수동 slug 입력으로 막힘이 풀리는지를 단언한다.
+// story 4669 (U6 · AC2) — the organization step has no slug field. Before (story #2750) a Korean-only name derived no slug
+// and the button sat disabled behind a hint; now the name alone is enough and the server derives the slug
+// (org_project_create.py: the ASCII part, or `workspace-<8 hex>`, made unique — the app way's one screen has used it since
+// 4427). Reverted (the slug field and its `slug:` in the body back) → the second input reappears / the body carries `slug`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -35,8 +33,10 @@ beforeEach(() => {
   root = createRoot(container);
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
+    if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true } }) };
+    if (url === '/api/auth/refresh') return { ok: true, json: async () => ({}) };
     if (url === '/api/organizations') {
-      return { ok: true, json: async () => ({ data: { id: 'org-korean-1', slug: 'woorim' } }) };
+      return { ok: true, json: async () => ({ data: { id: 'org-korean-1', slug: 'workspace-3f9a1c2b' } }) };
     }
     throw new Error('unexpected fetch: ' + url);
   }));
@@ -46,6 +46,7 @@ afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
+  window.sessionStorage.clear();
 });
 
 function setNativeValue(el: HTMLInputElement, value: string) {
@@ -54,41 +55,42 @@ function setNativeValue(el: HTMLInputElement, value: string) {
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+async function flush() {
+  await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+}
+
 describe.each([
   ['ko', koMessages] as const,
   ['en', enMessages] as const,
-])('OnboardingForm — 한국어 조직명 slug 자동파생 실패 안내 (story #2750, locale=%s)', (locale, messages) => {
-  it('한글만으로 조직명을 입력하면 slug가 비고, 무설명이 아니라 안내 문구가 뜨며, 버튼은 disabled 유지', async () => {
+])('[SID:4669] OnboardingForm — no slug field · the name alone makes the organization (locale=%s)', (locale, messages) => {
+  it('one text input only · no slug label · a Korean-only name enables [조직 만들기] with no hint', async () => {
     await act(async () => { root.render(wrap(locale)); });
+    await flush();
 
-    const [nameInput, slugInput] = [...container.querySelectorAll('input')] as HTMLInputElement[];
-    await act(async () => { setNativeValue(nameInput, '우리팀'); });
+    const inputs = [...container.querySelectorAll('input')] as HTMLInputElement[];
+    expect(inputs).toHaveLength(1); // reverted → 2 (name · slug)
+    expect(container.textContent).not.toContain('URL');
+    expect(container.textContent).not.toContain('slug');
 
-    expect(slugInput.value).toBe(''); // 자동 파생이 한글을 전부 걸러내 빈 값
-    expect(container.textContent).toContain(messages.onboarding.slugManualRequired);
-
-    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === messages.onboarding.createOrg);
-    expect(createBtn?.disabled).toBe(true);
-  });
-
-  it('안내를 따라 slug를 직접 입력하면 막힘이 풀려 조직 생성까지 완주한다', async () => {
-    await act(async () => { root.render(wrap(locale)); });
-
-    const [nameInput, slugInput] = [...container.querySelectorAll('input')] as HTMLInputElement[];
-    await act(async () => { setNativeValue(nameInput, '우리팀'); });
-    await act(async () => { setNativeValue(slugInput, 'woorim'); });
-
-    expect(container.textContent).not.toContain(messages.onboarding.slugManualRequired);
-
+    await act(async () => { setNativeValue(inputs[0]!, '문클랩스'); });
     const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === messages.onboarding.createOrg);
     expect(createBtn?.disabled).toBe(false);
+  });
 
+  it('POST /api/organizations carries the name only — the slug is the server\'s (the same rule as the app way)', async () => {
+    await act(async () => { root.render(wrap(locale)); });
+    await flush();
+
+    const nameInput = container.querySelector('input') as HTMLInputElement;
+    await act(async () => { setNativeValue(nameInput, '문클랩스'); });
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === messages.onboarding.createOrg);
     await act(async () => { createBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await flush();
 
-    const fetchMock = vi.mocked(fetch);
-    const orgCall = fetchMock.mock.calls.find((c) => c[0] === '/api/organizations');
+    const orgCall = vi.mocked(fetch).mock.calls.find((c) => c[0] === '/api/organizations');
     expect(orgCall).not.toBeUndefined();
-    expect(JSON.parse((orgCall![1] as RequestInit).body as string)).toEqual({ name: '우리팀', slug: 'woorim' });
+    expect(JSON.parse((orgCall![1] as RequestInit).body as string)).toEqual({ name: '문클랩스' }); // reverted → has `slug`
+    // and on to the fork (4668)
+    expect(container.querySelector('h1')?.textContent).toBe(messages.onboarding.where.title);
   });
 });

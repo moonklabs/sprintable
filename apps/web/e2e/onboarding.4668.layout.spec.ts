@@ -135,8 +135,7 @@ const stepOf = (page: Page) => page.getByTestId('onboarding-step-of');
 async function makeOrg(page: Page) {
   const input = page.locator('input').first();
   await expect(input).toBeEnabled(); // the draft gate opens once /api/auth/me answered
-  await input.fill('문클랩스');
-  await page.locator('input').nth(1).fill('moonklabs'); // a Korean name derives no slug (4669 removes the field)
+  await input.fill('문클랩스'); // story 4669: the name alone — the slug field is gone (the server derives it)
   await page.getByRole('button', { name: '조직 만들기' }).click();
   await expect(page.locator('h1')).toHaveText('에이전트를 어디서 돌릴까요?');
 }
