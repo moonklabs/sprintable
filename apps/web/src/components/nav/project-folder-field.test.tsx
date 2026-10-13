@@ -91,6 +91,23 @@ describe('ProjectFolderField', () => {
     expect(pick.disabled).toBe(false); // picking is over
   });
 
+  it('[Yuna 5067 ①] a 60-character path: on its own line under the buttons, no CSS end-cut (break-all · no truncate), the rendered text ends with the last folder\'s name', async () => {
+    appRef.current = { pickFolder: async () => null };
+    const long = '/Users/yuna/dev/sprintable-lanes/yuna/sprintable/apps/webnav';
+    expect(long.length).toBe(60);
+    await render(long, () => {});
+    const field = container.querySelector('[data-testid="project-folder-field"]')!;
+    const code = field.querySelector('[data-testid="project-folder-path"]')!;
+    expect(code.textContent!.endsWith('/webnav')).toBe(true);
+    expect(code.textContent!.length).toBeLessThanOrEqual(44);
+    expect(code.className).toContain('break-all');
+    expect(code.className).not.toContain('truncate');
+    // its own line: not inside the button row
+    const row = field.querySelector('[data-testid="project-folder-pick"]')!.parentElement!;
+    expect(row.contains(code)).toBe(false);
+    expect(row.querySelector('[data-testid="project-folder-clear"]')).not.toBeNull(); // [지우기] stays beside [폴더 고르기]
+  });
+
   it('with a value: the path shown as ~/… with the full path in title · [지우기] → onChange(null)', async () => {
     appRef.current = { pickFolder: async () => null };
     const onChange = vi.fn();

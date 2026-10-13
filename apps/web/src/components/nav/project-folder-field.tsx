@@ -55,14 +55,16 @@ export function ProjectFolderField({ value, onChange, disabled = false, idPrefix
           {t('switcherFolderPick')}
         </Button>
         {value && (
-          <>
-            <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 text-xs" title={value} data-testid="project-folder-path">{displayFolder(value)}</code>
-            <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => onChange(null)} data-testid="project-folder-clear">
-              {t('switcherFolderClear')}
-            </Button>
-          </>
+          <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => onChange(null)} data-testid="project-folder-clear">
+            {t('switcherFolderClear')}
+          </Button>
         )}
       </div>
+      {/* Yuna 5067 ①: the path on its own line under the buttons (the dialog's content width holds the 44-character display); `break-all`,
+          never `truncate` — a CSS end-cut would drop the last folder's name, the one part displayFolder keeps */}
+      {value && (
+        <code className="block break-all rounded bg-muted px-2 py-1 text-xs" title={value} data-testid="project-folder-path">{displayFolder(value)}</code>
+      )}
     </div>
   );
 }
