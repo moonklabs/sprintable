@@ -48,9 +48,9 @@ describe('[SID:4681] ProjectAccessPicker', () => {
     const boxes = [...host.querySelectorAll<HTMLInputElement>('[data-testid="project-access-checkbox"]')];
     expect(boxes.map((b) => b.getAttribute('data-agent-id'))).toEqual(['a-1', 'a-2']);
     expect(boxes.every((b) => !b.checked)).toBe(true);
-    // Yuna §F (ux1-copy-1013) words, letter for letter
-    expect(host.querySelector('legend')?.textContent).toBe('접근을 줄 에이전트 (선택)');
-    expect(host.textContent).toContain('고른 에이전트가 이 프로젝트에서 일할 수 있어요. 지금 안 골라도 돼요.');
+    // Yuna §G-3 (ux1-copy-1013 · story 4680/4677 — «프로젝트 팀에 넣기» words, replacing §F's «접근» ones in one go) letter for letter
+    expect(host.querySelector('legend')?.textContent).toBe('프로젝트 팀에 넣을 에이전트 (선택)');
+    expect(host.textContent).toContain('고른 에이전트가 이 프로젝트 팀에 들어가 일해요. 지금 안 골라도 돼요.');
     // each box has a label naming the agent (the label is the accessible name)
     expect(host.querySelector('label[for="t-agent-a-1"]')?.textContent).toBe('민 레');
   });
@@ -77,7 +77,7 @@ describe('[SID:4681] ProjectAccessPicker', () => {
     fetchWithAuth.mockResolvedValue({ ok: false, json: async () => ({}) });
     await draw([]);
     const line = host.querySelector('[data-testid="project-access-load-error"]');
-    expect(line?.querySelector('span')?.textContent).toBe('에이전트 목록을 읽지 못했어요 — 접근은 나중에 프로젝트 설정 › 접근 권한에서 줄 수 있어요.');
+    expect(line?.querySelector('span')?.textContent).toBe('에이전트 목록을 읽지 못했어요 — 팀은 나중에 프로젝트 설정 › 접근 권한에서 넣을 수 있어요.'); // §G-3
     expect(host.querySelectorAll('[data-testid="project-access-checkbox"]').length).toBe(0);
     // Yuna §F (non-blocking): [다시 시도] reads once more — and the list comes
     fetchWithAuth.mockResolvedValue({ ok: true, json: async () => ({ data: AGENTS }) });
