@@ -367,6 +367,9 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
             "org_id": str(done.org_id) if done.org_id else None,
             # story #4529 — the device token for /api/v2/desktop/relay/* (shown once · an older app ignores it)
             "device_token": done.device_token,
+            # [SID:4681] (D3 · piece ③): the setup's project — the app keeps it per agent profile for the project folder's cwd (an
+            # added field — an older app ignores it · null for a setup with no project)
+            "project_id": str(done.project_id) if done.project_id else None,
         },
         headers=headers,
     )

@@ -255,6 +255,7 @@ async def test_ac1_pending_then_the_keys_once_then_never_again(world, caplog):
         assert body["recipe_name"] == RECIPE_NAME  # the app's default folder ~/Sprintable/{recipe}
         assert body["org_name"] == "O"  # the org the desktop joined — shown to the person (Qadir 4825)
         assert body["org_id"] == str(ORG)  # story 4470: which org, for the app's per-org default folder
+        assert body["project_id"] == str(PROJ)  # [SID:4681] ③: which project, for the app's per-project folder (the profile keeps it)
 
         r = await _exchange(c, code, verifier)
         assert r.status_code == 410  # once

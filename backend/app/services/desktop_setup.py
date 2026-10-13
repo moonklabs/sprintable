@@ -809,6 +809,10 @@ class Exchanged:
     device_token: str | None = None
     # story #4576 — «move» · «recipe»
     setup_kind: str | None = None
+    # [SID:4681] (D3 · piece ③) — which project this setup was for: the app keeps it on each agent's profile, so a start on that
+    # Mac can use the project's folder (chosen in the new-project dialog) when the agent has not picked one of its own. An added
+    # field — an older app ignores it; None for a setup with no project (a move).
+    project_id: uuid.UUID | None = None
 
 
 async def _lock_in_order(db: AsyncSession, *, member_ids: set[uuid.UUID], setup_ids: set[uuid.UUID]) -> dict[uuid.UUID, DesktopSetup]:
@@ -1020,7 +1024,7 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
     device_token = await issue_device_token(db, setup.id)  # story #4529 — same transaction as the keys: all or nothing
     return Exchanged(
         setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup), org_name=org_name,
-        org_id=setup.org_id, device_token=device_token, setup_kind=kind,
+        org_id=setup.org_id, device_token=device_token, setup_kind=kind, project_id=setup.project_id,
     )
 
 

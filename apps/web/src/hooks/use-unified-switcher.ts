@@ -7,6 +7,8 @@ import { beginPendingProjectTarget, endPendingProjectTarget } from '@/lib/pendin
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { canGrantProjectAccess } from '@/lib/project-access-role';
+import { desktopApp } from '@/lib/desktop-app';
+import { homeAsTilde } from '@/lib/home-tilde';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 export interface OrgSwitcherItem {
@@ -155,6 +157,12 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // [SID:4681] — after a make: the project exists but some grants failed (the count) · null = nothing to say. Shown beside the
   // trigger (the dialog closed and the switch happened — the project is real; the missing grants are given again in the project's settings).
   const [createProjectNotice, setCreateProjectNotice] = useState<string | null>(null);
+  // [SID:4681] (D3 · piece ③) — the folder picked in the app's chooser for the new project (app only · the field is not drawn in a
+  // browser · not a draft: a path the app handed to THIS page is the only one it accepts — `not_picked` otherwise); kept on this Mac
+  // right after the make (`setProjectFolder`) and sent as the project's `workdir_hint` (① · shown as text, never opened by the server)
+  const [newProjectFolder, setNewProjectFolder] = useState<string | null>(null);
+  // [SID:4681] ③ — the project exists but the folder could not be kept on this Mac (Yuna §H: its own line, apart from the grants' one)
+  const [createProjectFolderNotice, setCreateProjectFolderNotice] = useState<string | null>(null);
 
   // story #3147(doc mobile-switcher-redesign-spec-4758744a §③) — 검색 state 신규. 데스크톱
   // UnifiedSwitcher(lg:)는 이 필드를 안 쓰므로(호출부가 안 읽으면 그냥 죽은 값) 회귀 0.
@@ -378,11 +386,29 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     return { granted, failed };
   }
 
-  async function createProject(name: string, description: string, opts: { agentIds?: string[] } = {}): Promise<boolean> {
+  /**
+   * [SID:4681] (D3 · piece ③) — the folder, kept on this Mac by the app (D1 `setProjectFolder`: the app checks the path again — one its
+   * own chooser handed to this page, inside home, not its own folder). `{problem}` or no app or a throw = not kept: the project stays,
+   * the notice says so (the agent picks a folder when it starts — 4565). True when kept.
+   */
+  async function keepProjectFolder(projectId: string, folder: string): Promise<boolean> {
+    const app = desktopApp();
+    if (!app) return false;
+    try {
+      const r = await app.setProjectFolder({ projectId, path: folder });
+      return 'ok' in r && r.ok === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function createProject(name: string, description: string, opts: { agentIds?: string[]; folder?: string | null } = {}): Promise<boolean> {
     if (!name.trim() || creating) return false;
     setCreating(true);
     setCreateProjectError(null);
     setCreateProjectNotice(null);
+    setCreateProjectFolderNotice(null);
+    const folder = opts.folder === undefined ? newProjectFolder : opts.folder;
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -391,6 +417,10 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
           name: name.trim(),
           description: description.trim() || null,
           ...(currentOrgId ? { org_id: currentOrgId } : {}),
+          // [SID:4681] ③: the picked folder as the project's text hint (① · 5061) — only when one was picked, and with home as `~`
+          // (PO 5067 review): the hint is a server value every project member reads, so the Mac user's name never rides in it (the
+          // setup's defaultWorkdirHint is `~/…` too); the app's own setProjectFolder below gets the absolute path
+          ...(folder ? { workdir_hint: homeAsTilde(folder) } : {}),
         }),
       });
       if (!res.ok) {
@@ -404,6 +434,9 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       }
       const data = await res.json() as { id?: string; data?: { id: string } };
       const newId = data.id ?? data.data?.id;
+      // [SID:4681] ③: the folder first — kept on this Mac under the new project's id (before the grants: the folder is the app's
+      // one-call hand, the grants are n server calls)
+      if (newId && folder && !(await keepProjectFolder(newId, folder))) setCreateProjectFolderNotice(tSwitcher('switcherFolderNotSaved'));
       // [SID:4681]: the grants before the dialog closes (the person sees «만드는 중» until the agents are in)
       const agentIds = opts.agentIds ?? newProjectAgentIds;
       if (newId && canGrantAccess && agentIds.length > 0) {
@@ -413,6 +446,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       setCreateProjectOpen(false);
       clearNewProjectDraft();
       setNewProjectAgentIds([]);
+      setNewProjectFolder(null);
       setCreateProjectError(null);
       if (newId) await switchProject(newId);
       else router.refresh();
@@ -441,7 +475,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 성공 뒤 다시 열었을 때(취소→재오픈) 낡은 에러가 새 시도처럼 보일 수 있다.
   function setCreateProjectOpenAndClearError(nextOpen: boolean) {
     setCreateProjectError(null);
-    if (nextOpen) { setNewProjectAgentIds([]); setCreateProjectNotice(null); } // [SID:4681]: every box off each time the dialog opens · the last make's notice goes (Yuna §F)
+    if (nextOpen) { setNewProjectAgentIds([]); setCreateProjectNotice(null); setNewProjectFolder(null); setCreateProjectFolderNotice(null); } // [SID:4681]: every box off · no folder each time the dialog opens · the last make's notices go (Yuna §F · §H)
     setCreateProjectOpen(nextOpen);
   }
 
@@ -452,11 +486,13 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     createProjectOpen, setCreateProjectOpen: setCreateProjectOpenAndClearError,
     createProjectError,
     createProjectNotice, // [SID:4681]
+    createProjectFolderNotice, // [SID:4681] ③
     switchOrgError,
     newProjectName, setNewProjectName,
     newProjectDesc, setNewProjectDesc,
     newProjectAgentIds, setNewProjectAgentIds, // [SID:4681]
     canGrantAccess, // [SID:4681] (PO (나)): the check list is drawn only for an owner/admin
+    newProjectFolder, setNewProjectFolder, // [SID:4681] ③ (app only)
     clearNewProjectDraft,
     creating,
     searchQuery, setSearchQuery,
