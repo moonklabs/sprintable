@@ -526,6 +526,24 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect(selectOf('조사').value).toBe('codex');
   });
 
+  // Kadir 5065 (codex round 2): the agent list may arrive BEFORE the recipes — then there is no row yet; the preselect must not
+  // be spent on nothing, and the recipe's first rows (built by pick() from the mount render's closure) must see the list that
+  // has arrived. Reverted (spent on «would land» · pick reads the closure's []) → the row stays 'claude' and the group is missing.
+  it('[SID:4680] agents first, recipes later → the recruiter\'s agent still takes the first agent row (and the existing group is there)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    recipesNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(container.querySelector('select')).toBeNull(); // no recipe yet, no rows
+    await act(async () => { release(new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the existing group, from the list that arrived first
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    expect(selectOf('작성').value).not.toBe(`agent:${DAN}`);
+  });
+
   it('no live key → no line under it (nothing would be cut)', async () => {
     stub(() => new Response('{}', { status: 200 }));
     agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
