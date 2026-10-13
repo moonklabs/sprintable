@@ -20,7 +20,8 @@ import { moveConfirmBody, moveListOrder, moveProgress, parseSetupQuery, setupFra
 
 const CODE = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
 const RECIPES = [{ id: 'rec-1', key: 'org.research_one', name: '조사 한 명', roles: [{ role: '조사', kind: 'agent', stages: ['research'] }] }];
-const DAN: AttachableAgent = { id: 'a-dan', name: '댄 어윈', runtime: 'claude', live_keys: 1, last_used_at: null, in_project: true };
+// story 4680 (Yuna G-4): the «connection is cut» note needs a key that was used — a never-used key has nothing to cut (no line)
+const DAN: AttachableAgent = { id: 'a-dan', name: '댄 어윈', runtime: 'claude', live_keys: 1, last_used_at: new Date(Date.now() - 5 * 60_000).toISOString(), in_project: true };
 const KADIR: AttachableAgent = { id: 'a-kadir', name: '까디르 QA', runtime: 'codex', live_keys: 0, last_used_at: null, in_project: true };
 const DAMRONG: AttachableAgent = { id: 'a-dam', name: '담롱', runtime: 'claude', live_keys: 0, last_used_at: null, in_project: false };
 
@@ -93,7 +94,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(text()).toContain('이 컴퓨터에서 찾은 에이전트: Claude Code · Codex');
     expect(rows().map((r) => [r.querySelector('.font-medium')!.textContent, r.dataset.state])).toEqual([['댄 어윈', 'ok'], ['까디르 QA', 'ok'], ['담롱', 'not-in-project']]);
     expect(rows()[0].textContent).toContain('Claude Code · 이 컴퓨터에 있음');
-    expect(rows()[2].textContent).toContain('이 프로젝트에 아직 없어요 — 먼저 프로젝트에 추가해 주세요');
+    expect(rows()[2].textContent).toContain('이 프로젝트 팀에 아직 없어요 — 먼저 프로젝트 팀에 넣어 주세요'); // 4677 wording
     expect((rows()[2].querySelector('input') as HTMLInputElement).disabled).toBe(true);
     expect(rows().every((r) => !(r.querySelector('input') as HTMLInputElement).checked)).toBe(true);
     expect(text()).toContain('작업 폴더는 옮긴 뒤 앱에서 에이전트마다 골라요 — 이 컴퓨터에서 일한 적이 있는 에이전트는 그 폴더를 그대로 써요');

@@ -41,6 +41,21 @@ async def test_runtime_capabilities_200_and_shape():
         app.dependency_overrides.clear()
 
 
+def test_desktop_runtime_is_the_one_table_inverted():
+    """story 4680 (D2): `desktop_runtime` = the desktop app's id for the runtime, from agent_runtime.DESKTOP_RUNTIME_TYPES
+    (desktop_setup.py binds with the same table) — claude-code → claude · codex → codex · the rest None. Reverted (the field
+    gone or a second table) → red."""
+    from app.services.agent_onboarding_config import list_runtime_capabilities
+    from app.services.agent_runtime import DESKTOP_RUNTIME_TYPES
+    from app.services.desktop_setup import RUNTIME_TYPES
+
+    assert RUNTIME_TYPES is DESKTOP_RUNTIME_TYPES
+    by_slug = {r["slug"]: r["desktop_runtime"] for r in list_runtime_capabilities()}
+    assert by_slug["claude-code"] == "claude"
+    assert by_slug["codex"] == "codex"
+    assert {slug for slug, d in by_slug.items() if d is not None} == set(DESKTOP_RUNTIME_TYPES.values())
+
+
 @pytest.mark.anyio
 async def test_runtime_capabilities_401_when_unauthenticated():
     from app.main import app

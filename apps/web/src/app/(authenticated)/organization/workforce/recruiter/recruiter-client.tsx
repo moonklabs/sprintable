@@ -1,7 +1,7 @@
 'use client';
 
 import { VerifyPromptCopyFailedPanel } from '@/app/onboarding/verify-prompt-copy-failed-panel';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { memberOptionLabels } from '@/lib/member-display';
@@ -25,11 +25,25 @@ import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FIL
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { desktopApp, type SprintableDesktop, type DesktopRuntimeFound } from '@/lib/desktop-app';
+import { appSetupLink } from '@/lib/auth/native-return-app';
+import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { copyTextSafely } from '@/lib/clipboard';
 import { buildCodexConfigToml } from '@/lib/codex-mcp-config';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
+
+const noSubscribe = () => () => undefined;
+
+/** story 4680 (D2): the app's «found on this computer» list matched to the server's capabilities by `desktop_runtime` (the one table,
+ * agent_runtime.DESKTOP_RUNTIME_TYPES) — in the app's order; a found runtime the server has no capability for is left out. */
+export function foundRuntimes(found: readonly DesktopRuntimeFound[], caps: readonly RuntimeCapabilityItem[]): { found: DesktopRuntimeFound; cap: RuntimeCapabilityItem }[] {
+  return found.flatMap((f) => {
+    const cap = caps.find((c) => c.desktop_runtime === f.runtime);
+    return cap ? [{ found: f, cap }] : [];
+  });
+}
 
 // story d82c1092(생성경로 단일화): 5-step(직무›스코프›실행환경›번들›검증). equip-skip(역할 없이)
 // 경로는 3(직무·스코프·완료)만 쓰고 STEP3을 "결과" 화면으로 재사용한다(runtime 스텝 스킵).
@@ -525,12 +539,27 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     [supportedRuntimes],
   );
 
+  // story 4680 (UX-1 · D2): inside the desktop app the page reads its bridge (D1 · lib/desktop-app.ts) — the runtimes the app
+  // found on this computer; in a browser there is none and the picker is as it was. Read once (the same frozen object every time).
+  const bridge = useSyncExternalStore<SprintableDesktop | undefined>(noSubscribe, desktopApp, () => undefined);
+  const foundHere = useMemo(
+    () => foundRuntimes(bridge?.runtimes ?? [], supportedRuntimes),
+    [bridge, supportedRuntimes],
+  );
+  const foundSlugs = useMemo(() => new Set(foundHere.map((f) => f.cap.slug)), [foundHere]);
+  // the default is the first the app found (bridge order · PO Q-d) — once, when the list is known; a person's pick after that stands
+  const foundDefaultApplied = useRef(false);
+
   // 로드된 목록에 현재 선택값이 없으면(예: 기본값 'claude-code'가 이 org enviro서 미지원) 첫 지원
   // 런타임으로 보정 — recruit() 400 방지.
   useEffect(() => {
+    if (!foundDefaultApplied.current && foundHere.length) {
+      foundDefaultApplied.current = true;
+      if (foundHere[0]!.cap.slug !== runtime) { setRuntime(foundHere[0]!.cap.slug); return; }
+    }
     const next = pickDefaultRuntime(supportedRuntimes, runtime);
     if (next !== runtime) setRuntime(next);
-  }, [supportedRuntimes, runtime]);
+  }, [supportedRuntimes, runtime, foundHere]);
 
   // story 0dfa1d79: generic connector 슬롯은 named 9런타임 승격 後 "커스텀/미지원 런타임용 BYO
   // escape hatch"로 재정의 — BE display_name("Connector")을 그대로 안 쓰고 명확한 라벨로 오버라이드.
@@ -565,10 +594,53 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         </div>
       ) : (
         <>
+          {/* story 4680 (D2 · Yuna G-1): inside the app, what it found on this computer comes first and is the default; nothing found →
+              the list as before with one line and the way to install (the app's setup ① card) */}
+          {bridge && foundHere.length > 0 ? (
+            <div className="space-y-1" data-testid="recruiter-found-here">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t('foundHereTitle')}<span className="ml-1 normal-case tracking-normal" data-testid="recruiter-found-here-device">· {bridge.device.name}</span>
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {foundHere.map(({ found, cap }, i) => {
+                  const sel = runtime === cap.slug;
+                  return (
+                    <Button
+                      key={cap.slug}
+                      type="button"
+                      variant="outline"
+                      onClick={() => setRuntime(cap.slug)}
+                      aria-label={t('foundHereCardAria', { n: i + 1, label: runtimeDisplayName(cap) })}
+                      aria-pressed={sel}
+                      data-testid={`recruiter-found-${found.runtime}`}
+                      className={cn(
+                        'relative h-auto min-w-0 flex-col items-start gap-1 whitespace-normal rounded-xl p-2.5 text-left',
+                        sel ? 'border-primary/60 ring-1 ring-primary/40' : 'hover:border-primary/30',
+                      )}
+                    >
+                      {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+                      <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
+                      <span className="text-[10px] text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
+                      <span className="w-full truncate font-mono text-[10px] text-muted-foreground" title={found.executable}>{found.executable}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {bridge && foundHere.length === 0 ? (
+            <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="recruiter-found-none">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                {t('foundHereNone')}{' '}
+                <a href={appSetupLink(null)} className="font-medium text-primary hover:underline" data-testid="recruiter-found-install">{t('foundHereInstall')}</a>
+              </span>
+            </p>
+          ) : null}
           <div className="space-y-1">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
             <div className="grid grid-cols-3 gap-2">
-              {displayedSupportedRuntimes.map((rc) => {
+              {displayedSupportedRuntimes.filter((rc) => !foundSlugs.has(rc.slug)).map((rc) => {
                 const sel = runtime === rc.slug;
                 return (
                   <button
@@ -852,6 +924,22 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     leftRef.current = true;
     if (!verified) {
       emitOnboardingEvent('abandoned_explicit', { agent_id: recruiterAgentId, failure_reason: 'abandoned_explicit', flow: 'recruit' });
+    }
+  };
+
+  // story 4680 (D2): [이 컴퓨터에서 시작] inside the app — the bridge opens the app's setup page with this agent chosen (its `agent=`
+  // fragment · the setup's 4565 way). `ok` → what to press next; any closed code ('ignored' · 'no_setup' · 'bad_request' — D1) →
+  // one line, the app's own way back. Counted with the desktop signal the onboarding uses (3983 funnel · flow recruit).
+  const [startHere, setStartHere] = useState<{ kind: 'idle' | 'busy' | 'ok' | 'failed'; code?: string }>({ kind: 'idle' });
+  const handleStartHere = async () => {
+    if (!bridge || !recruiterAgentId || startHere.kind === 'busy') return;
+    setStartHere({ kind: 'busy' });
+    emitOnboardingEvent('desktop_handoff_selected', { agent_id: recruiterAgentId, flow: 'recruit' });
+    try {
+      const r = await bridge.startHere({ agentId: recruiterAgentId });
+      if (r.ok) { leftRef.current = true; setStartHere({ kind: 'ok' }); } else setStartHere({ kind: 'failed', code: r.code });
+    } catch {
+      setStartHere({ kind: 'failed' });
     }
   };
 
@@ -1639,10 +1727,34 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 {t('executionBoundaryNote')}
               </p>
 
+              {/* story 4680 (D2 · 4677 · Yuna G-2): the agent starts on this computer — inside the app one hand (the bridge opens the
+                  setup page with this agent chosen · 4565 way), from a browser the app link with `?agent=` (+ the download card for a
+                  computer with no app). The one hero on this screen — [완료] is glass. */}
+              <div className="space-y-2 border-t border-border pt-3" data-testid="recruiter-start-here">
+                {bridge ? (
+                  <Button variant="hero" onClick={() => void handleStartHere()} disabled={startHere.kind === 'busy'} data-testid="recruiter-start-here-button">
+                    {t('startHere')}
+                  </Button>
+                ) : (
+                  <Button variant="hero" asChild data-testid="recruiter-start-here-link">
+                    <a href={appSetupLink(null, undefined, { agent: recruitResult.agent_id })}>{t('startHere')}</a>
+                  </Button>
+                )}
+                {startHere.kind === 'ok' ? (
+                  <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="recruiter-start-here-opened">{t('startHereOpened')}</p>
+                ) : null}
+                {startHere.kind === 'failed' ? (
+                  <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
+                ) : null}
+                {/* 4435: the switch is the app's own (its menu) — the page only says where (PO Q-a: a page never turns it on) */}
+                <p className="break-keep text-xs text-muted-foreground" data-testid="recruiter-own-mcp-note">{t('ownMcpNote')}</p>
+                {!bridge ? <DesktopDownloadCard /> : null}
+              </div>
+
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
-                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. */}
-                <Link href={chatsHref} onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
+                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. story 4680: glass — the hero is [이 컴퓨터에서 시작] */}
+                <Link href={chatsHref} onClick={handleFinish}><Button variant="glass">{t('finish')}</Button></Link>
               </div>
             </div>
           )}

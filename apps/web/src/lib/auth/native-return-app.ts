@@ -39,7 +39,12 @@ export function appReturnUrl(searchParams: URLSearchParams): string {
 }
 
 /** the setup page's «open the app» links (`/desktop/setup`, `?intent=reopen`) for that app · story 4670 (U2): `pair` = the app's band
- *  [폰 페어링] entry, as if pressed (the setup's end card [폰 페어링 열기]) — no setup starts */
-export function appSetupLink(app: NativeReturnApp | null, intent?: 'reopen' | 'pair'): string {
-  return `${appScheme(app)}:/desktop/setup${intent ? `?intent=${intent}` : ''}`;
+ *  [폰 페어링] entry, as if pressed (the setup's end card [폰 페어링 열기]) — no setup starts.
+ *  story 4680 (D2 · 4677): `agent` — the recruiter's [이 컴퓨터에서 시작] from a browser: the app reads `?agent=` (D1 mobile) and
+ *  puts it in its setup page's fragment, so that agent is chosen there. Only a uuid-shaped id goes into the link. `intent` wins
+ *  when both are given (a reopen/pair is the setup the person has — no agent to choose); no caller passes both today (PO 5065). */
+export function appSetupLink(app: NativeReturnApp | null, intent?: 'reopen' | 'pair', opts?: { agent?: string | null }): string {
+  const agent = opts?.agent && /^[0-9a-f-]{36}$/i.test(opts.agent) ? opts.agent : null;
+  const q = intent ? `intent=${intent}` : agent ? `agent=${agent}` : '';
+  return `${appScheme(app)}:/desktop/setup${q ? `?${q}` : ''}`;
 }

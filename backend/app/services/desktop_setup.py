@@ -66,8 +66,9 @@ EVENT_AGENT_NEEDS_SIGN_IN = "desktop_agent_needs_sign_in"  # story #4658
 EVENT_AGENT_SIGN_IN_CLEARED = "desktop_agent_sign_in_cleared"  # story #4658 (the question is over)
 from app.services.onboarding_funnel import START_FAILED_CODES, START_FAILED_REASONS  # noqa: E402
 from app.services.onboarding_funnel import EXIT_CODE_RANGE as _EXIT_CODE_RANGE  # noqa: E402
-# the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
-RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
+# the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses) — story 4680: the table lives in
+# agent_runtime.py (runtime_capabilities carries its inverse); this name stays for the readers here
+from app.services.agent_runtime import DESKTOP_RUNTIME_TYPES as RUNTIME_TYPES  # noqa: E402
 _CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")  # base64url(sha256) without padding
 _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 

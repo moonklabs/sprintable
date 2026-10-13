@@ -23,6 +23,8 @@ class RuntimeCapability(BaseModel):
     guide_filename: str | None = None
     supports_event_push: bool = False
     icon: str | None = None
+    # story 4680 (D2): the desktop app's runtime id (`claude` · `codex`) or None — from agent_runtime.DESKTOP_RUNTIME_TYPES
+    desktop_runtime: str | None = None
 
 
 @router.get("", response_model=list[RuntimeCapability])

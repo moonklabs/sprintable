@@ -20,7 +20,7 @@ import { formatLocaleDate } from '@/lib/i18n';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
-  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
   type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
   moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
@@ -209,7 +209,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] };
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, preselect = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -385,7 +385,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         setAttachable(list);
         // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
         setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
-        setRows((rs) => withAttachable(rs, list, runtimes));
+        // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices
+        setRows((rs) => withPreselectedAgent(withAttachable(rs, list, runtimes), preselect));
       })
       .catch(() => { if (!off) setAttachable([]); }); // the group is left out — «새로 만들기» still works
     return () => { off = true; };
@@ -394,7 +395,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
-    setRows(withAttachable(setupRoleRows(r, runtimes), attachable, runtimes));
+    setRows(withPreselectedAgent(withAttachable(setupRoleRows(r, runtimes), attachable, runtimes), preselect));
     setWorkdir(defaultWorkdirHint(presetName(r, tPreset)));
     setEditingDir(false);
   }
@@ -878,12 +879,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 }
 
 /** story #4565 (Yuna 02:32Z ② · 02:39Z): under a row moved from elsewhere — only when it has a live key: what the move does
- * (in the body's colour: it is a result to read), then when one of its keys was last used (muted · none known → no line). */
+ * (in the body's colour: it is a result to read), then when one of its keys was last used (muted · none known → no line).
+ * story 4680 (Yuna G-4 · PO Q-b): a key that was never used (the agent the recruiter just made) has no live connection to cut —
+ * no line: the screen does not name a cost that is not there. */
 function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
   const viewerTz = useViewerTimeZone();
-  if (!agent || agent.live_keys < 1) return null;
+  if (!agent || agent.live_keys < 1 || !agent.last_used_at) return null;
   const when = agent.last_used_at ? formatViewerRelativeTime(agent.last_used_at, locale, viewerTz) : '';
   return (
     <div className="mt-1 flex flex-col gap-0.5" data-testid="setup-moved-note">
@@ -1111,7 +1114,7 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   }, [id]);
   if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
-  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */
