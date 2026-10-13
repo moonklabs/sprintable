@@ -6951,6 +6951,12 @@
       "seeResult": "See the result",
       "goToday": "Go to Today",
       "wayOutNote": "You can leave — setup continues on this computer, and the first result will be in Work.",
+      "phoneCard": {
+        "title": "To handle agents from your phone too",
+        "body": "Scan the QR with your phone's camera to get the phone app, then [Open phone pairing] to pair it with this computer.",
+        "openPairing": "Open phone pairing",
+        "memberNote": "Pairing is done from [Pair phone] in the Sprintable app's band on this computer."
+      },
       "stopped": "{count, plural, one {The {roles} agent stopped} other {The {roles} agents stopped}} — select it in the «Agents on this computer» bar at the bottom of the window and press Start again.",
       "stoppedTrust": "It may ask again whether to trust the working folder — if it does, use the arrow keys to put ❯ on \"Yes, I trust this folder\", then Enter.",
       "signInBody": "The agent isn't signed in — sign in with this command",

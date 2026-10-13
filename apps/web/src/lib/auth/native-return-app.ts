@@ -38,7 +38,8 @@ export function appReturnUrl(searchParams: URLSearchParams): string {
   return query ? `${base}?${query}` : base;
 }
 
-/** the setup page's «open the app» links (`/desktop/setup`, `?intent=reopen`) for that app */
-export function appSetupLink(app: NativeReturnApp | null, intent?: 'reopen'): string {
+/** the setup page's «open the app» links (`/desktop/setup`, `?intent=reopen`) for that app · story 4670 (U2): `pair` = the app's band
+ *  [폰 페어링] entry, as if pressed (the setup's end card [폰 페어링 열기]) — no setup starts */
+export function appSetupLink(app: NativeReturnApp | null, intent?: 'reopen' | 'pair'): string {
   return `${appScheme(app)}:/desktop/setup${intent ? `?intent=${intent}` : ''}`;
 }
