@@ -6337,7 +6337,7 @@
     "foundHereNone": "No agent on this computer yet —",
     "foundHereInstall": "How to install",
     "startHere": "Start on this computer",
-    "startHereOpened": "The app opened the setup screen — press [시작] there.",
+    "startHereOpened": "The app opened the setup screen — press [Start] there.",
     "startHereFailed": "The app couldn't open it — start the setup again from the app.",
     "foundHereCardAria": "{n}. {label}",
     "ownMcpNote": "To let the agent use your own MCP tools too, turn on the «my MCP tools» item in the app's «Sprintable» menu — it's off by default."

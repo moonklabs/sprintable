@@ -493,6 +493,23 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect(selectOf('조사').value).toBe('claude'); // not on the team: never chosen (4565 · PO 04:37Z)
   });
 
+  // PO 5065 ②: the preselect is spent the first time it lands — a person's later choice stands when the rows are built again
+  // (another recipe · the list read again). Reverted (applied on every rebuild) → the recruiter's agent comes back and this fails.
+  it('[SID:4680] preselect once: chosen another agent, then another recipe → the row is not pulled back to the recruiter\'s agent', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await choose('조사', 'claude');
+    expect(selectOf('조사').value).toBe('claude');
+    await openRecipes();
+    const other = [...container.querySelectorAll('input[name=recipe]')].find((i) => (i as HTMLInputElement).value === 'rec-2') as HTMLInputElement;
+    await act(async () => { other.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect((container.querySelector('input[name=recipe]:checked') as HTMLInputElement).value).toBe('rec-2');
+    expect(selectOf('조사').value).toBe('claude'); // the spent preselect does not come back
+  });
+
   it('no live key → no line under it (nothing would be cut)', async () => {
     stub(() => new Response('{}', { status: 200 }));
     agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });

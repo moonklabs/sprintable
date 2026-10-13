@@ -36,6 +36,14 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 
 const noSubscribe = () => () => undefined;
 
+/** story 4680 (PO 5065 ①): how the recruit's end screen offers «start on this computer» — only for a runtime the desktop app runs
+ * (`desktop_runtime` set: claude-code · codex): inside the app the bridge's hand (`app`), in a browser the app link (`link`); any
+ * other runtime (cursor · gemini · connector …) → null = the screen exactly as before (the app could not even choose that agent). */
+export function startHereMode(inApp: boolean, chosen: Pick<RuntimeCapabilityItem, 'desktop_runtime'> | undefined): 'app' | 'link' | null {
+  if (!chosen?.desktop_runtime) return null;
+  return inApp ? 'app' : 'link';
+}
+
 /** story 4680 (D2): the app's «found on this computer» list matched to the server's capabilities by `desktop_runtime` (the one table,
  * agent_runtime.DESKTOP_RUNTIME_TYPES) — in the app's order; a found runtime the server has no capability for is left out. */
 export function foundRuntimes(found: readonly DesktopRuntimeFound[], caps: readonly RuntimeCapabilityItem[]): { found: DesktopRuntimeFound; cap: RuntimeCapabilityItem }[] {
@@ -568,10 +576,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
   // story 5ea9bafe: STEP4 오리엔팅 헤더·전달 카피·STEP5 intro에서 공용으로 쓰는 현재 선택 런타임의
   // 표시명(못 찾으면 slug 그대로 — 로딩 중 등 방어).
-  const currentRuntimeDisplayName = (() => {
-    const rc = runtimeCapabilities?.find((r) => r.slug === runtime);
-    return rc ? runtimeDisplayName(rc) : runtime;
-  })();
+  const currentCapability = runtimeCapabilities?.find((r) => r.slug === runtime);
+  const currentRuntimeDisplayName = currentCapability ? runtimeDisplayName(currentCapability) : runtime;
 
   // story #2433(B) — equip-skip("역할 없이(키만)")도 STEP3(실행환경) 자체가 스킵돼 런타임을
   // 고를 길이 없었다(equip-skip은 STEP2 이후 바로 생성). Full 경로 STEP3의 런타임 그리드를
@@ -1729,7 +1735,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
               {/* story 4680 (D2 · 4677 · Yuna G-2): the agent starts on this computer — inside the app one hand (the bridge opens the
                   setup page with this agent chosen · 4565 way), from a browser the app link with `?agent=` (+ the download card for a
-                  computer with no app). The one hero on this screen — [완료] is glass. */}
+                  computer with no app). Only for a runtime the app runs (PO 5065 ①: startHereMode) — then the one hero on this
+                  screen and [완료] is glass; otherwise the screen is as it was. */}
+              {startHereMode(Boolean(bridge), currentCapability) ? (
               <div className="space-y-2 border-t border-border pt-3" data-testid="recruiter-start-here">
                 {bridge ? (
                   <Button variant="hero" onClick={() => void handleStartHere()} disabled={startHere.kind === 'busy'} data-testid="recruiter-start-here-button">
@@ -1744,17 +1752,20 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="recruiter-start-here-opened">{t('startHereOpened')}</p>
                 ) : null}
                 {startHere.kind === 'failed' ? (
-                  <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
+                  <p role="alert" aria-live="assertive" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
                 ) : null}
                 {/* 4435: the switch is the app's own (its menu) — the page only says where (PO Q-a: a page never turns it on) */}
                 <p className="break-keep text-xs text-muted-foreground" data-testid="recruiter-own-mcp-note">{t('ownMcpNote')}</p>
-                {!bridge ? <DesktopDownloadCard /> : null}
+                {/* Yuna 5065: the shared card's [다운로드] under this hero is outline — one primary on the screen */}
+                {!bridge ? <DesktopDownloadCard ctaVariant="outline" /> : null}
               </div>
+              ) : null}
 
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
-                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. story 4680: glass — the hero is [이 컴퓨터에서 시작] */}
-                <Link href={chatsHref} onClick={handleFinish}><Button variant="glass">{t('finish')}</Button></Link>
+                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. story 4680: glass while [이 컴퓨터에서
+                    시작] is the hero; the old rule (hero once verified) otherwise */}
+                <Link href={chatsHref} onClick={handleFinish}><Button variant={startHereMode(Boolean(bridge), currentCapability) ? 'glass' : verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
               </div>
             </div>
           )}

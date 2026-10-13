@@ -385,17 +385,28 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         setAttachable(list);
         // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
         setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
-        // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices
-        setRows((rs) => withPreselectedAgent(withAttachable(rs, list, runtimes), preselect));
+        // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices — once
+        // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576) and a recipe change rebuilds the rows; a person's own
+        // choice after that is never written over
+        setRows((rs) => applyPreselectOnce(withAttachable(rs, list, runtimes)));
       })
       .catch(() => { if (!off) setAttachable([]); }); // the group is left out — «새로 만들기» still works
     return () => { off = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgMode.kind, chosenProject, isAdmin, attachableTick]);
 
+  /** story 4680 (PO 5065 ②): the preselect is spent the first time it lands on a row (or the first time a person sets a row) */
+  const preselectSpent = useRef(false);
+  const applyPreselectOnce = (rows: SetupRoleRow[]): SetupRoleRow[] => {
+    if (preselectSpent.current || !preselect) return rows;
+    const out = withPreselectedAgent(rows, preselect);
+    if (out.some((r, i) => r.owner !== rows[i]!.owner)) preselectSpent.current = true;
+    return out;
+  };
+
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
-    setRows(withPreselectedAgent(withAttachable(setupRoleRows(r, runtimes), attachable, runtimes), preselect));
+    setRows(applyPreselectOnce(withAttachable(setupRoleRows(r, runtimes), attachable, runtimes)));
     setWorkdir(defaultWorkdirHint(presetName(r, tPreset)));
     setEditingDir(false);
   }

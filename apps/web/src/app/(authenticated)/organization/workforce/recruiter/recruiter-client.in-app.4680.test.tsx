@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
-import { RecruiterClient, foundRuntimes } from './recruiter-client';
+import { RecruiterClient, foundRuntimes, startHereMode } from './recruiter-client';
 import { RUNTIME_CAPABILITIES_FALLBACK } from '@/services/recruit';
 
 vi.mock('next-intl', () => ({
@@ -123,6 +123,25 @@ describe('[SID:4680] RecruiterClient — the runtime picker inside the desktop a
     expect(container.querySelector('[data-testid=recruiter-found-none]')).toBeNull();
     expect(buttonsWithText(container, (t) => t.endsWith('Claude Code'))).toHaveLength(1);
     expect(buttonsWithText(container, (t) => t.endsWith('Codex'))).toHaveLength(1);
+  });
+});
+
+// PO 5065 ①: the end screen offers «start on this computer» only for a runtime the desktop app runs — the one judgement, as a pure
+// function (the STEP 5 screen has no mount harness; this is its test). Reverted (the block for every runtime) → the null cases fail.
+describe('[SID:4680] startHereMode — only a desktop runtime gets the start-here block', () => {
+  const claude = CAPS.find((c) => c.slug === 'claude-code')!;
+  const codex = CAPS.find((c) => c.slug === 'codex')!;
+  const cursor = CAPS.find((c) => c.slug === 'cursor')!;
+  const connector = CAPS.find((c) => c.slug === 'connector')!;
+  it('in the app + claude-code → app (the bridge\'s hand) · browser + codex → link (the app link)', () => {
+    expect(startHereMode(true, claude)).toBe('app');
+    expect(startHereMode(false, codex)).toBe('link');
+  });
+  it('a runtime the app does not run (cursor · gemini · connector) → null, in the app or not · no capability yet → null', () => {
+    expect(startHereMode(false, cursor)).toBeNull();
+    expect(startHereMode(true, cursor)).toBeNull();
+    expect(startHereMode(true, connector)).toBeNull();
+    expect(startHereMode(true, undefined)).toBeNull();
   });
 });
 
