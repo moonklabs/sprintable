@@ -27,6 +27,11 @@ class Project(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # non-null이고, 유니크 제약(org_id, slug)은 NULL 여러 개를 서로 다른 값으로 취급해 무해하다.
     slug: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [SID:4681] (UX-1 · D3 · AC4): the folder a person picked on their computer for this project's agents — a hint for people and
+    # other devices («this project lives in ~/work/foo»), stored and shown as TEXT only. The server never opens, resolves or checks
+    # it as a path (migration 0451 · additive · nullable). The folder an agent actually starts in is decided on the Mac
+    # (desktop-electron project-workdirs · the 4565 home-only check) — never from this value (a server-named path could point anywhere).
+    workdir_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     # S3-2: warn(default) | block
     violation_level: Mapped[str] = mapped_column(String(10), nullable=False, default="warn")
 

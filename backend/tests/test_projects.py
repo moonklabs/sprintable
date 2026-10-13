@@ -17,6 +17,7 @@ def _mock_project(name: str = "Sprintable") -> MagicMock:
     p.name = name
     p.slug = "sprintable"
     p.description = None
+    p.workdir_hint = None  # [SID:4681]: a MagicMock attribute is not `str | None` — the response schema reads this field now
     p.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     p.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return p
