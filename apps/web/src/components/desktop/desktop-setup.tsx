@@ -372,6 +372,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   // story #4576: «목록 다시 불러오기» after a move was refused because the agents changed reads them again
   const [attachableTick, setAttachableTick] = useState(0);
+  /** story 4680 (PO 5065 ②): the preselect is spent the first time it lands on a row, or the first time a person sets any row —
+   * after that the rows are never written over (a recipe change · the list read again · a list that arrives after the person
+   * acted). The flag is read and written OUTSIDE setRows updaters (an updater may run twice; it stays pure — PO 6e245cf40 (가)). */
+  const preselectSpent = useRef(false);
+  /** whether `agentId` would land on a row of this list (the same rule as existingChoices · withPreselectedAgent) */
+  const preselectLands = (list: readonly AttachableAgent[]) =>
+    !!preselect && list.some((a) => a.id === preselect && a.in_project && runtimes.includes(a.runtime));
   // story #4565 — the «이미 있는 에이전트» group: read once the project is known (a new organization has none to move)
   useEffect(() => {
     if (orgMode.kind !== 'has-org' || !chosenProject || !isAdmin) { setAttachable([]); return; }
@@ -386,27 +393,23 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
         setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
         // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices — once
-        // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576) and a recipe change rebuilds the rows; a person's own
-        // choice after that is never written over
-        setRows((rs) => applyPreselectOnce(withAttachable(rs, list, runtimes)));
+        // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576 · move mode) and a recipe change rebuilds the rows; a
+        // person's own choice after that is never written over. The flag is decided here, not inside the updater (pure).
+        const apply = !preselectSpent.current && preselectLands(list);
+        if (apply) preselectSpent.current = true;
+        setRows((rs) => (apply ? withPreselectedAgent(withAttachable(rs, list, runtimes), preselect) : withAttachable(rs, list, runtimes)));
       })
       .catch(() => { if (!off) setAttachable([]); }); // the group is left out — «새로 만들기» still works
     return () => { off = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgMode.kind, chosenProject, isAdmin, attachableTick]);
 
-  /** story 4680 (PO 5065 ②): the preselect is spent the first time it lands on a row (or the first time a person sets a row) */
-  const preselectSpent = useRef(false);
-  const applyPreselectOnce = (rows: SetupRoleRow[]): SetupRoleRow[] => {
-    if (preselectSpent.current || !preselect) return rows;
-    const out = withPreselectedAgent(rows, preselect);
-    if (out.some((r, i) => r.owner !== rows[i]!.owner)) preselectSpent.current = true;
-    return out;
-  };
-
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
-    setRows(applyPreselectOnce(withAttachable(setupRoleRows(r, runtimes), attachable, runtimes)));
+    const built = withAttachable(setupRoleRows(r, runtimes), attachable, runtimes);
+    const apply = !preselectSpent.current && preselectLands(attachable);
+    if (apply) preselectSpent.current = true;
+    setRows(apply ? withPreselectedAgent(built, preselect) : built);
     setWorkdir(defaultWorkdirHint(presetName(r, tPreset)));
     setEditingDir(false);
   }
@@ -554,7 +557,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} />;
   if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} />;
 
-  const setOwner = (role: string, key: string) => setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
+  const setOwner = (role: string, key: string) => {
+    preselectSpent.current = true; // story 4680 (PO (나)): a person set a row — the recruiter's preselect never lands after this
+    setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
+  };
   // agents found but every either row set to «나»: «시작» off with the reason in the count line's place (Yuna v21 — n = 0 there
   // would be false); the server refuses the same with no_agent_role
   const noAgentRow = needsAnAgent(rows);

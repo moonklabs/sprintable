@@ -510,6 +510,22 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect(selectOf('조사').value).toBe('claude'); // the spent preselect does not come back
   });
 
+  // PO 6e245cf40 (나): the list may arrive AFTER the person already set a row (a slow read) — their choice stands; the preselect
+  // is spent by the person's hand, not only by landing. Reverted (spent only when it lands) → the late list writes DAN over 'codex'.
+  it('[SID:4680] preselect pending (list not here yet) · a person sets the row · the list arrives → the row keeps the person\'s choice', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    agentsNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(selectOf('조사').value).toBe('claude'); // the recipe's default — the preselect has nothing to land on yet
+    await choose('조사', 'codex');
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the late list did arrive
+    expect(selectOf('조사').value).toBe('codex');
+  });
+
   it('no live key → no line under it (nothing would be cut)', async () => {
     stub(() => new Response('{}', { status: 200 }));
     agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
