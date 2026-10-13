@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// story 4654 (Yuna 4654-phone-app-cta-design §1 · §3): on a device that is not a Mac, the onboarding desktop step places the phone app's
-// store links (PhoneAppGet — only the published stores) under the download card, with the aux line «맥 앱은 맥에서 받아 주세요».
-// On a Mac the card is not drawn at all (the Mac app's own card stays alone). Nothing published → no card, no line.
+// story 4654 (Yuna 4654-phone-app-cta-design §1 · §3): the onboarding desktop step places the phone app's links (PhoneAppGet) under the
+// download card; not a Mac → the aux line «맥 앱은 맥에서 받아 주세요» too.
+// [SID:4671] (UX-1 · U3): a Mac draws the card as well (the QR is for the phone's camera) with «scan it with your phone» instead of the
+// aux line; iOS has its «준비 중» line. Nothing to get → no card, no line (phone-pairing-get-app.test.tsx · phoneAppLinks = []).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -53,22 +54,40 @@ describe('[SID:4654] the phone app card under the onboarding download card', () 
     expect(title!.compareDocumentPosition(body!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('a Mac: nothing is drawn (the Mac app card stays alone on the page)', async () => {
-    const h = await draw(false);
-    expect(h.innerHTML).toBe('');
-  });
-
-  // Kadir 5049: the device comes from the user agent the page reads (no forced flag) — a Mac draws nothing, a phone draws the line and the link
-  it('no forced flag: a Mac user agent draws nothing', async () => {
-    setUA(MAC);
-    const h = await draw();
-    expect(h.innerHTML).toBe('');
-  });
-
   it('no forced flag: a phone user agent draws the aux line and the published link', async () => {
     setUA(IPHONE);
     const h = await draw();
     expect(h.textContent).toContain('맥 앱은 맥에서 받아 주세요');
     expect([...h.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([PHONE_APP_STORE_ANDROID]);
+  });
+});
+
+describe('[SID:4671] a Mac draws the card too (the QR is for the phone)', () => {
+  it('forced Mac: the card, the link + QR, «scan it with your phone» — and no «맥 앱은 맥에서» line', async () => {
+    const h = await draw(false);
+    expect(h.querySelector('[data-testid="phone-app-card"]')).not.toBeNull();
+    expect([...h.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([PHONE_APP_STORE_ANDROID]);
+    expect(h.querySelectorAll('svg').length).toBe(1);
+    expect(h.querySelector('[data-testid="phone-app-scan-hint"]')?.textContent).toBe('폰 카메라로 QR을 찍으면 바로 열려요');
+    expect(h.querySelector('[data-testid="phone-app-mac-aux"]')).toBeNull();
+    expect(h.textContent).not.toContain('맥 앱은 맥에서 받아 주세요');
+  });
+
+  it('no forced flag: a Mac user agent draws the card (it drew nothing before this story)', async () => {
+    setUA(MAC);
+    const h = await draw();
+    expect(h.querySelector('[data-testid="phone-app-card"]')).not.toBeNull();
+    expect(h.querySelector('[data-testid="phone-app-scan-hint"]')).not.toBeNull();
+    expect(h.querySelector('[data-testid="phone-app-mac-aux"]')).toBeNull();
+  });
+
+  it('iOS not open: the one «준비 중» line, no iOS link, no second QR (on a Mac and on a phone alike)', async () => {
+    for (const elsewhere of [false, true]) {
+      const h = await draw(elsewhere);
+      expect(h.querySelector('[data-testid="phone-app-ios-soon"]')?.textContent).toBe('아이폰 · 준비 중이에요');
+      expect(h.querySelectorAll('a').length).toBe(1);
+      expect(h.querySelectorAll('svg').length).toBe(1);
+      act(() => root.unmount()); root = createRoot(host);
+    }
   });
 });
