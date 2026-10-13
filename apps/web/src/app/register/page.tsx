@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -40,6 +40,12 @@ export default function RegisterPage() {
   const googleEnabled = process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true';
   const [emailOpen, setEmailOpen] = useState(false);
   const emailFormOpen = !googleEnabled || emailOpen;
+  // Yuna (5064 design · 4723's class): the fold button goes away when pressed, so the keyboard focus must not fall to the body —
+  // it moves to the form's first field. One-way: the form never folds again (no aria-expanded — there is no «collapsed» state after).
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (emailOpen) nameInputRef.current?.focus();
+  }, [emailOpen]);
 
   const rules = checkPasswordRules(password);
   const categoriesMet = countCategories(rules);
@@ -170,8 +176,6 @@ export default function RegisterPage() {
                 variant="outline"
                 size="lg"
                 onClick={() => setEmailOpen(true)}
-                aria-expanded={false}
-                aria-controls="register-email-form"
                 data-testid="register-email-open"
                 className="w-full min-h-[44px] rounded-lg text-sm font-medium"
               >
@@ -182,8 +186,9 @@ export default function RegisterPage() {
         )}
 
         {emailFormOpen && (
-        <div className="space-y-3" id="register-email-form" data-testid="register-email-form">
+        <div className="space-y-3" data-testid="register-email-form">
           <input
+            ref={nameInputRef}
             type="text"
             placeholder={t('namePlaceholder')}
             autoComplete="name"

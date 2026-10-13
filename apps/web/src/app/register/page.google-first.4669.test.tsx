@@ -52,7 +52,7 @@ const byTestId = (id: string) => container.querySelector(`[data-testid=${id}]`);
 const inputs = () => [...container.querySelectorAll('input')];
 
 describe('[SID:4669] RegisterPage — Google first, the e-mail form folded', () => {
-  it('T1 OAuth on: [Google로 계속] is the first control after the terms line · no e-mail inputs · [이메일로 가입] folded (aria-expanded=false)', async () => {
+  it('T1 OAuth on: [Google로 계속] is the first control after the terms line · no e-mail inputs · [이메일로 가입] folded (one-way: no aria-expanded)', async () => {
     process.env['NEXT_PUBLIC_OAUTH_ENABLED'] = 'true';
     await mount();
     const google = byTestId('register-google') as HTMLAnchorElement;
@@ -63,19 +63,27 @@ describe('[SID:4669] RegisterPage — Google first, the e-mail form folded', () 
     expect(byTestId('register-email-form')).toBeNull();
     const open = byTestId('register-email-open');
     expect(open?.textContent?.trim()).toBe(koMessages.register.emailSignUp);
-    expect(open?.getAttribute('aria-expanded')).toBe('false');
+    // Yuna (5064 design): the button goes away when pressed — a disclosure that never collapses has no expanded state to announce
+    expect(open?.hasAttribute('aria-expanded')).toBe(false);
+    expect(open?.hasAttribute('aria-controls')).toBe(false);
     expect(container.textContent).toContain(koMessages.register.or);
     // Google comes before the fold button in the document
     expect(google.compareDocumentPosition(open!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('T2 OAuth on: [이메일로 가입] opens the form in place — name · e-mail · password · [회원가입] (not brand-colored) · the fold button is gone', async () => {
+  it('T2 OAuth on: [이메일로 가입] opens the form in place — focus lands on the name field (the button is gone) · name · e-mail · password · [회원가입] (not brand-colored)', async () => {
     process.env['NEXT_PUBLIC_OAUTH_ENABLED'] = 'true';
     await mount();
-    await act(async () => { (byTestId('register-email-open') as HTMLButtonElement).click(); });
+    const open = byTestId('register-email-open') as HTMLButtonElement;
+    open.focus();
+    await act(async () => { open.click(); });
     expect(byTestId('register-email-form')).not.toBeNull();
     expect(inputs().map((i) => i.type)).toEqual(['checkbox', 'text', 'email', 'password']);
     expect(byTestId('register-email-open')).toBeNull();
+    // Yuna (5064 design · 4723's class): the pressed button vanished — the keyboard focus must be on the first field, not the body
+    // (reverted — no focus() — the active element is the body and this fails)
+    expect(document.activeElement).toBe(inputs()[1]);
+    expect(document.activeElement).not.toBe(document.body);
     const submit = byTestId('register-submit') as HTMLButtonElement;
     expect(submit.textContent?.trim()).toBe(koMessages.register.submit);
     expect(submit.className).not.toContain('bg-brand');
