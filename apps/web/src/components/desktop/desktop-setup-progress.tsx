@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
+import { useSearchParams } from 'next/navigation';
 import { Check, Circle, Info, Loader2 } from 'lucide-react';
+import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM, type NativeReturnApp } from '@/lib/auth/native-return-app';
+import { PhoneAppGet } from './phone-pairing';
+import { PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET, phoneAppLinks } from '@/lib/phone-app-store';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -43,6 +47,11 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
   const tPreset = useTranslations('recipePreset');
   const { orgId, orgMemberships, currentProjectSlug, navV3Flags } = useDashboardContext();
   const flatHref = useFlatHref();
+  // story 4670 (U2): the end card's [폰 페어링 열기] is for an owner/admin (the same reading as the setup page's isAdmin); the link names
+  // the app that opened this page (story #4626 · `?app=`)
+  const orgRole = orgMemberships?.find((o) => o.orgId === orgId)?.role ?? 'member';
+  const isAdmin = orgRole === 'owner' || orgRole === 'admin';
+  const app = nativeReturnApp(useSearchParams()?.get(RETURN_APP_PARAM));
   // one reading: the status, when it was read, and when this page first saw «handed_over» (the status carries no such time)
   const [snap, setSnap] = useState<{ status: SetupStatus; at: number; handedOverSeenAt: number | null } | null>(null);
   const stopped = useRef(false);
@@ -249,7 +258,34 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         </div>
         <p className="text-xs text-muted-foreground">{t('wayOutNote')}</p>
       </footer>
+      {/* story 4670 (U2 · Yuna §E ③): once the setup is done, the phone's way in — beside the way out */}
+      {done ? <PhoneHandoffCard isAdmin={isAdmin} app={app} /> : null}
     </Card>
+  );
+}
+
+/**
+ * story 4670 (UX-1 · U2 · design nwachukwu/4670-design.md §2-2 · Yuna §E ③): the end screen's «폰에서도 다루려면» — the phone app's QR
+ * (U3's PhoneAppGet, the same block) and, for an owner/admin, [폰 페어링 열기]: the app's deep link `intent=pair`, which the app reads as
+ * its band's [폰 페어링] pressed (sprintable-mobile · no setup starts). A member reads where pairing is done instead. The org's
+ * remote-control line (§E ③e · [켜기]) joins with the switch pieces after the security lens.
+ */
+export function PhoneHandoffCard({ isAdmin, app }: { isAdmin: boolean; app: NativeReturnApp | null }) {
+  // the file's namespace with dotted keys (the repo's i18n key check binds one namespace per hook name in a file — story #2371)
+  const t = useTranslations('desktop.setup');
+  // PO 5066 ① · Yuna §E ③f: whether the phone app can be got here at all — the same reading PhoneAppGet makes (it draws nothing without
+  // a way in); then the body names no QR, and a member (no button either) gets no card at all — nothing to do on that screen
+  const hasApp = phoneAppLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET).length > 0;
+  if (!hasApp && !isAdmin) return null;
+  return (
+    <section className="flex flex-col gap-3 rounded-md border p-3" aria-labelledby="setup-phone-card-title" data-testid="setup-phone-card" data-app={hasApp ? 'yes' : 'no'}>
+      <h2 id="setup-phone-card-title" className="text-sm font-medium">{t('phoneCard.title')}</h2>
+      <p className="text-sm text-muted-foreground">{hasApp ? t('phoneCard.body') : t('phoneCard.bodyNoApp')}</p>
+      {hasApp ? <PhoneAppGet /> : null}
+      {isAdmin
+        ? <div><Button asChild variant="outline"><a href={appSetupLink(app, 'pair')} data-testid="setup-phone-pair">{t('phoneCard.openPairing')}</a></Button></div>
+        : <p className="text-xs text-muted-foreground" data-testid="setup-phone-member">{t('phoneCard.memberNote')}</p>}
+    </section>
   );
 }
 

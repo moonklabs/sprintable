@@ -13,6 +13,10 @@ const { ctx, sp } = vi.hoisted(() => ({ ctx: vi.fn(), sp: { value: null as URLSe
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 // the query the router reports (the dashboard shell adds ?p= with a router replace)
 vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next/navigation')>()), useSearchParams: () => sp.value }));
+// story 4670: the end card draws the phone app's QR block (PhoneAppGet) when the app can be got — a published Android store by default;
+// one test turns it off (no store · no opt-in page in this environment) for the §E ③f shape
+const { phonePub } = vi.hoisted(() => ({ phonePub: { android: true, ios: false } }));
+vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: phonePub }));
 
 import { DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
@@ -1031,6 +1035,59 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     const n = polls();
     await tick(10_000);
     expect(polls()).toBe(n); // stops once the result is in
+  });
+
+  // story 4670 (UX-1 · U2 · Yuna §E ③): once the setup is done, the end screen carries «폰에서도 다루려면» — the phone app's QR block and,
+  // for an owner/admin, [폰 페어링 열기] (the app's deep link `intent=pair`); a member reads where pairing is done; nothing before the end
+  it('[SID:4670] the end card «폰에서도 다루려면»: QR block · owner → [폰 페어링 열기] = ai.sprintable:/desktop/setup?intent=pair · member → the band line · not drawn before the setup is done', async () => {
+    statusNow = () => status('waiting_for_app');
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-phone-card]')).toBeNull();
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    await tick(2_000);
+    const card = container.querySelector('[data-testid=setup-phone-card]');
+    expect(card?.querySelector('h2')?.textContent).toBe('폰에서도 다루려면');
+    expect(card?.textContent).toContain('폰 카메라로 QR을 찍어 폰 앱을 받고, 그 다음 [폰 페어링 열기]로 이 컴퓨터와 페어링해요.');
+    expect(card?.querySelector('[data-testid=phone-app-get]')).not.toBeNull();
+    const pair = card?.querySelector('[data-testid=setup-phone-pair]');
+    expect(pair?.textContent).toBe('폰 페어링 열기');
+    expect(pair?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=pair');
+    expect(card?.querySelector('[data-testid=setup-phone-member]')).toBeNull();
+    // the way out stays as it was, the card after it
+    expect([...(container.querySelector('[data-testid=setup-way-out]')?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '오늘로 가기']);
+    // a member: the QR block and the band line — no button
+    act(() => root.unmount()); root = createRoot(container);
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />, 'member');
+    await tick(0);
+    const member = container.querySelector('[data-testid=setup-phone-card]');
+    expect(member?.querySelector('[data-testid=setup-phone-pair]')).toBeNull();
+    expect(member?.querySelector('[data-testid=setup-phone-member]')?.textContent).toBe('페어링은 이 컴퓨터의 Sprintable 앱 띠 [폰 페어링]에서 해요.');
+    expect(member?.querySelector('[data-testid=phone-app-get]')).not.toBeNull();
+  });
+
+  // PO 5066 ① · Yuna §E ③f: no way to get the phone app here (nothing published · no opt-in page) → PhoneAppGet draws nothing, so the
+  // card must not speak of a QR: the owner's body becomes «폰 앱을 받아 두었다면 …» with the button, and a member gets no card at all
+  it('[SID:4670] no way to get the phone app → owner: «폰 앱을 받아 두었다면 [폰 페어링 열기]로 …», no QR block, the button · member: no card', async () => {
+    phonePub.android = false;
+    try {
+      statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+      stub(() => new Response('{}', { status: 200 }));
+      await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+      await tick(0);
+      const card = container.querySelector('[data-testid=setup-phone-card]');
+      expect(card?.getAttribute('data-app')).toBe('no');
+      expect(card?.textContent).toContain('폰 앱을 받아 두었다면 [폰 페어링 열기]로 이 컴퓨터와 페어링해요.');
+      expect(card?.textContent).not.toContain('QR');
+      expect(card?.querySelector('[data-testid=phone-app-get]')).toBeNull();
+      expect(card?.querySelector('[data-testid=setup-phone-pair]')?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=pair');
+      act(() => root.unmount()); root = createRoot(container);
+      await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />, 'member');
+      await tick(0);
+      expect(container.querySelector('[data-testid=setup-phone-card]')).toBeNull();
+      expect(container.querySelector('[data-testid=setup-way-out]')).not.toBeNull(); // the way out is still there
+    } finally { phonePub.android = true; }
   });
 
   it('[SID:4492] ②\'s line: «준비가 끝나면 … 건네요» while it waits · «… 건네는 중이에요» once it runs (ko · bare · en)', async () => {
