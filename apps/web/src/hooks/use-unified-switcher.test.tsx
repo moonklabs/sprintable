@@ -553,7 +553,10 @@ describe('useUnifiedSwitcher — 새 프로젝트의 이 컴퓨터 폴더 (story
     await act(async () => { result!.setNewProjectFolder(FOLDER); });
     expect(result!.newProjectFolder).toBe(FOLDER);
     await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1'] }); });
-    expect(s.bodies[0]!.workdir_hint).toBe(FOLDER);
+    // PO 5067: the server gets home as `~` (the Mac user's name never leaves this computer) — the app's own hand gets the absolute path
+    expect(s.bodies[0]!.workdir_hint).toBe('~/work/결제');
+    expect(String(s.bodies[0]!.workdir_hint).startsWith('~/')).toBe(true);
+    expect(JSON.stringify(s.bodies[0])).not.toContain('/Users/');
     expect(s.order).toEqual(['make', `keep:proj-new:${FOLDER}`, 'grant']);
     expect(s.setProjectFolder).toHaveBeenCalledWith({ projectId: 'proj-new', path: FOLDER });
     expect(result!.createProjectFolderNotice).toBeNull();
@@ -566,7 +569,7 @@ describe('useUnifiedSwitcher — 새 프로젝트의 이 컴퓨터 폴더 (story
     const s = stub();
     await act(async () => { root.render(<TestComp />); });
     await act(async () => { await result!.createProject('결제 개편', '', { folder: '/Users/t/other' }); });
-    expect(s.bodies[0]!.workdir_hint).toBe('/Users/t/other');
+    expect(s.bodies[0]!.workdir_hint).toBe('~/other');
     expect(s.setProjectFolder).toHaveBeenCalledWith({ projectId: 'proj-new', path: '/Users/t/other' });
   });
 

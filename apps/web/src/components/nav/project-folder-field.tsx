@@ -8,10 +8,11 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { desktopApp } from '@/lib/desktop-app';
+import { homeAsTilde } from '@/lib/home-tilde';
 
-/** the path as the person reads it: `/Users/<name>` as `~`, the middle elided when long — the last folder's name always stays */
+/** the path as the person reads it: `/Users/<name>` as `~` (homeAsTilde), the middle elided when long — the last folder's name always stays */
 export function displayFolder(path: string, max = 44): string {
-  const tilde = path.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
+  const tilde = homeAsTilde(path);
   if (tilde.length <= max) return tilde;
   const last = tilde.slice(tilde.lastIndexOf('/'));
   const head = tilde.slice(0, Math.max(max - last.length - 1, 4));

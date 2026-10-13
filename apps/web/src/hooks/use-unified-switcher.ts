@@ -8,6 +8,7 @@ import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { canGrantProjectAccess } from '@/lib/project-access-role';
 import { desktopApp } from '@/lib/desktop-app';
+import { homeAsTilde } from '@/lib/home-tilde';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 export interface OrgSwitcherItem {
@@ -416,8 +417,10 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
           name: name.trim(),
           description: description.trim() || null,
           ...(currentOrgId ? { org_id: currentOrgId } : {}),
-          // [SID:4681] ③: the picked folder as the project's text hint (① · 5061) — only when one was picked
-          ...(folder ? { workdir_hint: folder } : {}),
+          // [SID:4681] ③: the picked folder as the project's text hint (① · 5061) — only when one was picked, and with home as `~`
+          // (PO 5067 review): the hint is a server value every project member reads, so the Mac user's name never rides in it (the
+          // setup's defaultWorkdirHint is `~/…` too); the app's own setProjectFolder below gets the absolute path
+          ...(folder ? { workdir_hint: homeAsTilde(folder) } : {}),
         }),
       });
       if (!res.ok) {
