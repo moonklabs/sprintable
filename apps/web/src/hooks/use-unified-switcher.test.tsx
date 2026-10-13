@@ -417,6 +417,79 @@ describe('useUnifiedSwitcher — story #3147 검색 state(신규)', () => {
   });
 });
 
+// [SID:4681] (D3 · piece ②) — the checked agents get a grant each right after the project is made (POST /api/projects/{id}/access
+// {member_id} · 409 = already there = done); a failed grant leaves the project and says the count; no check = no call; the list is
+// cleared when the dialog opens and after a make.
+describe('useUnifiedSwitcher — 새 프로젝트의 에이전트 접근 grant (story #4681)', () => {
+  function stubCreateAndAccess(accessStatus: (memberId: string) => number) {
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects' && init?.method === 'POST') return { ok: true, json: async () => ({ data: { id: 'proj-new' } }) };
+      const m = /^\/api\/projects\/(.+)\/access$/.exec(url);
+      if (m && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { member_id: string };
+        calls.push({ url, body });
+        const status = accessStatus(body.member_id);
+        return { ok: status >= 200 && status < 300, status, json: async () => ({ data: { id: `rec-${body.member_id}` } }) };
+      }
+      return { ok: true, json: async () => ({ data: { ok: true } }) }; // switch-project · slug
+    }));
+    return calls;
+  }
+
+  it('checked ids → one grant each on the new project, in order; the dialog closes and the switch happens; no notice', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    await act(async () => { result!.setNewProjectAgentIds(['a-1', 'a-2']); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: result!.newProjectAgentIds }); });
+    expect(calls.map((c) => c.url)).toEqual(['/api/projects/proj-new/access', '/api/projects/proj-new/access']);
+    expect(calls.map((c) => (c.body as { member_id: string }).member_id)).toEqual(['a-1', 'a-2']);
+    expect((calls[0]!.body as Record<string, unknown>)).toEqual({ member_id: 'a-1', org_member_id: null, permission: 'granted' });
+    expect(result!.createProjectOpen).toBe(false);
+    expect(result!.createProjectNotice).toBeNull();
+    expect(result!.newProjectAgentIds).toEqual([]);
+  });
+
+  it('nothing checked → no access call at all (as before this story)', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', ''); });
+    expect(calls).toEqual([]);
+    expect(result!.createProjectNotice).toBeNull();
+  });
+
+  it('409 (already granted) counts as done; a 400 and a thrown fetch count as failed — the project stays, the notice names the count', async () => {
+    const calls = stubCreateAndAccess((id) => (id === 'a-dup' ? 409 : id === 'a-bad' ? 400 : 201));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-ok', 'a-dup', 'a-bad'] }); });
+    expect(calls.length).toBe(3);
+    expect(result!.createProjectOpen).toBe(false); // the project is real — closed and switched as on success
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1명에게 접근을 주지 못했어요 — 프로젝트 설정 › 접근에서 다시 해 주세요.');
+    expect(result!.createProjectError).toBeNull();
+  });
+
+  it('opening the dialog clears the checked ids (every box off each time)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setNewProjectAgentIds(['a-1']); });
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    expect(result!.newProjectAgentIds).toEqual([]);
+  });
+
+  it('a failed make (403) grants nothing', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') calls.push(url);
+      return { ok: false, status: 403, json: async () => ({}) };
+    }));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1'] }); });
+    expect(calls).toEqual(['/api/projects']);
+    expect(result!.createProjectError).toBeTruthy();
+  });
+});
+
 // story #4370(유나 판정 (가)) — 새 프로젝트 폼(이름 · 설명 — 설명이 여러 줄 칸)은 조직별 초안: 전환기가 다시 마운트돼도(페이지 이동 ·
 // 새로 열기) 남고, 보이는 «취소»(clearNewProjectDraft)와 만들기 성공에서만 지운다. 예전엔 훅 상태라 언마운트면 사라졌다.
 describe('useUnifiedSwitcher — 새 프로젝트 폼 초안 (story #4370)', () => {
