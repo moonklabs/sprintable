@@ -68,8 +68,9 @@ const FAILURE_KEY: Record<string, string> = {
   'recipes-changed.title': 'failure.recipes-changed.title', 'recipes-changed.body': 'failure.recipes-changed.body', 'recipes-changed.action': 'failure.recipes-changed.action',
   'recipe-too-big.title': 'failure.recipe-too-big.title', 'recipe-too-big.body': 'failure.recipe-too-big.body', 'recipe-too-big.action': 'failure.agent-limit.action',
   'has-org.title': 'failure.has-org.title', 'has-org.body': 'failure.has-org.body', 'has-org.action': 'failure.has-org.action',
-  // story 4498 (Yuna 10:51Z): the button is the expired card's «앱에서 다시 시작» — the same way back, the same words
-  'disconnected.title': 'failure.disconnected.title', 'disconnected.body': 'failure.disconnected.body', 'disconnected.action': 'failure.expired.action',
+  // story 4498 (Yuna 10:51Z): the button is the same way back as the expired card's. story 4669 (Yuna A-5): its own words —
+  // the expired card now says «새 코드로 다시», which is false here (this device's setup ended; it is not a code that ran out)
+  'disconnected.title': 'failure.disconnected.title', 'disconnected.body': 'failure.disconnected.body', 'disconnected.action': 'failure.disconnected.action',
   // story #4576 (Yuna «② 확인이 거절될 때»): the not-admin card's button stays its «다시 확인» · the offline card keeps its title and button
   'move-not-admin.title': 'move.failureNotAdminTitle', 'move-not-admin.body': 'move.failureNotAdminBody', 'move-not-admin.action': 'failure.not-admin.action',
   'move-changed.title': 'move.failureChangedTitle', 'move-changed.body': 'move.failureChangedBody', 'move-changed.action': 'move.failureChangedAction',

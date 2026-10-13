@@ -1490,7 +1490,8 @@
     "privacyPolicy": "Privacy Policy",
     "creatingAccount": "Creating account…",
     "submit": "Sign up",
-    "orContinueWith": "or continue with",
+    "or": "or",
+    "emailSignUp": "Sign up with e-mail",
     "continueWithGoogle": "Continue with Google",
     "tosRequiredError": "Please agree to the Terms of Service and Privacy Policy first.",
     "registrationFailed": "Registration failed. Please try again.",
@@ -1578,7 +1579,6 @@
         "backToChoice": "Back to the choice",
         "laterNote": "You don't have to download now — you can reopen this screen from Settings › «Get the desktop app»."
       },
-    "slugCharsHint": "Only lowercase letters, numbers, and hyphens are allowed",
     "verifyStatusDone": "Done",
     "verifyStatusActive": "In progress",
     "verifyStatusFailed": "Failed",
@@ -1587,9 +1587,6 @@
     "welcome": "Welcome to Sprintable!",
     "orgName": "Organization Name",
     "orgNamePlaceholder": "e.g. Moonklabs",
-    "slug": "URL Slug",
-    "slugPlaceholder": "e.g. moonklabs",
-    "slugManualRequired": "We couldn't auto-generate a slug from that name. Enter one above using lowercase letters, numbers, and hyphens.",
     "createProject": "Create First Project",
     "projectSubtitle": "Create the first project for {orgName}.",
     "projectName": "Project Name",
@@ -6888,8 +6885,8 @@
         },
         "expired": {
           "title": "This setup has expired",
-          "body": "For security, this page is only open for a short time. Start again from the app to open it again.",
-          "action": "Start again in the app"
+          "body": "For security, this page is only open for a short time. Opening it with a new code starts the choices over.",
+          "action": "Try again with a new code"
         },
         "offline": {
           "title": "You're offline",
@@ -6927,7 +6924,8 @@
         },
         "disconnected": {
           "title": "This device was disconnected",
-          "body": "To use it again, start again in the app."
+          "body": "To use it again, start again in the app.",
+          "action": "Start again in the app"
         }
       },
       "direct": {

@@ -139,7 +139,9 @@ describe('[SID:4427] desktop setup page', () => {
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(text()).toContain('설정 시간이 지났어요');
-    expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('앱에서 다시 시작');
+    // story 4669 (Yuna A-5): the expired card's button names what it does — a new code (the disconnected card keeps «앱에서 다시 시작»)
+    expect(text()).toContain('새 코드로 다시 열면 처음부터 골라요');
+    expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('새 코드로 다시');
     await act(async () => { root.unmount(); }); root = createRoot(container);
 
     stub(() => { throw new TypeError('fetch failed'); });

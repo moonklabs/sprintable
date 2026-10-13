@@ -37,7 +37,9 @@ from app.models.api_key import ApiKey
 from app.models.desktop_setup import DesktopSetup
 from app.services.oauth_handoff import pkce_challenge_from_verifier
 
-SETUP_CODE_TTL = timedelta(minutes=10)
+# story 4669 (U6): 30 minutes — a person who signs up on the web, installs the app and comes back to the setup page found the
+# code gone at 10 (failure.expired). The app polls until this `expires_at` (setup-flow.ts), so the number lives here only.
+SETUP_CODE_TTL = timedelta(minutes=30)
 # story #4426 ② — the setup's own steps, written by the backend (grouped by `session_id` = the setup id). A person's action
 # carries `meta.human_hand = true`; the one-line read counts those.
 EVENT_CODE_ISSUED = "desktop_setup_code_issued"

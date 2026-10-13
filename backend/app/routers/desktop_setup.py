@@ -155,7 +155,7 @@ class RoleIn(BaseModel):
 
 
 # Qadir 4825 (PO 09:45Z) — the setup code travels in bodies only, never in a URL: a path is written to the access log and the
-# error handler's log (the exchange polls for ten minutes, a line each time), and a code plus any org's admin session could
+# error handler's log (the exchange polls for the code's whole life — SETUP_CODE_TTL — a line each time), and a code plus any org's admin session could
 # bind someone else's desktop to that org. So neither route has the code in its path.
 SETUP_CODE_FIELD = Field(min_length=20, max_length=128)
 
