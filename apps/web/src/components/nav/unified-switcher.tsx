@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { SidebarMenuButton } from '@/components/ui/sidebar';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
+import { ProjectAccessPicker } from '@/components/nav/project-access-picker';
 import { useUnifiedSwitcher, withSwitchedSlugs, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -239,6 +240,10 @@ export function UnifiedSwitcher({
                 onChange={(e) => s.setNewProjectDesc(e.target.value)}
               />
             </div>
+            {/* [SID:4681] (D3 · piece ②): who may work in the new project — the organization's agents, all off to start; the web too (AC3).
+                The folder field (app only · D1 4679 lib/desktop-app) comes in the next piece. */}
+            {/* Kadir codex · PO (나): an org member may not grant (the server's rule) — no list, no call */}
+            {s.canGrantAccess && <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="unified" />}
             {/* story #2468(b) — 실패를 침묵하지 않는다("버튼 무반응"의 정체가 이 자리였다). */}
             {s.createProjectError && (
               <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>
@@ -253,6 +258,10 @@ export function UnifiedSwitcher({
           </form>
         </DialogContent>
       </Dialog>
+      {/* [SID:4681]: the project was made but some grants failed — said here (the dialog closed and the switch happened), like the org-switch error above */}
+      {s.createProjectNotice && (
+        <p role="alert" className="mt-1 px-1 text-xs text-destructive" data-testid="unified-switcher-create-project-notice">{s.createProjectNotice}</p>
+      )}
     </>
   );
 }

@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { beginPendingProjectTarget, endPendingProjectTarget } from '@/lib/pending-project-switch';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { canGrantProjectAccess } from '@/lib/project-access-role';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 export interface OrgSwitcherItem {
@@ -148,6 +149,12 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   const setNewProjectName = (v: string) => setNewProjectForm((f) => ({ ...f, name: v }));
   const setNewProjectDesc = (v: string) => setNewProjectForm((f) => ({ ...f, description: v }));
   const [creating, setCreating] = useState(false);
+  // [SID:4681] (D3 · piece ②) — the agents the person checked for the new project (ids · all off to start · not a draft: a check list
+  // is re-read from the server each time the dialog opens, so a stale saved pick could name an agent that is gone)
+  const [newProjectAgentIds, setNewProjectAgentIds] = useState<string[]>([]);
+  // [SID:4681] — after a make: the project exists but some grants failed (the count) · null = nothing to say. Shown beside the
+  // trigger (the dialog closed and the switch happened — the project is real; the missing grants are given again in the project's settings).
+  const [createProjectNotice, setCreateProjectNotice] = useState<string | null>(null);
 
   // story #3147(doc mobile-switcher-redesign-spec-4758744a §③) — 검색 state 신규. 데스크톱
   // UnifiedSwitcher(lg:)는 이 필드를 안 쓰므로(호출부가 안 읽으면 그냥 죽은 값) 회귀 0.
@@ -174,6 +181,9 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
 
   const currentOrg = orgs.find((o) => o.orgId === localOrgId);
   const otherOrgs = orgs.filter((o) => o.orgId !== localOrgId);
+  // [SID:4681] (Kadir codex · PO (나)): only an org owner/admin may grant (the server's rule) — a member sees no check list and no grant
+  // is sent (every one would be a 403, and the «접근 권한» screen the notice names is owner/admin only too)
+  const canGrantAccess = canGrantProjectAccess(currentOrg?.role);
 
   const displayOrg = currentOrg?.orgName ?? 'Organization';
 
@@ -344,10 +354,35 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     }
   }
 
-  async function createProject(name: string, description: string): Promise<boolean> {
+  /**
+   * [SID:4681] (D3 · piece ②) — right after the project is made, each checked agent gets a grant (the existing endpoint, one call
+   * each · POST /api/projects/{id}/access {member_id}); 409 (already granted) counts as done. A failed grant does not undo the
+   * project: the count goes to `createProjectNotice`, the dialog closes and the switch happens as before.
+   */
+  async function grantAgents(projectId: string, agentIds: string[]): Promise<{ granted: number; failed: number }> {
+    let granted = 0;
+    let failed = 0;
+    for (const memberId of agentIds) {
+      try {
+        const r = await fetchWithAuth(`/api/projects/${projectId}/access`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ member_id: memberId, org_member_id: null, permission: 'granted' }),
+        });
+        if (r.ok || r.status === 409) granted += 1;
+        else failed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    return { granted, failed };
+  }
+
+  async function createProject(name: string, description: string, opts: { agentIds?: string[] } = {}): Promise<boolean> {
     if (!name.trim() || creating) return false;
     setCreating(true);
     setCreateProjectError(null);
+    setCreateProjectNotice(null);
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -369,8 +404,15 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       }
       const data = await res.json() as { id?: string; data?: { id: string } };
       const newId = data.id ?? data.data?.id;
+      // [SID:4681]: the grants before the dialog closes (the person sees «만드는 중» until the agents are in)
+      const agentIds = opts.agentIds ?? newProjectAgentIds;
+      if (newId && canGrantAccess && agentIds.length > 0) {
+        const r = await grantAgents(newId, agentIds);
+        if (r.failed > 0) setCreateProjectNotice(tSwitcher('switcherAccessPartial', { failed: r.failed }));
+      }
       setCreateProjectOpen(false);
       clearNewProjectDraft();
+      setNewProjectAgentIds([]);
       setCreateProjectError(null);
       if (newId) await switchProject(newId);
       else router.refresh();
@@ -399,6 +441,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 성공 뒤 다시 열었을 때(취소→재오픈) 낡은 에러가 새 시도처럼 보일 수 있다.
   function setCreateProjectOpenAndClearError(nextOpen: boolean) {
     setCreateProjectError(null);
+    if (nextOpen) { setNewProjectAgentIds([]); setCreateProjectNotice(null); } // [SID:4681]: every box off each time the dialog opens · the last make's notice goes (Yuna §F)
     setCreateProjectOpen(nextOpen);
   }
 
@@ -408,9 +451,12 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     createOrgOpen, setCreateOrgOpen,
     createProjectOpen, setCreateProjectOpen: setCreateProjectOpenAndClearError,
     createProjectError,
+    createProjectNotice, // [SID:4681]
     switchOrgError,
     newProjectName, setNewProjectName,
     newProjectDesc, setNewProjectDesc,
+    newProjectAgentIds, setNewProjectAgentIds, // [SID:4681]
+    canGrantAccess, // [SID:4681] (PO (나)): the check list is drawn only for an owner/admin
     clearNewProjectDraft,
     creating,
     searchQuery, setSearchQuery,

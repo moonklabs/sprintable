@@ -32,7 +32,8 @@ let container: HTMLDivElement;
 let root: Root;
 
 const ORGS: OrgSwitcherItem[] = [
-  { orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs' },
+  // [SID:4681] (PO (나)): an org admin — the grants of the 4681 tests below are allowed; a member's case sets its own orgs
+  { orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs', role: 'admin' },
   { orgId: 'org-dogfood', orgName: 'HITL Dogfood Test', orgSlug: 'hitl-dogfood-test' },
 ];
 // 서버 /me/memberships — 계정 상태(JWT "현재 org"=Dogfood)로 스코프된 값. currentOrgId(URL,
@@ -414,6 +415,104 @@ describe('useUnifiedSwitcher — story #3147 검색 state(신규)', () => {
     await act(async () => { result?.setSearchQuery('landing'); });
     await act(async () => { result?.setOpen(true); });
     expect(result?.searchQuery).toBe('landing');
+  });
+});
+
+// [SID:4681] (D3 · piece ②) — the checked agents get a grant each right after the project is made (POST /api/projects/{id}/access
+// {member_id} · 409 = already there = done); a failed grant leaves the project and says the count; no check = no call; the list is
+// cleared when the dialog opens and after a make.
+describe('useUnifiedSwitcher — 새 프로젝트의 에이전트 접근 grant (story #4681)', () => {
+  function stubCreateAndAccess(accessStatus: (memberId: string) => number) {
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects' && init?.method === 'POST') return { ok: true, json: async () => ({ data: { id: 'proj-new' } }) };
+      const m = /^\/api\/projects\/(.+)\/access$/.exec(url);
+      if (m && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { member_id: string };
+        calls.push({ url, body });
+        const status = accessStatus(body.member_id);
+        return { ok: status >= 200 && status < 300, status, json: async () => ({ data: { id: `rec-${body.member_id}` } }) };
+      }
+      return { ok: true, json: async () => ({ data: { ok: true } }) }; // switch-project · slug
+    }));
+    return calls;
+  }
+
+  it('checked ids → one grant each on the new project, in order; the dialog closes and the switch happens; no notice', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    await act(async () => { result!.setNewProjectAgentIds(['a-1', 'a-2']); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: result!.newProjectAgentIds }); });
+    expect(calls.map((c) => c.url)).toEqual(['/api/projects/proj-new/access', '/api/projects/proj-new/access']);
+    expect(calls.map((c) => (c.body as { member_id: string }).member_id)).toEqual(['a-1', 'a-2']);
+    expect((calls[0]!.body as Record<string, unknown>)).toEqual({ member_id: 'a-1', org_member_id: null, permission: 'granted' });
+    expect(result!.createProjectOpen).toBe(false);
+    expect(result!.createProjectNotice).toBeNull();
+    expect(result!.newProjectAgentIds).toEqual([]);
+  });
+
+  it('nothing checked → no access call at all (as before this story)', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', ''); });
+    expect(calls).toEqual([]);
+    expect(result!.createProjectNotice).toBeNull();
+  });
+
+  it('409 (already granted) counts as done; a 400 and a thrown fetch count as failed — the project stays, the notice names the count', async () => {
+    const calls = stubCreateAndAccess((id) => (id === 'a-dup' ? 409 : id === 'a-bad' ? 400 : 201));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-ok', 'a-dup', 'a-bad'] }); });
+    expect(calls.length).toBe(3);
+    expect(result!.createProjectOpen).toBe(false); // the project is real — closed and switched as on success
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개에게 접근을 주지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.'); // Yuna §F: «개» · the tab's own name
+    expect(result!.createProjectError).toBeNull();
+    // Yuna §F (non-blocking): the notice goes the next time the dialog opens
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    expect(result!.createProjectNotice).toBeNull();
+  });
+
+  it('opening the dialog clears the checked ids (every box off each time)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setNewProjectAgentIds(['a-1']); });
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    expect(result!.newProjectAgentIds).toEqual([]);
+  });
+
+  it('[Kadir codex · PO (나)] an org member (not owner/admin): canGrantAccess is false and no grant is sent even with ids — the server would refuse each one (403) and the notice would name a screen the member cannot open', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    const MEMBER_ORGS: OrgSwitcherItem[] = [{ orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs', role: 'member' }];
+    function MemberComp() {
+      const hook = useUnifiedSwitcher({ orgs: MEMBER_ORGS, currentOrgId: 'org-moonklabs', projects: STALE_PROJECTS, currentProjectId: undefined });
+      useEffect(() => { result = hook; });
+      return null;
+    }
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><MemberComp /></NextIntlClientProvider>); });
+    expect(result!.canGrantAccess).toBe(false);
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1', 'a-2'] }); });
+    expect(calls).toEqual([]);
+    expect(result!.createProjectOpen).toBe(false); // the project itself is made and switched to, as before
+    expect(result!.createProjectNotice).toBeNull();
+  });
+
+  it('an org admin: canGrantAccess is true (the list is drawn · the grants go)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(<TestComp />); });
+    expect(result!.canGrantAccess).toBe(true);
+  });
+
+  it('a failed make (403) grants nothing', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') calls.push(url);
+      return { ok: false, status: 403, json: async () => ({}) };
+    }));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1'] }); });
+    expect(calls).toEqual(['/api/projects']);
+    expect(result!.createProjectError).toBeTruthy();
   });
 });
 

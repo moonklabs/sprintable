@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
+import { ProjectAccessPicker } from '@/components/nav/project-access-picker';
 import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { useAccountSwitcher } from '@/hooks/use-account-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
@@ -384,6 +385,9 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                 onChange={(e) => s.setNewProjectDesc(e.target.value)}
               />
             </div>
+            {/* [SID:4681] (D3 · piece ②): the same check list as the sidebar dialog — the web too (AC3) */}
+            {/* Kadir codex · PO (나): an org member may not grant (the server's rule) — no list, no call */}
+            {s.canGrantAccess && <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="chip" />}
             {/* story #2468(b) — 실패를 침묵하지 않는다("버튼 무반응"의 정체가 이 자리였다). */}
             {s.createProjectError && (
               <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>
@@ -398,6 +402,10 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
           </form>
         </DialogContent>
       </Dialog>
+      {/* [SID:4681]: the project was made but some grants failed — said under the chip (the sheet closed and the switch happened) */}
+      {s.createProjectNotice && (
+        <p role="alert" className="px-1 text-xs text-destructive lg:hidden" data-testid="context-switcher-chip-create-project-notice">{s.createProjectNotice}</p>
+      )}
     </>
   );
 }
