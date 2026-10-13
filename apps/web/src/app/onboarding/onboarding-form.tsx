@@ -8,6 +8,8 @@ import { useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
 import { getPublicAppHost } from '@/lib/public-app-host';
 import { ConnectStep } from './connect-step';
+import { WhereStep, type WhereChoice } from './where-step';
+import { DesktopGetStep } from './desktop-get-step';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
 
@@ -74,8 +76,26 @@ const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
   devops: 'roleDevops',
 };
 
-type Step = 'org' | 'project' | 'agent' | 'connect';
-const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
+// story 4668 (UX-1 · U1 · design mirko/4668-design.md): after the organization, one fork («where») — the app way goes to one
+// screen «데스크톱 앱 받기» («desktop») and ends there (the desktop setup makes the project and agents · 4496); the web way keeps
+// project → agent → connect. The agent step's [건너뛰기] now goes to connect (not home — that was a dead end: the app card was
+// never seen).
+type Step = 'org' | 'where' | 'desktop' | 'project' | 'agent' | 'connect';
+
+/** The progress strip (PO · Yuna 07:16Z): before the fork is chosen the total is unknown, so the organization and fork screens show
+ * the bar only — its width follows the radio currently chosen (app = 3 screens, web = 5). From the screen after the fork on, the
+ * fraction is shown: app «3 / 3» · web «3 / 5» «4 / 5» «5 / 5». */
+export function onboardingProgress(step: Step, choice: WhereChoice): { fraction: number; label: { current: number; total: number } | null } {
+  const total = choice === 'app' ? 3 : 5;
+  switch (step) {
+    case 'org': return { fraction: 1 / total, label: null };
+    case 'where': return { fraction: 2 / total, label: null };
+    case 'desktop': return { fraction: 1, label: { current: 3, total: 3 } };
+    case 'project': return { fraction: 3 / 5, label: { current: 3, total: 5 } };
+    case 'agent': return { fraction: 4 / 5, label: { current: 4, total: 5 } };
+    case 'connect': return { fraction: 1, label: { current: 5, total: 5 } };
+  }
+}
 
 interface OnboardingFormProps {
   initialStep?: Step;
@@ -102,6 +122,8 @@ export function OnboardingForm({
   const tc = useTranslations('common');
 
   const [step, setStep] = useState<Step>(initialStep ?? 'org');
+  // story 4668: the fork's choice — the app way is the default («권장»); the bar on the org/fork screens follows it
+  const [whereChoice, setWhereChoice] = useState<WhereChoice>('app');
   const [orgName, setOrgName] = useState('');
   const [orgSlug, setOrgSlug] = useState('');
   // story #3195 — draft 저장/복원 키는 uid가 확정돼야(=/api/auth/me 응답 後) 정해진다.
@@ -134,7 +156,7 @@ export function OnboardingForm({
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [resendError, setResendError] = useState('');
 
-  const stepIndex = STEPS.indexOf(step);
+  const progress = onboardingProgress(step, whereChoice);
 
   // OB-4: wizard 진입 1회 emit. session_id는 telemetry가 sessionStorage로 1회차당 고정.
   useEffect(() => {
@@ -259,7 +281,8 @@ export function OnboardingForm({
       // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
       // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
       await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-      setStep('project');
+      // story 4668: the fork comes next, not the project step
+      setStep('where');
     } catch {
       setError(t('networkError'));
     } finally {
@@ -418,31 +441,49 @@ export function OnboardingForm({
     void finishToHome();
   };
 
+  // story 4668: [계속] at the fork. The app way is counted with the same signal the connect step's desktop button sends
+  // (3983 funnel · one axis for «went the desktop way»); no project or agent is made here.
+  const handleWhereContinue = () => {
+    if (whereChoice === 'app') {
+      emitOnboardingEvent('desktop_handoff_selected', { agent_id: null, flow: 'onboarding' });
+      setStep('desktop');
+      return;
+    }
+    setStep('project');
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8`}>
-        {/* 진행 표시줄 */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>{t('stepOf', { current: stepIndex + 1, total: STEPS.length })}</span>
-          </div>
+      <div className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8`} data-testid="onboarding-card">
+        {/* 진행 표시줄 — story 4668: bar only until the fork is chosen, the fraction from the screen after it (onboardingProgress) */}
+        <div className="space-y-1.5" data-testid="onboarding-progress">
+          {progress.label ? (
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span data-testid="onboarding-step-of">{t('stepOf', progress.label)}</span>
+            </div>
+          ) : null}
           <div className="h-1.5 w-full rounded-full bg-muted">
             <div
               className="h-1.5 rounded-full bg-primary transition-all duration-300"
-              style={{ width: `${((stepIndex + 1) / STEPS.length) * 100}%` }}
+              style={{ width: `${progress.fraction * 100}%` }}
+              data-testid="onboarding-progress-bar"
             />
           </div>
         </div>
 
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-foreground">
+          <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">
             {step === 'org' && t('createOrg')}
+            {step === 'where' && t('where.title')}
+            {step === 'desktop' && t('download.title')}
             {step === 'project' && t('createProject')}
             {step === 'agent' && t('createAgent')}
             {step === 'connect' && t('connectAgent')}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 break-keep text-sm text-muted-foreground">
             {step === 'org' && t('welcome')}
+            {step === 'where' && t('where.subtitle')}
+            {step === 'desktop' && t('download.lead')}
             {step === 'project' && t('projectSubtitle', { orgName })}
             {step === 'agent' && t('agentSubtitle')}
             {step === 'connect' && t('connectSubtitle')}
@@ -596,19 +637,36 @@ export function OnboardingForm({
             >
               {loading ? tc('creating') : t('createAgentAction')}
             </Button>
+            {/* story 4668 (AC2): skipping goes to the connect step (the app card is there) — before, it went home: a dead end */}
             <Button
               variant="glass"
               size="lg"
               className="w-full"
-              onClick={handleFinish}
+              onClick={() => setStep('connect')}
             >
               {t('skip')}
             </Button>
           </div>
         )}
 
+        {step === 'where' && (
+          <WhereStep choice={whereChoice} onChoose={setWhereChoice} onContinue={handleWhereContinue} titleId="onboarding-step-title" />
+        )}
+
+        {step === 'desktop' && (
+          <DesktopGetStep orgId={orgId} onBackToChoice={() => setStep('where')} onFinish={handleFinish} />
+        )}
+
         {step === 'connect' && (
-          <ConnectStep agentId={agentId} apiKey={newApiKey} projectId={projectId} orgId={orgId} onFinish={handleFinish} todayV3Enabled={todayV3Enabled} />
+          <ConnectStep
+            agentId={agentId}
+            apiKey={newApiKey}
+            projectId={projectId}
+            orgId={orgId}
+            onFinish={handleFinish}
+            todayV3Enabled={todayV3Enabled}
+            onMakeAgent={() => setStep('agent')}
+          />
         )}
       </div>
       {showUpgrade && <UpgradeModal message={upgradeReason} onClose={() => setShowUpgrade(false)} />}

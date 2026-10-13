@@ -51,6 +51,8 @@ interface ConnectStepProps {
   // 낱말이 실제 착지와 같아야 한다(온보딩 원칙). 기본값 false = 기존 테스트
   // (이 prop 없이 마운트)가 현행 낱말(dashboardCta)을 계속 기대.
   todayV3Enabled?: boolean;
+  /** story 4668 (AC2 · Yuna A-3): the person skipped the agent step (`agentId` null) — [에이전트 만들기] takes them back to it. */
+  onMakeAgent?: () => void;
 }
 
 /** `sk_live_••••<last4>` — prefix + 마지막 4자만 노출.
@@ -108,7 +110,7 @@ export function HighlightedJson({ text }: { text: string }) {
   );
 }
 
-export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish, todayV3Enabled = false }: ConnectStepProps) {
+export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish, todayV3Enabled = false, onMakeAgent }: ConnectStepProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
 
@@ -323,6 +325,54 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
     }
   };
 
+  // story #3983(PO 확定 2026-09-17 01:41Z, CHANGES 2026-09-17 02:11Z) — 주
+  // 경로 「데스크톱 앱에서 이어서」(기존 DesktopDownloadCard 그대로, 새
+  // 다운로드 로직 0). 보조 경로(아래 기존 웹 connect 흐름)는 삭제 0.
+  // CHANGES ③: 절 제목을 안 둔다(카드 자체가 이미 「데스크톱 앱」 제목을
+  // 갖는다 — 두 제목이 부딪힌다). 부제만 남긴다.
+  // story 4668: the same section is drawn for a person who skipped the agent step (below) — one element, two places.
+  const desktopPrimary = (
+    <section className={cn(cardVariants(), 'space-y-3 p-4')} data-testid="connect-step-desktop-primary">
+      <p className="text-xs text-muted-foreground">{t('desktopHandoffSubtitle')}</p>
+      {/* story #4656: the org's remote control, once, for its owner — before the desktop steps that need it (no flash: it draws only when read) */}
+      <OnboardingRemoteControl orgId={orgId} />
+      <DesktopDownloadCard />
+      {/* story 4654: a device that is not a Mac gets the phone app's store links under the download card (Yuna §1) */}
+      <PhoneAppCard />
+      {/* 키 붙여 넣기 입구는 데스크톱 앱에 없다(카드 4542 · 까디르 확인). 앱은 첫 실행 때 웹 setup 페이지를 열어 연결을 가져간다 —
+          그래서 키 칸 대신 그 흐름을 한 줄로 안내한다. */}
+      <p className="text-xs text-muted-foreground" data-testid="connect-step-desktop-open-note">
+        {t('desktopOpenAppNote')}
+      </p>
+      {/* CHANGES ②: 낱말 = 착지와 같이(ON이면 「오늘」 낱말·OFF면 현행
+          dashboardCta). variant도 outline(이 절의 주 행동은 내려받기 —
+          hero는 화면에 하나만, 웹 경로 「첫 지시 보내기」가 그 자리). */}
+      <Button variant="outline" size="sm" onClick={handleDesktopFinish} data-testid="connect-step-desktop-finish">
+        {todayV3Enabled ? t('desktopFinishToToday') : t('dashboardCta')}
+      </Button>
+    </section>
+  );
+
+  // story 4668 (AC2 · Yuna A-3 · PO Q-a): the agent step was skipped — not a failure, so not the failure line. The desktop way
+  // as the main one, and [에이전트 만들기] back to the agent step for the web way (its toggle · config · rail need an agent).
+  // No footer: the section's own button is the one way out (Yuna: two «대시보드로» otherwise).
+  if (!apiKey && agentId === null) {
+    return (
+      <div className="space-y-4">
+        <div role="status" className="break-keep rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground" data-testid="connect-step-no-agent">
+          {t('connectNoAgent')}
+        </div>
+        {desktopPrimary}
+        {onMakeAgent ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" data-testid="connect-step-needs-agent">
+            <span className="break-keep">{t('connectNeedsAgent')}</span>
+            <Button variant="outline" size="sm" onClick={onMakeAgent} data-testid="connect-step-make-agent">{t('connectMakeAgent')}</Button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   // 키 발급 실패 폴백(기존 동작 보존) — 아티팩트 없이 멤버 관리로 유도.
   if (!apiKey) {
     return (
@@ -350,30 +400,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
 
   return (
     <div className="space-y-4">
-      {/* story #3983(PO 확定 2026-09-17 01:41Z, CHANGES 2026-09-17 02:11Z) — 주
-          경로 「데스크톱 앱에서 이어서」(기존 DesktopDownloadCard 그대로, 새
-          다운로드 로직 0). 보조 경로(아래 기존 웹 connect 흐름)는 삭제 0.
-          CHANGES ③: 절 제목을 안 둔다(카드 자체가 이미 「데스크톱 앱」 제목을
-          갖는다 — 두 제목이 부딪힌다). 부제만 남긴다. */}
-      <section className={cn(cardVariants(), 'space-y-3 p-4')} data-testid="connect-step-desktop-primary">
-        <p className="text-xs text-muted-foreground">{t('desktopHandoffSubtitle')}</p>
-        {/* story #4656: the org's remote control, once, for its owner — before the desktop steps that need it (no flash: it draws only when read) */}
-        <OnboardingRemoteControl orgId={orgId} />
-        <DesktopDownloadCard />
-        {/* story 4654: a device that is not a Mac gets the phone app's store links under the download card (Yuna §1) */}
-        <PhoneAppCard />
-        {/* 키 붙여 넣기 입구는 데스크톱 앱에 없다(카드 4542 · 까디르 확인). 앱은 첫 실행 때 웹 setup 페이지를 열어 연결을 가져간다 —
-            그래서 키 칸 대신 그 흐름을 한 줄로 안내한다. */}
-        <p className="text-xs text-muted-foreground" data-testid="connect-step-desktop-open-note">
-          {t('desktopOpenAppNote')}
-        </p>
-        {/* CHANGES ②: 낱말 = 착지와 같이(ON이면 「오늘」 낱말·OFF면 현행
-            dashboardCta). variant도 outline(이 절의 주 행동은 내려받기 —
-            hero는 화면에 하나만, 웹 경로 「첫 지시 보내기」가 그 자리). */}
-        <Button variant="outline" size="sm" onClick={handleDesktopFinish} data-testid="connect-step-desktop-finish">
-          {todayV3Enabled ? t('desktopFinishToToday') : t('dashboardCta')}
-        </Button>
-      </section>
+      {desktopPrimary}
       <p className="text-xs font-medium text-muted-foreground" data-testid="connect-step-web-secondary-label">
         {t('webConnectSecondaryLabel')}
       </p>

@@ -63,7 +63,9 @@ export function notAMac(userAgent: string, inPhoneApp: boolean): boolean {
   return inPhoneApp || !/Macintosh/.test(userAgent);
 }
 
-export function DesktopDownloadCard() {
+/** story 4668: `hideTitle` — the onboarding's «데스크톱 앱 받기» screen has the title as its h1, so the card's own «데스크톱 앱» line
+ * is not drawn there (Yuna A-2); every other place keeps it. */
+export function DesktopDownloadCard({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const t = useTranslations('desktop');
   const [manifest, setManifest] = useState<DesktopDownloadManifest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,7 +103,7 @@ export function DesktopDownloadCard() {
   if (!manifest) {
     return (
       <Card className="space-y-2 p-4" data-testid="desktop-download-card">
-        <p className="text-sm font-medium text-foreground">{t('title')}</p>
+        {hideTitle ? null : <p className="text-sm font-medium text-foreground">{t('title')}</p>}
         <p className="text-xs text-muted-foreground" data-testid="desktop-download-unavailable">
           {t('unavailable')}
         </p>
@@ -114,7 +116,7 @@ export function DesktopDownloadCard() {
 
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-download-card">
-      <p className="text-sm font-medium text-foreground">{t('title')}</p>
+      {hideTitle ? null : <p className="text-sm font-medium text-foreground">{t('title')}</p>}
       <p className="text-xs text-muted-foreground" data-testid="desktop-download-target">
         {t('targetLabel')}
       </p>

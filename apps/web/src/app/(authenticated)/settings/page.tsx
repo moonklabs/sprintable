@@ -5,7 +5,9 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Monitor, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
@@ -749,6 +751,13 @@ export default function SettingsPage() {
               <Bell className="h-4 w-4" />
               {t('tabNotifications')}
             </TabsTrigger>
+            {/* story 4668 (PO Q-b · Yuna A-4): where the onboarding's «데스크톱 앱 받기» screen is reopened — the card and the phone
+                card only, with no DESKTOP_DOWNLOAD_ENABLED gate (the onboarding card has none either; the gated «데스크톱 앱» menu
+                and /desktop page would be a lie to point at where the flag is off) */}
+            <TabsTrigger value="desktop">
+              <Monitor className="h-4 w-4" />
+              {t('desktopTab')}
+            </TabsTrigger>
             {isSupportWidgetEnabled() && (
               <TabsTrigger value="support">
                 <LifeBuoy className="h-4 w-4" />
@@ -910,6 +919,14 @@ export default function SettingsPage() {
               <div className="space-y-6">
                 <ThemeSettings />
                 <LanguageSettings />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="desktop">
+              {/* story 4668: the download card (+ the phone app's store links on a device that is not a Mac · 4654) — nothing else */}
+              <div className="space-y-6" data-testid="settings-desktop-tab">
+                <DesktopDownloadCard />
+                <PhoneAppCard />
               </div>
             </TabsContent>
 

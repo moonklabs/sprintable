@@ -1559,6 +1559,25 @@
         "enabled": "Remote control is on",
         "failed": "Couldn't turn on remote control — please try again"
       },
+      "where": {
+        "title": "Where will your agents run?",
+        "subtitle": "The next screens follow your choice. You can do the other one any time later.",
+        "app": "The app on this computer",
+        "appDesc": "Download the Mac app and open it — it makes your project and agents in one go. Needs Claude Code or Codex on this computer.",
+        "web": "Connect on the web",
+        "webDesc": "Paste one config into an agent that's already running. Three steps: project · agent · connect.",
+        "continue": "Continue",
+        "notMacNote": "The Mac app is downloaded on a Mac — the next screen tells you where."
+      },
+      "download": {
+        "title": "Get the desktop app",
+        "lead": "Install and open it — your browser continues with this account, and the project and agents are made there.",
+        "afterNote": "After the download, just open the app. You can close this window.",
+        "more": "More — remote control · other ways",
+        "switchToWeb": "To connect on the web instead →",
+        "backToChoice": "Back to the choice",
+        "laterNote": "You don't have to download now — you can reopen this screen from Settings › «Get the desktop app»."
+      },
     "slugCharsHint": "Only lowercase letters, numbers, and hyphens are allowed",
     "verifyStatusDone": "Done",
     "verifyStatusActive": "In progress",
@@ -1652,6 +1671,9 @@
     "firstInstructionTooLongHint": "We'll just open the conversation — type it there instead.",
     "firstInstructionOpenConversation": "Open conversation",
     "connectFooterHint": "Once verified you're ready — you can skip for now.",
+    "connectNoAgent": "You came to the connect step without an agent — get the desktop app, or go back and make one.",
+    "connectNeedsAgent": "Connecting on the web needs an agent →",
+    "connectMakeAgent": "Make an agent",
     "transportHosted": "Hosted",
     "transportLocal": "Local (uvx)",
     "transportRecommended": "Recommended",
@@ -1948,6 +1970,7 @@
     "tabDisplay": "Appearance",
     "tabApiKeys": "API Keys",
     "tabNotifications": "Notifications",
+    "desktopTab": "Get the desktop app",
     "tabSupport": "Contact & Support",
     "tabProjects": "Projects",
     "tabMembers": "Access",
