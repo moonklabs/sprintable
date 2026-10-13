@@ -24,10 +24,9 @@ export function PhoneAppCard({ elsewhere: forced }: { elsewhere?: boolean }) {
   if (phoneAppLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET).length === 0) return null;
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="phone-app-card">
-      <PhoneAppGet body={t('needPhoneAppBody')} />
-      {/* the device line: not a Mac → where the Mac app is; a Mac → how to use the QR; unknown (server · before the read) → neither */}
+      {/* a Mac → how the QR is used, under the body (Yuna §D); not a Mac → where the Mac app is, at the bottom; unknown (server · before the read) → neither */}
+      <PhoneAppGet body={t('needPhoneAppBody')} scanHint={elsewhere === false} />
       {elsewhere === true ? <p className="text-xs text-muted-foreground" data-testid="phone-app-mac-aux">{t('macAppAux')}</p> : null}
-      {elsewhere === false ? <p className="text-xs text-muted-foreground" data-testid="phone-app-scan-hint">{t('scanWithPhone')}</p> : null}
     </Card>
   );
 }

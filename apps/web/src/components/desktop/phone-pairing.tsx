@@ -45,13 +45,14 @@ type View =
  * testers' group page ② the internal-test opt-in page — two rows, each QR + link); iOS draws the store when open, else one «준비 중»
  * line (no link · no QR). Nothing to get at all → nothing drawn (phoneAppLinks · the page keeps its one line, story 4654 · Yuna 5048).
  */
-export function PhoneAppGet({ body }: { body?: string }) {
+export function PhoneAppGet({ body, scanHint = false }: { body?: string; scanHint?: boolean }) {
   const t = useTranslations('phonePairing');
   const links = phoneAppLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET);
   if (links.length === 0) return null;
   const row = (key: string, url: string, label: string, kind: string) => (
     <div key={key} className="flex items-center gap-3" data-testid={`phone-app-link-${key}`} data-kind={kind}>
-      <QRCodeSVG value={url} size={72} />
+      {/* Yuna 5060: the QR is decoration for a camera — the link's words are the row's name */}
+      <QRCodeSVG value={url} size={72} aria-hidden="true" />
       <a className="text-sm underline" href={url} target="_blank" rel="noreferrer">{label}</a>
     </div>
   );
@@ -59,9 +60,16 @@ export function PhoneAppGet({ body }: { body?: string }) {
     <div className="flex flex-col gap-3" data-testid="phone-app-get">
       <p className="text-sm">{t('getApp')}</p>
       {body ? <p className="text-xs text-muted-foreground" data-testid="phone-app-body">{body}</p> : null}
+      {/* Yuna §D (ux1-copy-1013): on a Mac, how the QR is used — right under the body, before the rows */}
+      {scanHint ? <p className="text-xs text-muted-foreground" data-testid="phone-app-scan-hint">{t('scanWithPhone')}</p> : null}
       {links.flatMap((l) => {
         if (l.kind === 'soon') return [<p key={l.store} className="text-sm text-muted-foreground" data-testid="phone-app-ios-soon">{t('getAppIosSoon')}</p>];
-        if (l.kind === 'invite') return [row('android-group', l.group, t('getAppGroupJoin'), 'invite'), row('android', l.url, t('getAppAndroidInvite'), 'invite')];
+        // Yuna §D: the two-step note right above the two rows — scanning ② alone is a dead end at Play until ① is joined
+        if (l.kind === 'invite') return [
+          <p key="android-note" className="text-xs text-muted-foreground" data-testid="phone-app-invite-note">{t('getAppInviteNote')}</p>,
+          row('android-group', l.group, t('getAppGroupJoin'), 'invite'),
+          row('android', l.url, t('getAppAndroidInvite'), 'invite'),
+        ];
         return [row(l.store, l.url, l.store === 'ios' ? t('getAppIos') : t('getAppAndroid'), 'store')];
       })}
     </div>

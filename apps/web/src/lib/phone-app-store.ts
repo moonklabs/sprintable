@@ -31,6 +31,9 @@ const GROUP_RE = /^https:\/\/groups\.google\.com\/(a\/[a-z0-9.-]+\/)?g\/[a-z0-9.
 
 export type PhoneAppPublished = { android: boolean; ios: boolean };
 export type PhoneAppTarget = { published: PhoneAppPublished; android: string; invite: string | null; group: string | null };
+/** [SID:4671] the three way-in settings as phoneAppTarget reads them — the constants by default; a test hands in filled values (Kadir 5060 m8) */
+export type PhoneAppWayIn = { group: string; inviteProd: string; inviteDev: string };
+export const PHONE_APP_WAY_IN: PhoneAppWayIn = { group: PHONE_APP_TEST_GROUP, inviteProd: PHONE_APP_INVITE_ANDROID, inviteDev: PHONE_APP_INVITE_ANDROID_DEV };
 
 /** [SID:4671] the opt-in address if it has Play's shape — else null (empty · a typo · another site) */
 export function inviteLink(url: string | undefined | null): string | null {
@@ -44,14 +47,18 @@ export function groupLink(url: string | undefined | null): string | null {
   return GROUP_RE.test(u) ? u : null;
 }
 
-/** what this web build shows, from its own public app address (dev → the dev package; anything else → nothing published) */
-export function phoneAppTarget(appUrl: string | undefined): PhoneAppTarget {
+/**
+ * what this web build shows, from its own public app address (dev → the dev package; anything else → nothing published).
+ * [SID:4671] `wayIn` = the three settings (the constants by default); each host reads its own package's opt-in page and the one group —
+ * any other host (localhost · a test build) reads none, even when the settings are filled.
+ */
+export function phoneAppTarget(appUrl: string | undefined, wayIn: PhoneAppWayIn = PHONE_APP_WAY_IN): PhoneAppTarget {
   let host = '';
   try { host = appUrl ? new URL(appUrl).hostname : ''; } catch { host = ''; }
-  const group = groupLink(PHONE_APP_TEST_GROUP);
-  if (host === DEV_WEB_HOST) return { published: { android: true, ios: false }, android: PHONE_APP_STORE_ANDROID_DEV, invite: inviteLink(PHONE_APP_INVITE_ANDROID_DEV), group };
+  const group = groupLink(wayIn.group);
+  if (host === DEV_WEB_HOST) return { published: { android: true, ios: false }, android: PHONE_APP_STORE_ANDROID_DEV, invite: inviteLink(wayIn.inviteDev), group };
   // the production web: the store stays closed until the PO opens the track; the two-step way in (when set) is the way meanwhile
-  if (host === PROD_WEB_HOST) return { published: { android: false, ios: false }, android: PHONE_APP_STORE_ANDROID, invite: inviteLink(PHONE_APP_INVITE_ANDROID), group };
+  if (host === PROD_WEB_HOST) return { published: { android: false, ios: false }, android: PHONE_APP_STORE_ANDROID, invite: inviteLink(wayIn.inviteProd), group };
   return { published: { android: false, ios: false }, android: PHONE_APP_STORE_ANDROID, invite: null, group: null };
 }
 
@@ -85,8 +92,11 @@ export type PhoneAppLink =
 
 /**
  * [SID:4671] what the «get the phone app» block draws, in the page's order (Android first), on any device (a Mac too — the QR is for
- * the phone's camera). Android: the store when it is open; else the two-step way in when BOTH its addresses are set (a group with no
- * opt-in page, or the reverse, is half a path → nothing); else nothing. iOS: the store when open, else the one «준비 중» line.
+ * the phone's camera). Android: the two-step way in FIRST, when BOTH its addresses are set (a group with no opt-in page, or the
+ * reverse, is half a path → not that); else the store when `published` says it is on a track; else nothing. The way in goes first
+ * (PO 5060 review): «published» on the dev web means «on the internal-test track», not a store anyone can open — a new account that
+ * is not a tester gets «not found» from that store link, while the group + opt-in page take it in. With the settings empty nothing
+ * changes (the store link as before). iOS: the store when open, else the one «준비 중» line.
  * Nothing at all to get (no Android way in · iOS not open) → [] — the block is not drawn (an «iPhone 준비 중» line alone would be a dead end).
  */
 export function phoneAppLinks(
@@ -95,8 +105,8 @@ export function phoneAppLinks(
   invite: string | null = PHONE_APP_INVITE_ANDROID_TARGET,
   group: string | null = PHONE_APP_TEST_GROUP_TARGET,
 ): PhoneAppLink[] {
-  const a: PhoneAppLink | null = published.android ? { store: 'android', kind: 'store', url: android }
-    : invite && group ? { store: 'android', kind: 'invite', url: invite, group }
+  const a: PhoneAppLink | null = invite && group ? { store: 'android', kind: 'invite', url: invite, group }
+    : published.android ? { store: 'android', kind: 'store', url: android }
     : null;
   const i: PhoneAppLink = published.ios ? { store: 'ios', kind: 'store', url: PHONE_APP_STORE_IOS } : { store: 'ios', kind: 'soon', url: null };
   if (!a && i.kind === 'soon') return [];

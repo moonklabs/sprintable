@@ -43,36 +43,62 @@ describe('[SID:4671] store closed, the way in set (group + opt-in page)', () => 
     expect(block).not.toBeNull();
     expect([...block!.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([GROUP, OPTIN]);
     expect(block!.querySelectorAll('svg').length).toBe(2);
+    for (const svg of block!.querySelectorAll('svg')) expect(svg.getAttribute('aria-hidden')).toBe('true'); // Yuna 5060: the link's words name the row
     const group = block!.querySelector('[data-testid="phone-app-link-android-group"]');
     const optin = block!.querySelector('[data-testid="phone-app-link-android"]');
     expect(group?.getAttribute('data-kind')).toBe('invite');
     expect(optin?.getAttribute('data-kind')).toBe('invite');
-    expect(group?.querySelector('a')?.textContent).toBe('안드로이드 1 · 테스트 그룹 가입');
-    expect(optin?.querySelector('a')?.textContent).toBe('안드로이드 2 · 구글 플레이 테스트 참여');
+    // Yuna §D (ux1-copy-1013) words, letter for letter
+    expect(group?.querySelector('a')?.textContent).toBe('안드로이드 ① · 테스터 그룹 가입');
+    expect(optin?.querySelector('a')?.textContent).toBe('안드로이드 ② · 구글 플레이 테스트 참여 후 설치');
+    const note = block!.querySelector('[data-testid="phone-app-invite-note"]');
+    expect(note?.textContent).toBe('스토어 공개 전이라 두 단계예요 — ①에 가입해야 ②가 열려요');
+    // the note right above the two rows · ① before ②
+    expect(note!.compareDocumentPosition(group!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(group!.compareDocumentPosition(optin!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(block!.querySelector('[data-testid="phone-app-ios-soon"]')?.textContent).toBe('아이폰 · 준비 중이에요');
     expect(h.textContent).not.toContain('play.google.com/store');
   });
 
-  it('en: the same rows in English', async () => {
+  it('en: the same rows in English (Yuna §D)', async () => {
     const h = await draw(<PhonePairing />, 'en');
-    expect(h.querySelector('[data-testid="phone-app-link-android-group"] a')?.textContent).toBe('Android 1 · join the test group');
-    expect(h.querySelector('[data-testid="phone-app-link-android"] a')?.textContent).toBe('Android 2 · join the Google Play test');
+    expect(h.querySelector('[data-testid="phone-app-invite-note"]')?.textContent).toBe('Before the store opens it takes two steps — ② opens only after you join ①');
+    expect(h.querySelector('[data-testid="phone-app-link-android-group"] a')?.textContent).toBe("Android ① · Join the testers' group");
+    expect(h.querySelector('[data-testid="phone-app-link-android"] a')?.textContent).toBe('Android ② · Join the Google Play test, then install');
     expect(h.querySelector('[data-testid="phone-app-ios-soon"]')?.textContent).toBe('iPhone · coming soon');
   });
 
-  it('the onboarding card on a Mac: the same two rows + «scan with your phone»', async () => {
+  it('no note when the store row is drawn (the store is open · no two steps)', async () => {
+    const store = await import('@/lib/phone-app-store');
+    expect(store.phoneAppLinks({ android: true, ios: false }, store.PHONE_APP_STORE_ANDROID_DEV, null, null)[0]?.kind).toBe('store');
+  });
+
+  it('the onboarding card on a Mac: the same two rows + «scan with your phone» under the body · the note above the rows', async () => {
     const h = await draw(<PhoneAppCard elsewhere={false} />);
     expect([...h.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([GROUP, OPTIN]);
-    expect(h.querySelector('[data-testid="phone-app-scan-hint"]')).not.toBeNull();
+    const hint = h.querySelector('[data-testid="phone-app-scan-hint"]');
+    const note = h.querySelector('[data-testid="phone-app-invite-note"]');
+    expect(hint?.textContent).toBe('폰 카메라로 QR을 찍으면 폰에서 열려요');
+    expect(hint!.compareDocumentPosition(note!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(h.querySelector('[data-testid="phone-app-ios-soon"]')).not.toBeNull();
+  });
+  it('/desktop/pair outside the app (no body): no scan hint (the hint is the Mac card\'s)', async () => {
+    const h = await draw(<PhonePairing />);
+    expect(h.querySelector('[data-testid="phone-app-scan-hint"]')).toBeNull();
   });
 });
 
-describe('[SID:4671] half a path is no path', () => {
+describe('[SID:4671] half a path is no path · the way in goes before the store', () => {
   it('the opt-in page without the group (the group setting still empty): nothing is drawn', async () => {
     const store = await import('@/lib/phone-app-store');
     const links = store.phoneAppLinks({ android: false, ios: false }, store.PHONE_APP_STORE_ANDROID, OPTIN, null);
     expect(links).toEqual([]);
+  });
+  it('PO 5060: on the dev web (published = on the internal track) the two steps are drawn, not the store link a non-tester cannot open', async () => {
+    const store = await import('@/lib/phone-app-store');
+    const dev = store.phoneAppTarget('https://dev-app.sprintable.ai');
+    const links = store.phoneAppLinks(dev.published, dev.android, OPTIN, GROUP);
+    expect(links[0]).toEqual({ store: 'android', kind: 'invite', url: OPTIN, group: GROUP });
+    expect(links.some((l) => l.url === store.PHONE_APP_STORE_ANDROID_DEV)).toBe(false);
   });
 });

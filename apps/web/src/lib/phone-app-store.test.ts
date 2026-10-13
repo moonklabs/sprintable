@@ -82,6 +82,23 @@ describe('[SID:4671] the opt-in page and the group page: settings with one shape
     expect(phoneAppTarget('http://localhost:3108').group).toBeNull();
     expect(phoneAppTarget(undefined).invite).toBeNull();
   });
+
+  // Kadir 5060 m8: with the constants empty, dropping the prod branch stayed GREEN — so the branches are pinned with filled settings
+  it('with the settings filled: app → the prod page · dev-app → the dev page · both → the group · any other host → none', () => {
+    const PROD = 'https://play.google.com/apps/internaltest/4700000000000000001';
+    const DEV = 'https://play.google.com/apps/internaltest/4700000000000000002';
+    const filled = { group: GROUP, inviteProd: PROD, inviteDev: DEV };
+    expect(phoneAppTarget('https://app.sprintable.ai', filled)).toEqual({ published: { android: false, ios: false }, android: PHONE_APP_STORE_ANDROID, invite: PROD, group: GROUP });
+    expect(phoneAppTarget('https://dev-app.sprintable.ai', filled)).toEqual({ published: { android: true, ios: false }, android: PHONE_APP_STORE_ANDROID_DEV, invite: DEV, group: GROUP });
+    for (const other of ['http://localhost:3108', 'https://sprintable.ai', undefined]) {
+      expect(phoneAppTarget(other, filled)).toMatchObject({ invite: null, group: null });
+    }
+    // a malformed value in a setting is read as none (the shape check), per host
+    expect(phoneAppTarget('https://app.sprintable.ai', { ...filled, inviteProd: 'https://example.com/x' }).invite).toBeNull();
+    expect(phoneAppTarget('https://app.sprintable.ai', { ...filled, group: 'not a group' }).group).toBeNull();
+    // and the empty settings (today's) read as none on both hosts
+    expect(phoneAppTarget('https://app.sprintable.ai', { group: '', inviteProd: '', inviteDev: '' })).toMatchObject({ invite: null, group: null });
+  });
 });
 
 describe('[SID:4671] phoneAppLinks: what the block draws', () => {
@@ -98,8 +115,16 @@ describe('[SID:4671] phoneAppLinks: what the block draws', () => {
     expect(phoneAppLinks(none, PHONE_APP_STORE_ANDROID, OPTIN, null)).toEqual([]);
     expect(phoneAppLinks(none, PHONE_APP_STORE_ANDROID, null, GROUP)).toEqual([]);
   });
-  it('store open: Android = the store even when the way in is set (the store wins) · iOS as it is', () => {
+  // PO 5060 review: the dev web's published.android means «on the internal-test track» — a new account (not a tester) gets «not found»
+  // from the store link, so the way in goes first whenever both its addresses are set; the store only when they are not
+  it('the way in set: Android = the two steps even when published (dev · the track is not a store anyone can open)', () => {
     expect(phoneAppLinks({ android: true, ios: false }, PHONE_APP_STORE_ANDROID_DEV, OPTIN, GROUP)).toEqual([
+      { store: 'android', kind: 'invite', url: OPTIN, group: GROUP },
+      { store: 'ios', kind: 'soon', url: null },
+    ]);
+  });
+  it('the way in not set, published: the store (as before this story) · iOS as it is', () => {
+    expect(phoneAppLinks({ android: true, ios: false }, PHONE_APP_STORE_ANDROID_DEV, null, null)).toEqual([
       { store: 'android', kind: 'store', url: PHONE_APP_STORE_ANDROID_DEV },
       { store: 'ios', kind: 'soon', url: null },
     ]);
@@ -107,6 +132,8 @@ describe('[SID:4671] phoneAppLinks: what the block draws', () => {
       { store: 'android', kind: 'store', url: PHONE_APP_STORE_ANDROID },
       { store: 'ios', kind: 'store', url: PHONE_APP_STORE_IOS },
     ]);
+    // half a path with the store published: the store, not the half
+    expect(phoneAppLinks({ android: true, ios: false }, PHONE_APP_STORE_ANDROID_DEV, OPTIN, null)[0]).toEqual({ store: 'android', kind: 'store', url: PHONE_APP_STORE_ANDROID_DEV });
   });
   it('nothing to get (store closed · no way in · iOS closed): [] — the «준비 중» line is never drawn alone', () => {
     expect(phoneAppLinks(none, PHONE_APP_STORE_ANDROID, null, null)).toEqual([]);

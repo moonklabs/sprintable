@@ -68,7 +68,13 @@ describe('[SID:4671] a Mac draws the card too (the QR is for the phone)', () => 
     expect(h.querySelector('[data-testid="phone-app-card"]')).not.toBeNull();
     expect([...h.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([PHONE_APP_STORE_ANDROID]);
     expect(h.querySelectorAll('svg').length).toBe(1);
-    expect(h.querySelector('[data-testid="phone-app-scan-hint"]')?.textContent).toBe('폰 카메라로 QR을 찍으면 바로 열려요');
+    const hint = h.querySelector('[data-testid="phone-app-scan-hint"]');
+    expect(hint?.textContent).toBe('폰 카메라로 QR을 찍으면 폰에서 열려요');
+    // Yuna §D: the hint sits under the body and before the first row
+    const body = h.querySelector('[data-testid="phone-app-body"]');
+    const firstRow = h.querySelector('[data-testid="phone-app-link-android"]');
+    expect(body!.compareDocumentPosition(hint!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(hint!.compareDocumentPosition(firstRow!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(h.querySelector('[data-testid="phone-app-mac-aux"]')).toBeNull();
     expect(h.textContent).not.toContain('맥 앱은 맥에서 받아 주세요');
   });
