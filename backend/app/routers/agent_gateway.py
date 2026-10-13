@@ -902,8 +902,10 @@ async def agent_stream(
                         await sse_lease.refresh("agent_global", _lease_conn_id)
                         if _owns_receiver_slot():
                             # story #4676: a person took this agent over on another install (another instance) — this stream ends
-                            # superseded instead of keeping its slot alive
-                            _taken = await sse_lease.taken_by(f"perkey:{agent_id_str}") if _receiver_id and not _took_over else None
+                            # superseded instead of keeping its slot alive. Every stream but the taker reads the mark — a connection
+                            # without the header (an old app) too: its refresh is a ZADD, which would put the member the taker released
+                            # back and leave two places receiving (PO 11:56Z). A hand-made key never has a mark → refresh as before.
+                            _taken = await sse_lease.taken_by(f"perkey:{agent_id_str}") if not _took_over else None
                             if _taken is not None and _taken != _pk_member:
                                 _signal_superseded(queue)
                             else:

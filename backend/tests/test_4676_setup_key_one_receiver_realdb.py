@@ -113,6 +113,7 @@ async def _world(*, setup: bool = True, limit: int = 1):
              patch.object(gw, "_AGENT_STREAM_TIER_LIMITS", {}), \
              patch.object(gw, "_AGENT_STREAM_DEFAULT_LIMIT", limit), \
              patch.object(gw, "_SSE_HEARTBEAT", 0.02), \
+             patch.object(gw, "_PRESENCE_TICK_INTERVAL", 0.02), \
              patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
             yield gw, auth, str(agent_id)
     finally:
@@ -220,6 +221,29 @@ async def test_takeover_header_ends_the_other_receiver_and_takes_the_slot(lease_
         await second.body_iterator.aclose()
         if lease_path == "redis":
             assert await sse_lease.taken_by(f"perkey:{agent}") is None
+
+
+@pytest.mark.parametrize("receiver", [None, R1], ids=["headerless", "receiver"])
+async def test_redis_path_a_stream_on_another_instance_ends_on_its_heartbeat_when_taken_over(lease_path, receiver):
+    """the taker is on another instance: it released this stream's member and left the mark — this stream (a receiver, or an old app
+    without the header) reads the mark on its heartbeat and ends superseded; its refresh (a ZADD) must not put the member back (PO 11:56Z)"""
+    if lease_path != "redis":
+        pytest.skip("the other-instance view is the Redis lease's")
+    from app.services import sse_lease
+
+    async with _world(setup=True, limit=5) as (gw, auth, agent):
+        scope = f"perkey:{agent}"
+        first = await gw.agent_stream(request=_Req(receiver), auth=auth)
+        mine = await sse_lease.members(scope)
+        assert len(mine) == 1
+        # what the taker's entry does on the other instance
+        await sse_lease.release(scope, mine[0])
+        await sse_lease.acquire(scope, 5, f"rcv:{R2}")
+        await sse_lease.mark_taken(scope, f"rcv:{R2}")
+        old = await _drain(first.body_iterator)
+        assert old[-1] == "event: superseded\ndata: {}\n\n"
+        assert await sse_lease.members(scope) == [f"rcv:{R2}"], "the refresh did not put the released member back"
+        assert await sse_lease.taken_by(scope) == f"rcv:{R2}", "only the taker's own end clears the mark"
 
 
 async def test_redis_path_sees_a_receiver_on_another_instance(lease_path):
