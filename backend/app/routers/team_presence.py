@@ -84,8 +84,9 @@ async def get_team_presence(
             presence_status=r.presence_status,
             working=str(r.id) in working_ids,
             active_story=r.active_story,
-            device_name=r.device_name,
-            desktop_setup_id=r.desktop_setup_id,
+            # story 4675 — read softly: a test double for `_inject_active_stories` (SimpleNamespace) may not carry the two (Kadir 5068)
+            device_name=getattr(r, "device_name", None),
+            desktop_setup_id=getattr(r, "desktop_setup_id", None),
         )
         for r in responses
     ]
