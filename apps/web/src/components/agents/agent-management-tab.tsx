@@ -28,6 +28,7 @@ import { orgRoleLabel } from '@/lib/org-role-label';
 import { memberRowLabels } from '@/lib/member-display';
 import { RowName } from '@/components/shared/row-name';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { DeviceChip } from '@/components/desktop/device-chip';
 
 /**
  * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
@@ -85,6 +86,8 @@ interface OrgAgent {
   // false지만 연결 대상이 아니다(BE TeamMemberResponse가 이미 실어 보내던 필드, 이
   // 로컬 타입에만 없었다 — 새 BE 0). 판별 없이 verified만 보면 거짓 「연결 안 됨」.
   runtime_type?: string | null;
+  // story 4675 (F2) — the computer the agent is bound to now (BE `_inject_active_stories()` · null = no live desktop key)
+  device_name?: string | null;
 }
 
 interface ProjectOption {
@@ -326,6 +329,8 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                       {agent.needs_restart ? (
                         <Badge variant="warning">{ta('agentNeedsRestartBadge')}</Badge>
                       ) : null}
+                      {/* story 4675 (F2): the computer, last in the chip line — two agents with one name are told apart here */}
+                      <DeviceChip name={agent.device_name} />
                     </div>
                     {(() => {
                       const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);

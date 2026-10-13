@@ -42,6 +42,9 @@ class TeamPresenceItem(BaseModel):
     presence_status: str | None = None  # "online" | "idle" | "offline"
     working: bool = False  # B: 여부만 — 어느 conversation 이든 working 이면 true
     active_story: ActiveStorySummary | None = None
+    # story 4675 (F2) — the computer the agent is bound to now (null = no live desktop key) · from the same injection as /team-members
+    device_name: str | None = None
+    desktop_setup_id: uuid.UUID | None = None
 
 
 @router.get("", response_model=list[TeamPresenceItem])
@@ -81,6 +84,8 @@ async def get_team_presence(
             presence_status=r.presence_status,
             working=str(r.id) in working_ids,
             active_story=r.active_story,
+            device_name=r.device_name,
+            desktop_setup_id=r.desktop_setup_id,
         )
         for r in responses
     ]

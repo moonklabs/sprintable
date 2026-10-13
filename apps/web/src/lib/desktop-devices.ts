@@ -12,7 +12,29 @@ export interface DesktopDevice {
   revoked_at: string | null;
   revoked_by_name?: string | null;
   active_keys: number;
-  members: { kind: 'agent' | 'human'; member_id?: string }[];
+  /** one entry per stage — story 4675 reads the server's `name` · `role` too (it always sent them; the web dropped them) */
+  members: { kind: 'agent' | 'human'; member_id?: string; name?: string | null; role?: string | null }[];
+}
+
+/** story 4675 (F2 · Yuna §I ④): the agents of a device as the row lists them when opened — one line per agent (an agent holding
+ *  four stages is one line · the first stage's role), in the setup's order; the person's own role is not an agent. */
+export function deviceAgents(device: DesktopDevice): { member_id: string; name: string | null; role: string | null }[] {
+  const seen = new Set<string>();
+  const out: { member_id: string; name: string | null; role: string | null }[] = [];
+  device.members.forEach((m, i) => {
+    if (m.kind !== 'agent') return;
+    const id = m.member_id ?? `stage-${i}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    out.push({ member_id: id, name: m.name ?? null, role: m.role ?? null });
+  });
+  return out;
+}
+
+/** story 4675: the device a link points at (`/desktop#device=<setup_id>` — the workforce detail's «연결된 기기 보기») */
+export function linkedSetupId(hash: string): string | null {
+  const m = /(?:^#|[#&])device=([0-9a-f-]{36})(?:&|$)/i.exec(hash);
+  return m?.[1] ?? null;
 }
 
 /** Only an org owner/admin reads the list and disconnects (the backend's gate); a member's page does not ask at all. */

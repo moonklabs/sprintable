@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -93,6 +94,37 @@ async def _agent_setups(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID
     return [s for s in rows if any(m.get("member_id") == str(agent_id) and m.get("kind") == "agent" for m in (s.members or []))]
 
 
+async def bound_devices(db: AsyncSession, *, org_id: uuid.UUID, member_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, dict]:
+    """story 4675 (F2) — the computer each agent is bound to now, for a list: `{member_id: {setup_id, device_name}}`.
+
+    «Bound» = the agent holds a live key (not revoked · not expired) that a confirmed, exchanged, not-revoked setup of this org
+    handed out — a move (4565 · 4576) revokes the old computer's key, so the key is the one true link (`desktop_setups.members`
+    keeps the agent on the old setup too and cannot say). Two live keys for the moment after a move → the newest exchanged
+    setup wins. No live key → the agent is absent from the dict (the API shows null). Only this org's setups are read: a
+    conversation shared across organizations never carries another org's computer names (PO 09:54Z).
+    """
+    from app.models.api_key import ApiKey
+
+    ids = [i for i in set(member_ids) if i]
+    if not ids:
+        return {}
+    now = _now()
+    rows = (await db.execute(
+        select(ApiKey.team_member_id, DesktopSetup.id, DesktopSetup.device_name)
+        .join(DesktopSetup, DesktopSetup.id == ApiKey.desktop_setup_id)
+        .where(
+            ApiKey.team_member_id.in_(ids), ApiKey.revoked_at.is_(None),
+            (ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now),
+            DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None),
+        )
+        .order_by(DesktopSetup.exchanged_at.desc())
+    )).all()
+    out: dict[uuid.UUID, dict] = {}
+    for member_id, setup_id, device_name in rows:
+        out.setdefault(member_id, {"setup_id": setup_id, "device_name": device_name})
+    return out
+
+
 # ── ① the DM header ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -129,6 +161,10 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
             "pending_permission_request_id": None}
+    # story 4675 (F2) — the computer the agent is bound to (its live key's setup), said even before any session was reported:
+    # the workforce detail's «{name}에 연결됨 · 아직 안 돌았어요» line and its link to the device row
+    bound = (await bound_devices(db, org_id=org_id, member_ids=[agent_id])).get(agent_id)
+    view.update({"bound_setup_id": str(bound["setup_id"]) if bound else None, "bound_device_name": bound["device_name"] if bound else None})
     if not setups:
         return view
     sessions = (await db.execute(

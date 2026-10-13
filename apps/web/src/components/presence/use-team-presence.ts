@@ -17,6 +17,9 @@ export interface TeamPresenceItem {
   presence_status?: PresenceStatus | null;
   working: boolean;
   active_story?: { id: string; title: string; status: string } | null;
+  // story 4675 (F2) — the computer the agent is bound to now (null = no live desktop key) · the same injection as /team-members
+  device_name?: string | null;
+  desktop_setup_id?: string | null;
 }
 
 /**
