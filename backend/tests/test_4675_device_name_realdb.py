@@ -96,6 +96,17 @@ async def test_device_name_follows_the_live_key(conversation):
         tm = next(m for m in (await c.get("/api/v2/team-members?type=agent", headers=_person(OWNER))).json() if m["id"] == str(EXISTING))
         assert tm["desktop_setup_id"] == setup_b  # the link target of «연결된 기기 보기»
 
+        # two live keys at once (the moment after a move, before the old one is cut): the newest exchanged setup wins (Kadir 5068 —
+        # pins `exchanged_at.desc()`; asc would name the first mac here)
+        setup_a = (await _sql(fetch="SELECT id::text FROM desktop_setups WHERE device_name='d4675 first mac'"))[0][0]
+        await _sql(
+            "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash,scope,desktop_setup_id) VALUES "
+            f"('d4675000-0000-0000-0000-000000000008','{EXISTING}','{EXISTING}','sk_d4675_old','h4675old',ARRAY['core'],'{setup_a}')"
+        )
+        assert (await _sql(fetch=f"SELECT count(*) FROM agent_api_keys WHERE team_member_id='{EXISTING}' AND revoked_at IS NULL"))[0][0] == 2
+        assert await _device_of(c, EXISTING) == ("d4675 second mac", "d4675 second mac", "d4675 second mac")
+        await _sql("DELETE FROM agent_api_keys WHERE id='d4675000-0000-0000-0000-000000000008'")
+
         # the detail's own read says the bound computer even with no session reported
         r = await c.get(f"/api/v2/agents/{EXISTING}/desktop-session", headers=_person(OWNER))
         assert r.status_code == 200, r.text
@@ -110,10 +121,11 @@ async def test_device_name_follows_the_live_key(conversation):
 async def test_another_organizations_agent_never_carries_a_computer(conversation):
     """PO 09:54Z — a participant from another organization: its own setup's computer is not this org's to show."""
     await _sql(
-        "INSERT INTO desktop_setups (id,org_id,device_name,challenge,code_hash,expires_at,confirmed_at,exchanged_at,keys_issued) VALUES "
-        f"('d4675000-0000-0000-0000-000000000009','{ORG2}','elsewhere mac','c','h',now()+interval '1 hour',now(),now(),1)",
+        # the columns as the model names them (desktop_setup.py: code_hash · code_challenge — Kadir 5068)
+        "INSERT INTO desktop_setups (id,org_id,device_name,code_challenge,code_hash,expires_at,confirmed_at,exchanged_at,keys_issued) VALUES "
+        f"('d4675000-0000-0000-0000-000000000009','{ORG2}','elsewhere mac','c4675','h4675',now()+interval '1 hour',now(),now(),1)",
         "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash,scope,desktop_setup_id) VALUES "
-        f"(gen_random_uuid(),'{OTHER_ORG_AGENT}','{OTHER_ORG_AGENT}','sk_d4675_x','h4675','{{core}}','d4675000-0000-0000-0000-000000000009')",
+        f"(gen_random_uuid(),'{OTHER_ORG_AGENT}','{OTHER_ORG_AGENT}','sk_d4675_x','h4675x',ARRAY['core'],'d4675000-0000-0000-0000-000000000009')",
     )
     async with _client() as c:
         r = await c.get(f"/api/v2/conversations/{CONV}", headers=_person(OWNER))
