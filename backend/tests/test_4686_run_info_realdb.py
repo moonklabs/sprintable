@@ -101,6 +101,7 @@ async def test_03_the_snapshot_path_carries_it_too_and_a_dropped_session_loses_i
 
 
 @pytest.mark.parametrize("bad", [
+    {"model": "claude-fable-5-1\n"}, {"model": "claude-opus-5-5[1m]\n"},  # a `$` takes a trailing newline; fullmatch does not
     {"model": "claude fable"}, {"model": "--dangerously-skip-permissions"}, {"model": "x" * 80}, {"model": ""},
     {"effort": "turbo"}, {"model_set": "yes"}, {"account": ""}, {"account": "a" * 81},
     {"account": "org‮txt"}, {"account": "line\nbreak"}, {"account": " padded "},
@@ -109,6 +110,7 @@ async def test_03_the_snapshot_path_carries_it_too_and_a_dropped_session_loses_i
     {"account": "jo@gmail.com (Pro)"}, {"account": "j@x.io (Pro)"}, {"account": "john＠gmail.com"}, {"account": "Acme (bob@acme.io)"},
     {"account": "sk-ant-api03-AbCdEf0123456789"}, {"account": "Bearer eyJhbGciOiJIUzI1NiJ9"}, {"account": "eyJhbGciOiJIUzI1NiJ9.e30.abc"},
     {"account": "0123456789abcdef0123456789abcdef01234567"},
+    {"account": "https://evil.example/x"}, {"account": "Acme http://x.io"}, {"account": "ftp://a.b (Pro)"},  # a link is not a label (Kadir probe)
     # the allow-list: not a label the daemon makes — a sentence, a plan word that is not one, a bracket that is not a plan, a mask on the wrong shape
     {"account": "moonklabs (Gold)"}, {"account": "moonklabs (Pro) (Max)"}, {"account": "moonklabs [Max]"}, {"account": "yo***@host (Pro)"},
     {"account": "y***@a.b"}, {"account": "yon***@moonklabs.com"}, {"account": "yo*** @moonklabs.com"}, {"account": "yo***@moonklabs.com extra"},
@@ -204,12 +206,12 @@ def test_07_the_account_label_is_an_allow_list_not_a_refusal_list():
 
     from app.services.desktop_relay import SessionRun
 
-    for ok in ["yo***@moonklabs.com", "y***@x.io (Max)", "j.***@sub.moonklabs.co.kr (Enterprise)", "Acme Co. 한국 (Team)", "Free & Co, Ltd (Free)", "moonklabs"]:
+    for ok in ["yo***@moonklabs.com", "y***@x.io (Max)", "j.***@sub.moonklabs.co.kr (Enterprise)", "Acme Co. 한국 (Team)", "Free & Co, Ltd (Free)", "R&D/Ops", "moonklabs"]:
         assert SessionRun(account=ok).account == ok, ok
     # a fullwidth letter is the letter it means; the kept form is the normalized one
     assert SessionRun(account="Ａcme (Pro)").account == "Acme (Pro)"
     for bad in ["jo@gmail.com", "j@x.io (Pro)", "john＠gmail.com", "Acme (bob@acme.io)", "sk-ant-api03-AbCdEf0123456789", "Bearer eyJhbGciOiJIUzI1NiJ9",
-                "0123456789abcdef0123456789abcdef01234567", "moonklabs (Gold)", "yo***@host (Pro)", "Acme\u2028Corp", "Acme*Corp"]:
+                "0123456789abcdef0123456789abcdef01234567", "https://evil.example/x", "moonklabs (Gold)", "yo***@host (Pro)", "Acme\u2028Corp", "Acme*Corp"]:
         with pytest.raises(ValidationError):
             SessionRun(account=bad)
 

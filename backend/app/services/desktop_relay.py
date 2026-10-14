@@ -177,6 +177,8 @@ _ACCOUNT_SECRET_SHAPES = (
     re.compile(r"\bBearer\s", re.IGNORECASE),
     re.compile(r"\beyJ[A-Za-z0-9_-]{8,}"),
     re.compile(r"[A-Za-z0-9+/=_-]{32,}"),
+    # a link (Kadir 5073 probe, PO 10-14): the name's marks «:» and «/» are for «R&D/Ops» — «://» makes it an address a reader could follow
+    re.compile(r"://"),
 )
 
 
@@ -195,14 +197,14 @@ class SessionRun(BaseModel):
 
     @model_validator(mode="after")
     def _closed_shapes(self) -> "SessionRun":
-        if self.model is not None and not _RUN_MODEL.match(self.model):
+        if self.model is not None and not _RUN_MODEL.fullmatch(self.model):  # (fullmatch: a `$` also takes a trailing newline)
             raise ValueError("model is not a model id")
         if self.account is not None:
             if any(unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp", "Co", "Cs") for ch in self.account) or self.account != self.account.strip():
                 raise ValueError("account carries a control, invisible or edge-space character")
             # NFKC first: the shapes below are read on what the label MEANS (a fullwidth «＠» is an «@»), and that is what is kept
             account = unicodedata.normalize("NFKC", self.account)
-            if len(account) > 80 or not _ACCOUNT_LABEL.match(account):
+            if len(account) > 80 or not _ACCOUNT_LABEL.fullmatch(account):
                 raise ValueError("account is not a label the daemon makes (a masked address or an organisation name, then a plan word)")
             if any(shape.search(account) for shape in _ACCOUNT_SECRET_SHAPES):
                 raise ValueError("account carries a token shape")
