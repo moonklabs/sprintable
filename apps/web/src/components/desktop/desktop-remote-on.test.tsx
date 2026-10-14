@@ -85,6 +85,20 @@ describe('[SID:4670] AC3-보안 — opening the page switches nothing (the bridg
     expect(puts()).toHaveLength(0); // reverted (auto-PUT on open) → fails
   });
 
+  it('no org name known (the membership list has no such org): the page does not ask — a loading card, no [켜기], no PUT (the one promise is the name beside the button)', async () => {
+    await mountPage({ orgs: [{ orgId: 'o-other', orgName: '다른 조직', orgSlug: 'other', role: 'owner' }] });
+    expect(q('remote-on-ask')).toBeNull();
+    expect(q('remote-on-press')).toBeNull();
+    expect(container.querySelector('[aria-label]')).not.toBeNull(); // the spinner card
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('a long name with no break points wraps inside the card (overflow-wrap:anywhere) — the org line never pushes the card wider (유나 비차단 ②)', async () => {
+    await mountPage({ orgs: [{ orgId: 'o-1', orgName: 'ㅁ'.repeat(60) + 'Averyveryveryverylongorganizationname'.repeat(3), orgSlug: 'x', role: 'owner' }] });
+    expect(q('remote-on-org')?.className).toContain('[overflow-wrap:anywhere]');
+    expect(q('remote-on-org')?.textContent).toContain('Averyveryveryverylongorganizationname'); // not cut
+  });
+
   it('inside the app (the bridge is there): STILL no PUT — the bridge does not say who asked, a link in a chat opens the same page', async () => {
     (window as unknown as { sprintableDesktop: unknown }).sprintableDesktop = Object.freeze({
       inApp: true, device: { name: 'mac' }, runtimes: [], pickFolder: async () => null, startHere: async () => ({ ok: true }), setProjectFolder: async () => ({ ok: true }),
