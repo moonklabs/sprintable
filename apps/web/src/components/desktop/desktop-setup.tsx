@@ -386,6 +386,20 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     !!preselect && list.some((a) => a.id === preselect && a.in_project && runtimes.includes(a.runtime));
   // «spent» = a person set a row (setOwner). Landing itself needs no mark: withPreselectedAgent is idempotent (the first agent row,
   // the same agent), so a rebuild before anyone touched a row lands the same thing — and with no rows yet nothing is lost.
+  /** the agents list arrived — the first read · «목록 다시 불러오기» (4576) · after a [프로젝트 팀에 넣기] (4678): rows and ticks follow it */
+  const applyAttachable = (list: AttachableAgent[]) => {
+    attachableRef.current = list;
+    setAttachable(list);
+    // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
+    setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
+    // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices — once
+    // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576 · move mode) and a recipe change rebuilds the rows; a
+    // person's own choice after that is never written over. Whether to apply is decided here (the updater stays pure); a
+    // recruiter's agent that was not on the team lands here once [프로젝트 팀에 넣기] has made it so (PO 4678: the recruit path's
+    // promise — the «자동 선택 안 함» of a put-on-team is for every other agent).
+    const apply = !preselectSpent.current && preselectLands(list);
+    setRows((rs) => (apply ? withPreselectedAgent(withAttachable(rs, list, runtimes), preselect) : withAttachable(rs, list, runtimes)));
+  };
   // story #4565 — the «이미 있는 에이전트» group: read once the project is known (a new organization has none to move)
   useEffect(() => {
     if (orgMode.kind !== 'has-org' || !chosenProject || !isAdmin) { attachableRef.current = []; setAttachable([]); return; }
@@ -395,18 +409,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       .then((body: { agents?: AttachableAgent[] } | null) => {
         if (off) return;
         // the contract's one shape ({agents}) — anything else draws no group (never guessed from another field)
-        const list = Array.isArray(body?.agents) ? body.agents : [];
-        attachableRef.current = list;
-        setAttachable(list);
-        // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
-        setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
-        // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices — once
-        // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576 · move mode) and a recipe change rebuilds the rows; a
-        // person's own choice after that is never written over. Whether to apply is decided here (the updater stays pure); whether
-        // it landed is read off the committed rows (the effect above) — with no rows yet (Kadir 5065: the list may come before
-        // the recipes) nothing is spent, and pick() lands it when the recipe arrives.
-        const apply = !preselectSpent.current && preselectLands(list);
-        setRows((rs) => (apply ? withPreselectedAgent(withAttachable(rs, list, runtimes), preselect) : withAttachable(rs, list, runtimes)));
+        applyAttachable(Array.isArray(body?.agents) ? body.agents : []);
       })
       .catch(() => { if (!off) { attachableRef.current = []; setAttachable([]); } }); // the group is left out — «새로 만들기» still works
     return () => { off = true; };
@@ -424,6 +427,49 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     setEditingDir(false);
   }
 
+  // story 4678 (P1′-a · Yuna §J): an agent the organization has that this project's team does not — [프로젝트 팀에 넣기] grants it
+  // in place (POST /api/projects/{id}/access — the call the workforce page makes; this page is for org owners/admins, whom the
+  // server lets in for every project), then the list is read again (the server is the truth). The setup code, the recipe and the
+  // rows are not touched: one fetch, no navigation. 409 = already on the team = done.
+  const [teamState, setTeamState] = useState<Record<string, 'busy' | 'failed'>>({});
+  const [putDone, setPutDone] = useState<string | null>(null);
+  const pendingFocus = useRef<string | null>(null);
+  const rolesRef = useRef<HTMLElement | null>(null);
+  async function putOnTeam(a: AttachableAgent, order: readonly AttachableAgent[]) {
+    if (!chosenProject || teamState[a.id] === 'busy') return;
+    setTeamState((s) => ({ ...s, [a.id]: 'busy' }));
+    setPutDone(null);
+    const failed = () => { pendingFocus.current = `put:${a.id}`; setTeamState((s) => ({ ...s, [a.id]: 'failed' })); };
+    try {
+      const res = await fetchWithAuth(`/api/projects/${chosenProject}/access`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ member_id: a.id, org_member_id: null, permission: 'granted' }),
+      });
+      if (!res.ok && res.status !== 409) return failed();
+      const again = await fetchWithAuth(`/api/desktop/setup/agents?project_id=${encodeURIComponent(chosenProject)}`);
+      const body = again.ok ? await again.json() : null;
+      if (!Array.isArray(body?.agents)) return failed(); // it is on the team now; pressing again reads 409 = done and reads the list
+      // Yuna §J (필수): the pressed button goes away — focus goes to the next row's button, else where the agent can be picked
+      const at = order.findIndex((x) => x.id === a.id);
+      const next = order[at + 1] ?? order[at - 1];
+      pendingFocus.current = next ? `put:${next.id}` : moveMode ? `move:${a.id}` : 'select';
+      applyAttachable(body.agents);
+      setTeamState((s) => { const rest = { ...s }; delete rest[a.id]; return rest; });
+      setPutDone(a.name);
+    } catch {
+      failed();
+    }
+  }
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target) return;
+    pendingFocus.current = null;
+    const el = target.startsWith('put:') ? document.querySelector<HTMLElement>(`[data-put-on-team="${target.slice(4)}"]`)
+      : target.startsWith('move:') ? document.getElementById(`setup-move-${target.slice(5)}`)
+        : rolesRef.current?.querySelector<HTMLElement>('select');
+    el?.focus();
+  }, [attachable, teamState]);
+
   const recipe = recipes.find((r) => r.id === recipeId);
   // story #4576 (Yuna): the two ways show only with an organization and at least one agent it could move — a way that cannot be
   // chosen is not shown (an app that cannot move is the exception: the way shows, turned off, with why and what to do)
@@ -432,6 +478,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const showKinds = orgMode.kind === 'has-org' && (attachable.length > 0 || setupKind === 'move');
   const moveMode = showKinds && canMove && setupKind === 'move';
   const movable = useMemo(() => moveListOrder(attachable, runtimes), [attachable, runtimes]);
+  // story 4678: the ones [프로젝트 팀에 넣기] can help — not on the team, and a runtime this computer has (without one, putting it on
+  // the team would still leave it unusable: that is the line the move list gives instead)
+  const outsiders = attachable.filter((a) => !a.in_project && runtimes.includes(a.runtime));
+  const movableOutsiders = movable.filter((a) => !a.in_project && runtimes.includes(a.runtime));
   const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && movableState(a, runtimes) === 'ok'));
   const anyMovable = movable.some((a) => movableState(a, runtimes) === 'ok');
   const roleName = (role: string) => stageRoleLabel(role, tOrg);
@@ -683,8 +733,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               const on = state === 'ok' && moving.includes(a.id);
               // move.rowNotInProject says the same as the select's existingNotInProject (4565) without the name — change one, change both
               // (kept two keys: the en select line starts lower-case after «{name} · »)
-              const second = state === 'not-in-project' ? t('move.rowNotInProject')
-                : state === 'runtime-missing' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
+              // story 4678: «팀에 아직 없어요» is a line with a button next to it — only where the button can help; a missing runtime is the
+              // blocker that stays whatever the team says
+              const canPutOnTeam = state === 'not-in-project' && runtimes.includes(a.runtime);
+              const second = canPutOnTeam ? t('move.rowNotInProject')
+                : state === 'runtime-missing' || state === 'not-in-project' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
                   : t('onThisComputer', { runtime: RUNTIME_LABEL[a.runtime] });
               return (
                 <li key={a.id} className="p-3" data-testid="setup-move-row" data-state={state}>
@@ -697,6 +750,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                       </label>
                       {/* the 4565 note under a ticked row only (same place, same words — under the name's column) */}
                       {on ? <MovedAgentNote agent={a} /> : null}
+                      {canPutOnTeam ? <div className="mt-1"><PutOnTeamButton agent={a} state={teamState[a.id]} onPress={() => void putOnTeam(a, movableOutsiders)} /></div> : null}
                     </div>
                   </div>
                 </li>
@@ -793,7 +847,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           ) : null}
         </section>
   
-        <section aria-labelledby="setup-roles">
+        <section aria-labelledby="setup-roles" ref={rolesRef}>
           <h2 id="setup-roles" className="text-sm font-medium">{t('rolesTitle')}</h2>
           <p className="text-xs text-muted-foreground">{t('found', { list: runtimes.map((r) => RUNTIME_LABEL[r]).join(' · ') || '—' })}</p>
           {/* story 4494 (Yuna 10:11Z ⓑ): another runtime was found, this one is only below its floor — why it is not offered */}
@@ -828,17 +882,16 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                             {claudeBlocked ? <option value="claude-blocked" disabled>{t('blockedClaudeOption')}</option> : null}
                           </optgroup>
                           <optgroup label={t('ownerGroupExisting')}>
-                            {attachable.map((a) => {
+                            {attachable.filter((a) => a.in_project).map((a) => {
                               const key = `agent:${a.id}`;
                               const elsewhere = rows.some((o) => o.role !== r.role && o.owner.kind === 'existing' && o.owner.agentId === a.id);
                               const missing = !runtimes.includes(a.runtime);
-                              // PO 04:37Z: not in this project yet — what the person does first, said in the list (the server refuses it too)
-                              // existingNotInProject = move.rowNotInProject with «{name} · » before it (4576) — change one, change both
-                            const label = !a.in_project ? t('existingNotInProject', { name: a.name })
-                                // story #4576: the reason is the move list's own line (one text, never two that overlap) after «{name} · »
-                                : missing ? `${a.name} · ${t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })}`
-                                  : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
-                              return <option key={key} value={key} disabled={!a.in_project || missing || elsewhere}>{label}</option>;
+                              // story 4678: an agent not on this project's team is not an option here (a disabled line cannot hold the
+                              // button) — it is in the «프로젝트 팀에 없는 에이전트» list under the rows, with [프로젝트 팀에 넣기]
+                              // story #4576: the reason is the move list's own line (one text, never two that overlap) after «{name} · »
+                              const label = missing ? `${a.name} · ${t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })}`
+                                : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
+                              return <option key={key} value={key} disabled={missing || elsewhere}>{label}</option>;
                             })}
                           </optgroup>
                           {r.choices.some((c) => c.kind === 'me') ? (
@@ -860,6 +913,23 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               </li>
             ))}
           </ul>
+          {/* story 4678 (Yuna §J): the organization's agents that are not on this project's team — one folded list, a button per line */}
+          {outsiders.length > 0 ? (
+            <details className="mt-2 rounded-md border" data-testid="setup-not-on-team">
+              <summary className="cursor-pointer break-keep px-3 py-2 text-sm">{t('notOnTeamGroup', { n: outsiders.length })}</summary>
+              <ul className="divide-y border-t">
+                {outsiders.map((a) => (
+                  <li key={a.id} className="flex flex-wrap items-start justify-between gap-2 p-3" data-testid="setup-not-on-team-row">
+                    <span className="min-w-0 break-keep text-sm">{t('existingNotInProject', { name: a.name })}</span>
+                    <PutOnTeamButton agent={a} state={teamState[a.id]} onPress={() => void putOnTeam(a, outsiders)} />
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          <p role="status" aria-live="polite" className="mt-2 break-keep text-xs text-foreground empty:hidden" data-testid="setup-put-on-team-done">
+            {putDone ? t('putOnTeamDone', { name: putDone }) : null}
+          </p>
           {claudeBlocked && runtimes.length > 0 ? <p className="mt-2 text-xs text-muted-foreground" data-testid="setup-blocked-note">{t('blockedClaudeNote')}</p> : null}
           <p className="mt-2 text-xs text-muted-foreground">{t('humanNote')}</p>
         </section>
@@ -909,6 +979,31 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
  * (in the body's colour: it is a result to read), then when one of its keys was last used (muted · none known → no line).
  * story 4680 (Yuna G-4 · PO Q-b): a key that was never used (the agent the recruiter just made) has no live connection to cut —
  * no line: the screen does not name a cost that is not there. */
+/**
+ * story 4678 (P1′-a · Yuna §J ②③⑤): [프로젝트 팀에 넣기] on a line for an agent that is not on this project's team. Pressing it grants
+ * in place (the page's putOnTeam); while it works the button reads «넣는 중…» and ignores presses — `aria-disabled`, not `disabled`, so
+ * keyboard focus stays on it (a disabled button drops focus to the page). A failure says so under the button; the line stays.
+ */
+function PutOnTeamButton({ agent, state, onPress }: { agent: AttachableAgent; state?: 'busy' | 'failed'; onPress: () => void }) {
+  const t = useTranslations('desktop.setup');
+  const busy = state === 'busy';
+  return (
+    <span className="flex flex-col items-start gap-1">
+      <Button
+        type="button" variant="outline" size="sm"
+        aria-disabled={busy || undefined}
+        aria-label={busy ? undefined : t('putOnTeamAria', { name: agent.name })}
+        className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+        onClick={() => { if (!busy) onPress(); }}
+        data-put-on-team={agent.id} data-testid="setup-put-on-team"
+      >
+        {busy ? t('putOnTeamBusy') : t('putOnTeam')}
+      </Button>
+      {state === 'failed' ? <span role="alert" className="break-keep text-xs text-destructive" data-testid="setup-put-on-team-failed">{t('putOnTeamFailed')}</span> : null}
+    </span>
+  );
+}
+
 function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
