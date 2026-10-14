@@ -22,7 +22,7 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parent.parent
 _ROUTERS = _BACKEND / "app" / "routers"
 _ROUTE_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
-_ACCESS = re.compile(r"(project_access|accessible|can_access|_scope_filter)")
+_ACCESS = re.compile(r"(project_access|accessible|can_access|_scope_filter|scoped_project_ids|live_scope|project_is_live)")  # story #4688: the live-scope helpers resolve the same set
 
 _KNOWN = {
     "app/routers/account.py::resolve_accounts",

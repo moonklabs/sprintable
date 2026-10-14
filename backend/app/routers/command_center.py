@@ -678,9 +678,9 @@ async def overview(
     restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(_auth.user_id)), org_id)
     # story #4688 (AC2): «reaches every project» (restricted None) still filters — to the projects that EXIST. A deleted project's stories and
     # goals have no foreign key to remove them and would otherwise be counted for an owner/admin. `scope` below still says «org» for them.
-    from app.services.project_auth import live_project_ids_in_org
+    from app.services.project_auth import live_scope
 
-    scope_ids = restricted if restricted is not None else await live_project_ids_in_org(session, org_id)
+    scope_ids = await live_scope(session, org_id, restricted)
 
     def _in_scope(col) -> list:
         return [col.in_(scope_ids)]

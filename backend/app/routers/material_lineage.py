@@ -152,7 +152,12 @@ async def get_hook_performance(
 
     # story #4351 PR B — 접근이 제한된 caller는 접근 가능 프로젝트 변주만 합산(owner/admin = None = 옛 동작).
     restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(_auth.user_id)), org_id)
-    summary = await compute_hook_performance(session, org_id=org_id, hook_key=hook_key, project_ids=restricted)
+    # story #4688: None («reaches every project») still filters — to the projects that exist; the label below keeps saying «org»
+    from app.services.project_auth import live_scope
+
+    summary = await compute_hook_performance(
+        session, org_id=org_id, hook_key=hook_key, project_ids=await live_scope(session, org_id, restricted),
+    )
     view = HookPerformanceView.from_summary(summary)
     view.scope = "org" if restricted is None else "accessible_projects"
     return view

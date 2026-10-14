@@ -1112,12 +1112,11 @@ async def get_workflow_line_metrics(
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    from app.services.project_auth import live_project_ids_in_org, restricted_accessible_project_ids
+    from app.services.project_auth import scoped_project_ids
     from app.services.workflow_line_metrics import compute_line_metrics
 
-    restricted = await restricted_accessible_project_ids(repo.session, uuid.UUID(auth.user_id), repo.org_id)
     # story #4688 (AC2): None = «reaches every project» must not mean «no filter» — a deleted project's stories would join the numbers
-    scope = restricted if restricted is not None else await live_project_ids_in_org(repo.session, repo.org_id)
+    scope = await scoped_project_ids(repo.session, uuid.UUID(auth.user_id), repo.org_id)
     return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days, project_ids=scope)
 
 

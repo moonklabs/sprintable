@@ -751,6 +751,18 @@ async def live_project_ids_in_org(session: AsyncSession, org_id: uuid.UUID) -> l
     )).scalars())
 
 
+async def live_scope(session: AsyncSession, org_id: uuid.UUID, restricted: list[uuid.UUID] | None) -> list[uuid.UUID]:
+    """story #4688 (AC2): the list a project-bound query filters by. `restricted` is `restricted_accessible_project_ids`' answer — a list for a
+    caller with limited access, None for one who reaches every project. None must not mean «filter nothing»: rows of a DELETED project have no foreign
+    key that removes them, and they would join the owner's/admin's numbers and lists. None becomes every project that still exists."""
+    return restricted if restricted is not None else await live_project_ids_in_org(session, org_id)
+
+
+async def scoped_project_ids(session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID) -> list[uuid.UUID]:
+    """`restricted_accessible_project_ids` + `live_scope` in one call — for routes that only filter (no «scope» label to keep)."""
+    return await live_scope(session, org_id, await restricted_accessible_project_ids(session, user_id, org_id))
+
+
 async def project_is_live(session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID) -> bool:
     """story #4688 (AC2): the project exists in this org and is not deleted. Deleting a project is non-destructive (what it held stays,
     unreachable): a list asked for a dead project's own id has nothing to say."""

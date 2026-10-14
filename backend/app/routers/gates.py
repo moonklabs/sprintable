@@ -1306,11 +1306,11 @@ async def list_gates(
     # story #4351 — 접근이 제한된 caller에겐 접근 불가 프로젝트의 게이트를 싣지 않는다(SEC-S8 · PO 2026-09-26: 접근 가능 프로젝트 게이트 +
     # 어느 프로젝트에도 안 걸린 org 수준 게이트 · owner/admin 등 전체 접근은 옛 동작 그대로 — merge-gate 집계와 같은 규칙).
     from app.services.gate_service import gate_in_inaccessible_project_clause
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import scoped_project_ids
 
-    _restricted = await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id)
-    if _restricted is not None:
-        q = q.where(~gate_in_inaccessible_project_clause(_restricted))
+    # story #4688: a caller who reaches every project is scoped to the projects that still exist — a deleted project's gates leave the list
+    _restricted = await scoped_project_ids(session, uuid.UUID(auth.user_id), org_id)
+    q = q.where(~gate_in_inaccessible_project_clause(_restricted))
     if gate_ids is not None:
         # story #5ace2e84 — ids 배치는 고정 집합 앵커 조회(stories.py list_stories ids 분기와
         # 동형). 나머지 필터/정렬/페이지네이션은 의미가 없어 전부 건너뛴다.
@@ -1753,11 +1753,11 @@ async def list_gate_inbox(
         work_item_id=None, work_item_type=None, status=status, sort=sort,
         assigned_to_me=assigned_to_me, session=session, org_id=org_id, auth=auth,
     )
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import scoped_project_ids
 
     hitl_rows = await _list_hitl_inbox_rows(
         session, org_id, status,
-        restricted_project_ids=await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id),
+        restricted_project_ids=await scoped_project_ids(session, uuid.UUID(auth.user_id), org_id),
     )
 
     if assigned_to_me:

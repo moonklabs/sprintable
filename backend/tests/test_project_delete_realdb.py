@@ -61,6 +61,9 @@ async def _clean_orphans():
         await _sql(
             f"DELETE FROM stories WHERE title LIKE '{MARK}%'", f"DELETE FROM sprints WHERE title LIKE '{MARK}%'", f"DELETE FROM goals WHERE title LIKE '{MARK}%'",
             f"DELETE FROM docs WHERE title LIKE '{MARK}%'", f"DELETE FROM standup_entries WHERE author_id='{AUTHOR}'",
+            f"DELETE FROM site_post_versions WHERE title LIKE '{MARK}%'", f"DELETE FROM channel_post_versions WHERE text LIKE '{MARK}%'",
+            "DELETE FROM site_post_drafts WHERE slug LIKE 't4688-site-%'", "DELETE FROM channel_post_drafts WHERE channel LIKE 't4688-%'",
+            "DELETE FROM gate WHERE scope_key LIKE 't4688-%'",
             f"DELETE FROM workflow_line_step_runs WHERE transition_id LIKE '{MARK}%'",
         )
     await wipe()
@@ -239,3 +242,98 @@ async def test_10_the_workflow_line_metrics_do_not_count_a_deleted_projects_step
         assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
         after = (await c.get("/api/v2/stories/workflow-line/metrics", headers=_person(OWNER))).json()
         assert after["total_step_runs"] == base + 1, after  # reverted → base + 3
+
+
+# ---- every caller of `restricted_accessible_project_ids` that answered None («reaches every project») — PO 10-14: the same fix in this PR ----
+
+async def _story_in(pid: str, tag: str) -> str:
+    await _sql(f"INSERT INTO stories (id,org_id,project_id,title,status,priority) VALUES (gen_random_uuid(),'{ORG}','{pid}','{MARK}-{tag}','backlog','medium')")
+    return (await _sql(fetch=f"SELECT id::text FROM stories WHERE project_id='{pid}' AND title='{MARK}-{tag}'"))[0][0]
+
+
+async def test_11_site_post_drafts_of_a_deleted_project_are_not_listed_for_the_owner(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-site-live"), await _create(c, "walk-site-dead")
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"site-{tag}")
+            await _sql(f"INSERT INTO site_post_drafts (id,org_id,work_item_id,slug) VALUES (gen_random_uuid(),'{ORG}','{sid}','t4688-site-{tag}')")
+            await _sql(  # a draft is listed through its latest version — one row is enough
+                "INSERT INTO site_post_versions (id,draft_id,version,title,lang,summary,body_md,body_sha256,author_member_id,author_kind) "
+                f"SELECT gen_random_uuid(),id,1,'{MARK}-t','ko','s','b','sha','{EXISTING}','agent' FROM site_post_drafts WHERE slug='t4688-site-{tag}'"
+            )
+        path = f"/api/v2/organizations/{ORG}/site-posts/drafts"
+        both = await c.get(path, headers=_person(OWNER))
+        assert both.status_code == 200 and "t4688-site-live" in both.text and "t4688-site-dead" in both.text, both.text[:300]  # both projects live: both listed
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        r = await c.get(path, headers=_person(OWNER))
+        assert r.status_code == 200 and "t4688-site-live" in r.text and "t4688-site-dead" not in r.text, r.text[:300]
+        assert int(r.headers["X-Total-Count"]) == int(both.headers["X-Total-Count"]) - 1  # the count follows the list (a count that leaks tells it exists)
+
+
+async def test_12_channel_post_drafts_of_a_deleted_project_are_not_listed_for_the_owner(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-chan-live"), await _create(c, "walk-chan-dead")
+        ids = {}
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"chan-{tag}")
+            await _sql(f"INSERT INTO channel_post_drafts (id,org_id,work_item_id,channel,connection_id) VALUES (gen_random_uuid(),'{ORG}','{sid}','t4688-{tag}',gen_random_uuid())")
+            ids[tag] = (await _sql(fetch=f"SELECT id::text FROM channel_post_drafts WHERE work_item_id='{sid}'"))[0][0]
+            await _sql(
+                "INSERT INTO channel_post_versions (id,draft_id,version,text,body_sha256,author_member_id,author_kind) "
+                f"VALUES (gen_random_uuid(),'{ids[tag]}',1,'{MARK}-t','sha','{EXISTING}','agent')"
+            )
+        path = f"/api/v2/organizations/{ORG}/channel-posts/drafts"
+        both = await c.get(path, headers=_person(OWNER))
+        assert both.status_code == 200 and ids["live"] in both.text and ids["dead"] in both.text, both.text[:300]
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        r = await c.get(path, headers=_person(OWNER))
+        assert r.status_code == 200 and ids["live"] in r.text and ids["dead"] not in r.text, r.text[:300]
+        assert int(r.headers["X-Total-Count"]) == int(both.headers["X-Total-Count"]) - 1
+        # a single read by id is a 404 as for a draft that is not there
+        assert (await c.get(f"{path}/{ids['dead']}", headers=_person(OWNER))).status_code == 404
+
+
+async def test_13_gates_of_a_deleted_project_are_not_listed_for_the_owner_and_org_level_ones_stay(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-gate-live"), await _create(c, "walk-gate-dead")
+        gate_ids = {}
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"gate-{tag}")
+            await _sql(f"INSERT INTO gate (id,org_id,work_item_id,work_item_type,gate_type,scope_key) VALUES (gen_random_uuid(),'{ORG}','{sid}','story','merge','t4688-{tag}')")
+            gate_ids[tag] = (await _sql(fetch=f"SELECT id::text FROM gate WHERE scope_key='t4688-{tag}'"))[0][0]
+        # an org-level gate (its work item resolves to no project): never hidden by this
+        await _sql(f"INSERT INTO gate (id,org_id,work_item_id,work_item_type,gate_type,scope_key) VALUES (gen_random_uuid(),'{ORG}',gen_random_uuid(),'story','merge','t4688-org')")
+        gate_ids["org"] = (await _sql(fetch="SELECT id::text FROM gate WHERE scope_key='t4688-org'"))[0][0]
+        both = await c.get("/api/v2/gates?limit=200", headers=_person(OWNER))
+        assert both.status_code == 200 and all(g in both.text for g in gate_ids.values()), both.text[:300]
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        r = await c.get("/api/v2/gates?limit=200", headers=_person(OWNER))
+        assert r.status_code == 200 and gate_ids["live"] in r.text and gate_ids["org"] in r.text and gate_ids["dead"] not in r.text, r.text[:300]
+
+
+async def test_14_a_deleted_project_gives_its_slot_back_to_the_free_plan(world, monkeypatch):
+    """PO 10-14 (walks 5 and 6): the free plan allows one project; on walk 6 the one project still on screen made the create answer 402. The count
+    (`ee.plan_limits.check_project_create_limit`) already skips `deleted_at` rows — what made the walk-5 project stay was the delete that answered
+    500 (this story): a project that is really gone is not counted. The limit here is set to «the live projects + 1» so the world's own project does
+    not matter; the project that is deleted holds a granted member and an epic — exactly what could not be deleted before."""
+    import ee.plan_limits as plan_limits
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "license_consent", "agreed")  # EE on: the plan limit is checked
+    live_now = (await _sql(fetch=f"SELECT count(*) FROM projects WHERE org_id='{ORG}' AND deleted_at IS NULL"))[0][0]
+    monkeypatch.setitem(plan_limits.FREE_LIMITS, "max_projects", live_now + 1)
+    async with _client() as c:
+        first = await c.post("/api/v2/projects", headers=_person(OWNER), json={"name": "walk-slot-1", "org_id": str(ORG)})
+        assert first.status_code in (200, 201), first.text
+        full = await c.post("/api/v2/projects", headers=_person(OWNER), json={"name": "walk-slot-2", "org_id": str(ORG)})
+        assert full.status_code == 402, full.text  # the plan's one slot is taken (the control: the limit is really in force here)
+        pid = first.json()["id"]
+        await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{pid}','{EXISTING}','granted')")
+        await _sql(f"INSERT INTO goals (id,org_id,project_id,title,status) VALUES (gen_random_uuid(),'{ORG}','{pid}','{MARK}-slot-epic','active')")
+        assert (await c.delete(f"/api/v2/projects/{pid}", headers=_person(OWNER))).status_code == 200  # was 500
+        again = await c.post("/api/v2/projects", headers=_person(OWNER), json={"name": "walk-slot-3", "org_id": str(ORG)})
+        assert again.status_code in (200, 201), again.text
+        # a soft-deleted project (deleted_at) does not hold a slot either
+        await _sql(f"UPDATE projects SET deleted_at=now() WHERE id='{again.json()['id']}'")
+        third = await c.post("/api/v2/projects", headers=_person(OWNER), json={"name": "walk-slot-4", "org_id": str(ORG)})
+        assert third.status_code in (200, 201), third.text

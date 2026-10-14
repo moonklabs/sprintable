@@ -28,7 +28,7 @@ from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.publish_error_body import preflight_error_body, preflight_error_facts
 from app.services.background_jobs import background_job_view, enqueue_background_job
 from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
-from app.services.project_auth import require_project_access, restricted_accessible_project_ids
+from app.services.project_auth import require_project_access, scoped_project_ids
 from app.services.publication_command import derive_processing_kind, viewer_can_retry
 from app.services.provider_call_mark import provider_call_marked, reset_provider_call_mark
 from app.services.channel_posts import (
@@ -1661,7 +1661,7 @@ async def list_channel_post_drafts_endpoint(
 
     rows = await list_channel_post_drafts(
         db, org_id=org_id, limit=limit, offset=offset,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
         include_withdrawn=include_withdrawn, include_deleted=include_deleted,
         work_item_id=work_item_id,
@@ -1669,7 +1669,7 @@ async def list_channel_post_drafts_endpoint(
     total = await count_channel_post_drafts(
         db, org_id=org_id, include_withdrawn=include_withdrawn, include_deleted=include_deleted,
         work_item_id=work_item_id,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
     )
     response.headers["X-Total-Count"] = str(total)
     source_titles = await get_source_titles_and_latest_versions(
@@ -1716,7 +1716,7 @@ async def get_channel_post_draft_detail_endpoint(
     # 필터가 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다).
     rows = await list_channel_post_drafts(
         db, org_id=org_id, draft_id=draft_id, limit=1, include_withdrawn=True, include_deleted=True,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
     )
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
@@ -1791,7 +1791,7 @@ async def list_content_item_variants_endpoint(
 
     rows = await list_channel_post_drafts(
         db, org_id=org_id, source_content_item_id=content_item_id, limit=200,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
     )
     # story #3437(후속 묶음) — 이 엔드포인트는 filter 자체가 content_item_id 단건이라
     # source_content_item_id가 전부 이 값 하나 — 배치라 해도 실질 단건 조회.
