@@ -79,10 +79,27 @@ const REREAD_MS = 30_000;
 /** story #4534 (Kadir 4960 · PO 05:36Z): the board's own word when the server sends one (`activity`), else the five-word `state`;
  *  a word this page does not know falls back to the five-word `state`, then to «unrecognized» (its own line — never the «computer lost»
  *  line) — never a crash (a server newer than this bundle) */
-function shownState(view: View): SessionState {
+export function shownState(view: { state: string | null; activity?: string | null }): SessionState {
   const known = (w: string | null | undefined): w is SessionState => !!w && w !== 'unrecognized' && Object.hasOwn(SHAPES, w);
   if (known(view.activity)) return view.activity;
   return known(view.state) ? view.state : 'unrecognized';
+}
+
+/** story 4675 (F2 · Yuna §I Q-d): the one place the session's word is chosen — the strip and the workforce detail's «지금 도는
+ *  컴퓨터» line say the same word for the same agent. Claude at a usage limit (or a limit the app held) wears «사용 한도». */
+export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null }, t: (key: string) => string): string {
+  const state = shownState(view);
+  const claudeLimit = (state === 'waiting_input' && !!view.limit?.self_resume) || limitHeld(state, view.limit);
+  return claudeLimit ? t('state.usage_limit')
+    : state === 'starting' ? t('state.starting')
+      : state === 'working' ? t('state.working')
+        : state === 'idle' ? t('state.idle')
+          : state === 'waiting_permission' ? t('state.waiting_permission')
+            : state === 'waiting_input' ? t('state.waiting_input')
+              : state === 'error' ? t('state.error')
+                : state === 'paused_limit' ? t('state.paused_limit')
+                  : state === 'waiting_system' ? t('state.waiting_system')
+                    : state === 'stopped' ? t('state.stopped') : t('state.unknown');
 }
 /** the daemon's cut (contracts/send-prompt-vectors.json text_max · UTF-16 units — a string's length) */
 const INSTRUCTION_MAX = 8000;
@@ -170,16 +187,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   const checkOnly = pending?.verb === 'stop';
   const count = codePoints(draft);
   const tooLong = count > INSTRUCT_NOW_MAX;
-  const label = claudeLimit ? t('state.usage_limit')
-    : view.state === 'starting' ? t('state.starting')
-      : view.state === 'working' ? t('state.working')
-        : view.state === 'idle' ? t('state.idle')
-          : view.state === 'waiting_permission' ? t('state.waiting_permission')
-            : view.state === 'waiting_input' ? t('state.waiting_input')
-              : view.state === 'error' ? t('state.error')
-                : view.state === 'paused_limit' ? t('state.paused_limit')
-                  : view.state === 'waiting_system' ? t('state.waiting_system')
-                    : view.state === 'stopped' ? t('state.stopped') : t('state.unknown');
+  // story 4675: the word comes from one function (the workforce detail says the same) — `view.state` here is already the shown one
+  const label = sessionStateLabel({ state: view.state, activity: null, limit: view.limit }, t);
 
   const deps: CommandDeps = {
     phoneCall,

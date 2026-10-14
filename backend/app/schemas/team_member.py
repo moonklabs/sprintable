@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 from app.schemas.not_null_fields import RejectsExplicitNull
 
 _ONLINE_THRESHOLD = timedelta(minutes=5)
@@ -105,6 +105,20 @@ class TeamMemberResponse(BaseModel):
     # 없는(None) 에이전트나 단건 조회 경로(주입 미실행)는 None — "낮음"이 아니라 "판단
     # 불가"로 정직하게 구분(휴리스틱 배지 금지, PO 확定).
     needs_restart: bool | None = None
+    # story 4675 (F2) — the computer this agent is bound to now (the desktop setup whose live key it holds · services.
+    # desktop_commands.bound_devices), batch-injected by `_inject_active_stories()`; None = no live desktop key, or a path the
+    # injection does not run on (humans · single reads).
+    device_name: str | None = None
+    desktop_setup_id: uuid.UUID | None = None
+
+    @field_validator("device_name", "desktop_setup_id", mode="before")
+    @classmethod
+    def _desktop_fields_only_from_the_injection(cls, v: object) -> object:
+        """story 4675 (Kadir 5068): these two are set by `model_copy(update=…)` after validation, never read off the member.
+        `from_attributes` still asks the object for them — a real ORM Member has neither (→ default), but a test double that
+        answers every attribute (MagicMock) would hand back a mock and fail validation. Anything that is not a str/UUID reads
+        as «not bound» (None), so every caller that validates a member object is safe, mocked or real."""
+        return v if v is None or isinstance(v, (str, uuid.UUID)) else None
 
     # S2-3: computed presence_status — 조회 시점 실시간 계산
     @computed_field

@@ -4536,6 +4536,9 @@
     "agentRuntimePluginSegment": "(plugin v{version})",
     "agentRuntimeSessionSegment": "session started {relative}",
     "agentNeedsRestartBadge": "Restart needed",
+    "runningOn": "Running on: {name} · {state}",
+    "boundNotRunYet": "Connected to {name} · hasn't run yet",
+    "seeConnectedDevices": "See connected devices",
     "systemPublisherNeutralDescription": "This is the sender Sprintable uses for automatic notifications and records — no connection needed.",
     "accessTab": "Access",
     "matrixTitle": "Access matrix",
@@ -6810,6 +6813,7 @@
     "title": "Desktop app",
     "targetLabel": "For macOS (Apple Silicon)",
     "versionLabel": "Version {version}",
+    "deviceChipAria": "Connected to {name}",
     "buildLabel": "Build {sha}",
     "notarizationNotice": "For internal use before Apple notarization.",
     "gatekeeperTitle": "macOS blocks the first open — open it once like this",
@@ -7098,7 +7102,8 @@
       "emptyBody": "Download the desktop app above and finish its setup — your organization's devices will show up here.",
       "loadFailed": "Couldn't load the list",
       "retry": "Try again",
-      "member": "Your organization's admins manage its desktop connections."
+      "member": "Your organization's admins manage its desktop connections.",
+      "expandAgentsAria": "Show {device}'s agents"
     },
     "remote": {
       "loading": "Loading",

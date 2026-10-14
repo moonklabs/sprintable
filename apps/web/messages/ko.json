@@ -4536,6 +4536,9 @@
     "agentRuntimePluginSegment": "(플러그인 v{version})",
     "agentRuntimeSessionSegment": "세션 시작 {relative}",
     "agentNeedsRestartBadge": "재기동 필요",
+    "runningOn": "지금 도는 컴퓨터: {name} · {state}",
+    "boundNotRunYet": "{name}에 연결됨 · 아직 안 돌았어요",
+    "seeConnectedDevices": "연결된 기기 보기",
     "systemPublisherNeutralDescription": "Sprintable이 자동으로 남기는 알림·기록의 보낸 이예요 — 따로 연결하지 않아도 돼요.",
     "accessTab": "접근권한",
     "matrixTitle": "접근권한 매트릭스",
@@ -6810,6 +6813,7 @@
     "title": "데스크톱 앱",
     "targetLabel": "대상 macOS (Apple Silicon)",
     "versionLabel": "버전 {version}",
+    "deviceChipAria": "{name}에 연결됨",
     "buildLabel": "빌드 {sha}",
     "notarizationNotice": "Apple 공증 전 내부용이에요.",
     "gatekeeperTitle": "처음 열면 macOS가 막아요 — 한 번만 이렇게 열어 주세요",
@@ -7098,7 +7102,8 @@
       "emptyBody": "위에서 데스크톱 앱을 받아 설정을 마치면 이 조직의 기기가 여기에 보여요.",
       "loadFailed": "목록을 불러오지 못했어요",
       "retry": "다시 시도",
-      "member": "이 조직의 데스크톱 연결은 조직 관리자가 관리해요."
+      "member": "이 조직의 데스크톱 연결은 조직 관리자가 관리해요.",
+      "expandAgentsAria": "{device}의 에이전트 보기"
     },
     "remote": {
       "loading": "불러오는 중",

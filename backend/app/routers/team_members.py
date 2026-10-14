@@ -132,10 +132,17 @@ async def _inject_active_stories(
         await _org_max_plugin_version(members[0].org_id, session) if members else None
     )
 
+    # story 4675 (F2) — which computer each agent is bound to (one query for the list · this org's setups only); the same
+    # injection serves /team-members and /team-presence, so every list names the computer the same way.
+    from app.services.desktop_commands import bound_devices
+    devices = await bound_devices(session, org_id=org_id, member_ids=[m.id for m in members])
+
     out = []
     for m in members:
         resp = TeamMemberResponse.model_validate(m)
         resp = _override_online(resp, online_map.get(str(m.id)))
+        if (bound := devices.get(m.id)) is not None:
+            resp = resp.model_copy(update={"device_name": bound["device_name"], "desktop_setup_id": bound["setup_id"]})
         if m.active_story_id and m.active_story_id in stories:
             s = stories[m.active_story_id]
             resp = resp.model_copy(update={

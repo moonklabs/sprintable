@@ -383,6 +383,8 @@ def _total_unread_count_stmt(member_id: uuid.UUID):
 async def _fetch_conversation_participants(
     conv_ids: list[uuid.UUID],
     db: AsyncSession,
+    *,
+    device_org_id: uuid.UUID | None = None,
 ) -> dict[uuid.UUID, list[dict]]:
     """story #2009: conversation(들)의 participants 배치 조회 — list_conversations의 기존
     N+1 방지 배치 로직을 단건(`get_conversation`)에서도 재사용하도록 추출(로직 복제 금지, AC).
@@ -390,6 +392,10 @@ async def _fetch_conversation_participants(
     반환 dict shape는 두 엔드포인트가 항상 동일 JSON을 내려주도록 고정:
     `{"member_id", "name", "avatar_url", "type", "runtime_type"}` (list_conversations의
     participants 항목과 byte-identical — FE 파싱 일관성).
+
+    story 4675 (F2) — `device_name`: the computer an agent participant is bound to now, read only when the caller passes its
+    org (`device_org_id`) and only for that org's setups — a participant from another organization gets null, as does a
+    human or an agent with no live desktop key.
     """
     if not conv_ids:
         return {}
@@ -409,6 +415,12 @@ async def _fetch_conversation_participants(
             select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
         )).all()
         runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
+
+    devices: dict[uuid.UUID, dict] = {}
+    if all_member_ids and device_org_id is not None:
+        from app.services.desktop_commands import bound_devices
+
+        devices = await bound_devices(db, org_id=device_org_id, member_ids=all_member_ids)
 
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
@@ -431,6 +443,7 @@ async def _fetch_conversation_participants(
             "type": resolved.type if resolved else "human",
             "runtime_type": runtime_type_map.get(r.member_id),
             "resolved": resolved.resolved if resolved else False,
+            "device_name": (devices.get(r.member_id) or {}).get("device_name"),
         })
     return conv_participants
 
@@ -1584,7 +1597,7 @@ async def list_conversations(
 
     # participants 배치 조회 (N+1 방지) — story #2009: get_conversation과 공유하는 헬퍼로 추출.
     conv_id_list = [c.id for c in convs]
-    conv_participants = await _fetch_conversation_participants(conv_id_list, db)
+    conv_participants = await _fetch_conversation_participants(conv_id_list, db, device_org_id=org_id)
 
     # story #1976: unread_count 배치 — 단일 JOIN+GROUP BY(N+1 방지, §4-2). INNER JOIN이라
     # unread=0 대화는 결과행 없음 → dict.get(id, 0)으로 자연 0 처리.
@@ -1817,7 +1830,7 @@ async def list_recent_conversations_outside_project(
     # 관례 그대로)인데 이 엔드포인트가 participants를 안 내려줘 FE가 조립할 재료 자체가 없었다
     # ("님과의 대화"라는 접미 조각만 그대로 노출되던 원인). limit≤5라 배치조회 비용 무시 가능
     # — list_conversations/get_conversation과 동일 헬퍼(_fetch_conversation_participants) 재사용.
-    conv_participants = await _fetch_conversation_participants([conv.id for conv, *_ in rows], db)
+    conv_participants = await _fetch_conversation_participants([conv.id for conv, *_ in rows], db, device_org_id=org_id)
 
     return {
         "data": [
@@ -1903,7 +1916,7 @@ async def get_conversation(
         )).scalar_one()
     # story #2009: 단건 조회도 list_conversations와 동일 participants shape을 자체 포함 —
     # FE가 30건 캡 있는 list 엔드포인트에 기대던 workaround(.find() miss 버그) 제거.
-    participants_map = await _fetch_conversation_participants([conversation_id], db)
+    participants_map = await _fetch_conversation_participants([conversation_id], db, device_org_id=org_id)
     resp.participants = participants_map.get(conversation_id, [])
     # story #4631 C: the open flood block, for the conversation's banner and its [차단 해제]
     from app.services.chain_escalation import open_circuit_breaker_state

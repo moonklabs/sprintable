@@ -28,6 +28,7 @@ import { toPlainPreview } from './entity-ref';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { DeviceChip } from '@/components/desktop/device-chip';
 
 interface Participant {
   member_id: string;
@@ -42,6 +43,9 @@ interface Participant {
   // [conversation_id]/page.tsx의 Participant와 동일 계약). optional — BE 기본값(True)과
   // 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
   resolved?: boolean;
+  /** story 4675 (F2) — the computer an agent participant is bound to (the server's `_fetch_conversation_participants` · this
+   *  org's setups only); null/absent for humans, agents with no live desktop key, and an older server */
+  device_name?: string | null;
 }
 
 interface ConversationItem {
@@ -212,6 +216,8 @@ function ConversationRow({
             {t('agent')}
           </span>
         )}
+        {/* story 4675 (F2): a DM with an agent names its computer after the «에이전트» chip; a group row says nothing (several · Q-b) */}
+        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="text-[10px]" /> : null}
       </div>
     ) : (
       <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
