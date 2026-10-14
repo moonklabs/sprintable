@@ -44,6 +44,11 @@ let recipesNow: () => Response = () => new Response(JSON.stringify({ recipes: RE
 let agentsNow: () => Response = () => new Response('{}', { status: 404 });
 /** What GET /api/desktop/setups/{id} answers now (the progress tests change it between polls). */
 let statusNow: () => unknown = () => ({});
+/** story 4670 — GET /api/organizations/{id}/remote-control (default 404: not known → no «폰에서도 다루기» row) and the PUT that switches it on. */
+const REMOTE_OFF_OWNER = { enabled: false, can_change: true, enabled_at: null };
+let remoteGet: () => Response = () => new Response('{}', { status: 404 });
+let remotePut: () => Response = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
+const remoteGetOf = (v: object) => () => new Response(JSON.stringify({ data: v }), { status: 200 });
 
 function stub(confirm: () => Response | Promise<Response>) {
   calls = [];
@@ -54,6 +59,7 @@ function stub(confirm: () => Response | Promise<Response>) {
     if (url.includes('/api/desktop/setup/agents')) return agentsNow();
     if (url.includes('/api/desktop/setup-codes/')) return confirm();
     if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
+    if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return init?.method === 'PUT' ? remotePut() : remoteGet();
     return new Response('{}', { status: 404 });
   }));
 }
@@ -80,7 +86,7 @@ const openRecipes = async () => {
   if (b) await act(async () => { b.click(); });
 };
 
-beforeEach(() => { agentsNow = () => new Response('{}', { status: 404 }); recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 }); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { remoteGet = () => new Response('{}', { status: 404 }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); agentsNow = () => new Response('{}', { status: 404 }); recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 }); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 const events = () => calls.filter((c) => c.url.endsWith('/api/onboarding/events')).map((c) => c.body as { event: string; session_id: string });
 
@@ -1290,6 +1296,61 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(member?.querySelector('[data-testid=phone-app-get]')).not.toBeNull();
   });
 
+  // story 4670 (Yuna §E ②): the «폰에서도 다루기» tick was on but the switch did not turn on — one line at the progress head; the setup went on
+  it('[SID:4670] §E ② the head line «폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.» only when the page says the switch failed', async () => {
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" phoneControlFailed />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-phone-control-failed]')?.textContent).toBe('폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.');
+    act(() => root.unmount()); root = createRoot(container);
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-phone-control-failed]')).toBeNull();
+  });
+
+  // §E ③e: the card's own line for the org's off switch — an owner turns it on in place (the session's org · one PUT)
+  it('[SID:4670] §E ③e the card: org remote control off + can change → «원격 제어가 꺼져 있어요 — [켜기]»; [켜기] = one PUT (session org) and the line goes · a refusal says so, the line stays · on / not an owner → no line', async () => {
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    const line = () => container.querySelector('[data-testid=setup-phone-remote-off]');
+    expect(line()?.textContent).toContain('원격 제어가 꺼져 있어요 —');
+    // a refusal: says so, the line stays
+    remotePut = () => new Response('{}', { status: 500 });
+    await act(async () => { (container.querySelector('[data-testid=setup-phone-remote-on]') as HTMLButtonElement).click(); });
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-phone-remote-failed]')?.textContent).toBe('켜지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+    expect(line()).not.toBeNull();
+    // the press that works
+    remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
+    calls = [];
+    await act(async () => { (container.querySelector('[data-testid=setup-phone-remote-on]') as HTMLButtonElement).click(); });
+    await tick(0);
+    const puts = calls.filter((c) => c.method === 'PUT');
+    expect(puts.map((c) => c.url)).toEqual(['/api/organizations/o-1/remote-control']); // the session's org
+    expect(puts[0]!.body).toEqual({ enabled: true });
+    expect(line()).toBeNull();
+    expect(container.querySelector('[data-testid=setup-phone-pair]')).not.toBeNull(); // the pairing button was never hidden
+    // already on · cannot change · not read → no line at all
+    for (const v of [{ enabled: true, can_change: true, enabled_at: 'x' }, { enabled: false, can_change: false, enabled_at: null }] as const) {
+      act(() => root.unmount()); root = createRoot(container);
+      remoteGet = remoteGetOf(v);
+      stub(() => new Response('{}', { status: 200 }));
+      await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+      await tick(0);
+      expect(line()).toBeNull();
+    }
+    act(() => root.unmount()); root = createRoot(container);
+    remoteGet = () => new Response('{}', { status: 404 });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(line()).toBeNull();
+  });
+
   // PO 5066 ① · Yuna §E ③f: no way to get the phone app here (nothing published · no opt-in page) → PhoneAppGet draws nothing, so the
   // card must not speak of a QR: the owner's body becomes «폰 앱을 받아 두었다면 …» with the button, and a member gets no card at all
   it('[SID:4670] no way to get the phone app → owner: «폰 앱을 받아 두었다면 [폰 페어링 열기]로 …», no QR block, the button · member: no card', async () => {
@@ -1494,7 +1555,8 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     calls = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      calls.push({ url, ...(init?.method ? { method: init.method } : {}), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return remotePut();
       if (url.endsWith('/api/invites/mine')) return invitesNow();
       if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: meName, ...meVerify } }), { status: 200 });
       if (url.endsWith('/api/desktop/recipes/for-new-org')) return recipesNow();
@@ -1607,11 +1669,47 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
       code: CODE, recipe_id: 'rec-1', roles: [{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'claude' }],
       workdir_hint: '~/Sprintable/마케팅 루프', org_name: '김지우의 조직', project_name: '첫 프로젝트',
     });
+    // story 4670 (AC1): the «폰에서도 다루기» tick is on by default for the owner-to-be → after the confirmation and the new token, the one PUT
+    // for the org the server just made (`org_id` of the answer), then the progress
     expect(calls.filter((c) => !c.url.includes('/api/desktop/setups/')).map((c) => c.url)).toEqual([
-      '/api/desktop/setup-codes/confirm-new-org', '/api/auth/refresh', '/api/current-project', '/api/auth/refresh',
+      '/api/desktop/setup-codes/confirm-new-org', '/api/auth/refresh', '/api/current-project', '/api/auth/refresh', '/api/organizations/o-new/remote-control',
     ]);
+    expect(calls.find((c) => c.url === '/api/organizations/o-new/remote-control')).toMatchObject({ method: 'PUT', body: { enabled: true } });
     expect(calls.find((c) => c.url === '/api/current-project')!.body).toEqual({ project_id: 'p-new' });
     expect(container.textContent).not.toContain('새 조직 «'); // the progress view
+  });
+
+  it('[SID:4670] the new organization: the tick «폰에서도 다루기 (원격 제어)» is on by default with its help line; unticked → no switch call at all', async () => {
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    const row = container.querySelector('[data-testid=setup-phone-control]')!;
+    expect(row).not.toBeNull();
+    const box = row.querySelector('input[type=checkbox]') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(row.textContent).toContain('폰에서도 다루기 (원격 제어)');
+    expect(row.textContent).toContain('켜면 페어링된 폰에서 에이전트를 멈추고, 지시하고, 권한 요청에 답할 수 있어요 — 끄면 권한 요청이 폰으로 오지 않아요. 나중에 바꿀 수 있어요.');
+    // the row sits in the start row, above «시작»
+    expect(container.querySelector('[data-testid=setup-start-row]')!.contains(row)).toBe(true);
+    await act(async () => { box.click(); });
+    expect(box.checked).toBe(false);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flush();
+    expect(urls()).toContain('/api/desktop/setup-codes/confirm-new-org');
+    expect(calls.some((c) => c.url.includes('/remote-control'))).toBe(false); // reverted (PUT whatever the tick says) → fails
+  });
+
+  it('[SID:4670] the new organization, the tick on, the switch refused: the setup still goes on to its progress (one PUT only · no retry loop)', async () => {
+    remotePut = () => new Response('{}', { status: 500 });
+    statusNow = () => status('waiting_for_app'); // a status that is still going — the progress card holds still (an empty status would read as expired)
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flush();
+    expect(calls.filter((c) => c.url.includes('/remote-control'))).toHaveLength(1);
+    expect(text()).toContain('에이전트를 시작하고 있어요'); // the progress, not an error card
+    expect(container.querySelector('[data-testid=setup-phone-control]')).toBeNull(); // the form is gone
   });
 
   it('[바꾸기] opens both names (organization · first project) with «이름은 나중에 설정에서 바꿀 수 있어요.»; an empty name blocks «시작» with its reason; typed names are sent', async () => {
@@ -2464,5 +2562,78 @@ describe('[SID:4494] old= — the page says a runtime is too old, not missing', 
     window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-9&runtimes=&old=codex:0.153.4:0.156.1`);
     await mount(<DesktopSetupEntry />);
     expect(text()).toContain('이 컴퓨터의 Codex 버전(0.153.4)이 낮아 쓸 수 없어요');
+  });
+});
+
+describe('[SID:4670] «폰에서도 다루기 (원격 제어)» — the tick above «시작» for the person who can switch the org\'s remote control', () => {
+  const confirmOk = () => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1' }), { status: 200 });
+  const puts = () => calls.filter((c) => c.method === 'PUT' && /\/remote-control$/.test(c.url));
+  const row = () => container.querySelector('[data-testid=setup-phone-control]');
+  const flushAll = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
+
+  it('owner · switch off → the row is there and ticked; «시작» = the confirmation first, then ONE PUT for this session\'s org with {enabled:true}', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    const order = calls.filter((c) => !c.url.includes('/api/desktop/setups/')).map((c) => `${c.method ?? 'GET'} ${c.url}`);
+    expect(order).toEqual(['POST /api/desktop/setup-codes/confirm', 'PUT /api/organizations/o-1/remote-control']);
+    expect(puts()[0]!.body).toEqual({ enabled: true });
+    expect(text()).toContain('에이전트를 시작하고 있어요');
+  });
+
+  it('unticked → «시작» sends the confirmation and NO switch call, by any road', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(calls.some((c) => c.url === '/api/desktop/setup-codes/confirm')).toBe(true);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('the confirmation fails → no switch call (the PUT never rides ahead of it)', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(() => new Response(JSON.stringify({ error: { code: 'recipes_changed' } }), { status: 409 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(calls.some((c) => c.url === '/api/desktop/setup-codes/confirm')).toBe(true);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('no row — and no PUT — when the switch is already on · the person cannot change it (an admin) · the value is not read', async () => {
+    for (const get of [
+      remoteGetOf({ enabled: true, can_change: true, enabled_at: 'x' }),
+      remoteGetOf({ enabled: false, can_change: false, enabled_at: null }),
+      () => new Response('{}', { status: 404 }),
+    ]) {
+      remoteGet = get;
+      stub(confirmOk);
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+      expect(row()).toBeNull();
+      calls = [];
+      await act(async () => { startButton().click(); });
+      await flushAll();
+      expect(puts()).toHaveLength(0);
+      act(() => root.unmount()); root = createRoot(container);
+    }
+  });
+
+  it('the switch call is refused: the setup still goes on to its progress (no error card)', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    remotePut = () => new Response('{}', { status: 403 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(puts()).toHaveLength(1);
+    expect(text()).toContain('에이전트를 시작하고 있어요');
   });
 });

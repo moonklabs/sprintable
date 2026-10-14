@@ -6995,7 +6995,13 @@
       "seeResult": "See the result",
       "goToday": "Go to Today",
       "wayOutNote": "You can leave — setup continues on this computer, and the first result will be in Work.",
+      "phoneControl": {
+        "label": "Also handle from your phone (remote control)",
+        "help": "On, a paired phone can stop and instruct agents and answer their permission requests — off, permission requests don't reach the phone. You can change this later.",
+        "failed": "Phone control couldn't be turned on — you can turn it on from the card at the end."
+      },
       "phoneCard": {
+        "remoteOff": "Remote control is off —",
         "title": "To handle agents from your phone too",
         "body": "Scan the QR with your phone's camera to get the phone app, then [Open phone pairing] to pair it with this computer.",
         "bodyNoApp": "If you already have the phone app, [Open phone pairing] pairs it with this computer.",
@@ -7127,6 +7133,17 @@
       "retry": "Try again",
       "member": "Your organization's admins manage its desktop connections.",
       "expandAgentsAria": "Show {device}'s agents"
+    },
+    "remoteOn": {
+      "confirmTitle": "Turn on remote control",
+      "confirmBody": "On, a paired phone can stop and instruct agents and answer their permission requests. This applies to the whole organization.",
+      "orgLine": "Organization: {org}",
+      "turningOn": "Turning on remote control…",
+      "done": "On — back to the app",
+      "doneHere": "Remote control is on",
+      "already": "Already on — back to the app",
+      "alreadyHere": "Remote control is already on",
+      "backToApp": "Back to the app"
     },
     "remote": {
       "loading": "Loading",

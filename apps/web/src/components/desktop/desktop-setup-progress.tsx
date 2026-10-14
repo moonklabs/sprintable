@@ -19,6 +19,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { endsWithAgentWord, forgetActiveSetup, moveProgress, rememberActiveSetup, setupPollDelayMs, setupProgress, stepsShown, SETUP_STATUS_POLL_MS, type DesktopRuntime, type MoveProgress, type SetupStatus, type StepShown } from '@/lib/desktop-setup';
 import { Failure, ToolsNotConnected } from './desktop-setup';
+import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
 
 /**
  * «시작» 뒤 진행 표시(유나 시안 v13 · PO 12:25Z): 설정 상태 조회(4826)를 2초마다 읽어 세 단계로. 조회는 setupProgress()의
@@ -40,7 +41,7 @@ export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {
   );
 }
 
-export function SetupProgressView({ setupId, recipeName }: { setupId: string | null; recipeName: string }) {
+export function SetupProgressView({ setupId, recipeName, phoneControlFailed = false }: { setupId: string | null; recipeName: string; phoneControlFailed?: boolean }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
   const tOrg = useTranslations('organization');
@@ -154,6 +155,8 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
         <p className="text-xs text-muted-foreground">{t('eyebrow')}{task ? ` · ${task}` : ''}</p>
         <h1 className="text-lg font-semibold">{progress.result === 'done' ? t('startedDoneTitle') : t('startedTitle')}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p>
+        {/* story 4670 (Yuna §E ②): the «폰에서도 다루기» tick was on but the switch did not turn on — the setup went on; the way is the card below */}
+        {phoneControlFailed ? <p className="mt-1 text-xs text-muted-foreground" role="status" data-testid="setup-phone-control-failed">{t('phoneControl.failed')}</p> : null}
       </header>
       <ol className="flex flex-col gap-3" aria-live="polite">
         {/* a later step done → the earlier one is drawn done (Yuna 12:22Z): ② proves the receiving agent was ready; the pairs line
@@ -273,6 +276,21 @@ export function SetupProgressView({ setupId, recipeName }: { setupId: string | n
 export function PhoneHandoffCard({ isAdmin, app }: { isAdmin: boolean; app: NativeReturnApp | null }) {
   // the file's namespace with dotted keys (the repo's i18n key check binds one namespace per hook name in a file — story #2371)
   const t = useTranslations('desktop.setup');
+  const tRemote = useTranslations('desktop.remote');
+  // §E ③e: the org's remote control is off and this person can switch it → a line with [켜기] that turns it on in place (the one PUT ·
+  // the session's org); anyone else sees nothing here (the member's own off-line lives where it already did)
+  const { orgId } = useDashboardContext();
+  const [remote, setRemote] = useOrgRemoteControl(orgId);
+  const [turning, setTurning] = useState<'idle' | 'busy' | 'failed'>('idle');
+  const showOff = !!orgId && !!remote && remote.can_change && !remote.enabled;
+  const turnOn = async () => {
+    if (!orgId || turning === 'busy') return;
+    setTurning('busy');
+    const r = await putOrgRemoteControl(orgId);
+    if (!r.ok) { setTurning('failed'); return; }
+    if (r.data) setRemote(r.data);
+    setTurning('idle');
+  };
   // PO 5066 ① · Yuna §E ③f: whether the phone app can be got here at all — the same reading PhoneAppGet makes (it draws nothing without
   // a way in); then the body names no QR, and a member (no button either) gets no card at all — nothing to do on that screen
   const hasApp = phoneAppLinks(PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET).length > 0;
@@ -281,6 +299,15 @@ export function PhoneHandoffCard({ isAdmin, app }: { isAdmin: boolean; app: Nati
     <section className="flex flex-col gap-3 rounded-md border p-3" aria-labelledby="setup-phone-card-title" data-testid="setup-phone-card" data-app={hasApp ? 'yes' : 'no'}>
       <h2 id="setup-phone-card-title" className="text-sm font-medium">{t('phoneCard.title')}</h2>
       <p className="text-sm text-muted-foreground">{hasApp ? t('phoneCard.body') : t('phoneCard.bodyNoApp')}</p>
+      {showOff ? (
+        <div className="flex flex-wrap items-center gap-2" data-testid="setup-phone-remote-off">
+          <p className="text-sm">{t('phoneCard.remoteOff')}</p>
+          <Button size="sm" variant="outline" onClick={() => void turnOn()} aria-disabled={turning === 'busy' || undefined} className="aria-disabled:pointer-events-none aria-disabled:opacity-50" data-testid="setup-phone-remote-on">
+            {tRemote('turnOn')}
+          </Button>
+          {turning === 'failed' ? <p className="w-full text-xs text-destructive" role="alert" data-testid="setup-phone-remote-failed">{tRemote('failed')}</p> : null}
+        </div>
+      ) : null}
       {hasApp ? <PhoneAppGet /> : null}
       {isAdmin
         ? <div><Button asChild variant="outline"><a href={appSetupLink(app, 'pair')} data-testid="setup-phone-pair">{t('phoneCard.openPairing')}</a></Button></div>
