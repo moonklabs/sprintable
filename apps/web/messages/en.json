@@ -5195,6 +5195,12 @@
         "usage_limit": "Usage limit",
         "waiting_system": "Waiting on a macOS prompt"
       },
+      "inbox": {
+        "otherReceiver": "Another place is receiving this agent's work, so new work doesn't come to {device}",
+        "otherReceiverNoDevice": "Another place is receiving this agent's work, so new work doesn't come to this session",
+        "takenOver": "Another place took over this agent's work, so new work no longer comes to {device} — to take it back, press [Receive here] in the app on {device}",
+        "takenOverNoDevice": "Another place took over this agent's work, so no new work comes to this session — to take it back, press [Receive here] in the app on the computer this session runs on"
+      },
       "folder": {
         "documents": "the Documents folder",
         "desktop": "the Desktop folder",

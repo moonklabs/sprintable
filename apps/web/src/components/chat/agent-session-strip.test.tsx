@@ -313,3 +313,139 @@ describe('AgentSessionStrip — what it runs on (story 4686)', () => {
     expect(runLine()).toBeNull();
   });
 });
+
+// story 4684 (Yuna ux1-copy §L ② ③): one line under the status when THIS computer receives no new work for the agent — ② another place is
+// receiving (muted fact line) · ③ another place took the agent over (warning tone). No button: taking it back is the app's [여기서 받기]
+describe('AgentSessionStrip — why this computer receives no new work (story 4684)', () => {
+  const inboxLine = () => container.querySelector('[data-testid="agent-session-inbox"]');
+  const takeBackButtons = () => Array.from(container.querySelectorAll('button')).filter((b) => /여기서 받기|Receive here/.test(b.textContent ?? ''));
+
+  it('② another place is receiving: the muted fact line with the computer\'s name — under the status line, no button', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', inbox: { stream: 'stopped_other_receiver' } }));  // working has a status line to sit under
+    await render();
+    expect(inboxLine()?.textContent).toBe('다른 곳에서 이 에이전트의 일을 받고 있어 SYJ-MacBook-Pro에서는 새 일을 받지 않아요');
+    expect(inboxLine()?.getAttribute('data-stop')).toBe('other_receiver');
+    expect(inboxLine()?.className).toContain('text-muted-foreground');
+    expect(inboxLine()?.className).not.toContain('text-warning');
+    const status = container.querySelector('[data-testid="agent-session-line"]');
+    expect(status).not.toBeNull();  // the status line is there, and the inbox line comes after it
+    expect(status!.compareDocumentPosition(inboxLine()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(takeBackButtons()).toHaveLength(0);
+  });
+
+  it('a very long computer name without spaces cannot push the line past the phone\'s width (Yuna PASS note: break-keep + overflow-wrap:anywhere), both tones', async () => {
+    for (const stream of ['stopped_other_receiver', 'stopped_taken_over']) {
+      fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: 'SYJ-MacBook-Pro-'.repeat(8) + 'x', inbox: { stream } }));
+      await render();
+      expect(inboxLine()?.className).toContain('[overflow-wrap:anywhere]');
+      expect(inboxLine()?.className).toContain('break-keep');
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
+  it('②′ no computer name → «this session» wording', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: null, inbox: { stream: 'stopped_other_receiver' } }));
+    await render();
+    expect(inboxLine()?.textContent).toBe('다른 곳에서 이 에이전트의 일을 받고 있어 이 세션에는 새 일이 오지 않아요');
+  });
+
+  it('③ taken over: the warning tone, names the computer twice and where to press — still no button here', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', inbox: { stream: 'stopped_taken_over' } }));
+    await render();
+    expect(inboxLine()?.textContent).toBe('다른 곳에서 이 에이전트의 일을 넘겨받아 SYJ-MacBook-Pro에서는 새 일을 받지 않아요 — 되돌리려면 SYJ-MacBook-Pro의 앱에서 [여기서 받기]를 눌러 주세요');
+    expect(inboxLine()?.getAttribute('data-stop')).toBe('taken_over');
+    expect(inboxLine()?.className).toContain('text-warning');
+    expect(takeBackButtons()).toHaveLength(0);
+  });
+
+  it('③′ no computer name → the session\'s own computer wording', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: '   ', inbox: { stream: 'stopped_taken_over' } }));
+    await render();
+    expect(inboxLine()?.textContent).toBe('다른 곳에서 이 에이전트의 일을 넘겨받아 이 세션에는 새 일이 오지 않아요 — 되돌리려면 이 세션이 도는 컴퓨터의 앱에서 [여기서 받기]를 눌러 주세요');
+  });
+
+  it('English words for both', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', inbox: { stream: 'stopped_other_receiver' } }));
+    await render('en');
+    expect(inboxLine()?.textContent).toBe("Another place is receiving this agent's work, so new work doesn't come to SYJ-MacBook-Pro");
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', inbox: { stream: 'stopped_taken_over' } }));
+    await render('en');
+    expect(inboxLine()?.textContent).toBe("Another place took over this agent's work, so new work no longer comes to SYJ-MacBook-Pro — to take it back, press [Receive here] in the app on SYJ-MacBook-Pro");
+  });
+
+  it.each(['stopped_auth', 'stopped_inbox_full', 'stopped_something_new', 'open', null, undefined])('a stop with no strip words yet / an unknown one (%s) → no line at all', async (stream) => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', inbox: { stream } }));
+    await render();
+    expect(inboxLine()).toBeNull();
+  });
+
+  it('no `inbox` from the server (an older one, a silent computer) → no line', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle' }));
+    await render();
+    expect(inboxLine()).toBeNull();
+  });
+
+  it.each(['stopped', 'unknown'])('a session that is not live (%s) shows none even if a stop arrives with it', async (state) => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state, inbox: { stream: 'stopped_taken_over' } }));
+    await render();
+    expect(inboxLine()).toBeNull();
+  });
+});
+
+// story 4684 (Kadir 5084): the DM moves from agent A to agent B — B's strip must never show A's lines (its stop, its run, its computer)
+describe('AgentSessionStrip — another agent\'s view is never shown (story 4684 · Kadir)', () => {
+  const inboxLine = () => container.querySelector('[data-testid="agent-session-inbox"]');
+  const renderFor = async (agentId: string) => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <AgentSessionStrip agentId={agentId} conversationId="c-1" />
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+  };
+  const failed = () => new Response('{}', { status: 500 });
+
+  it('A shows its stop line; the DM moves to B and B\'s first read fails → nothing of A is left on B\'s screen', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', device_name: 'A-맥', inbox: { stream: 'stopped_taken_over' }, run: { model: 'claude-fable-5-1', model_set: true } }));
+    await renderFor('a-1');
+    expect(inboxLine()?.textContent).toContain('A-맥');
+    expect(container.querySelector('[data-testid="agent-session-chip"]')).not.toBeNull();
+    fetchWithAuth.mockResolvedValue(failed());
+    await renderFor('a-2');
+    expect(inboxLine()).toBeNull();
+    expect(container.querySelector('[data-testid="agent-session-chip"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-session-run"]')).toBeNull();
+    expect(container.textContent).not.toContain('A-맥');
+  });
+
+  it('while B\'s first read is still pending, A\'s lines are already gone (nothing of A is shown in the meantime)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', device_name: 'A-맥', inbox: { stream: 'stopped_taken_over' } }));
+    await renderFor('a-1');
+    expect(inboxLine()?.textContent).toContain('A-맥');
+    fetchWithAuth.mockReturnValue(new Promise(() => undefined)); // B's read never comes back during this test
+    await renderFor('a-2');
+    expect(inboxLine()).toBeNull();
+    expect(container.querySelector('[data-testid="agent-session-chip"]')).toBeNull();
+    expect(container.textContent).not.toContain('A-맥');
+  });
+
+  it('B\'s own successful read replaces it; and a failed read for the SAME agent still keeps what it showed (a blip does not blank the strip)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', device_name: 'A-맥', inbox: { stream: 'stopped_other_receiver' } }));
+    await renderFor('a-1');
+    expect(inboxLine()?.textContent).toContain('A-맥');
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: 'B-맥' }));
+    await renderFor('a-2');
+    expect(inboxLine()).toBeNull();
+    expect(container.textContent).toContain('B-맥');
+    // the same agent re-reads (the REREAD timer or a nudge) and the read fails: its last view stays
+    fetchWithAuth.mockResolvedValue(failed());
+    await act(async () => { onExtra?.('desktop.session_changed', JSON.stringify({ agent_member_id: 'a-2' })); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain('B-맥');
+  });
+});

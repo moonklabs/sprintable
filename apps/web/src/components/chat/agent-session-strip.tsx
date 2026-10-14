@@ -16,6 +16,7 @@ import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
 import { limitHeld, limitLine, limitLooksAgain, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
 import { runInfoLine, type SessionRun } from '@/lib/agent-session-run';
+import { inboxStop, type SessionInbox } from '@/lib/agent-session-inbox';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
@@ -46,6 +47,9 @@ interface View {
   // story 4686 (AC2): what it really runs on — model · whether the profile named it · thinking depth · account (the server sends it only while
   // the computer is heard and the session lives; an older server sends none → no line)
   run?: SessionRun | null;
+  // story 4684 (Yuna ux1-copy §L ②③): why THIS computer receives no new work for the agent — the board's stop word (the server sends it only while
+  // the computer is heard and the session lives; an older server sends none → no line)
+  inbox?: SessionInbox | null;
   // story #4599: a held turn's why — the folder the macOS window asks about, when the daemon read it (a closed list; null = not read)
   system?: { folder?: SystemFolder | null } | null;
   // story #4641: a permission widening a person made at the terminal — the three keys, only while one is stored (the server's)
@@ -127,7 +131,11 @@ async function readView(agentId: string): Promise<View | null> {
 }
 
 export function AgentSessionStrip({ agentId, conversationId }: { agentId: string; conversationId: string }) {
-  const [view, setView] = useState<View | null>(null);
+  // story 4684 (Kadir 5084): the view is kept WITH the agent it was read for. A read that fails keeps the last view (a network blip must not blank the
+  // strip) — but only that same agent's: when the DM moves from A to B and B's first read comes back empty, A's lines (its stop, its run, its
+  // computer) must not show on B's screen. Not a `key` at one call site: every caller is covered.
+  const [loaded, setLoaded] = useState<{ agentId: string; view: View } | null>(null);
+  const view = loaded?.agentId === agentId ? loaded.view : null;
   const [nudges, setNudges] = useState(0);
   // story #4534: when the view was read — a limit's «passed» is judged on this page's clock at that read (never in render)
   const [readAt, setReadAt] = useState(0);
@@ -146,7 +154,7 @@ export function AgentSessionStrip({ agentId, conversationId }: { agentId: string
 
   useEffect(() => {
     let off = false;
-    const read = () => void readView(agentId).then((v) => { if (!off) { setView((prev) => v ?? prev); setReadAt(Date.now()); } });
+    const read = () => void readView(agentId).then((v) => { if (!off) { setLoaded((prev) => (v ? { agentId, view: v } : prev?.agentId === agentId ? prev : null)); setReadAt(Date.now()); } });
     read();
     const id = setInterval(read, REREAD_MS);
     return () => { off = true; clearInterval(id); };
@@ -264,6 +272,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
         </span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
+      <InboxLine view={view} />
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
@@ -371,6 +380,23 @@ function RunLine({ run }: { run: SessionRun | null }) {
   if (!run) return null;
   const text = runInfoLine(run, ta);
   return <p className="w-full truncate text-muted-foreground" title={text} data-testid="agent-session-run">{text}</p>;
+}
+
+// story 4684 (Yuna ux1-copy §L ② ③): one line under the status when THIS computer receives no new work for the agent. ② another place is
+// receiving (the second install was refused) — a muted fact line · ③ another place TOOK it over (this computer was displaced) — the warning tone,
+// a person should notice. No button: taking it back is the app's [여기서 받기] on that computer (a remote command would be new, and a dead end where
+// remote control is off) — the line says where to press it. The computer's name is the strip's own `device_name` (none → the «this session» wording).
+// Nothing when the server sends no stop, a stop whose words are not here yet (key refused · waiting list full), or the session is not live.
+function InboxLine({ view }: { view: View }) {
+  const t = useTranslations('chats.agentSession');
+  const stop = view.state === 'stopped' || view.state === 'unknown' ? null : inboxStop(view.inbox);
+  if (!stop) return null;
+  const device = view.device_name?.trim() ? view.device_name : null;
+  // each wording by its own literal call (the dead-key guard reads the literals)
+  const text = stop === 'taken_over'
+    ? (device ? t('inbox.takenOver', { device }) : t('inbox.takenOverNoDevice'))
+    : (device ? t('inbox.otherReceiver', { device }) : t('inbox.otherReceiverNoDevice'));
+  return <p className={`w-full break-keep [overflow-wrap:anywhere] ${stop === 'taken_over' ? 'text-warning' : 'text-muted-foreground'}`} data-testid="agent-session-inbox" data-stop={stop}>{text}</p>;
 }
 
 // story #4641 (Yuna's copy, 2026-10-08): one plain muted line under the session, only when a person widened the mode at the terminal —
