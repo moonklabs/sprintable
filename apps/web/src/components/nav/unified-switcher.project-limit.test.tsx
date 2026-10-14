@@ -170,4 +170,27 @@ describe('«새 프로젝트» 창 — 요금제 프로젝트 한도(402) (story
     expect(dialog.querySelector('[data-testid="project-limit-banner"]')).toBeNull();
     expect(dialog.textContent).toContain(GENERIC);
   });
+
+  it('the order a customer really walks — limit → close → open again: no old banner and no general line (the open/close setter clears it)', async () => {
+    await render();
+    const dialog = await fillAndSubmit();
+    expect(dialog.querySelector('[data-testid="project-limit-banner"]')).not.toBeNull();
+    // close with the visible cancel button
+    const cancel = [...dialog.querySelectorAll('button')].find((b) => b.textContent?.trim() === (koMessages.common as Record<string, string>).cancel) as HTMLButtonElement;
+    await act(async () => { cancel.click(); });
+    await settle();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    // open the dialog again
+    const trigger = container.querySelector('[data-slot="dropdown-menu-trigger"]') as HTMLElement;
+    await act(async () => { trigger.click(); });
+    await settle();
+    const item = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.trim() === nav.switcherNewProject) as HTMLElement;
+    await act(async () => { item.click(); });
+    await settle();
+    const again = document.body.querySelector('[role="dialog"]')!;
+    expect(again).not.toBeNull();
+    expect(again.querySelector('[data-testid="project-limit-banner"]')).toBeNull();
+    expect(again.textContent).not.toContain(GENERIC);
+    expect(again.querySelector('[role="alert"]')).toBeNull();
+  });
 });
