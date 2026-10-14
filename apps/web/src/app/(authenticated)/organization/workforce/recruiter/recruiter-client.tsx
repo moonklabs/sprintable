@@ -25,7 +25,7 @@ import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FIL
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
-import { desktopApp, type SprintableDesktop, type DesktopRuntimeFound } from '@/lib/desktop-app';
+import { desktopApp, subscribeDesktopApp, type SprintableDesktop, type DesktopRuntimeFound } from '@/lib/desktop-app';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { copyTextSafely } from '@/lib/clipboard';
@@ -33,8 +33,6 @@ import { buildCodexConfigToml } from '@/lib/codex-mcp-config';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
-
-const noSubscribe = () => () => undefined;
 
 /** story 4680 (PO 5065 ①): how the recruit's end screen offers «start on this computer» — only for a runtime the desktop app runs
  * (`desktop_runtime` set: claude-code · codex): inside the app the bridge's hand (`app`), in a browser the app link (`link`); any
@@ -548,8 +546,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   );
 
   // story 4680 (UX-1 · D2): inside the desktop app the page reads its bridge (D1 · lib/desktop-app.ts) — the runtimes the app
-  // found on this computer; in a browser there is none and the picker is as it was. Read once (the same frozen object every time).
-  const bridge = useSyncExternalStore<SprintableDesktop | undefined>(noSubscribe, desktopApp, () => undefined);
+  // found on this computer; in a browser there is none and the picker is as it was. story 4691: the app's list can arrive AFTER the
+  // page loaded (detection takes seconds) — `subscribeDesktopApp` re-reads it when the app says it changed (an older app: no-op).
+  const bridge = useSyncExternalStore<SprintableDesktop | undefined>(subscribeDesktopApp, desktopApp, () => undefined);
   const foundHere = useMemo(
     () => foundRuntimes(bridge?.runtimes ?? [], supportedRuntimes),
     [bridge, supportedRuntimes],
@@ -557,13 +556,16 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const foundSlugs = useMemo(() => new Set(foundHere.map((f) => f.cap.slug)), [foundHere]);
   // the default is the first the app found (bridge order · PO Q-d) — once, when the list is known; a person's pick after that stands
   const foundDefaultApplied = useRef(false);
+  // story 4691: a runtime a PERSON clicked stands — a list that arrives later never replaces it with the found default
+  const runtimePickedByPerson = useRef(false);
+  const chooseRuntime = useCallback((slug: string) => { runtimePickedByPerson.current = true; setRuntime(slug); }, []);
 
   // 로드된 목록에 현재 선택값이 없으면(예: 기본값 'claude-code'가 이 org enviro서 미지원) 첫 지원
   // 런타임으로 보정 — recruit() 400 방지.
   useEffect(() => {
     if (!foundDefaultApplied.current && foundHere.length) {
       foundDefaultApplied.current = true;
-      if (foundHere[0]!.cap.slug !== runtime) { setRuntime(foundHere[0]!.cap.slug); return; }
+      if (!runtimePickedByPerson.current && foundHere[0]!.cap.slug !== runtime) { setRuntime(foundHere[0]!.cap.slug); return; }
     }
     const next = pickDefaultRuntime(supportedRuntimes, runtime);
     if (next !== runtime) setRuntime(next);
@@ -615,7 +617,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       key={cap.slug}
                       type="button"
                       variant="outline"
-                      onClick={() => setRuntime(cap.slug)}
+                      onClick={() => chooseRuntime(cap.slug)}
                       aria-label={t('foundHereCardAria', { n: i + 1, label: runtimeDisplayName(cap) })}
                       aria-pressed={sel}
                       data-testid={`recruiter-found-${found.runtime}`}
@@ -652,7 +654,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <button
                     key={rc.slug}
                     type="button"
-                    onClick={() => setRuntime(rc.slug)}
+                    onClick={() => chooseRuntime(rc.slug)}
                     className={cn(
                       'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
                       sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
