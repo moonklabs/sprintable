@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import exists, func, or_, select, text, tuple_
+from sqlalchemy import and_, exists, func, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
@@ -144,7 +144,15 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
                 StandupEntryProject.project_id.in_(list(project_ids)),
             )
             any_link = exists().where(StandupEntryProject.entry_id == StandupEntry.id)
-            conds.append(or_(linked_accessible, ~any_link))
+            # story #4688 (AC2): deleting a project CASCADE-deletes its links, so an entry written for it would have no link left and read as an
+            # «org-level» one — shown to everybody. An entry whose ORIGIN project (`project_id`) is gone is that project's leftover, not an org record.
+            from app.models.project import Project
+
+            origin_gone = and_(
+                StandupEntry.project_id.is_not(None),
+                ~exists().where(Project.id == StandupEntry.project_id, Project.deleted_at.is_(None)),
+            )
+            conds.append(or_(linked_accessible, and_(~any_link, ~origin_gone)))
         if cursor is not None:
             cursor_date, cursor_created_at, cursor_id = cursor
             conds.append(
@@ -164,6 +172,23 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
         )
         result = await self.session.execute(q)
         return list(result.scalars().all()), total
+
+    async def is_leftover_of_deleted_project(self, entry: StandupEntry) -> bool:
+        """story #4688 (AC2): the entry was written for a project that is gone and no live project carries it any more (the links went with the
+        project). The same rule `list_paginated` uses to keep it out of the org-level list — a single read answers 404 for it."""
+        if entry.project_id is None:
+            return False
+        from app.models.project import Project
+
+        live = (await self.session.execute(
+            select(Project.id).where(Project.id == entry.project_id, Project.deleted_at.is_(None))
+        )).scalar_one_or_none()
+        if live is not None:
+            return False
+        linked = (await self.session.execute(
+            select(StandupEntryProject.entry_id).where(StandupEntryProject.entry_id == entry.id).limit(1)
+        )).scalar_one_or_none()
+        return linked is None
 
     async def upsert(self, **data: Any) -> StandupEntry:
         """E-STANDUP 3b6b567c: org-level upsert — 키 **(org_id, author_id, date)**.

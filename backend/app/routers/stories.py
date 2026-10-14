@@ -261,11 +261,8 @@ async def list_stories(
     # «no scope» and the three branches below filter by the dead id. A project that does not exist (or is deleted) has no stories to list: an empty page,
     # the same answer an unknown id always got.
     if project_id is not None:
-        from app.models.project import Project
-        live = (await repo.session.execute(
-            select(Project.id).where(Project.id == project_id, Project.org_id == repo.org_id, Project.deleted_at.is_(None))
-        )).scalar_one_or_none()
-        if live is None:
+        from app.services.project_auth import project_is_live
+        if not await project_is_live(repo.session, repo.org_id, project_id):
             if response is not None:
                 response.headers["X-Total-Count"] = "0"
                 response.headers["X-Result-Count"] = "0"
@@ -1115,11 +1112,13 @@ async def get_workflow_line_metrics(
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import live_project_ids_in_org, restricted_accessible_project_ids
     from app.services.workflow_line_metrics import compute_line_metrics
 
     restricted = await restricted_accessible_project_ids(repo.session, uuid.UUID(auth.user_id), repo.org_id)
-    return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days, project_ids=restricted)
+    # story #4688 (AC2): None = «reaches every project» must not mean «no filter» — a deleted project's stories would join the numbers
+    scope = restricted if restricted is not None else await live_project_ids_in_org(repo.session, repo.org_id)
+    return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days, project_ids=scope)
 
 
 @router.get("/{id}", response_model=StoryResponse)

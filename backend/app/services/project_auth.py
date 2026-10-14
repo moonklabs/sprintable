@@ -738,6 +738,31 @@ async def restricted_accessible_project_ids(
     return None if all_projects <= set(accessible) else accessible
 
 
+async def live_project_ids_in_org(session: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
+    """story #4688 (AC2): the org's projects that exist and are not deleted. `restricted_accessible_project_ids` answers None («nothing to filter»)
+    for a caller who reaches every project — that None lets a deleted project's leftovers (rows with no foreign key to `projects`) into org-wide
+    aggregates; the aggregate routes use THIS list in its place, so «all projects» means all that are still there."""
+    from sqlalchemy import select
+
+    from app.models.project import Project
+
+    return list((await session.execute(
+        select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalars())
+
+
+async def project_is_live(session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID) -> bool:
+    """story #4688 (AC2): the project exists in this org and is not deleted. Deleting a project is non-destructive (what it held stays,
+    unreachable): a list asked for a dead project's own id has nothing to say."""
+    from sqlalchemy import select
+
+    from app.models.project import Project
+
+    return (await session.execute(
+        select(Project.id).where(Project.id == project_id, Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalar_one_or_none() is not None
+
+
 async def project_accessible_member_ids(
     session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID,
 ) -> set[uuid.UUID]:

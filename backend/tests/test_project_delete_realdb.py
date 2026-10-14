@@ -51,13 +51,18 @@ async def test_02_a_project_with_a_granted_member_can_be_deleted(world):
 
 
 MARK = "ORPHAN-4688"
+AUTHOR = "d4688000-0000-0000-0000-0000000000b0"  # the standup entries these tests write (wiped after each)
 
 
 @pytest.fixture(autouse=True)
 async def _clean_orphans():
     """a deleted project leaves its rows behind (that is the point of the non-destructive delete) — these tests must not leave theirs in the shared DB."""
     async def wipe():
-        await _sql(f"DELETE FROM stories WHERE title LIKE '{MARK}%'", f"DELETE FROM sprints WHERE title LIKE '{MARK}%'", f"DELETE FROM goals WHERE title LIKE '{MARK}%'")
+        await _sql(
+            f"DELETE FROM stories WHERE title LIKE '{MARK}%'", f"DELETE FROM sprints WHERE title LIKE '{MARK}%'", f"DELETE FROM goals WHERE title LIKE '{MARK}%'",
+            f"DELETE FROM docs WHERE title LIKE '{MARK}%'", f"DELETE FROM standup_entries WHERE author_id='{AUTHOR}'",
+            f"DELETE FROM workflow_line_step_runs WHERE transition_id LIKE '{MARK}%'",
+        )
     await wipe()
     yield
     await wipe()
@@ -142,3 +147,95 @@ async def test_06_a_soft_deleted_project_lists_no_stories_either(world):
             # answers an empty page if it ever got through: either way nothing of the project's shows and nothing is a 5xx
             assert r.status_code == 403 or (r.status_code == 200 and r.json() == []), (suffix, r.status_code, r.text[:200])
             assert MARK not in r.text
+
+
+# ---- the four paths Kadir found on 5076 (codex, 10-14): docs · standups · the command-center overview · the workflow-line metrics ----
+
+async def _doc(pid: str, slug: str, title: str) -> None:
+    await _sql(f"INSERT INTO docs (id,org_id,project_id,title,slug,tags) VALUES (gen_random_uuid(),'{ORG}','{pid}','{title}','{slug}',ARRAY['t4688'])")
+
+
+async def test_07_docs_of_a_deleted_project_list_nowhere_and_a_live_projects_stay(world):
+    """docs have no foreign key to `projects`: every project branch of the list (plain · tree · search · slug · tags · parent) answered the dead id."""
+    async with _client() as c:
+        live, dead = await _create(c, "walk-docs-live"), await _create(c, "walk-docs-dead")
+        await _doc(live, "t4688-live", f"{MARK}-doc-live")
+        await _doc(dead, "t4688-dead", f"{MARK}-doc-dead")
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        base = "/api/v2/docs?project_id="
+        dead_paths = [f"{base}{dead}", f"{base}{dead}&tree=true", f"{base}{dead}&q={MARK}", f"{base}{dead}&slug=t4688-dead",
+                      f"{base}{dead}&tags=t4688", f"{base}{dead}&parent_id={dead}"]
+        for path in dead_paths:
+            r = await c.get(path, headers=_person(OWNER))
+            assert r.status_code == 200 and r.json()["data"] == [], (path, r.status_code, r.text[:200])
+            assert MARK not in r.text, path
+        tree = (await c.get(f"{base}{dead}&tree=true", headers=_person(OWNER))).json()
+        assert tree["meta"]["total"] == 0 and tree["meta"]["has_more"] is False
+        for path in ("/api/v2/docs", f"/api/v2/docs?ids={(await _sql(fetch=f'SELECT id::text FROM docs WHERE slug=' + chr(39) + 't4688-dead' + chr(39)))[0][0]}"):
+            r = await c.get(path, headers=_person(OWNER))
+            assert r.status_code == 200 and "doc-dead" not in r.text, path
+        # control: the live project lists its doc on the same branches
+        for path in (f"{base}{live}", f"{base}{live}&tree=true", f"{base}{live}&q={MARK}", f"{base}{live}&slug=t4688-live", f"{base}{live}&tags=t4688"):
+            r = await c.get(path, headers=_person(OWNER))
+            assert r.status_code == 200 and [d["title"] for d in r.json()["data"]] == [f"{MARK}-doc-live"], (path, r.text[:200])
+
+
+async def test_08_a_standup_written_for_a_deleted_project_is_not_an_org_record(world):
+    """deleting the project CASCADE-deletes its links, so the entry kept only its origin `project_id`: with no link it read as «org-level» and showed
+    to everybody. An org-level record (no project, no link) and one on a live project are untouched."""
+    async with _client() as c:
+        live, dead = await _create(c, "walk-su-live"), await _create(c, "walk-su-dead")
+        ids = {}
+        for key, day, project in (("dead", "2026-09-01", dead), ("live", "2026-09-02", live), ("org", "2026-09-03", None)):
+            pj = f"'{project}'" if project else "NULL"
+            await _sql(f"INSERT INTO standup_entries (id,org_id,project_id,author_id,date) VALUES (gen_random_uuid(),'{ORG}',{pj},'{AUTHOR}','{day}')")
+            ids[key] = (await _sql(fetch=f"SELECT id::text FROM standup_entries WHERE author_id='{AUTHOR}' AND date='{day}'"))[0][0]
+            if project:
+                await _sql(f"INSERT INTO standup_entry_projects (id,entry_id,project_id,org_id) VALUES (gen_random_uuid(),'{ids[key]}','{project}','{ORG}')")
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        r = await c.get("/api/v2/standups", headers=_person(OWNER))
+        assert r.status_code == 200, r.text
+        mine = {e["id"] for e in r.json() if e["author_id"] == AUTHOR}
+        assert mine == {ids["live"], ids["org"]}, mine  # reverted → the dead one is in the set
+        assert (await c.get(f"/api/v2/standups/{ids['dead']}", headers=_person(OWNER))).status_code == 404
+        assert (await c.get(f"/api/v2/standups/{ids['live']}", headers=_person(OWNER))).status_code == 200
+        assert (await c.get(f"/api/v2/standups/{ids['org']}", headers=_person(OWNER))).status_code == 200
+
+
+async def test_09_the_command_center_overview_does_not_count_what_a_deleted_project_left(world):
+    """the owner reaches every project, so `restricted_accessible_project_ids` answered None («no filter»): the epics and the contribution numbers
+    then included rows of a project that is gone. The scope label still says «org»."""
+    async with _client() as c:
+        before = (await c.get("/api/v2/command-center/overview", headers=_person(OWNER))).json()
+        base_unassigned = before["project_status"]["contribution"]["unassigned"]
+        live, dead = await _create(c, "walk-cc-live"), await _create(c, "walk-cc-dead")
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            await _sql(
+                f"INSERT INTO goals (id,org_id,project_id,title,status) VALUES (gen_random_uuid(),'{ORG}','{pid}','{MARK}-epic-{tag}','active')",
+                f"INSERT INTO stories (id,org_id,project_id,title,status,priority,epic_id) SELECT gen_random_uuid(),'{ORG}','{pid}','{MARK}-story-{tag}','done','medium',id FROM goals WHERE title='{MARK}-epic-{tag}'",
+            )
+        both = (await c.get("/api/v2/command-center/overview", headers=_person(OWNER))).json()
+        assert both["project_status"]["contribution"]["unassigned"] == base_unassigned + 2  # both projects are live: both count
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        after = (await c.get("/api/v2/command-center/overview", headers=_person(OWNER))).json()
+        titles = [e["title"] for e in after["project_status"]["epics"]]
+        assert f"{MARK}-epic-live" in titles and f"{MARK}-epic-dead" not in titles, titles
+        assert after["project_status"]["contribution"]["unassigned"] == base_unassigned + 1  # reverted → +2
+        assert after["scope"] == "org"
+
+
+async def test_10_the_workflow_line_metrics_do_not_count_a_deleted_projects_step_runs(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-wf-live"), await _create(c, "walk-wf-dead")
+        for pid, n in ((live, 1), (dead, 2)):
+            for i in range(n):
+                await _sql(
+                    "INSERT INTO workflow_line_step_runs (id,org_id,project_id,entity_type,entity_id,to_status,mode,correlation_id,transition_id) VALUES "
+                    f"(gen_random_uuid(),'{ORG}','{pid}','story',gen_random_uuid(),'done','advisory_only',gen_random_uuid(),'{MARK}-{pid}-{i}')"
+                )
+        both = (await c.get("/api/v2/stories/workflow-line/metrics", headers=_person(OWNER))).json()
+        base = both["total_step_runs"] - 3
+        assert base >= 0
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        after = (await c.get("/api/v2/stories/workflow-line/metrics", headers=_person(OWNER))).json()
+        assert after["total_step_runs"] == base + 1, after  # reverted → base + 3

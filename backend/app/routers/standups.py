@@ -443,7 +443,8 @@ async def get_standup(
     auth: AuthContext = Depends(get_current_user),
 ) -> StandupEntryResponse:
     entry = await repo.get(id)
-    if entry is None:
+    # story #4688 (AC2): what a deleted project left behind reads as one that does not exist (the list leaves it out the same way)
+    if entry is None or await repo.is_leftover_of_deleted_project(entry):
         raise HTTPException(status_code=404, detail="Standup entry not found")
     # b47f9b05: 단건 조회도 plan_stories enrich(list/upsert/update 와 일관·cross-board 백로그 노출).
     return (await _entries_with_plan_stories([entry], repo.session, repo.org_id, uuid.UUID(auth.user_id)))[0]

@@ -676,9 +676,14 @@ async def overview(
     from app.services.project_auth import restricted_accessible_project_ids
 
     restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(_auth.user_id)), org_id)
+    # story #4688 (AC2): «reaches every project» (restricted None) still filters — to the projects that EXIST. A deleted project's stories and
+    # goals have no foreign key to remove them and would otherwise be counted for an owner/admin. `scope` below still says «org» for them.
+    from app.services.project_auth import live_project_ids_in_org
+
+    scope_ids = restricted if restricted is not None else await live_project_ids_in_org(session, org_id)
 
     def _in_scope(col) -> list:
-        return [] if restricted is None else [col.in_(restricted)]
+        return [col.in_(scope_ids)]
     # 헤더 — 함대: 총 에이전트(실).
     total_agents = (
         await session.execute(

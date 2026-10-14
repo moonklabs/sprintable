@@ -25,6 +25,8 @@ def _full_access_caller_4351(monkeypatch):
     import app.services.project_auth as project_auth
 
     monkeypatch.setattr(project_auth, "restricted_accessible_project_ids", _AsyncMock(return_value=None))
+    # story #4688: «reaches every project» now filters to the projects that EXIST — one more query, which this mock session does not count
+    monkeypatch.setattr(project_auth, "live_project_ids_in_org", _AsyncMock(return_value=[]))
     monkeypatch.setattr(project_auth, "has_project_access", _AsyncMock(return_value=True))
 
 
