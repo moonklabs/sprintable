@@ -107,13 +107,13 @@ def test_heartbeat_disconnect_check_clears_connection():
                         def _inject():
                             import time; time.sleep(0.05)
                             for q in list(_agent_connections.get(member_id_str, set())):
-                                try: q.put_nowait({"event_type": "__test_sentinel__"})
+                                try: q.put_nowait({"event_type": "test_sentinel"})
                                 except: pass
 
                         t = threading.Thread(target=_inject)
                         t.start()
                         for line in resp.iter_lines():
-                            if "__test_sentinel__" in line:
+                            if "test_sentinel" in line:
                                 resp.close(); break
                         t.join(timeout=1.0)
         # 연결 종료 후 _agent_connections에 해당 member_id 없어야 함
@@ -240,7 +240,7 @@ def test_connection_count_increments_and_decrements():
             return
         queues = list(_agent_connections.get(member_id_str, set()))
         for q in queues:
-            q.put_nowait({"event_type": "__test_sentinel__"})
+            q.put_nowait({"event_type": "test_sentinel"})
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
             if all(q.empty() for q in queues):

@@ -46,11 +46,11 @@ APP = Path(__file__).resolve().parent.parent / "app"
 
 GOOD = [
     "dispatched", "story_assigned", "conversation.message_created", "conversation:mention", "a2a.task_message", "agent.permission_request.changed",
-    "onboarding.connection_test", "desktop.remote_control", "qa_test_ping", "__test_sentinel__", "_a", "x", "0", "a-b_c.d:e", "a" * 64,
+    "onboarding.connection_test", "desktop.remote_control", "qa_test_ping", "test_sentinel", "x", "0", "a-b_c.d:e", "a" * 64,
 ]
 BAD = [
     "", " ", "A", "Story_Assigned", "story assigned", "story_assigned\n", "\nstory_assigned", "a\nb", "a\r\nevent: x", "a\rb", "a\x00b", "a\x1bb", "a\x7fb",
-    "a b", "a b", "a\u0085b", "é", "한글", "a/b", "a;b", "a,b", "a b", " a", "a ", "-a", ".a", ":a", "a" * 65, EVIL,
+    "a b", "a b", "a\u0085b", "é", "한글", "_a", "__test_sentinel__", "a/b", "a;b", "a,b", "a b", " a", "a ", "-a", ".a", ":a", "a" * 65, EVIL,
 ]
 
 

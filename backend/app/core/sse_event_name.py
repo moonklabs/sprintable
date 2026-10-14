@@ -9,7 +9,7 @@ chose the name could plant frames on another agent's stream (`event: superseded`
 
 The shape was measured from the code (every literal event type any producer creates: `story_assigned` · `conversation.message_created` ·
 `conversation:mention` · `a2a.task_message` · `agent.permission_request.changed` …) and the dev DB's DISTINCT values: lower-case letters, digits,
-`.` `_` `:` `-`, starting with a letter, digit or `_` (the existing tests' own sentinel is `__test_sentinel__`), 1–64 long.
+`.` `_` `:` `-`, starting with a letter or digit, 1–64 long.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import re
 
 EVENT_TYPE_MAX = 64
 # fullmatch, never `$`: Python's `$` also matches before a trailing newline — the very thing this guards against
-_EVENT_TYPE_RE = re.compile(r"[a-z0-9_][a-z0-9._:-]{0,%d}" % (EVENT_TYPE_MAX - 1))
+_EVENT_TYPE_RE = re.compile(r"[a-z0-9][a-z0-9._:-]{0,%d}" % (EVENT_TYPE_MAX - 1))
 UNKNOWN_EVENT_NAME = "unknown_event"
 
 
@@ -28,7 +28,7 @@ def is_event_type(value: object) -> bool:
 def validate_event_type(value: str) -> str:
     """the API's gate (a pydantic field validator): the closed shape or a ValueError → 422"""
     if not is_event_type(value):
-        raise ValueError(f"event_type must be 1-{EVENT_TYPE_MAX} characters of a-z 0-9 . _ : - (lower case, starting with a letter, digit or _)")
+        raise ValueError(f"event_type must be 1-{EVENT_TYPE_MAX} characters of a-z 0-9 . _ : - (lower case, starting with a letter or digit)")
     return value
 
 
