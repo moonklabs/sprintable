@@ -192,6 +192,16 @@ async def list_docs(
             "meta": {"has_more": False, "next_cursor": None},
         }
 
+    # story #4688 (AC2): a DELETED project leaves its docs behind (docs have no foreign key to `projects`; the delete is non-destructive). Every project
+    # branch below (search · slug · tree · tags · parent · plain) asks `project_id` and would hand them back — a project that is gone has no docs to list.
+    # (The org-wide list and `ids=` already read the accessible-project set, which comes from `projects`.)
+    if isinstance(project_id, uuid.UUID):
+        from app.services.project_auth import project_is_live
+        if not await project_is_live(repo.session, repo.org_id, project_id):
+            if response is not None:
+                response.headers["X-Result-Count"] = "0"
+            return {"data": [], "meta": {"has_more": False, "next_cursor": None, **({"total": 0} if tree is True else {})}}
+
     # AC1 + AC3: 전문 검색 — project_id 필수
     # story #2191: 의도적으로 커서 미지원(관련도순 + 위치커서 조합이 결과를 뒤섞음, repo단
     # search_full_text 주석 참조) — has_more/next_cursor는 항상 False/None으로 봉투만 맞춘다.

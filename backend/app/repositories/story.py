@@ -112,6 +112,14 @@ class StoryRepository(BaseRepository[Story]):
         story_number = await allocate_story_number(self.session, data["project_id"])
         return await super().create(story_number=story_number, **data)
 
+    def _project_live_clause(self, project_id: uuid.UUID) -> Any:
+        """story #4688 (AC2): a DELETED (or unknown) project has no stories to list — its rows stay behind (no foreign key removes them; the delete is
+        non-destructive) and `get_project_scoped_org_id` lets an unknown project through as «no scope». One EXISTS inside the page query itself, so it adds
+        no roundtrip (the stories-list SQL budget, test_4299, is 4) and the count follows the same rule."""
+        from app.models.project import Project
+
+        return exists(select(Project.id).where(Project.id == project_id, Project.org_id == self.org_id, Project.deleted_at.is_(None)))
+
     async def list(
         self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None,
         unattached: bool = False, epic_ids: list[uuid.UUID] | None = None,
@@ -173,6 +181,8 @@ class StoryRepository(BaseRepository[Story]):
         query = select(Story).where(self._org_filter(), Story.deleted_at.is_(None))
         for attr, val in filters.items():
             query = query.where(getattr(Story, attr) == val)
+        if isinstance(filters.get("project_id"), uuid.UUID):
+            query = query.where(self._project_live_clause(filters["project_id"]))  # story #4688
         # story #4350 — project 필터 없는 목록은 caller가 접근 가능한 프로젝트로만(SQL IN · base.list_paginated와 같은 규칙).
         if project_ids is not None:
             if not project_ids:
@@ -245,6 +255,7 @@ class StoryRepository(BaseRepository[Story]):
         q = select(Story).where(
             self._org_filter(),
             Story.project_id == project_id,
+            self._project_live_clause(project_id),  # story #4688
             Story.status == status,
             Story.deleted_at.is_(None),
         )
@@ -330,6 +341,7 @@ class StoryRepository(BaseRepository[Story]):
         query = select(Story).where(
             self._org_filter(),
             Story.project_id == project_id,
+            self._project_live_clause(project_id),  # story #4688
             Story.sprint_id.is_(None),
             Story.deleted_at.is_(None),
         )

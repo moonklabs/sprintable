@@ -219,6 +219,28 @@ async def resolve_publication_org_id(db: AsyncSession, *, publication_id: uuid.U
     )).scalar_one_or_none()
 
 
+async def resolve_publication_project_id(db: AsyncSession, *, publication_id: uuid.UUID) -> uuid.UUID | None:
+    """story #4688 (AC2): the project of the story a publication came from — a site post carries `source_story_id`, a channel publication reaches
+    its story through its gate (`gate.work_item_id`). None when it resolves to no story (the publication is org-level: nothing to hide)."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+    from app.models.pm import Story
+    from app.models.site_post import SitePost
+
+    site_story = (await db.execute(
+        select(SitePost.source_story_id).where(SitePost.id == publication_id)
+    )).scalar_one_or_none()
+    if site_story is not None:
+        return (await db.execute(select(Story.project_id).where(Story.id == site_story))).scalar_one_or_none()
+    return (await db.execute(
+        select(Story.project_id)
+        .select_from(ChannelPublication)
+        .join(Gate, Gate.id == ChannelPublication.gate_id)
+        .join(Story, Story.id == Gate.work_item_id)
+        .where(ChannelPublication.id == publication_id)
+    )).scalar_one_or_none()
+
+
 async def resolve_publication_published_at(
     db: AsyncSession, *, publication_kind: str, publication_id: uuid.UUID,
 ) -> datetime | None:

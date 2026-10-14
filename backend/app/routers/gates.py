@@ -1306,11 +1306,11 @@ async def list_gates(
     # story #4351 — 접근이 제한된 caller에겐 접근 불가 프로젝트의 게이트를 싣지 않는다(SEC-S8 · PO 2026-09-26: 접근 가능 프로젝트 게이트 +
     # 어느 프로젝트에도 안 걸린 org 수준 게이트 · owner/admin 등 전체 접근은 옛 동작 그대로 — merge-gate 집계와 같은 규칙).
     from app.services.gate_service import gate_in_inaccessible_project_clause
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import scoped_project_ids
 
-    _restricted = await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id)
-    if _restricted is not None:
-        q = q.where(~gate_in_inaccessible_project_clause(_restricted))
+    # story #4688: a caller who reaches every project is scoped to the projects that still exist — a deleted project's gates leave the list
+    _restricted = await scoped_project_ids(session, uuid.UUID(auth.user_id), org_id)
+    q = q.where(~gate_in_inaccessible_project_clause(_restricted))
     if gate_ids is not None:
         # story #5ace2e84 — ids 배치는 고정 집합 앵커 조회(stories.py list_stories ids 분기와
         # 동형). 나머지 필터/정렬/페이지네이션은 의미가 없어 전부 건너뛴다.
@@ -1647,11 +1647,18 @@ async def get_designated_pending_count(
     # story #4533 (Yuna 14:15Z ③) — the approvals inbox shows «에이전트 권한 요청» at its top; they count here too, or «결재 5»
     # would sit over six cards. In the same statement, so the one snapshot watermark covers both.
     permission_requests = open_requests_count(member_id=resolved.id, org_id=org_id)
+    # story #4688 (AC2): the badge number must not count a gate the list no longer shows — a deleted project's gate would read as «something to do»
+    # and lead to a dead end. Same rule as the list and the inbox (`~gate_in_inaccessible_project_clause`: org-level gates stay).
+    from app.services.gate_service import gate_in_inaccessible_project_clause
+    from app.services.project_auth import scoped_project_ids
+
+    scope = await scoped_project_ids(session, uuid.UUID(auth.user_id), org_id)
     count, snapshot_xmin = (await session.execute(
         select(func.count() + permission_requests, func.pg_snapshot_xmin(func.pg_current_snapshot())).select_from(Gate).where(
             Gate.org_id == org_id,
             Gate.designated_approver_id == resolved.id,
             Gate.status == "pending",
+            ~gate_in_inaccessible_project_clause(scope),
         )
     )).one()
     return GateDesignatedPendingCountResponse(count=count, snapshot_xmin=str(snapshot_xmin) if snapshot_xmin is not None else None)
@@ -1753,11 +1760,11 @@ async def list_gate_inbox(
         work_item_id=None, work_item_type=None, status=status, sort=sort,
         assigned_to_me=assigned_to_me, session=session, org_id=org_id, auth=auth,
     )
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import scoped_project_ids
 
     hitl_rows = await _list_hitl_inbox_rows(
         session, org_id, status,
-        restricted_project_ids=await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id),
+        restricted_project_ids=await scoped_project_ids(session, uuid.UUID(auth.user_id), org_id),
     )
 
     if assigned_to_me:
