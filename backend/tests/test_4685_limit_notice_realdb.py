@@ -15,6 +15,7 @@ import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
+    ORG2,
     OWNER,
     OWNER_TM,
     _addresses,
@@ -197,6 +198,79 @@ async def test_08_looks_is_stored_shown_to_readers_and_only_ever_true(world):
         await _report(c, device, a, "waiting_input", 4, limit=LOOKS)
         view = (await c.get(f"/api/v2/agents/{a}/desktop-session", headers=_person(OWNER))).json()
         assert view["limit"] == {"self_resume": "unknown", "looks": True}
+
+
+async def _record_dispatches(monkeypatch) -> list[dict]:
+    """The dispatcher is replaced by a recorder: the claim under test is WHO the notice is addressed to — a call that would go to
+    the wrong person must show up as a call, whatever the real dispatcher would later filter out."""
+    import app.services.notification_dispatch as nd
+
+    calls: list[dict] = []
+
+    async def record(*_a, **kw):
+        calls.append(kw)
+        return 0
+
+    monkeypatch.setattr(nd, "dispatch_notification", record)
+    return calls
+
+
+async def test_11_a_person_who_left_this_org_for_another_is_not_told(world, monkeypatch):
+    """The notice goes to the person who connected the computer — as a member of THIS org. A person who has since left it (their
+    only member row is in another org) gets nothing: the recipient lookup is bound to the setup's org (Kadir's pin, 10-14)."""
+    calls = await _record_dispatches(monkeypatch)
+    async with _client() as c:
+        device = await _device(c, "d4685 mac i")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _sql(f"UPDATE members SET org_id = '{ORG2}' WHERE id = '{OWNER_TM}'")  # the person's only member row is now in another org
+        await _report(c, device, a, "waiting_input", 2, limit=LOOKS)
+        assert calls == [], "nobody in THIS org to tell — and never a member of another org"
+
+
+async def test_12_an_inactive_member_is_not_told(world, monkeypatch):
+    """A member who was removed (is_active false) is not told, even though they once connected the computer (Kadir's pin)."""
+    calls = await _record_dispatches(monkeypatch)
+    async with _client() as c:
+        device = await _device(c, "d4685 mac j")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")
+        await _report(c, device, a, "waiting_input", 2, limit=LOOKS)
+        assert calls == []
+
+
+@pytest.fixture(params=["local", "redis"])
+def store(request):
+    """Where the window and the outstanding promise live: this process (no Redis) or Redis (fakeredis — the instances' shared store)."""
+    if request.param == "local":
+        yield "local"
+        return
+    from unittest.mock import patch
+
+    aioredis = pytest.importorskip("fakeredis.aioredis")
+    client = aioredis.FakeRedis(server=aioredis.FakeServer(), decode_responses=True)
+    with patch("app.services.redis_shared.get_client", return_value=client):
+        yield "redis"
+
+
+async def test_13_one_working_again_line_even_when_a_second_agent_stands_and_returns_inside_the_window(world, store):
+    """A stands → all back (the line goes, the promise is TAKEN) → B stands inside the 5-minute window (no new notice, nothing
+    promised) → B is back: no second line. The promise is read-and-removed in one step (Redis GETDEL · the process map's pop) —
+    a plain read would leave it standing and B's return would tell «working again» a second time (Kadir's pin, 10-14)."""
+    async with _client() as c:
+        device = await _device(c, "d4685 mac k")
+        a, b = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+        await _report(c, device, a, "working", 1, key="s-a")
+        await _report(c, device, b, "working", 2, key="s-b")
+        await _report(c, device, a, "waiting_input", 3, key="s-a", limit=LOOKS)
+        assert len(await _notices(STOOD)) == 1
+        await _report(c, device, a, "working", 4, key="s-a")
+        assert len(await _notices(LIFTED)) == 1
+        await _report(c, device, b, "waiting_input", 5, key="s-b", limit=LOOKS)  # inside the window: nothing told, nothing promised
+        assert len(await _notices(STOOD)) == 1
+        await _report(c, device, b, "working", 6, key="s-b")
+        assert len(await _notices(LIFTED)) == 1, "the promise was kept once — B's return is not a second «working again»"
 
 
 def test_10_the_reset_time_reads_in_the_persons_zone_today_as_a_clock_another_day_with_the_date():
