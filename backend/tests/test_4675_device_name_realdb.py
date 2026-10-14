@@ -18,6 +18,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures us
     OWNER,
     PROJ,
     RECIPE,
+    _addresses,  # autouse: the MCP/API addresses the exchange hands over — without it CI's exchange is 503 service_unavailable
     _client,
     _code,
     _confirm,
