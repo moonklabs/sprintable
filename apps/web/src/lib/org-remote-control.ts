@@ -98,12 +98,17 @@ export function useOrgRemoteControl(orgId: string | null | undefined): [OrgRemot
  * value read from an address. Resolves with the server's new value; a refusal or a dropped connection is `ok: false` (status kept so a
  * page can tell «not the owner» 403 from a failure).
  */
-export async function putOrgRemoteControl(orgId: string): Promise<{ ok: true; data: OrgRemoteControl | null } | { ok: false; status: number }> {
+export async function putOrgRemoteControl(orgId: string): Promise<{ ok: true; data: OrgRemoteControl | null } | { ok: false; status: number; code?: string }> {
   try {
     const res = await fetchWithAuth(`/api/organizations/${orgId}/remote-control`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true }),
     });
-    if (!res.ok) return { ok: false, status: res.status };
+    if (!res.ok) {
+      // the server's closed code (`owner_required` · `person_session_required` …) — the error envelope, or FastAPI's own `detail`
+      const err = (await res.json().catch(() => null)) as { error?: { code?: unknown }; detail?: { code?: unknown } } | null;
+      const code = err?.error?.code ?? err?.detail?.code;
+      return { ok: false, status: res.status, ...(typeof code === 'string' ? { code } : {}) };
+    }
     const body = (await res.json().catch(() => null)) as { data?: OrgRemoteControl } | null;
     return { ok: true, data: body?.data ?? null };
   } catch {

@@ -181,6 +181,39 @@ describe('[SID:4670] AC3 — [켜기] is the one trigger; the org is the session
   });
 });
 
+describe('[SID:4670] AC3 — the server says «not the owner» at the press (the owner seat was lost after the page opened)', () => {
+  const refuse = (code: string, status = 403) => () => new Response(JSON.stringify({ data: null, error: { code, message: 'refused' } }), { status });
+
+  it('403 owner_required → the existing «조직 소유자(…)가 켜면…» line with the owner names, [켜기] gone (the server\'s answer shown as it is); the way back only with #then=pair', async () => {
+    getNow = () => json({ ...OFF_OWNER, owner_names: ['김지우'] });
+    putNow = refuse('owner_required');
+    await mountPage({ hash: '#then=pair' });
+    await act(async () => { (q('remote-on-press') as HTMLButtonElement).click(); });
+    await flush();
+    expect(q('remote-on-not-owner')?.textContent).toContain('조직 소유자(김지우)가 켜면 다시 할 수 있어요');
+    expect(q('remote-on-press')).toBeNull(); // reverted (the generic failure line) → fails
+    expect(q('remote-on-failed')).toBeNull();
+    expect(q('remote-on-back')?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=pair');
+    expect(puts()).toHaveLength(1);
+  });
+
+  it('any other refusal stays the one failure line with [켜기] to press again (a 403 that is not owner_required · a 500)', async () => {
+    getNow = () => json({ ...OFF_OWNER, owner_names: ['김지우'] });
+    putNow = refuse('person_session_required');
+    await mountPage();
+    await act(async () => { (q('remote-on-press') as HTMLButtonElement).click(); });
+    await flush();
+    expect(q('remote-on-failed')?.textContent).toBe('켜지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+    expect(q('remote-on-press')).not.toBeNull();
+    expect(q('remote-on-not-owner')).toBeNull();
+    putNow = () => new Response('{}', { status: 500 });
+    await act(async () => { (q('remote-on-press') as HTMLButtonElement).click(); });
+    await flush();
+    expect(q('remote-on-failed')).not.toBeNull();
+    expect(q('remote-on-not-owner')).toBeNull();
+  });
+});
+
 describe('[SID:4670] AC3 — not the person who can switch it · already on', () => {
   it('a member (cannot change · off): the existing «조직 소유자가 켜면…» line with the owner\'s name, no [켜기], no PUT — and [앱으로] only with the way back', async () => {
     getNow = () => json({ enabled: false, can_change: false, enabled_at: null, owner_names: ['김지우'] });

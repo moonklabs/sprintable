@@ -37,7 +37,7 @@ export function DesktopRemoteOn() {
   const app = nativeReturnApp(useSearchParams()?.get(RETURN_APP_PARAM));
   const [state, setState] = useOrgRemoteControl(orgId);
   const [then, setThen] = useState<'pair' | null>(null);
-  const [phase, setPhase] = useState<'ask' | 'working' | 'done' | 'failed'>('ask');
+  const [phase, setPhase] = useState<'ask' | 'working' | 'done' | 'failed' | 'notOwner'>('ask');
   const backRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
@@ -74,7 +74,9 @@ export function DesktopRemoteOn() {
     : null;
 
   // not the person who can change it (a member · an admin): the existing line, the server refuses them as well
-  if (!state.can_change && !state.enabled) {
+  // — also when the page was opened as an owner and the server says otherwise at the press (the owner's seat was lost meanwhile): the server's
+  // answer is shown as it is — the same line, no [켜기] any more (`owner_required` only; any other refusal stays the one failure line)
+  if ((!state.can_change && !state.enabled) || phase === 'notOwner') {
     const owners = state.owner_names ?? [];
     return (
       <Card className="break-keep flex flex-col gap-3 p-6" data-testid="remote-on-not-owner">
@@ -108,7 +110,7 @@ export function DesktopRemoteOn() {
     if (phase === 'working') return;
     setPhase('working');
     const result = await putOrgRemoteControl(orgId); // the session's org — the one named beside the button
-    if (!result.ok) { setPhase('failed'); return; }
+    if (!result.ok) { setPhase(result.status === 403 && result.code === 'owner_required' ? 'notOwner' : 'failed'); return; }
     if (result.data) setState(result.data);
     setPhase('done');
   };
