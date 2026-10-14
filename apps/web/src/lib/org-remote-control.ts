@@ -91,3 +91,27 @@ export function useOrgRemoteControl(orgId: string | null | undefined): [OrgRemot
   }, [orgId]);
   return [value, set];
 }
+
+/**
+ * story 4670 — turn the org's «원격 제어» on: the one PUT (owner-only on the server — the web's `can_change` is only the page's manners).
+ * `orgId` is always the caller's own org (the session's, or the id the server just returned for the org this person made) — never a
+ * value read from an address. Resolves with the server's new value; a refusal or a dropped connection is `ok: false` (status kept so a
+ * page can tell «not the owner» 403 from a failure).
+ */
+export async function putOrgRemoteControl(orgId: string): Promise<{ ok: true; data: OrgRemoteControl | null } | { ok: false; status: number }> {
+  try {
+    const res = await fetchWithAuth(`/api/organizations/${orgId}/remote-control`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true }),
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    const body = (await res.json().catch(() => null)) as { data?: OrgRemoteControl } | null;
+    return { ok: true, data: body?.data ?? null };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+/** tests only: forget every org's value and listeners */
+export function __resetOrgRemoteControlForTest(): void {
+  entries.clear();
+}

@@ -26,6 +26,7 @@ import {
   moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
+import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
 
 /**
  * story #4427(E-DESKTOP P2) — 웹 설정 페이지. 데스크톱 앱이 이 페이지를 설정 코드 + 찾은 에이전트 목록과 함께 연다.
@@ -243,6 +244,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // 에이전트를 만드는 건 조직 owner/admin(4424 not_org_admin) — 조직 역할은 orgMemberships(content-rules와 같은 판정)
   const orgRole = orgMemberships?.find((o) => o.orgId === orgId)?.role ?? 'member';
   const isAdmin = orgRole === 'owner' || orgRole === 'admin';
+  // story 4670 (U2 · AC1): «폰에서도 다루기» — one tick above «시작», on by default, only for the person who can switch the org's remote
+  // control and only while it is off (a new organization: its maker is the owner-to-be, so always). The org's value is read the way
+  // every page reads it (one reading · `useOrgRemoteControl`); not read (null) → no row. The PUT is sent only after the confirmation
+  // succeeded and only if the tick is still on — it never rides on anything else (Kadir's lens 10-14 ⓒ).
+  const [remoteState] = useOrgRemoteControl(orgId);
+  const [phoneControl, setPhoneControl] = useState(true);
+  const [phoneControlFailed, setPhoneControlFailed] = useState(false);
   const [recipes, setRecipes] = useState<SetupRecipe[]>([]);
   const [recipeId, setRecipeId] = useState<string>('');
   const [rows, setRows] = useState<SetupRoleRow[]>([]);
@@ -477,6 +485,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // page never falls through to the recipe page with a recipe already chosen (one press would confirm a recipe)
   const showKinds = orgMode.kind === 'has-org' && (attachable.length > 0 || setupKind === 'move');
   const moveMode = showKinds && canMove && setupKind === 'move';
+  const showPhoneControl = !moveMode && (newOrg || (orgMode.kind === 'has-org' && !!remoteState && remoteState.can_change && !remoteState.enabled));
   const movable = useMemo(() => moveListOrder(attachable, runtimes), [attachable, runtimes]);
   // story 4678: the ones [프로젝트 팀에 넣기] can help — not on the team, and a runtime this computer has (without one, putting it on
   // the team would still leave it unusable: that is the line the move list gives instead)
@@ -506,11 +515,18 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             : confirmBody(code, rows, chosenProject!, recipe.id, workdir)),
         });
       if (res.ok) {
-        if (newOrg && !(await joinNewOrg(await res.json().catch(() => null)))) { setView({ kind: 'done-reload' }); return; }
+        const okBody = await res.json().catch(() => null) as { project_id?: string; org_id?: string } | null;
+        if (newOrg && !(await joinNewOrg(okBody))) { setView({ kind: 'done-reload' }); return; }
         // story 4496: the tab had no project — the one made (or the one used) becomes the tab's, the way the new organization's does
         if (!newOrg && !projectId) {
-          const made = await res.json().catch(() => null) as { project_id?: string | null } | null;
-          if (!(await joinNewOrg({ project_id: made?.project_id ?? chosenProject }))) { setView({ kind: 'done-reload' }); return; }
+          if (!(await joinNewOrg({ project_id: okBody?.project_id ?? chosenProject }))) { setView({ kind: 'done-reload' }); return; }
+        }
+        // story 4670 (AC1): the confirmation went through → the tick's one PUT, for the org this setup belongs to: the one the server
+        // just made (confirm-new-org's `org_id`) or this session's. A failure never stops the setup — its line is at the progress head.
+        const phoneOrg = newOrg ? okBody?.org_id ?? null : orgId;
+        if (showPhoneControl && phoneControl && phoneOrg) {
+          const turned = await putOrgRemoteControl(phoneOrg);
+          setPhoneControlFailed(!turned.ok);
         }
         setView({ kind: 'started' });
         return;
@@ -615,7 +631,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     return blocked.length === 0 && old.length > 0 ? <TooOldCard old={old} /> : <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
   }
   if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} />;
+  if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} phoneControlFailed={phoneControlFailed} />;
 
   const setOwner = (role: string, key: string) => {
     preselectSpent.current = true; // story 4680 (PO (나)): a person set a row — the recruiter's preselect never lands after this
@@ -958,6 +974,15 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           the window for a new organization, the app shell's main area for an existing one — on the card's own background, a thin
           line above. Spans the card's padding so it reads as the card's last row. */}
       <footer className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 pt-3 pb-6" data-testid="setup-start-row">
+        {showPhoneControl ? (
+          <div className="flex gap-3" data-testid="setup-phone-control">
+            <input type="checkbox" id="setup-phone-control" checked={phoneControl} onChange={(e) => setPhoneControl(e.target.checked)} disabled={view.kind === 'starting'} className="mt-1 shrink-0 self-start" />
+            <label htmlFor="setup-phone-control" className="block min-w-0 cursor-pointer break-keep">
+              <span className="block text-sm font-medium">{t('phoneControl.label')}</span>
+              <span className="block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
+            </label>
+          </div>
+        ) : null}
         <Button onClick={() => void (moveMode ? moveStart() : start())} disabled={moveMode ? !canMoveStart : !canStart}>
           {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{moveMode ? t('move.start') : t('start')}
         </Button>
