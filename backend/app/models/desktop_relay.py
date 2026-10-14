@@ -81,6 +81,10 @@ class DesktopSession(Base):
             name="ck_desktop_sessions_widened_distinct",
         ),
         CheckConstraint(f"limit_held IS NULL OR {_in('limit_held', SESSION_LIMIT_HELD)}", name="ck_desktop_sessions_limit_held"),
+        # story #4686 (0453): the run info's own caps in the DB too
+        CheckConstraint("run_model IS NULL OR char_length(run_model) <= 70", name="ck_desktop_sessions_run_model_len"),
+        CheckConstraint("run_account IS NULL OR char_length(run_account) <= 80", name="ck_desktop_sessions_run_account_len"),
+        CheckConstraint("run_effort IS NULL OR run_effort IN ('low','medium','high','xhigh','max','ultra')", name="ck_desktop_sessions_run_effort"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -110,6 +114,12 @@ class DesktopSession(Base):
     limit_held: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4685 (0452): the daemon looks at this limit again by itself (its reset time is unknown) — the words may promise it
     limit_looks: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # story #4686 (0453): what the session really runs on — the model that ran · whether the profile named one · the thinking depth ·
+    # the account's display label (Claude only; masked by the daemon). All set by the report that carries `run`.
+    run_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    run_model_set: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    run_effort: Mapped[str | None] = mapped_column(Text, nullable=True)
+    run_account: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4534 (0438): whether the session can take an instruction into the running turn — hides [지금 지시] when not (only)
     instruct_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 

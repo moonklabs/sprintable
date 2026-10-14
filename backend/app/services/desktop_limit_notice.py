@@ -156,6 +156,29 @@ def format_time(at: datetime, tz: ZoneInfo, locale: str, *, now: datetime) -> st
     return t("desktop_limit_notice.time.dated", locale, month=month, day=local.day, clock=clock)
 
 
+def where_text(rows: list[DesktopSession], locale: str) -> str | None:
+    """story #4686 (Yuna `run-info-1014.md` (5)): where the limit hit — «{account} · {model}». A usage limit hits the ACCOUNT, so the account
+    comes first. `rows` are the sessions the notice names, this report's first. One account (one or several sessions): its model too when
+    all of them run the same one. Several accounts: «{first} and {k} more accounts». No account known (Codex, a login that could not be
+    read): the model alone — and for several sessions only when they all run one model. Nothing known → None (no «한도가 걸린 곳: »)."""
+    from app.services.i18n_catalog import t
+
+    accounts = list(dict.fromkeys(r.run_account for r in rows if r.run_account))
+    models = {r.run_model for r in rows if r.run_model}
+    if accounts:
+        if len(accounts) > 1:
+            where = t("desktop_limit_notice.where_more_accounts", locale, account=accounts[0], k=len(accounts) - 1)
+        else:
+            own = {r.run_model for r in rows if r.run_account and r.run_model}
+            where = (t("desktop_limit_notice.where_account_model", locale, account=accounts[0], model=next(iter(own)))
+                     if len(own) == 1 and all(r.run_model for r in rows if r.run_account) else accounts[0])
+    elif len(models) == 1 and all(r.run_model for r in rows):
+        where = next(iter(models))
+    else:
+        return None
+    return t("desktop_limit_notice.where", locale, where=where)
+
+
 async def _limited_rows(db: AsyncSession, setup_id: uuid.UUID) -> list[DesktopSession]:
     return list((await db.execute(
         select(DesktopSession).where(
@@ -201,6 +224,11 @@ async def _stood(db: AsyncSession, setup: DesktopSetup, row: DesktopSession) -> 
             body = t("desktop_limit_notice.stood.body_known", locale, time=time_text)
         else:  # a time not known for all of them, or one already past: never «풀려요» at a time that has gone
             body = t("desktop_limit_notice.stood.body_unknown", locale)
+        # story #4686: where it hit (account first, then the model) — this report's session first; no line when nothing is known
+        named = [row] + [r for r in rows if r.id != row.id]
+        where = where_text(named, locale)
+        if where:
+            body = f"{body} {where}"
         title = (t("desktop_limit_notice.stood.title_many", locale, agent=name, others=others) if others
                  else t("desktop_command.turn_end_title.paused_limit", locale, agent=name))
         sent = await dispatch_notification(

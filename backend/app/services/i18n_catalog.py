@@ -110,6 +110,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 다시 일하기 시작하면 또 알려요.",
         "en": "Hit the usage limit and stopped — the reset time isn't known yet. You'll get another notice when work starts again.",
     },
+    # story #4686 (Yuna `run-info-1014.md` (5)): where the limit hit — the account first (a usage limit hits the ACCOUNT), then the model.
+    # Appended to the «stood» body only (never to «lifted»); no line at all when nothing is known.
+    "desktop_limit_notice.where": {"ko": "한도가 걸린 곳: {where}.", "en": "Limit reached on: {where}."},
+    "desktop_limit_notice.where_account_model": {"ko": "{account} · {model}", "en": "{account} · {model}"},
+    "desktop_limit_notice.where_more_accounts": {"ko": "{account} 외 계정 {k}개", "en": "{account} and {k} more accounts"},
     # the {time} of the body: the person's clock — «오후 3:20» / «3:20 PM»; another day adds the date — «10월 15일 오전 9:00» / «Oct 15, 9:00 AM»
     "desktop_limit_notice.time.am": {"ko": "오전", "en": "AM"},
     "desktop_limit_notice.time.pm": {"ko": "오후", "en": "PM"},

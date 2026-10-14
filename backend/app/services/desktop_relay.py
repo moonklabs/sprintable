@@ -14,7 +14,9 @@ import functools
 import hashlib
 import hmac
 import logging
+import re
 import secrets
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -157,6 +159,59 @@ class SessionLimit(BaseModel):
     looks: Literal[True] | None = None
 
 
+RUN_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+# story #4686: a Claude model id as the run profile takes it — the one rule (services.agent_run_profile.CLAUDE_MODEL_NAME), which also
+# admits the other runtime's names (a subset); the optional «[1m]» tail is kept as it is
+_RUN_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\[1m\])?$")
+# story #4686 (Kadir 5073 · PO 10-14 02:0xZ — «an allow-list first, not a refusal list»): the account label is only what the daemon builds —
+# after NFKC (a fullwidth «＠» is an «@»): ① a MASKED address — one or two address characters, «***», the host (`yo***@host.tld`) — or ② an
+# organisation name (letters · digits · spaces · a few marks, ≤ 50, no «@» · «*» · «(»), then optionally « (Plan)» from a CLOSED set of words.
+# Anything else (an address of any length, a token, a free sentence) is refused — so a new way of writing a secret does not need a new rule.
+ACCOUNT_PLANS = ("Free", "Pro", "Max", "Team", "Enterprise")
+_ACCOUNT_MASKED = r"[A-Za-z0-9.+_%-]{1,2}\*\*\*@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,60}[A-Za-z0-9])?\.[A-Za-z]{2,}"
+_ACCOUNT_ORG = r"[^\W_][\w .,&'\u2019\u00b7+/:-]{0,49}"
+_ACCOUNT_LABEL = re.compile(rf"^(?:{_ACCOUNT_MASKED}|{_ACCOUNT_ORG})(?: \((?:{'|'.join(ACCOUNT_PLANS)})\))?$")
+# the second layer: token shapes an organisation name could still spell (the allow-list admits letters and digits)
+_ACCOUNT_SECRET_SHAPES = (
+    re.compile(r"\bsk-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\bBearer\s", re.IGNORECASE),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}"),
+    re.compile(r"[A-Za-z0-9+/=_-]{32,}"),
+    # a link (Kadir 5073 probe, PO 10-14): the name's marks «:» and «/» are for «R&D/Ops» — «://» makes it an address a reader could follow
+    re.compile(r"://"),
+)
+
+
+class SessionRun(BaseModel):
+    """story #4686 (PO 10-14 01:06Z · Yuna run-info-1014.md): what a session really runs on — shown on the board, the phone and the web.
+    `model` the model that ran (the transcript's last real assistant line; else the profile's) · `model_set` whether the profile
+    NAMED a model (false = the runtime's default ran — 10-13) · `effort` the thinking depth the profile gave (a closed word; absent =
+    the default) · `account` the account's display label, Claude only, already masked by the daemon (never an e-mail written out)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str | None = Field(default=None, max_length=70)
+    model_set: StrictBool | None = None
+    effort: Literal["low", "medium", "high", "xhigh", "max", "ultra"] | None = None
+    account: str | None = Field(default=None, min_length=1, max_length=80)
+
+    @model_validator(mode="after")
+    def _closed_shapes(self) -> "SessionRun":
+        if self.model is not None and not _RUN_MODEL.fullmatch(self.model):  # (fullmatch: a `$` also takes a trailing newline)
+            raise ValueError("model is not a model id")
+        if self.account is not None:
+            if any(unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp", "Co", "Cs") for ch in self.account) or self.account != self.account.strip():
+                raise ValueError("account carries a control, invisible or edge-space character")
+            # NFKC first: the shapes below are read on what the label MEANS (a fullwidth «＠» is an «@»), and that is what is kept
+            account = unicodedata.normalize("NFKC", self.account)
+            if len(account) > 80 or not _ACCOUNT_LABEL.fullmatch(account):
+                raise ValueError("account is not a label the daemon makes (a masked address or an organisation name, then a plan word)")
+            if any(shape.search(account) for shape in _ACCOUNT_SECRET_SHAPES):
+                raise ValueError("account carries a token shape")
+            self.account = account
+        return self
+
+
 class SystemHold(BaseModel):
     """story #4599 (contract v1.13 · Kadir lens ③): why a `waiting_system` turn waits — the folder the macOS window asks about, when
     the daemon read it (tccd's service name → a closed list); absent when the window was seen by its owner alone. Never a path."""
@@ -186,6 +241,8 @@ class SessionReport(BaseModel):
     state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "waiting_system", "stopped"]
     at: OffsetDatetime  # a time without its offset is refused (4330)
     limit: SessionLimit | None = None
+    # story #4686: what it runs on — each report sets it (a report without it clears it, like `instruct_now`)
+    run: SessionRun | None = None
     # story #4599: the window's folder — with `waiting_system` only (the validator below)
     system: SystemHold | None = None
     # story #4641: a widening a person made at the terminal — the three together or none; the daemon decides the order (from ≠ to only)
@@ -250,6 +307,28 @@ def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
     row.limit_self_resume = limit.self_resume if limit else None
     row.limit_held = limit.held if limit else None
     row.limit_looks = True if limit and limit.looks else None  # story #4685
+
+
+def _set_run(row: DesktopSession, run: SessionRun | None) -> None:
+    """story #4686: the row's run info is the report's — a report without it clears it (the reader then says nothing, never a stale value)."""
+    row.run_model = run.model if run else None
+    row.run_model_set = run.model_set if run else None
+    row.run_effort = run.effort if run else None
+    row.run_account = run.account if run else None
+
+
+def run_view(row: DesktopSession) -> dict | None:
+    """story #4686: a row's run info as a reader sees it (only what is set) — None when the row says none."""
+    out: dict = {}
+    if row.run_model is not None:
+        out["model"] = row.run_model
+    if row.run_model_set is not None:
+        out["model_set"] = row.run_model_set
+    if row.run_effort is not None:
+        out["effort"] = row.run_effort
+    if row.run_account is not None:
+        out["account"] = row.run_account
+    return out or None
 
 
 def _set_system(row: DesktopSession, report: SessionReport) -> None:
@@ -385,6 +464,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     row.ended_at = report.at if report.state == "stopped" else None
     was_limited = bool(row.limited)  # story #4685: read before this report overwrites it — the notice follows the move into / out of a limit
     _set_limit(row, report.limit)
+    _set_run(row, report.run)  # story #4686
     _set_system(row, report)  # story #4599
     _set_widened(row, report, _now(), was_stopped=was_stopped)  # story #4641
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
@@ -441,6 +521,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         row.last_report_seq = snapshot.report_seq
         row.ended_at = s.at if s.state == "stopped" else None
         _set_limit(row, s.limit)
+        _set_run(row, s.run)  # story #4686
         _set_system(row, s)  # story #4599
         _set_widened(row, s, now, was_stopped=was_stopped)  # story #4641
         row.instruct_now = s.instruct_now
@@ -450,6 +531,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
             limit_moves.append((row, bool(row.limited)))  # story #4685: a dropped session leaves its limit too
             row.state, row.state_at, row.ended_at = "stopped", now, now
             _set_limit(row, None)
+            _set_run(row, None)  # story #4686: a dropped session says nothing of what it ran on
             row.system_folder = None  # story #4599: a dropped session holds no window
             row.instruct_now = None
     await touch_device(db, setup.id)
@@ -492,6 +574,8 @@ async def device_sessions_view(
         # story #4534: the board's own word (eight) and a usage limit's why — for the new web only
         "activity": "unknown" if silent and r.state != "stopped" else r.state,
         **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),
+        # story #4686: what it runs on (model · whether chosen · thinking depth · account) — only while the device is heard
+        **({"run": rn} if not silent and r.state != "stopped" and (rn := run_view(r)) is not None else {}),
         # story #4599: a held turn's why (the window's folder) — for the new web only, and only while the device is heard
         **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard
