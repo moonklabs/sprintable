@@ -17,9 +17,11 @@ from app.dependencies.auth import get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.i18n_catalog import t
+from app.services.project_auth import scoped_project_ids
 from app.services.insight_snapshots import (
     label_snapshot_offset,
     list_insight_snapshots_for_publication,
+    resolve_publication_project_id,
     resolve_head_publication_id,
     resolve_publication_org_id,
     resolve_publication_published_at,
@@ -96,6 +98,14 @@ async def _list_publication_insights_endpoint(
     # story #3829 — 어느 세그먼트 id로 물어도 그 스레드의 헤드(seq 1) 행으로 해석
     # (스레드가 아니면 무변 — 자기 자신이 이미 헤드).
     publication_id = await resolve_head_publication_id(db, publication_id=publication_id)
+
+    # story #4688 (AC2): the publication belongs to a story, the story to a project — one that is gone (or that this caller may not reach) has no
+    # insights to show. The same 404 as «not in your org» (nothing tells the two apart), and before the snapshot rows are read.
+    project_id = await resolve_publication_project_id(db, publication_id=publication_id)
+    if project_id is not None and project_id not in set(await scoped_project_ids(db, uuid.UUID(str(_auth.user_id)), org_id)):
+        raise HTTPException(
+            status_code=404, detail=t("insight_snapshots.publication_not_found_in_org", resolved_locale),
+        )
 
     rows = await list_insight_snapshots_for_publication(db, org_id=org_id, publication_id=publication_id)
     if not rows:

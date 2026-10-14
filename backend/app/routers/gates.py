@@ -1647,11 +1647,18 @@ async def get_designated_pending_count(
     # story #4533 (Yuna 14:15Z ③) — the approvals inbox shows «에이전트 권한 요청» at its top; they count here too, or «결재 5»
     # would sit over six cards. In the same statement, so the one snapshot watermark covers both.
     permission_requests = open_requests_count(member_id=resolved.id, org_id=org_id)
+    # story #4688 (AC2): the badge number must not count a gate the list no longer shows — a deleted project's gate would read as «something to do»
+    # and lead to a dead end. Same rule as the list and the inbox (`~gate_in_inaccessible_project_clause`: org-level gates stay).
+    from app.services.gate_service import gate_in_inaccessible_project_clause
+    from app.services.project_auth import scoped_project_ids
+
+    scope = await scoped_project_ids(session, uuid.UUID(auth.user_id), org_id)
     count, snapshot_xmin = (await session.execute(
         select(func.count() + permission_requests, func.pg_snapshot_xmin(func.pg_current_snapshot())).select_from(Gate).where(
             Gate.org_id == org_id,
             Gate.designated_approver_id == resolved.id,
             Gate.status == "pending",
+            ~gate_in_inaccessible_project_clause(scope),
         )
     )).one()
     return GateDesignatedPendingCountResponse(count=count, snapshot_xmin=str(snapshot_xmin) if snapshot_xmin is not None else None)

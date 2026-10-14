@@ -67,7 +67,7 @@ async def _clean_orphans():
             f"DELETE FROM agent_hitl_requests WHERE title LIKE '{MARK}%'", f"DELETE FROM judgments WHERE statement LIKE '{MARK}%'",
             f"DELETE FROM story_activities WHERE created_by='{AUTHOR}'", f"DELETE FROM site_posts WHERE title LIKE '{MARK}%'",
             "DELETE FROM material_lineage WHERE hook_key='t4688-hook'", "DELETE FROM site_post_drafts WHERE slug LIKE 't4688-camp-%'",
-            f"DELETE FROM campaigns WHERE name LIKE '{MARK}%'",
+            f"DELETE FROM campaigns WHERE name LIKE '{MARK}%'", "DELETE FROM insight_snapshots WHERE channel='t4688-ins'",
             f"DELETE FROM workflow_line_step_runs WHERE transition_id LIKE '{MARK}%'",
         )
     await wipe()
@@ -447,3 +447,48 @@ async def test_20_a_campaign_detail_does_not_list_a_deleted_projects_content_ite
         assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
         r = await c.get(path, headers=_person(OWNER))
         assert r.status_code == 200 and "t4688-camp-live" in r.text and "t4688-camp-dead" not in r.text, r.text[:300]
+
+
+# ---- Kadir's last two (round 4): the paths that decided «owner/admin = no filter» on their own, not through the shared helper ----
+
+async def test_21_the_designated_pending_badge_does_not_count_a_deleted_projects_gates(world):
+    async with _client() as c:
+        me = (await _sql(fetch=f"SELECT id::text FROM members WHERE org_id='{ORG}' AND user_id='{OWNER}' LIMIT 1"))[0][0]
+        path = "/api/v2/gates/designated-pending-count"
+        base = (await c.get(path, headers=_person(OWNER))).json()["count"]
+        live, dead = await _create(c, "walk-badge-live"), await _create(c, "walk-badge-dead")
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"badge-{tag}")
+            await _sql(
+                "INSERT INTO gate (id,org_id,work_item_id,work_item_type,gate_type,scope_key,designated_approver_id) VALUES "
+                f"(gen_random_uuid(),'{ORG}','{sid}','story','merge','t4688-badge-{tag}','{me}')"
+            )
+        # an org-level gate (its work item resolves to no project) is counted before and after
+        await _sql(f"INSERT INTO gate (id,org_id,work_item_id,work_item_type,gate_type,scope_key,designated_approver_id) VALUES (gen_random_uuid(),'{ORG}',gen_random_uuid(),'story','merge','t4688-badge-org','{me}')")
+        assert (await c.get(path, headers=_person(OWNER))).json()["count"] == base + 3  # all three count while both projects live
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        assert (await c.get(path, headers=_person(OWNER))).json()["count"] == base + 2  # the live one and the org-level one — reverted → +3
+
+
+async def test_22_the_insights_of_a_deleted_projects_publication_are_not_readable(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-insl-live"), await _create(c, "walk-insl-dead")
+        pubs = {}
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"insl-{tag}")
+            await _sql(
+                "INSERT INTO site_posts (id,org_id,lang,slug,title,summary,body_md,published_at,source_story_id,gate_id) VALUES "
+                f"(gen_random_uuid(),'{ORG}','ko','t4688-insl-{tag}','{MARK}-insl-{tag}','s','b',now(),'{sid}',gen_random_uuid())"
+            )
+            pubs[tag] = (await _sql(fetch=f"SELECT id::text FROM site_posts WHERE slug='t4688-insl-{tag}'"))[0][0]
+            await _sql(
+                "INSERT INTO insight_snapshots (id,org_id,publication_id,publication_kind,work_item_id,channel,due_at) VALUES "
+                f"(gen_random_uuid(),'{ORG}','{pubs[tag]}','site_post','{sid}','t4688-ins',now())"
+            )
+        path = lambda tag: f"/api/v2/organizations/{ORG}/publications/{pubs[tag]}/insights"  # noqa: E731
+        assert len((await c.get(path("live"), headers=_person(OWNER))).json()) == 1
+        assert len((await c.get(path("dead"), headers=_person(OWNER))).json()) == 1  # both projects live: both readable
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        assert len((await c.get(path("live"), headers=_person(OWNER))).json()) == 1  # the live project's stay
+        gone = await c.get(path("dead"), headers=_person(OWNER))
+        assert gone.status_code == 404, gone.text  # the same 404 as a publication that is not in your org
