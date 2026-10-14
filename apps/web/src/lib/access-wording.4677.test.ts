@@ -126,6 +126,11 @@ describe('[SID:4677] AC2 — the copy of 유나 §L ⑥, key by key (ko · en); 
     ['settings', 'projectAccessGrantFailed', '팀에 넣지 못했어요', "Couldn't put on the team"],
     ['settings', 'projectAccessRevokeFailed', '팀에서 빼지 못했어요', "Couldn't take off the team"],
     ['settings', 'projectAccessAlwaysAllowed', '늘 들어감', 'Always on the team'],
+    // the cell values the two settings screens draw (agent-project-access-section · project-access-section) — set before this PR, pinned here so the
+    // «옛 문구 0» guard keeps those screens too (까디르: «Granted» / «Blocked» put back in en used to stay GREEN)
+    ['settings', 'projectAccessAllowed', '들어감', 'On the team'],
+    ['settings', 'projectAccessBlocked', '안 들어감', 'Not on the team'],
+    ['settings', 'projectAccessGrantedLabel', '들어간 프로젝트', 'On the team'],
     ['agents', 'accessTab', '접근 권한', 'Access'],
     ['agents', 'matrixTitle', '접근 권한 매트릭스', 'Access matrix'],
     ['agents', 'matrixDescription', '칸을 누르면 그 프로젝트 팀에 넣거나 빼요.', "Click a cell to put the agent on or take it off that project's team."],
