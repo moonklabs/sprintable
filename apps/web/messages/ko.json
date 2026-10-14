@@ -2808,7 +2808,7 @@
     "agentStatsCompleted": "완료 {count}건",
     "agentStatsLeadTime": "평균 리드타임 {days}일",
     "agentStatsProjectScope": "{project} 기준",
-    "agentAccessGranted": "프로젝트 {count}개 접근 허용",
+    "agentAccessGranted": "{count, plural, =0 {아직 어느 프로젝트 팀에도 없어요} other {프로젝트 팀 #곳에 들어가 있어요}}",
     "channelsSectionTitle": "연결된 채널",
     "channelsSectionHint": "글이 나갈 채널이에요. 사람이 해야 할 일만 강조돼요.",
     "channelsEmptyTitle": "아직 연결된 채널이 없어요",

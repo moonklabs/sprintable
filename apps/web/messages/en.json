@@ -2808,7 +2808,7 @@
     "agentStatsCompleted": "{count} completed",
     "agentStatsLeadTime": "Avg lead time {days}d",
     "agentStatsProjectScope": "Based on {project}",
-    "agentAccessGranted": "{count, plural, one {# project granted} other {# projects granted}}",
+    "agentAccessGranted": "{count, plural, =0 {Not on any project's team yet} one {On # project's team} other {On # projects' teams}}",
     "channelsSectionTitle": "Connected channels",
     "channelsSectionHint": "Channels your posts go out to. Only what you need to do stands out.",
     "channelsEmptyTitle": "No channels connected yet",
