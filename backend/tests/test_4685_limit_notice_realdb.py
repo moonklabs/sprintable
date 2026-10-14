@@ -241,7 +241,7 @@ async def test_12_an_inactive_member_is_not_told(world, monkeypatch):
 
 
 @pytest.fixture(params=["local", "redis"])
-def store(request):
+def store(request):  # noqa: D401 — the two stores below (test_13 · test_14)
     """Where the window and the outstanding promise live: this process (no Redis) or Redis (fakeredis — the instances' shared store)."""
     if request.param == "local":
         yield "local"
@@ -271,6 +271,33 @@ async def test_13_one_working_again_line_even_when_a_second_agent_stands_and_ret
         assert len(await _notices(STOOD)) == 1
         await _report(c, device, b, "working", 6, key="s-b")
         assert len(await _notices(LIFTED)) == 1, "the promise was kept once — B's return is not a second «working again»"
+
+
+async def test_14_a_dispatch_that_reached_nobody_leaves_no_window_and_no_promise(world, store, monkeypatch):
+    """The dispatcher answers 0 (it does not raise) when it told nobody. Then the 5-minute window is let go and nothing is promised: the
+    NEXT report tells it, and no «working again» line goes for a «stopped» the person never got (Kadir's codex lens ③, 10-14)."""
+    import app.services.notification_dispatch as nd
+
+    calls: list[str] = []
+    answers = iter([0, 1, 1, 1, 1])  # the first dispatch reaches nobody; the later ones do
+
+    async def dispatch(*_a, **kw):
+        calls.append(kw["event_type"])
+        return next(answers)
+
+    monkeypatch.setattr(nd, "dispatch_notification", dispatch)
+    async with _client() as c:
+        device = await _device(c, "d4685 mac l")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=LOOKS)  # the stood notice reaches nobody
+        assert calls == ["agent.limit_paused"]
+        await _report(c, device, a, "working", 3)  # back — but nothing was promised, so no «working again» is told
+        assert calls == ["agent.limit_paused"], "no «working again» for a «stopped» nobody got"
+        await _report(c, device, a, "waiting_input", 4, limit=LOOKS)  # stands again, inside what would have been the window
+        assert calls == ["agent.limit_paused", "agent.limit_paused"], "the window was let go: this report tells it"
+        await _report(c, device, a, "working", 5)  # now the promise was made, and kept once
+        assert calls == ["agent.limit_paused", "agent.limit_paused", "agent.limit_lifted"]
 
 
 def test_10_the_reset_time_reads_in_the_persons_zone_today_as_a_clock_another_day_with_the_date():

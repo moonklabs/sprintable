@@ -203,11 +203,19 @@ async def _stood(db: AsyncSession, setup: DesktopSetup, row: DesktopSession) -> 
             body = t("desktop_limit_notice.stood.body_unknown", locale)
         title = (t("desktop_limit_notice.stood.title_many", locale, agent=name, others=others) if others
                  else t("desktop_command.turn_end_title.paused_limit", locale, agent=name))
-        await dispatch_notification(
+        sent = await dispatch_notification(
             db, org_id=setup.org_id, event_type="agent.limit_paused", target_member_ids=[member_id], title=title, body=body,
             reference_type="agent", reference_id=agents[0], source_project_id=setup.project_id,
             event={"payload": {"agent_name": name}},
         )
+        if not sent:
+            # the dispatcher answers 0 (it does not raise) when it told nobody — a failure it swallowed, or a person whose settings turn
+            # the notice off. Nothing was told: the window is let go (the next report may still tell it) and nothing is promised — else
+            # the person would never hear «stopped» and later hear only «working again», and for five minutes no report could tell it
+            # (Kadir's codex lens ③, 10-14)
+            await _release_window(setup.id)
+            logger.warning("desktop limit notice: the stood notice reached nobody setup=%s session=%s", setup.id, row.session_key)
+            return
         await _save_open(setup.id, {"agent": str(agents[0]), "others": others})
     except Exception:
         await _release_window(setup.id)  # nothing was told: the next report may still tell it
