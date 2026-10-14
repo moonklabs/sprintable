@@ -14,6 +14,7 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/hooks/use-flat-href';
+import { existingOrgIdFromMe } from './existing-org';
 
 /** A display name longer than this is not used in the default (Yuna f6cfda19: «40자 넘으면 «내 조직»»). */
 export const DEFAULT_NAME_MAX = 40;
@@ -47,13 +48,18 @@ export function DesktopCreateOrg({ next }: DesktopCreateOrgProps) {
     setOrgName((prev) => prev || fallback);
     fetchWithAuth('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
-      .then((json: { data?: { display_name?: string | null } } | null) => {
-        if (cancelled || orgTouchedRef.current) return;
+      .then((json: { data?: { display_name?: string | null; org_id?: string | null; org_member_id?: string | null } } | null) => {
+        if (cancelled) return;
+        // story 4668: the organization already exists (a reload after it was made — the project step failed, or the link was opened
+        // again): a second one is refused on the free plan. The setup page itself makes the first project of an organization that
+        // has none (story 4496), so it is the next place — no new screen.
+        if (existingOrgIdFromMe(json)) { window.location.href = next; return; }
+        if (orgTouchedRef.current) return;
         setOrgName(defaultOrgName(json?.data?.display_name, (name) => t('defaultOrgNameWithName', { name }), fallback));
       })
       .catch(() => { /* keep «내 조직» */ });
     return () => { cancelled = true; };
-  }, [t]);
+  }, [t, next]);
   const orgMissing = !orgName.trim();
   const projectMissing = !projectName.trim();
   const canCreate = !loading && !orgMissing && !projectMissing;
