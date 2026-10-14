@@ -561,6 +561,11 @@ async def test_23_a_member_with_no_project_grants_sees_no_project_bound_row_whil
             member = await c.get(path, headers=_person(PLAIN))
             assert member.status_code == 200, (name, member.status_code, member.text[:200])  # a limited member is answered, with nothing project-bound in it
             assert marker not in member.text, (name, "a member with NO project grants sees a project-bound row")
+            if name in ("site drafts", "channel drafts"):
+                # the TOTAL is a second answer: a count that still says «the whole organization» tells the member that drafts exist (4351 — «a total leaks
+                # the existence»). The owner's header is the real number; the member's is zero.
+                assert int(owner.headers["X-Total-Count"]) >= 1, (name, owner.headers.get("X-Total-Count"))
+                assert member.headers["X-Total-Count"] == "0", (name, "the member's X-Total-Count counts rows the member may not see", member.headers.get("X-Total-Count"))
         # org-level rows are not project-bound: the member keeps them
         general = await c.get("/api/v2/judgments", headers=_person(PLAIN))
         assert f"{MARK}-lim-org" in general.text, general.text[:300]
