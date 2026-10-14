@@ -67,6 +67,10 @@ class _Req:
         return False
 
 
+# story 4676 (Kadir 10-14): a stream another install TOOK OVER says so (`by`); a same-receiver hand-over (4509) stays `data: {}`
+TAKEN_OVER_FRAME = 'event: superseded\ndata: {"by":"other_receiver"}\n\n'
+SAME_RECEIVER_FRAME = "event: superseded\ndata: {}\n\n"
+
 async def _seed_key(session, agent_id: uuid.UUID, org_id: uuid.UUID, *, setup: bool) -> uuid.UUID:
     """a live key for this agent — made by a desktop setup (a desktop_setups row it points at) or by hand (no setup)"""
     from app.models.api_key import ApiKey
@@ -178,7 +182,7 @@ async def test_the_same_receiver_still_hands_over(lease_path):
         first = await gw.agent_stream(request=_Req(R1), auth=auth)
         second = await gw.agent_stream(request=_Req(R1), auth=auth)  # the reconnect, not a 409
         old = await _drain(first.body_iterator)
-        assert old[-1] == "event: superseded\ndata: {}\n\n"
+        assert old[-1] == SAME_RECEIVER_FRAME  # a reconnect of the SAME install is not a takeover: the daemon ends quietly (4509)
         assert gw._receiver_streams[(agent, R1)] is not None
         await second.body_iterator.aclose()
 
@@ -208,7 +212,7 @@ async def test_takeover_header_ends_the_other_receiver_and_takes_the_slot(lease_
         first = await gw.agent_stream(request=_Req(R1), auth=auth)
         second = await gw.agent_stream(request=_Req(R2, takeover=True), auth=auth)  # a person's [여기서 받기] on the other install
         old = await _drain(first.body_iterator)
-        assert old[-1] == "event: superseded\ndata: {}\n\n"
+        assert old[-1] == TAKEN_OVER_FRAME
         assert (agent, R1) not in gw._receiver_streams
         if lease_path == "redis":
             assert await sse_lease.members(f"perkey:{agent}") == [f"rcv:{R2}"]
@@ -237,8 +241,8 @@ async def test_redis_path_a_second_takeover_keeps_its_mark_when_the_first_taker_
         second = await gw.agent_stream(request=_Req(R2, takeover=True), auth=auth)
         third = await gw.agent_stream(request=_Req(R3, takeover=True), auth=auth)
         assert await sse_lease.taken_by(scope) == f"rcv:{R3}"
-        assert (await _drain(first.body_iterator))[-1] == "event: superseded\ndata: {}\n\n"
-        assert (await _drain(second.body_iterator))[-1] == "event: superseded\ndata: {}\n\n"  # the first taker's stream ended …
+        assert (await _drain(first.body_iterator))[-1] == TAKEN_OVER_FRAME
+        assert (await _drain(second.body_iterator))[-1] == TAKEN_OVER_FRAME  # the first taker's stream ended …
         assert await sse_lease.taken_by(scope) == f"rcv:{R3}", "… and the second taker's mark is still there"
         assert await sse_lease.members(scope) == [f"rcv:{R3}"]
         await anext(third.body_iterator)
@@ -264,7 +268,7 @@ async def test_redis_path_a_stream_on_another_instance_ends_on_its_heartbeat_whe
         await sse_lease.acquire(scope, 5, f"rcv:{R2}")
         await sse_lease.mark_taken(scope, f"rcv:{R2}")
         old = await _drain(first.body_iterator)
-        assert old[-1] == "event: superseded\ndata: {}\n\n"
+        assert old[-1] == TAKEN_OVER_FRAME
         assert await sse_lease.members(scope) == [f"rcv:{R2}"], "the refresh did not put the released member back"
         assert await sse_lease.taken_by(scope) == f"rcv:{R2}", "only the taker's own end clears the mark"
 
