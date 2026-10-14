@@ -14,7 +14,7 @@ import { useFieldDraft } from '@/hooks/use-field-draft';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
-import { limitHeld, limitLine, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
+import { limitHeld, limitLine, limitLooksAgain, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
@@ -89,8 +89,12 @@ export function shownState(view: { state: string | null; activity?: string | nul
  *  컴퓨터» line say the same word for the same agent. Claude at a usage limit (or a limit the app held) wears «사용 한도». */
 export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null }, t: (key: string) => string): string {
   const state = shownState(view);
-  const claudeLimit = (state === 'waiting_input' && !!view.limit?.self_resume) || limitHeld(state, view.limit);
+  // story #4685 (Yuna §③): a limit the app looks at again by itself (`limit.looks`) is «한도로 쉬는 중»; only a held one, or one from a
+  // daemon that does not look (no `looks`), keeps «사용 한도» — the strip's dot and line follow the same decision (limitLooksAgain)
+  const looksAgain = limitLooksAgain(state, view.limit);
+  const claudeLimit = (state === 'waiting_input' && !!view.limit?.self_resume && !looksAgain) || limitHeld(state, view.limit);
   return claudeLimit ? t('state.usage_limit')
+    : looksAgain ? t('state.paused_limit')
     : state === 'starting' ? t('state.starting')
       : state === 'working' ? t('state.working')
         : state === 'idle' ? t('state.idle')
@@ -169,8 +173,12 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   const [draft, setDraft, clearDraft] = useFieldDraft({ surface: 'agent-instruct', targetId: `${agentId}:${conversationId}`, field: 'text' });
   // Claude at a usage limit (it may continue by itself, or ask in its terminal) wears the board's «사용 한도» look (Yuna 08:46Z) ·
   // story #4560: so does a limit the app held off at its end (Yuna §③ — a person's hand is needed at that terminal)
-  const claudeLimit = (view.state === 'waiting_input' && !!view.limit?.self_resume) || limitHeld(view.state, view.limit);
-  const { icon: Shape, tone } = claudeLimit ? { icon: AlertTriangle, tone: 'text-warning' } : SHAPES[view.state];
+  // story #4685 (Yuna §③): a limit the app looks at again by itself (`limit.looks`) is «한도로 쉬는 중» with the quiet dot — the same
+  // look as paused_limit; only a held one, or one from a daemon that does not look, keeps «사용 한도» and the warning
+  const looksAgain = limitLooksAgain(view.state, view.limit);
+  const claudeLimit = (view.state === 'waiting_input' && !!view.limit?.self_resume && !looksAgain) || limitHeld(view.state, view.limit);
+  const shapeState = looksAgain ? 'paused_limit' : view.state;
+  const { icon: Shape, tone } = claudeLimit ? { icon: AlertTriangle, tone: 'text-warning' } : SHAPES[shapeState];
   const unknown = view.state === 'unknown' || view.state === 'unrecognized';
   const busy = result?.busy === true;
   // the buttons: inside the phone app · remote control on · a person who may command it (the server's own rule).
@@ -233,7 +241,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
           : 'inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-foreground'}
         data-testid="agent-session-chip"
       >
-        <Shape className={`${view.state === 'idle' || view.state === 'paused_limit' ? 'size-2' : 'size-3'} ${tone}${view.state === 'working' ? ' animate-spin' : ''}`} aria-hidden />
+        <Shape className={`${view.state === 'idle' || shapeState === 'paused_limit' ? 'size-2' : 'size-3'} ${tone}${view.state === 'working' ? ' animate-spin' : ''}`} aria-hidden />
         {label}
       </span>
       {view.device_name ? <span className="text-muted-foreground">{view.device_name}</span> : null}
@@ -401,7 +409,7 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
     const words = {
       waitingInput: () => t('line.waitingInput'), error: () => t('line.error'),
       paused: () => t('line.paused', { time }), pausedAgain: () => t('line.pausedAgain', { time }),
-      limitMaybe: () => t('line.limitMaybe'), limitNo: () => t('line.limitNo'), limitUnknown: () => t('line.limitUnknown'),
+      limitMaybe: () => t('line.limitMaybe'), limitNo: () => t('line.limitNo'), limitUnknown: () => t('line.limitUnknown'), limitLooking: () => t('line.limitLooking'),
       limitErrorNoTime: () => t('line.limitErrorNoTime'), limitErrorAhead: () => t('line.limitErrorAhead', { time }), limitErrorPassed: () => t('line.limitErrorPassed'),
       limitHeld: () => t('line.limitHeld'),
     }[rest.key];

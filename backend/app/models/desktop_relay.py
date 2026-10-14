@@ -108,6 +108,8 @@ class DesktopSession(Base):
     limit_self_resume: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4560 (0444): the daemon held off — the limit's time is over but it did not touch the terminal (screen · esc_not_taken)
     limit_held: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4685 (0452): the daemon looks at this limit again by itself (its reset time is unknown) — the words may promise it
+    limit_looks: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # story #4534 (0438): whether the session can take an instruction into the running turn — hides [지금 지시] when not (only)
     instruct_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
