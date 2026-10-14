@@ -64,6 +64,10 @@ async def _clean_orphans():
             f"DELETE FROM site_post_versions WHERE title LIKE '{MARK}%'", f"DELETE FROM channel_post_versions WHERE text LIKE '{MARK}%'",
             "DELETE FROM site_post_drafts WHERE slug LIKE 't4688-site-%'", "DELETE FROM channel_post_drafts WHERE channel LIKE 't4688-%'",
             "DELETE FROM gate WHERE scope_key LIKE 't4688-%'",
+            f"DELETE FROM agent_hitl_requests WHERE title LIKE '{MARK}%'", f"DELETE FROM judgments WHERE statement LIKE '{MARK}%'",
+            f"DELETE FROM story_activities WHERE created_by='{AUTHOR}'", f"DELETE FROM site_posts WHERE title LIKE '{MARK}%'",
+            "DELETE FROM material_lineage WHERE hook_key='t4688-hook'", "DELETE FROM site_post_drafts WHERE slug LIKE 't4688-camp-%'",
+            f"DELETE FROM campaigns WHERE name LIKE '{MARK}%'",
             f"DELETE FROM workflow_line_step_runs WHERE transition_id LIKE '{MARK}%'",
         )
     await wipe()
@@ -337,3 +341,109 @@ async def test_14_a_deleted_project_gives_its_slot_back_to_the_free_plan(world, 
         await _sql(f"UPDATE projects SET deleted_at=now() WHERE id='{again.json()['id']}'")
         third = await c.post("/api/v2/projects", headers=_person(OWNER), json={"name": "walk-slot-4", "org_id": str(ORG)})
         assert third.status_code in (200, 201), third.text
+
+
+# ---- Kadir's round 3: the places the table called «tested» (or only mock-shaped) each get their own orphan seed — put the old None path back and the test goes red ----
+
+async def test_15_the_hitl_inbox_does_not_list_a_deleted_projects_approvals(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-hitl-live"), await _create(c, "walk-hitl-dead")
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            await _sql(
+                "INSERT INTO agent_hitl_requests (id,org_id,project_id,agent_id,request_type,title,prompt,requested_for) VALUES "
+                f"(gen_random_uuid(),'{ORG}','{pid}','{EXISTING}','gate_approval','{MARK}-hitl-{tag}','p','{EXISTING}')"
+            )
+        both = await c.get("/api/v2/gates/inbox", headers=_person(OWNER))
+        assert both.status_code == 200 and f"{MARK}-hitl-live" in both.text and f"{MARK}-hitl-dead" in both.text, both.text[:300]  # both live: both listed
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        r = await c.get("/api/v2/gates/inbox", headers=_person(OWNER))
+        assert r.status_code == 200 and f"{MARK}-hitl-live" in r.text and f"{MARK}-hitl-dead" not in r.text, r.text[:300]
+
+
+async def test_16_judgments_about_a_deleted_projects_stories_are_not_listed(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-judg-live"), await _create(c, "walk-judg-dead")
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"judg-{tag}")
+            await _sql(
+                "INSERT INTO judgments (id,org_id,scope,work_item_ids,kind,statement,created_by) VALUES "
+                f"(gen_random_uuid(),'{ORG}','items',ARRAY['{sid}']::uuid[],'judgment','{MARK}-judg-{tag}','{EXISTING}')"
+            )
+        both = await c.get("/api/v2/judgments", headers=_person(OWNER))
+        assert both.status_code == 200 and f"{MARK}-judg-live" in both.text and f"{MARK}-judg-dead" in both.text, both.text[:300]
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        r = await c.get("/api/v2/judgments", headers=_person(OWNER))
+        assert r.status_code == 200 and f"{MARK}-judg-live" in r.text and f"{MARK}-judg-dead" not in r.text, r.text[:300]
+
+
+async def test_17_the_today_snapshot_does_not_count_a_deleted_projects_landed_stories(world):
+    async with _client() as c:
+        base = (await c.get("/api/v2/today", headers=_person(OWNER))).json()["landed_today"]["count"]
+        live, dead = await _create(c, "walk-today-live"), await _create(c, "walk-today-dead")
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"today-{tag}")
+            await _sql(
+                "INSERT INTO story_activities (id,story_id,org_id,project_id,activity_type,new_value,created_by) VALUES "
+                f"(gen_random_uuid(),'{sid}','{ORG}','{pid}','status_changed','done','{AUTHOR}')"
+            )
+        both = (await c.get("/api/v2/today", headers=_person(OWNER))).json()
+        assert both["landed_today"]["count"] == base + 2  # both projects live: both count
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        after = (await c.get("/api/v2/today", headers=_person(OWNER))).json()
+        assert after["landed_today"]["count"] == base + 1  # reverted → +2
+        assert after["scope"] == "org"  # the label is about who looks, not about the list the query used
+
+
+async def test_18_hook_performance_does_not_count_a_deleted_projects_variants(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-hook-live"), await _create(c, "walk-hook-dead")
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"hook-{tag}")
+            await _sql(
+                "INSERT INTO material_lineage (id,org_id,source_evidence_id,derived_kind,derived_id,relation_kind,work_item_id,hook_key) VALUES "
+                f"(gen_random_uuid(),'{ORG}',gen_random_uuid(),'channel_post_draft',gen_random_uuid(),'hook_variant','{sid}','t4688-hook')"
+            )
+        path = "/api/v2/material-lineage/hook-performance?hook_key=t4688-hook"
+        both = await c.get(path, headers=_person(OWNER))
+        assert both.status_code == 200 and both.json()["variant_count"] == 2, both.text[:300]
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        after = await c.get(path, headers=_person(OWNER))
+        assert after.status_code == 200 and after.json()["variant_count"] == 1, after.text[:300]  # reverted → 2
+        assert after.json()["scope"] == "org"
+
+
+async def test_19_the_insights_board_does_not_list_a_deleted_projects_publications(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-ins-live"), await _create(c, "walk-ins-dead")
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"ins-{tag}")
+            await _sql(
+                "INSERT INTO site_posts (id,org_id,lang,slug,title,summary,body_md,published_at,source_story_id,gate_id) VALUES "
+                f"(gen_random_uuid(),'{ORG}','ko','t4688-ins-{tag}','{MARK}-ins-{tag}','s','b',now(),'{sid}',gen_random_uuid())"
+            )
+        path = f"/api/v2/organizations/{ORG}/insights-board?window=30d&limit=200"
+        both = await c.get(path, headers=_person(OWNER))
+        assert both.status_code == 200 and f"{MARK}-ins-live" in both.text and f"{MARK}-ins-dead" in both.text, both.text[:300]
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        r = await c.get(path, headers=_person(OWNER))
+        assert r.status_code == 200 and f"{MARK}-ins-live" in r.text and f"{MARK}-ins-dead" not in r.text, r.text[:300]
+        assert r.json()["scope"] == "org"  # the owner still reads «org» (the label follows the caller, 4351 PR B)
+
+
+async def test_20_a_campaign_detail_does_not_list_a_deleted_projects_content_items(world):
+    async with _client() as c:
+        live, dead = await _create(c, "walk-camp-live"), await _create(c, "walk-camp-dead")
+        cid = (await _sql(fetch=f"INSERT INTO campaigns (id,org_id,name,created_by_member_id) VALUES (gen_random_uuid(),'{ORG}','{MARK}-campaign','{EXISTING}') RETURNING id::text"))[0][0]
+        for pid, tag in ((live, "live"), (dead, "dead")):
+            sid = await _story_in(pid, f"camp-{tag}")
+            await _sql(f"INSERT INTO site_post_drafts (id,org_id,work_item_id,slug,campaign_id) VALUES (gen_random_uuid(),'{ORG}','{sid}','t4688-camp-{tag}','{cid}')")
+            await _sql(
+                "INSERT INTO site_post_versions (id,draft_id,version,title,lang,summary,body_md,body_sha256,author_member_id,author_kind) "
+                f"SELECT gen_random_uuid(),id,1,'{MARK}-camp-{tag}','ko','s','b','sha','{EXISTING}','agent' FROM site_post_drafts WHERE slug='t4688-camp-{tag}'"
+            )
+        path = f"/api/v2/organizations/{ORG}/campaigns/{cid}"
+        both = await c.get(path, headers=_person(OWNER))
+        assert both.status_code == 200 and "t4688-camp-live" in both.text and "t4688-camp-dead" in both.text, both.text[:300]
+        assert (await c.delete(f"/api/v2/projects/{dead}", headers=_person(OWNER))).status_code == 200
+        r = await c.get(path, headers=_person(OWNER))
+        assert r.status_code == 200 and "t4688-camp-live" in r.text and "t4688-camp-dead" not in r.text, r.text[:300]
