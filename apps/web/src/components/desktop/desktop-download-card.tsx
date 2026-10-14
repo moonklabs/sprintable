@@ -65,7 +65,9 @@ export function notAMac(userAgent: string, inPhoneApp: boolean): boolean {
 
 /** story 4668: `hideTitle` — the onboarding's «데스크톱 앱 받기» screen has the title as its h1, so the card's own «데스크톱 앱» line
  * is not drawn there (Yuna A-2); every other place keeps it. */
-export function DesktopDownloadCard({ hideTitle = false }: { hideTitle?: boolean } = {}) {
+/** story 4680 (Yuna 5065): `ctaVariant` — under another hero (the recruiter's [이 컴퓨터에서 시작]) the card's [다운로드] is outline,
+ * so one screen has one primary; every other place keeps the default. */
+export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default' }: { hideTitle?: boolean; ctaVariant?: 'default' | 'outline' } = {}) {
   const t = useTranslations('desktop');
   const [manifest, setManifest] = useState<DesktopDownloadManifest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -161,7 +163,7 @@ export function DesktopDownloadCard({ hideTitle = false }: { hideTitle?: boolean
         </div>
       </Alert>
       )}
-      <Button asChild size="sm" data-testid="desktop-download-button">
+      <Button asChild size="sm" variant={ctaVariant} data-testid="desktop-download-button">
         <a href={downloadUrl} download>{t('downloadCta')}</a>
       </Button>
       </>

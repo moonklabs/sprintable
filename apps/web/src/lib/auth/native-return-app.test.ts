@@ -39,5 +39,12 @@ describe('native-return-app — story #4626', () => {
     expect(appSetupLink(null, 'reopen')).toBe('ai.sprintable:/desktop/setup?intent=reopen');
     expect(appSetupLink('check')).toBe('ai.sprintable.check:/desktop/setup');
     expect(appSetupLink('check', 'reopen')).toBe('ai.sprintable.check:/desktop/setup?intent=reopen');
+    // story 4670 (PR 5066 · merged shape): `pair` opens the app's phone pairing · intent wins over an agent
+    expect(appSetupLink(null, 'pair')).toBe('ai.sprintable:/desktop/setup?intent=pair');
+    expect(appSetupLink(null, 'pair', { agent: 'a1111111-0000-4000-8000-000000000001' })).toBe('ai.sprintable:/desktop/setup?intent=pair');
+    // story 4680 (D2 · 4677): the recruiter's [이 컴퓨터에서 시작] from a browser — `?agent=<uuid>`; a value off the shape never goes in
+    expect(appSetupLink(null, undefined, { agent: 'a1111111-0000-4000-8000-000000000001' })).toBe('ai.sprintable:/desktop/setup?agent=a1111111-0000-4000-8000-000000000001');
+    expect(appSetupLink(null, undefined, { agent: '../x' })).toBe('ai.sprintable:/desktop/setup');
+    expect(appSetupLink(null, undefined, { agent: null })).toBe('ai.sprintable:/desktop/setup');
   });
 });

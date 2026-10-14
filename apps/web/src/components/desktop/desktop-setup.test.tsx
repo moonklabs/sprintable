@@ -448,7 +448,7 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([mini.disabled, mini.textContent]).toEqual([true, '미니 · Codex가 이 컴퓨터에 없어요']);
     // PO 04:37Z: not in the project yet — turned off, and what to do first
     const out = optionText(research, `agent:${OUT}`)!;
-    expect([out.disabled, out.textContent]).toEqual([true, '바깥 · 이 프로젝트에 아직 없어요 — 먼저 프로젝트에 추가해 주세요']);
+    expect([out.disabled, out.textContent]).toEqual([true, '바깥 · 이 프로젝트 팀에 아직 없어요 — 먼저 프로젝트 팀에 넣어 주세요']); // 4677 wording
     await choose('조사', `agent:${DAN}`);
     const elsewhere = optionText(selectOf('작성'), `agent:${DAN}`)!;
     expect([elsewhere.disabled, elsewhere.textContent]).toEqual([true, '댄 어윈 · 다른 역할에 골랐어요']);
@@ -468,11 +468,80 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 1개를 새로 만들고 1개를 이 컴퓨터로 옮겨 첫 일감을 맡겨요 · 연출은 내가 맡아요');
     await choose('작성', `agent:${MINI}`);
     expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 2개를 이 컴퓨터로 옮겨 첫 일감을 맡겨요 · 연출은 내가 맡아요');
-    expect(container.querySelectorAll('[data-testid=setup-moved-note]')).toHaveLength(2); // MINI: a live key, no last-used line
+    // story 4680 (Yuna G-4): MINI's keys were never used — no live connection to cut, so no line under it (DAN's stays)
+    expect(container.querySelectorAll('[data-testid=setup-moved-note]')).toHaveLength(1);
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const post = calls.find((c) => c.url.includes('/api/desktop/setup-codes/confirm'))!;
     expect((post.body as { roles: unknown[] }).roles).toEqual([{ role: '조사', agent_id: DAN }, { role: '작성', agent_id: MINI }]);
+  });
+
+  // story 4680 (D2): the recruiter's [이 컴퓨터에서 시작] puts `agent=` in the address — that agent takes the first agent row
+  it('[SID:4680] preselect: the first agent row starts with that agent · not in the project → nothing chosen · the body sends its id', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`); // reverted (no preselect) → 'claude'
+    expect(selectOf('작성').value).not.toBe(`agent:${DAN}`); // the first agent row only
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const post = calls.find((c) => c.url.includes('/api/desktop/setup-codes/confirm'))!;
+    expect((post.body as { roles: { role: string; agent_id?: string }[] }).roles[0]).toEqual({ role: '조사', agent_id: DAN });
+    await act(async () => { root.unmount(); }); root = createRoot(container); calls.length = 0;
+
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    expect(selectOf('조사').value).toBe('claude'); // not on the team: never chosen (4565 · PO 04:37Z)
+  });
+
+  // PO 5065 ②: the preselect is spent the first time it lands — a person's later choice stands when the rows are built again
+  // (another recipe · the list read again). Reverted (applied on every rebuild) → the recruiter's agent comes back and this fails.
+  it('[SID:4680] preselect once: chosen another agent, then another recipe → the row is not pulled back to the recruiter\'s agent', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await choose('조사', 'claude');
+    expect(selectOf('조사').value).toBe('claude');
+    await openRecipes();
+    const other = [...container.querySelectorAll('input[name=recipe]')].find((i) => (i as HTMLInputElement).value === 'rec-2') as HTMLInputElement;
+    await act(async () => { other.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect((container.querySelector('input[name=recipe]:checked') as HTMLInputElement).value).toBe('rec-2');
+    expect(selectOf('조사').value).toBe('claude'); // the spent preselect does not come back
+  });
+
+  // PO 6e245cf40 (나): the list may arrive AFTER the person already set a row (a slow read) — their choice stands; the preselect
+  // is spent by the person's hand, not only by landing. Reverted (spent only when it lands) → the late list writes DAN over 'codex'.
+  it('[SID:4680] preselect pending (list not here yet) · a person sets the row · the list arrives → the row keeps the person\'s choice', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    agentsNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(selectOf('조사').value).toBe('claude'); // the recipe's default — the preselect has nothing to land on yet
+    await choose('조사', 'codex');
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the late list did arrive
+    expect(selectOf('조사').value).toBe('codex');
+  });
+
+  // Kadir 5065 (codex round 2): the agent list may arrive BEFORE the recipes — then there is no row yet; the preselect must not
+  // be spent on nothing, and the recipe's first rows (built by pick() from the mount render's closure) must see the list that
+  // has arrived. Reverted (spent on «would land» · pick reads the closure's []) → the row stays 'claude' and the group is missing.
+  it('[SID:4680] agents first, recipes later → the recruiter\'s agent still takes the first agent row (and the existing group is there)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    recipesNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(container.querySelector('select')).toBeNull(); // no recipe yet, no rows
+    await act(async () => { release(new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the existing group, from the list that arrived first
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    expect(selectOf('작성').value).not.toBe(`agent:${DAN}`);
   });
 
   it('no live key → no line under it (nothing would be cut)', async () => {

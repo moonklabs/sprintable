@@ -472,7 +472,7 @@ describe('useUnifiedSwitcher — 새 프로젝트의 에이전트 접근 grant (
     await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-ok', 'a-dup', 'a-bad'] }); });
     expect(calls.length).toBe(3);
     expect(result!.createProjectOpen).toBe(false); // the project is real — closed and switched as on success
-    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개에게 접근을 주지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.'); // Yuna §F: «개» · the tab's own name
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.'); // Yuna §G-3 (4680/4677): «팀에 넣기» · «개» · the tab's own name
     expect(result!.createProjectError).toBeNull();
     // Yuna §F (non-blocking): the notice goes the next time the dialog opens
     await act(async () => { result!.setCreateProjectOpen(true); });
@@ -581,7 +581,7 @@ describe('useUnifiedSwitcher — 새 프로젝트의 이 컴퓨터 폴더 (story
     expect(result!.createProjectOpen).toBe(false);
     expect(result!.createProjectError).toBeNull();
     expect(result!.createProjectFolderNotice).toBe('프로젝트는 만들었지만 폴더는 이 컴퓨터에 남기지 못했어요 — 에이전트를 시작할 때 앱에서 폴더를 고를 수 있어요.');
-    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개에게 접근을 주지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.');
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.');
     // a throw
     const t = stub();
     t.setProjectFolder.mockImplementationOnce(async () => { throw new Error('bridge gone'); });

@@ -158,7 +158,7 @@ def list_runtime_capabilities() -> list[dict]:
     이제 ``SUPPORTED_RUNTIMES``에 있어 "곧 지원" 섹션은 비게 된다(의도된 결과 — 전 런타임
     올지원이 이 스토리의 목표).
     """
-    from app.services.agent_runtime import RuntimeType
+    from app.services.agent_runtime import RuntimeType, desktop_runtime_of
 
     out = []
     all_slugs = sorted({rt.value for rt in RuntimeType} | SUPPORTED_RUNTIMES)
@@ -181,6 +181,9 @@ def list_runtime_capabilities() -> list[dict]:
             "guide_filename": "CONNECTOR_SETUP.md" if needs_connector_guide else None,
             "supports_event_push": supported and runtime in MCP_NATIVE_RUNTIMES,
             "icon": None,
+            # story 4680 (D2): the desktop app's id for this runtime (`claude` · `codex`), None when no desktop app runs it — the
+            # recruiter matches the app's «found on this computer» list with it (one table: agent_runtime.DESKTOP_RUNTIME_TYPES)
+            "desktop_runtime": desktop_runtime_of(runtime),
         })
     return out
 

@@ -20,7 +20,7 @@ import { formatLocaleDate } from '@/lib/i18n';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
-  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk,
+  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
   type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
   moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
@@ -209,7 +209,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] };
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, preselect = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -248,6 +248,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [rows, setRows] = useState<SetupRoleRow[]>([]);
   // story #4565: this org's existing agents the setup may move to this computer (owner/admin · this project) — none: no group
   const [attachable, setAttachable] = useState<AttachableAgent[]>([]);
+  // story 4680 (Kadir 5065 · codex round 2): the recipes and the agent list are both read at mount, in either order. The recipe
+  // read's `pick(usable[0])` closes over the mount render, where `attachable` is still [] — so it reads the list through a ref
+  // (what has arrived by then). The preselect is never marked spent on «this list would land» — with no rows yet that spent it
+  // on nothing and the recipe's rows came up without it.
+  const attachableRef = useRef<readonly AttachableAgent[]>([]);
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
   const [pickingRecipe, setPickingRecipe] = useState(false); // 4446: the recipe list is folded to the chosen one until [바꾸기]
@@ -372,9 +377,18 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   // story #4576: «목록 다시 불러오기» after a move was refused because the agents changed reads them again
   const [attachableTick, setAttachableTick] = useState(0);
+  /** story 4680 (PO 5065 ②): the preselect is spent the first time it lands on a row, or the first time a person sets any row —
+   * after that the rows are never written over (a recipe change · the list read again · a list that arrives after the person
+   * acted). The flag is read and written OUTSIDE setRows updaters (an updater may run twice; it stays pure — PO 6e245cf40 (가)). */
+  const preselectSpent = useRef(false);
+  /** whether `agentId` would land on a row of this list (the same rule as existingChoices · withPreselectedAgent) */
+  const preselectLands = (list: readonly AttachableAgent[]) =>
+    !!preselect && list.some((a) => a.id === preselect && a.in_project && runtimes.includes(a.runtime));
+  // «spent» = a person set a row (setOwner). Landing itself needs no mark: withPreselectedAgent is idempotent (the first agent row,
+  // the same agent), so a rebuild before anyone touched a row lands the same thing — and with no rows yet nothing is lost.
   // story #4565 — the «이미 있는 에이전트» group: read once the project is known (a new organization has none to move)
   useEffect(() => {
-    if (orgMode.kind !== 'has-org' || !chosenProject || !isAdmin) { setAttachable([]); return; }
+    if (orgMode.kind !== 'has-org' || !chosenProject || !isAdmin) { attachableRef.current = []; setAttachable([]); return; }
     let off = false;
     fetchWithAuth(`/api/desktop/setup/agents?project_id=${encodeURIComponent(chosenProject)}`)
       .then((res) => (res.ok ? res.json() : null))
@@ -382,19 +396,30 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         if (off) return;
         // the contract's one shape ({agents}) — anything else draws no group (never guessed from another field)
         const list = Array.isArray(body?.agents) ? body.agents : [];
+        attachableRef.current = list;
         setAttachable(list);
         // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
         setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
-        setRows((rs) => withAttachable(rs, list, runtimes));
+        // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices — once
+        // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576 · move mode) and a recipe change rebuilds the rows; a
+        // person's own choice after that is never written over. Whether to apply is decided here (the updater stays pure); whether
+        // it landed is read off the committed rows (the effect above) — with no rows yet (Kadir 5065: the list may come before
+        // the recipes) nothing is spent, and pick() lands it when the recipe arrives.
+        const apply = !preselectSpent.current && preselectLands(list);
+        setRows((rs) => (apply ? withPreselectedAgent(withAttachable(rs, list, runtimes), preselect) : withAttachable(rs, list, runtimes)));
       })
-      .catch(() => { if (!off) setAttachable([]); }); // the group is left out — «새로 만들기» still works
+      .catch(() => { if (!off) { attachableRef.current = []; setAttachable([]); } }); // the group is left out — «새로 만들기» still works
     return () => { off = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgMode.kind, chosenProject, isAdmin, attachableTick]);
 
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
-    setRows(withAttachable(setupRoleRows(r, runtimes), attachable, runtimes));
+    // the list that has arrived by now — not the one this closure saw (the recipe read calls pick() from the mount render)
+    const list = attachableRef.current;
+    const built = withAttachable(setupRoleRows(r, runtimes), list, runtimes);
+    const apply = !preselectSpent.current && preselectLands(list);
+    setRows(apply ? withPreselectedAgent(built, preselect) : built);
     setWorkdir(defaultWorkdirHint(presetName(r, tPreset)));
     setEditingDir(false);
   }
@@ -542,7 +567,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} />;
   if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} />;
 
-  const setOwner = (role: string, key: string) => setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
+  const setOwner = (role: string, key: string) => {
+    preselectSpent.current = true; // story 4680 (PO (나)): a person set a row — the recruiter's preselect never lands after this
+    setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
+  };
   // agents found but every either row set to «나»: «시작» off with the reason in the count line's place (Yuna v21 — n = 0 there
   // would be false); the server refuses the same with no_agent_role
   const noAgentRow = needsAnAgent(rows);
@@ -878,12 +906,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 }
 
 /** story #4565 (Yuna 02:32Z ② · 02:39Z): under a row moved from elsewhere — only when it has a live key: what the move does
- * (in the body's colour: it is a result to read), then when one of its keys was last used (muted · none known → no line). */
+ * (in the body's colour: it is a result to read), then when one of its keys was last used (muted · none known → no line).
+ * story 4680 (Yuna G-4 · PO Q-b): a key that was never used (the agent the recruiter just made) has no live connection to cut —
+ * no line: the screen does not name a cost that is not there. */
 function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
   const viewerTz = useViewerTimeZone();
-  if (!agent || agent.live_keys < 1) return null;
+  if (!agent || agent.live_keys < 1 || !agent.last_used_at) return null;
   const when = agent.last_used_at ? formatViewerRelativeTime(agent.last_used_at, locale, viewerTz) : '';
   return (
     <div className="mt-1 flex flex-col gap-0.5" data-testid="setup-moved-note">
@@ -1111,7 +1141,7 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   }, [id]);
   if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
-  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */

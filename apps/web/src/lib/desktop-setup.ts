@@ -21,7 +21,10 @@ const CODE_RE = /^[A-Za-z0-9_-]{43}$/;
 export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null; /** 찾았지만 이 컴퓨터에서 도구를 못 붙이는 것(⑥ · 회사 관리 MCP) — runtimes의 부분집합. */ blocked: DesktopRuntime[]; /** story 4494: 이 컴퓨터에 깔렸지만 바닥보다 낮은 판뿐인 런타임(쓸 수 없음) — runtimes에 없는 것만. */ old?: OldRuntime[];
   /** story #4576 (PO 04:24Z): the app said `caps=move` — it can take a move's exchange (agents with no recipe role). Absent = an app
    *  from before: the page offers «옮기기» turned off with why. Only present when true (the parsed shape stays as before otherwise). */
-  canMove?: true }
+  canMove?: true;
+  /** story 4680 (D2): `agent=<member id>` — the agent the recruiter just made (the app's startHere({agentId}) put it in the fragment);
+   *  the page chooses it for the first agent row once the «이미 있는 에이전트» list has it. Only a uuid-shaped value; absent otherwise. */
+  agent?: string }
 
 /** story 4494 (PO 10:00Z (a)): the app's `old=codex:0.153.4:0.156.1` — a runtime installed only below its floor (its version · the
  * lowest that works). The page says «버전이 낮아» for it instead of «찾지 못했어요». */
@@ -55,7 +58,26 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r));
   const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
   const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}) };
+  const agent = params.get('agent') ?? '';
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}) };
+}
+
+/** story 4680: a member id as the app puts it in `agent=` — a uuid; anything else is ignored (never put in a request) */
+const AGENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** story 4680 (D2): the rows with `agentId` chosen for the first agent/either row whose choices include it (the recruiter's
+ * [이 컴퓨터에서 시작] put it in the address) — no such row or choice (another project · its runtime not here · the list has not
+ * come yet) → the rows as they are. Applied when rows are (re)built; a person's later choice stands until the next rebuild. */
+export function withPreselectedAgent(rows: readonly SetupRoleRow[], agentId: string | null | undefined): SetupRoleRow[] {
+  if (!agentId) return [...rows];
+  let done = false;
+  return rows.map((r) => {
+    if (done || r.actor === 'human') return r;
+    const choice = r.choices.find((c) => c.kind === 'existing' && c.agentId === agentId);
+    if (!choice) return r;
+    done = true;
+    return { ...r, owner: choice };
+  });
 }
 
 /** `existing` (story #4565): an agent the organization already has, moved to this computer for the row (no new member). */
@@ -297,6 +319,7 @@ export function setupFragment(q: SetupQuery): string {
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
   if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
   if (q.canMove) p.set('caps', 'move');
+  if (q.agent) p.set('agent', q.agent);
   return `#${p.toString().replace(/%2C/g, ',')}`;
 }
 
