@@ -392,7 +392,7 @@ function InboxLine({ view }: { view: View }) {
   const text = stop === 'taken_over'
     ? (device ? t('inbox.takenOver', { device }) : t('inbox.takenOverNoDevice'))
     : (device ? t('inbox.otherReceiver', { device }) : t('inbox.otherReceiverNoDevice'));
-  return <p className={`w-full break-keep ${stop === 'taken_over' ? 'text-warning' : 'text-muted-foreground'}`} data-testid="agent-session-inbox" data-stop={stop}>{text}</p>;
+  return <p className={`w-full break-keep [overflow-wrap:anywhere] ${stop === 'taken_over' ? 'text-warning' : 'text-muted-foreground'}`} data-testid="agent-session-inbox" data-stop={stop}>{text}</p>;
 }
 
 // story #4641 (Yuna's copy, 2026-10-08): one plain muted line under the session, only when a person widened the mode at the terminal —

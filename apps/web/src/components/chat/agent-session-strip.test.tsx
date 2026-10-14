@@ -333,6 +333,17 @@ describe('AgentSessionStrip — why this computer receives no new work (story 46
     expect(takeBackButtons()).toHaveLength(0);
   });
 
+  it('a very long computer name without spaces cannot push the line past the phone\'s width (Yuna PASS note: break-keep + overflow-wrap:anywhere), both tones', async () => {
+    for (const stream of ['stopped_other_receiver', 'stopped_taken_over']) {
+      fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: 'SYJ-MacBook-Pro-'.repeat(8) + 'x', inbox: { stream } }));
+      await render();
+      expect(inboxLine()?.className).toContain('[overflow-wrap:anywhere]');
+      expect(inboxLine()?.className).toContain('break-keep');
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
   it('②′ no computer name → «this session» wording', async () => {
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: null, inbox: { stream: 'stopped_other_receiver' } }));
     await render();
