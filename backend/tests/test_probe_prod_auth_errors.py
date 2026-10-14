@@ -262,8 +262,8 @@ def test_one_failing_branch_does_not_stop_the_others(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "웹 서비스: sprintable-frontend-prod · 백엔드 서비스: sprintable-backend-prod" in out  # dev 는 안 읽는다
     assert "PERMISSION_DENIED on state_check read" in out
-    assert out.count("(해당 항목 없음)") == 3  # 나머지 세 갈래는 돌았고 비어 있다
-    assert len(calls) == 4
+    assert out.count("(해당 항목 없음)") == 4  # 나머지 네 갈래(②·④·③a·③b)는 돌았고 비어 있다
+    assert len(calls) == 5
     assert all("sprintable-backend-dev" not in c for c in calls)
 
 
@@ -338,3 +338,72 @@ def test_the_real_sources_in_this_checkout_yield_the_codes_the_story_is_about():
     for code in ("csrf_mismatch", "oauth_native_issue_failed", "oauth_no_token", "oauth_failed", "oauth_missing_params"):
         assert code in errors
     assert {"issue", "consume"} <= actions
+
+
+# ── ④ 웹 앱 링크 길 (경로 셋 · 메서드 · 상태 · 브라우저 갈래) ────────────────────────────────────────────────────────────────
+
+UA_ANDROID_WEBVIEW = (
+    "Mozilla/5.0 (Linux; Android 14; SM-S918N Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Version/4.0 Chrome/120.0.6099.144 Mobile Safari/537.36 SecretUA teacher@example.com"
+)
+UA_ANDROID_CHROME = (
+    "Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.6099.144 Mobile Safari/537.36 SecretUA teacher@example.com"
+)
+UA_SAMSUNG = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 SamsungBrowser/23.0 Mobile Safari/537.36 SecretUA"
+UA_IOS_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1 SecretUA"
+UA_GOOGLE_VERIFIER = "Mozilla/5.0 (compatible; Google-Digital-Assetlinks/1.0) SecretUA"
+
+
+def _web_req(ts: str, path_and_query: str, method="GET", status=200, ua=UA_ANDROID_CHROME) -> dict:
+    return {
+        "timestamp": ts,
+        "httpRequest": {
+            "requestUrl": f"https://app.example{path_and_query}", "requestMethod": method, "status": status,
+            "userAgent": ua, "remoteIp": SECRETS[2], "referer": SECRETS[4],
+        },
+    }
+
+
+def test_browser_classes_are_a_closed_three():
+    assert probe.classify_browser(UA_ANDROID_WEBVIEW) == "android-webview"
+    assert probe.classify_browser(UA_ANDROID_CHROME) == "chrome"
+    assert probe.classify_browser(UA_SAMSUNG) == "other"
+    assert probe.classify_browser(UA_IOS_SAFARI) == "other"
+    assert probe.classify_browser(UA_GOOGLE_VERIFIER) == "other"
+    assert probe.classify_browser(None) == "other" and probe.classify_browser(123) == "other" and probe.classify_browser("") == "other"
+
+
+def test_app_link_paths_count_by_hour_label_method_status_browser():
+    es = [
+        _web_req("2026-10-14T03:01:00Z", "/native/oauth-return?code=AUTHCODE_abc123&state=STATEVALUE_xyz789", "GET", 200, UA_ANDROID_CHROME),
+        _web_req("2026-10-14T03:20:00Z", "/native/oauth-return", "GET", 200, UA_ANDROID_CHROME),
+        _web_req("2026-10-14T03:30:00Z", "/auth/oauth-handoff?token=" + SECRETS[7], "POST", 400, UA_ANDROID_WEBVIEW),
+        _web_req("2026-10-14T04:05:00Z", "/.well-known/assetlinks.json", "GET", 200, UA_GOOGLE_VERIFIER),
+    ]
+    out = probe.agg_app_link_paths(es)
+    assert out == [
+        "  2026-10-14T03:00Z  /auth/oauth-handoff  POST  400  browser=android-webview  1건",
+        "  2026-10-14T03:00Z  /native/oauth-return  GET  200  browser=chrome  2건",
+        "  2026-10-14T04:00Z  /.well-known/assetlinks.json  GET  200  browser=other  1건",
+    ]
+    _no_secret("\n".join(out))
+
+
+def test_app_link_paths_never_echo_the_ua_the_query_or_a_path_suffix():
+    """사용자 지시: 쿼리 · 경로 뒤 값 0, UA 원문 0 — 경로는 정확히 일치하는 셋만 센다."""
+    es = [
+        _web_req("2026-10-14T03:01:00Z", "/native/oauth-return/alice_kim_x?email=" + SECRETS[0], ua=UA_ANDROID_WEBVIEW),  # 경로 뒤 값 → 안 셈
+        _web_req("2026-10-14T03:02:00Z", "/u/alice_kim_x/native/oauth-return", ua=UA_ANDROID_WEBVIEW),  # 앞 접두 → 안 셈
+        _web_req("2026-10-14T03:03:00Z", "/auth/oauth-handoff-alice", method="ALICE", ua=UA_ANDROID_CHROME),  # 다른 경로 → 안 셈
+        _web_req("2026-10-14T03:04:00Z", "/auth/oauth-handoff", method="ALICE", status=99999, ua="Android ; wv) " + SECRETS[0]),
+    ]
+    out = "\n".join(probe.agg_app_link_paths(es))
+    assert out == "  2026-10-14T03:00Z  /auth/oauth-handoff  ?  ?  browser=android-webview  1건"
+    _no_secret(out)
+    assert "alice" not in out and "Mozilla" not in out and "Chrome/" not in out and "SecretUA" not in out
+
+
+def test_app_link_malformed_entries_do_not_crash():
+    junk = [{}, {"httpRequest": "x"}, {"httpRequest": {"requestUrl": 5}}, {"httpRequest": {"requestUrl": "https://a/native/oauth-return", "userAgent": 5}}]
+    assert probe.agg_app_link_paths(junk) == ["  ?  /native/oauth-return  ?  ?  browser=other  1건"]

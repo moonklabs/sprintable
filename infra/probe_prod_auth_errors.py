@@ -10,6 +10,10 @@
   ② 웹 요청 `/login?error=` — error 값 · 개수 · 처음/마지막 시각
   ③ 백엔드 `/oauth/callback` · `/oauth-handoff/` 의 4xx/5xx — 경로(상수) · 메서드 · 상태 · 개수 · 시각,
      + 백엔드 로그에서 허용 낱말(OAUTH_* · INVALID_STATE · 구글 토큰 오류 낱말)만 뽑은 개수 · 시각
+  ④ 웹 요청 로그에서 앱 링크 길의 경로 셋 — `/native/oauth-return`(앱 링크가 앱 대신 브라우저로 열리면 여기에 찍힘) ·
+     `/auth/oauth-handoff`(앱이 웹뷰로 마지막 POST) · `/.well-known/assetlinks.json`(안드로이드 앱 링크 검증) — 시간별
+     «경로 라벨 · 메서드 · 상태 코드 · 브라우저 갈래(닫힌 목록 chrome / android-webview / other) · 개수». 경로는 정확히 일치하는
+     셋만 세고(쿼리 · 경로 뒤 값 0), User-Agent 는 원문을 어디에도 찍지 않고 닫힌 목록 셋 중 하나로만 접는다.
 
 ⛔**출력은 허용 목록만이다.** 로그 항목(이메일 · 사용자 id · IP · 쿠키 · 토큰 · UA · referer · 쿼리의 code/state/error 외 값)은
 어디에도 찍지 않는다 — 집계 함수는 항목에서 «정해진 칸»만 꺼내 **닫힌 목록**에 있는 값만 그대로 세고, 목록 밖은 «(other)» 로 센다.
@@ -209,6 +213,52 @@ def agg_backend_words(entries: list[dict], known_be_codes: frozenset[str]) -> li
     return [f"  {w}  {sp.text()}" for w, sp in sorted(spans.items(), key=lambda kv: (-kv[1].n, kv[0]))]
 
 
+# ── ④ 웹 앱 링크 길 ────────────────────────────────────────────────────────────────────────────────────────────────────────
+_APP_LINK_PATHS = ("/native/oauth-return", "/auth/oauth-handoff", "/.well-known/assetlinks.json")
+_BROWSERS = ("chrome", "android-webview", "other")
+_OTHER_BRAND_TOKENS = ("Edg/", "EdgA/", "OPR/", "SamsungBrowser/", "Firefox/", "FxiOS/", "CriOS/", "DuckDuckGo/", "YaBrowser/")
+
+
+def classify_browser(user_agent: object) -> str:
+    """User-Agent → 닫힌 목록 셋(chrome / android-webview / other). 원문은 어디에도 내보내지 않는다.
+    안드로이드 WebView 는 `; wv)` 표지를 단다. Chrome(Custom Tab 포함)은 `Chrome/` 이 있고 WebView 표지와 다른 브랜드 표지가 없다."""
+    if not isinstance(user_agent, str):
+        return "other"
+    if "Android" in user_agent and "; wv)" in user_agent:
+        return "android-webview"
+    if "Chrome/" in user_agent and not any(tok in user_agent for tok in _OTHER_BRAND_TOKENS):
+        return "chrome"
+    return "other"
+
+
+def _app_link_label(request_url: object) -> str | None:
+    """요청 URL 의 «경로»가 세 상수 중 하나와 정확히 같을 때만 그 상수를 돌려준다(쿼리 · 호스트는 버림). 아니면 None(세지 않는다)."""
+    if not isinstance(request_url, str):
+        return None
+    path = urlsplit(request_url).path
+    return path if path in _APP_LINK_PATHS else None
+
+
+def agg_app_link_paths(entries: list[dict]) -> list[str]:
+    counts: Counter[tuple[str, str, str, str, str]] = Counter()
+    for e in entries:
+        hr = e.get("httpRequest")
+        if not isinstance(hr, dict):
+            continue
+        label = _app_link_label(hr.get("requestUrl"))
+        if label is None:
+            continue
+        method = hr.get("requestMethod")
+        method = method if method in _METHODS else "?"
+        status = hr.get("status")
+        status_text = str(status) if isinstance(status, int) and 100 <= status <= 599 else "?"
+        counts[(_hour(e.get("timestamp")), label, method, status_text, classify_browser(hr.get("userAgent")))] += 1
+    return [
+        f"  {hour}  {label}  {method}  {status}  browser={browser}  {n}건"
+        for (hour, label, method, status, browser), n in sorted(counts.items())
+    ]
+
+
 # ── 닫힌 목록 만들기 (순수 추출 + 읽기) ─────────────────────────────────────────────────────────────────────────────────────
 class Known:
     """소스에서 뽑은 닫힌 목록 셋 + 어느 판을 읽었는지(출력 첫머리에 찍는다)."""
@@ -384,6 +434,12 @@ def main() -> int:
             es = _read(f'{_service_filter(web)} AND {req_log} AND httpRequest.requestUrl:"/login?error=" AND {t}')
             return agg_login_errors(es, known_errors), len(es)
         out += _section("② 웹 요청 /login?error= (error 값)", two)
+
+        def four():
+            paths = " OR ".join(f'httpRequest.requestUrl:"{p}"' for p in _APP_LINK_PATHS)
+            es = _read(f'{_service_filter(web)} AND {req_log} AND ({paths}) AND {t}')
+            return agg_app_link_paths(es), len(es)
+        out += _section("④ 웹 앱 링크 길 (경로 라벨 · 메서드 · 상태 · 브라우저 갈래, 시간별)", four)
 
     if backend:
         def three():
