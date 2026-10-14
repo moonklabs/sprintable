@@ -394,3 +394,58 @@ describe('AgentSessionStrip — why this computer receives no new work (story 46
     expect(inboxLine()).toBeNull();
   });
 });
+
+// story 4684 (Kadir 5084): the DM moves from agent A to agent B — B's strip must never show A's lines (its stop, its run, its computer)
+describe('AgentSessionStrip — another agent\'s view is never shown (story 4684 · Kadir)', () => {
+  const inboxLine = () => container.querySelector('[data-testid="agent-session-inbox"]');
+  const renderFor = async (agentId: string) => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <AgentSessionStrip agentId={agentId} conversationId="c-1" />
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+  };
+  const failed = () => new Response('{}', { status: 500 });
+
+  it('A shows its stop line; the DM moves to B and B\'s first read fails → nothing of A is left on B\'s screen', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', device_name: 'A-맥', inbox: { stream: 'stopped_taken_over' }, run: { model: 'claude-fable-5-1', model_set: true } }));
+    await renderFor('a-1');
+    expect(inboxLine()?.textContent).toContain('A-맥');
+    expect(container.querySelector('[data-testid="agent-session-chip"]')).not.toBeNull();
+    fetchWithAuth.mockResolvedValue(failed());
+    await renderFor('a-2');
+    expect(inboxLine()).toBeNull();
+    expect(container.querySelector('[data-testid="agent-session-chip"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-session-run"]')).toBeNull();
+    expect(container.textContent).not.toContain('A-맥');
+  });
+
+  it('while B\'s first read is still pending, A\'s lines are already gone (nothing of A is shown in the meantime)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', device_name: 'A-맥', inbox: { stream: 'stopped_taken_over' } }));
+    await renderFor('a-1');
+    expect(inboxLine()?.textContent).toContain('A-맥');
+    fetchWithAuth.mockReturnValue(new Promise(() => undefined)); // B's read never comes back during this test
+    await renderFor('a-2');
+    expect(inboxLine()).toBeNull();
+    expect(container.querySelector('[data-testid="agent-session-chip"]')).toBeNull();
+    expect(container.textContent).not.toContain('A-맥');
+  });
+
+  it('B\'s own successful read replaces it; and a failed read for the SAME agent still keeps what it showed (a blip does not blank the strip)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', device_name: 'A-맥', inbox: { stream: 'stopped_other_receiver' } }));
+    await renderFor('a-1');
+    expect(inboxLine()?.textContent).toContain('A-맥');
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: 'B-맥' }));
+    await renderFor('a-2');
+    expect(inboxLine()).toBeNull();
+    expect(container.textContent).toContain('B-맥');
+    // the same agent re-reads (the REREAD timer or a nudge) and the read fails: its last view stays
+    fetchWithAuth.mockResolvedValue(failed());
+    await act(async () => { onExtra?.('desktop.session_changed', JSON.stringify({ agent_member_id: 'a-2' })); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain('B-맥');
+  });
+});

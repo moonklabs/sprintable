@@ -131,7 +131,11 @@ async function readView(agentId: string): Promise<View | null> {
 }
 
 export function AgentSessionStrip({ agentId, conversationId }: { agentId: string; conversationId: string }) {
-  const [view, setView] = useState<View | null>(null);
+  // story 4684 (Kadir 5084): the view is kept WITH the agent it was read for. A read that fails keeps the last view (a network blip must not blank the
+  // strip) — but only that same agent's: when the DM moves from A to B and B's first read comes back empty, A's lines (its stop, its run, its
+  // computer) must not show on B's screen. Not a `key` at one call site: every caller is covered.
+  const [loaded, setLoaded] = useState<{ agentId: string; view: View } | null>(null);
+  const view = loaded?.agentId === agentId ? loaded.view : null;
   const [nudges, setNudges] = useState(0);
   // story #4534: when the view was read — a limit's «passed» is judged on this page's clock at that read (never in render)
   const [readAt, setReadAt] = useState(0);
@@ -150,7 +154,7 @@ export function AgentSessionStrip({ agentId, conversationId }: { agentId: string
 
   useEffect(() => {
     let off = false;
-    const read = () => void readView(agentId).then((v) => { if (!off) { setView((prev) => v ?? prev); setReadAt(Date.now()); } });
+    const read = () => void readView(agentId).then((v) => { if (!off) { setLoaded((prev) => (v ? { agentId, view: v } : prev?.agentId === agentId ? prev : null)); setReadAt(Date.now()); } });
     read();
     const id = setInterval(read, REREAD_MS);
     return () => { off = true; clearInterval(id); };
