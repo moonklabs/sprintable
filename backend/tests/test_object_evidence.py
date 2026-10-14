@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import sqlalchemy as sa
 
 from app.services import activity_stream as mod
 from app.services.activity_stream import (
@@ -21,6 +22,9 @@ from app.services.activity_stream import (
 )
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+
+# story #4690: whether `activity_events` existed when the real-db test started (it is dropped at the end only if that test created it)
+_ACTIVITY_EVENTS_EXISTED: dict[str, bool] = {}
 
 
 @pytest.fixture
@@ -101,6 +105,12 @@ async def test_object_evidence_real_db():
             payload={"seq": seq}, dedup_key=f"dk-{uuid.uuid4()}", activity_seq=seq,
         )
 
+    # story #4690: on a migrated DB (CI's baseline — migration 0116) the table is already there; this test must leave it there. It used to
+    # `create(checkfirst)` (a no-op) and then DROP in `finally`, deleting the migrated table for every later test of the session that reads it.
+    # Only a table THIS test created is dropped; `_ACTIVITY_EVENTS_EXISTED` lets the test after this one check that the session's table survived.
+    async with engine.begin() as conn:
+        existed = await conn.run_sync(lambda c: sa.inspect(c).has_table("activity_events"))
+    _ACTIVITY_EVENTS_EXISTED["before"] = existed
     try:
         async with engine.begin() as conn:
             await conn.run_sync(ActivityEvent.__table__.create, checkfirst=True)
@@ -144,6 +154,27 @@ async def test_object_evidence_real_db():
                 assert await poll_object_evidence(s, org, "story", empty_id) == []
                 assert await latest_object_evidence(s, org, "story", empty_id) is None
     finally:
-        async with engine.begin() as conn:
-            await conn.run_sync(ActivityEvent.__table__.drop, checkfirst=True)
+        if not existed:
+            async with engine.begin() as conn:
+                await conn.run_sync(ActivityEvent.__table__.drop, checkfirst=True)
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_object_evidence_real_db_leaves_the_activity_events_table_as_it_found_it():
+    """story #4690 (AC2): the test above runs first (definition order) in the same session; whatever later test reads `activity_events` (the
+    overview, the activity stream) must still find the migrated table. Table present before → present after; absent before (a bare DB) → absent
+    after (the test cleans up what it created). Dropping the migrated table in `finally` makes this red."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    if "before" not in _ACTIVITY_EVENTS_EXISTED:
+        pytest.skip("the real-db test above did not run in this session (deselected) — nothing to compare")
+    url = _REAL_DB_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
+    engine = create_async_engine(url)
+    try:
+        async with engine.begin() as conn:
+            now = await conn.run_sync(lambda c: sa.inspect(c).has_table("activity_events"))
+    finally:
+        await engine.dispose()
+    assert now == _ACTIVITY_EVENTS_EXISTED["before"]
