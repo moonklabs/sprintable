@@ -66,6 +66,55 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
+// ── story 4678 (P1′-a · Yuna §J ①c): the move list's «not on this project's team» row gets [프로젝트 팀에 넣기] too ──
+describe('[SID:4678] the move list · a row not on the team', () => {
+  const ZED: AttachableAgent = { id: 'a-zed', name: '제드', runtime: 'codex', live_keys: 0, last_used_at: null, in_project: false };
+  function stubGrant() {
+    stub(() => new Response('{}'));
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    let granted = false;
+    agentsNow = () => new Response(JSON.stringify({ agents: [{ ...DAMRONG, in_project: granted }, DAN, KADIR, ZED] }), { status: 200 });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) {
+        calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        granted = true;
+        return new Response('{}', { status: 201 });
+      }
+      return base(input, init);
+    }));
+  }
+  const rowOf = (name: string) => rows().find((r) => r.textContent?.includes(name))!;
+
+  it('the row says it is not on the team and has the button; pressing it grants in place, reads the list again, and the row can be ticked (focus on its checkbox) · a runtime this computer lacks gets the runtime line, no button', async () => {
+    stubGrant();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />);
+    await chooseMove();
+    const row = rowOf('담롱');
+    expect(row.dataset.state).toBe('not-in-project');
+    expect(row.textContent).toContain('이 프로젝트 팀에 아직 없어요');
+    expect((row.querySelector('input') as HTMLInputElement).disabled).toBe(true);
+    const put = row.querySelector('[data-testid=setup-put-on-team]') as HTMLButtonElement;
+    expect([put.textContent, put.getAttribute('aria-label')]).toEqual(['프로젝트 팀에 넣기', '프로젝트 팀에 넣기 · 담롱']);
+    // Codex is not on this computer: the blocker is the runtime — said once, with no button next to it
+    expect(rowOf('제드').querySelector('[data-testid=setup-put-on-team]')).toBeNull();
+    expect(rowOf('제드').textContent).toContain('Codex가 이 컴퓨터에 없어요');
+    expect(rowOf('제드').textContent).not.toContain('이 프로젝트 팀에 아직 없어요');
+
+    await act(async () => { put.click(); });
+    await settle();
+    const posts = calls.filter((c) => c.url.endsWith('/access'));
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ method: 'POST', body: { member_id: 'a-dam', org_member_id: null, permission: 'granted' } });
+    expect(rowOf('담롱').dataset.state).toBe('ok');
+    const box = rowOf('담롱').querySelector('input') as HTMLInputElement;
+    expect(box.disabled).toBe(false);
+    expect(box.checked).toBe(false); // not ticked for them
+    expect(document.activeElement).toBe(box); // the pressed button is gone — focus goes to the row's checkbox, not the page
+    expect(container.querySelector('[data-testid=setup-put-on-team-done]')).toBeNull(); // the recipe page's role fields are not here — no «위 역할 칸» line
+  });
+});
+
 describe('[SID:4576] the two ways · the move list', () => {
   it('no agent the organization could move → no «시작 방법» at all (the page as before)', async () => {
     agentsNow = () => new Response(JSON.stringify({ agents: [] }), { status: 200 });
@@ -94,7 +143,8 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(text()).toContain('이 컴퓨터에서 찾은 에이전트: Claude Code · Codex');
     expect(rows().map((r) => [r.querySelector('.font-medium')!.textContent, r.dataset.state])).toEqual([['댄 어윈', 'ok'], ['까디르 QA', 'ok'], ['담롱', 'not-in-project']]);
     expect(rows()[0].textContent).toContain('Claude Code · 이 컴퓨터에 있음');
-    expect(rows()[2].textContent).toContain('이 프로젝트 팀에 아직 없어요 — 먼저 프로젝트 팀에 넣어 주세요'); // 4677 wording
+    expect(rows()[2].textContent).toContain('이 프로젝트 팀에 아직 없어요'); // 4678: the line, then [프로젝트 팀에 넣기] (the button's own test: desktop-setup.4678.test)
+    expect(rows()[2].querySelector('[data-testid=setup-put-on-team]')?.textContent).toBe('프로젝트 팀에 넣기');
     expect((rows()[2].querySelector('input') as HTMLInputElement).disabled).toBe(true);
     expect(rows().every((r) => !(r.querySelector('input') as HTMLInputElement).checked)).toBe(true);
     expect(text()).toContain('작업 폴더는 옮긴 뒤 앱에서 에이전트마다 골라요 — 이 컴퓨터에서 일한 적이 있는 에이전트는 그 폴더를 그대로 써요');

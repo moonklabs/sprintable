@@ -37,7 +37,7 @@ const RECIPES: { id: string; key: string; name: string; description?: string; ro
 
 let container: HTMLDivElement;
 let root: Root;
-let calls: { url: string; body?: unknown }[];
+let calls: { url: string; method?: string; body?: unknown }[];
 /** What GET /api/desktop/recipes answers now (tests change it: empty · failing · a list). */
 let recipesNow: () => Response = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
 /** story #4565 — what GET /api/desktop/setup/agents answers now (none by default: the page as before). */
@@ -49,7 +49,7 @@ function stub(confirm: () => Response | Promise<Response>) {
   calls = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    calls.push({ url, ...(init?.method ? { method: init.method } : {}), body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.endsWith('/api/desktop/recipes')) return recipesNow();
     if (url.includes('/api/desktop/setup/agents')) return agentsNow();
     if (url.includes('/api/desktop/setup-codes/')) return confirm();
@@ -446,12 +446,166 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([...selectOf('작성').querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['새로 만들기', '이미 있는 에이전트', '사람']); // either row
     const mini = optionText(research, `agent:${MINI}`)!;
     expect([mini.disabled, mini.textContent]).toEqual([true, '미니 · Codex가 이 컴퓨터에 없어요']);
-    // PO 04:37Z: not in the project yet — turned off, and what to do first
-    const out = optionText(research, `agent:${OUT}`)!;
-    expect([out.disabled, out.textContent]).toEqual([true, '바깥 · 이 프로젝트 팀에 아직 없어요 — 먼저 프로젝트 팀에 넣어 주세요']); // 4677 wording
+    // story 4678 (PO 04:37Z → P1′-a): not on the team yet is not an option here (a disabled line cannot hold [프로젝트 팀에 넣기]) — it is
+    // in the list under the rows with its button (desktop-setup.4678.test)
+    expect(optionText(research, `agent:${OUT}`)).toBeUndefined();
     await choose('조사', `agent:${DAN}`);
     const elsewhere = optionText(selectOf('작성'), `agent:${DAN}`)!;
     expect([elsewhere.disabled, elsewhere.textContent]).toEqual([true, '댄 어윈 · 다른 역할에 골랐어요']);
+  });
+
+  // ── story 4678 (P1′-a · Yuna §J): [프로젝트 팀에 넣기] on an agent the organization has that this project's team does not ──
+  const OUT2 = 'a1111111-0000-4000-8000-000000000005';
+  const ZED = 'a1111111-0000-4000-8000-000000000006'; // Codex, off the team — and Codex is not on this computer
+  const outsider = (id: string, name: string, runtime = 'claude') => ({ id, name, runtime, live_keys: 0, last_used_at: null, in_project: false });
+  let onTeam = new Set<string>();
+  /** the agents list as the server tells it: whoever was put on the team reads `in_project: true` from then on */
+  const agentsWith = (extra: object[] = []) => () => new Response(JSON.stringify({
+    agents: [...AGENTS, ...extra].map((a) => ('id' in a && onTeam.has(String(a.id)) ? { ...a, in_project: true } : a)),
+  }), { status: 200 });
+  /** `post(n, memberId)` answers the n-th POST /api/projects/{id}/access (a throw = a dropped connection) */
+  function stubGrant(post: (n: number, memberId: string) => Response | Promise<Response>) {
+    onTeam = new Set();
+    stub(() => new Response('{}', { status: 200 }));
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) {
+        const body = JSON.parse(String(init?.body));
+        calls.push({ url, method: init?.method, body });
+        const res = await post(++n, body.member_id);
+        if (res.ok || res.status === 409) onTeam.add(body.member_id);
+        return res;
+      }
+      return base(input, init);
+    }));
+  }
+  const putButtons = () => [...container.querySelectorAll('[data-testid=setup-put-on-team]')] as HTMLButtonElement[];
+  const press = async (b: HTMLButtonElement) => { await act(async () => { b.click(); }); for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+  const posts = () => calls.filter((c) => c.url.includes('/api/projects/') && c.url.endsWith('/access'));
+  const doneLine = () => container.querySelector('[data-testid=setup-put-on-team-done]') as HTMLElement;
+  const failedLine = () => container.querySelector('[data-testid=setup-put-on-team-failed]') as HTMLElement | null;
+
+  it('[SID:4678] not on the team → no option in the select; a line in a folded list with [프로젝트 팀에 넣기] · a runtime this computer lacks gets no button', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith([outsider(ZED, '제드', 'codex')]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(optionText(selectOf('조사'), `agent:${OUT}`)).toBeUndefined(); // reverted (a disabled option again) → defined
+    const group = container.querySelector('[data-testid=setup-not-on-team]') as HTMLDetailsElement;
+    expect(group.open).toBe(false);
+    expect(group.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 1개');
+    expect(group.textContent).not.toContain('제드');
+    const [b] = putButtons();
+    expect(putButtons()).toHaveLength(1);
+    expect([b.textContent, b.getAttribute('aria-label')]).toEqual(['프로젝트 팀에 넣기', '프로젝트 팀에 넣기 · 바깥']);
+    expect(group.querySelector('[data-testid=setup-not-on-team-row]')!.textContent).toContain('바깥 · 이 프로젝트 팀에 아직 없어요');
+    expect(doneLine().textContent).toBe('');
+  });
+
+  it('[SID:4678] [프로젝트 팀에 넣기] → one POST {member_id}, the list read again, the agent is an option (not picked), one line says so, focus goes to the role select, the code is not touched', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const count = (m: (u: string) => boolean) => calls.filter((c) => m(c.url)).length;
+    const recipesBefore = count((u) => u.endsWith('/api/desktop/recipes'));
+    const agentsBefore = count((u) => u.includes('/api/desktop/setup/agents'));
+    await press(putButtons()[0]);
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]).toMatchObject({ method: 'POST', body: { member_id: OUT, org_member_id: null, permission: 'granted' } });
+    expect(posts()[0].url).toContain('/api/projects/p-1/access');
+    expect(count((u) => u.includes('/api/desktop/setup/agents'))).toBe(agentsBefore + 1); // the server is the truth
+    expect(count((u) => u.endsWith('/api/desktop/recipes'))).toBe(recipesBefore); // the recipe is not read again
+    expect(count((u) => u.includes('/api/desktop/setup-codes/'))).toBe(0); // the code is not touched
+    const opt = optionText(selectOf('조사'), `agent:${OUT}`)!;
+    expect([opt.disabled, opt.textContent]).toEqual([false, '바깥']);
+    expect(selectOf('조사').value).toBe('claude'); // not picked for them
+    expect(container.querySelector('[data-testid=setup-not-on-team]')).toBeNull(); // the list is empty → gone
+    expect(doneLine().textContent).toBe('바깥 · 팀에 넣었어요 — 위 역할 칸에서 고를 수 있어요');
+    expect(doneLine().getAttribute('role')).toBe('status');
+    expect(document.activeElement).toBe(selectOf('조사')); // not the page (the pressed button is gone)
+  });
+
+  it('[SID:4678] another line left → focus goes to that line\'s button, never the page', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith([outsider(OUT2, '바깥 둘')]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 2개');
+    await press(putButtons()[0]);
+    expect(putButtons()).toHaveLength(1);
+    expect((document.activeElement as HTMLElement).dataset.putOnTeam).toBe(OUT2); // reverted (focus not moved) → body
+    expect(container.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 1개');
+  });
+
+  it('[SID:4678] 409 (already on the team — another tab did it) is done, not a failure', async () => {
+    stubGrant(() => new Response('{}', { status: 409 }));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await press(putButtons()[0]);
+    expect(failedLine()).toBeNull();
+    expect(doneLine().textContent).toBe('바깥 · 팀에 넣었어요 — 위 역할 칸에서 고를 수 있어요'); // reverted (409 = failure) → the alert
+    expect(optionText(selectOf('조사'), `agent:${OUT}`)!.disabled).toBe(false);
+  });
+
+  it('[SID:4678] a 500 or a dropped connection: the line stays with «팀에 넣지 못했어요 — 다시 눌러 주세요» under it, the button works again, the third press goes through', async () => {
+    stubGrant((n) => {
+      if (n === 1) return new Response('{}', { status: 500 });
+      if (n === 2) throw new Error('offline');
+      return new Response('{}', { status: 201 });
+    });
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    for (const _ of [1, 2]) {
+      await press(putButtons()[0]);
+      expect(failedLine()!.textContent).toBe('팀에 넣지 못했어요 — 다시 눌러 주세요');
+      expect(failedLine()!.getAttribute('role')).toBe('alert');
+      expect(putButtons()).toHaveLength(1); // the line stays
+      expect(putButtons()[0].getAttribute('aria-disabled')).toBeNull();
+      expect(document.activeElement).toBe(putButtons()[0]);
+      expect(optionText(selectOf('조사'), `agent:${OUT}`)).toBeUndefined();
+    }
+    await press(putButtons()[0]);
+    expect(posts()).toHaveLength(3);
+    expect(failedLine()).toBeNull();
+    expect(optionText(selectOf('조사'), `agent:${OUT}`)!.disabled).toBe(false);
+  });
+
+  it('[SID:4678] while it works the button reads «넣는 중…», ignores a second press and keeps focus', async () => {
+    let release!: (r: Response) => void;
+    const pending = new Promise<Response>((r) => { release = r; });
+    stubGrant((n) => (n === 1 ? pending : new Response('{}', { status: 201 })));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const [b] = putButtons();
+    b.focus();
+    await act(async () => { b.click(); });
+    expect([b.textContent, b.getAttribute('aria-disabled'), b.getAttribute('aria-label')]).toEqual(['넣는 중…', 'true', null]);
+    await act(async () => { b.click(); });
+    expect(posts()).toHaveLength(1); // reverted (no guard) → 2
+    expect(document.activeElement).toBe(b);
+    await act(async () => { release(new Response('{}', { status: 201 })); });
+    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+    expect(doneLine().textContent).toContain('팀에 넣었어요');
+  });
+
+  // PO 4678: the recruiter's agent (4680 preselect) that was not on the team lands on the first agent row once it is put on the team —
+  // if nobody touched a row yet; «자동 선택 안 함» is for every other agent
+  it('[SID:4678 × 4680] the recruiter\'s agent was not on the team: put on the team → it lands on the first agent row · a person who already picked keeps their pick', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    expect(selectOf('조사').value).toBe('claude'); // not on the team: nothing to land on yet
+    await press(putButtons()[0]);
+    expect(selectOf('조사').value).toBe(`agent:${OUT}`);
+    expect(selectOf('작성').value).not.toBe(`agent:${OUT}`);
+
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    await choose('조사', 'codex'); // a person's pick first
+    await press(putButtons()[0]);
+    expect(selectOf('조사').value).toBe('codex'); // reverted (the preselect lands anyway) → the recruiter's agent
   });
 
   it('a moved agent with a live key: what the move does, when it was last seen · the start line counts new and moved apart · the body sends its id', async () => {
