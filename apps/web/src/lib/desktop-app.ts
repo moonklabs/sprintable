@@ -14,6 +14,10 @@ export interface SprintableDesktop {
   readonly device: { readonly name: string };
   /** read once when the page loaded — a page opened later sees the app's newer list */
   readonly runtimes: readonly DesktopRuntimeFound[];
+  /** story 4691: the app's «found here» list as it changes. `listener` is called ONCE right away with the newest list (so a page that
+   *  loaded before detection finished — or after — is never raced), then only when the list CHANGES. Returns the unsubscribe.
+   *  Absent in an older app (that page keeps the one read above). Read it through `subscribeDesktopApp` — never call it from a screen. */
+  subscribeRuntimes?(listener: (runtimes: readonly DesktopRuntimeFound[]) => void): () => void;
   /** the OS folder chooser: a folder inside home, or null (canceled · refused — the reason comes back from setProjectFolder) */
   pickFolder(): Promise<string | null>;
   /** start that agent on this computer: the app opens its setup page (with `agent=` in the fragment) — no link round trip */
@@ -35,11 +39,70 @@ export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined 
   if (!d.device || typeof d.device !== 'object' || typeof d.device.name !== 'string') return undefined;
   if (!Array.isArray(d.runtimes) || !d.runtimes.every(isRuntime)) return undefined;
   if (typeof d.pickFolder !== 'function' || typeof d.startHere !== 'function' || typeof d.setProjectFolder !== 'function') return undefined;
+  // 4691: the fourth hand is OPTIONAL (an older app has none → the page keeps its first read) — but present means a function
+  if (d.subscribeRuntimes !== undefined && typeof d.subscribeRuntimes !== 'function') return undefined;
   return d as SprintableDesktop;
 }
 
-/** this page inside the desktop app, or undefined (a browser · the server) */
-export function desktopApp(): SprintableDesktop | undefined {
+const rawBridge = (): SprintableDesktop | undefined => {
   if (typeof window === 'undefined') return undefined;
   return desktopAppOf((window as unknown as { sprintableDesktop?: unknown }).sprintableDesktop);
+};
+
+// story 4691: the newest list the app told us (through `subscribeRuntimes`), kept here so `desktopApp()` can answer with it. The
+// derived bridge is memoized on (raw bridge · list) — the SAME list gives the SAME object, or useSyncExternalStore would loop.
+let latestRuntimes: readonly DesktopRuntimeFound[] | null = null;
+let derived: { raw: SprintableDesktop; list: readonly DesktopRuntimeFound[]; out: SprintableDesktop } | null = null;
+const listeners = new Set<() => void>();
+let stopBridge: (() => void) | null = null;
+
+const sameList = (a: readonly DesktopRuntimeFound[], b: readonly DesktopRuntimeFound[]) =>
+  a.length === b.length && a.every((r, i) => r.runtime === b[i]!.runtime && r.version === b[i]!.version && r.executable === b[i]!.executable);
+
+/** this page inside the desktop app, or undefined (a browser · the server). Inside the app after the app's list changed: the
+ *  bridge with the newest `runtimes` (everything else as the app gave it). */
+export function desktopApp(): SprintableDesktop | undefined {
+  const raw = rawBridge();
+  if (!raw || !latestRuntimes || sameList(latestRuntimes, raw.runtimes)) return raw;
+  if (derived && derived.raw === raw && derived.list === latestRuntimes) return derived.out;
+  const out: SprintableDesktop = { ...raw, runtimes: latestRuntimes };
+  derived = { raw, list: latestRuntimes, out };
+  return out;
+}
+
+/** story 4691 — for useSyncExternalStore: tell me when the app's found list changed. The app calls back right away with its newest
+ *  list, so a page that loaded before (or after) detection finished is never raced. Nothing to subscribe to (a browser · an older
+ *  app without `subscribeRuntimes`) → a no-op, and the page keeps its one read. One subscription to the app is shared by all. */
+export function subscribeDesktopApp(listen: () => void): () => void {
+  const raw = rawBridge();
+  if (!raw?.subscribeRuntimes) return () => undefined;
+  listeners.add(listen);
+  if (!stopBridge) {
+    try {
+      stopBridge = raw.subscribeRuntimes((next) => {
+        // the app's answer is checked like the first read: anything off the closed shape is ignored (the page keeps what it has)
+        if (!Array.isArray(next) || !next.every(isRuntime)) return;
+        const have = latestRuntimes ?? rawBridge()?.runtimes ?? [];
+        if (sameList(have, next)) return;
+        latestRuntimes = [...next];
+        for (const l of [...listeners]) l();
+      });
+    } catch { stopBridge = null; }
+  }
+  return () => {
+    listeners.delete(listen);
+    if (listeners.size === 0 && stopBridge) {
+      const stop = stopBridge;
+      stopBridge = null;
+      try { stop(); } catch { /* the app is gone — nothing to release */ }
+    }
+  };
+}
+
+/** tests only: forget the app's list and the shared subscription */
+export function __resetDesktopAppForTest(): void {
+  latestRuntimes = null;
+  derived = null;
+  listeners.clear();
+  stopBridge = null;
 }
