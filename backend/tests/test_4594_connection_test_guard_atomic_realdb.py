@@ -38,6 +38,17 @@ from tests.test_4582_one_waiting_connection_test_realdb import _quiet_but_verify
 pytestmark = pytest.mark.anyio
 
 
+class _InstallRequest:
+    """story #4676: a stream request from ONE install — the daemon's receiver id on it. A desktop setup's key is received in one place now:
+    a connect without the header beside another live one is a second place (409 another_receiver), so the «two connects at once» of this
+    test (one launcher started twice · a daemon restart overlapping the old stream — the same install) carries the install's receiver id:
+    the second takes the slot over (4509) and both connects still reach the connection-test decision this test pins."""
+    headers = {"x-sprintable-receiver-id": "rcv_" + "k" * 22}
+
+    async def is_disconnected(self) -> bool:
+        return False
+
+
 async def _advisory_waiters() -> int:
     """how many backends of this DB are blocked on an advisory lock right now — the second connect, when the guard is atomic"""
     rows = await _sql(fetch=(
@@ -89,7 +100,7 @@ async def test_two_connects_at_once_start_one_connection_test(world, monkeypatch
 
         async def connect() -> None:
             """one stream connect of this agent: the connect step runs before the first heartbeat is yielded"""
-            agen = (await ag.agent_stream(_StreamRequest(), auth=auth)).body_iterator
+            agen = (await ag.agent_stream(_InstallRequest(), auth=auth)).body_iterator
             try:
                 assert "event: heartbeat" in await agen.__anext__()
             finally:
