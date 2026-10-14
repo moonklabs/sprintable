@@ -148,18 +148,14 @@ async def get_hook_performance(
 ) -> HookPerformanceView:
     """유나 성과 화면이 소비할 축 — doc c7991109 §3③. 미등록 hook_key도 에러 없이
     빈 요약(전부 None/0)을 낸다(compute_hook_performance 자체 계약, 지어내지 않는다)."""
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import project_scope
 
     # story #4351 PR B — 접근이 제한된 caller는 접근 가능 프로젝트 변주만 합산(owner/admin = None = 옛 동작).
-    restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(_auth.user_id)), org_id)
-    # story #4688: None («reaches every project») still filters — to the projects that exist; the label below keeps saying «org»
-    from app.services.project_auth import live_scope
-
-    summary = await compute_hook_performance(
-        session, org_id=org_id, hook_key=hook_key, project_ids=await live_scope(session, org_id, restricted),
-    )
+    # story #4688: the projects that exist and that the caller reaches (an owner/admin is not «unfiltered»); `restricted` is only the label
+    scope_ids, restricted = await project_scope(session, uuid.UUID(str(_auth.user_id)), org_id)
+    summary = await compute_hook_performance(session, org_id=org_id, hook_key=hook_key, project_ids=scope_ids)
     view = HookPerformanceView.from_summary(summary)
-    view.scope = "org" if restricted is None else "accessible_projects"
+    view.scope = "accessible_projects" if restricted else "org"
     return view
 
 

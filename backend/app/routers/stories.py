@@ -255,18 +255,8 @@ async def list_stories(
             response.headers["X-Result-Count"] = str(len(stories))
         return [StoryResponse.model_validate(s) for s in stories]
 
-    # story #4688 (AC2): a project that was DELETED leaves its stories behind (no foreign key removes them — the delete is non-destructive: the screen
-    # promises «관련 데이터가 비활성화돼요»). Every org-wide list already hides them (the accessible-project set is read from `projects`), and a single read
-    # answers 404; only this list, asked for the dead project's own id, handed them back — `get_project_scoped_org_id` lets an unknown project through as
-    # «no scope» and the three branches below filter by the dead id. A project that does not exist (or is deleted) has no stories to list: an empty page,
-    # the same answer an unknown id always got.
-    if project_id is not None:
-        from app.services.project_auth import project_is_live
-        if not await project_is_live(repo.session, repo.org_id, project_id):
-            if response is not None:
-                response.headers["X-Total-Count"] = "0"
-                response.headers["X-Result-Count"] = "0"
-            return []
+    # story #4688 (AC2): a DELETED / unknown project's own id lists nothing — the three project branches below carry the rule in their query
+    # (`StoryRepository._project_live_clause`, an EXISTS: no extra roundtrip), so the page, the count and the headers all say «none».
 
     # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
     # `no_sprint=True`를 `project_id` 없이 보내면 이 분기 자체가 안 걸려 제네릭 분기(:148

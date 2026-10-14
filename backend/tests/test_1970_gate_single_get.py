@@ -35,7 +35,9 @@ pytestmark = pytest.mark.destructive_schema
 def _full_access_caller_4351():
     """story #4351 — list_gates · 결재함이 제한된 caller를 접근 가능 프로젝트로 좁힌다. 이 파일의 관심은 assigned_to_me · can_approve ·
     정렬 · project_id 채움이라 caller를 «전체 접근(None)»으로 고정한다(범위 규칙 자체는 test_4351_gates_scope_realdb.py 실 PG)."""
-    with patch("app.services.project_auth.restricted_accessible_project_ids", AsyncMock(return_value=None)):
+    from tests.scope_pin_4688 import full_access_scope
+
+    with full_access_scope():
         yield
 
 

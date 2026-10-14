@@ -51,6 +51,24 @@ async def test_02_a_project_with_a_granted_member_can_be_deleted(world):
 
 
 MARK = "ORPHAN-4688"
+
+
+async def _ensure_activity_events() -> None:
+    """The overview and the activity stream read `activity_events` (migration 0116). The CI baseline DB of the non-destructive job does not have it
+    (those routes answer 500 there whatever this PR does — seen on the first CI run), so a test that needs them creates the table first. A no-op where
+    it exists (checkfirst); additive where it does not."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.models.activity_event import ActivityEvent
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with eng.begin() as conn:
+            await conn.run_sync(lambda c: ActivityEvent.__table__.create(c, checkfirst=True))
+    finally:
+        await eng.dispose()
 AUTHOR = "d4688000-0000-0000-0000-0000000000b0"  # the standup entries these tests write (wiped after each)
 
 
@@ -108,6 +126,7 @@ ORG_WIDE = (
 
 
 async def test_04_what_a_deleted_project_left_behind_shows_nowhere_and_nothing_errors(world):
+    await _ensure_activity_events()
     async with _client() as c:
         pid = await _create(c, "walk-hidden")
         ids = await _seed_children(pid)
@@ -212,6 +231,7 @@ async def test_08_a_standup_written_for_a_deleted_project_is_not_an_org_record(w
 async def test_09_the_command_center_overview_does_not_count_what_a_deleted_project_left(world):
     """the owner reaches every project, so `restricted_accessible_project_ids` answered None («no filter»): the epics and the contribution numbers
     then included rows of a project that is gone. The scope label still says «org»."""
+    await _ensure_activity_events()
     async with _client() as c:
         before = (await c.get("/api/v2/command-center/overview", headers=_person(OWNER))).json()
         base_unassigned = before["project_status"]["contribution"]["unassigned"]

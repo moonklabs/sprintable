@@ -673,14 +673,11 @@ async def overview(
     # story #4351 PR B(④ · SEC-S8 · PO 2026-09-26) — 접근이 제한된 caller에겐 프로젝트 소속 집계(에픽 · 가설 · 최근 변화 · 기여 ·
     # 사이클타임 · 비용 · 위험)를 접근 가능 프로젝트로 좁힌다(owner/admin = None = 옛 동작). 헤더 함대(에이전트 수 · 상태)는 org 수준
     # 그대로. «aggregate only»는 개인별 노출 0이라는 뜻(CC-BE.2)이지 프로젝트 범위 결정이 아니다. 좁혀진 판은 scope로 그 범위를 말한다.
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import project_scope
 
-    restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(_auth.user_id)), org_id)
-    # story #4688 (AC2): «reaches every project» (restricted None) still filters — to the projects that EXIST. A deleted project's stories and
-    # goals have no foreign key to remove them and would otherwise be counted for an owner/admin. `scope` below still says «org» for them.
-    from app.services.project_auth import live_scope
-
-    scope_ids = await live_scope(session, org_id, restricted)
+    # story #4688 (AC2): `scope_ids` = the projects that exist and that the caller reaches — an owner/admin is NOT «unfiltered» any more (a deleted
+    # project's stories and goals have no foreign key to remove them and would be counted); `restricted` only decides the label below.
+    scope_ids, restricted = await project_scope(session, uuid.UUID(str(_auth.user_id)), org_id)
 
     def _in_scope(col) -> list:
         return [col.in_(scope_ids)]
@@ -907,7 +904,7 @@ async def overview(
 
     return JSONResponse(content={
         # 좁혀진 판(제한된 caller) = "accessible_projects" — 화면 라벨이 «조직 전체»라고 단정하지 않게(유나 판정 대상).
-        "scope": "org" if restricted is None else "accessible_projects",
+        "scope": "accessible_projects" if restricted else "org",
         "fleet": {
             "total_agents": total_agents,
             "status_breakdown": fleet_breakdown,  # CC-BE.2 실데이터.

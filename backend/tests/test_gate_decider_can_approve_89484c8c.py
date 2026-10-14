@@ -22,8 +22,9 @@ def _full_access_caller():
     """story #4351 — list_gates가 제한된 caller면 접근 가능 프로젝트로 좁히며 그 판정에 조회를 쓴다. 이 파일은 execute 순서를 세는 목
     세션이라 판정을 «전체 접근(None)»으로 고정한다(범위 규칙 자체는 test_4351_gates_scope_realdb.py 실 PG)."""
     # story #4688: «reaches every project» now filters to the projects that exist — one more query this counting mock does not have
-    with patch("app.services.project_auth.restricted_accessible_project_ids", AsyncMock(return_value=None)), \
-            patch("app.services.project_auth.live_project_ids_in_org", AsyncMock(return_value=[])):
+    from tests.scope_pin_4688 import full_access_scope
+
+    with full_access_scope():
         yield
 
 
