@@ -133,8 +133,8 @@ describe('en 개수 문구 복수형(story #4223)', () => {
     expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 0 })).toBe('3 items not ready yet — none of them are owned yet');
     expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 1 })).toBe('3 items not ready yet — 1 of them is owned');
     expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 2 })).toBe('3 items not ready yet — 2 of them are owned');
-    expect(t('settings.agentScopeAllProjectsHint', { count: 1 })).toBe('Granted to the only project.');
-    expect(t('settings.agentScopeAllProjectsHint', { count: 4 })).toBe('Granted to all 4 projects.');
+    expect(t('settings.agentScopeAllProjectsHint', { count: 1 })).toBe('Joins the only project team.');
+    expect(t('settings.agentScopeAllProjectsHint', { count: 4 })).toBe('Joins all 4 project teams.');
   });
 
   it('⭐배포 20 라이브 미달 — 레시피 상세 요약 «1 gate» · 오늘 머리 요약 · 인원 한도 · 경과 일수(1·N)', () => {

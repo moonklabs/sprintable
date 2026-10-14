@@ -93,9 +93,9 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
         const res = await fetchWithAuth(`/api/projects/${projectId}/access/${recordId}`, { method: 'DELETE' });
         if (res.ok) {
           setGrantMap((m) => { const n = { ...m }; delete n[projectId]; return n; });
-          setMessage({ type: 'success', text: `${projectName} 접근을 차단했습니다.` });
+          setMessage({ type: 'success', text: t('agentProjectAccessTakeOff', { project: projectName }) });
         } else {
-          setMessage({ type: 'error', text: `${projectName} 차단에 실패했습니다.` });
+          setMessage({ type: 'error', text: t('agentProjectAccessTakeOffFailed', { project: projectName }) });
         }
       } else {
         // 허용 — POST grant (새 API 키 발급 없음).
@@ -115,9 +115,9 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
             }
           }
           if (recId) setGrantMap((m) => ({ ...m, [projectId]: recId! }));
-          setMessage({ type: 'success', text: `${projectName} 접근을 허용했습니다.` });
+          setMessage({ type: 'success', text: t('agentProjectAccessPutOn', { project: projectName }) });
         } else {
-          setMessage({ type: 'error', text: `${projectName} 허용에 실패했습니다.` });
+          setMessage({ type: 'error', text: t('agentProjectAccessPutOnFailed', { project: projectName }) });
         }
       }
     } finally {
