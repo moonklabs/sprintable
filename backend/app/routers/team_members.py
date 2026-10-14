@@ -137,10 +137,24 @@ async def _inject_active_stories(
     from app.services.desktop_commands import bound_devices
     devices = await bound_devices(session, org_id=org_id, member_ids=[m.id for m in members])
 
+    # story 4686 (AC3): which desktop agents name no model in their run profile (one query for the list) — the org list's «모델 · 런타임
+    # 기본값» badge. NULL / no row = the runtime's own default runs (the profile never makes a value up).
+    from app.models.agent_run_profile import AgentRunProfile
+    from app.services.agent_run_profile import DESKTOP_RUNTIMES
+    desktop_agent_ids = {m.id for m in members if m.type == "agent" and m.runtime_type in DESKTOP_RUNTIMES}
+    profile_models: dict[uuid.UUID, str | None] = {}
+    if desktop_agent_ids:
+        rows = (await session.execute(
+            select(AgentRunProfile.member_id, AgentRunProfile.model).where(AgentRunProfile.member_id.in_(desktop_agent_ids))
+        )).all()
+        profile_models = {r.member_id: r.model for r in rows}
+
     out = []
     for m in members:
         resp = TeamMemberResponse.model_validate(m)
         resp = _override_online(resp, online_map.get(str(m.id)))
+        if m.id in desktop_agent_ids:
+            resp = resp.model_copy(update={"run_model_unset": not profile_models.get(m.id)})
         if (bound := devices.get(m.id)) is not None:
             resp = resp.model_copy(update={"device_name": bound["device_name"], "desktop_setup_id": bound["setup_id"]})
         if m.active_story_id and m.active_story_id in stories:

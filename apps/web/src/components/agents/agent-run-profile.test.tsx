@@ -171,13 +171,13 @@ describe('AgentRunProfileSection', () => {
     return calls;
   }
 
-  async function render(canChange: boolean, put?: () => Response) {
+  async function render(canChange: boolean, put?: () => Response, runNow?: Record<string, unknown> | null) {
     const profile = { agent_id: 'a1', runtime: 'codex', model: 'gpt-6-sol', effort: 'ultra', version: 3, updated_at: null, can_change: canChange };
     const calls = stub(profile, put);
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-          <AgentRunProfileSection agentId="a1" runtimeType="codex" />
+          <AgentRunProfileSection agentId="a1" runtimeType="codex" runNow={runNow ?? null} />
         </NextIntlClientProvider>,
       );
     });
@@ -194,6 +194,24 @@ describe('AgentRunProfileSection', () => {
     expect(text).toContain('울트라');
     expect(container.querySelector('code')?.textContent).toBe('ultra');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '저장')).toBe(false);
+  });
+
+  // story 4686 (AC2 · Yuna run-info-1014 (3)): «지금 도는 것: {model} · 생각 깊이 {effort}» and «계정: {account}» — what runs NOW, next to the saved values
+  it('[SID:4686] a live session → «지금 도는 것» (the model that ran, the thinking depth) and «계정» above the saved values, which stay', async () => {
+    await render(false, undefined, { model: 'claude-fable-5-1', model_set: false, effort: 'high', account: 'moonklabs (Max)' });
+    const now = container.querySelector('[data-testid="run-profile-run-now-value"]')?.textContent;
+    expect(now).toBe('지금 도는 것: claude-fable-5-1 · 런타임 기본값 · 생각 깊이 높게');
+    expect(container.querySelector('[data-testid="run-profile-run-now-account"]')?.textContent).toBe('계정: moonklabs (Max)');
+    expect(container.textContent).toContain('gpt-6-sol'); // the saved profile is still there: running ≠ saved is told, not hidden
+  });
+
+  it('[SID:4686] no account (Codex · a login that could not be read) → no account line; no live session → neither line', async () => {
+    await render(false, undefined, { model: 'gpt-5-codex', model_set: true, effort: 'medium' });
+    expect(container.querySelector('[data-testid="run-profile-run-now-value"]')?.textContent).toBe('지금 도는 것: gpt-5-codex · 생각 깊이 보통');
+    expect(container.querySelector('[data-testid="run-profile-run-now-account"]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await render(false, undefined, null);
+    expect(container.querySelector('[data-testid="run-profile-run-now"]')).toBeNull();
   });
 
   it('there is no restart on the web — the only button is save, and it waits for a change', async () => {

@@ -110,6 +110,17 @@ class TeamMemberResponse(BaseModel):
     # injection does not run on (humans · single reads).
     device_name: str | None = None
     desktop_setup_id: uuid.UUID | None = None
+    # story 4686 (AC3 · Yuna run-info-1014 (4)): the run profile of a DESKTOP agent (claude-code · codex) names no model — the runtime's own
+    # default runs («모델 · 런타임 기본값» in the org list). True = no profile row, or a row whose model is empty · False = a model is named ·
+    # None = not a desktop agent (a person · another runtime) or a path the injection does not run on. Set by the injection only.
+    run_model_unset: bool | None = None
+
+    @field_validator("run_model_unset", mode="before")
+    @classmethod
+    def _run_model_unset_only_from_the_injection(cls, v: object) -> object:
+        """story 4686: like the two above — set by `model_copy(update=…)`, never read off the member (a test double that answers every
+        attribute would hand back a mock): anything that is not a real bool reads as «not told» (None)."""
+        return v if isinstance(v, bool) else None
 
     @field_validator("device_name", "desktop_setup_id", mode="before")
     @classmethod
