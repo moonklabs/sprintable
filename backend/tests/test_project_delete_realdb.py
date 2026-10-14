@@ -13,6 +13,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures us
     EXISTING,
     ORG,
     OWNER,
+    PLAIN,
     _addresses,
     _client,
     _dispose_global_engine_after_test,
@@ -512,3 +513,56 @@ async def test_22_the_insights_of_a_deleted_projects_publication_are_not_readabl
         assert len((await c.get(path("live"), headers=_person(OWNER))).json()) == 1  # the live project's stay
         gone = await c.get(path("dead"), headers=_person(OWNER))
         assert gone.status_code == 404, gone.text  # the same 404 as a publication that is not in your org
+
+
+# ---- Kadir round 5: `[]` means «reaches nothing», `None` means «no filter» — pinned for the places that take a project list ----
+
+async def test_23_a_member_with_no_project_grants_sees_no_project_bound_row_while_the_owner_sees_all(world):
+    """The list a project-bound query filters by is `[]` for a limited member who has no grant (not None): every service takes `is not None` as «a
+    filter was asked for» — so `[]` must give ZERO project-bound rows. A «tidy-up» to `if project_ids:` (truthy) would turn `[]` into «no filter» and
+    show that member the whole organization; nothing else in this file noticed (the owner's list is a non-empty list). Org-level rows stay."""
+    await _sql(f"UPDATE org_members SET role='member' WHERE org_id='{ORG}' AND user_id='{PLAIN}'")
+    await _sql(f"DELETE FROM project_access WHERE org_member_id IN (SELECT id FROM org_members WHERE org_id='{ORG}' AND user_id='{PLAIN}')")
+    async with _client() as c:
+        pid = await _create(c, "walk-limited")
+        sid = await _story_in(pid, "limited")
+        # a project-bound and an org-level judgment; a site and a channel draft; a site publication; a campaign with one content item
+        await _sql(
+            "INSERT INTO judgments (id,org_id,scope,work_item_ids,kind,statement,created_by) VALUES "
+            f"(gen_random_uuid(),'{ORG}','items',ARRAY['{sid}']::uuid[],'judgment','{MARK}-lim-bound','{EXISTING}'),"
+            f"(gen_random_uuid(),'{ORG}','general','{{}}'::uuid[],'judgment','{MARK}-lim-org','{EXISTING}')",
+            f"INSERT INTO site_post_drafts (id,org_id,work_item_id,slug) VALUES (gen_random_uuid(),'{ORG}','{sid}','t4688-lim-site')",
+            f"INSERT INTO channel_post_drafts (id,org_id,work_item_id,channel,connection_id) VALUES (gen_random_uuid(),'{ORG}','{sid}','t4688-lim','{EXISTING}')",
+            "INSERT INTO site_posts (id,org_id,lang,slug,title,summary,body_md,published_at,source_story_id,gate_id) VALUES "
+            f"(gen_random_uuid(),'{ORG}','ko','t4688-lim-pub','{MARK}-lim-pub','s','b',now(),'{sid}',gen_random_uuid())",
+        )
+        await _sql(
+            "INSERT INTO site_post_versions (id,draft_id,version,title,lang,summary,body_md,body_sha256,author_member_id,author_kind) "
+            f"SELECT gen_random_uuid(),id,1,'{MARK}-lim-site','ko','s','b','sha','{EXISTING}','agent' FROM site_post_drafts WHERE slug='t4688-lim-site'",
+            "INSERT INTO channel_post_versions (id,draft_id,version,text,body_sha256,author_member_id,author_kind) "
+            f"SELECT gen_random_uuid(),id,1,'{MARK}-lim-chan','sha','{EXISTING}','agent' FROM channel_post_drafts WHERE channel='t4688-lim'",
+        )
+        cid = (await _sql(fetch=f"INSERT INTO campaigns (id,org_id,name,created_by_member_id) VALUES (gen_random_uuid(),'{ORG}','{MARK}-lim-campaign','{EXISTING}') RETURNING id::text"))[0][0]
+        await _sql(f"INSERT INTO site_post_drafts (id,org_id,work_item_id,slug,campaign_id) VALUES (gen_random_uuid(),'{ORG}','{sid}','t4688-camp-lim','{cid}')")
+        await _sql(
+            "INSERT INTO site_post_versions (id,draft_id,version,title,lang,summary,body_md,body_sha256,author_member_id,author_kind) "
+            f"SELECT gen_random_uuid(),id,1,'{MARK}-lim-camp','ko','s','b','sha','{EXISTING}','agent' FROM site_post_drafts WHERE slug='t4688-camp-lim'"
+        )
+        paths = {
+            "judgments": ("/api/v2/judgments", f"{MARK}-lim-bound"),
+            "site drafts": (f"/api/v2/organizations/{ORG}/site-posts/drafts", "t4688-lim-site"),
+            "channel drafts": (f"/api/v2/organizations/{ORG}/channel-posts/drafts", "t4688-lim"),
+            "insights board": (f"/api/v2/organizations/{ORG}/insights-board?window=30d&limit=200", f"{MARK}-lim-pub"),
+            "campaign detail": (f"/api/v2/organizations/{ORG}/campaigns/{cid}", "t4688-camp-lim"),
+        }
+        for name, (path, marker) in paths.items():
+            owner = await c.get(path, headers=_person(OWNER))
+            assert owner.status_code == 200 and marker in owner.text, (name, "owner (None → no filter) sees it", owner.status_code, owner.text[:200])
+            member = await c.get(path, headers=_person(PLAIN))
+            assert member.status_code == 200, (name, member.status_code, member.text[:200])  # a limited member is answered, with nothing project-bound in it
+            assert marker not in member.text, (name, "a member with NO project grants sees a project-bound row")
+        # org-level rows are not project-bound: the member keeps them
+        general = await c.get("/api/v2/judgments", headers=_person(PLAIN))
+        assert f"{MARK}-lim-org" in general.text, general.text[:300]
+        camp = await c.get(paths["campaign detail"][0], headers=_person(PLAIN))
+        assert f"{MARK}-lim-campaign" in camp.text, camp.text[:300]  # the campaign itself is org-level; only its project-bound items are not shown
