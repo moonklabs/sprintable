@@ -36,7 +36,8 @@ def _patch_db_and_auth(monkeypatch, agent_id):
     res_agent = MagicMock(); res_agent.scalar_one_or_none.return_value = tm
     res_plan = MagicMock(); res_plan.scalar_one_or_none.return_value = "free"  # E-INFRA S5: org.plan 조회
     res_cursor = MagicMock(); res_cursor.scalar_one_or_none.return_value = None
-    db.execute = AsyncMock(side_effect=[res_agent, res_plan, res_cursor])
+    res_key = MagicMock(); res_key.scalar_one_or_none.return_value = None  # story #4676: the key's desktop_setup_id — a hand-made key here
+    db.execute = AsyncMock(side_effect=[res_agent, res_plan, res_key, res_cursor])
 
     class _Ctx:
         async def __aenter__(self):

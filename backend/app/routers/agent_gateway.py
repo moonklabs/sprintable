@@ -28,6 +28,7 @@ from app.core.database import async_session_factory
 from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
+from app.models.api_key import ApiKey
 from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import TeamMember
@@ -248,6 +249,9 @@ _agent_sse_connection_count: int = 0
 # story #4509 AC1b — a receiver's own id (one desktop install · contract with the daemon, Mirko 10:35Z): not a key, only a name
 # for «the same place reconnecting». The streams this instance holds per (agent, receiver), so a reconnect can hand over.
 RECEIVER_ID_HEADER = "x-sprintable-receiver-id"
+# story #4676 (UX-1 F4): a person's [여기서 받기] on the install that was refused — this connection takes the agent over from the other
+# receivers (the daemon sends it on that one reconnect only); never on the daemon's own reconnects
+RECEIVER_TAKEOVER_HEADER = "x-sprintable-receiver-takeover"
 _RECEIVER_ID_RE = re.compile(r"^rcv_[A-Za-z0-9_-]{22}$")
 _receiver_streams: dict[tuple[str, str], asyncio.Queue] = {}
 
@@ -597,6 +601,17 @@ async def agent_stream(
         )).scalar_one_or_none() or "free"
         org_id_str = str(tm.org_id)  # R2: presence SSE 발행용(generate 클로저 캡처).
 
+        # story #4676 (UX-1 F4): a key a desktop setup made (`ApiKey.desktop_setup_id`) is received in ONE place — read here, decided
+        # below with the receiver header. A hand-made key (no setup) keeps the plan's count. A key id that is not a UUID is not a
+        # setup key (the recheck on the heartbeat fails it closed on its own — 4434).
+        _key_id_claim = auth.claims.get("app_metadata", {}).get("api_key_id")
+        try:
+            _setup_key = (await db.execute(
+                select(ApiKey.desktop_setup_id).where(ApiKey.id == uuid.UUID(str(_key_id_claim)))
+            )).scalar_one_or_none() is not None
+        except (TypeError, ValueError):
+            _setup_key = False
+
         # acked_seq DB ì¡°í
         cursor = (await db.execute(
             select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
@@ -642,6 +657,43 @@ async def agent_stream(
         raise HTTPException(status_code=422, detail={"code": "invalid_receiver_id", "message": "X-Sprintable-Receiver-Id must be rcv_ and 22 base64url characters"})
     _pk_member = f"rcv:{_receiver_id}" if _receiver_id else _lease_conn_id
     _superseded_queue = _receiver_streams.get((agent_id_str, _receiver_id)) if _receiver_id else None
+    # story #4676 (UX-1 F4): a setup key = one receiver. Any other live member of this agent's lease — another install (`rcv:…`) or a
+    # connection without the header (an old app) — means another place receives: 409 `another_receiver` (not the plan's 429, which
+    # is a count). The same receiver's reconnect hands over as before (4509). A connection without the header follows the same rule:
+    # alone it receives (an old app on a lone Mac is not cut), beside another it is refused. A hand-made key: the plan limit, as before.
+    # `X-Sprintable-Receiver-Takeover: 1` (a person's [여기서 받기] only) ends the others instead: on this instance now (superseded), on
+    # another instance at its next heartbeat (sse_lease.taken_by); their lease members go, so this connection's acquire passes.
+    _took_over = False
+    _open_here = _agent_connections.get(agent_id_str, ())
+    if _setup_key:
+        _scope = f"perkey:{agent_id_str}"
+        _redis_members = await sse_lease.members(_scope)
+        _local_others = [q for q in _open_here if q is not _superseded_queue]
+        _other_members = [m for m in _redis_members if m != _pk_member] if _redis_members is not None else [f"queue:{id(q)}" for q in _local_others]
+        if _other_members:
+            if request.headers.get(RECEIVER_TAKEOVER_HEADER) == "1":
+                for q in list(_local_others):
+                    _agent_connections.get(agent_id_str, set()).discard(q)
+                    for k in [k for k, v in _receiver_streams.items() if v is q]:
+                        _receiver_streams.pop(k, None)
+                    _signal_superseded(q)
+                if _redis_members is not None:
+                    for m in _other_members:
+                        await sse_lease.release(_scope, m)
+                    await sse_lease.mark_taken(_scope, _pk_member)
+                _took_over = True
+                logger.info("agent_stream takeover agent=%s to=%s from=%d", agent_id_str, _pk_member, len(_other_members))
+            else:
+                _retry_after = _AGENT_STREAM_RETRY_AFTER
+                _earliest = await sse_lease.earliest_expiry(_scope)
+                if _earliest is not None:
+                    _retry_after = max(1, round(_earliest - time.time()))
+                logger.info("agent_stream another_receiver agent=%s mine=%s others=%d", agent_id_str, _pk_member, len(_other_members))
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "another_receiver", "message": "another install is receiving this agent's work", "retry_after": _retry_after},
+                    headers={"Retry-After": str(_retry_after)},
+                )
     _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _pk_member)
     # story #2602: `_agent_connections`는 defaultdict(set) — `[...]` 서브스크립트는 키가 없으면
     # 빈 set을 **만들면서** 반환한다. 이 줄은 판정(길이 체크)일 뿐인데 거부(429)로 끝나는 요청도
@@ -849,7 +901,15 @@ async def agent_stream(
                     if not _skip_refresh:
                         await sse_lease.refresh("agent_global", _lease_conn_id)
                         if _owns_receiver_slot():
-                            await sse_lease.refresh(f"perkey:{agent_id_str}", _pk_member)
+                            # story #4676: a person took this agent over on another install (another instance) — this stream ends
+                            # superseded instead of keeping its slot alive. Every stream but the taker reads the mark — a connection
+                            # without the header (an old app) too: its refresh is a ZADD, which would put the member the taker released
+                            # back and leave two places receiving (PO 11:56Z). A hand-made key never has a mark → refresh as before.
+                            _taken = await sse_lease.taken_by(f"perkey:{agent_id_str}") if not _took_over else None
+                            if _taken is not None and _taken != _pk_member:
+                                _signal_superseded(queue)
+                            else:
+                                await sse_lease.refresh(f"perkey:{agent_id_str}", _pk_member)
                     last_presence_tick = _now
 
             # story #4569 (PO 01:14Z) — the seqs this connection has sent and the client has not acked yet. A wake still rescans
@@ -1005,6 +1065,8 @@ async def agent_stream(
                 await sse_lease.release(f"perkey:{agent_id_str}", _pk_member)
                 if _receiver_id:
                     _receiver_streams.pop((agent_id_str, _receiver_id), None)
+            if _took_over:  # story #4676: the taker's mark goes with its stream (only its own)
+                await sse_lease.clear_taken(f"perkey:{agent_id_str}", _pk_member)
             _agent_connections[agent_id_str].discard(queue)
             if not _agent_connections[agent_id_str]:
                 _agent_connections.pop(agent_id_str, None)
