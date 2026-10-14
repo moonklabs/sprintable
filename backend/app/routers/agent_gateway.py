@@ -256,11 +256,18 @@ _RECEIVER_ID_RE = re.compile(r"^rcv_[A-Za-z0-9_-]{22}$")
 _receiver_streams: dict[tuple[str, str], asyncio.Queue] = {}
 
 
-def _signal_superseded(queue: asyncio.Queue) -> None:
+# story #4676 (Kadir 10-14): the `by` of a `superseded` frame when ANOTHER install took the agent over with its header — the only one the
+# daemon reads (it shows the displaced Mac a line instead of just ending). A same-receiver hand-over (4509) says nothing: `data: {}`.
+SUPERSEDED_BY_OTHER_RECEIVER = "other_receiver"
+
+
+def _signal_superseded(queue: asyncio.Queue, by: str | None = None) -> None:
     """Tell a handed-over stream to end — the wake path's #2530 shape: a full queue (a dead old stream piling up wakes — the very
     moment a hand-over is needed) drops its oldest signal to make room; if a racer refills it, this signal is given up (Qadir
     01a101bf T1: an uncaught QueueFull here was a 500 that kept the lease and the old queue registered)."""
-    signal = {"__superseded__": True}
+    signal: dict = {"__superseded__": True}
+    if by is not None:
+        signal["by"] = by
     try:
         queue.put_nowait(signal)
     except asyncio.QueueFull:
@@ -676,7 +683,7 @@ async def agent_stream(
                     _agent_connections.get(agent_id_str, set()).discard(q)
                     for k in [k for k, v in _receiver_streams.items() if v is q]:
                         _receiver_streams.pop(k, None)
-                    _signal_superseded(q)
+                    _signal_superseded(q, SUPERSEDED_BY_OTHER_RECEIVER)
                 if _redis_members is not None:
                     for m in _other_members:
                         await sse_lease.release(_scope, m)
@@ -902,12 +909,15 @@ async def agent_stream(
                         await sse_lease.refresh("agent_global", _lease_conn_id)
                         if _owns_receiver_slot():
                             # story #4676: a person took this agent over on another install (another instance) — this stream ends
-                            # superseded instead of keeping its slot alive. Every stream but the taker reads the mark — a connection
-                            # without the header (an old app) too: its refresh is a ZADD, which would put the member the taker released
-                            # back and leave two places receiving (PO 11:56Z). A hand-made key never has a mark → refresh as before.
-                            _taken = await sse_lease.taken_by(f"perkey:{agent_id_str}") if not _took_over else None
+                            # superseded instead of keeping its slot alive. EVERY stream reads the mark — a connection without the header
+                            # (an old app) too: its refresh is a ZADD, which would put the member the taker released back and leave two
+                            # places receiving (PO 11:56Z). The taker reads it as well (Kadir 01a13a34): its own mark is its own member, so
+                            # it goes on; but when the displaced owner takes the agent BACK from another instance the mark is theirs, and a
+                            # taker that skipped it would refresh itself back into the lease (two receive, the take-back silently lost).
+                            # A hand-made key never has a mark → refresh as before.
+                            _taken = await sse_lease.taken_by(f"perkey:{agent_id_str}")
                             if _taken is not None and _taken != _pk_member:
-                                _signal_superseded(queue)
+                                _signal_superseded(queue, SUPERSEDED_BY_OTHER_RECEIVER)
                             else:
                                 await sse_lease.refresh(f"perkey:{agent_id_str}", _pk_member)
                     last_presence_tick = _now
@@ -1014,7 +1024,9 @@ async def agent_stream(
                     signal = get_task.result()
                     if signal.get("__superseded__"):
                         # story #4509 AC1b — the same receiver reconnected: this stream hands its slot over and ends
-                        yield "event: superseded\ndata: {}\n\n"
+                        _by = signal.get("by")
+                        _data = json.dumps({"by": _by}, separators=(",", ":")) if _by == SUPERSEDED_BY_OTHER_RECEIVER else "{}"
+                        yield f"event: superseded\ndata: {_data}\n\n"
                         return
                     if signal.get("__wake__"):
                         # ìµì  acked_seq ì¡°í (í´ë¼ì´ì¸í¸ê° ACK ë³´ëì ì ìì)
