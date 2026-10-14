@@ -35,6 +35,8 @@ SESSION_WIDENED_MODES = ("plan", "default", "acceptEdits", "auto", "dontAsk", "b
 # story #4560 (0444 · contract v2.1 §5 · PO 14:41Z): the daemon did not touch a session whose limit should be over — the terminal's
 # screen was not the expected one (`screen`), or the one Esc it sent was not taken (`esc_not_taken`)
 SESSION_LIMIT_HELD = ("screen", "esc_not_taken")
+# story #4684 (0454): why a computer's subscription for an agent is stopped — the app board's own closed words (the daemon's InboxStreamStatus stops)
+SESSION_INBOX_STREAMS = ("stopped_other_receiver", "stopped_taken_over", "stopped_auth", "stopped_inbox_full")
 SESSION_RUNTIMES = ("claude", "codex")
 
 
@@ -85,6 +87,8 @@ class DesktopSession(Base):
         CheckConstraint("run_model IS NULL OR char_length(run_model) <= 70", name="ck_desktop_sessions_run_model_len"),
         CheckConstraint("run_account IS NULL OR char_length(run_account) <= 80", name="ck_desktop_sessions_run_account_len"),
         CheckConstraint("run_effort IS NULL OR run_effort IN ('low','medium','high','xhigh','max','ultra')", name="ck_desktop_sessions_run_effort"),
+        # story #4684 (0454): the receive stop's closed set in the DB too
+        CheckConstraint(f"inbox_stream IS NULL OR {_in('inbox_stream', SESSION_INBOX_STREAMS)}", name="ck_desktop_sessions_inbox_stream"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -120,6 +124,8 @@ class DesktopSession(Base):
     run_model_set: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     run_effort: Mapped[str | None] = mapped_column(Text, nullable=True)
     run_account: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4684 (0454): why this computer's subscription for the agent is stopped (the board's closed words) — set by the report that carries `inbox`
+    inbox_stream: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4534 (0438): whether the session can take an instruction into the running turn — hides [지금 지시] when not (only)
     instruct_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
