@@ -9,6 +9,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { ConnectStep } from './connect-step';
 import { WhereStep, type WhereChoice } from './where-step';
 import { DesktopGetStep } from './desktop-get-step';
+import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
 
@@ -174,8 +175,13 @@ export function OnboardingForm({
     let cancelled = false;
     fetchWithAuth('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
-      .then((json: { data?: { member_id?: string; email_verified?: boolean | null } } | null) => {
+      .then((json: { data?: { member_id?: string; email_verified?: boolean | null; org_id?: string | null; org_member_id?: string | null } } | null) => {
         if (cancelled) return;
+        // story 4668: this account already has an organization (a reload at the fork or at the app download, a re-opened
+        // `/onboarding?signup=1`) — no second «조직 만들기» (the free plan allows one: it ended in the upgrade modal). On to the
+        // fork, with that organization; the fork is where the first run left off after the organization was made.
+        const existingOrgId = existingOrgIdFromMe(json);
+        if (existingOrgId) { setOrgId(existingOrgId); setStep('where'); return; }
         // AC2 — email_verified가 명시 false일 때만 배너를 띄운다(true·null 둘 다 무표시 —
         // null은 조회 실패/판정 불가란 뜻이라, 이전처럼 "제출해봐야 아는" 폴백으로 자연스럽게
         // 저하할 뿐 새로운 오탐을 만들지 않는다).
