@@ -78,6 +78,12 @@ jobs:
       # (집계 함수가 칸을 정해 걸러 찍는다 — backend/tests/test_probe_prod_auth_errors.py 가 «새지 않음»을 고정).
       # hours 는 env 로만 넘기고 스크립트가 1~72 정수로 검증한다(스크립트 주입 0). SA 에 logging 읽기 권한이 없으면 gcloud 오류
       # 문구가 그대로 결과다.
+      # prod 는 main 코드로 도는데 이 워크플로는 develop 체크아웃에서 돈다 — probe 의 닫힌 코드 목록(소스에서 실행 때 만듦)이
+      # develop ∪ main 이 되도록 main 의 소스도 읽을 수 있게 가져온다(`git show origin/main:<경로>`). 읽기 전용.
+      - name: Fetch main sources (closed code list = develop + main)
+        if: ${{ inputs.probe == 'prod_auth_errors' }}
+        run: git fetch --no-tags --depth 1 origin +refs/heads/main:refs/remotes/origin/main
+
       - name: Probe prod auth errors (allowlisted output only)
         if: ${{ inputs.probe == 'prod_auth_errors' }}
         env:

@@ -12,8 +12,14 @@
      + 백엔드 로그에서 허용 낱말(OAUTH_* · INVALID_STATE · 구글 토큰 오류 낱말)만 뽑은 개수 · 시각
 
 ⛔**출력은 허용 목록만이다.** 로그 항목(이메일 · 사용자 id · IP · 쿠키 · 토큰 · UA · referer · 쿼리의 code/state/error 외 값)은
-어디에도 찍지 않는다 — 집계 함수는 항목에서 «정해진 칸»만 꺼내 정규식/집합으로 걸러 값만 센다. 모양이 다른 error 값은
-«(other)» 로 센다. 원문 한 줄도 출력하지 않는다. 오직 예외: gcloud 가 실패하면 그 오류 문구(권한 부족 등)를 그대로 찍는다
+어디에도 찍지 않는다 — 집계 함수는 항목에서 «정해진 칸»만 꺼내 **닫힌 목록**에 있는 값만 그대로 세고, 목록 밖은 «(other)» 로 센다.
+«글자 모양이 맞으면 통과»는 호출자(URL 친 쪽)가 고른 글자를 찍는 구멍이라(까디르 렌즈) 쓰지 않는다. 원문 한 줄도 출력하지 않는다.
+
+닫힌 목록은 **손으로 적지 않고 소스에서 실행 때 만든다**(새 코드가 생겨도 따라오게) — 그리고 prod 는 main 코드로 도니 **develop(체크아웃)
+∪ origin/main 두 판의 합집합**이다(main 에만 있는 코드가 «(other)» 로 묻히지 않게):
+  · 웹 `apps/web/src/app/login/page.tsx` 의 `oauthErrors` 키 + 콜백 route 의 `login?error=<리터럴>` · `errCode ?? '<기본값>'`
+  · 백엔드 `backend/app/routers/auth.py` 의 `_err("CODE"` · `OAuthExchangeError("CODE"` 첫 인자(대문자)
+  · 핸드오프 동작 이름: `backend/app/routers/auth_firebase_internal.py` 의 `"/oauth-handoff/<동작>"` 오직 예외: gcloud 가 실패하면 그 오류 문구(권한 부족 등)를 그대로 찍는다
 (이 자체가 결과 — PO 지시. 로그 항목이 아니라 gcloud 의 stderr 다).
 
 앱 런타임을 import 하지 않는다(gcloud + 표준 라이브러리만) — check_serving_reality.py 와 같은 규율.
@@ -37,15 +43,27 @@ _HOURS_MIN, _HOURS_MAX = 1, 72
 # ── 허용 목록 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _OUTCOMES = frozenset({"missing_cookie", "state_mismatch", "ok"})
 _PROVIDERS = frozenset({"google", "apple"})
-_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_]{1,64}$")  # `/login?error=<코드>` 의 코드 모양 — 이 밖은 «(other)»
-_BACKEND_CODE = re.compile(r"\b(OAUTH_[A-Z][A-Z_]{1,40}|INVALID_STATE)\b")
+_OTHER = "(other)"
+_BACKEND_CODE = re.compile(r"\b([A-Z][A-Z0-9_]{2,60})\b")  # 후보 뽑기용 — 출력은 닫힌 목록(known_be_codes)에 있는 것만
 _GOOGLE_ERRORS = (
     "invalid_grant", "invalid_client", "invalid_request", "redirect_uri_mismatch", "access_denied",
     "unauthorized_client", "invalid_scope", "unsupported_grant_type", "invalid_token",
 )
 _GOOGLE_ERROR_RE = re.compile(r"\b(" + "|".join(_GOOGLE_ERRORS) + r")\b")
 _STATE_CHECK = re.compile(r"auth\.oauth\.callback\.state_check\s+outcome=(\w+)\s+provider=(\w+)\s+native=(\w+)")
-_SAFE_PATH = re.compile(r"^/[A-Za-z0-9/_-]{0,80}$")
+
+# ── 닫힌 목록의 소스 (develop 체크아웃 ∪ origin/main) ──────────────────────────────────────────────────────────────────────
+_SRC_WEB_LOGIN = "apps/web/src/app/login/page.tsx"
+_SRC_WEB_CALLBACK = "apps/web/src/app/api/auth/callback/[provider]/route.ts"
+_SRC_BE_AUTH = "backend/app/routers/auth.py"
+_SRC_BE_HANDOFF = "backend/app/routers/auth_firebase_internal.py"
+_SOURCES = (_SRC_WEB_LOGIN, _SRC_WEB_CALLBACK, _SRC_BE_AUTH, _SRC_BE_HANDOFF)
+_OAUTH_ERRORS_BLOCK = re.compile(r"const\s+oauthErrors\s*:[^=]*=\s*\{(.*?)\n\s*\};", re.S)
+_OAUTH_ERRORS_KEY = re.compile(r"^\s*([a-z][a-z0-9_]{1,60})\s*:", re.M)
+_CALLBACK_LITERAL = re.compile(r"login\?error=([a-z][a-z0-9_]{1,60})(?![A-Za-z0-9_$\{])")
+_CALLBACK_DEFAULT = re.compile(r"errCode\s*=[^;\n]*\?\?\s*'([a-z][a-z0-9_]{1,60})'")
+_BE_CODE_SITE = re.compile(r"(?:\b_err|\bOAuthExchangeError)\(\s*\"([A-Z][A-Z0-9_]{1,60})\"")
+_HANDOFF_ACTION = re.compile(r"\"/oauth-handoff/([a-z][a-z_]{1,30})\"")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
 
@@ -118,8 +136,8 @@ def agg_state_checks(entries: list[dict]) -> list[str]:
 
 
 # ── ② 웹 /login?error= ─────────────────────────────────────────────────────────────────────────────────────────────────────
-def _error_param(request_url: str | None) -> str | None:
-    """요청 URL 의 `error` 쿼리 값 하나만 — 다른 쿼리/호스트/경로는 버린다."""
+def _error_param(request_url: str | None, known: frozenset[str]) -> str | None:
+    """요청 URL 의 `error` 쿼리 값 하나만 — 다른 쿼리/호스트/경로는 버린다. 닫힌 목록 밖은 «(other)»."""
     if not isinstance(request_url, str):
         return None
     parts = urlsplit(request_url)
@@ -129,14 +147,14 @@ def _error_param(request_url: str | None) -> str | None:
     if not vals:
         return None
     v = vals[0]
-    return v if _ERROR_VALUE.match(v) else "(other)"
+    return v if v in known else _OTHER
 
 
-def agg_login_errors(entries: list[dict]) -> list[str]:
+def agg_login_errors(entries: list[dict], known: frozenset[str]) -> list[str]:
     spans: dict[str, _Span] = defaultdict(_Span)
     for e in entries:
         hr = e.get("httpRequest")
-        err = _error_param(hr.get("requestUrl") if isinstance(hr, dict) else None)
+        err = _error_param(hr.get("requestUrl") if isinstance(hr, dict) else None, known)
         if err is None:
             continue
         spans[err].add(e.get("timestamp"))
@@ -144,27 +162,27 @@ def agg_login_errors(entries: list[dict]) -> list[str]:
 
 
 # ── ③ 백엔드 요청 + 허용 낱말 ──────────────────────────────────────────────────────────────────────────────────────────────
-def _route_label(request_url: str | None) -> str | None:
-    """`/oauth/callback` · `/oauth-handoff/` 만 — 쿼리(code · state)는 버리고 경로 상수로 접는다. 다른 경로는 None."""
+def _route_label(request_url: str | None, handoff_actions: frozenset[str]) -> str | None:
+    """상수 라벨만 — `/oauth/callback` · `/oauth-handoff/<동작>`. 앞 접두(`/u/alice/…` 포함)는 통째로 버리고, 쿼리도 버린다.
+    동작 이름이 소스 목록 밖이면 «/oauth-handoff/(other)». 두 경로 어느 쪽도 아니면 None(세지 않는다)."""
     if not isinstance(request_url, str):
         return None
     path = urlsplit(request_url).path
-    if not _SAFE_PATH.match(path):
-        return None
-    if "/oauth/callback" in path:
-        return path[: path.index("/oauth/callback")] + "/oauth/callback"
-    if "/oauth-handoff/" in path:
-        return path[: path.index("/oauth-handoff/")] + "/oauth-handoff/*"
+    if path.endswith("/oauth/callback"):
+        return "/oauth/callback"
+    head, sep, tail = path.rpartition("/oauth-handoff/")
+    if sep:
+        return f"/oauth-handoff/{tail}" if tail in handoff_actions else f"/oauth-handoff/{_OTHER}"
     return None
 
 
-def agg_backend_requests(entries: list[dict]) -> list[str]:
+def agg_backend_requests(entries: list[dict], handoff_actions: frozenset[str]) -> list[str]:
     spans: dict[tuple[str, str, int], _Span] = defaultdict(_Span)
     for e in entries:
         hr = e.get("httpRequest")
         if not isinstance(hr, dict):
             continue
-        label = _route_label(hr.get("requestUrl"))
+        label = _route_label(hr.get("requestUrl"), handoff_actions)
         status = hr.get("status")
         if label is None or not isinstance(status, int) or status < 400:
             continue
@@ -174,15 +192,94 @@ def agg_backend_requests(entries: list[dict]) -> list[str]:
     return [f"  {m} {label}  → {status}  {sp.text()}" for (label, m, status), sp in sorted(spans.items())]
 
 
-def agg_backend_words(entries: list[dict]) -> list[str]:
-    """백엔드 로그 항목 전체를 훑되 **정규식에 걸린 낱말만** 센다 — 항목의 나머지는 한 글자도 안 나간다."""
+def agg_backend_words(entries: list[dict], known_be_codes: frozenset[str]) -> list[str]:
+    """백엔드 로그 항목 전체를 훑되 **닫힌 목록에 있는 낱말만** 센다. `OAUTH_*` 꼴인데 목록 밖이면 «OAUTH_(other)» 로 접는다 —
+    항목의 나머지는 한 글자도 안 나간다."""
     spans: dict[str, _Span] = defaultdict(_Span)
     for e in entries:
         blob = json.dumps(e, ensure_ascii=False)
-        seen = set(_BACKEND_CODE.findall(blob)) | set(_GOOGLE_ERROR_RE.findall(blob))
+        seen: set[str] = set(_GOOGLE_ERROR_RE.findall(blob))
+        for w in set(_BACKEND_CODE.findall(blob)):
+            if w in known_be_codes:
+                seen.add(w)
+            elif w.startswith("OAUTH_"):
+                seen.add(f"OAUTH_{_OTHER}")
         for w in seen:
             spans[w].add(e.get("timestamp"))
     return [f"  {w}  {sp.text()}" for w, sp in sorted(spans.items(), key=lambda kv: (-kv[1].n, kv[0]))]
+
+
+# ── 닫힌 목록 만들기 (순수 추출 + 읽기) ─────────────────────────────────────────────────────────────────────────────────────
+class Known:
+    """소스에서 뽑은 닫힌 목록 셋 + 어느 판을 읽었는지(출력 첫머리에 찍는다)."""
+
+    def __init__(self) -> None:
+        self.web_errors: set[str] = set()
+        self.be_codes: set[str] = set()
+        self.handoff_actions: set[str] = set()
+        self.versions: list[str] = []
+        self.notes: list[str] = []
+
+    def freeze(self) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+        # `/login?error=` 에는 웹 리터럴과 BE 코드가 그대로 실려 온다 → 합집합
+        return frozenset(self.web_errors | self.be_codes), frozenset(self.be_codes), frozenset(self.handoff_actions)
+
+
+def extract_web_errors(login_page_text: str, callback_text: str) -> set[str]:
+    out: set[str] = set()
+    m = _OAUTH_ERRORS_BLOCK.search(login_page_text)
+    if m:
+        out |= set(_OAUTH_ERRORS_KEY.findall(m.group(1)))
+    out |= set(_CALLBACK_LITERAL.findall(callback_text))
+    out |= set(_CALLBACK_DEFAULT.findall(callback_text))
+    return out
+
+
+def extract_be_codes(auth_py_text: str) -> set[str]:
+    return set(_BE_CODE_SITE.findall(auth_py_text))
+
+
+def extract_handoff_actions(handoff_py_text: str) -> set[str]:
+    return set(_HANDOFF_ACTION.findall(handoff_py_text))
+
+
+def _repo_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read_versions(path: str) -> list[tuple[str, str]]:
+    """(판 이름, 본문) — develop 체크아웃(디스크) + origin/main(git show). 못 읽은 판은 빠진다."""
+    root = _repo_root()
+    out: list[tuple[str, str]] = []
+    try:
+        with open(os.path.join(root, path), encoding="utf-8") as fh:
+            out.append(("checkout", fh.read()))
+    except OSError:
+        pass
+    proc = subprocess.run(["git", "show", f"origin/main:{path}"], capture_output=True, text=True, cwd=root, timeout=30)
+    if proc.returncode == 0:
+        out.append(("origin/main", proc.stdout))
+    return out
+
+
+def build_known(read_versions=_read_versions) -> Known:
+    k = Known()
+    seen_versions: set[str] = set()
+    pages = {p: dict(read_versions(p)) for p in _SOURCES}
+    for ver in ("checkout", "origin/main"):
+        got = {p: pages[p].get(ver) for p in _SOURCES}
+        if all(v is None for v in got.values()):
+            k.notes.append(f"{ver}: 소스 파일을 못 읽었다 — 이 판은 목록에 없다")
+            continue
+        seen_versions.add(ver)
+        k.web_errors |= extract_web_errors(got[_SRC_WEB_LOGIN] or "", got[_SRC_WEB_CALLBACK] or "")
+        k.be_codes |= extract_be_codes(got[_SRC_BE_AUTH] or "")
+        k.handoff_actions |= extract_handoff_actions(got[_SRC_BE_HANDOFF] or "")
+        for p, v in got.items():
+            if v is None:
+                k.notes.append(f"{ver}: {p} 못 읽음")
+    k.versions = sorted(seen_versions)
+    return k
 
 
 # ── gcloud ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -259,6 +356,16 @@ def main() -> int:
         print(f"✗ Cloud Run 서비스 목록을 못 읽었다 — gcloud 오류 문구 그대로:\n{exc}")
         return 1
     print(f"웹 서비스: {', '.join(web) or '(없음)'} · 백엔드 서비스: {', '.join(backend) or '(없음)'}")
+    known = build_known()
+    known_errors, known_be_codes, handoff_actions = known.freeze()
+    print(
+        f"닫힌 목록(소스에서 실행 때 만듦): 읽은 판 {' + '.join(known.versions) or '(없음)'} · "
+        f"/login?error 값 {len(known_errors)}개 · BE 코드 {len(known_be_codes)}개 · 핸드오프 동작 {len(handoff_actions)}개"
+    )
+    for note in known.notes:
+        print(f"  ⚠ {note}")
+    if not known_errors:
+        print("  ⚠ 목록이 비었다 — 모든 값이 (other) 로 나온다(소스 경로가 바뀌었는지 확인)")
     if not web and not backend:
         print("✗ 이름에 prod 가 든 웹/백엔드 서비스를 못 찾았다 — 위 목록 규칙(frontend/web/backend + prod)을 확인할 것")
         return 1
@@ -275,7 +382,7 @@ def main() -> int:
 
         def two():
             es = _read(f'{_service_filter(web)} AND {req_log} AND httpRequest.requestUrl:"/login?error=" AND {t}')
-            return agg_login_errors(es), len(es)
+            return agg_login_errors(es, known_errors), len(es)
         out += _section("② 웹 요청 /login?error= (error 값)", two)
 
     if backend:
@@ -284,13 +391,13 @@ def main() -> int:
                 f'{_service_filter(backend)} AND {req_log} AND httpRequest.status>=400 '
                 f'AND (httpRequest.requestUrl:"/oauth/callback" OR httpRequest.requestUrl:"/oauth-handoff/") AND {t}'
             )
-            return agg_backend_requests(es), len(es)
+            return agg_backend_requests(es, handoff_actions), len(es)
         out += _section("③a 백엔드 /oauth/callback · /oauth-handoff/ 4xx·5xx", three)
 
         def words():
-            toks = " OR ".join(f'"{w}"' for w in ["OAUTH_", "INVALID_STATE", *_GOOGLE_ERRORS])
+            toks = " OR ".join(f'"{w}"' for w in ["OAUTH_", *sorted(known_be_codes), *_GOOGLE_ERRORS])
             es = _read(f'{_service_filter(backend)} AND severity>=WARNING AND ({toks}) AND {t}')
-            return agg_backend_words(es), len(es)
+            return agg_backend_words(es, known_be_codes), len(es)
         out += _section("③b 백엔드 로그의 허용 낱말 (OAUTH_* · INVALID_STATE · 구글 토큰 오류)", words)
 
     print("\n".join(out))
