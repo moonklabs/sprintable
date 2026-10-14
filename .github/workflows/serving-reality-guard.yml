@@ -12,7 +12,21 @@ name: Serving Reality Guard
 # (이전 6시간 주기는 표본 B 5일·표본 A 22시간 맹점을 막으려던 설계였다 — 그 대가를 받아들인 결정.)
 on:
   workflow_call: {}
-  workflow_dispatch: {}     # 배포 직후 온디맨드 확認용
+  workflow_dispatch:        # 배포 직후 온디맨드 확認용
+    inputs:
+      # 2026-10-14 — prod 로그인 실패 진단. `default` 는 기존 가드 그대로(손 0). `prod_auth_errors` 는 가드 대신
+      # infra/probe_prod_auth_errors.py 를 돌려 «허용 목록 출력만» 찍는다(이메일 · id · IP · 쿠키 · 토큰 · UA 0).
+      probe:
+        description: "default = 배포 실효 가드(기존) · prod_auth_errors = prod 로그인 실패 로그 진단(읽기 전용)"
+        type: choice
+        options:
+          - default
+          - prod_auth_errors
+        default: default
+      hours:
+        description: "prod_auth_errors 가 읽을 지난 시간 (1~72)"
+        type: string
+        default: "12"
 
 concurrency:
   group: serving-reality-guard
@@ -26,7 +40,8 @@ jobs:
   serving-check:
     name: Check serving reality
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # probe=prod_auth_errors 는 gcloud logging read 를 여러 번 하므로 여유를 둔다(기본 가드의 5분은 그대로).
+    timeout-minutes: ${{ inputs.probe == 'prod_auth_errors' && 10 || 5 }}
 
     steps:
       - name: Checkout
@@ -56,7 +71,19 @@ jobs:
       # 배운 것: infra 도구가 앱 의존성을 import 하면 이 가벼운 CI 에서 매일 크래시한다.
       - name: Run serving reality check
         id: serving
+        if: ${{ inputs.probe != 'prod_auth_errors' }}
         run: python3 infra/check_serving_reality.py
+
+      # 2026-10-14 prod 로그인 실패 진단 — dispatch 로만, `probe=prod_auth_errors` 일 때만 돈다. 읽기 전용 · 출력은 허용 목록만
+      # (집계 함수가 칸을 정해 걸러 찍는다 — backend/tests/test_probe_prod_auth_errors.py 가 «새지 않음»을 고정).
+      # hours 는 env 로만 넘기고 스크립트가 1~72 정수로 검증한다(스크립트 주입 0). SA 에 logging 읽기 권한이 없으면 gcloud 오류
+      # 문구가 그대로 결과다.
+      - name: Probe prod auth errors (allowlisted output only)
+        if: ${{ inputs.probe == 'prod_auth_errors' }}
+        env:
+          HOURS: ${{ inputs.hours }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: python3 infra/probe_prod_auth_errors.py
 
       # ⛔"알림 불가 → 조용히 스킵" 금지 — 그러면 감시가 꺼졌는데 켜진 것처럼 보인다.
       # env-drift-guard.yml 과 같은 규율(웹훅 미등록 자체를 실패로 만든다).
