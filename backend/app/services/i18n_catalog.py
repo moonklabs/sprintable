@@ -98,6 +98,27 @@ _CATALOG: dict[str, dict[str, str]] = {
     "desktop_command.turn_end_title.waiting_input": {"ko": "{agent} · 입력 대기", "en": "{agent} · Waiting for input"},
     "desktop_command.turn_end_title.usage_limit": {"ko": "{agent} · 사용 한도", "en": "{agent} · Usage limit"},
     "desktop_command.turn_end_title.paused_limit": {"ko": "{agent} · 한도로 쉬는 중", "en": "{agent} · Paused at usage limit"},
+    # story #4685 (Yuna `limit-notice-1014.md` — the words as written): an agent on the person's computer stood at the usage limit, and
+    # the one notice that it is working again. One agent: the title is the existing paused_limit one above (same words for the same
+    # state). Several told together: «{agent} and {others} more». No account · model · number of tries in the words.
+    "desktop_limit_notice.stood.title_many": {"ko": "{agent} 외 {others}개 · 한도로 쉬는 중", "en": "{agent} and {others} more · Paused at usage limit"},
+    "desktop_limit_notice.stood.body_known": {
+        "ko": "사용 한도에 걸려 멈췄어요 — {time}에 풀려요. 다시 일하기 시작하면 또 알려요.",
+        "en": "Hit the usage limit and stopped — it resets at {time}. You'll get another notice when work starts again.",
+    },
+    "desktop_limit_notice.stood.body_unknown": {
+        "ko": "사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 다시 일하기 시작하면 또 알려요.",
+        "en": "Hit the usage limit and stopped — the reset time isn't known yet. You'll get another notice when work starts again.",
+    },
+    # the {time} of the body: the person's clock — «오후 3:20» / «3:20 PM»; another day adds the date — «10월 15일 오전 9:00» / «Oct 15, 9:00 AM»
+    "desktop_limit_notice.time.am": {"ko": "오전", "en": "AM"},
+    "desktop_limit_notice.time.pm": {"ko": "오후", "en": "PM"},
+    "desktop_limit_notice.time.clock": {"ko": "{ampm} {hour}:{minute}", "en": "{hour}:{minute} {ampm}"},
+    "desktop_limit_notice.time.dated": {"ko": "{month}월 {day}일 {clock}", "en": "{month} {day}, {clock}"},
+    "desktop_limit_notice.lifted.title_one": {"ko": "{agent} · 작업 중", "en": "{agent} · Working"},
+    "desktop_limit_notice.lifted.title_many": {"ko": "{agent} 외 {others}개 · 작업 중", "en": "{agent} and {others} more · Working"},
+    "desktop_limit_notice.lifted.body_one": {"ko": "사용 한도가 풀려 다시 일하기 시작했어요.", "en": "The usage limit reset and it's working again."},
+    "desktop_limit_notice.lifted.body_many": {"ko": "사용 한도가 풀려 다시 일하기 시작했어요.", "en": "The usage limit reset and they're working again."},
     "desktop_command.turn_end_title.error": {"ko": "{agent} · 오류", "en": "{agent} · Error"},
     "desktop_command.turn_end_title_bare.waiting_input": {"ko": "입력 대기", "en": "Waiting for input"},
     "desktop_command.turn_end_title_bare.usage_limit": {"ko": "사용 한도", "en": "Usage limit"},

@@ -152,6 +152,9 @@ class SessionLimit(BaseModel):
     self_resume: Literal["maybe", "no", "unknown"] | None = None
     # story #4560 (contract v2.1 §5 · PO 14:41Z): the daemon held off at the limit's end — the closed words only (another → 422)
     held: Literal["screen", "esc_not_taken"] | None = None
+    # story #4685 (PO 10-14 00:39Z · additive): this daemon looks at the limit again by itself (reset time unknown) — `true` or absent;
+    # a `false` is not a word of the contract (422), so «not looking» is only ever the absence
+    looks: Literal[True] | None = None
 
 
 class SystemHold(BaseModel):
@@ -246,6 +249,7 @@ def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
     row.limit_again = limit.again if limit else None
     row.limit_self_resume = limit.self_resume if limit else None
     row.limit_held = limit.held if limit else None
+    row.limit_looks = True if limit and limit.looks else None  # story #4685
 
 
 def _set_system(row: DesktopSession, report: SessionReport) -> None:
@@ -319,6 +323,8 @@ def limit_view(row: DesktopSession) -> dict | None:
         out["self_resume"] = row.limit_self_resume
     if row.limit_held is not None:  # story #4560: the device list and the DM header read it from here
         out["held"] = row.limit_held
+    if row.limit_looks:  # story #4685: the phone and the web say «the app checks again» only when this is here
+        out["looks"] = True
     return out
 
 
@@ -377,6 +383,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     row.agent_member_id, row.runtime, row.state = report.agent_member_id, report.runtime, report.state
     row.last_report_seq, row.state_at = report.report_seq, report.at
     row.ended_at = report.at if report.state == "stopped" else None
+    was_limited = bool(row.limited)  # story #4685: read before this report overwrites it — the notice follows the move into / out of a limit
     _set_limit(row, report.limit)
     _set_system(row, report)  # story #4599
     _set_widened(row, report, _now(), was_stopped=was_stopped)  # story #4641
@@ -384,8 +391,10 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     await touch_device(db, setup.id)
     await db.flush()
     from app.services.desktop_commands import on_session_reported  # story #4534 — a [지금 지시]'s turn end
+    from app.services.desktop_limit_notice import after_report  # story #4685 — the person who connected the computer is told
 
     await on_session_reported(db, setup, session_key, report.state, report.at)
+    await after_report(db, setup, row, was_limited=was_limited)
     return row
 
 
@@ -420,11 +429,13 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     await _make_room(db, setup.id, new_rows=sum(1 for s in snapshot.sessions if s.session_key not in existing))  # story #4554 ①
     kept = set((await db.execute(select(DesktopSession.id).where(DesktopSession.setup_id == setup.id))).scalars().all())
     existing = {k: r for k, r in existing.items() if r.id in kept}  # an ended row _make_room dropped is not written again
+    limit_moves: list[tuple[DesktopSession, bool]] = []  # story #4685: (row, was it limited before this snapshot) — the notice reads the move
     for s in snapshot.sessions:
         row = existing.pop(s.session_key, None)
         if row is None:
             row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=s.session_key)
             db.add(row)
+        limit_moves.append((row, bool(row.limited)))
         was_stopped = row.state == "stopped"  # captured before the row takes the new word (a new session under the same key)
         row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, s.at
         row.last_report_seq = snapshot.report_seq
@@ -436,6 +447,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     for row in existing.values():
         row.last_report_seq = snapshot.report_seq
         if row.state != "stopped":
+            limit_moves.append((row, bool(row.limited)))  # story #4685: a dropped session leaves its limit too
             row.state, row.state_at, row.ended_at = "stopped", now, now
             _set_limit(row, None)
             row.system_folder = None  # story #4599: a dropped session holds no window
@@ -448,6 +460,10 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         await on_session_reported(db, setup, s.session_key, s.state, s.at)
     for row in existing.values():
         await on_session_reported(db, setup, row.session_key, "stopped", now)
+    from app.services.desktop_limit_notice import after_report  # story #4685 — a snapshot's lines move sessions into / out of a limit too
+
+    for row, was_limited in limit_moves:
+        await after_report(db, setup, row, was_limited=was_limited)
     return len(snapshot.sessions)
 
 

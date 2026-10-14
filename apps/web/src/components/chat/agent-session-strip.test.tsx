@@ -20,7 +20,7 @@ let onExtra: ((name: string, data: unknown) => void) | undefined;
 vi.mock('@/hooks/use-sse-notifications', () => ({
   useSseNotifications: (o: { onExtraEvent?: typeof onExtra }) => { onExtra = o.onExtraEvent; },
 }));
-const { AgentSessionStrip } = await import('./agent-session-strip');
+const { AgentSessionStrip, sessionStateLabel } = await import('./agent-session-strip');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -140,6 +140,12 @@ describe('AgentSessionStrip — the board\'s own words (story #4534 · contract 
     // PO 14:55Z: the daemon's own word while held is waiting_input (no self_resume with it) — the same look and line
     [{ state: 'idle', activity: 'waiting_input', limit: { at: earlier, held: 'screen' } }, '사용 한도', '한도가 풀릴 때가 됐지만 그 컴퓨터의 터미널 화면이 예상과 달라 앱이 손대지 않았어요 — 그 컴퓨터의 터미널에서 확인해 주세요', 'text-warning'],
     [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'maybe', held: 'screen' } }, '사용 한도', '한도가 풀릴 때가 됐지만 그 컴퓨터의 터미널 화면이 예상과 달라 앱이 손대지 않았어요 — 그 컴퓨터의 터미널에서 확인해 주세요', 'text-warning'],
+    // story #4685 (Yuna `limit-notice-1014.md` §③ · PO 10-14 00:39Z): a limit the APP looks at again (`looks`, only a daemon that does says it)
+    // is «한도로 쉬는 중» — the quiet dot, one new line for any self_resume; a held one keeps «사용 한도» whatever `looks` says
+    [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'maybe', looks: true } }, '한도로 쉬는 중', '사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 앱이 틈틈이 다시 해 보고, 풀리면 이어서 일해요', 'text-muted-foreground'],
+    [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'no', looks: true } }, '한도로 쉬는 중', '사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 앱이 틈틈이 다시 해 보고, 풀리면 이어서 일해요', 'text-muted-foreground'],
+    [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'unknown', looks: true } }, '한도로 쉬는 중', '사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 앱이 틈틈이 다시 해 보고, 풀리면 이어서 일해요', 'text-muted-foreground'],
+    [{ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'maybe', held: 'screen', looks: true } }, '사용 한도', '한도가 풀릴 때가 됐지만 그 컴퓨터의 터미널 화면이 예상과 달라 앱이 손대지 않았어요 — 그 컴퓨터의 터미널에서 확인해 주세요', 'text-warning'],
   ])('%j → «%s» and its line', async (over, word, expected, tone) => {
     fetchWithAuth.mockResolvedValueOnce(view({ ...over, remote_control: false }));
     await render();
@@ -147,6 +153,19 @@ describe('AgentSessionStrip — the board\'s own words (story #4534 · contract 
     expect(line()).toBe(expected);
     expect(container.querySelector('[data-testid="agent-session-chip"] svg')?.getAttribute('class')).toContain(tone);
     expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+  it('story #4685: `looks` in English — «Paused at usage limit» and the new line; without `looks` (a daemon from before) the old word and line stay', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'unknown', looks: true }, remote_control: false }));
+    await render('en');
+    expect(chip()).toBe('Paused at usage limit');
+    expect(line()).toBe('Hit the usage limit and stopped — the reset time isn\'t known yet. The app checks again from time to time and carries on once it resets');
+    expect(container.querySelector('[data-testid="agent-session-chip"] svg')?.getAttribute('class')).toContain('fill-current');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', activity: 'waiting_input', limit: { self_resume: 'unknown' }, remote_control: false }));
+    await render('en');
+    expect(chip()).toBe('Usage limit'); // fail-closed: no promise that the app checks again
+    expect(line()).toBe('Hit its usage limit — check in that computer\'s terminal how it can go on');
   });
   it('paused at a usage limit: a quiet dot and when it continues (this page\'s clock) · again · a limit still ahead on an error', async () => {
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', activity: 'paused_limit', limit: { at: later, again: false } }));
@@ -165,6 +184,26 @@ describe('AgentSessionStrip — the board\'s own words (story #4534 · contract 
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', activity: 'error', limit: { at: later } }));
     await render();
     expect(line()).toMatch(/^사용 한도에 걸려 멈췄어요 — .+에 풀려요$/);
+  });
+});
+
+// story 4675 + #4685 (PO 10-14 01:03Z): the strip and the workforce detail's «지금 도는 컴퓨터» line choose the word through ONE function —
+// a limit the app looks at again (`looks`) is «한도로 쉬는 중»; held, or no `looks` (a daemon from before), keeps «사용 한도»
+describe('sessionStateLabel — the one place the word is chosen', () => {
+  const key = (k: string) => k; // the word's key is what is compared
+  it('looks → paused_limit\'s word on any self_resume row, on the shown state or the server\'s activity alike', () => {
+    for (const self_resume of ['maybe', 'no', 'unknown'] as const) {
+      expect(sessionStateLabel({ state: 'waiting_input', limit: { self_resume, looks: true } }, key)).toBe('state.paused_limit');
+      expect(sessionStateLabel({ state: 'idle', activity: 'waiting_input', limit: { self_resume, looks: true } }, key)).toBe('state.paused_limit');
+    }
+  });
+  it('held (whatever `looks` says) and no `looks` keep «사용 한도» · other words are untouched', () => {
+    expect(sessionStateLabel({ state: 'waiting_input', limit: { self_resume: 'maybe', held: 'screen', looks: true } }, key)).toBe('state.usage_limit');
+    expect(sessionStateLabel({ state: 'waiting_input', limit: { self_resume: 'unknown' } }, key)).toBe('state.usage_limit');
+    expect(sessionStateLabel({ state: 'waiting_input', limit: null }, key)).toBe('state.waiting_input');
+    expect(sessionStateLabel({ state: 'paused_limit', limit: { at: '2026-10-05T05:00:00Z' } }, key)).toBe('state.paused_limit');
+    expect(sessionStateLabel({ state: 'error', limit: { looks: true } }, key)).toBe('state.error'); // `looks` rides on the self_resume row only
+    expect(sessionStateLabel({ state: 'working' }, key)).toBe('state.working');
   });
 });
 

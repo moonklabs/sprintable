@@ -1,0 +1,231 @@
+"""story #4685 (AC1 · PO 10-14 00:27Z · Yuna limit-notice-1014.md) — an agent on a person's computer stands at the usage limit: the
+person who connected that computer is told, once; and once more when work starts again.
+
+10-13: five lanes stood and nobody was told — the only limit notice was the turn-end one a phone's [지금 지시] earned. These tests
+drive the relay's own report endpoints over a migrated PG (the 4424/4534 harness): the report is the only input, the notice the
+only output. Each claim has a test that goes red without it (mutants in the PR).
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
+import pytest
+
+from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
+    ORG,
+    OWNER,
+    OWNER_TM,
+    _addresses,
+    _client,
+    _dispose_global_engine_after_test,
+    _person,
+    _sql,
+    anyio_backend,
+    world,
+)
+from tests.test_4529_desktop_relay_realdb import _device, _tok
+
+pytestmark = pytest.mark.anyio
+
+LOOKS = {"self_resume": "unknown", "looks": True}  # the 10-13 shape: Claude, reset time unknown, a daemon that looks again
+
+
+@pytest.fixture(autouse=True)
+async def _remote_control_on_and_korean(world):
+    await _sql(f"UPDATE organizations SET remote_control_enabled_at = now() WHERE id = '{ORG}'",
+               f"UPDATE users SET locale = 'ko' WHERE id = '{OWNER}'")
+    yield
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+async def _report(c, device, agent, state, seq, *, key="s-1", limit=None, at=None, expect=200):
+    body = {"report_seq": seq, "agent_member_id": agent, "runtime": "claude", "state": state, "at": (at or _now()).isoformat()}
+    if limit is not None:
+        body["limit"] = limit
+    r = await c.post(f"/api/v2/desktop/relay/sessions/{key}/state", headers=_tok(device["device_token"]), json=body)
+    assert r.status_code == expect, r.text
+    return r
+
+
+async def _notices(event_type, member=OWNER_TM):
+    rows = await _sql(fetch=("SELECT payload FROM events WHERE recipient_id = :m AND event_type = 'dispatched' "
+                             "AND payload->>'event_type' = :t ORDER BY created_at"), params={"m": member, "t": event_type})
+    return [r[0] for r in rows]
+
+
+STOOD, LIFTED = "agent.limit_paused", "agent.limit_lifted"
+UNKNOWN_BODY = "사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 다시 일하기 시작하면 또 알려요."
+
+
+async def test_01_a_session_that_stands_tells_the_person_who_connected_the_computer_once(world):
+    async with _client() as c:
+        device = await _device(c, "d4685 mac a")
+        agent = device["agents"][0]["member_id"]
+        await _report(c, device, agent, "working", 1)
+        assert await _notices(STOOD) == []
+        await _report(c, device, agent, "waiting_input", 2, limit=LOOKS)
+        (n,) = await _notices(STOOD)
+        assert n["title"] == f"{n['agent_name']} · 한도로 쉬는 중"  # the existing paused_limit title — Yuna: the same words for the same state
+        assert n["body"] == UNKNOWN_BODY  # no reset time → the unknown body; no number of tries, no account, no model in the words
+        # the same limit reported again is not a new stand
+        await _report(c, device, agent, "waiting_input", 3, limit=LOOKS)
+        await _report(c, device, agent, "waiting_input", 4, limit={**LOOKS, "held": "screen"})  # held: still the same limit episode
+        assert len(await _notices(STOOD)) == 1
+
+
+async def test_02_nothing_for_a_move_that_is_not_into_a_limit(world):
+    async with _client() as c:
+        device = await _device(c, "d4685 mac b")
+        agent = device["agents"][0]["member_id"]
+        for seq, state in enumerate(["working", "idle", "waiting_permission", "working", "error"], start=1):
+            await _report(c, device, agent, state, seq)  # an error with no limit is not a usage limit
+        assert await _notices(STOOD) == [] and await _notices(LIFTED) == []
+
+
+async def test_03_others_that_stand_within_the_window_are_folded_and_the_lifted_line_waits_for_all(world):
+    async with _client() as c:
+        device = await _device(c, "d4685 mac c")
+        a, b = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+        await _report(c, device, a, "working", 1, key="s-a")
+        await _report(c, device, b, "working", 2, key="s-b")
+        await _report(c, device, a, "waiting_input", 3, key="s-a", limit=LOOKS)
+        await _report(c, device, b, "waiting_input", 4, key="s-b", limit=LOOKS)  # inside the window: not told again
+        stood = await _notices(STOOD)
+        assert len(stood) == 1 and stood[0]["title"] == f"{stood[0]['agent_name']} · 한도로 쉬는 중"
+        # one is back — the other still stands: «all working again» would be false
+        await _report(c, device, a, "working", 5, key="s-a")
+        assert await _notices(LIFTED) == []
+        # the last one is back: the one line, the same agent as the stood notice
+        await _report(c, device, b, "working", 6, key="s-b")
+        (back,) = await _notices(LIFTED)
+        assert back["title"] == f"{stood[0]['agent_name']} · 작업 중"
+        assert back["body"] == "사용 한도가 풀려 다시 일하기 시작했어요."
+        await _report(c, device, b, "idle", 7, key="s-b")  # told once
+        assert len(await _notices(LIFTED)) == 1
+
+
+async def test_04_several_standing_at_once_in_a_snapshot_are_one_notice_with_the_count_and_one_lifted_line_with_the_same_count(world):
+    async with _client() as c:
+        device = await _device(c, "d4685 mac d")
+        a, b = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+
+        def snap(seq, state_a, state_b):
+            lim = {"limit": LOOKS}
+            return {"report_seq": seq, "sessions": [
+                {"session_key": "s-a", "agent_member_id": a, "runtime": "claude", "state": state_a, "at": _now().isoformat(), **(lim if state_a == "waiting_input" else {})},
+                {"session_key": "s-b", "agent_member_id": b, "runtime": "claude", "state": state_b, "at": _now().isoformat(), **(lim if state_b == "waiting_input" else {})}]}
+
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap(1, "working", "working"), headers=_tok(device["device_token"]))).status_code == 200
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap(2, "waiting_input", "waiting_input"), headers=_tok(device["device_token"]))).status_code == 200
+        (stood,) = await _notices(STOOD)
+        assert stood["title"] == f"{stood['agent_name']} 외 1개 · 한도로 쉬는 중"
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap(3, "working", "working"), headers=_tok(device["device_token"]))).status_code == 200
+        (back,) = await _notices(LIFTED)
+        assert back["title"] == f"{stood['agent_name']} 외 1개 · 작업 중"
+
+
+async def test_05_a_known_reset_time_is_told_in_the_org_zone_and_a_past_one_is_not(world):
+    async with _client() as c:
+        device = await _device(c, "d4685 mac e")
+        a, b = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+        await _sql(f"UPDATE organizations SET timezone = 'Asia/Seoul' WHERE id = '{ORG}'")
+        later = _now() + timedelta(hours=26)  # another day for sure
+        await _report(c, device, a, "working", 1, key="s-a")
+        await _report(c, device, a, "paused_limit", 2, key="s-a", limit={"at": later.isoformat(), "again": False})
+        (n,) = await _notices(STOOD)
+        local = later.astimezone(__import__("zoneinfo").ZoneInfo("Asia/Seoul"))
+        clock = f"{'오전' if local.hour < 12 else '오후'} {local.hour % 12 or 12}:{local.minute:02d}"
+        assert n["body"] == f"사용 한도에 걸려 멈췄어요 — {local.month}월 {local.day}일 {clock}에 풀려요. 다시 일하기 시작하면 또 알려요."
+        # a second computer's session with a time that has already passed: never «풀려요» at a time that has gone
+        other = await _device(c, "d4685 mac e2")
+        o = other["agents"][0]["member_id"]
+        await _report(c, other, o, "working", 1, key="s-o")
+        await _report(c, other, o, "paused_limit", 2, key="s-o", limit={"at": (_now() - timedelta(minutes=5)).isoformat(), "again": True})
+        bodies = [x["body"] for x in await _notices(STOOD)]
+        assert UNKNOWN_BODY in bodies
+
+
+async def test_06_a_session_that_ends_is_not_working_again_and_clears_what_was_promised(world):
+    async with _client() as c:
+        device = await _device(c, "d4685 mac f")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=LOOKS)
+        await _report(c, device, a, "stopped", 3)
+        assert await _notices(LIFTED) == []  # it ended — not «working again»
+        await _report(c, device, a, "working", 4)  # a new session under the same key: nothing promised any more
+        await _report(c, device, a, "idle", 5)
+        assert await _notices(LIFTED) == []
+
+
+async def test_07_nobody_to_tell_is_not_a_failure_and_a_failing_notice_never_fails_the_report(world, monkeypatch):
+    async with _client() as c:
+        device = await _device(c, "d4685 mac g")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{uuid.uuid4()}' WHERE id = '{device['setup_id']}'")  # nobody active
+        await _report(c, device, a, "waiting_input", 2, limit=LOOKS)  # 200 — nobody told
+        assert await _notices(STOOD) == []
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{OWNER}' WHERE id = '{device['setup_id']}'")
+        await _report(c, device, a, "working", 3)
+
+        import app.services.notification_dispatch as nd
+
+        async def boom(*_a, **_k):
+            raise RuntimeError("the dispatcher is down")
+
+        monkeypatch.setattr(nd, "dispatch_notification", boom)
+        await _report(c, device, a, "waiting_input", 4, limit=LOOKS)  # the notice fails — the report still stands
+        row = await _sql(fetch=f"SELECT state, limited FROM desktop_sessions WHERE setup_id = '{device['setup_id']}' AND session_key = 's-1'")
+        assert row[0][0] == "waiting_input" and row[0][1] is True
+
+
+async def test_08_looks_is_stored_shown_to_readers_and_only_ever_true(world):
+    async with _client() as c:
+        device = await _device(c, "d4685 mac h")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit={"self_resume": "maybe", "looks": False}, expect=422)  # `false` is not a word of the contract
+        await _report(c, device, a, "waiting_input", 3, limit={"self_resume": "maybe"})
+        view = (await c.get(f"/api/v2/agents/{a}/desktop-session", headers=_person(OWNER))).json()
+        assert view["limit"] == {"self_resume": "maybe"}  # no `looks`: a daemon that does not look
+        await _report(c, device, a, "waiting_input", 4, limit=LOOKS)
+        view = (await c.get(f"/api/v2/agents/{a}/desktop-session", headers=_person(OWNER))).json()
+        assert view["limit"] == {"self_resume": "unknown", "looks": True}
+
+
+def test_10_the_reset_time_reads_in_the_persons_zone_today_as_a_clock_another_day_with_the_date():
+    """Yuna's {time}: «오후 3:20» / «3:20 PM» today · «10월 15일 오전 9:00» / «Oct 15, 9:00 AM» another day."""
+    from zoneinfo import ZoneInfo
+
+    from app.services.desktop_limit_notice import format_time
+
+    seoul = ZoneInfo("Asia/Seoul")
+    now = datetime(2026, 10, 14, 5, 0, tzinfo=timezone.utc)  # 14:00 in Seoul
+    today = datetime(2026, 10, 14, 6, 20, tzinfo=timezone.utc)  # 15:20 Seoul
+    tomorrow = datetime(2026, 10, 15, 0, 0, tzinfo=timezone.utc)  # 09:00 Seoul, the 15th
+    assert format_time(today, seoul, "ko", now=now) == "오후 3:20"
+    assert format_time(today, seoul, "en", now=now) == "3:20 PM"
+    assert format_time(tomorrow, seoul, "ko", now=now) == "10월 15일 오전 9:00"
+    assert format_time(tomorrow, seoul, "en", now=now) == "Oct 15, 9:00 AM"
+    assert format_time(datetime(2026, 10, 14, 15, 0, tzinfo=timezone.utc), seoul, "en", now=now) == "Oct 15, 12:00 AM"  # midnight reads 12, not 0
+
+
+def test_09_the_turn_end_word_follows_the_same_decision_as_the_strip():
+    """Yuna §③ — one word for one state: a limit the app looks at again is «paused at the usage limit»; a held one, and one from a
+    daemon that does not look, keep «usage limit» (fail-closed: never promise a look that never comes)."""
+    from app.services.desktop_commands import _turn_end_kind
+
+    def row(**kw):
+        base = dict(state="waiting_input", limit_self_resume="unknown", limit_looks=None, limit_held=None, limited=True)
+        return SimpleNamespace(**{**base, **kw})
+
+    assert _turn_end_kind(row(limit_looks=True)) == ("paused_limit", "paused_limit")
+    assert _turn_end_kind(row(limit_looks=True, limit_held="screen")) == ("usage_limit", "usage_limit")
+    assert _turn_end_kind(row()) == ("usage_limit", "usage_limit")
+    assert _turn_end_kind(row(limit_self_resume=None)) == ("waiting_input", "waiting_input")

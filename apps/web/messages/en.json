@@ -5208,6 +5208,7 @@
         "limitMaybe": "Hit its usage limit — if a choice is open in that computer's terminal, pick one there. If not, it continues by itself when the limit resets",
         "limitNo": "Hit its usage limit — it won't continue by itself. Send it again in that computer's terminal once the limit resets",
         "limitUnknown": "Hit its usage limit — check in that computer's terminal how it can go on",
+        "limitLooking": "Hit the usage limit and stopped — the reset time isn't known yet. The app checks again from time to time and carries on once it resets",
         "limitErrorNoTime": "Hit its usage limit and stopped — that computer's terminal shows when it resets",
         "limitErrorAhead": "Hit its usage limit — resets {time}",
         "limitErrorPassed": "The limit has reset — start it again on that computer",

@@ -428,6 +428,11 @@ def _turn_end_kind(row: DesktopSession | None) -> tuple[str | None, str | None]:
     if row is None or row.state == "idle":
         return None, None
     if row.state == "waiting_input":
+        # story #4685 (Yuna limit-notice-1014.md §③): one word for one state — a limit the app looks at again by itself (`looks`) is
+        # «paused at the usage limit», like the strip says; a held one (a person must look at that computer) and a limit from a
+        # daemon that does not look keep «usage limit» (fail-closed: never promise a look that never comes)
+        if row.limit_self_resume and row.limit_looks and not row.limit_held:
+            return "paused_limit", "paused_limit"
         return ("usage_limit", "usage_limit") if row.limit_self_resume else ("waiting_input", "waiting_input")
     if row.state == "paused_limit":
         return "paused_limit", "paused_limit"
