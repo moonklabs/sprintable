@@ -279,3 +279,37 @@ describe('AgentSessionStrip — a permission widened at the terminal (story #464
     expect(chip()).toBe('Working');
   });
 });
+
+// story 4686 (AC2 · Yuna run-info-1014 (2)): one muted line UNDER the status — what the session really runs on; nothing when the server tells none
+describe('AgentSessionStrip — what it runs on (story 4686)', () => {
+  const runLine = () => container.querySelector('[data-testid="agent-session-run"]');
+  const RUN = { model: 'claude-fable-5-1', model_set: false, effort: 'high', account: 'moonklabs (Max)' };
+
+  it('says the model (+ «· 런타임 기본값» when nobody chose it) · thinking depth · account, under the status line, whole in its title', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', run: RUN }));
+    await render();
+    expect(runLine()?.textContent).toBe('claude-fable-5-1 · 런타임 기본값 · 생각 깊이 높게 · moonklabs (Max)');
+    expect(runLine()?.getAttribute('title')).toBe('claude-fable-5-1 · 런타임 기본값 · 생각 깊이 높게 · moonklabs (Max)');
+    // under the status: the status line comes first in the document
+    const status = container.querySelector('[data-testid="agent-session-line"]')!;
+    expect(status.compareDocumentPosition(runLine()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('English words; a named model carries no suffix; no account → no tail', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', run: { model: 'gpt-5-codex', model_set: true, effort: 'medium' } }));
+    await render('en');
+    expect(runLine()?.textContent).toBe('gpt-5-codex · Thinking depth Medium');
+  });
+
+  it('a thinking depth this page does not know is left out of the line — never shown as «기본값»', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', run: { model: 'claude-fable-5-1', model_set: true, effort: 'turbo', account: 'moonklabs (Max)' } }));
+    await render();
+    expect(runLine()?.textContent).toBe('claude-fable-5-1 · moonklabs (Max)');
+  });
+
+  it('no `run` from the server (an older one, a silent computer, a stopped session) → no line at all', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working' }));
+    await render();
+    expect(runLine()).toBeNull();
+  });
+});

@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { formatAgentRuntimeLine } from '@/components/agents/agent-management-tab';
 import { sessionStateLabel } from '@/components/chat/agent-session-strip';
 import type { SessionLimit } from '@/lib/agent-session-limit';
+import type { SessionRun } from '@/lib/agent-session-run';
 import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
@@ -90,6 +91,8 @@ interface DeskView {
   state: string | null;
   activity?: string | null;
   limit?: SessionLimit | null;
+  // story 4686 (AC2): what the live session really runs on (the strip's line · «지금 도는 것» in the run group)
+  run?: SessionRun | null;
   bound_setup_id?: string | null;
   bound_device_name?: string | null;
 }
@@ -632,7 +635,7 @@ export default function AgentDetailPage() {
       })()}
 
       {/* story #4540 (C-5) — «실행»: the model · effort the desktop app starts this agent with (desktop runtimes only) */}
-      {isDesktopRuntime(agent.runtime_type) ? <AgentRunProfileSection agentId={agent.id} runtimeType={agent.runtime_type ?? null} /> : null}
+      {isDesktopRuntime(agent.runtime_type) ? <AgentRunProfileSection agentId={agent.id} runtimeType={agent.runtime_type ?? null} runNow={desk?.run ?? null} /> : null}
 
       {/* API Keys */}
       {/* story #3994(«거짓 경고» 클래스, PO CHANGES-1 2026-09-17) — 「시스템 발행」은

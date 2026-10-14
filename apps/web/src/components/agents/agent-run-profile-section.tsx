@@ -15,6 +15,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgRemoteControl } from '@/lib/org-remote-control';
 import { formatOwners } from '@/components/desktop/remote-off';
 import { EFFORT_LABEL_KEYS, SAVE_ERROR_KEYS, saveErrorKey, type RunProfile, type RunProfileOptions } from '@/lib/agent-run-profile';
+import { runNowText, type SessionRun } from '@/lib/agent-session-run';
 import { AgentRunProfileFields, draftBody, draftReady, initialDraft, type RunProfileDraft } from './agent-run-profile-fields';
 
 const RUNTIME_LABELS: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
@@ -29,9 +30,11 @@ interface Props {
   agentId: string;
   /** the runtime saved elsewhere on this page changed — read again */
   runtimeType: string | null;
+  /** story 4686 (AC2): what the live session really runs on (the server's `run`) — null/absent = no live session: only the saved values show */
+  runNow?: SessionRun | null;
 }
 
-export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
+export function AgentRunProfileSection({ agentId, runtimeType, runNow = null }: Props) {
   const ta = useTranslations('agents');
   // story #4598 (Yuna ① · the remote-control card's `ownerOnlyOn/Off` form): the «not an owner» line names the owners — the same
   // reading of the org the /desktop card uses (owner_names come with it · one read per org while shown)
@@ -149,6 +152,15 @@ export function AgentRunProfileSection({ agentId, runtimeType }: Props) {
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-3">
+        {/* story 4686 (AC2 · Yuna run-info-1014 (3)): «지금 도는 것: {model} · 생각 깊이 {effort}» and, for Claude, «계정: {account}» — what runs NOW,
+            above the saved values below (they differ right after a change, until the next start: the line under the title says so). No live
+            session → neither line. */}
+        {runNow ? (
+          <div className="space-y-0.5 text-sm" data-testid="run-profile-run-now">
+            <p className="break-keep" data-testid="run-profile-run-now-value"><span className="text-muted-foreground">{ta('runNowLabel')}:</span> <span className="text-foreground">{runNowText(runNow, ta)}</span></p>
+            {runNow.account ? <p className="break-keep text-muted-foreground" data-testid="run-profile-run-now-account">{ta('runNowAccount', { account: runNow.account })}</p> : null}
+          </div>
+        ) : null}
         {profile.can_change ? (
           <>
             <AgentRunProfileFields options={options} draft={draft} onChange={(d) => { setDraft(d); setLine(null); }} disabled={saving} />

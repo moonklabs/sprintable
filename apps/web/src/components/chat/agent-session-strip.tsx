@@ -15,6 +15,7 @@ import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
 import { limitHeld, limitLine, limitLooksAgain, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
+import { runInfoLine, type SessionRun } from '@/lib/agent-session-run';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
@@ -42,6 +43,9 @@ interface View {
   // true (a daemon from before says nothing → hidden: its «지금 턴» was not so). It hides a button; the daemon decides again.
   instruct_now?: boolean | null;
   limit?: SessionLimit | null;
+  // story 4686 (AC2): what it really runs on — model · whether the profile named it · thinking depth · account (the server sends it only while
+  // the computer is heard and the session lives; an older server sends none → no line)
+  run?: SessionRun | null;
   // story #4599: a held turn's why — the folder the macOS window asks about, when the daemon read it (a closed list; null = not read)
   system?: { folder?: SystemFolder | null } | null;
   // story #4641: a permission widening a person made at the terminal — the three keys, only while one is stored (the server's)
@@ -261,6 +265,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
       <WidenedLine view={view} />
+      <RunLine run={view.run ?? null} />
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
         <DialogContent showCloseButton={false} initialFocus={endCancelRef}>
           <DialogHeader>
@@ -356,6 +361,16 @@ function ResultLine({ result }: { result: Result }) {
     case 'no_screen_lock': return line(stop ? t('command.stop.noScreenLock') : t('command.send.noScreenLock'), settings);
     default: return line(stop ? t('command.stop.failed') : t('command.send.failed'));
   }
+}
+
+// story 4686 (AC2 · Yuna run-info-1014 (2)): one muted line under the status — «{model} · 생각 깊이 {effort} · {account}» in the run settings
+// screen's own words; under the status line (the status reads first), none when the server tells nothing of what it runs on. One line, cut
+// at its end when it does not fit; the title carries it whole.
+function RunLine({ run }: { run: SessionRun | null }) {
+  const ta = useTranslations('agents');
+  if (!run) return null;
+  const text = runInfoLine(run, ta);
+  return <p className="w-full truncate text-muted-foreground" title={text} data-testid="agent-session-run">{text}</p>;
 }
 
 // story #4641 (Yuna's copy, 2026-10-08): one plain muted line under the session, only when a person widened the mode at the terminal —
