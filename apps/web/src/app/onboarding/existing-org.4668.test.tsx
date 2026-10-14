@@ -26,13 +26,18 @@ let root: Root;
 let urls: string[];
 let hrefSet: string[];
 
-function stubFetch(me: Me) {
+function stubFetch(me: Me, opts: { meGate?: Promise<void>; meFails?: 'reject' | 'status' } = {}) {
   urls = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
     urls.push(url);
     const ok = (data: unknown) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ data, error: null, meta: null }) } as Response);
-    if (url === '/api/auth/me') return ok(me);
+    if (url === '/api/auth/me') {
+      if (opts.meGate) await opts.meGate;
+      if (opts.meFails === 'reject') throw new Error('network');
+      if (opts.meFails === 'status') return { ok: false, status: 500, headers: new Headers(), json: async () => ({}) } as Response;
+      return ok(me);
+    }
     if (url === '/api/onboarding/events') return ok({});
     if (url === '/api/organizations/org-1/remote-control') return ok({ enabled: false, enabled_at: null, can_change: true, owner_names: [] });
     throw new Error('unexpected fetch: ' + url);
@@ -139,5 +144,39 @@ describe('[SID:4668] the desktop sign-up\'s one screen (DesktopCreateOrg)', () =
       expect(text()).toContain('조직 만들기');
       await act(async () => { root.render(provider(<div />)); });
     }
+  });
+
+  describe('«만들기» waits for /api/auth/me (PO 10-15 · Kadir codex): pressed before the answer it would make a second organization', () => {
+    const createBtn = () => Array.from(container.querySelectorAll('button')).find((b) => /만들기|만드는 중/.test(b.textContent ?? '')) as HTMLButtonElement;
+
+    it('held while the answer is pending → enabled once it says «no organization»; nothing was sent meanwhile', async () => {
+      let open!: () => void;
+      stubFetch(NO_ORG, { meGate: new Promise<void>((r) => { open = r; }) });
+      await act(async () => { root.render(provider(<DesktopCreateOrg next="/desktop/setup" />)); });
+      await settle();
+      expect(createBtn().disabled).toBe(true); // reverted (the default name enables it at once) → fails
+      expect(urls).not.toContain('/api/organizations');
+      await act(async () => { open(); });
+      await settle();
+      expect(createBtn().disabled).toBe(false);
+    });
+
+    it('an answer that fails (rejects · not ok) still releases the button — no dead end', async () => {
+      for (const meFails of ['reject', 'status'] as const) {
+        stubFetch(NO_ORG, { meFails });
+        await act(async () => { root.render(provider(<DesktopCreateOrg next="/desktop/setup" />)); });
+        await settle();
+        expect(createBtn().disabled).toBe(false);
+        await act(async () => { root.render(provider(<div />)); });
+      }
+    });
+
+    it('an account found to have an organization stays held while it is sent on (no second organization from a last-moment press)', async () => {
+      stubFetch(WITH_ORG);
+      await act(async () => { root.render(provider(<DesktopCreateOrg next="/desktop/setup" />)); });
+      await settle();
+      expect(hrefSet).toEqual(['/desktop/setup']);
+      expect(createBtn().disabled).toBe(true);
+    });
   });
 });

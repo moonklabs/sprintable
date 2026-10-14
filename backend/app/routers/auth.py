@@ -2499,10 +2499,14 @@ async def get_auth_me(
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
         # story #4178 — org 미해소(org 없음·OrgMember 행 없음)는 예외가 아니라 None.
+        # story 4668 — «살아 있는 조직»의 멤버십일 때만: org_members.org_id에는 FK가 없고 조직 삭제는 조직 행만 지운다
+        # (organization.py delete_by_user) → 지운 조직의 OrgMember는 고아로 남는다. 조직 존재를 조인하지 않으면 JWT에 옛 org_id가
+        # 남은 사람이 지운 조직의 «가입자»로 읽혀, 온보딩이 «이미 조직이 있다»며 지운 조직으로 보낸다.
         if resolved_org is not None:
+            from app.models.organization import Organization
             try:
                 row = (await db.execute(
-                    select(OrgMember.id).where(
+                    select(OrgMember.id).join(Organization, Organization.id == OrgMember.org_id).where(
                         OrgMember.org_id == resolved_org,
                         OrgMember.user_id == uuid.UUID(auth.user_id),
                         OrgMember.deleted_at.is_(None),

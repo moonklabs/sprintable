@@ -37,6 +37,10 @@ export function DesktopCreateOrg({ next }: DesktopCreateOrgProps) {
   const [projectName, setProjectName] = useState(() => t('defaultProjectName'));
   const orgTouchedRef = useRef(false);
   const [orgId, setOrgId] = useState<string | null>(null);
+  // story 4668: «만들기» waits for /api/auth/me to answer (the usual onboarding holds its field the same way) — pressed before the
+  // answer, the screen would make a second organization for an account that has one. An answer that fails or is not ok counts
+  // as answered (no dead end); an account found to have an organization is on its way to the setup page and stays held.
+  const [meRead, setMeRead] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -54,15 +58,15 @@ export function DesktopCreateOrg({ next }: DesktopCreateOrgProps) {
         // again): a second one is refused on the free plan. The setup page itself makes the first project of an organization that
         // has none (story 4496), so it is the next place — no new screen.
         if (existingOrgIdFromMe(json)) { window.location.href = next; return; }
-        if (orgTouchedRef.current) return;
-        setOrgName(defaultOrgName(json?.data?.display_name, (name) => t('defaultOrgNameWithName', { name }), fallback));
+        if (!orgTouchedRef.current) setOrgName(defaultOrgName(json?.data?.display_name, (name) => t('defaultOrgNameWithName', { name }), fallback));
+        setMeRead(true);
       })
-      .catch(() => { /* keep «내 조직» */ });
+      .catch(() => { if (!cancelled) setMeRead(true); /* keep «내 조직» */ });
     return () => { cancelled = true; };
   }, [t, next]);
   const orgMissing = !orgName.trim();
   const projectMissing = !projectName.trim();
-  const canCreate = !loading && !orgMissing && !projectMissing;
+  const canCreate = !loading && meRead && !orgMissing && !projectMissing;
 
   const handleCreate = async () => {
     if (!canCreate) return;
