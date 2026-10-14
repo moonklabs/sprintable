@@ -36,9 +36,14 @@ class Project(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     violation_level: Mapped[str] = mapped_column(String(10), nullable=False, default="warn")
 
     # relationships (string refs to avoid circular imports)
-    team_members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="project", lazy="select")
-    sprints: Mapped[list["Sprint"]] = relationship("Sprint", back_populates="project", lazy="select")
-    epics: Mapped[list["Goal"]] = relationship("Goal", back_populates="project", lazy="select")
+    # `passive_deletes="all"` (10-14, dev: DELETE /api/projects/{id} answered 500 twice): deleting the project must not make the ORM touch these rows.
+    # Without it the unit of work first SETS each child's project_id to NULL before the DELETE — `team_members` is a VIEW (0088: «cannot update
+    # view»), `sprints` · `goals` have project_id NOT NULL — so a project with a granted member, a sprint or an epic could never be deleted.
+    # What happens to a dependent row is the database's own rule (ON DELETE CASCADE where a foreign key says so — project_access, desktop_setups …);
+    # rows with no foreign key (sprints · goals · stories …) stay as they are: the copy promises «비활성화», not erasure.
+    team_members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="project", lazy="select", passive_deletes="all")
+    sprints: Mapped[list["Sprint"]] = relationship("Sprint", back_populates="project", lazy="select", passive_deletes="all")
+    epics: Mapped[list["Goal"]] = relationship("Goal", back_populates="project", lazy="select", passive_deletes="all")
 
 
 class OrgMember(Base):
