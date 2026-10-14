@@ -27,6 +27,7 @@ const KO_OLD = [
   // 유나 §L ⑥: the grid / toasts / scope card / recruiter step spoke of grant · block · 부여 for the team
   /(허용|차단)\s*\/\s*(허용|차단)/, /(허용|차단)됨\s*—\s*클릭/, /클릭해\s*(허용|차단)/, /프로젝트에\s*부여/, /부여\s*프로젝트/, /권한\s*(부여|해제)/, /상시 허용/, /프로젝트\s*접근을\s*허용/,
   /프로젝트에\s*접근하나요/,
+  /접근\s*권한\s*(부여|해제)됨/, // the project-side settings toasts (유나 §L ⑥h)
   // the tab's NAME is one spelling: «접근 권한» (never «접근권한»)
   /접근권한/,
 ];
@@ -54,6 +55,7 @@ describe('[SID:4677] AC2 — the old access words stay out of every message (ko 
     expect('Allow access').toMatch(EN_OLD[1]!);
     expect('셀을 눌러 허용/차단을 즉시 토글해요.').toMatch(KO_OLD[5]!);
     expect('접근권한 매트릭스').toMatch(KO_OLD[KO_OLD.length - 1]!);
+    expect('김지우 접근 권한 부여됨').toMatch(/접근\s*권한\s*(부여|해제)됨/);
     expect('Click a cell to toggle grant/block instantly.').toMatch(EN_OLD[5]!);
   });
 });
@@ -106,7 +108,7 @@ function sourceFiles(dir: string): string[] {
 describe('[SID:4677] AC2 — no hard-coded «허용/차단» toast in a source file (the words live in the messages)', () => {
   it('no .ts/.tsx has «접근을 허용/차단했습니다» · «허용/차단에 실패했습니다» as text', () => {
     const root = join(__dirname, '..'); // apps/web/src
-    const re = /접근을\s*(허용|차단)|(허용|차단)했습니다|(허용|차단)에\s*실패/;
+    const re = /접근을\s*(허용|차단)|(허용|차단)했습니다|(허용|차단)에\s*실패|접근\s*권한\s*(부여|해제)됨/;
     const found = sourceFiles(root).filter((f) => re.test(readFileSync(f, 'utf8'))).map((f) => f.slice(root.length + 1));
     expect(found).toEqual([]);
   });
@@ -128,6 +130,9 @@ describe('[SID:4677] AC2 — the copy of 유나 §L ⑥, key by key (ko · en); 
     ['settings', 'projectAccessAlwaysAllowed', '늘 들어감', 'Always on the team'],
     // the cell values the two settings screens draw (agent-project-access-section · project-access-section) — set before this PR, pinned here so the
     // «옛 문구 0» guard keeps those screens too (까디르: «Granted» / «Blocked» put back in en used to stay GREEN)
+    // 유나 §L ⑥h — the project-side settings section's two success toasts («이름 · 한 일» like 4678's putOnTeamDone: no particle, no honorific)
+    ['settings', 'projectMemberPutOn', '{name} · 이 프로젝트 팀에 넣었어요', "{name} · On this project's team now"],
+    ['settings', 'projectMemberTakeOff', '{name} · 이 프로젝트 팀에서 뺐어요', "{name} · Taken off this project's team"],
     ['settings', 'projectAccessAllowed', '들어감', 'On the team'],
     ['settings', 'projectAccessBlocked', '안 들어감', 'Not on the team'],
     ['settings', 'projectAccessGrantedLabel', '들어간 프로젝트', 'On the team'],

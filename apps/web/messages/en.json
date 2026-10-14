@@ -1827,6 +1827,8 @@
     "agentProjectAccessTakeOff": "Taken off the {project} team",
     "agentProjectAccessPutOnFailed": "Couldn't put it on the {project} team — try again",
     "agentProjectAccessTakeOffFailed": "Couldn't take it off the {project} team — try again",
+    "projectMemberPutOn": "{name} · On this project's team now",
+    "projectMemberTakeOff": "{name} · Taken off this project's team",
     "agentProjectAccessDesc": "Works in the projects below with one API key. Putting it on or taking it off a team keeps the key.",
     "noAccessibleProjects": "No projects to join.",
     "loadFailedRetry": "Load failed · Retry",

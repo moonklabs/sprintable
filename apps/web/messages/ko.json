@@ -1827,6 +1827,8 @@
     "agentProjectAccessTakeOff": "{project} 팀에서 뺐어요",
     "agentProjectAccessPutOnFailed": "{project} 팀에 넣지 못했어요 — 다시 눌러 주세요",
     "agentProjectAccessTakeOffFailed": "{project} 팀에서 빼지 못했어요 — 다시 눌러 주세요",
+    "projectMemberPutOn": "{name} · 이 프로젝트 팀에 넣었어요",
+    "projectMemberTakeOff": "{name} · 이 프로젝트 팀에서 뺐어요",
     "agentProjectAccessDesc": "API 키 하나로 아래 프로젝트에서 일해요. 팀에 넣고 빼도 키는 그대로예요.",
     "noAccessibleProjects": "들어갈 수 있는 프로젝트가 없어요.",
     "loadFailedRetry": "로드 실패 · 재시도",
