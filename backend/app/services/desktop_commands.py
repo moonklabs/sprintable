@@ -25,6 +25,7 @@ from app.services.desktop_relay import (
     PROMPT_MAX,
     SESSION_KEY_PATTERN,
     DesktopRelayError,
+    inbox_view,
     legacy_state,
     limit_view,
     run_view,
@@ -188,6 +189,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         "limit": limit_view(pick) if state == pick.state else None,
         # story #4686: what it runs on — only while the device is heard and the session lives (the same gate)
         "run": run_view(pick) if state == pick.state and pick.state != "stopped" else None,
+        "inbox": inbox_view(pick) if state == pick.state and pick.state != "stopped" else None,  # story #4684
         # story #4599: a held turn's why (the window's folder) — only while the device is heard
         "system": system_view(pick) if state == pick.state else None,
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard (the same gate as above)

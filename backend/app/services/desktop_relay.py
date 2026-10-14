@@ -221,6 +221,15 @@ class SystemHold(BaseModel):
     folder: Literal["documents", "desktop", "downloads", "network_volume", "icloud"] | None = None
 
 
+class SessionInbox(BaseModel):
+    """story #4684 (0454 · Yuna ux1-copy §L ②③): why THIS computer's subscription for the agent is stopped — the app board's own closed words.
+    A stopped session keeps none (accepted like `run`, never stored or shown — it receives nothing to explain); absent = receiving, or not said."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stream: Literal["stopped_other_receiver", "stopped_taken_over", "stopped_auth", "stopped_inbox_full"]
+
+
 # story #4641 (design 4641 · 0449): a mode a person widened at the terminal — the same closed list as the model (a test holds them together)
 WidenedMode = Literal["plan", "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions"]
 # a widening stamped further ahead of the server's clock than this is not believed: the three keys are dropped, never kept (a
@@ -245,6 +254,8 @@ class SessionReport(BaseModel):
     run: SessionRun | None = None
     # story #4599: the window's folder — with `waiting_system` only (the validator below)
     system: SystemHold | None = None
+    # story #4684: why this computer's subscription for the agent is stopped — each report sets it (a report without it clears it: it receives again)
+    inbox: SessionInbox | None = None
     # story #4641: a widening a person made at the terminal — the three together or none; the daemon decides the order (from ≠ to only)
     permission_widened_at: OffsetDatetime | None = None
     permission_widened_from: WidenedMode | None = None
@@ -315,6 +326,16 @@ def _set_run(row: DesktopSession, run: SessionRun | None) -> None:
     row.run_model_set = run.model_set if run else None
     row.run_effort = run.effort if run else None
     row.run_account = run.account if run else None
+
+
+def _set_inbox(row: DesktopSession, inbox: SessionInbox | None) -> None:
+    """story #4684: the row's receive stop is the report's — a report without it clears it (this computer receives again)."""
+    row.inbox_stream = inbox.stream if inbox else None
+
+
+def inbox_view(row: DesktopSession) -> dict | None:
+    """story #4684: a row's receive stop as a reader sees it — None when the row says none."""
+    return {"stream": row.inbox_stream} if row.inbox_stream is not None else None
 
 
 def run_view(row: DesktopSession) -> dict | None:
@@ -465,6 +486,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     was_limited = bool(row.limited)  # story #4685: read before this report overwrites it — the notice follows the move into / out of a limit
     _set_limit(row, report.limit)
     _set_run(row, report.run)  # story #4686
+    _set_inbox(row, report.inbox if report.state != "stopped" else None)  # story #4684
     _set_system(row, report)  # story #4599
     _set_widened(row, report, _now(), was_stopped=was_stopped)  # story #4641
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
@@ -522,6 +544,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         row.ended_at = s.at if s.state == "stopped" else None
         _set_limit(row, s.limit)
         _set_run(row, s.run)  # story #4686
+        _set_inbox(row, s.inbox if s.state != "stopped" else None)  # story #4684
         _set_system(row, s)  # story #4599
         _set_widened(row, s, now, was_stopped=was_stopped)  # story #4641
         row.instruct_now = s.instruct_now
@@ -532,6 +555,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
             row.state, row.state_at, row.ended_at = "stopped", now, now
             _set_limit(row, None)
             _set_run(row, None)  # story #4686: a dropped session says nothing of what it ran on
+            _set_inbox(row, None)  # story #4684: a dropped session explains no receive stop
             row.system_folder = None  # story #4599: a dropped session holds no window
             row.instruct_now = None
     await touch_device(db, setup.id)
@@ -576,6 +600,8 @@ async def device_sessions_view(
         **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),
         # story #4686: what it runs on (model · whether chosen · thinking depth · account) — only while the device is heard
         **({"run": rn} if not silent and r.state != "stopped" and (rn := run_view(r)) is not None else {}),
+        # story #4684: why this computer receives no new work for the agent — only while the device is heard and the session lives
+        **({"inbox": ib} if not silent and r.state != "stopped" and (ib := inbox_view(r)) is not None else {}),
         # story #4599: a held turn's why (the window's folder) — for the new web only, and only while the device is heard
         **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard
