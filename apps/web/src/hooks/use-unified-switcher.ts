@@ -10,6 +10,24 @@ import { canGrantProjectAccess } from '@/lib/project-access-role';
 import { desktopApp } from '@/lib/desktop-app';
 import { homeAsTilde } from '@/lib/home-tilde';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
+
+/**
+ * [SID:4681] (Yuna §K): the plan-limit answer of a refused project create — `{ error: { code: 'PLAN_LIMIT_EXCEEDED', limit, tier, resource } }`
+ * (the legacy `detail` envelope too, as the organization dialog reads it) — or null for any other answer. `free` = the tier is free or
+ * not said (the banner's reason differs for a paid plan). A 402 for another resource is not this banner's.
+ */
+async function planLimitOf(res: { json: () => Promise<unknown> }): Promise<{ limit: number; free: boolean } | null> {
+  try {
+    const j = await res.json() as { error?: Record<string, unknown>; detail?: unknown } | null;
+    const e = j?.error ?? (j?.detail && typeof j.detail === 'object' ? j.detail as Record<string, unknown> : null);
+    if (!e || e.code !== 'PLAN_LIMIT_EXCEEDED') return null;
+    if (e.resource !== undefined && e.resource !== 'project') return null;
+    return { limit: typeof e.limit === 'number' ? e.limit : 1, free: e.tier === undefined || e.tier === 'free' };
+  } catch {
+    return null;
+  }
+}
 
 export interface OrgSwitcherItem {
   orgId: string;
@@ -174,6 +192,9 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 403이었다. 실패를 담아 다이얼로그에 명시로 보여준다(어떤 실패든 침묵하지 않는 게 근본 — a
   // 만으론 다음 다른 실패가 또 조용히 묻힌다).
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
+  // [SID:4681] (Yuna §K · PO 10-14 · walk 7): the plan's project limit (402 PLAN_LIMIT_EXCEEDED) is not a «try again later» — it has its own banner
+  const [createProjectLimit, setCreateProjectLimit] = useState<{ limit: number; free: boolean } | null>(null);
+  const [createProjectLimitNonce, bumpCreateProjectLimitNonce] = useRenderNonce();
   // story #2544 — switchOrg/switchOrgAndProject는 `localOrgId`를 optimistic으로 먼저 찍고
   // (아래 참고) try에 catch 없이 finally만 있었다. `fetch` 자체가 던지면(네트워크 실패 등)
   // else 분기(revert)를 절대 못 타 — 실제 전환은 실패했는데 드롭다운은 "전환됨"으로 영구
@@ -406,6 +427,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     if (!name.trim() || creating) return false;
     setCreating(true);
     setCreateProjectError(null);
+    setCreateProjectLimit(null);
     setCreateProjectNotice(null);
     setCreateProjectFolderNotice(null);
     const folder = opts.folder === undefined ? newProjectFolder : opts.folder;
@@ -429,6 +451,14 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         // 다이얼로그만 그대로 남았다 — "버튼 무반응"으로 보인 정체. 원인이 뭐든(403/기타) 침묵
         // 하지 않는다: (a)가 이번 원인(stale project_id 헤더)은 없앴지만, 다음 다른 실패가 또
         // 조용히 묻히지 않도록 실패 표시 자체를 근본으로 남긴다.
+        // [SID:4681] (Yuna §K): only the plan's project limit (402 PLAN_LIMIT_EXCEEDED) gets the upgrade banner — the dialog keeps what was
+        // typed and picked; every other failure (5xx · network · 403) keeps the one line above
+        const limit = res.status === 402 ? await planLimitOf(res) : null;
+        if (limit) {
+          setCreateProjectLimit(limit);
+          bumpCreateProjectLimitNonce();
+          return false;
+        }
         setCreateProjectError(tSwitcher('switcherCreateProjectError'));
         return false;
       }
@@ -475,6 +505,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 성공 뒤 다시 열었을 때(취소→재오픈) 낡은 에러가 새 시도처럼 보일 수 있다.
   function setCreateProjectOpenAndClearError(nextOpen: boolean) {
     setCreateProjectError(null);
+    setCreateProjectLimit(null);
     if (nextOpen) { setNewProjectAgentIds([]); setCreateProjectNotice(null); setNewProjectFolder(null); setCreateProjectFolderNotice(null); } // [SID:4681]: every box off · no folder each time the dialog opens · the last make's notices go (Yuna §F · §H)
     setCreateProjectOpen(nextOpen);
   }
@@ -485,6 +516,8 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     createOrgOpen, setCreateOrgOpen,
     createProjectOpen, setCreateProjectOpen: setCreateProjectOpenAndClearError,
     createProjectError,
+    createProjectLimit,
+    createProjectLimitNonce,
     createProjectNotice, // [SID:4681]
     createProjectFolderNotice, // [SID:4681] ③
     switchOrgError,

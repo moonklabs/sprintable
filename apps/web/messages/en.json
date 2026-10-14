@@ -1635,6 +1635,7 @@
     "resendFailed": "Failed to resend the verification email.",
     "resendUserNotFound": "We couldn't find your account.",
     "projectLimitExceededError": "The free plan allows up to {limit} project(s). Upgrade your plan to continue.",
+    "projectLimitExceededPaid": "Your current plan allows up to {limit} project(s). Change your plan to add more.",
     "createAgentFailed": "Couldn't create the agent.",
     "networkError": "Network error — please check your connection and try again",
     "apiKeyFailedMembers": "API key generation failed. Go to Settings > Members > Agents to issue one manually.",
