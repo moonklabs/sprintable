@@ -39,6 +39,7 @@ from app.dependencies.auth import (
     get_verified_org_id_streaming,
 )
 from app.core import shutdown as _shutdown_module
+from app.core.sse_event_name import sse_event_name, validate_event_type
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
@@ -409,6 +410,12 @@ class CreateEventRequest(BaseModel):
     recipient_type: str
     payload: dict = {}
 
+    @field_validator("event_type")
+    @classmethod
+    def _event_type_is_a_closed_shape(cls, v: str) -> str:
+        # story #4692 [SEC]: the name is written into SSE `event:` lines — a newline in it would plant frames on an agent's stream
+        return validate_event_type(v)
+
 
 class EventResponse(BaseModel):
     id: uuid.UUID
@@ -671,7 +678,7 @@ async def agent_event_stream(
                     # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
                     for data, evt in zip(batch_data, batch):
-                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
+                        yield f"event: {sse_event_name(evt.event_type)}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
                         # story #3026 — 이 연결이 백필로 이미 내보낸 id. 아래 라이브 루프의
                         # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
                         # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
@@ -696,7 +703,7 @@ async def agent_event_stream(
                 # id와 달라져 클라 SeenIdsCache dedup이 같은 이벤트를 다른 걸로 오판한다.
                 _r_id = _r_payload.pop("_sse_transient_id", None) or str(uuid.uuid4())
                 yield (
-                    f"event: {_r_event_type}\nid: {_r_id}\n"
+                    f"event: {sse_event_name(_r_event_type)}\nid: {_r_id}\n"
                     f"data: {json.dumps({**_r_payload, 'event_id': _r_id, 'is_backfill': True})}\n\n"
                 )
 
@@ -770,7 +777,7 @@ async def agent_event_stream(
                         # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
                         if event_type == "conversation.message_created":
                             yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
-                        yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                        yield f"event: {sse_event_name(event_type)}\nid: {_live_id}\ndata: {_sse_data}\n\n"
                         # story #3026 — 이 연결이 방금 보낸 id를 기록(연결-로컬, 위 pre-yield
                         # 체크가 읽는 그 집합). yield가 여기까지 왔다는 건 이미 성공했다는
                         # 뜻이라 실패 시 기록 안 남는 걱정은 없다(아래 DB 마킹과 동일 순서

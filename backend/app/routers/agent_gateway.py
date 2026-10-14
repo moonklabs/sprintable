@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_current_user_streaming
 from app.core.database import async_session_factory
 from app.core import shutdown as _shutdown_module
+from app.core.sse_event_name import sse_event_name
 from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.api_key import ApiKey
@@ -961,7 +962,7 @@ async def agent_stream(
                             )
                             _sse = _frame_data({**data, "is_backfill": is_backfill})
                             # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
-                            yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
+                            yield f"event: {sse_event_name(row.event_type)}\nid: {gseq}\ndata: {_sse}\n\n"
                     await _presence_tick_if_due()  # between batches too (PO 01:28Z) — a long catch-up keeps presence / lease fresh
                     if len(rows) < _BACKFILL_LIMIT:
                         return
@@ -1060,7 +1061,7 @@ async def agent_stream(
                         event_type = signal.get("event_type", "message")
                         # story 4649: the direct push's frame leads with the same two keys (one lookup for this sender)
                         _sse = _frame_data({**_with_stream_org({**signal, "sender_org_id": await _sender_org_of(signal.get("sender_id"))}, uuid.UUID(org_id_str)), "is_backfill": False})
-                        yield f"event: {event_type}\ndata: {_sse}\n\n"
+                        yield f"event: {sse_event_name(event_type)}\ndata: {_sse}\n\n"
                 finally:
                     for t in (get_task, shutdown_task):
                         if not t.done():
