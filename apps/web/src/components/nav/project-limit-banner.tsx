@@ -16,8 +16,8 @@ export function ProjectLimitBanner({ limit, free }: { limit: number; free: boole
   const flatHref = useFlatHref();
   return (
     <div data-testid="project-limit-banner" role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md border border-warning-border bg-warning-tint px-3 py-3 text-sm space-y-1">
-      <p className="font-medium text-warning-strong">{t('orgLimitBannerTitle')}</p>
-      <p className="text-warning-strong">{tOnboarding(free ? 'projectLimitExceededError' : 'projectLimitExceededPaid', { limit })}</p>
+      <p className="font-medium text-warning-strong break-keep">{t('orgLimitBannerTitle')}</p>
+      <p className="text-warning-strong break-keep">{tOnboarding(free ? 'projectLimitExceededError' : 'projectLimitExceededPaid', { limit })}</p>
       <a
         href={flatHref('/settings?tab=billing')}
         className="inline-block mt-1 text-xs font-medium text-warning-strong underline underline-offset-2 transition hover:opacity-80"

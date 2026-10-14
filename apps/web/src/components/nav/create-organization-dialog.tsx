@@ -143,8 +143,8 @@ export function CreateOrganizationDialog({
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           {planLimitHit && (
             <div key={planLimitNonce} role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md border border-warning-border bg-warning-tint px-3 py-3 text-sm space-y-1">
-              <p className="font-medium text-warning-strong">{t('orgLimitBannerTitle')}</p>
-              <p className="text-warning-strong">{tOnboarding('orgLimitExceededError', { limit: 1 })}</p>
+              <p className="font-medium text-warning-strong break-keep">{t('orgLimitBannerTitle')}</p>
+              <p className="text-warning-strong break-keep">{tOnboarding('orgLimitExceededError', { limit: 1 })}</p>
               <a
                 href={flatHref('/settings?tab=billing')}
                 className="inline-block mt-1 text-xs font-medium text-warning-strong underline underline-offset-2 transition hover:opacity-80"

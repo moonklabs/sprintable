@@ -94,6 +94,7 @@ describe('«새 프로젝트» 창 — 요금제 프로젝트 한도(402) (story
     const banner = dialog.querySelector('[data-testid="project-limit-banner"]')!;
     expect(banner).not.toBeNull();
     expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.querySelectorAll('p.break-keep').length).toBe(2); // no global keep-all: a Korean line must not break inside a word (Yuna)
     expect(banner.textContent).toContain(nav.orgLimitBannerTitle);
     expect(banner.textContent).toContain(onb.projectLimitExceededError!.replace('{limit}', '1'));
     const link = banner.querySelector('a')!;
