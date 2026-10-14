@@ -250,6 +250,68 @@ async def test_redis_path_a_second_takeover_keeps_its_mark_when_the_first_taker_
         assert await sse_lease.taken_by(scope) is None, "the taker's own end clears its mark"
 
 
+async def test_redis_path_a_taker_is_pushed_off_when_the_owner_takes_it_back_on_another_instance(lease_path):
+    """Kadir 01a13a34 (4676): B took the agent over here (its stream is `_took_over`); the displaced owner A presses [여기서 받기] on ANOTHER
+    instance — that entry released B's lease member and left A's mark. B's heartbeat must read the mark (its own stream took over, which
+    used to skip the read): A's mark is not B's member → B ends superseded and its refresh must not put B back (else two receive and the
+    take-back is silently lost)."""
+    if lease_path != "redis":
+        pytest.skip("the other-instance view is the Redis lease's")
+    from app.services import sse_lease
+
+    async with _world(setup=True, limit=5) as (gw, auth, agent):
+        scope = f"perkey:{agent}"
+        owner = await gw.agent_stream(request=_Req(R1), auth=auth)
+        taker = await gw.agent_stream(request=_Req(R2, takeover=True), auth=auth)  # B takes it over here: a `_took_over` stream
+        assert (await _drain(owner.body_iterator))[-1] == TAKEN_OVER_FRAME
+        assert await sse_lease.taken_by(scope) == f"rcv:{R2}"
+        # what the owner's [여기서 받기] does on the other instance: release the taker's member, take the slot, leave its mark
+        for m in await sse_lease.members(scope):
+            await sse_lease.release(scope, m)
+        await sse_lease.acquire(scope, 5, f"rcv:{R1}")
+        await sse_lease.mark_taken(scope, f"rcv:{R1}")
+        pushed = await _drain(taker.body_iterator)
+        assert pushed[-1] == TAKEN_OVER_FRAME, "the taker was pushed off by the take-back"
+        assert await sse_lease.members(scope) == [f"rcv:{R1}"], "the taker's refresh did not put itself back — one place receives"
+        assert await sse_lease.taken_by(scope) == f"rcv:{R1}", "the owner's mark stands (the taker's end clears only its own)"
+
+
+async def test_redis_path_a_taker_keeps_receiving_through_its_own_heartbeats(lease_path):
+    """the other side of the take-back test: a taker now READS the mark on its heartbeat — its own mark is its own member, so it must go on
+    (not end itself) and keep its slot. Waits for several heartbeat frames (a count, not a clock) before it looks."""
+    if lease_path != "redis":
+        pytest.skip("the mark is the Redis lease's")
+    from app.services import sse_lease
+
+    async with _world(setup=True, limit=5) as (gw, auth, agent):
+        scope = f"perkey:{agent}"
+        owner = await gw.agent_stream(request=_Req(R1), auth=auth)
+        taker = await gw.agent_stream(request=_Req(R2, takeover=True), auth=auth)
+        assert (await _drain(owner.body_iterator))[-1] == TAKEN_OVER_FRAME
+        frames: list[str] = []
+
+        async def _pump():
+            async for chunk in taker.body_iterator:
+                frames.append(chunk)
+
+        task = asyncio.create_task(_pump())
+        try:
+            for _ in range(1000):
+                if sum("event: heartbeat" in f for f in frames) >= 5:
+                    break
+                await asyncio.sleep(0.01)
+            assert sum("event: heartbeat" in f for f in frames) >= 5, "the taker's stream kept running through its heartbeats"
+            assert not any("superseded" in f for f in frames), "a taker is not pushed off by its OWN mark"
+            assert await sse_lease.members(scope) == [f"rcv:{R2}"]
+            assert await sse_lease.taken_by(scope) == f"rcv:{R2}"
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 — the stream is torn down with the test world
+                pass
+
+
 @pytest.mark.parametrize("receiver", [None, R1], ids=["headerless", "receiver"])
 async def test_redis_path_a_stream_on_another_instance_ends_on_its_heartbeat_when_taken_over(lease_path, receiver):
     """the taker is on another instance: it released this stream's member and left the mark — this stream (a receiver, or an old app
