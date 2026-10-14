@@ -163,9 +163,21 @@ RUN_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 # story #4686: a Claude model id as the run profile takes it — the one rule (services.agent_run_profile.CLAUDE_MODEL_NAME), which also
 # admits the other runtime's names (a subset); the optional «[1m]» tail is kept as it is
 _RUN_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\[1m\])?$")
-# an e-mail address written out in full: three or more address characters right before an «@» (a masked one — «yo***@host» — has
-# its «*» there). The daemon masks; the server refuses what slipped through (defence in depth — an address never reaches a reader).
-_UNMASKED_EMAIL = re.compile(r"[^\s*@]{3,}@")
+# story #4686 (Kadir 5073 · PO 10-14 02:0xZ — «an allow-list first, not a refusal list»): the account label is only what the daemon builds —
+# after NFKC (a fullwidth «＠» is an «@»): ① a MASKED address — one or two address characters, «***», the host (`yo***@host.tld`) — or ② an
+# organisation name (letters · digits · spaces · a few marks, ≤ 50, no «@» · «*» · «(»), then optionally « (Plan)» from a CLOSED set of words.
+# Anything else (an address of any length, a token, a free sentence) is refused — so a new way of writing a secret does not need a new rule.
+ACCOUNT_PLANS = ("Free", "Pro", "Max", "Team", "Enterprise")
+_ACCOUNT_MASKED = r"[A-Za-z0-9.+_%-]{1,2}\*\*\*@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,60}[A-Za-z0-9])?\.[A-Za-z]{2,}"
+_ACCOUNT_ORG = r"[^\W_][\w .,&'\u2019\u00b7+/:-]{0,49}"
+_ACCOUNT_LABEL = re.compile(rf"^(?:{_ACCOUNT_MASKED}|{_ACCOUNT_ORG})(?: \((?:{'|'.join(ACCOUNT_PLANS)})\))?$")
+# the second layer: token shapes an organisation name could still spell (the allow-list admits letters and digits)
+_ACCOUNT_SECRET_SHAPES = (
+    re.compile(r"\bsk-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\bBearer\s", re.IGNORECASE),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}"),
+    re.compile(r"[A-Za-z0-9+/=_-]{32,}"),
+)
 
 
 class SessionRun(BaseModel):
@@ -188,8 +200,13 @@ class SessionRun(BaseModel):
         if self.account is not None:
             if any(unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp", "Co", "Cs") for ch in self.account) or self.account != self.account.strip():
                 raise ValueError("account carries a control, invisible or edge-space character")
-            if _UNMASKED_EMAIL.search(self.account):
-                raise ValueError("account carries an e-mail address written out")
+            # NFKC first: the shapes below are read on what the label MEANS (a fullwidth «＠» is an «@»), and that is what is kept
+            account = unicodedata.normalize("NFKC", self.account)
+            if len(account) > 80 or not _ACCOUNT_LABEL.match(account):
+                raise ValueError("account is not a label the daemon makes (a masked address or an organisation name, then a plan word)")
+            if any(shape.search(account) for shape in _ACCOUNT_SECRET_SHAPES):
+                raise ValueError("account carries a token shape")
+            self.account = account
         return self
 
 

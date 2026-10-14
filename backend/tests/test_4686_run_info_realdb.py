@@ -105,6 +105,13 @@ async def test_03_the_snapshot_path_carries_it_too_and_a_dropped_session_loses_i
     {"effort": "turbo"}, {"model_set": "yes"}, {"account": ""}, {"account": "a" * 81},
     {"account": "org‮txt"}, {"account": "line\nbreak"}, {"account": " padded "},
     {"account": "someone@moonklabs.com (Pro)"},  # an address written out in full never gets in
+    # Kadir 5073 (10-14): every row he called — short addresses, the fullwidth «＠», token shapes — each refused alone
+    {"account": "jo@gmail.com (Pro)"}, {"account": "j@x.io (Pro)"}, {"account": "john＠gmail.com"}, {"account": "Acme (bob@acme.io)"},
+    {"account": "sk-ant-api03-AbCdEf0123456789"}, {"account": "Bearer eyJhbGciOiJIUzI1NiJ9"}, {"account": "eyJhbGciOiJIUzI1NiJ9.e30.abc"},
+    {"account": "0123456789abcdef0123456789abcdef01234567"},
+    # the allow-list: not a label the daemon makes — a sentence, a plan word that is not one, a bracket that is not a plan, a mask on the wrong shape
+    {"account": "moonklabs (Gold)"}, {"account": "moonklabs (Pro) (Max)"}, {"account": "moonklabs [Max]"}, {"account": "yo***@host (Pro)"},
+    {"account": "y***@a.b"}, {"account": "yon***@moonklabs.com"}, {"account": "yo*** @moonklabs.com"}, {"account": "yo***@moonklabs.com extra"},
     {"account": "moonklabs (Max)", "token": "sk-live-1"},  # a field the contract does not have
 ])
 async def test_04_what_is_not_a_model_a_word_or_a_label_is_refused(world, bad):
@@ -188,3 +195,31 @@ def test_09_where_the_limit_hit_follows_yunas_table():
     assert where_text([row(), row()], "ko") is None
     # an account whose model is not known: the account alone
     assert where_text([row("A (Max)", None)], "ko") == "한도가 걸린 곳: A (Max)."
+
+
+def test_07_the_account_label_is_an_allow_list_not_a_refusal_list():
+    """Kadir 5073 (PO 10-14): only what the daemon makes gets in — a masked address or an org name, then a plan word from a closed set —
+    read after NFKC, and what is kept is the normalized form. The refusals of every shape Kadir called are in test_04 (one row each)."""
+    from pydantic import ValidationError
+
+    from app.services.desktop_relay import SessionRun
+
+    for ok in ["yo***@moonklabs.com", "y***@x.io (Max)", "j.***@sub.moonklabs.co.kr (Enterprise)", "Acme Co. 한국 (Team)", "Free & Co, Ltd (Free)", "moonklabs"]:
+        assert SessionRun(account=ok).account == ok, ok
+    # a fullwidth letter is the letter it means; the kept form is the normalized one
+    assert SessionRun(account="Ａcme (Pro)").account == "Acme (Pro)"
+    for bad in ["jo@gmail.com", "j@x.io (Pro)", "john＠gmail.com", "Acme (bob@acme.io)", "sk-ant-api03-AbCdEf0123456789", "Bearer eyJhbGciOiJIUzI1NiJ9",
+                "0123456789abcdef0123456789abcdef01234567", "moonklabs (Gold)", "yo***@host (Pro)", "Acme\u2028Corp", "Acme*Corp"]:
+        with pytest.raises(ValidationError):
+            SessionRun(account=bad)
+
+
+async def test_08_a_stopped_session_in_the_device_list_carries_no_run(world):
+    """Kadir 5073 (10-14): the DM header's twin is test_06 of the commands; the device list's own `state != "stopped"` had no test."""
+    async with _client() as c:
+        device = await _device(c, "d4686 mac g")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1, run=RUN)
+        await _report(c, device, a, "stopped", 2, run=RUN)  # the daemon says «stopped» and still carries what it ran on
+        (row,) = [s for s in await _list(c, device) if s["session_key"] == "s-1"]
+        assert row["state"] == "stopped" and "run" not in row  # an ended session is not told as running on anything
