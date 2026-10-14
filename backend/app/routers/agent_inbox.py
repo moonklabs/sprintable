@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.sse_event_name import is_event_type
 from app.dependencies.database import get_db
 from app.models.event import Event
 from app.models.team import TeamMember
@@ -87,6 +88,11 @@ async def receive_inbox_webhook(
             logger.warning("agent_inbox: payload project_id 파싱 실패(%r) — default 라우팅", _raw_pid)
 
     event_type = str(payload.get("event_type", "inbox_webhook"))
+    # story #4692 [SEC]: this name is written into SSE `event:` lines on the agent's stream — only the closed shape (a newline would plant frames).
+    # This door is best-effort by design (an ungranted project_id falls back instead of rejecting), so a name outside the shape is not refused: the
+    # event is stored under the default `inbox_webhook` (which no consumer acts on) and the sender's own value stays in the payload.
+    if not is_event_type(event_type):
+        event_type = "inbox_webhook"
     source_entity_type: str | None = payload.get("source_entity_type")
     raw_source_id = payload.get("source_entity_id")
     try:
