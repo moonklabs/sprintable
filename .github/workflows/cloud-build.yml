@@ -177,7 +177,9 @@ jobs:
             # story #2078(E-ARCH 0단계, 오르테가군 판정 2026-07-21): dev 실측 GREEN 확認 전
             # prod에 얹지 않는다 — develop→main 48커밋 일괄승격에 검증 안 된 롤백 플래그를
             # 섞으면 문제 발생 시 원인 격리가 안 된다. dev 실측 후 별도 판단.
-            echo "sse_multiplex_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #4698(2026-10-15 PO): 그 «별도 판단»이 3달 안 내려져 prod만 문서당 EventSource 가 넷(웹뷰 첫 로그인 뒤 대화 탭 18초 — dev는 1)이다.
+            # dev 게이트 실측(탭당 1 · story.status_changed · conversation.message_created 도착)을 통과한 뒤에만 이 값을 true 로 둔다. 롤백 = 이 한 줄 되돌림.
+            echo "sse_multiplex_enabled=true" >> "$GITHUB_OUTPUT"
             # story #4397 — prod: push by person stays off until the app build that re-registers on account switch is out.
             echo "push_devices_by_user=false" >> "$GITHUB_OUTPUT"
             # story #2728 후속(2026-08-17, 페드루 PO 지시) — NEXT_PUBLIC_EE_ENABLED가 이 파이프라인
