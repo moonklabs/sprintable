@@ -93,8 +93,10 @@ export interface AttachableAgent { id: string; name: string; runtime: DesktopRun
  * - `unlisted`: the id is not in the list — not an active agent of this organization with a desktop runtime. Another organization's agent,
  *   an id that does not exist and an agent with no desktop runtime are ONE answer here (the list is this organization's only, and carries
  *   no name or id of the missing one — nothing about whether it exists elsewhere can show).
- * - `runtime_missing` / `runtime_blocked`: its runtime is not on this computer / is found but cannot take tools (company-managed); a missing
- *   runtime comes first when several reasons meet (adding it to the project would not make it run).
+ * - `runtime_blocked` / `runtime_missing`: its runtime is found but cannot take tools (company-managed) / is not on this computer. The two exclude
+ *   each other (a blocked runtime is a found one). A runtime reason comes before `outside_project` when several meet (adding the agent to the
+ *   project would not make it run, and an install hint is the wrong thing to say about a blocked runtime). The order checked, as in Yuna's
+ *   4703 copy: unlisted → runtime_blocked → runtime_missing → outside_project.
  * - `outside_project`: in the organization, its runtime usable here, but not in this project (the page's [프로젝트 팀에 넣기] road). */
 export type PreselectHold =
   | { reason: 'unlisted' }
