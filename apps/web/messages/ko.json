@@ -7055,6 +7055,8 @@
       "stepHandedDetailBare": "«{task}»{josa} {role}에게 건네는 중이에요",
       "stepHandedWaitingDetailBare": "준비가 끝나면 «{task}»{josa} {role}에게 건네요",
       "noAgentRow": "에이전트가 맡는 역할이 하나는 있어야 시작할 수 있어요 — 역할 하나를 에이전트로 바꿔 주세요.",
+      "attachableReading": "이미 있는 에이전트 목록을 불러오고 있어요",
+      "attachableFailed": "이미 있는 에이전트 목록을 불러오지 못했어요",
       "newOrg": {
         "line": "새 조직 «{name}»도 함께 만들어요",
         "later": "이름은 나중에 설정에서 바꿀 수 있어요."

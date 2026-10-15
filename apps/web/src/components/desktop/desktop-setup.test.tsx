@@ -18,7 +18,7 @@ vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next
 const { phonePub } = vi.hoisted(() => ({ phonePub: { android: true, ios: false } }));
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: phonePub }));
 
-import { DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -727,6 +727,147 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the existing group, from the list that arrived first
     expect(selectOf('조사').value).toBe(`agent:${DAN}`);
     expect(selectOf('작성').value).not.toBe(`agent:${DAN}`);
+  });
+
+  // story 4701 (walk: «profile no» 2 of 7): with the recruiter's agent in the address, «시작» pressed BEFORE the agents list arrived sent
+  // «새로 만들기» rows — a new Creator · Publisher — and the recruited agent was on no setup. Now «시작» waits for the list.
+  // Reverted (`attachableHold` out of `canStart`) → the button is on while the list is late and the press posts a confirm with no agent_id.
+  it('[SID:4701] preselect + list late: «시작» is off with the reading line (a press posts nothing) · the list arrives → on, and the body sends the recruiter\'s agent', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    agentsNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(container.querySelector('select')).not.toBeNull(); // the recipe's rows are here — only the list is not
+    expect(startButton().disabled).toBe(true);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')?.textContent).toBe('이미 있는 에이전트 목록을 불러오고 있어요');
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')?.getAttribute('role')).toBe('status'); // Yuna 4701-copy §1
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.some((c) => c.url.includes('/api/desktop/setup-codes/confirm'))).toBe(false);
+
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const post = calls.find((c) => c.url.includes('/api/desktop/setup-codes/confirm'))!;
+    expect((post.body as { roles: { role: string; agent_id?: string }[] }).roles[0]).toEqual({ role: '조사', agent_id: DAN });
+  });
+
+  // The read failing (a refusal · the network) never falls quietly to «새로 만들기»: «시작» stays off, the line says so, [다시 불러오기]
+  // reads again — and what it reads lands the recruiter's agent. Reverted (a failed read counts as «done») → «시작» is on after the failure.
+  it('[SID:4701] preselect + the list read fails → «시작» stays off · [다시 불러오기] reads again (the page is not reloaded) · then the agent lands', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    for (const failing of [() => new Response('{}', { status: 500 }), () => { throw new Error('offline'); }]) {
+      agentsNow = failing as unknown as () => Response;
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+      expect(startButton().disabled).toBe(true);
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')?.textContent).toBe('이미 있는 에이전트 목록을 불러오지 못했어요');
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')?.getAttribute('role')).toBe('alert'); // Yuna 4701-copy §2
+      const retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+      expect(retry.textContent).toBe('목록 다시 불러오기');
+      expect(retry.previousElementSibling).toBe(container.querySelector('[data-testid=setup-attachable-failed]')); // directly below the line
+      const reads = () => calls.filter((c) => c.url.includes('/api/desktop/setup/agents')).length;
+      const before = reads();
+      agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+      await act(async () => { retry.click(); });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(reads()).toBe(before + 1);
+      expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+      expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+      await act(async () => { root.unmount(); }); root = createRoot(container); calls.length = 0;
+    }
+  });
+
+  // Yuna 4701-copy §2 (the press): the line goes back to «reading», the button STAYS with aria-disabled and ignores presses (keyboard focus
+  // stays on it — not `disabled`); the list arriving takes it away and focus goes to «시작»; failing again leaves focus on the button.
+  // Reverted (`disabled` instead of aria-disabled · no focus move) → the focus checks fail.
+  it('[SID:4701] [목록 다시 불러오기]: reading again keeps the button (aria-disabled · presses ignored · focus kept) · arrives → focus on «시작» · fails again → focus stays', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    const reads = () => calls.filter((c) => c.url.includes('/api/desktop/setup/agents')).length;
+    let retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+    expect(retry.getAttribute('aria-disabled')).toBeNull();
+    retry.focus();
+    let release!: (r: Response) => void;
+    agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+    const before = reads();
+    await act(async () => { retry.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(reads()).toBe(before + 1);
+    retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement; // still here
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    expect(retry.disabled).toBe(false);
+    expect(document.activeElement).toBe(retry);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull();
+    await act(async () => { retry.click(); });                                   // a press while it reads is ignored
+    expect(reads()).toBe(before + 1);
+
+    await act(async () => { release(new Response('{}', { status: 500 })); });    // fails again → the failure line · the button · focus kept
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-failed]')).not.toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-testid=setup-attachable-retry]'));
+
+    agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+    await act(async () => { (container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement).click(); });
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton());
+  });
+
+  // Yuna 4701-copy §3: a read that never answers is a silent failure — after the limit the page says «failed» (button reads again); an answer
+  // that comes later still lands. Reverted (no limit) → the reading line goes on for ever.
+  it('[SID:4701] a read that never answers → after the limit the failure line and the button (the limit is not a wall-clock wait here: faked timers)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let release!: (r: Response) => void;
+      agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull();
+      await act(async () => { vi.advanceTimersByTime(ATTACHABLE_READ_LIMIT_MS - 1); });
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull(); // not yet
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')).not.toBeNull();
+      expect(container.querySelector('[data-testid=setup-attachable-retry]')).not.toBeNull();
+      expect(startButton().disabled).toBe(true);
+      await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); }); // a late answer still lands
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+      expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // The road with no `agent=` (the first setup · a recipe) and the roads with no read to wait for are as they were: a late or failing list
+  // never holds «시작» (the group is left out; «새로 만들기» works) — AC2. Reverted (the hold applied without a preselect) → «시작» is off here.
+  it('[SID:4701] no preselect: a late or failing list does not hold «시작» · a preselect for a non-admin (no read) does not either', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = (() => new Promise<Response>(() => undefined)) as unknown as () => Response; // never arrives
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container); calls.length = 0;
+
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />, 'member');
+    expect(calls.some((c) => c.url.includes('/api/desktop/setup/agents'))).toBe(false); // not an admin: the list is not asked for
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull(); // …so nothing waits for it
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
   });
 
   it('no live key → no line under it (nothing would be cut)', async () => {
