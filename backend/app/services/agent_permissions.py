@@ -120,6 +120,19 @@ async def _key_of_same_person(db: AsyncSession, key: RemoteDevice, user_id: uuid
     return "movable" if live == 0 else "has_pairings"
 
 
+async def _org_name_if_member(db: AsyncSession, *, key_org_id: uuid.UUID, user_id: uuid.UUID | None) -> str | None:
+    """story 4695 — the name of an organization, only to a person who is (still) a member of it."""
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+
+    if user_id is None:
+        return None
+    return (await db.execute(
+        select(Organization.name).join(OrgMember, OrgMember.org_id == Organization.id)
+        .where(Organization.id == key_org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+    )).scalars().first()
+
+
 async def register_phone(
     db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: RemoteDeviceRegistration, user_id: uuid.UUID | None = None,
 ) -> tuple[dict, bool]:
@@ -145,7 +158,11 @@ async def register_phone(
             raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
         if kind == "has_pairings":
             # the same person's own key — not «someone else's»: it pairs with computers of another organization of theirs
-            raise DesktopRelayError(409, "remote_device_other_org", "this phone key is paired with a computer of another organization of yours")
+            # which organization — the person is told where to remove the phone (they are a member there, so its name is theirs to see);
+            # a person who has since left that organization is told without a name
+            org_name = await _org_name_if_member(db, key_org_id=existing.org_id, user_id=user_id)
+            raise DesktopRelayError(409, "remote_device_other_org", "this phone key is paired with a computer of another organization of yours",
+                                    detail={"org_name": org_name} if org_name else None)
         existing.member_id, existing.org_id = member_id, org_id
         await db.flush()
     if existing is not None and existing.revoked_at is None:

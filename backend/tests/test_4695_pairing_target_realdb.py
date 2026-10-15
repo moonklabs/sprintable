@@ -185,6 +185,14 @@ async def test_07_a_key_that_holds_a_live_pairing_stays_where_it_is(world):
         again = await c.post(PHONES, json={"label": "iPhone", "public_key": key}, headers=_person(OWNER, ORG2))
         # the same person's own key — said as such (not «registered by someone else»): it is paired with a computer of another org of theirs
         assert (again.status_code, again.json()["error"]["code"]) == (409, "remote_device_other_org")
+        # …and it names the organization the key is paired in (the person is a member there): where to remove the phone
+        org_name = (await _sql(fetch=f"SELECT name FROM organizations WHERE id = '{ORG}'"))[0][0]
+        assert again.json()["error"]["detail"] == {"org_name": org_name}
+        # a person who has since left that organization is told without its name
+        await _sql(f"UPDATE org_members SET deleted_at = now() WHERE org_id = '{ORG}' AND user_id = '{OWNER}'")
+        left = await c.post(PHONES, json={"label": "iPhone", "public_key": key}, headers=_person(OWNER, ORG2))
+        assert (left.status_code, left.json()["error"]["code"], left.json()["error"].get("detail")) == (409, "remote_device_other_org", None)
+        await _sql(f"UPDATE org_members SET deleted_at = NULL WHERE org_id = '{ORG}' AND user_id = '{OWNER}'")
         row = (await _sql(fetch=f"SELECT member_id FROM remote_devices WHERE id = '{first.json()['id']}'"))[0]
         assert str(row[0]) == str(OWNER_TM)
 
@@ -209,3 +217,14 @@ async def test_09_a_failing_reason_lookup_logs_the_kind_of_failure_only_and_neve
     assert "RuntimeError" in text
     for v in (setup_id, org_id, member_id):
         assert str(v) not in text
+
+
+async def test_08_a_person_who_left_the_org_is_not_told_its_computers_org(world):
+    """Kadir (5091): an org_members row with deleted_at set is no member — the join carries `deleted_at IS NULL`; pinned here."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4695g")
+        await _with_session(c, device)
+        sid = device["setup_id"]
+        assert (await c.get(TARGET, params={"setup_id": sid}, headers=_no_org(OWNER))).status_code == 200
+        await _sql(f"UPDATE org_members SET deleted_at = now() WHERE org_id = '{ORG}' AND user_id = '{OWNER}'")
+        assert _code(await c.get(TARGET, params={"setup_id": sid}, headers=_no_org(OWNER))) == (404, "setup_not_found")
