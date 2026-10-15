@@ -81,18 +81,29 @@ class _FakeDb:
         self.statements.append(stmt)
 
 
-def _line(machine_key, revoked_at=None):
-    return SimpleNamespace(id=uuid.uuid4(), machine_key=machine_key, revoked_at=revoked_at, revoked_reason=None)
+A, B, C = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+
+def _line(machine_key, revoked_at=None, carried=()):
+    """`carried` = the agents the line carried before the exchange under test (what `before` is built from)."""
+    return SimpleNamespace(id=uuid.uuid4(), machine_key=machine_key, revoked_at=revoked_at, revoked_reason=None, carried=frozenset(carried))
+
+
+def _retire(db, others, *, new, key="K", now=None):
+    return asyncio.run(ds._retire_same_machine(
+        db, machine_key=key, others=others, now=now or datetime(2026, 10, 12, tzinfo=timezone.utc),
+        new_agents=frozenset(new), before={o.id: o.carried for o in others},
+    ))
 
 
 def test_retire_closes_only_the_same_key_lines_with_the_reason():
     now = datetime(2026, 10, 12, tzinfo=timezone.utc)
-    same_old = _line("K")
-    other_machine = _line("OTHER")
-    already_closed = _line("K", revoked_at=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    same_old = _line("K", carried={A})
+    other_machine = _line("OTHER", carried={A})
+    already_closed = _line("K", revoked_at=datetime(2026, 10, 1, tzinfo=timezone.utc), carried={A})
     db = _FakeDb()
 
-    count = asyncio.run(ds._retire_same_machine(db, machine_key="K", others=[same_old, other_machine, already_closed], now=now))
+    count = _retire(db, [same_old, other_machine, already_closed], new={A}, now=now)
 
     assert count == 1
     assert same_old.revoked_at == now
@@ -104,9 +115,65 @@ def test_retire_closes_only_the_same_key_lines_with_the_reason():
 
 def test_retire_with_no_match_touches_nothing():
     db = _FakeDb()
-    count = asyncio.run(ds._retire_same_machine(db, machine_key="K", others=[_line("OTHER")], now=datetime.now(timezone.utc)))
-    assert count == 0
+    assert _retire(db, [_line("OTHER", carried={A})], new={A}) == 0
     assert db.statements == []
+
+
+def test_a_line_of_another_lane_on_the_same_machine_stays_open():
+    # PO 10-15: one computer holds one setup per lane — a new setup with OTHER agents closes nothing
+    lane_a = _line("K", carried={A})
+    db = _FakeDb()
+    assert _retire(db, [lane_a], new={B}) == 0
+    assert lane_a.revoked_at is None and lane_a.revoked_reason is None
+    assert db.statements == []
+
+
+def test_a_line_is_closed_when_the_new_setup_has_all_its_agents_and_also_when_it_has_more():
+    same, fewer = _line("K", carried={A, B}), _line("K", carried={A})
+    db = _FakeDb()
+    assert _retire(db, [same, fewer], new={A, B}) == 2
+    assert same.revoked_reason == fewer.revoked_reason == "replaced_by_new_setup"
+
+
+def test_a_line_that_still_carries_an_agent_the_new_setup_lacks_stays_open():
+    # the new setup takes A only; the old line also carried B (A is moved out of it — B keeps it alive)
+    old = _line("K", carried={A, B})
+    db = _FakeDb()
+    assert _retire(db, [old], new={A}) == 0
+    assert old.revoked_at is None
+
+
+def test_a_line_with_no_agent_left_is_closed_by_any_setup_on_the_machine():
+    # PO 10-15 ③: its agents all moved elsewhere → nothing is left to cover → the next setup on the machine closes it
+    empty = _line("K", carried=())
+    db = _FakeDb()
+    assert _retire(db, [empty], new={C}) == 1
+    assert empty.revoked_reason == "replaced_by_new_setup"
+
+
+def test_the_judgement_reads_the_before_argument_not_the_lines_current_members():
+    # The exchange hands in what each line carried when it began (`before`); the function judges on that and never reads the
+    # line's `members` itself. (Today the two agree for every reachable state — _rotate_existing_agent takes exactly the new
+    # setup's agents out of the other lines — so this pins the contract of the function, not a separate scenario.)
+    line = SimpleNamespace(id=uuid.uuid4(), machine_key="K", revoked_at=None, revoked_reason=None, members=[])
+    now = datetime(2026, 10, 12, tzinfo=timezone.utc)
+    carried_more = asyncio.run(ds._retire_same_machine(
+        _FakeDb(), machine_key="K", others=[line], now=now, new_agents=frozenset({A}), before={line.id: frozenset({A, B})},
+    ))
+    assert carried_more == 0 and line.revoked_at is None
+    carried_only_covered = asyncio.run(ds._retire_same_machine(
+        _FakeDb(), machine_key="K", others=[line], now=now, new_agents=frozenset({A}), before={line.id: frozenset({A})},
+    ))
+    assert carried_only_covered == 1 and line.revoked_reason == "replaced_by_new_setup"
+
+
+def test_agents_of_counts_agent_entries_of_any_kind_of_setup_and_ignores_people():
+    line = SimpleNamespace(members=[
+        {"kind": "agent", "member_id": str(A), "stage": "writer"}, {"kind": "agent", "member_id": str(A), "stage": "reviewer"},
+        {"kind": "human", "member_id": str(B)}, {"kind": "agent", "member_id": str(C), "existing": True},
+    ])
+    assert ds._agents_of(line) == frozenset({A, C})
+    assert ds._agents_of(SimpleNamespace(members=None)) == frozenset()
 
 
 def test_exchange_body_without_device_id_still_parses_and_unknown_fields_are_ignored():
