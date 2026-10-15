@@ -121,13 +121,38 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(status()).toBe('이미 빠져 있었어요 · 갤럭시');
   });
 
-  it('empty, and the org with remote control off', async () => {
+  it('empty, and the org with remote control off: only the empty line — no «off» line over it (story 4697 AC5: every new customer sees this)', async () => {
     answers([], false);
     await render();
     expect(text()).toContain('아직 페어링된 폰이 없어요');
     expect(text()).not.toContain('폰 페어링'); // the tail comes back with 4531's button, and only with the org on (PO · Yuna 19:00Z)
-    expect(text()).toContain('지금 조직(문클랩스)은 원격 제어가 꺼져 있어요 — 페어링된 기기로 상태는 보이지만 제어는 안 돼요');
+    expect(text()).not.toContain('원격 제어가 꺼져 있어요');
+    expect(text()).not.toContain('제어는 안 돼요');
     expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('a paired phone and the org with remote control off: the «off» line says it (status shows, control does not)', async () => {
+    answers([phone()], false);
+    await render();
+    expect(text()).toContain('지금 조직(문클랩스)은 원격 제어가 꺼져 있어요 — 페어링된 기기로 상태는 보이지만 제어는 안 돼요');
+    expect(text()).not.toContain('아직 페어링된 폰이 없어요');
+  });
+
+  it('the same two in English', async () => {
+    answers([], false);
+    await render('en');
+    expect(text()).not.toContain("Remote control is off for this organization");
+    root.unmount();
+    root = createRoot(container);
+    answers([phone()], false);
+    await render('en');
+    expect(text()).toContain("Remote control is off for this organization (");
+  });
+
+  it('a phone with no pair left (its key still holds a place) and the org off: the «off» line stays (a phone is listed)', async () => {
+    answers([phone({ pairs: [] })], false);
+    await render();
+    expect(text()).toContain('원격 제어가 꺼져 있어요');
   });
 
   // story 4645 AC7: with the org's remote control on, the empty card says where to pair (the app's top button) — in the app or a browser alike
