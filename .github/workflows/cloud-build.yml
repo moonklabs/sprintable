@@ -417,7 +417,9 @@ jobs:
             # 탭당 EventSource 1개·정상 채널 이벤트 도착·롤백 왕복) 실측 통과가 prod 승격의
             # 전제. 3개 소비 훅(use-sse-notifications·use-chat-sse·use-team-presence)이 이
             # 값 하나로 공유 커넥션 vs 독립 커넥션을 가른다(realtime-provider.tsx).
-            echo "sse_multiplex_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #4698 실험판(초안 PR · 병합 X): dev 를 prod 꼴(탭당 EventSource 여럿)로 한 번 굽는다 — «앱 완전 종료 → 열기 → 대화 탭» 간격과
+            # 첫 30초 longtask 를 ON/OFF 로 맞대려는 한 판. 판이 끝나면 이 줄만 `true` 로 되돌리는 PR 을 병합한다(revert).
+            echo "sse_multiplex_enabled=false" >> "$GITHUB_OUTPUT"
             # story #4397 — dev: push notifications by person across orgs (settings.push_devices_by_user).
             echo "push_devices_by_user=true" >> "$GITHUB_OUTPUT"
             # story #2728 후속(2026-08-17, 페드루 PO 지시) — 선생님 기결정 "결제는 dev에서 구현·
