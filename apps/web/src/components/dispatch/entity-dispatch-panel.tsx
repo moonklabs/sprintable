@@ -155,7 +155,7 @@ export function EntityDispatchPanel({
         <select
           value={assigneeId}
           onChange={(e) => setAssigneeId(e.target.value)}
-          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
         >
           <option value="">{t('assigneeSelectPlaceholder')}</option>
           {members.map((m) => (

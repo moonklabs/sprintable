@@ -90,6 +90,7 @@ async def test_push_device_register_list_revoke_round_trip_realdb():
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_verified_org_id] = lambda: ORG
     app.dependency_overrides[pd._get_caller_member_id] = _make_caller_override(MEMBER_X)
+    app.dependency_overrides[pd._get_caller_user_id] = lambda: None  # story #4397 — the person on the row (not asserted here)
 
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -214,6 +215,7 @@ async def test_push_device_register_without_platform_realdb():
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_verified_org_id] = lambda: ORG
     app.dependency_overrides[pd._get_caller_member_id] = _make_caller_override(MEMBER_X)
+    app.dependency_overrides[pd._get_caller_user_id] = lambda: None  # story #4397 — the person on the row (not asserted here)
 
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -292,6 +294,7 @@ async def test_push_device_register_macos_apns_round_trip_realdb():
     override_db_and_read(app, _override_db)
     app.dependency_overrides[get_verified_org_id] = lambda: ORG
     app.dependency_overrides[pd._get_caller_member_id] = _make_caller_override(MEMBER_X)
+    app.dependency_overrides[pd._get_caller_user_id] = lambda: None  # story #4397 — the person on the row (not asserted here)
 
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

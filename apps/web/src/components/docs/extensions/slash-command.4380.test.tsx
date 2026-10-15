@@ -11,6 +11,16 @@ import koMessages from '../../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// jsdom has no Range/Element getClientRects. `editor.chain().focus()` scrolls the selection into view in a requestAnimationFrame;
+// when that frame runs while the editor is still alive, ProseMirror measures the selection and threw «getClientRects is not a
+// function» as an unhandled error after the tests passed (vitest rc 1 · 9/10 single-file runs). Same stand-in as the other editor
+// tests (code-block-lang-menu-a11y-4364 · doc-editor-heading-anchors …).
+const EMPTY_RECT = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) } as DOMRect;
+for (const proto of [Range.prototype, Element.prototype] as unknown as { getClientRects?: unknown; getBoundingClientRect?: unknown }[]) {
+  proto.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] });
+  proto.getBoundingClientRect = () => EMPTY_RECT;
+}
+
 type RawItems = Record<keyof SlashMenuStrings['items'], { title: string; description: string }>;
 const raw = (koMessages as unknown as { docs: { slashMenu: Omit<SlashMenuStrings, 'items' | 'titles'> & { items: RawItems } } }).docs.slashMenu;
 const koStrings: SlashMenuStrings = {

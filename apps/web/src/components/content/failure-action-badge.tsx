@@ -6,6 +6,7 @@ import {
   type FailureAction,
 } from '@/components/content/failure-action';
 import { formatScheduledAt } from '@/components/content/schedule-format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 
 // story #3422 ②-c 2/N(doc §17-13) — 실패 5종 렌더 매핑. 버튼 유무표 그대로:
@@ -25,7 +26,7 @@ export interface FailureActionBadgeProps {
   /** B2(페드루 PO 지적, 2026-09-04) — auto_retry의 next_retry_at을 scheduled_at과 같은
    * tz·형식(formatScheduledAt)으로 보인다. schedule-format.ts::resolveDisplayTimezone이
    * 유일한 tz 출처(ChannelPostCard·CalendarGrid와 동형 원칙). */
-  displayTimezone: string;
+  displayTimezone: string | null;
   /** N3(페드루 PO, 2026-09-04 13:26Z) — ChannelPostCard는 `<Link>`라 그 안에 이 배지의
    * `<Button>`을 그대로 넣으면 인터랙티브 요소가 중첩된다(a>button, 무효 HTML). 카드
    * 소비처는 compact=true로 라벨만 받는다 — 재시도는 상세로 들어가서 한다. */
@@ -79,6 +80,9 @@ function blockedApprovalNextKey(ctx: BlockedApprovalContext | undefined): string
 
 export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact, recheckGate, approvalContext, connectionHref }: FailureActionBadgeProps) {
   const t = useTranslations('content');
+  // story #4443 PR3a (Kadir 4871 ①) — `displayTimezone` is the zone the page draws in (the calendar card's: the org's · a draft
+  // page's: the viewer's); the viewer's own is read here, so an org time is labelled «… GMT+9» when it is not the viewer's
+  const viewerTz = useViewerTimeZone();
   // story #3815 — dead_letter가 아닌 다른 kind에선 항상 null(훅은 조건 없이 매
   // 렌더 호출돼야 하므로 이 자리에 둔다 — early return보다 위).
   const reasonResetAt = action.kind === 'dead_letter' ? action.reasonResetAt : null;
@@ -162,11 +166,11 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   }
   if (action.kind === 'auto_retry') {
     // B2(페드루 PO 지적) — ISO 원문을 그대로 보간하던 것을 scheduled_at과 같은
-    // formatScheduledAt(...).display로 바꾼다(같은 카드 안에서 두 형식이 섞이던 결함).
+    // formatViewerScheduledAt(...).display로 바꾼다(같은 카드 안에서 두 형식이 섞이던 결함).
     return (
       <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
         {action.nextRetryAt
-          ? t('channelPostsFailureAutoRetryAt', { time: formatScheduledAt(action.nextRetryAt, displayTimezone).display })
+          ? t('channelPostsFailureAutoRetryAt', { time: formatScheduledAt(action.nextRetryAt, displayTimezone, viewerTz).display })
           : t('channelPostsFailureAutoRetryUnknown')}
       </p>
     );

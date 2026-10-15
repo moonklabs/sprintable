@@ -62,7 +62,7 @@ function ToggleSummaryView({ getPos, editor }: ReactNodeViewProps) {
       <button
         type="button"
         contentEditable={false}
-        onClick={handleToggle}
+        onClick={handleToggle} aria-expanded={isOpen}
         className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         aria-label={isOpen ? t('toggleCollapse') : t('toggleExpand')}
       >

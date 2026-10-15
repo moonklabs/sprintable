@@ -4,6 +4,7 @@ import { isSessionExpiredSignaled, signalSessionExpired } from '@/lib/auth/sessi
 import { notifySessionChanged } from '@/lib/native-shell-bridge';
 import { collectRefreshDiagnostics } from '@/lib/auth/refresh-diagnostics';
 import { invalidateMeCache } from '@/lib/auth/me-invalidation';
+import { clearAccountScopedStorage } from '@/lib/browser-storage-keys';
 
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ export async function loginWithPassword(
 
 export async function logoutUser(refreshToken?: string): Promise<void> {
   invalidateMeCache(); // story #4184
+  clearAccountScopedStorage('signout'); // story #4487
   await fetch('/api/auth/logout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

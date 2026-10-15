@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import type { FailureAction } from '@/components/content/failure-action';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 
@@ -30,7 +30,7 @@ export interface CommentReplyFailureNoteProps {
   /** channel_post와 같은 축(failure-action.ts::deriveFailureAction 재사용 — 신규
    * 발명 0, command_status 우선순위 진리표는 한 곳에서만 산다). */
   action: FailureAction;
-  displayTimezone: string;
+  displayTimezone: string | null;
   /** dead_letter 전용 — publication-commands/{id}/retry(공용 엔드포인트, content_kind
    * 무관, BE 신설 0)를 호출한다. command_id가 없으면(레이스) 호출부가 안 넘긴다. */
   onRetry?: () => Promise<CommentReplyRetryResult>;
@@ -73,7 +73,7 @@ export function CommentReplyFailureNote({
     return (
       <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-failure-note">
         {action.nextRetryAt
-          ? t('commentsReplyFailureRetrying', { time: formatScheduledAt(action.nextRetryAt, displayTimezone).display })
+          ? t('commentsReplyFailureRetrying', { time: formatViewerScheduledAt(action.nextRetryAt, displayTimezone).display })
           : t('commentsReplyFailureRetryingSoon')}
       </p>
     );

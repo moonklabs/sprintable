@@ -94,6 +94,23 @@ def build_verification_rail(
     return rail
 
 
+async def lock_connection_test_decision(db: AsyncSession, agent_id: uuid.UUID) -> None:
+    """story #4594 (Qadir · QA on 4975) — one connect at a time decides whether this agent gets a connection test.
+
+    The stream's connect reads «is a test waiting?» (``get_verification_state``) and then writes one (``start_verification``)
+    — two statements, and nothing between them held a second connect of the same agent back (no FOR UPDATE · no unique · no
+    upsert): two connects at nearly the same moment (one launcher started twice · a daemon restart overlapping the old
+    stream) both read «none» and both wrote one. Bounded by the size of that first-connect burst (the next reconnect is held
+    back by either row), but two rows where #4582 says one. A transaction-scoped advisory lock keyed by the agent, taken
+    before the read, makes the second connect wait for the first's commit (or rollback) and then read what it wrote.
+
+    Not a unique index: the person's [확인] button (``POST verify-connection``) starts a fresh test on purpose while one
+    waits, so «one unacked test per agent» is a rule of the connect path, not an invariant of the table. The lock is released
+    with the caller's commit/rollback — call it inside the transaction that reads and writes. Same key shape as
+    ``onboarding_funnel``/``desktop_setup`` (``hashtext`` of a string); pinned by test_4594_connection_test_guard_atomic_realdb."""
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"{VERIFY_EVENT_TYPE}:{agent_id}"))))
+
+
 async def start_verification(
     db: AsyncSession, *, agent_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID
 ) -> int:
@@ -187,7 +204,7 @@ def build_http_verification_rail(*, heartbeat_fresh: bool) -> list[dict]:
 
 
 async def get_verification_state(
-    db: AsyncSession, agent_id: uuid.UUID, *, transport: str = "stdio",
+    db: AsyncSession, agent_id: uuid.UUID, *, org_id: uuid.UUID, transport: str = "stdio",
 ) -> dict:
     """최신 verify Event seq + acked_seq + 세션 freshness → 레일/verified.
 
@@ -204,6 +221,10 @@ async def get_verification_state(
             Event.recipient_id == agent_id,
             Event.event_type == VERIFY_EVENT_TYPE,
             Event.recipient_seq.isnot(None),
+            # story #4500 (AC3 · PO 12:57Z): the caller's org's events only — an event another org made with this agent as its
+            # recipient is not its verify. The caller's org, not a re-lookup of the recipient (which would miss an org_members-
+            # only recipient)
+            Event.org_id == org_id,
         ).order_by(desc(Event.recipient_seq)).limit(1)
     )).scalar_one_or_none()
 
@@ -221,7 +242,7 @@ async def get_verification_state(
     return {"verify_seq": verify_seq, "acked_seq": acked_seq, "verified": verified, "rail": rail}
 
 
-async def get_verified_map(db: AsyncSession, agent_ids: list[uuid.UUID]) -> dict[uuid.UUID, bool]:
+async def get_verified_map(db: AsyncSession, agent_ids: list[uuid.UUID], *, org_id: uuid.UUID) -> dict[uuid.UUID, bool]:
     """story #2751(설계②, PO 판정 2026-08-18) — 워크포스 목록 "연결 안 됨" CTA용 배치 조회.
 
     `get_verification_state()`와 **같은 정의**(``acked_seq >= verify_seq``, stdio 레일) —
@@ -245,6 +266,7 @@ async def get_verified_map(db: AsyncSession, agent_ids: list[uuid.UUID]) -> dict
             Event.recipient_id.in_(agent_ids),
             Event.event_type == VERIFY_EVENT_TYPE,
             Event.recipient_seq.isnot(None),
+            Event.org_id == org_id,  # story #4500 (AC3): the caller's org's verify events only
         ).group_by(Event.recipient_id)
     )).all()
     verify_seq_map = {row[0]: row[1] for row in verify_seq_rows}

@@ -551,10 +551,13 @@ async def test_list_messages_response_shape():
         # _resolve_member가 grant-only 휴먼 폴백 경로(resolve_member)로 빠져 쿼리가 하나 더
         # 필요해진다 — non-None으로 그 분기를 막는다).
         blocked_sender_result.scalars.return_value.first.return_value = mock_member
+        # story #4444 — the isinstance gate is gone (an org person's blocks mask too): the viewer's blocks are read once more
+        viewer_blocks_result = MagicMock()
+        viewer_blocks_result.scalars.return_value.all.return_value = []
 
         session.execute = AsyncMock(side_effect=[
             conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
-            runtime_type_result, refs_result, blocked_sender_result,
+            runtime_type_result, refs_result, blocked_sender_result, viewer_blocks_result,
         ])
 
         async with client as c:
@@ -610,9 +613,13 @@ async def test_get_conversation_200_returns_project_id():
         participants_result = MagicMock()
         participants_result.all.return_value = []
 
+        # story #4631 C: the read ends with the conversation's open flood block (open_circuit_breaker_state) — none open here
+        breaker_result = MagicMock()
+        breaker_result.scalar_one_or_none.return_value = None
+
         session.execute = AsyncMock(side_effect=[
             conv_result, member_result, access_valid_result, predicate_result,
-            member_result, muted_result, participants_result,
+            member_result, muted_result, participants_result, breaker_result,
         ])
 
         async with client as c:
@@ -781,7 +788,10 @@ async def test_send_message_filters_cross_org_mentions_group():
             mention_calls["targets"] = set(mention_targets)
             return []
 
-        with patch("app.routers.conversations.filter_org_member_ids",
+        # story #4505: mentions resolve through member_resolver.org_mention_ids (alias → canonical, then the org filter)
+        with patch("app.services.member_resolver.canonicalize_member_ids",
+                   new=AsyncMock(side_effect=lambda ids, *a, **kw: {i: i for i in ids})), \
+             patch("app.services.member_resolver.filter_org_member_ids",
                    new=AsyncMock(return_value={valid_id})), \
              patch("app.services.conversation_webhook.resolve_conversation_webhook_targets",
                    new=AsyncMock(return_value=[])), \

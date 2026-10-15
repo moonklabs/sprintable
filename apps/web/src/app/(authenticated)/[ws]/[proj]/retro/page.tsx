@@ -15,8 +15,8 @@ import { useRetroRoute } from './retro-context';
 import { RETRO_PHASE_TO_STAGE, RETRO_STAGE_VARIANTS, type RetroSessionPhase } from '@/services/retro-session';
 import { isRetroStale, daysStale } from './retro-staleness';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface RetroSession {
   id: string;
@@ -37,7 +37,7 @@ export default function RetroPage() {
   const tc = useTranslations('common');
   const shellT = useTranslations('shell');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story a539c649 S3a: projectId 는 URL 경로(retro-context.tsx, layout.tsx가 헤더 경유 주입)
   // 가 SSOT — useDashboardContext()(전역 "현재 프로젝트")가 아니다. orgId 는 경로 무관 그대로.
   const { projectId, wsSlug, projSlug } = useRetroRoute();
@@ -239,7 +239,7 @@ export default function RetroPage() {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{session.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatRelativeTime(session.created_at, locale, displayTimezone)}
+                      {formatViewerRelativeTime(session.created_at, locale, displayTimezone)}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">

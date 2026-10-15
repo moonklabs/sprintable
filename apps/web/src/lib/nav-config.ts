@@ -13,6 +13,7 @@ import {
   Link2,
   ListChecks,
   MessageSquare,
+  Monitor,
   Newspaper,
   Settings,
   Share2,
@@ -183,13 +184,21 @@ export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
     if (group.id === 'results') {
       return { ...group, items: group.items.map((item) => (item.id === 'org-insights-board' ? { ...item, path: dest.results.path } : item)) };
     }
-    if (group.id === 'connect-rules' && dest.connectRules) {
-      const v3Item: NavItemConfig = {
+    if (group.id === 'connect-rules') {
+      const v3Item: NavItemConfig | null = dest.connectRules ? {
         // story #4278(유나) — 구역 이름과 같은 «연결·규칙»이 구역 안에 또 있었다 → 이 항목은 «모아 보기»(구역 › 모아 보기).
         id: 'connect-rules-v3', labelKey: 'connectRulesOverview', descriptionKey: 'descConnectRulesV3',
         icon: Link2, kind: 'static', path: dest.connectRules.path, scope: 'org',
-      };
-      return { ...group, items: [v3Item, ...group.items] };
+      } : null;
+      // story #4524(유나 04:47Z) — the web had no way to «데스크톱 앱 · 연결된 기기» (/desktop) but its address, where a person
+      // disconnects a device. Added here, not in NAV_GROUPS: /desktop redirects when DESKTOP_DOWNLOAD_ENABLED is off, and the
+      // command palette reads NAV_GROUPS as is — the link exists only where the page does.
+      const desktopItem: NavItemConfig | null = flags.desktopDownloadEnabled ? {
+        id: 'desktop-app', labelKey: 'desktopApp', descriptionKey: 'descDesktopApp',
+        icon: Monitor, kind: 'static', path: '/desktop', scope: 'org',
+      } : null;
+      if (!v3Item && !desktopItem) return group;
+      return { ...group, items: [...(v3Item ? [v3Item] : []), ...group.items, ...(desktopItem ? [desktopItem] : [])] };
     }
     return group;
   });

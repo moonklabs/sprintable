@@ -216,7 +216,7 @@ function VariantSlot({
                       value={reasons[artifact.id] ?? ''}
                       onChange={(e) => setReasons((prev) => ({ ...prev, [artifact.id]: e.target.value }))}
                       placeholder={selectedForSubmit ? t('chooseReasonPlaceholder') : t('rejectionReasonPlaceholder')}
-                      className="min-h-[52px] text-xs"
+                      className="min-h-[52px] text-base lg:text-xs"
                     />
                     <p className="text-[10px] text-muted-foreground">
                       {selectedForSubmit ? t('chooseReasonLabel') : t('rejectionReasonLabel')}

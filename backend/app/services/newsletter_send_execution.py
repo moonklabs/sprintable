@@ -280,6 +280,9 @@ async def _process_real_send(
 
     try:
 
+        from app.services.external_call_tx import end_transaction_before_external_call
+
+        await end_transaction_before_external_call(db)  # story #4404 — reads only before the provider call
         async with provider_client(timeout=20) as client:
             await reserve_email(
                 client, api_key=access_token, email_id=int(publication.external_id),

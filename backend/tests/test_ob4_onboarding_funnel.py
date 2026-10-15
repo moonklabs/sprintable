@@ -23,10 +23,17 @@ def anyio_backend():
 
 # ─── 카탈로그 / PII 가드 ──────────────────────────────────────────────────────
 
-def test_event_catalog_has_canonical_11():
-    assert len(f.EVENT_CATALOG) == 11
+def test_event_catalog_has_canonical_28():
+    # story #4426 — 11 → 14: the three names the web was already sending (silent 422 before)
+    # story #4424 — 14 → 17: the desktop setup's three server-written steps (code issued · confirmed · exchanged)
+    # story #4424 — 17 → 24: two server marks (tools connected · first result) and the desktop app's five steps
+    # story #4427 — 24 → 25: the desktop setup page's desktop_doc_opened (the login hand is the shell's — PO 09:58Z)
+    # story #4433 — 25 → 27: the desktop app's agent ended early · agent restarted (Min 11:55Z · signals.agents_ended)
+    # story #4452 — 27 → 28: the desktop app's agent start failed (선생님 check A · signals.agents_start_failed)
+    # story #4658 — 28 → 30: the desktop app's agent asks for a sign-in · signed in again (signals.agents_sign_in)
+    assert len(f.EVENT_CATALOG) == 30
     assert "config_generated" in f.EVENT_CATALOG and "verified" in f.EVENT_CATALOG
-    assert len(f.BE_EMIT_EVENTS) == 8
+    assert len(f.BE_EMIT_EVENTS) == 13
     assert len(f.FAILURE_REASONS) == 8
 
 
@@ -164,7 +171,8 @@ async def test_post_authed_derives_server_truth():
         user_id=str(real_agent),
         claims={"app_metadata": {"org_id": str(real_org), "project_id": None, "api_key_id": "k"}},
     )
-    body = OnboardingEventBody(event="first_auth_seen", agent_id=uuid.uuid4())  # 클라가 보낸 가짜 agent_id
+    # story #4424 — a web name (the server's own names are refused from outside now)
+    body = OnboardingEventBody(event="config_copied", agent_id=uuid.uuid4())  # 클라가 보낸 가짜 agent_id
     with patch("app.routers.onboarding._resolve_api_key", new=AsyncMock(return_value=ctx)):
         await post_onboarding_event(
             body, db=db, credentials=None, x_agent_api_key="sk_" + "live_" + "z" * 26

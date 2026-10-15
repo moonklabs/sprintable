@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
-from app.services.project_auth import require_project_access, restricted_accessible_project_ids
+from app.services.project_auth import require_project_access, scoped_project_ids
 from app.routers.insight_snapshots import InsightSnapshotView
 from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.external_publish_pause import ExternalPublishPausedError
@@ -528,7 +528,7 @@ async def list_site_post_drafts_endpoint(
 
     requester_member_id, is_org_admin = await _resolve_member_best_effort(db, auth, org_id)
     # story #4351 — 제한된 caller는 접근 가능 프로젝트의 초안만(목록 · 총계 같은 범위 — 총계가 새면 존재가 샌다).
-    restricted = await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id)
+    restricted = await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id)  # story #4688: None → the projects that still exist
     rows = await list_site_post_drafts(
         db, org_id=org_id, limit=limit, offset=offset, include_deleted=include_deleted,
         work_item_id=work_item_id, project_ids=restricted,
@@ -572,7 +572,7 @@ async def get_site_post_draft_detail_endpoint(
     # 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다, withdraw #3614와 동형 관례).
     rows = await list_site_post_drafts(
         db, org_id=org_id, draft_id=draft_id, limit=1, include_deleted=True,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
     )
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")

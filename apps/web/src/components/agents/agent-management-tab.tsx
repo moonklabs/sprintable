@@ -18,13 +18,17 @@ import {
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { isDesktopRuntime } from '@/lib/agent-run-profile';
+import { AgentRunProfileBulkDialog } from '@/components/agents/agent-run-profile-bulk-dialog';
+import { CountBadge } from '@/components/ui/count-badge';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { orgRoleLabel } from '@/lib/org-role-label';
 import { memberRowLabels } from '@/lib/member-display';
 import { RowName } from '@/components/shared/row-name';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { DeviceChip } from '@/components/desktop/device-chip';
 
 /**
  * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
@@ -34,7 +38,7 @@ import { RowName } from '@/components/shared/row-name';
 export function formatAgentRuntimeLine(
   agent: Pick<OrgAgent, 'client_version' | 'plugin_version' | 'session_started_at'>,
   locale: string,
-  displayTimezone: string,
+  displayTimezone: string | null,
   // story #4129 CI RED(check-i18n-keys.js) — 이 파라미터가 `t`였을 때, 이 파일의
   // `const t = useTranslations('settings')`(scripts/check-i18n-keys.js는 스코프를
   // 모르는 파일 단위 정적 매칭이라 함수 파라미터의 섀도잉을 못 본다)로 오귀속돼
@@ -51,7 +55,7 @@ export function formatAgentRuntimeLine(
     segments.push(translate('agentRuntimePluginSegment', { version: agent.plugin_version }));
   }
   if (agent.session_started_at) {
-    const relative = formatRelativeTime(agent.session_started_at, locale, displayTimezone);
+    const relative = formatViewerRelativeTime(agent.session_started_at, locale, displayTimezone);
     if (relative) segments.push(translate('agentRuntimeSessionSegment', { relative }));
   }
   if (segments.length === 0) return null;
@@ -82,6 +86,11 @@ interface OrgAgent {
   // false지만 연결 대상이 아니다(BE TeamMemberResponse가 이미 실어 보내던 필드, 이
   // 로컬 타입에만 없었다 — 새 BE 0). 판별 없이 verified만 보면 거짓 「연결 안 됨」.
   runtime_type?: string | null;
+  // story 4675 (F2) — the computer the agent is bound to now (BE `_inject_active_stories()` · null = no live desktop key)
+  device_name?: string | null;
+  // story 4686 (AC3): a desktop agent whose run profile names no model — the runtime's own default runs (true) · a model is named (false) · not a
+  // desktop agent / an older server (null · absent). The row says «모델 · 런타임 기본값» only for true.
+  run_model_unset?: boolean | null;
 }
 
 interface ProjectOption {
@@ -120,7 +129,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const tc = useTranslations('common');
   const to = useTranslations('organization');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
   // story #4311(유나 비차단) — 행에 조직 역할 배지가 보이므로 그 글자를 roleLabel로 넘긴다(역할이 보이고 서로 다르면 꼬리 없음).
@@ -137,6 +146,9 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<OrgAgent | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // story #4540 — agents chosen for «실행 설정 바꾸기» (desktop runtimes only · the server judges each)
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   // settings/page.tsx 컨벤션과 동일: plain(비-useCallback) 헬퍼 — mount effect가 이를 호출하는
   // 체인 안에서 setState가 일어나도 react-hooks/set-state-in-effect가 useCallback 체인만큼
@@ -246,9 +258,16 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
               <p className="text-sm text-muted-foreground">{t('orgAgentsDescription')}</p>
             </div>
             {isAdmin ? (
-              <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={onAddAgent}>
-                <Plus className="size-3.5" /> {ta('manageAddAgent')}
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                {chosen.size > 0 ? (
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setBulkOpen(true)}>
+                    {ta('runProfileBulkOpen')} <CountBadge count={chosen.size} />
+                  </Button>
+                ) : null}
+                <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={onAddAgent}>
+                  <Plus className="size-3.5" /> {ta('manageAddAgent')}
+                </Button>
+              </div>
             ) : null}
           </div>
         </SectionCardHeader>
@@ -280,6 +299,19 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
             <div className="space-y-2">
               {agents.map((agent, index) => (
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
+                  {isAdmin && isDesktopRuntime(agent.runtime_type) ? (
+                    <input
+                      type="checkbox"
+                      className="size-4 shrink-0 accent-primary"
+                      checked={chosen.has(agent.id)}
+                      onChange={(e) => setChosen((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(agent.id); else next.delete(agent.id);
+                        return next;
+                      })}
+                      aria-label={ta('runProfileChooseAria', { name: rowLabels.get(agent.id) ?? agent.name })}
+                    />
+                  ) : isAdmin ? <span className="size-4 shrink-0" aria-hidden /> : null}
                   <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <RowName className="font-medium text-foreground hover:underline hover:text-primary" label={rowLabels.get(agent.id)} id={agent.id} />
@@ -300,6 +332,11 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                       {agent.needs_restart ? (
                         <Badge variant="warning">{ta('agentNeedsRestartBadge')}</Badge>
                       ) : null}
+                      {/* story 4686 (AC3 · Yuna run-info-1014 (4)): no model named → the runtime's default runs — a neutral badge (not an error: a choice
+                          not made), the settings screen's own word; only for a desktop agent whose profile names none */}
+                      {agent.run_model_unset === true ? <Badge variant="outline">{ta('modelUnsetBadge')}</Badge> : null}
+                      {/* story 4675 (F2): the computer, last in the chip line — two agents with one name are told apart here */}
+                      <DeviceChip name={agent.device_name} />
                     </div>
                     {(() => {
                       const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
@@ -347,6 +384,13 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
           )}
         </SectionCardBody>
       </SectionCard>
+
+      <AgentRunProfileBulkDialog
+        agents={agents.filter((a) => chosen.has(a.id))}
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onSaved={() => { void refreshAgents(); setChosen(new Set()); }}
+      />
 
       <Dialog open={!!deactivateTarget} onOpenChange={(o) => { if (!o) setDeactivateTarget(null); }}>
         <DialogContent className="max-w-md">

@@ -84,3 +84,9 @@ export function pickIGaJosa(word: string): '이' | '가' {
 export function pickEulReulJosa(word: string): '을' | '를' {
   return hasBatchim(word) ? '을' : '를';
 }
+
+// story #4412 — the copula 「(이)라」 after a placeholder («{found}이라 연결하지 않았어요»): the same mechanical rule as 이/가
+// (batchim → 이라 · none → 라; digits follow hasBatchim's digit table).
+export function pickIRaJosa(word: string): '이라' | '라' {
+  return hasBatchim(word) ? '이라' : '라';
+}

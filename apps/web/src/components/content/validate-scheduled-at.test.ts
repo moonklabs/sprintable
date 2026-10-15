@@ -6,7 +6,7 @@ describe('validateScheduledAt', () => {
   const now = new Date('2026-09-04T10:00:00.000Z');
 
   it('⭐미래 값이면 유효, UTC ISO(Z 표기, tz 정보 있음)로 낸다(BE 규칙① 항상 충족)', () => {
-    const result = validateScheduledAt('2026-09-05T14:30', now);
+    const result = validateScheduledAt('2026-09-05T14:30', 'Asia/Seoul', now);
     expect(result.valid).toBe(true);
     if (result.valid) {
       expect(result.iso.endsWith('Z')).toBe(true);
@@ -14,23 +14,31 @@ describe('validateScheduledAt', () => {
     }
   });
 
+  // story #4443 PR3b — the typed wall clock is the team's (the org's zone), whatever the browser's is
+  it('⭐«14:30» is 14:30 in the zone it is read in — Seoul 05:30Z · Los Angeles 21:30Z (was the browser\'s zone)', () => {
+    expect(validateScheduledAt('2026-09-05T14:30', 'Asia/Seoul', now)).toEqual({ valid: true, iso: '2026-09-05T05:30:00.000Z' });
+    expect(validateScheduledAt('2026-09-05T14:30', 'America/Los_Angeles', now)).toEqual({ valid: true, iso: '2026-09-05T21:30:00.000Z' });
+  });
+
+  it('the zone not known yet → invalid (nothing is sent in a guessed zone)', () => {
+    expect(validateScheduledAt('2026-09-05T14:30', null, now)).toEqual({ valid: false, reason: 'invalid' });
+  });
+
   it('⭐과거 값이면 무효(BE 규칙② "현재 시각 이후여야 한다")', () => {
-    expect(validateScheduledAt('2020-01-01T00:00', now)).toEqual({ valid: false, reason: 'past' });
+    expect(validateScheduledAt('2020-01-01T00:00', 'Asia/Seoul', now)).toEqual({ valid: false, reason: 'past' });
   });
 
   it('현재 시각과 정확히 같으면(경계) 무효 — BE는 <=를 거부한다(엄격 미래)', () => {
-    // now를 브라우저 로컬로 해석한 문자열이 필요 — 이 테스트 환경 tz(Asia/Seoul)에서
-    // now(UTC)를 로컬 datetime-local 문자열로 정확히 만들어 경계를 재현한다.
-    const localSameInstant = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-    expect(validateScheduledAt(localSameInstant, now)).toEqual({ valid: false, reason: 'past' });
+    // now(10:00Z)는 서울 19:00 — 그 시간대로 읽는 벽시계 값이 정확히 now
+    expect(validateScheduledAt('2026-09-04T19:00', 'Asia/Seoul', now)).toEqual({ valid: false, reason: 'past' });
   });
 
   it('빈 문자열은 invalid(입력 자체가 없다)', () => {
-    expect(validateScheduledAt('', now)).toEqual({ valid: false, reason: 'invalid' });
+    expect(validateScheduledAt('', 'Asia/Seoul', now)).toEqual({ valid: false, reason: 'invalid' });
   });
 
   it('파싱 불가 문자열은 invalid', () => {
-    expect(validateScheduledAt('not-a-date', now)).toEqual({ valid: false, reason: 'invalid' });
+    expect(validateScheduledAt('not-a-date', 'Asia/Seoul', now)).toEqual({ valid: false, reason: 'invalid' });
   });
 });
 

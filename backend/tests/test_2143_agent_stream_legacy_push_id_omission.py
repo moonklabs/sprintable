@@ -20,6 +20,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.agent_stream_auth import agent_stream_claims
+
 from app.dependencies.auth import AuthContext
 from app.routers import agent_gateway as ag
 
@@ -53,6 +55,7 @@ async def test_legacy_direct_push_frame_has_no_id_line(monkeypatch):
     init_db.execute = AsyncMock(side_effect=[
         _scalar_result(tm),          # TeamMember lookup
         _scalar_result("free"),     # Organization.plan
+        _scalar_result(None),       # story #4676: ApiKey.desktop_setup_id (a hand-made key)
         _scalar_result(None),       # AgentEventCursor (acked_seq=0)
     ])
 
@@ -106,7 +109,7 @@ async def test_legacy_direct_push_frame_has_no_id_line(monkeypatch):
     req.is_disconnected = AsyncMock(return_value=False)
     auth = AuthContext(
         user_id=agent_id_str, email=None,
-        claims={"app_metadata": {"api_key_id": "k"}}, org_id=str(org_id),
+        claims=agent_stream_claims(uuid.uuid4()), org_id=str(org_id),
     )
 
     resp = await ag.agent_stream(req, auth=auth)

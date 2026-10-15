@@ -204,7 +204,7 @@ export function StoryHypothesesSection({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('pickerSearch')}
-              className="w-full bg-transparent py-1.5 text-xs focus:outline-none"
+              className="w-full bg-transparent py-1.5 text-base lg:text-xs focus:outline-none"
             />
           </div>
           {/* story에선 가설을 생성하지 않는다 — 생성은 에픽 상세/MCP 경로(AC①). */}

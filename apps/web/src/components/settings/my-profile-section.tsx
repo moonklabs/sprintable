@@ -128,7 +128,7 @@ export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
                 <OperatorInput
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="h-8 text-sm"
+                  className="h-8"
                   autoFocus
                 />
                 <Button size="sm" disabled={saving} onClick={() => void handleSave()}>

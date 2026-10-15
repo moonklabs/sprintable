@@ -1746,6 +1746,9 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
     )).scalar_one_or_none()
     prior_external_id = existing_pub.external_id if existing_pub is not None else None
 
+    from app.services.external_call_tx import end_transaction_before_external_call
+
+    await end_transaction_before_external_call(db)  # story #4404 — reads only before the provider call
     try:
         async with provider_client() as client:
             external_id, permalink = await _call_blog_module_publish(
@@ -1900,6 +1903,9 @@ async def unpublish_site_post_external_command(
 
     module = get_blog_destination_module(connection_id=connection.id, channel=connection.channel)
 
+    from app.services.external_call_tx import end_transaction_before_external_call
+
+    await end_transaction_before_external_call(db)  # story #4404 — reads only before the provider call
     try:
         async with provider_client() as client:
             await _call_blog_module_unpublish(

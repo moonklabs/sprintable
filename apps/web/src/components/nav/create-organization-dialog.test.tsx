@@ -229,24 +229,24 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
 // 온보딩 폼(onboarding.orgName/slug*)이 같은 입력(조직 이름·URL 슬러그)을 다른 낱말로
 // 부르던 것을 값 통일했다. 두 화면의 값이 다시 갈리면(한쪽만 고치는 재발) 즉시 잡는다.
 describe('CreateOrganizationDialog — 대화상자·온보딩 폼 낱말 일치(story #3910 AC2)', () => {
-  it('ko: nav.createOrg*와 onboarding.org*/slug*가 값으로 같다', () => {
+  // story 4669 (U6): the onboarding form has no slug field any more (the server derives the slug) — only the name pair is
+  // shared now; the dialog keeps its own slug field and words (nav.createOrgSlug*).
+  it('ko: nav.createOrgName*와 onboarding.orgName*가 값으로 같다', () => {
     expect(koMessages.nav.createOrgNameLabel).toBe(koMessages.onboarding.orgName);
     expect(koMessages.nav.createOrgNamePlaceholder).toBe(koMessages.onboarding.orgNamePlaceholder);
-    expect(koMessages.nav.createOrgSlugLabel).toBe(koMessages.onboarding.slug);
-    expect(koMessages.nav.createOrgSlugPlaceholder).toBe(koMessages.onboarding.slugPlaceholder);
+    expect('slug' in koMessages.onboarding).toBe(false);
   });
 
-  it('en: nav.createOrg*와 onboarding.org*/slug*가 값으로 같다', () => {
+  it('en: nav.createOrgName*와 onboarding.orgName*가 값으로 같다', () => {
     expect(enMessages.nav.createOrgNameLabel).toBe(enMessages.onboarding.orgName);
     expect(enMessages.nav.createOrgNamePlaceholder).toBe(enMessages.onboarding.orgNamePlaceholder);
-    expect(enMessages.nav.createOrgSlugLabel).toBe(enMessages.onboarding.slug);
-    expect(enMessages.nav.createOrgSlugPlaceholder).toBe(enMessages.onboarding.slugPlaceholder);
+    expect('slug' in enMessages.onboarding).toBe(false);
   });
 
   // 양성대조 — 한쪽만 바꾸면(다이얼로그 재-드리프트) RED가 된다는 것을 실제로 증명한다.
-  it('양성대조 — nav.createOrgSlugLabel만 되돌리면(값 갈림) RED가 된다', () => {
-    const mutatedNav = { ...koMessages.nav, createOrgSlugLabel: 'Slug' };
-    expect(mutatedNav.createOrgSlugLabel).not.toBe(koMessages.onboarding.slug);
+  it('양성대조 — nav.createOrgNameLabel만 되돌리면(값 갈림) RED가 된다', () => {
+    const mutatedNav = { ...koMessages.nav, createOrgNameLabel: 'Org name' };
+    expect(mutatedNav.createOrgNameLabel).not.toBe(koMessages.onboarding.orgName);
   });
 
   // 무관 PR no-op — 이 4쌍과 무관한 다른 nav/onboarding 값 불일치는 이 가드가 안 본다.

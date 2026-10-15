@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3484(BE 3475, 정본 a0da40c9 §18 확定 2026-09-05) — 블루프린트 v3 §7
@@ -82,7 +83,7 @@ export function PublishingMetricsBand({ orgId, window: win }: { orgId: string; w
     return () => { cancelled = true; };
   }, [orgId, win]);
 
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   return (
     <div
@@ -121,7 +122,7 @@ export function PublishingMetricsBand({ orgId, window: win }: { orgId: string; w
             ) : null}
             {metrics.computed_at ? (
               <span className="ml-auto text-muted-foreground" data-testid="publishing-metrics-computed-at">
-                {t('publishingMetricsComputedAt', { time: formatScheduledAt(metrics.computed_at, displayTimezone).display })}
+                {t('publishingMetricsComputedAt', { time: formatViewerScheduledAt(metrics.computed_at, displayTimezone).display })}
               </span>
             ) : null}
           </>

@@ -70,7 +70,7 @@ async def test_team_presence_dedups_multiproject_rows():
     agents = [SimpleNamespace(id=a_id), SimpleNamespace(id=a_id), SimpleNamespace(id=a_id)]
     captured = {}
 
-    async def _fake_inject(unique, session, *, accessible_project_ids):
+    async def _fake_inject(unique, session, *, accessible_project_ids, org_id):
         captured["unique_count"] = len(unique)
         return [_resp(a_id)]
 

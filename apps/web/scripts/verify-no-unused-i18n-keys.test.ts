@@ -29,6 +29,17 @@ describe('isKeyReferenced — story #3732', () => {
     expect(isKeyReferenced('common.memberUnnamed', inputs({ unknownNsLiteralWords: new Set(['memberUnnamed']) }))).toBe(true);
   });
 
+  // story #4558 — ns를 모르는 번역자(파라미터 `tProof`)에 점 든 리터럴 `t('claim.goAheadLabel')`: 말단 비교로는 영영 안 맞아
+  // 산 키가 죽은 키로 읽혔다(gate-type-label.ts gateClaimLabel 실사고). 전체경로의 꼬리로 맞춘다 — 말단 하나보다 좁다.
+  it("A′(점 포함): unknown-ns 리터럴 'claim.goAheadLabel'은 꼬리가 같은 proofCapsule.claim.goAheadLabel을 살린다", () => {
+    const words = new Set(['claim.goAheadLabel']);
+    expect(isKeyReferenced('proofCapsule.claim.goAheadLabel', inputs({ unknownNsLiteralWords: words }))).toBe(true);
+    // 꼬리가 다르면 못 살린다 — 말단만 같은 키(세그먼트 하나 더 봄) · 가운데가 다른 키
+    expect(isKeyReferenced('other.goAheadLabel', inputs({ unknownNsLiteralWords: words }))).toBe(false);
+    expect(isKeyReferenced('proofCapsule.claimX.goAheadLabel', inputs({ unknownNsLiteralWords: words }))).toBe(false);
+    expect(isKeyReferenced('proofCapsule.claim.goAheadLabelX', inputs({ unknownNsLiteralWords: words }))).toBe(false);
+  });
+
   it('A″-word: indirectLookupWords(ns 모르는 co-argument/테이블값)가 말단 세그먼트와 일치하면 참조됨', () => {
     expect(isKeyReferenced('dashboard.ccGateTypeQa', inputs({ indirectLookupWords: new Set(['ccGateTypeQa']) }))).toBe(true);
   });

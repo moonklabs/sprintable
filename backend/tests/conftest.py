@@ -38,6 +38,7 @@ import inspect
 import json
 import os
 import re
+import sys
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -54,6 +55,22 @@ from unittest.mock import AsyncMock, MagicMock
 # 테스트(예: test_sandbox_env_flag_gates_registration_via_subprocess)는 자기
 # 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
 os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
+
+# PO 2026-10-07 22:51Z (Minh's catch_test_host · «사람 손 없이»): no test looks for cloud credentials on a metadata server — google-auth
+# (google.auth.default() — embedding · firebase · admin auth) and boto (the S3 storage provider) each asked 169.254.169.254, a sandbox
+# network question every run. Set before anything imports them: google-auth reads NO_GCE_CHECK once, when its metadata module loads.
+os.environ.setdefault("NO_GCE_CHECK", "true")
+os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+# …and a request to a made-up host or a metadata address is refused before a socket opens (tests/_no_real_network.py); the test that
+# made it fails, naming it (the autouse fixture `_no_real_network_requests` below)
+try:
+    from tests import _no_real_network  # noqa: E402
+except ImportError:
+    # a copy of this conftest run outside the tests package — the pytester-based guards (test_3186 · test_2643 · test_4152 ·
+    # test_a05da51b) copy it into a temp dir and run an inner session there: no guard module beside it, so no guard (not a real run)
+    _no_real_network = None
+else:
+    _no_real_network.install()
 
 
 # story #4319(AC5) — CI 정지 감지기(scripts/run-with-stall-detection.sh)가 죽이기 전에 보내는 신호로 스택을 남긴다.
@@ -188,19 +205,142 @@ def _sync_url(url: str) -> str:
     return url
 
 
+# story #4395 — 리셋의 잠금 대기 상한(관측 · 빠른 실패, 고침 아님). 앞 테스트가 남긴 세션이 잠금을 쥐고 있으면 DROP SCHEMA가
+# 끝없이 기다리다 CI 정지 감지(8분)에야 잘렸다 — 이름 없는 STALL. lock_timeout은 **잠금을 기다린 시간만** 센다(경합이 없으면 0).
+# 근거: 로컬 create_all 전체 스키마 리셋 20회 median 0.095s · max 0.456s(2026-09-28) → 30s는 그 60배 넘고 8분 STALL보다 한참 짧다.
+_RESET_LOCK_TIMEOUT_MS = 30_000
+
+
+def _describe_reset_blockers(engine, own_pid: int) -> str:
+    """리셋이 잠금을 못 받았을 때 이 DB에서 트랜잭션을 연 채 있는 다른 세션 — 앱 이름(전역 엔진이면 테스트 · 태스크까지,
+    아래 `_tag_global_engine_checkouts`) · 상태 · 트랜잭션 나이 · 쿼리 앞 200자."""
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT pid, COALESCE(application_name, ''), state, now() - xact_start, left(regexp_replace(query, '\\s+', ' ', 'g'), 200) "
+            "FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND pid <> :own "
+            "AND xact_start IS NOT NULL ORDER BY xact_start"
+        ), {"own": own_pid}).all()
+    if not rows:
+        return "  (잠금을 쥔 세션을 못 찾음 — 조회 사이에 끝났을 수 있음)"
+    lines = []
+    for pid, app, state, age, query in rows:
+        nodeid = _resolve_global_engine_test_tag(app)
+        who = f" test={nodeid}" if nodeid else ""
+        lines.append(f"  pid={pid} app={app!r}{who} state={state} xact_age={age} query={query!r}")
+    return "\n".join(lines)
+
+
 def _reset_public_schema(url: str) -> None:
     """대상 스키마 풀리셋 — DROP SCHEMA public CASCADE; CREATE SCHEMA public; + 필요한 extension
-    재생성(vector 등, baseline/모델이 요구). 안전가드 통과 후에만 호출."""
+    재생성(vector 등, baseline/모델이 요구). 안전가드 통과 후에만 호출.
+    잠금을 `_RESET_LOCK_TIMEOUT_MS` 안에 못 받으면 막는 세션을 이름 붙여 즉시 실패한다(조용히 끊지도, 다시 하지도 않음)."""
+    from sqlalchemy.exc import OperationalError
+
     assert_disposable_test_db(url)
     engine = create_engine(_sync_url(url))
     try:
-        with engine.begin() as conn:
-            # destructive-sql-allow: 위 assert_disposable_test_db() 이중가드 통과 후에만 도달(story #2786 정당 예외).
-            conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
-            conn.execute(text("CREATE SCHEMA public"))
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        with engine.connect() as conn:
+            own_pid = conn.execute(text("SELECT pg_backend_pid()")).scalar_one()
+            conn.commit()  # 위 조회의 autobegin을 닫고 리셋은 자기 트랜잭션에서
+            try:
+                with conn.begin():
+                    conn.execute(text(f"SET LOCAL lock_timeout = '{_RESET_LOCK_TIMEOUT_MS}ms'"))
+                    # destructive-sql-allow: 위 assert_disposable_test_db() 이중가드 통과 후에만 도달(story #2786 정당 예외).
+                    conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+                    conn.execute(text("CREATE SCHEMA public"))
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            except OperationalError as exc:
+                if getattr(exc.orig, "pgcode", None) != "55P03":  # lock_not_available 말고는 그대로 올린다
+                    raise
+                raise RuntimeError(
+                    f"story #4395 — destructive 리셋(DROP SCHEMA)이 잠금을 {_RESET_LOCK_TIMEOUT_MS // 1000}s 안에 못 받음: "
+                    f"앞 테스트가 트랜잭션을 연 세션을 남김.\n{_describe_reset_blockers(engine, own_pid)}"
+                ) from exc
     finally:
         engine.dispose()
+
+
+# story #4395 — 전역 엔진(`app.core.database`) 커넥션을 checkout할 때마다 application_name에 지금 destructive 테스트 · 태스크를
+# 싣는다(**테스트에서만** — 제품의 `db_application_name()` 규칙은 그대로). 리셋이 막혀 위 실패 메시지에 막는 세션이 찍히면
+# 그 app 이름이 곧 «어느 테스트의 어느 태스크가 연 커넥션인가»가 된다. 서버 쪽 set_config 한 번(트랜잭션 밖 · 세션 수준).
+# 형식: `ge|<nodeid 해시 6자>|<태스크>|<함수 이름>` — 가르는 것부터(접두는 짧게). Postgres는 63바이트에서 자르므로
+# (NAMEDATALEN) 긴 함수 이름은 여기서 잘릴 수 있다 → 실패 메시지가 같은 프로세스의 해시 → 전체 nodeid 표로 되살린다.
+GLOBAL_ENGINE_TEST_TAG_PREFIX = "ge|"
+_APP_NAME_MAX_BYTES = 63
+_DESTRUCTIVE_TAG: dict = {"node": None, "hash": None, "installed": False, "nodeids": {}}
+
+
+def _clip_utf8(value: str, max_bytes: int) -> str:
+    """바이트 기준으로 자르되 글자 중간에서 끊지 않는다."""
+    return value.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _global_engine_test_tag(node_hash: str, function_name: str, task_name: str) -> str:
+    # 태스크가 함수 이름보다 앞 — 함수는 해시로 되살아나지만 태스크는 여기서만 보인다(story #4395 첫 표본에서 긴 함수 이름에 잘려 안 보였음).
+    return _clip_utf8(f"{GLOBAL_ENGINE_TEST_TAG_PREFIX}{node_hash}|{task_name}|{function_name}", _APP_NAME_MAX_BYTES)
+
+
+def _install_global_engine_checkout_tag() -> None:
+    if _DESTRUCTIVE_TAG["installed"]:
+        return
+    import asyncio
+
+    from sqlalchemy import event
+    from sqlalchemy.util import await_only
+
+    from app.core.database import engine as global_engine
+
+    def _tag(dbapi_connection, _record, _proxy):
+        if _DESTRUCTIVE_TAG["node"] is None:
+            return
+        try:
+            task = asyncio.current_task()
+            task_name = task.get_coro().__qualname__ if task is not None else "-"
+        except RuntimeError:
+            task_name = "-"
+        name = _global_engine_test_tag(_DESTRUCTIVE_TAG["hash"], _DESTRUCTIVE_TAG["node"], task_name)
+        await_only(dbapi_connection.driver_connection.execute("SELECT set_config('application_name', $1, false)", name))
+
+    event.listen(global_engine.sync_engine, "checkout", _tag)
+    _DESTRUCTIVE_TAG["installed"] = True
+
+
+def _resolve_global_engine_test_tag(app_name: str) -> str | None:
+    """`ge|<해시>|…` app 이름 → 이 프로세스에서 그 해시를 단 테스트의 전체 nodeid(잘린 함수 이름을 되살린다)."""
+    if not app_name.startswith(GLOBAL_ENGINE_TEST_TAG_PREFIX):
+        return None
+    node_hash = app_name[len(GLOBAL_ENGINE_TEST_TAG_PREFIX):].split("|", 1)[0]
+    return _DESTRUCTIVE_TAG["nodeids"].get(node_hash)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network_requests():
+    """PO 2026-10-07 22:51Z: a test that sent a request to a made-up host or a metadata address (refused by tests/_no_real_network.py)
+    fails here, naming it — mock the call (MockTransport · respx · patch the client), never let it go out. A request a background task
+    of an earlier test makes shows under the test running then: still a leak to fix."""
+    if _no_real_network is None:  # a copied conftest outside the tests package (see its import)
+        yield
+        return
+    _no_real_network.CAUGHT.clear()
+    yield
+    if _no_real_network.CAUGHT:
+        caught = "; ".join(f"{what} (at {where})" for where, what in _no_real_network.CAUGHT)
+        _no_real_network.CAUGHT.clear()
+        pytest.fail(f"a real request left the test — mock it (tests/_no_real_network.py): {caught}", pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _tag_global_engine_connections_for_destructive_tests(request):
+    """destructive 테스트마다 이름을 바꿔 단다. 테스트가 끝나도 지우지 않는다 — 테스트 뒤에 뜬 태스크가 연 커넥션도 «마지막
+    destructive 테스트» 이름을 달아야 범인을 가리킬 수 있다."""
+    if request.node.get_closest_marker(_MARKER_NAME) is not None:
+        import hashlib
+
+        _install_global_engine_checkout_tag()
+        node_hash = hashlib.sha1(request.node.nodeid.encode("utf-8")).hexdigest()[:6]
+        _DESTRUCTIVE_TAG["nodeids"][node_hash] = request.node.nodeid
+        _DESTRUCTIVE_TAG["node"], _DESTRUCTIVE_TAG["hash"] = request.node.name, node_hash
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -397,6 +537,141 @@ async def _dispose_global_engine_for_non_destructive_tests():
     await _global_engine.dispose()
 
 
+# story #4395 — destructive async 테스트의 **배경 작업 drain → 전역 엔진 dispose**를 conftest 한 곳에서. 발행 경로(send_message ·
+# 이벤트 dispatch 등)는 커밋 뒤 배달을 `pg_pubsub.fire_and_forget`으로 테스트 루프에 띄우고, 그 작업은 전역 엔진을 쓴다. 테스트가 먼저
+# 끝나면 작업이 SELECT 뒤 트랜잭션을 연 채 얼어붙어 다음 테스트 리셋(DROP SCHEMA)을 막았다(test_4228 · test_4258 — 파일마다 기억에
+# 기대던 fixture를 걷고 여기로). 상한 안에 안 끝나면 **삼키지 않고** 남은 작업 이름을 박아 실패한다(삼키면 경합 창만 넓어진다).
+DESTRUCTIVE_DRAIN_TIMEOUT_S = 10.0
+_DRAIN_ROUNDS = 5  # 배달이 또 배달을 띄울 수 있어(after_commit 사슬) 빌 때까지 몇 번
+
+
+async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOUT_S) -> None:
+    """이 루프에 뜬 `fire_and_forget` 작업을 끝까지 기다린 뒤 전역 엔진 풀을 닫는다. 상한을 넘기면 남은 작업을 취소하고 이름과 함께 실패."""
+    import asyncio
+
+    from app.core.database import engine as _global_engine
+    from app.services import pg_pubsub
+
+    loop = asyncio.get_running_loop()
+    leftover: list[str] = []
+    for _ in range(_DRAIN_ROUNDS):
+        pending = [t for t in pg_pubsub._background_tasks if not t.done() and t.get_loop() is loop]
+        if not pending:
+            break
+        _done, still = await asyncio.wait(pending, timeout=timeout)
+        if still:
+            leftover = sorted(t.get_coro().__qualname__ for t in still)
+            for t in still:
+                t.cancel()
+            await asyncio.gather(*still, return_exceptions=True)
+            break
+    await _global_engine.dispose()
+    if leftover:
+        pytest.fail(
+            f"story #4395 — 테스트가 끝났는데 배경 작업이 {timeout:g}s 안에 안 끝남(취소함): {', '.join(leftover)} — "
+            "트랜잭션을 연 채 멈춘 작업은 다음 테스트 리셋을 막는다",
+            pytrace=False,
+        )
+
+
+async def _dispose_global_engine() -> None:
+    from app.core.database import engine as _global_engine
+
+    await _global_engine.dispose()
+
+
+def _in_test_loop(test_fn, after, mark: str):
+    """story #4395 — anyio 테스트: `after`(drain → dispose · 또는 dispose)를 테스트 코루틴의 마지막 단계로(같은 루프). 테스트가 이미
+    실패했으면 그 실패가 먼저다(정리의 실패가 원래 단언을 덮지 않게 — 정리는 그래도 돈다)."""
+
+    @functools.wraps(test_fn)
+    async def run(*args, **kwargs):
+        try:
+            result = await test_fn(*args, **kwargs)
+        except BaseException:
+            try:
+                await after()
+            except pytest.fail.Exception:
+                pass
+            raise
+        await after()
+        return result
+
+    setattr(run, mark, True)
+    return run
+
+
+TEST_LOOP_DRAIN_MARK = "__story_4395_drain_in_test_loop__"
+TEST_LOOP_DISPOSE_MARK = "__story_4395_dispose_in_test_loop__"
+
+
+@pytest.fixture
+async def _drain_and_dispose_global_engine_for_destructive_tests():
+    """story #4395 — autouse가 아니다: 아래 `pytest_collection_modifyitems`가 destructive **async** 테스트에만 주입한다(비파괴 쪽
+    `_dispose_global_engine_for_non_destructive_tests`와 같은 까닭 — sync 테스트는 async fixture를 몰라야 한다)."""
+    yield
+    await drain_global_background_work()
+
+
+# story #4395 (PO 09-30 결정 · 같은 부류 둘째 표본 test_4258) — 파일마다 고치지 않고 가드 한 곳: destructive 테스트가 끝났을 때 이
+# DB에 트랜잭션을 연 채 쉬는 세션(idle in transaction)이 남아 있으면 **그 테스트가** 실패한다. 남겨 두면 다음 테스트 리셋(DROP
+# SCHEMA)이 lock_timeout으로 실패해 엉뚱한 테스트를 가리킨다. CI destructive 샤드는 파일마다 새 DB라 이 DB의 세션은 이 파일의 것이다.
+# 실패하기 전에 그 세션들을 끊는다(다음 테스트로 번지지 않게). 위 drain fixture보다 뒤에 돈다: autouse가 먼저 서니 나중에 걷힌다.
+IDLE_IN_TX_GRACE_S = 2.0  # 커밋이 막 오가는 중인 세션을 범인으로 잡지 않게 — 이만큼 다시 본 뒤에도 남은 것만
+
+
+def _idle_in_transaction_sessions(engine) -> list[tuple]:
+    with engine.connect() as conn:
+        return conn.execute(text(
+            "SELECT pid, COALESCE(application_name, ''), state, now() - state_change, left(regexp_replace(query, '\\s+', ' ', 'g'), 200) "
+            "FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND state LIKE 'idle in transaction%' ORDER BY pid"
+        )).all()
+
+
+def check_no_idle_in_transaction(url: str, nodeid: str, grace: float = IDLE_IN_TX_GRACE_S) -> None:
+    """이 DB에 idle in transaction 세션이 `grace` 뒤에도 남아 있으면 끊고, 앱 이름 · 상태 · 쉰 시간 · 마지막 쿼리를 싣고 실패한다."""
+    import time
+
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(_sync_url(url), poolclass=NullPool)
+    try:
+        deadline = time.monotonic() + grace
+        rows = _idle_in_transaction_sessions(engine)
+        while rows and time.monotonic() < deadline:
+            time.sleep(0.1)
+            rows = _idle_in_transaction_sessions(engine)
+        if not rows:
+            return
+        with engine.connect() as conn:
+            for pid, *_ in rows:
+                conn.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
+        lines = []
+        for pid, app, state, idle_for, query in rows:
+            owner = _resolve_global_engine_test_tag(app)
+            who = f" test={owner}" if owner else ""
+            lines.append(f"  pid={pid} app={app!r}{who} state={state} idle_for={idle_for} query={query!r}")
+    finally:
+        engine.dispose()
+    pytest.fail(
+        f"story #4395 — {nodeid}: 테스트가 끝났는데 트랜잭션을 연 채 쉬는 세션 {len(rows)}개(끊음) — 다음 테스트 리셋을 막는다. "
+        "세션을 닫거나(async with) 커밋/롤백해 주세요:\n" + "\n".join(lines),
+        pytrace=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_idle_in_transaction_after_destructive_test(request):
+    if request.node.get_closest_marker(_MARKER_NAME) is None:
+        yield
+        return
+    yield
+    url = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+    if url:
+        check_no_idle_in_transaction(url, request.node.nodeid)
+
+
 # story 8236bbc3: destructive_schema 마커 drift 자기표면화 가드(PO crux 게이트②, 2026-07-03).
 # 마커 부여 자체는 수동이라(하드코딩 파일리스트와 동일 클래스의 drift 위험) 이 가드가 없으면
 # "새 create_all/drop_all 테스트가 마커 없이 들어오면?" 질문에 "alembic-fresh-db job에서 공유
@@ -477,8 +752,101 @@ def _calls_destructive_schema_api(filepath: Path) -> bool:
 # (필터 적용 前 스냅샷을 보므로) 매번 오탐 차단된다 — CI 두 job(Backend pytest·backend-
 # test-destructive) 자체가 못 돌 뻔한 실사고. trylast=True로 내장 디셀렉션 다음에 돌게
 # 고정해 `items`가 최종 선택 결과를 반영하게 한다.
+# story 4459 (Didi · Kadir 2026-10-01) — two ways one test file changed every later file in the same run. Alone each file was
+# green; in a 115-file batch three tests failed, on develop too. Both guards make the file that does it RED, by name, instead
+# of a far-away test failing for no reason.
+#
+# ① A test module that puts this tests/ directory on sys.path while it is imported (`sys.path.insert(0, Path(__file__).parent)`)
+#   leaves it there for the whole run — and tests/mcp/ then shadows the installed `mcp` package (test_2188 failed with
+#   «No module named 'mcp.types'» once test_deeplink_manifest_contract was collected). tests/ is a package: import through it
+#   (`from tests.x import …`). Checked per collected module, so every such module is named, not only the first.
+_TESTS_DIR = Path(__file__).resolve().parent
+_SYS_PATH_LEAKERS: list[str] = []
+
+
+@functools.lru_cache(maxsize=512)
+def _resolved_path(p: str) -> Path | None:
+    """sys.path entries resolved once each (the hook asks for every collected module — ~1500 a run)."""
+    try:
+        return Path(p).resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
+def _tests_dir_entries(path_list: list, tests_dir: Path) -> list:
+    """The sys.path entries that are `tests_dir` (any spelling of it) — empty when it is not on the path."""
+    return [p for p in path_list if p and _resolved_path(p) == tests_dir]
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_make_collect_report(collector):
+    had = bool(_tests_dir_entries(sys.path, _TESTS_DIR))
+    yield
+    added = _tests_dir_entries(sys.path, _TESTS_DIR)
+    if added and not had and isinstance(collector, pytest.Module):
+        _SYS_PATH_LEAKERS.append(collector.nodeid)
+        for p in added:  # take it off again, so the next module is judged on its own (the run stops below anyway)
+            while p in sys.path:
+                sys.path.remove(p)
+
+
+def _sys_path_leak_error(leakers: list) -> str | None:
+    if not leakers:
+        return None
+    return (
+        "these test modules put the tests/ directory on sys.path while being imported (story 4459) — it stays for the whole "
+        "run, and tests/mcp/ then shadows the installed `mcp` package (and any other name under tests/ shadows its "
+        "namesake) for every later file. tests/ is a package: import through it (`from tests.<module> import …`) and drop "
+        "the sys.path line:\n" + "\n".join(sorted(set(leakers)))
+    )
+
+
+# ② A test that replaces app.core.config's settings object (`importlib.reload(app.core.config)`, or assigning a new Settings to
+#   the module) and does not put the old one back: every module imported before keeps reading the old object, while later tests
+#   patch the new one (test_3815_youtube_publish failed only after test_3744 reloaded the config each test). Patch fields on the
+#   one object with monkeypatch.setattr(settings, …) instead. The swap is undone here so it cannot spread, and that test errors.
+def _settings_swap_error(module_before, settings_before, module_now, settings_now, nodeid: str) -> str | None:
+    if module_now is module_before and settings_now is settings_before:
+        return None
+    return (
+        f"{nodeid} replaced app.core.config's settings object and did not put it back (story 4459) — modules imported before "
+        "keep the old one, so later files read stale values. Patch the existing object: monkeypatch.setattr(settings, "
+        "\"field\", value) (undone after the test). The old object was put back here."
+    )
+
+
+@pytest.fixture(autouse=True)
+def _settings_object_stays(request):
+    # only watched when already loaded — never imported from here: a guard that loads app.core.config before every test would
+    # blind the env-drift check that proves its script runs without the backend's packages (Kadir 4879 — a planted
+    # `import app.core.config` went green)
+    module_before = sys.modules.get("app.core.config")
+    if module_before is None:
+        yield
+        return
+    settings_before = getattr(module_before, "settings", None)
+    yield
+    error = _settings_restore_if_swapped(module_before, settings_before, request.node.nodeid)
+    if error:
+        pytest.fail(error, pytrace=False)
+
+
+def _settings_restore_if_swapped(module_before, settings_before, nodeid: str, modules: dict | None = None) -> str | None:
+    """After a test: if app.core.config (or its settings object) is not the one from before, put the old one back and say so."""
+    modules = sys.modules if modules is None else modules
+    module_now = modules.get("app.core.config")
+    error = _settings_swap_error(module_before, settings_before, module_now, getattr(module_now, "settings", None), nodeid)
+    if error:
+        modules["app.core.config"] = module_before
+        module_before.settings = settings_before
+    return error
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(items: list) -> None:
+    leak = _sys_path_leak_error(_SYS_PATH_LEAKERS)  # story 4459 ① — before anything runs
+    if leak:
+        raise pytest.UsageError(leak)
     checked: dict[Path, bool] = {}
     violations: set[str] = set()
     for item in items:
@@ -557,10 +925,29 @@ def pytest_collection_modifyitems(items: list) -> None:
     # sync 테스트는 이 fixture를 아예 몰라야 한다. `inspect.iscoroutinefunction`으로
     # "실행 시점에 걸러도" 이미 늦으므로(경고는 dispatch 시점에 남), collection
     # 시점의 `item.fixturenames` 주입만이 sync 테스트를 완전히 비켜간다.
+    # story #4395 — 아래 destructive 쪽과 같은 까닭으로 anyio 테스트는 dispose도 테스트 루프 안에서(fixture는 pytest-asyncio 루프라
+    # anyio 루프의 연결을 다른 루프에서 닫다 «Future attached to a different loop»로 못 닫고 남겼다).
     for item in non_destructive_items:
         test_func = getattr(item, "function", None)
-        if inspect.iscoroutinefunction(test_func):
+        if not inspect.iscoroutinefunction(test_func):
+            continue
+        if item.get_closest_marker("anyio") is not None:
+            item.obj = _in_test_loop(item.obj, _dispose_global_engine, TEST_LOOP_DISPOSE_MARK)
+        else:
             item.fixturenames.append("_dispose_global_engine_for_non_destructive_tests")
+    # story #4395 — destructive async 테스트엔 drain → dispose. 파일별 `_dispose_global_engine_after_test`에 기대지 않는다.
+    # drain은 **테스트와 같은 루프**에서 돌아야 한다: `asyncio_mode = "auto"`라 async fixture는 pytest-asyncio 루프에서 도는데
+    # `@pytest.mark.anyio` 테스트는 anyio 루프에서 돈다 — fixture로 걸면 다른 루프를 보고(남은 작업 0), anyio가 자기 루프를 닫으며
+    # 연결 초기화 중이던 배경 작업을 취소해 서버에 idle in transaction을 남겼다(test_2985 · CI run 36947226511 shard 8 · 로컬 10판 중
+    # 5판). anyio 테스트는 테스트 함수를 감싸 그 코루틴의 마지막 단계로 drain한다.
+    for item in destructive_items:
+        test_func = getattr(item, "function", None)
+        if not inspect.iscoroutinefunction(test_func):
+            continue
+        if item.get_closest_marker("anyio") is not None:
+            item.obj = _in_test_loop(item.obj, drain_global_background_work, TEST_LOOP_DRAIN_MARK)
+        else:
+            item.fixturenames.append("_drain_and_dispose_global_engine_for_destructive_tests")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -733,7 +1120,13 @@ def _guard_global_shutdown_event_leak(request):
             "남긴 오염으로 판단해 reset 후 진행(이 테스트는 피해자로 취급, 실패 처리 안 함)",
             request.node.nodeid,
         )
-        shutdown_module.reset_shutdown_event()
+    # story 4687(까디르 2선 실측) — «set 오염»만이 아니라 «루프 묶임» 오염도 막는다: asyncio.Event는 `.wait()`가 처음 Future를
+    # 만든 순간 그 시점의 실행 루프에 영구히 묶인다(shutdown.py 주석). 전역 단일 인스턴스를 SSE 스트림 시험이 자기 anyio 루프에서
+    # `.wait()`하고(events.py/agent_gateway.py의 shutdown_wait_task) 끝나면, 그 닫힌 루프에 묶인 채 남아 — 다음 시험(다른 루프)의
+    # 스트림이 같은 Event를 기다리다 `RuntimeError: ... is bound to a different event loop`(«Task exception was never retrieved»)로
+    # 죽는다. 순서 의존(2143 → 4565[revoked] · 단독은 초록 · CI 셔플에서 언제든). set 여부와 무관하게 «매 시험을 새 · 묶이지 않은
+    # Event로 시작»시킨다 — 피해자 보호(설정 시점 방어, 위 처방과 같은 결). 앱 코드·시험 단언은 그대로.
+    shutdown_module.reset_shutdown_event()
     yield
 
 

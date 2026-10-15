@@ -167,7 +167,7 @@ function BucketRow({ story, onAttached }: { story: BucketStory; onAttached: (sto
         <p className="min-w-0 flex-1 truncate text-xs text-foreground">{story.title}</p>
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
           className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-brand-text hover:bg-brand/10"
         >
           {expanded ? t('bucketHideSuggestion') : t('bucketShowSuggestion')}

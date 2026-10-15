@@ -62,3 +62,18 @@ describe('notifySessionChanged — 웹→셸 브릿지 발신(story #3302, #2459
     expect(() => notifySessionChanged()).not.toThrow();
   });
 });
+
+describe('notifyAccountChanged — story #4397 (the app re-registers its push device for the new account)', () => {
+  it('posts {type: "account-changed"} inside the native shell', async () => {
+    const { notifyAccountChanged } = await import('./native-shell-bridge');
+    const postMessage = vi.fn();
+    window.ReactNativeWebView = { postMessage };
+    notifyAccountChanged();
+    expect(postMessage).toHaveBeenCalledWith(JSON.stringify({ type: 'account-changed' }));
+  });
+
+  it('does nothing outside the shell', async () => {
+    const { notifyAccountChanged } = await import('./native-shell-bridge');
+    expect(() => notifyAccountChanged()).not.toThrow();
+  });
+});

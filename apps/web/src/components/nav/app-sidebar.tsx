@@ -8,6 +8,7 @@ import { ChevronDown, Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
+import { useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
@@ -209,7 +210,8 @@ export function AppSidebar({
   const [inboxPendingCount, setInboxPendingCount] = useState(0);
   // story #1977(트랙B) GNB ③ 채팅 unread 총합 — story #2007로 dashboard-shell.tsx의 단일
   // useChatUnreadTotal() 호출 결과를 prop으로 받는다(MobileTabBar와 SSE 연결 중복 제거).
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  // story #4413 — 팔레트 열림 상태는 셸 층 한 벌(사이드바 단추 · ⌘K · 폰 «전체» 검색 행이 같은 상태).
+  const { open: paletteOpen, setOpen: setPaletteOpen } = useCommandPalette();
 
   // story #4211 — setPaletteOpen은 안정 참조라 동작 무변. React Compiler가 추론한 의존성과 맞춰 컴파일 건너뜀(lint error)을 없앤다
   // (이 컴포넌트가 scopedResourceHref를 부르며 컴파일러가 이 자리까지 분석하게 되면서 드러난 기존 불일치).
@@ -287,7 +289,7 @@ export function AppSidebar({
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [setPaletteOpen]);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mux = useSseMultiplexerContext();
@@ -371,6 +373,7 @@ export function AppSidebar({
   );
 
   return (
+    <>
     <Sidebar variant="inset" collapsible="offcanvas">
       <SidebarHeader className="py-3">
         <UnifiedSwitcher
@@ -628,7 +631,9 @@ export function AppSidebar({
       </SidebarFooter>
 
       <SidebarRail />
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} projectId={projectId} contextStoryId={contextStoryId} />
     </Sidebar>
+    {/* story #4413 — 팔레트는 Sidebar 밖에 둔다: 폰에서 Sidebar는 시트라 닫혀 있으면 안쪽이 안 그려져 팔레트도 없었다. */}
+    <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} projectId={projectId} contextStoryId={contextStoryId} />
+    </>
   );
 }

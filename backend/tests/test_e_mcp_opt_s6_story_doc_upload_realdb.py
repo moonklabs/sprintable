@@ -160,6 +160,8 @@ async def test_story_update_rejects_mcp_attachments_over_declared_limit(monkeypa
                     STORY, update_body, BackgroundTasks(), repo=repo, db=s, auth=_auth(AGENT_IN),
                 )
             assert ei.value.status_code == 422
+            assert ei.value.detail["code"] == "ATTACHMENT_LIMIT_EXCEEDED"  # story #4474 — same code as chat and the MCP client
+            assert ei.value.detail["files"] == 6
     finally:
         await eng.dispose()
 

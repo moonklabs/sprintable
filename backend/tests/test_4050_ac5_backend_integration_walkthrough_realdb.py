@@ -160,10 +160,16 @@ def test_capability_field_has_exactly_five_consumers_in_codebase():
     # 소비처가 는 게 아니라 자리를 옮긴 것이다.
     # story #4255(RED 확인 뒤 의도적 갱신) — 멘션 렌더러가 마지막 stage의 capability.target(채널 연결 게시)을 읽어 «발행됐어요 ·
     # 공개 주소» 결과 줄을 싣는다(마지막 서버 stage의 결과 통지).
+    # story #4424(RED 확인 뒤 의도적 갱신) — apply의 `_stage_target`(capability.target 읽기)을 공용
+    # `services/recipe_role_bindings.stage_target`으로 옮겼다(데스크톱 설정 확인도 같은 판정을 쓴다). 소비처가 는 게 아니라
+    # 자리를 옮긴 것 — 옮긴 자리를 아래에서 같이 고정한다.
     assert _capability_consumers(events_module) == [
         "_render_event_message_content", "_resolve_crew_scoped_recipe_binding", "_stage_capability_kind",
-        "_stage_target", "apply_recipe_role_bindings", "apply_recipe_role_bindings", "gate_verdict_next_action_kind",
+        "apply_recipe_role_bindings", "apply_recipe_role_bindings", "gate_verdict_next_action_kind",
     ]
+    import app.services.recipe_role_bindings as bindings_module
+
+    assert _capability_consumers(bindings_module) == ["stage_target"]
     # event_definition_registry.py: validate_stage_metadata 안의 `meta["capability"]`류 —
     # shape 검증 로직 안에서 "capability" 리터럴이 여러 번 등장(object 검사·에러 메시지 등)
     # 하므로 정확한 개수보다 "0이 아님(소비자가 실존)"만 고정한다.

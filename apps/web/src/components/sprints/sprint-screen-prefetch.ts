@@ -10,7 +10,6 @@
  * 화면은 서버 페이지 응답을 기다린다 — 차가운 첫 판(1440)에 목록이 1.1초 뒤에야 출발해 물결이 둘로 갈렸다(실측).
  * 남는 진짜 의존: 활성 스프린트 id가 있어야 스프린트 스토리 · 그 스토리의 작업 수.
  */
-import { formatSeoulDate } from '@/lib/date';
 import { createResponsePrefetch } from '@/lib/response-prefetch';
 
 export const SPRINT_SCREEN_PREFETCH_TTL_MS = 10_000;
@@ -34,16 +33,19 @@ export const sprintScreenUrls = {
 const store = createResponsePrefetch(SPRINT_SCREEN_PREFETCH_TTL_MS);
 const scopeKeyOf = (scope: SprintScreenPrefetchScope) => `${scope.memberId ?? ''}|${scope.projectId ?? ''}`;
 
-/** 스프린트 로딩 경계 · 스프린트 화면 마운트에서 부른다(목록 + 스탠드업 여섯)(오늘 날짜 — 스탠드업 절의 첫 날짜와 같은 `formatSeoulDate()`). */
-export function prefetchSprintScreen(scope: SprintScreenPrefetchScope, date: string = formatSeoulDate(), now: number = Date.now()): void {
+/** 스프린트 로딩 경계 · 스프린트 화면 마운트에서 부른다(목록 + 스탠드업 여섯). `date` = 팀의 오늘(teamDayKey — 스탠드업 절의 첫 날짜와
+ *  같은 계산이어야 넘겨받는다 · story #4443 PR3a). 아직 모르면(null) 날짜가 드는 셋은 안 보낸다(화면이 스스로 부른다). */
+export function prefetchSprintScreen(scope: SprintScreenPrefetchScope, date: string | null, now: number = Date.now()): void {
   if (!scope.projectId) return; // 스탠드업 절은 프로젝트 안에서만 붙는다.
   const key = scopeKeyOf(scope);
   store.start(sprintScreenUrls.sprintList(scope.projectId), key, now);
-  store.start(sprintScreenUrls.entries(date), key, now);
+  if (date) store.start(sprintScreenUrls.entries(date), key, now);
   store.start(sprintScreenUrls.members(), key, now);
   store.start(sprintScreenUrls.activeSprints(scope.projectId), key, now);
-  store.start(sprintScreenUrls.feedback(scope.projectId, date), key, now);
-  store.start(sprintScreenUrls.missing(scope.projectId, date), key, now);
+  if (date) {
+    store.start(sprintScreenUrls.feedback(scope.projectId, date), key, now);
+    store.start(sprintScreenUrls.missing(scope.projectId, date), key, now);
+  }
   store.start(sprintScreenUrls.history(scope.projectId), key, now);
 }
 

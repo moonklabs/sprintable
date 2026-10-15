@@ -7,6 +7,8 @@ import remarkBreaks from 'remark-breaks';
 import { hasNoVisibleText, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
 import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { ViewerDate } from '@/components/viewer-time-zone';
+import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { commandArgs, commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
@@ -29,6 +31,7 @@ import { Avatar } from '@/components/shared/avatar';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { IntentSuggestionCard } from './intent-suggestion-card';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
+import { WithheldDeliveryLine } from './withheld-delivery-line';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard, type CardState } from './approval-request-card';
 import { EventBlockCard } from './event-block-card';
@@ -446,7 +449,6 @@ export function ChatBubble({
   const cmdName = isCmd ? commandName(message.content) : null;
   const args = isCmd ? commandArgs(message.content) : '';
   const displayName = isMine ? t('you') : (senderLabel || message.sender_name || t('team'));
-  const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.created_at));
   const replyCount = message.reply_count ?? 0;
   const lastReplyAt = message.last_reply_at;
 
@@ -538,9 +540,6 @@ export function ChatBubble({
     onOpenThread?.(message);
   }, [message, onOpenThread]);
 
-  const lastReplyTime = lastReplyAt
-    ? new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(lastReplyAt))
-    : null;
 
   return (
     <>
@@ -725,6 +724,9 @@ export function ChatBubble({
             </div>
           )}
 
+          {/* story #4430 — right under the sender's own bubble, above the suggestion/reference rows */}
+          {!isDeleted && <WithheldDeliveryLine withheld={message.delivery_withheld} isMine={isMine} />}
+
           {/* story #2349(유나 design:changes) — "보기"로 펼친 뒤 되돌릴 문턱이 없으면
               "이걸 누르면 계속 보이나?"가 걸려 아예 안 누르게 된다(가리기+확認 가능을 둘 다
               주려던 설계가 반만 서는 것). 되돌릴 수 있어야 눌러 볼 수 있다. */}
@@ -812,7 +814,8 @@ export function ChatBubble({
             </div>
           )}
 
-          <time className="text-[10px] text-muted-foreground">{time}</time>
+          {/* story #4443 PR2 — the viewer's zone and locale (was ko-KR in the runtime's zone: «오전 07:32» in en too) */}
+          <time className="text-[10px] text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
 
           {/* AC5: 답글 수 표시 — reply_count > 0 */}
           {replyCount > 0 && (
@@ -823,8 +826,8 @@ export function ChatBubble({
             >
               <MessageSquare className="h-3 w-3" />
               {t('replyCount', { count: replyCount })}
-              {lastReplyTime && (
-                <span className="font-normal text-muted-foreground">{lastReplyTime}</span>
+              {lastReplyAt && (
+                <span className="font-normal text-muted-foreground"><ViewerDate value={lastReplyAt} options={VIEWER_TIME_OPTIONS} /></span>
               )}
             </button>
           )}

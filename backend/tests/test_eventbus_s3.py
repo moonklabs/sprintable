@@ -9,6 +9,17 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_sender_org_lookup(monkeypatch):
+    """story 4649: the stream's backfill looks its senders' orgs up in one query of its own. These tests script the
+    session's query results in order, so that lookup answers nothing here (its own tests cover it)."""
+
+    async def _no_orgs(ids, session):
+        return {}
+
+    monkeypatch.setattr("app.routers.events.lookup_members_by_ids", _no_orgs)
 from httpx import ASGITransport, AsyncClient
 
 from app.models.event import Event
@@ -355,9 +366,9 @@ async def test_stream_batch_delivers_over_100_events(mock_session, org_id):
                     if queues:
                         sync_status_observed = await _wait_for_event(observer, "sync_status", timeout=15.0)
                     for q in queues:
-                        q.put_nowait({"event_type": "__test_sentinel__"})
+                        q.put_nowait({"event_type": "test_sentinel"})
                     if queues and sync_status_observed:
-                        written_observed = await _wait_for_event(observer, "__test_sentinel__", timeout=5.0)
+                        written_observed = await _wait_for_event(observer, "test_sentinel", timeout=5.0)
                     shutdown_module.shutdown_event.set()
                     resp = await asyncio.wait_for(stream_task, timeout=15.0)
                     assert resp.status_code == 200

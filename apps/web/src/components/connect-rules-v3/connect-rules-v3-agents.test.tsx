@@ -188,7 +188,7 @@ describe('ConnectRulesV3Agents', () => {
     expect(container.textContent).toContain('연결 설정 보기');
     expect(container.textContent).toContain('완료 4건');
     expect(container.textContent).toContain('Sprintable 기준');
-    expect(container.textContent).toContain('프로젝트 1개 접근 허용');
+    expect(container.textContent).toContain('프로젝트 팀 1곳에 들어가 있어요'); // 4677 AC2 (유나 §L ④)
 
     // 재펼침(같은 행 접었다 다른 행 펼침) — projects/access-matrix 캐시돼 재조회 0.
     await act(async () => { firstRow.click(); });

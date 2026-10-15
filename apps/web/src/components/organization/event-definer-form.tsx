@@ -52,6 +52,7 @@ export function EventDefinerForm({
               <button
                 key={value}
                 type="button"
+                aria-pressed={state.format === value}
                 onClick={() => set('format', value)}
                 className={`relative rounded-xl border p-3 text-left transition-colors ${state.format === value ? 'border-primary ring-2 ring-primary/20' : 'border-border hover:bg-muted/40'}`}
               >
@@ -77,7 +78,7 @@ export function EventDefinerForm({
               id="definer-key"
               value={state.keySuffix}
               onChange={(e) => set('keySuffix', e.target.value)}
-              className="border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0"
+              className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
             />
           </div>
           {keyError ? (
@@ -112,6 +113,8 @@ export function EventDefinerForm({
 
         {/* ④ 받는 사람 */}
         <Section title={t('definerRoutingSectionTitle')} badge={t('definerDerivedBadge')} hint={t('definerRoutingSectionHint')}>
+          {/* [SID:4380] 하나 고르기 — 동그라미가 색으로만 고름을 보였다 → radiogroup · radio + aria-checked. */}
+          <div role="radiogroup" aria-label={t('definerRoutingSectionTitle')}>
           <RadioRow
             selected={state.routing === 'assign_on_publish'}
             onSelect={() => set('routing', 'assign_on_publish')}
@@ -124,6 +127,7 @@ export function EventDefinerForm({
             title={t('definerRoutingRecordTitle')}
             desc={t('definerRoutingRecordDesc')}
           />
+          </div>
           <div className="flex items-start gap-2 rounded-lg border border-border p-2.5 opacity-50">
             <span className="mt-0.5 size-4 shrink-0 rounded-full border-2 border-border" />
             <div>
@@ -204,6 +208,8 @@ function RadioRow({ selected, onSelect, title, desc }: { selected: boolean; onSe
   return (
     <button
       type="button"
+      role="radio"
+      aria-checked={selected}
       onClick={onSelect}
       className={`mb-1.5 flex w-full items-start gap-2 rounded-lg border p-2.5 text-left ${selected ? 'border-primary bg-primary/5' : 'border-border'}`}
     >
@@ -250,12 +256,12 @@ function StagesSection({ stages, onChange, t }: { stages: DefinerStage[]; onChan
                 update(s.id, { name, slug: slugify(name, i) });
               }}
               placeholder={t('definerStageNamePlaceholder')}
-              className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
+              className="min-w-0 flex-1 bg-transparent text-base lg:text-sm text-foreground outline-none"
             />
             <input
               value={s.slug}
               onChange={(e) => update(s.id, { slug: e.target.value })}
-              className="w-32 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground outline-none"
+              className="w-32 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-base lg:text-[11px] text-muted-foreground outline-none"
             />
             <button type="button" onClick={() => onChange(stages.filter((x) => x.id !== s.id))} className="shrink-0 text-muted-foreground hover:text-destructive" aria-label={t('definerRemoveRow')}>✕</button>
           </div>
@@ -340,14 +346,14 @@ function FieldsSection({ fields, onChange, t }: { fields: DefinerField[]; onChan
                     <input
                       value={f.name}
                       onChange={(e) => update(f.id, { name: e.target.value })}
-                      className={`w-full rounded-md border px-1.5 py-1 text-xs ${invalid ? 'border-destructive' : 'border-border'} bg-background text-foreground`}
+                      className={`w-full rounded-md border px-1.5 py-1 text-base lg:text-xs ${invalid ? 'border-destructive' : 'border-border'} bg-background text-foreground`}
                     />
                   </td>
                   <td className="py-1 pr-1.5">
                     <select
                       value={f.type}
                       onChange={(e) => update(f.id, { type: e.target.value as DefinerField['type'] })}
-                      className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+                      className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-base lg:text-xs text-foreground"
                     >
                       <option value="string">{t('definerFieldTypeString')}</option>
                       <option value="number">{t('definerFieldTypeNumber')}</option>
@@ -359,7 +365,7 @@ function FieldsSection({ fields, onChange, t }: { fields: DefinerField[]; onChan
                     <select
                       value={f.required ? '1' : '0'}
                       onChange={(e) => update(f.id, { required: e.target.value === '1' })}
-                      className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+                      className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-base lg:text-xs text-foreground"
                     >
                       <option value="1">{t('definerFieldRequired')}</option>
                       <option value="0">{t('definerFieldOptional')}</option>

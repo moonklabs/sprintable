@@ -207,3 +207,22 @@ describe('EmbedGroup — story #2905 open-panel 클릭 왕복(회귀가드)', ()
     }));
   });
 });
+
+// [SID:4380] «+N 더보기 ↔ 접기»가 펼침 상태를 알린다(aria-expanded).
+describe('EmbedGroup — 더보기 펼침 상태([SID:4380])', () => {
+  it('«+2 더보기» aria-expanded=false → 누르면 «접기» aria-expanded=true', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedGroup entityType="story" refs={REFS_5} />
+        </NextIntlClientProvider>,
+      );
+    });
+    const more = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '+2 더보기')!;
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const fold = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '접기')!;
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+  });
+});

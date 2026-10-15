@@ -54,6 +54,20 @@ def _parse_uuid(value: str, *, field_name: str) -> uuid.UUID:
 async def _resolve_work_item_stakeholders(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
 ) -> set[uuid.UUID]:
+    """story #4500 (Qadir 4912 QA 12:28Z · PO): the stakeholders are members of this org only. The ids come from stored rows
+    (assignees · owner · join rows) and from the payload (gate requester · draft author) — any of them can be outside the org
+    (written before 4497's check, another write path, a payload naming someone else's member), and a recipient outside the org
+    would get this org's event. The final set goes through `org_recipient_ids` — aliases resolved to the living member, then
+    `filter_org_member_ids` (the rule 4497's write check uses) — every branch (story · task · goal) and the payload keys alike."""
+    from app.services.member_resolver import org_recipient_ids
+
+    ids = await _work_item_stakeholders_unfiltered(db, org_id=org_id, payload=payload)
+    return await org_recipient_ids(ids, org_id, db)
+
+
+async def _work_item_stakeholders_unfiltered(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
+) -> set[uuid.UUID]:
     """work_item_type/work_item_id → 그 작업의 이해관계자(담당자·human owner·복수 assignee).
     타입별 필드가 제각각이라(story/task/goal 전부 다른 모델) 여기서 타입별 분기 — 코드베이스에
     범용 헬퍼가 없어 이 스토리에서 신설(그라운딩 확認, #2620/#2617류 재사용 대상 없음).
@@ -93,10 +107,14 @@ async def _resolve_work_item_stakeholders(
                 Story.id == work_item_id, Story.org_id == org_id,
             )
         )).one_or_none()
-        if row is not None:
-            ids |= {m for m in row if m is not None}
+        if row is None:
+            # story #4500: not this org's story (or none) — its assignees are not read at all (they used to be merged anyway)
+            return ids
+        ids |= {m for m in row if m is not None}
         extra = (await db.execute(
-            select(StoryAssignee.member_id).where(StoryAssignee.story_id == work_item_id)
+            select(StoryAssignee.member_id).where(
+                StoryAssignee.story_id == work_item_id, StoryAssignee.org_id == org_id,
+            )
         )).scalars().all()
         ids |= set(extra)
         return ids
@@ -141,7 +159,12 @@ async def _resolve_goal_owner(db: AsyncSession, *, org_id: uuid.UUID, payload: d
     assignee = (await db.execute(
         select(Goal.assignee_id).where(Goal.id == goal_id, Goal.org_id == org_id)
     )).scalar_one_or_none()
-    return {assignee} if assignee else set()
+    if not assignee:
+        return set()
+    # story #4500: the same recipient rule as work_item_stakeholders
+    from app.services.member_resolver import org_recipient_ids
+
+    return await org_recipient_ids({assignee}, org_id, db)
 
 
 async def _resolve_none(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> set[uuid.UUID]:  # noqa: ARG001
@@ -214,15 +237,46 @@ async def resolve_broad_crew_member_ids(
     )).scalars().all())
 
 
+async def _active_member_ids(db: AsyncSession, *, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """story #4437 — of these members, the ones that can still receive. Same two-step identity as
+    `member_resolver.resolve_member_identity`: a team-member row (agents · legacy humans) decides by its `is_active` — a stopped
+    agent (its desktop setup disconnected · PR 4847) is out; with no such row, an org membership that is not deleted (a
+    grant-only human, e.g. an org owner without a project row) is in. A member of neither is out."""
+    from app.models.project import OrgMember
+    from app.models.team import TeamMember
+
+    if not member_ids:
+        return set()
+    rows = (await db.execute(
+        select(TeamMember.id, TeamMember.is_active).where(TeamMember.id.in_(member_ids), TeamMember.org_id == org_id)
+    )).all()
+    with_row = {mid for mid, _active in rows}
+    active = {mid for mid, is_active in rows if is_active}
+    rest = member_ids - with_row
+    if rest:
+        active |= set((await db.execute(
+            select(OrgMember.id).where(OrgMember.id.in_(rest), OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None))
+        )).scalars().all())
+    return active
+
+
 async def _bound_member_for_stage(
     db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition_key: str, stage: str,
 ) -> uuid.UUID | None:
     """그 stage에 바인딩된 멤버(`agent_member_id` 열 — 에이전트·사람 종류 무관) — project 스코프 바인딩 우선, 없으면 org
-    전역(story #3288 규칙 그대로)."""
+    전역(story #3288 규칙 그대로).
+
+    story #4437 — the bound member must still be able to receive (active · of this org). A stopped or missing member is «no
+    one»: every caller (delivery · the stage assignee on the event card · recipe start candidates · stage complete/start
+    assignee checks · the channel-stage next member · the last server stage · publish-failure notices) then takes its existing
+    «no one» path — the zero-reach warning for delivery — instead of queuing work nobody will pick up. The project binding
+    still decides for its project: a stopped agent there does not fall back to the org-wide binding (project work would land
+    with someone nobody chose for it). The binding row itself is kept (a new setup upserts it)."""
     from app.models.recipe_role_binding import RecipeRoleBinding
 
+    member_id: uuid.UUID | None = None
     if project_id is not None:
-        agent_id = (await db.execute(
+        member_id = (await db.execute(
             select(RecipeRoleBinding.agent_member_id).where(
                 RecipeRoleBinding.org_id == org_id,
                 RecipeRoleBinding.project_id == project_id,
@@ -230,16 +284,18 @@ async def _bound_member_for_stage(
                 RecipeRoleBinding.stage == stage,
             )
         )).scalar_one_or_none()
-        if agent_id is not None:
-            return agent_id
-    return (await db.execute(
-        select(RecipeRoleBinding.agent_member_id).where(
-            RecipeRoleBinding.org_id == org_id,
-            RecipeRoleBinding.project_id.is_(None),
-            RecipeRoleBinding.event_definition_key == definition_key,
-            RecipeRoleBinding.stage == stage,
-        )
-    )).scalar_one_or_none()
+    if member_id is None:
+        member_id = (await db.execute(
+            select(RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id.is_(None),
+                RecipeRoleBinding.event_definition_key == definition_key,
+                RecipeRoleBinding.stage == stage,
+            )
+        )).scalar_one_or_none()
+    if member_id is None:
+        return None
+    return member_id if await _active_member_ids(db, org_id=org_id, member_ids={member_id}) else None
 
 
 async def recipe_crew_member_ids(
@@ -265,7 +321,9 @@ async def recipe_crew_member_ids(
             project_filter,
         )
     )).scalars().all()
-    return set(crew_ids)
+    # story #4437 — the crew is who can still take the work: stopped or missing members are left out (the connector-stage
+    # fallback would otherwise queue events for them, and the publish checks would let them count)
+    return await _active_member_ids(db, org_id=org_id, member_ids=set(crew_ids))
 
 
 async def _stage_approval_is_elsewhere(
@@ -537,4 +595,16 @@ async def resolve_routing_leg(
         return valid
 
     resolver = _SERVER_DERIVED_RESOLVERS[leg["target"]]
-    return await resolver(db, org_id=org_id, payload=payload)
+    ids = await resolver(db, org_id=org_id, payload=payload)
+    if leg["target"] == "work_item_stakeholders" and definition_key and payload.get("stage"):
+        # story #4451 (critical, 선생님 확인 A) — a recipe stage also reaches the member bound to that stage. The workflow presets
+        # route by `work_item_stakeholders` (assignee · human owner · assignees), which never read the setup's stage bindings: the
+        # first stage on a work item the desktop setup made a moment ago reached only its sender, and the hand-off to the next
+        # role (kanban_simple in_progress → Dev · done_check → Lead) missed the same way. The holder comes from the binding
+        # resolver itself (project before org-wide · a stopped member is no one · an approval held elsewhere has no holder), so
+        # this answers like the `recipe_role_binding` presets. No binding → the stakeholders as before; bindings are keyed by the
+        # definition, so a definition with no stages or no bindings (gate verdict · steer · work assigned/status) is unchanged.
+        ids |= await _resolve_recipe_role_binding(
+            db, org_id=org_id, payload=payload, definition_key=definition_key, context=context,
+        )
+    return ids

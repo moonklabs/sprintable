@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE, getServerSession } from '@/lib/db/server';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
@@ -26,7 +27,8 @@ export async function POST(request: Request): Promise<Response> {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ org_id: body.org_id }),
+    // story #4400 — this session's refresh token: the backend revokes only it (other devices keep their sessions)
+    body: JSON.stringify({ org_id: body.org_id, refresh_token: (await cookies()).get(SP_RT_COOKIE)?.value }),
   });
 
   const json = await safeJsonParse(fastapiRes) as {

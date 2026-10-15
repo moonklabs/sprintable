@@ -32,3 +32,18 @@ class AcceptInviteResponse(BaseModel):
     ok: bool
     org_id: str
     role: str
+
+
+class MyInvite(BaseModel):
+    """story #4427 (PO 01:21Z) — a pending invite to the signed-in person's own verified email. No token: accepting stays
+    the mail link (invite_accept.accept)."""
+    invite_id: str
+    org_id: str
+    org_name: str
+    role: str
+    invited_at: datetime
+    expires_at: datetime
+
+
+class MyInvitesResponse(BaseModel):
+    invites: list[MyInvite]

@@ -771,7 +771,7 @@ async def consume_oauth_handoff(
     _write_oauth_handoff_audit(
         db, "oauth_handoff_consumed", user_id=consumed.user_id, callback_mode=callback_mode, request=request,
     )
-    await _store_refresh_token(db, user, tokens["refresh_token"], refresh_expires_at)
+    await _store_refresh_token(db, user, tokens["refresh_token"], refresh_expires_at, app_metadata=app_metadata)
 
     # mint 직후(레거시 토큰 서명+RT 저장 커밋 이후) 재확인 — native consume의 "3번째
     # authoritative 재조회"와 동형: mint 도중 revoke가 끼어들었으면 방금 발급한 토큰을 폐기.

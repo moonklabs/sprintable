@@ -238,15 +238,15 @@ async def test_update_builtin_persona_403():
 
 
 @pytest.mark.anyio
-async def test_seed_builtin_200():
+async def test_seed_endpoint_is_removed():
+    """story #4407 AC5 — `POST /agent-personas/seed` never worked after the move to alembic (its Postgres function was never
+    ported) and is removed. The path now falls under `/{id}` (GET/PATCH/DELETE), so POST answers 405."""
     client, session, app = await _client()
     try:
-        # story #4000 — 모듈 autouse 픽스처(_mock_assert_agent_owner)가 가드 통과 처리.
-        with patch("app.repositories.agent_persona.AgentPersonaRepository.seed_builtin", new_callable=AsyncMock) as mock_seed:
-            mock_seed.return_value = {"seeded": True}
-            async with client as c:
-                resp = await c.post(f"/api/v2/agent-personas/seed?agent_id={AGENT_ID}")
-            assert resp.status_code == 200
-            assert resp.json()["data"]["seeded"] is True
+        async with client as c:
+            resp = await c.post(f"/api/v2/agent-personas/seed?agent_id={AGENT_ID}")
+        assert resp.status_code == 405
     finally:
         app.dependency_overrides.clear()
+
+

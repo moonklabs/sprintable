@@ -213,7 +213,11 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
     const { violations, fileCount } = __scan;
     expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
     expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
-    expect(fileCount).toBe(127);
+    // story #4490 — `onboarding/layout.tsx`(브라우저 주인 확인 TabOwnerGate) 하나로 128→129(default export만).
+    // story #4548 — `desktop/remote/page.tsx`(원격 제어 켜기 웹 확인) 하나로 129→130(default export만).
+    // story #4532 — `desktop/pair/page.tsx`(폰 앱 안 짝짓기 화면) 하나로 130→131(default export만).
+    // story 4670 — `desktop/remote-on/page.tsx`(원격 제어를 켜는 확인 한 장) 하나로 131→132(default export만).
+    expect(fileCount).toBe(132);
     expect(violations).toEqual([]);
   });
 });

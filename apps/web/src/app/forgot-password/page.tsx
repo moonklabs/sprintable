@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
               type="email"
               placeholder={t('emailPlaceholder')}
               autoComplete="email"
-              className="w-full rounded-lg border border-border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}

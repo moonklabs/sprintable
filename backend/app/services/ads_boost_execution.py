@@ -29,13 +29,15 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from datetime import datetime, timedelta
+
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
 from app.models.publication_command import PublicationCommand
 from app.services.provider_call_mark import provider_client
-from app.services.publication_command import create_or_get_publication_command
+from app.services.publication_command import create_or_get_publication_command, retry_dead_letter_command
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
 _ADS_BOOST_CONTENT_KIND = "ads_boost"
@@ -44,6 +46,10 @@ _NON_TERMINAL_STATUSES = ("pending", "in_progress", "blocked")
 OP_BOOST_START = "boost_start"
 OP_PAUSE = "pause"
 OP_RESUME = "resume"
+# story #4447 (PO 08:13Z · 08:34Z) — the commands that only stop money: never refused for their seal (a pause pressed before a
+# re-seal must still switch the campaign off). Everything else is seal-checked by default — a new operation that spends is checked
+# without anyone remembering to add it (the exempt list is pinned by test_4447_ads_boost_states_contract.py).
+MONEY_STOPPING_OPS: frozenset[str] = frozenset({OP_PAUSE})
 
 # story #3806(Phase3·3-2 PR 13) — process_one_ads_boost_command 실행 성공 지점의
 # ActivityLog action 키. FE gate-evidence.tsx::GATE_ACTIVITY_LABEL_KEY와 1:1 대응.
@@ -57,6 +63,164 @@ _ACTIVITY_ACTION_BY_OP = {
 # (신규 상수 발명 0 — 그 둘을 import하면 이 모듈의 gate_type 무관 워커 배치와
 # 우연히 같은 상수를 공유하게 돼 오히려 결합이 생긴다, 여기선 리터럴로 동형만).
 _DUE_STARTS_BATCH_SIZE = 50
+
+# story #4404 — outcome unknown: a campaign creation was started (marker committed) and never recorded its ids. Meta may have
+# created it, so it is never re-created automatically (customer ad spend) — needs_check (unmapped codes are needs_check).
+ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE = "ADS_BOOST_CREATE_OUTCOME_UNKNOWN"
+
+
+ADS_BOOST_CAMPAIGN_CHECK_REQUIRED_CODE = "ADS_BOOST_CAMPAIGN_CHECK_REQUIRED"
+
+
+class AdsBoostCampaignCheckRequiredError(Exception):
+    """story #4409 — retrying an «outcome unknown» start needs the person to confirm the campaign does not exist at Meta."""
+
+    code = ADS_BOOST_CAMPAIGN_CHECK_REQUIRED_CODE
+
+
+async def prepare_ads_boost_retry(db: AsyncSession, command, *, confirmed_no_campaign: bool) -> None:
+    """story #4409 — before a person's retry of a publication command.
+
+    Only an ads boost start stopped as ADS_BOOST_CREATE_OUTCOME_UNKNOWN is special: a plain retry would reach the same verdict
+    (expired claim + call marker + no ids). The person must confirm «I checked the ad account: this campaign does not exist»;
+    only then the run's claim and call marker are cleared, so the retry creates it once. Without that confirmation →
+    AdsBoostCampaignCheckRequiredError (nothing changes — if the campaign did exist, clearing would double the ad spend).
+    Every other command (ADS_BOOST_PROVIDER_ERROR included) retries as before."""
+    if command.content_kind != _ADS_BOOST_CONTENT_KIND or command.reason_code != ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE:
+        return
+    if not confirmed_no_campaign:
+        raise AdsBoostCampaignCheckRequiredError()
+    from app.models.ads_boost_run import AdsBoostRun
+
+    run = (await db.execute(
+        select(AdsBoostRun).where(AdsBoostRun.org_id == command.org_id, AdsBoostRun.gate_id == command.gate_id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if run is not None and not (run.campaign_id and run.adset_id and run.ad_id):
+        run.create_claimed_at = None
+        run.create_call_started_at = None
+
+
+class _CreateClaimLost(Exception):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class _SealReplacedBeforeCall(Exception):
+    """story #4458 — the gate was re-sealed after this command passed the execution context, before its provider call."""
+
+    code = "ADS_BOOST_SEAL_REPLACED"
+
+    def __init__(self, message: str, *, code: str | None = None):
+        super().__init__(message)
+        self.message = message
+        if code:
+            self.code = code  # story #4460 — the gate left «approved» right before the call (a cancel · a reopen)
+
+
+async def _refuse_if_seal_replaced(db: AsyncSession, command, gate_id: uuid.UUID) -> None:
+    """story #4458 (Qadir 08:03Z · PO 08:05Z) — the seal again, right before a provider call that spends. The execution context
+    checks it once, but a person can re-approve (re-seal) between that check and the call; the old seal's budget would then go out.
+    A short read of the current seal — no lock is held across the provider's HTTP call. A pause is never refused for its seal
+    (MONEY_STOPPING_OPS)."""
+    if command.operation in MONEY_STOPPING_OPS:
+        return
+    current, status = (await db.execute(
+        select(Gate.sealed_ads_boost_version_id, Gate.status).where(Gate.id == gate_id)
+    )).one_or_none() or (None, None)
+    if status != "approved":
+        # story #4460 (PO 16:32Z) — a cancel (or a reopen) landed while this command was already out: what it may have created is
+        # never switched on; the cancel finishes once this command ended
+        raise _SealReplacedBeforeCall(f"the gate is no longer approved before the provider call (status {status})", code="ADS_BOOST_GATE_NOT_APPROVED")
+    if current != command.approved_version:
+        raise _SealReplacedBeforeCall(
+            f"the gate was re-sealed before the provider call (command {command.approved_version} · current {current})",
+        )
+
+
+async def _refuse_if_cap_reached(db: AsyncSession, command, run) -> None:
+    """story #4517 (PO 02:52Z) — the cap again, read fresh right before the ACTIVE switch. The check at the top of the command
+    reads the run once (no lock; the provider calls hold no transaction), so a capture that reached the cap after it was not seen,
+    and the campaign was switched on past the approved budget. A start or resume only — a pause never stops for the cap."""
+    if command.operation not in (OP_BOOST_START, OP_RESUME):
+        return
+    from app.models.ads_boost_run import AdsBoostRun
+
+    reached = (await db.execute(select(AdsBoostRun.cap_reached_at).where(AdsBoostRun.id == run.id))).scalar_one_or_none()
+    if reached is not None:
+        raise _SealReplacedBeforeCall("spend reached the approved total budget — not switched on again", code=CAP_REACHED_CODE)
+
+
+def _record_created_adset(run, gate, command, *, adset_was_new: bool) -> None:
+    """story #4458 (Qadir 4881 · PO 11:24Z) — «what the campaign was created with» is recorded once, the moment the budget-carrying
+    ad set first exists — a full create, or a create that failed part-way after the ad set (its partial ids) — with the budget,
+    seal and connection of that call, and never overwritten. A later start that reuses that ad set (another seal, maybe a lower
+    budget) must not stamp its own budget as «created»: the check below would then pass and switch on an ad set made on other values."""
+    if adset_was_new and run.adset_id and run.created_budget_minor is None:
+        run.created_budget_minor = gate.sealed_ads_budget_minor
+        run.created_for_version_id = command.approved_version
+        run.created_connection_id = gate.sealed_ads_connection_id  # PO 09:00Z — the account the campaign lives in
+
+
+def _refuse_if_created_on_another_budget(run, gate) -> None:
+    """story #4458 (PO 08:13Z ② (다)) — a campaign made with a budget other than the current seal's is never switched on: a re-seal
+    landed while it was being created (on the older seal's values). Switching it on would spend outside the approval; changing
+    its budget at the provider is not done automatically. It stays off and stops for a person (needs_check). Null = created before
+    the record existed — no check."""
+    if run.created_budget_minor is not None and run.created_budget_minor != gate.sealed_ads_budget_minor:
+        from app.services.meta_ads_campaign import MetaAdsCampaignError
+
+        raise MetaAdsCampaignError(
+            CREATED_BUDGET_DIFFERS_CODE,
+            f"the campaign was created with budget {run.created_budget_minor} on seal {run.created_for_version_id}; the approved "
+            f"budget is now {gate.sealed_ads_budget_minor} — not switched on",
+            outcome_known=True,
+        )
+
+
+async def _claim_campaign_creation(db: AsyncSession, run, *, now: datetime) -> bool:
+    """story #4404 — at most one campaign creation per run, across commands (two boost_start commands for one gate can be in
+    flight: commands are unique per approved version, the run per gate).
+
+    Conditional UPDATE: claimable while the ids are incomplete and the claim is free — or expired **without** the call marker
+    (the worker died before calling Meta). Committed before any provider call. Returns True when this command won.
+    Returns False when the ids became complete meanwhile (the caller re-reads them and skips creation).
+    Raises _CreateClaimLost: another command holds a live claim (transient — retry later), or the claim expired **with** the
+    marker and no ids (outcome unknown → needs_check, never re-created)."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.services.publication_command import ADS_BOOST_CREATE_IN_PROGRESS_CODE, STUCK_IN_PROGRESS_THRESHOLD
+
+    expired_before = now - STUCK_IN_PROGRESS_THRESHOLD
+    incomplete = or_(AdsBoostRun.campaign_id.is_(None), AdsBoostRun.adset_id.is_(None), AdsBoostRun.ad_id.is_(None))
+    won = (await db.execute(
+        update(AdsBoostRun)
+        .where(
+            AdsBoostRun.id == run.id,
+            incomplete,
+            or_(
+                AdsBoostRun.create_claimed_at.is_(None),
+                and_(AdsBoostRun.create_claimed_at < expired_before, AdsBoostRun.create_call_started_at.is_(None)),
+            ),
+        )
+        .values(create_claimed_at=now, create_call_started_at=None)
+        .returning(AdsBoostRun.id)
+        .execution_options(synchronize_session=False)
+    )).first() is not None
+    await db.commit()
+    await db.refresh(run)
+    if won:
+        return True
+    if run.campaign_id and run.adset_id and run.ad_id:
+        return False
+    if run.create_call_started_at is not None and run.create_claimed_at is not None and run.create_claimed_at < expired_before:
+        raise _CreateClaimLost(
+            ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE,
+            f"campaign creation for run {run.id} started at {run.create_call_started_at.isoformat()} and never recorded its ids "
+            "— Meta may have created it; check the ad account before retrying",
+        )
+    raise _CreateClaimLost(ADS_BOOST_CREATE_IN_PROGRESS_CODE, f"another command is creating the campaign for run {run.id}")
 
 
 class AdsBoostGateNotFoundError(Exception):
@@ -86,6 +250,27 @@ class AdsBoostNotStartedError(Exception):
         super().__init__(f"ads_boost not started yet, cannot pause: {gate_id}")
 
 
+class AdsBoostSpendBlockedError(Exception):
+    """story #4417 — the boost was stopped because its spend can't be checked against the budget (`ads_boost_runs.spend_blocked_at`):
+    switching it on again would spend with no cap, so resume is refused."""
+
+    def __init__(self, gate_id: uuid.UUID, code: str | None):
+        self.gate_id = gate_id
+        self.code = code
+        super().__init__(f"ads_boost spend is unreadable ({code}), cannot resume: {gate_id}")
+
+
+class AdsBoostCapReachedError(Exception):
+    """story #4486 — the boost was paused because its spend reached the approved total budget (`ads_boost_runs.cap_reached_at`,
+    this cycle): switching it on again would spend past what was approved until the next capture (up to a day). Refused; more
+    spend is a new request (a cancel, then a new cycle — `_reset_run` clears the cap)."""
+
+    def __init__(self, gate_id: uuid.UUID, operation: str = "resume"):
+        self.gate_id = gate_id
+        self.operation = operation  # «resume» · «boost_start» (PO 04:01Z — a person's start after a re-approval)
+        super().__init__(f"ads_boost reached its approved budget, cannot {operation}: {gate_id}")
+
+
 class AdsBoostNotPausedError(Exception):
     """되돌아갈 paused 상태가 없는데 resume을 요청(토글 이력 0 또는 최신 토글이 pause가
     아님)."""
@@ -105,28 +290,47 @@ class AdsBoostAlreadyInStateError(Exception):
         super().__init__(f"ads_boost already in requested state (operation={operation}): {gate_id}")
 
 
-async def _resolve_gate(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID) -> Gate:
+async def _resolve_gate(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, operation: str | None = None) -> Gate:
     gate = (await db.execute(select(Gate).where(Gate.id == gate_id))).scalar_one_or_none()
     if gate is None or gate.org_id != org_id or gate.gate_type != _ADS_BOOST_GATE_TYPE:
         raise AdsBoostGateNotFoundError(gate_id)
-    if gate.status != "approved":
+    # story #4466 (PO 11:51Z · (가)) — stopping money never waits for an approval: a live campaign whose gate went back to review
+    # (re-request · undo · then void / hold / reject) must still be pausable — by the person and by the cap. Only the
+    # money-stopping operations are exempt; resume and start still need an approved gate.
+    if gate.status != "approved" and operation not in MONEY_STOPPING_OPS:
         raise AdsBoostGateNotApprovedError(gate_id, gate.status)
     return gate
 
 
-async def _latest_toggle(db: AsyncSession, *, gate_id: uuid.UUID) -> PublicationCommand | None:
+async def current_ads_boost_cycle(db: AsyncSession, *, gate_id: uuid.UUID) -> int:
+    """story #4460 (Qadir 02:22Z · PO) — the gate's current cycle: the run's number (a cancel's reset raises it); 1 before a run."""
+    from app.models.ads_boost_run import AdsBoostRun
+
+    return (await db.execute(select(AdsBoostRun.cycle_no).where(AdsBoostRun.gate_id == gate_id))).scalar_one_or_none() or 1
+
+
+def in_ads_boost_cycle(cycle: int):
+    """A command of this cycle (`ads_boost_cycle` null = made before the mark = the first cycle)."""
+    return func.coalesce(PublicationCommand.ads_boost_cycle, 1) == cycle
+
+
+async def _latest_toggle(db: AsyncSession, *, gate_id: uuid.UUID, cycle: int) -> PublicationCommand | None:
     """story #3806(Phase3·3-2 PR 13, 페드루 PO 確定 2026-09-11 19:58Z 정정) —
     「명령 사슬 정체성」은 `gate_id`(PublicationCommand 자체 컬럼)다, `(destination,
     approved_version)`이 아니다. `approved_version`(=gate.sealed_ads_boost_version_id)
     은 재봉인마다 새로 발급되는 값이라 "재봉인해도 실행 중 run은 하나"라는 불변식을
     못 담는다 — 감액 재봉인 뒤 이 스코프로 조회하면 최초 실행 당시(낡은 version)의
     토글 이력을 못 찾아 「한 번도 토글된 적 없다」로 오판했다(라이브 재측 中 PO
-    발견: 실행 중인데 「중지」가 409, 상한 도달 자동 중지도 조용히 실패)."""
+    발견: 실행 중인데 「중지」가 409, 상한 도달 자동 중지도 조용히 실패).
+    story #4460 (Qadir 02:22Z) — and within the current cycle only: after a cancel and a new start, the last cycle's completed
+    pause was «the latest» and every pause of the new campaign (a person's · the cap's · the scheduler's) was refused as «already
+    paused» while it spent."""
     return (await db.execute(
         select(PublicationCommand)
         .where(
             PublicationCommand.gate_id == gate_id,
             PublicationCommand.operation.in_((OP_PAUSE, OP_RESUME)),
+            in_ads_boost_cycle(cycle),
         )
         .order_by(PublicationCommand.toggle_seq.desc())
         .limit(1)
@@ -141,11 +345,22 @@ async def request_ads_boost_start(
     「누가 시작했나」 두 세계 처방). 필수 kwarg(기본값 0)로 둬 새 호출부가 이 축을
     빠뜨리면 즉시 TypeError로 드러나게 한다(조용히 None으로 새는 것을 막는다)."""
     gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id)
+    if initiated_by == "human":
+        # story #4486 (PO 04:01Z) — a person's start of a boost paused at its cap this cycle (the same post requested again and
+        # re-approved without a cancel) is refused with its reason; the worker refuses any start that still reaches it. The
+        # scheduler's starts only open gates with no run yet, so they never meet a cap.
+        from app.models.ads_boost_run import AdsBoostRun
+
+        capped = (await db.execute(
+            select(AdsBoostRun.cap_reached_at).where(AdsBoostRun.gate_id == gate.id)
+        )).scalar_one_or_none()
+        if capped is not None:
+            raise AdsBoostCapReachedError(gate.id, OP_BOOST_START)
     command, _ = await create_or_get_publication_command(
         db, org_id=org_id, gate_id=gate.id, destination=gate.sealed_ads_connection_id,
         approved_version=gate.sealed_ads_boost_version_id, requested_by_member_id=requester_member_id,
         scheduled_at=None, operation=OP_BOOST_START, content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=0,
-        initiated_by=initiated_by,
+        initiated_by=initiated_by, ads_boost_cycle=await current_ads_boost_cycle(db, gate_id=gate.id),
     )
     await db.commit()
     return command
@@ -155,33 +370,75 @@ async def _request_toggle(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, requester_member_id: uuid.UUID,
     operation: str, initiated_by: str | None = None,
 ) -> PublicationCommand:
-    gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id)
+    gate = await _resolve_gate(db, org_id=org_id, gate_id=gate_id, operation=operation)
     destination = gate.sealed_ads_connection_id
     approved_version = gate.sealed_ads_boost_version_id
 
     # story #3806(Phase3·3-2 PR 13 정정) — gate_id로 스코프(위 _latest_toggle
     # docstring과 동형 이유) — 감액 재봉인으로 approved_version이 바뀌어도 "이
     # 게이트가 시작된 적 있나"는 그대로 참이어야 한다.
+    # story #4447 (Qadir 4870 ②) — a re-approval gives the gate a second boost_start (one per approved version):
+    # scalar_one_or_none() raised MultipleResultsFound and pause/resume failed after any re-approval + start. «Ever started».
+    cycle = await current_ads_boost_cycle(db, gate_id=gate.id)
     started = (await db.execute(
         select(PublicationCommand.id).where(
             PublicationCommand.gate_id == gate.id,
             PublicationCommand.operation == OP_BOOST_START,
-        )
+            in_ads_boost_cycle(cycle),  # story #4460 — started in this cycle (a cancelled cycle's start is not this one's)
+        ).limit(1)
     )).scalar_one_or_none()
     if started is None:
         raise AdsBoostNotStartedError(gate.id)
 
-    latest = await _latest_toggle(db, gate_id=gate.id)
+    if operation == OP_RESUME:
+        from app.models.ads_boost_run import AdsBoostRun
+
+        blocked = (await db.execute(
+            select(AdsBoostRun.spend_blocked_at, AdsBoostRun.spend_blocked_code, AdsBoostRun.cap_reached_at)
+            .where(AdsBoostRun.gate_id == gate.id)
+        )).first()
+        if blocked is not None and blocked[2] is not None:
+            raise AdsBoostCapReachedError(gate.id)  # story #4486 — the cap first (the server's reason order: cap · spend · approval)
+        if blocked is not None and blocked[0] is not None:
+            raise AdsBoostSpendBlockedError(gate.id, blocked[1])
+
+    latest = await _latest_toggle(db, gate_id=gate.id, cycle=cycle)
 
     if latest is None:
         if operation == OP_RESUME:
             raise AdsBoostNotPausedError(gate.id)
-        toggle_seq = 1
+        # story #4460 — numbering goes on across cycles (a new cycle's first toggle never reuses an earlier toggle's number)
+        last_seq = (await db.execute(
+            select(func.max(PublicationCommand.toggle_seq)).where(
+                PublicationCommand.gate_id == gate.id, PublicationCommand.operation.in_((OP_PAUSE, OP_RESUME)),
+            )
+        )).scalar_one_or_none()
+        toggle_seq = (last_seq or 0) + 1
     elif latest.operation == operation:
+        if latest.status == "blocked":
+            # story #4476 (PO 14:27Z) — a toggle stopped on the connection is waiting for a person, not in flight: the double-click
+            # rule below returned that same blocked row and nothing went to the provider again — after reconnecting there was no
+            # way left to stop (or resume) the boost. Pressing again re-raises it by the retry rule (`retry_dead_letter_command`:
+            # same row · same idempotency key · sent through the campaign's connection now · still disconnected → it stops again).
+            # That rule decides what a press may re-raise: a row held by an org-wide pause is not (lifting the pause re-queues it)
+            # and comes back unchanged. A resume still passes the worker's approval and created-budget checks before ACTIVE.
+            if initiated_by == "scheduler" and not await _campaign_connection_usable(db, gate):
+                # Qadir 4896 · PO 16:53Z — the scheduler asks again at every capture: while the campaign's connection is still
+                # marked failed, re-raising would only block again, every capture. The row stays as it is (no new record); once
+                # the connection is back, the next ask re-raises it and the money stops with no person needed.
+                return latest
+            reraised = await retry_dead_letter_command(db, org_id=org_id, command_id=latest.id)
+            await db.commit()
+            return reraised or latest
         if latest.status in _NON_TERMINAL_STATUSES:
             toggle_seq = latest.toggle_seq  # 더블클릭 — 같은 행 재사용
-        else:
+        elif latest.status == "completed":
             raise AdsBoostAlreadyInStateError(gate.id, operation)
+        else:
+            # story #4417 (Qadir 01a0eba4 ①) — the last pause/resume ended without taking effect (dead_letter · failed ·
+            # voided): the boost is not in that state, so asking again makes a new command (before: «already paused», and
+            # neither the scheduler's retry nor a person's second press could stop a boost whose pause failed at Meta).
+            toggle_seq = latest.toggle_seq + 1
     else:
         if operation == OP_RESUME and latest.operation != OP_PAUSE:
             raise AdsBoostNotPausedError(gate.id)
@@ -190,7 +447,7 @@ async def _request_toggle(
     command, _ = await create_or_get_publication_command(
         db, org_id=org_id, gate_id=gate.id, destination=destination, approved_version=approved_version,
         requested_by_member_id=requester_member_id, scheduled_at=None, operation=operation,
-        content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=toggle_seq, initiated_by=initiated_by,
+        content_kind=_ADS_BOOST_CONTENT_KIND, toggle_seq=toggle_seq, initiated_by=initiated_by, ads_boost_cycle=cycle,
     )
     await db.commit()
     return command
@@ -299,6 +556,48 @@ class AdsBoostAdapterUnavailableError(Exception):
         super().__init__(message)
 
 
+async def _campaign_connection_usable(db: AsyncSession, gate) -> bool:
+    """story #4476 — the campaign's ad connection (4461) is not marked failed (active)."""
+    from app.models.channel_connection import ChannelConnection
+
+    connection_id = await campaign_connection_id(db, gate)
+    status = (await db.execute(
+        select(ChannelConnection.status).where(ChannelConnection.id == connection_id)
+    )).scalar_one_or_none() if connection_id else None
+    return status == "active"
+
+
+def _scheduler_pause_reason(run, gate) -> str | None:
+    """story #4466 — why the scheduler paused: the cap (`cap_reached_at`) · the spend could not be checked (`spend_blocked_at`,
+    4417) · the gate is no longer approved (4466). The scheduler's pauses come from exactly these (ads_spend_snapshots:
+    _follow_through_cap · _follow_through_block · _pause_if_off_approved).
+    story #4460 (Yuna 02:20Z · PO) — a cancelled boost's gate is voided too, and when the person's fast pause failed the scheduler
+    stops it; that is the cancel, not a withdrawn approval: `cancelled` comes first."""
+    if run.cancel_requested_at is not None:
+        return "cancelled"
+    if run.cap_reached_at is not None:
+        return "cap_reached"
+    if run.spend_blocked_at is not None:
+        return "spend_unreadable"
+    if gate.status != "approved":
+        return "approval_gone"
+    return None
+
+
+async def campaign_connection_id(db: AsyncSession, gate) -> uuid.UUID | None:
+    """story #4461 (Qadir 08:57Z · PO 09:00Z) — the ad connection to use for this boost's campaign: the one it was created under
+    (`ads_boost_runs.created_connection_id`, recorded at create) while a campaign exists, else the current seal's. A re-seal can move
+    the boost to another ad account while the campaign lives in the first — a pause sent with the new account's token missed it
+    and the campaign kept spending. Runs made before the record (null) keep the sealed connection. The single rule for pause ·
+    resume · switching an existing campaign on · spend reads · the card's ad-account link."""
+    from app.models.ads_boost_run import AdsBoostRun
+
+    run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate.id))).scalar_one_or_none()
+    if run is not None and run.campaign_id and run.created_connection_id is not None:
+        return run.created_connection_id
+    return gate.sealed_ads_connection_id
+
+
 async def _resolve_execution_context(db: AsyncSession, command: PublicationCommand) -> dict:
     """워커 처리 직전 재검증 + 실행에 필요한 모든 것을 한 번에 모은다 — gate.status
     재확認(요청 시점과 워커 pickup 시점 사이 재오픈될 수 있다, publish_channel_
@@ -311,17 +610,28 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
     gate = (await db.execute(select(Gate).where(Gate.id == command.gate_id))).scalar_one_or_none()
     if gate is None or gate.gate_type != _ADS_BOOST_GATE_TYPE:
         raise AdsBoostAdapterUnavailableError("ADS_BOOST_GATE_MISSING", f"gate not found: {command.gate_id}")
-    if gate.status != "approved":
+    if gate.status != "approved" and command.operation not in MONEY_STOPPING_OPS:  # story #4466 (가) — a pause runs on any status
         raise AdsBoostAdapterUnavailableError(
             "ADS_BOOST_GATE_NOT_APPROVED", f"gate no longer approved (status={gate.status}): {gate.id}",
         )
+    # story #4447 (Qadir 4870 07:19Z) — a command that spends must belong to the gate's current seal. A re-seal voids only
+    # *pending* commands; an older seal's stopped start (dead_letter · blocked) could still be retried by hand or adopted, and ran
+    # with that older approval (its budget · its content). Every execution path (worker · retry · adopt) passes here: refuse before
+    # any call. PO 08:13Z — a pause stops money, so it is never refused for its seal: a pause pressed before a re-seal and retried
+    # after it must still switch the campaign off. Only the money-stopping operations are exempt (fail-closed for new ones).
+    if command.operation not in MONEY_STOPPING_OPS and command.approved_version != gate.sealed_ads_boost_version_id:
+        raise AdsBoostAdapterUnavailableError(
+            SEAL_REPLACED_CODE, f"command belongs to a replaced seal ({command.approved_version}); current: {gate.sealed_ads_boost_version_id}",
+        )
 
+    # story #4461 — the campaign's own connection once it exists (a re-seal can point the gate at another ad account)
+    connection_id = await campaign_connection_id(db, gate)
     conn = (await db.execute(
-        select(ChannelConnection).where(ChannelConnection.id == gate.sealed_ads_connection_id)
+        select(ChannelConnection).where(ChannelConnection.id == connection_id)
     )).scalar_one_or_none()
     if conn is None or conn.status != "active":
         raise AdsBoostAdapterUnavailableError(
-            "ADS_BOOST_CONNECTION_UNAVAILABLE", f"ad connection unavailable: {gate.sealed_ads_connection_id}",
+            "ADS_BOOST_CONNECTION_UNAVAILABLE", f"ad connection unavailable: {connection_id}",
         )
 
     publication = None
@@ -353,21 +663,242 @@ async def _resolve_execution_context(db: AsyncSession, command: PublicationComma
     return {
         "gate": gate, "module": module,
         "ad_account_id": conn.account_id, "access_token": decrypt_channel_credential(conn.encrypted_access_token),
-        "object_story_id": f"{origin_conn.account_id}_{publication.external_id}",
+        "object_story_id": object_story_id_for(origin_conn, publication),
         "publication_id": publication.id, "ad_channel": conn.channel,
     }
 
 
+def object_story_id_for(origin_conn, publication) -> str:
+    """The boosted post as Meta knows it (page · post) — the single rule (execution context · expected_campaign_name)."""
+    return f"{origin_conn.account_id}_{publication.external_id}"
+
+
+async def expected_campaign_name(db: AsyncSession, gate) -> str | None:
+    """story #4409 — the name a boost start of this gate gives its campaign (for the person checking the ad account).
+    None when the boosted publication or its connection cannot be found (nothing is made up)."""
+    from app.models.channel_connection import ChannelConnection
+    from app.models.channel_publication import ChannelPublication
+    from app.services.meta_ads_campaign import boost_campaign_name
+
+    try:
+        publication_id = uuid.UUID(gate.scope_key)
+    except (TypeError, ValueError):
+        return None
+    publication = (await db.execute(
+        select(ChannelPublication).where(ChannelPublication.id == publication_id)
+    )).scalar_one_or_none()
+    if publication is None or not publication.external_id:
+        return None
+    origin_conn = (await db.execute(
+        select(ChannelConnection).where(ChannelConnection.id == publication.connection_id)
+    )).scalar_one_or_none()
+    return boost_campaign_name(object_story_id_for(origin_conn, publication)) if origin_conn is not None else None
+
+
+# story #4412 — a candidate must have been created by *this* run's create call: not before its call marker (minus a clock
+# skew between Meta and us).
+ADOPT_CLOCK_SKEW = timedelta(minutes=5)
+
+
+class AdsBoostAdoptNotApplicableError(Exception):
+    """story #4412 — the gate's boost start is not stopped as «outcome unknown» (nothing to adopt for)."""
+
+    code = "ADS_BOOST_ADOPT_NOT_APPLICABLE"
+
+
+async def adopt_existing_boost_objects(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID) -> dict:
+    """story #4412 — «it is already in my ad account»: find the campaign (and its ad set · ad) this run's create call may have
+    made, and adopt it instead of creating another.
+
+    Only for a boost start stopped as ADS_BOOST_CREATE_OUTCOME_UNKNOWN (call marker set, ids incomplete). A candidate counts
+    only when all of these hold:
+    - its name is exactly the one the create call uses (`boost_*_name(object_story_id)`), checked here, not by Meta's filter;
+    - it hangs under the adopted parent (ad set → campaign · ad → ad set);
+    - it was created at or after this run's call marker minus ADOPT_CLOCK_SKEW (an earlier boost of the same post has the same
+      name);
+    - its id is not already recorded on another run.
+    Exactly one campaign → adopt it, and each lower level whose single eligible match is found; a level with none is left for
+    the usual continuation (4268); two or more at any level → no adoption, the candidates are returned. The lookups run with
+    no transaction or lock held (provider calls); the run is then locked and re-checked before writing. On adoption the claim
+    and marker are cleared and the start command is queued again (with all ids the worker only switches the campaign on).
+
+    Money (PO 00:48Z): the budget lives on the ad set. An ad set is adopted only when its budget (`BOOST_ADSET_BUDGET_FIELD`,
+    the lifetime budget since 4415) equals the gate's
+    sealed amount — otherwise switching it on would spend an amount nobody approved (someone may have changed it in the ad
+    account). A different or unreadable budget → nothing adopted, `budget_mismatch` with both amounts.
+
+    Two runs adopting the same object at once: the unique indexes (0420) let only one write; the other → `already_linked`.
+
+    Returns {"result": "adopted"|"not_found"|"ambiguous"|"budget_mismatch"|"already_linked", "level"?, "candidates"?, "campaign_id"?,
+    "adset_id"?, "ad_id"?, "adset_budget_minor"?, "sealed_budget_minor"?}.
+    """
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.services.external_call_tx import end_transaction_before_external_call
+    from app.services.meta_ads_campaign import parse_meta_time
+    from app.services.publication_command import retry_dead_letter_command
+
+    # story #4447 (Qadir 07:19Z ②) — only the start of the gate's current seal (an older seal's «outcome unknown» start is not
+    # this boost's to adopt; the execution context refuses it anyway — this keeps adopt from even picking it)
+    current_seal = select(Gate.sealed_ads_boost_version_id).where(Gate.id == gate_id).scalar_subquery()
+    command = (await db.execute(
+        select(PublicationCommand).where(
+            PublicationCommand.org_id == org_id, PublicationCommand.gate_id == gate_id,
+            PublicationCommand.operation == OP_BOOST_START, PublicationCommand.approved_version == current_seal,
+        ).order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    run = (await db.execute(
+        select(AdsBoostRun).where(AdsBoostRun.org_id == org_id, AdsBoostRun.gate_id == gate_id)
+    )).scalar_one_or_none()
+    if (
+        command is None or command.status != "dead_letter" or command.reason_code != ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE
+        or run is None or run.create_call_started_at is None or (run.campaign_id and run.adset_id and run.ad_id)
+    ):
+        raise AdsBoostAdoptNotApplicableError()
+    ctx = await _resolve_execution_context(db, command)
+    gate, module = ctx["gate"], ctx["module"]
+    osid, objective = ctx["object_story_id"], gate.sealed_ads_objective or ""
+    marker_at, run_id = run.create_call_started_at, run.id
+    other_ids = {
+        value
+        for row in (await db.execute(
+            select(AdsBoostRun.campaign_id, AdsBoostRun.adset_id, AdsBoostRun.ad_id).where(AdsBoostRun.id != run_id)
+        )).all()
+        for value in row if value
+    }
+
+    def eligible(item: dict, *, parent_field: str | None = None, parent_id: str | None = None) -> bool:
+        created = parse_meta_time(item.get("created_time"))
+        return (
+            bool(item.get("id")) and item["id"] not in other_ids
+            and created is not None and created >= marker_at - ADOPT_CLOCK_SKEW
+            and (parent_field is None or item.get(parent_field) == parent_id)
+        )
+
+    def view(items: list[dict]) -> list[dict]:
+        return [{"id": i.get("id"), "name": i.get("name"), "created_time": i.get("created_time")} for i in items]
+
+    await end_transaction_before_external_call(db)  # story #4404 — no transaction held during the lookups
+    access_token = ctx["access_token"]
+    adopted: dict = {}
+    async with provider_client(timeout=20) as client:
+        campaigns = [c for c in await module.find_boost_campaigns(
+            client, ad_account_id=ctx["ad_account_id"], access_token=access_token, object_story_id=osid, objective=objective,
+        ) if eligible(c)]
+        if not campaigns:
+            return {"result": "not_found"}
+        if len(campaigns) > 1:
+            return {"result": "ambiguous", "level": "campaign", "candidates": view(campaigns)}
+        adopted["campaign_id"] = campaigns[0]["id"]
+        adsets = [a for a in await module.find_boost_adsets(
+            client, campaign_id=adopted["campaign_id"], access_token=access_token, object_story_id=osid, objective=objective,
+            expected_budget_minor=gate.sealed_ads_budget_minor,
+        ) if eligible(a, parent_field="campaign_id", parent_id=adopted["campaign_id"])]
+        if len(adsets) > 1:
+            return {"result": "ambiguous", "level": "adset", "candidates": view(adsets)}
+        if adsets:
+            from app.services.meta_ads_campaign import boost_adset_budget_minor
+
+            adset_budget = boost_adset_budget_minor(adsets[0])  # the same field the create call sets (4415)
+            if adset_budget is None or adset_budget != gate.sealed_ads_budget_minor:
+                return {
+                    "result": "budget_mismatch", "level": "adset",
+                    "adset_budget_minor": adset_budget, "sealed_budget_minor": gate.sealed_ads_budget_minor,
+                }
+            adopted["adset_id"] = adsets[0]["id"]
+            adopted["adset_budget_minor"] = adset_budget
+            ads = [a for a in await module.find_boost_ads(
+                client, adset_id=adopted["adset_id"], access_token=access_token, object_story_id=osid, objective=objective,
+            ) if eligible(a, parent_field="adset_id", parent_id=adopted["adset_id"])]
+            if len(ads) > 1:
+                return {"result": "ambiguous", "level": "ad", "candidates": view(ads)}
+            if ads:
+                adopted["ad_id"] = ads[0]["id"]
+
+    run = (await db.execute(select(AdsBoostRun).where(AdsBoostRun.id == run_id).with_for_update())).scalar_one()
+    if run.create_call_started_at != marker_at or (run.campaign_id and run.adset_id and run.ad_id):
+        raise AdsBoostAdoptNotApplicableError()  # someone else resolved it meanwhile
+    # The unique indexes (0420) are the guard against two runs adopting one campaign at the same time: each run locks only
+    # its own row, so the «not recorded on another run» filter above can pass for both. A violation → nothing adopted.
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with db.begin_nested():
+            run.campaign_id = adopted["campaign_id"]
+            if adopted.get("adset_id") and run.created_budget_minor is None:
+                # story #4458 (PO 11:24Z) — the adopted ad set's budget as read from the provider (checked equal to the seal above)
+                run.created_budget_minor = adopted["adset_budget_minor"]
+                run.created_for_version_id = command.approved_version
+                run.created_connection_id = gate.sealed_ads_connection_id
+            run.adset_id = adopted.get("adset_id") or run.adset_id
+            run.ad_id = adopted.get("ad_id") or run.ad_id
+            run.create_claimed_at = None
+            run.create_call_started_at = None
+            await db.flush()
+    except IntegrityError:
+        return {"result": "already_linked"}
+    await retry_dead_letter_command(db, org_id=org_id, command_id=command.id)
+    return {"result": "adopted", **adopted}
+
+
+# story #4417 — the ad account's currency is not the sealed one: nothing created, the start stops for a person (needs_check).
+ACCOUNT_CURRENCY_MISMATCH_CODE = "ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH"
+# story #4417 — a start/resume that reaches the worker after the run was blocked for an unreadable spend
+SPEND_BLOCKED_CODE = "ADS_BOOST_SPEND_BLOCKED"
+CAP_REACHED_CODE = "ADS_BOOST_CAP_REACHED"  # story #4486 — see the worker's check before a resume reaches the provider
+SEAL_REPLACED_CODE = "ADS_BOOST_SEAL_REPLACED"  # story #4447 — the command is of an older seal (see _resolve_execution_context)
+CREATED_BUDGET_DIFFERS_CODE = "ADS_BOOST_CREATED_BUDGET_DIFFERS"  # story #4458 — see _refuse_if_created_on_another_budget
+
+
 async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
+    gate_id, command_id = command.gate_id, command.id
+    await _process_one_ads_boost_command(db, command, now=now)
+    # story #4491 (PO 07:10Z) — the command's result is committed first; the cancel's follow-ups below then run each in its own
+    # session (isolated_side_effect — the worker-side rule): before, they ran in the batch session ahead of the batch's commit,
+    # so one that raised made the batch roll back the command's own result too (a pause's dead_letter back to in_progress, picked
+    # up again by the stuck-command recovery), and a rollback there expires the batch session's objects for the next item.
+    await db.commit()
+    # story #4460 — a cancel waits for the gate's commands: once this one ended (a pause landed · a start refused before ACTIVE),
+    # the cancel may finish (the one place: ads_boost_cancel.finish_cancel_if_stopped)
+    from app.services.ads_boost_cancel import (
+        finish_cancel_if_stopped,
+        pause_left_campaign_for_cancel,
+        schedule_capture_after_failed_cancel_pause,
+    )
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+    finished = {"done": False}
+
+    async def _finish(side: AsyncSession) -> None:
+        finished["done"] = await finish_cancel_if_stopped(side, gate_id=gate_id, now=now)
+
+    async def _pause_left(side: AsyncSession) -> None:
+        # Qadir 02:22Z ⓐ — a cancelled boost whose campaign was made and never confirmed off: pause it (once), then the cancel ends
+        await pause_left_campaign_for_cancel(side, gate_id=gate_id)
+
+    async def _retry_capture(side: AsyncSession) -> None:
+        # story #4491 — that pause (or any of the cycle's) failed at the provider: a spend capture soon, so the scheduler retries
+        done = await side.get(PublicationCommand, command_id)
+        if done is not None:
+            await schedule_capture_after_failed_cancel_pause(side, command=done, now=now)
+
+    tag = f"ads_boost cancel follow-up gate_id={gate_id} command_id={command_id}"
+    await run_side_effect_in_own_session(db, _finish, describe=f"{tag} ADS_BOOST_CANCEL_FINISH_FAILED")
+    if not finished["done"]:
+        await run_side_effect_in_own_session(db, _pause_left, describe=f"{tag} ADS_BOOST_CANCEL_PAUSE_LEFT_FAILED")
+        await run_side_effect_in_own_session(db, _retry_capture, describe=f"{tag} ADS_BOOST_CANCEL_RETRY_CAPTURE_FAILED")
+
+
+async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationCommand, *, now) -> None:
     """`app/services/publication_command.py::_process_one_command`의 content_kind==
     "ads_boost" 분기가 이 함수로 넘긴다(site_post/comment_reply와 동형 위임 패턴).
     실패 시 `apply_command_failure`(publication_command.py)를 그대로 재사용 —
     백오프·connection 승격 로직 재구현 금지."""
+    from app.services.meta_ads_campaign import MetaAdsCampaignError
     from app.services.provider_call_mark import provider_call_marked
     from app.services.publication_command import (
         PRE_CALL_ERROR_CODE,
-        STATUS_BLOCKED_UNAPPROVED,
         apply_command_failure,
+        mark_blocked_unapproved,
         record_publication_attempt,
     )
 
@@ -376,11 +907,12 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         ctx = await _resolve_execution_context(db, command)
     except AdsBoostAdapterUnavailableError as exc:
         await record_publication_attempt(
-            db, command=command, approval_check="missing" if exc.code == "ADS_BOOST_GATE_NOT_APPROVED" else "ok",
+            db, command=command, approval_check="missing" if exc.code in ("ADS_BOOST_GATE_NOT_APPROVED", SEAL_REPLACED_CODE) else "ok",
             adapter_called=False, started_at=attempt_started_at, finished_at=now, result_code=None,
         )
-        command.status = STATUS_BLOCKED_UNAPPROVED
-        command.last_error = str(exc)[:2000]
+        # story #4447 (Qadir 4870 ①) — the shared shape (`mark_blocked_unapproved`), with the reason code: this path wrote the
+        # status and the error text only, so the card (error_code = reason_code) could not say why the start stopped or what next
+        mark_blocked_unapproved(command, reason_code=exc.code, last_error=str(exc))
         return
 
     gate, module = ctx["gate"], ctx["module"]
@@ -388,34 +920,105 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     is_sandbox = getattr(module, "__name__", "").endswith("ads_sandbox_campaign")
 
     try:
+        # story #4417 (Qadir 01a0eb71 C) — a start or resume queued before the spend became unreadable: checked again when it
+        # runs (the request-time check can't see a block that came later). Refused with the reason; nothing reaches Meta.
+        # story #4486 — the same for the cap, start and resume alike: a resume queued before the cap was reached, or a new seal's
+        # start after the same post was requested again without a cancel (PO 04:01Z — it switched the existing campaign on, 4458
+        # only refuses one made on another budget), would run past the approved budget until the next capture (up to a day).
+        # Stopped before any provider call (blocked_unapproved · ADS_BOOST_CAP_REACHED — the card says why); more spend is a
+        # cancel and a new request (the new cycle's reset clears the cap).
+        if command.operation in (OP_BOOST_START, OP_RESUME) and run.cap_reached_at is not None:
+            raise _SealReplacedBeforeCall("spend reached the approved total budget — not switched on again", code=CAP_REACHED_CODE)
+        if command.operation in (OP_BOOST_START, OP_RESUME) and run.spend_blocked_at is not None:
+            raise MetaAdsCampaignError(
+                SPEND_BLOCKED_CODE, f"spend can't be checked against the budget ({run.spend_blocked_code})", outcome_known=True,
+            )
 
         async with provider_client(timeout=20) as client:
             if command.operation == OP_BOOST_START:
+                # story #4417 (Qadir 01a0eb3b ② · PO 03:49Z) — before anything is created or switched on: the budget goes to the
+                # provider in the ad account's currency, so an account whose currency is not the sealed one would run a
+                # different amount (a sealed KRW 50,000 on a USD account = $500). A different currency creates nothing and
+                # stops the start for a person (needs_check); the next step is a new request with a matching account.
+                from app.services.external_call_tx import end_transaction_before_external_call as _end_tx
+
+                await _end_tx(db)
+                account_currency = await module.get_ad_account_currency(
+                    client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
+                    expected_currency=gate.sealed_ads_currency, objective=gate.sealed_ads_objective or "",
+                )
+                run.account_currency = account_currency
+                if account_currency != gate.sealed_ads_currency:
+                    await db.commit()
+                    raise MetaAdsCampaignError(
+                        ACCOUNT_CURRENCY_MISMATCH_CODE,
+                        f"ad account currency {account_currency!r} is not the sealed currency {gate.sealed_ads_currency!r}",
+                        outcome_known=True,
+                    )
                 # story #4268 — 재시도(ACTIVE 전환 실패 · 생성 중간 실패 뒤)가 이미 만든 캠페인 · 광고 세트 · 광고를 다시 만들지
                 # 않는다(고객 광고 계정에 PAUSED 객체가 중복으로 쌓이던 결함). 셋이 다 있으면 생성을 건너뛰고 상태 전환만,
                 # 일부만 있으면 이어서 만든다. 중간 실패의 부분 id도 실행 행에 남긴다(이 명령의 결과와 같은 커밋 — 워커가 틱마다
                 # 명령 결과를 커밋한다).
                 existing = {"campaign_id": run.campaign_id, "adset_id": run.adset_id, "ad_id": run.ad_id}
+                if not all(existing.values()) and not await _claim_campaign_creation(db, run, now=now):
+                    # story #4404 — another command completed the ids meanwhile: no creation
+                    existing = {"campaign_id": run.campaign_id, "adset_id": run.adset_id, "ad_id": run.ad_id}
                 if not all(existing.values()):
+                    # story #4458 — the seal again, right before creating (the claim is released if it was replaced)
+                    try:
+                        await _refuse_if_seal_replaced(db, command, gate.id)
+                    except _SealReplacedBeforeCall:
+                        run.create_claimed_at = None
+                        raise
+                    # story #4404 — the marker, committed right before the call: from here an interrupted attempt is «outcome
+                    # unknown», never re-created automatically.
+                    run.create_call_started_at = now
+                    await db.commit()
                     try:
                         result = await module.create_boost_campaign(
                             client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
                             object_story_id=ctx["object_story_id"], budget_minor=gate.sealed_ads_budget_minor,
                             currency=gate.sealed_ads_currency, starts_at_iso=gate.sealed_ads_starts_at.isoformat(),
                             ends_at_iso=gate.sealed_ads_ends_at.isoformat(), objective=gate.sealed_ads_objective,
-                            existing=existing,
+                            existing=existing, gate_id=str(gate.id),
                         )
                     except Exception as create_exc:
                         partial = getattr(create_exc, "partial", None) or {}
                         run.campaign_id = partial.get("campaign_id") or run.campaign_id
                         run.adset_id = partial.get("adset_id") or run.adset_id
                         run.ad_id = partial.get("ad_id") or run.ad_id
-                        raise
+                        # story #4458 — the ad set made in this call carries this call's budget, even if the ad was rejected
+                        _record_created_adset(run, gate, command, adset_was_new=not existing.get("adset_id") and bool(partial.get("adset_id")))
+                        if getattr(create_exc, "code", None) and getattr(create_exc, "outcome_known", False):
+                            # story #4404 · #4409 — Meta rejected it (4xx): known «not created» (partial ids recorded above), the
+                            # claim is released so a retry may continue.
+                            run.create_claimed_at = None
+                            run.create_call_started_at = None
+                            raise
+                        # story #4409(Qadir 4805) — a 5xx, a 200 without an id, a transport error or a timeout: the campaign may
+                        # exist. Claim + marker stay, and the command stops as «outcome unknown» right away (a person checks the
+                        # ad account; only their confirmation clears the marker — never an automatic re-create).
+                        raise _CreateClaimLost(
+                            ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE,
+                            f"campaign creation for run {run.id} got no definite answer "
+                            f"({getattr(create_exc, 'code', None) or type(create_exc).__name__}) — Meta may have created it; "
+                            "check the ad account before retrying",
+                        ) from create_exc
                     run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
+                    # story #4458 — what it was created with, only if this call made the ad set (a reused ad set keeps its record)
+                    _record_created_adset(run, gate, command, adset_was_new=not existing.get("adset_id"))
+                    run.create_claimed_at = None  # story #4404 — ids recorded: the claim is done
+                    run.create_call_started_at = None
                     # story #4268 AC2 — 만든 id를 ACTIVE 전환 **전에** 커밋한다. 뒤(ACTIVE · 지출 스냅샷 예약 · 활동 기록)에서 DB
                     # 오류로 이 트랜잭션이 롤백돼도 id는 남아, 재시도가 새로 만들지 않는다(롤백으로 id를 잃으면 이미 ACTIVE인
                     # 캠페인 옆에 또 만들어 이중 집행이 될 수 있었다). 세션은 expire_on_commit=False라 아래 속성 읽기는 그대로다.
                     await db.commit()
+                from app.services.external_call_tx import end_transaction_before_external_call
+
+                await _refuse_if_seal_replaced(db, command, gate.id)  # story #4458 — before switching it on
+                await _refuse_if_cap_reached(db, command, run)  # story #4517
+                _refuse_if_created_on_another_budget(run, gate)  # story #4458 — not a campaign made on other values
+                await end_transaction_before_external_call(db)  # story #4404
                 await module.set_campaign_status(
                     client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="ACTIVE",
                 )
@@ -437,6 +1040,9 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                     raise AdsBoostAdapterUnavailableError(
                         "ADS_BOOST_NOT_STARTED_AT_PROVIDER", f"no campaign_id yet: {gate.id}",
                     )
+                from app.services.external_call_tx import end_transaction_before_external_call
+
+                await end_transaction_before_external_call(db)  # story #4404
                 await module.set_campaign_status(
                     client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="PAUSED",
                 )
@@ -453,6 +1059,12 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                     raise AdsBoostAdapterUnavailableError(
                         "ADS_BOOST_NOT_STARTED_AT_PROVIDER", f"no campaign_id yet: {gate.id}",
                     )
+                from app.services.external_call_tx import end_transaction_before_external_call
+
+                await _refuse_if_seal_replaced(db, command, gate.id)  # story #4458 — before switching it back on
+                await _refuse_if_cap_reached(db, command, run)  # story #4517
+                _refuse_if_created_on_another_budget(run, gate)  # story #4458
+                await end_transaction_before_external_call(db)  # story #4404
                 await module.set_campaign_status(
                     client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="ACTIVE",
                 )
@@ -491,17 +1103,26 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         # (scheduler 귀속 pause도 항상 사람 resolver_id로 채워져 있다 —
         # ads_boost_execution.py::request_ads_boost_pause 그대로) — human/scheduler
         # 구분은 actor가 아니라 context.initiated_by가 담당한다.
+        # story #4484 (PO 02:17Z · 06:56Z) — that recorded what the server did (a cap · approval · spend pause, a scheduled start)
+        # as done by a person (the approver or whoever started). The one place a command's activity is written: a command the
+        # scheduler sent is the platform's (actor_type «platform», no actor — activity_log.py's rule; the history says «시스템»,
+        # 4485) whatever path sent it; a person's press stays theirs. Rows written before stay as they were.
         from app.services.activity_log import ActivityLogService
 
         activity_context: dict = {"initiated_by": command.initiated_by or "human"}
         if command.operation == OP_PAUSE and command.initiated_by == "scheduler":
-            # 이 조합(scheduler 귀속 pause)의 유일한 발생원은 _enforce_spend_cap
-            # (ads_spend_snapshots.py)의 상한 도달 자동 중지뿐이다(다른 scheduler
-            # 발신 pause 경로 0, grep 확認) — reason을 지어내지 않고 그 사실 그대로.
-            activity_context["reason"] = "cap_reached"
+            # story #4466 (PO 17:07Z, the live run) — a scheduler pause is not only the cap's: the spend could not be checked
+            # (4417) and the gate left «approved» (4466) pause it too, and the history said «광고비 상한 도달» for all of them.
+            # The reason is the one that fired, read from what each source leaves on the run/gate; none left (re-approved in
+            # between) → no reason (the history says «자동 중지» only).
+            reason = _scheduler_pause_reason(run, gate)
+            if reason:
+                activity_context["reason"] = reason
+        by_scheduler = command.initiated_by == "scheduler"
         await ActivityLogService(db).record(
             org_id=command.org_id, action=_ACTIVITY_ACTION_BY_OP[command.operation],
-            actor_id=command.requested_by_member_id, actor_type="human",
+            actor_id=None if by_scheduler else command.requested_by_member_id,
+            actor_type="platform" if by_scheduler else "human",
             entity_type="gate", entity_id=gate.id, context=activity_context,
         )
 
@@ -512,6 +1133,16 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
+    except _SealReplacedBeforeCall as exc:
+        # story #4458 — the shared «stopped before the call» shape (as the execution context's own seal refusal): no retry here,
+        # the new seal's command is the way on
+        run.last_error = exc.message[:2000]
+        await record_publication_attempt(
+            # PO 11:24Z — a refusal before the ACTIVE switch can come after a create call went out: the ledger says so
+            db, command=command, approval_check="missing", adapter_called=provider_call_marked(),
+            started_at=attempt_started_at, finished_at=now, result_code=exc.code,
+        )
+        mark_blocked_unapproved(command, reason_code=exc.code, last_error=exc.message)
     except Exception as exc:  # noqa: BLE001 — publication_command.py 2중 방어와 동형.
         # story #4272(까디르 codex P1) — 코드 없는 예외는 광고 API 호출 직전 표시로 가른다: 호출 전이면 자동 재시도(아무것도 안
         # 나감), 호출 뒤면 예전처럼 모름(needs_check). 장부의 adapter_called도 그 표시 그대로.
@@ -532,6 +1163,14 @@ async def _get_or_create_run(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uu
     if run is not None:
         return run
     run = AdsBoostRun(id=uuid.uuid4(), org_id=org_id, gate_id=gate_id)
-    db.add(run)
-    await db.flush()
+    # story #4404 — a concurrent first start of the same gate inserts too (uq gate_id). The claim commits the winner's row right
+    # away now, so the loser takes that row instead of failing.
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with db.begin_nested():
+            db.add(run)
+            await db.flush()
+    except IntegrityError:
+        return (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
     return run

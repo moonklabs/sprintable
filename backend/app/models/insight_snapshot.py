@@ -65,6 +65,8 @@ class InsightSnapshot(Base):
     normalized: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     source: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4460 (0426) — a paid ads boost capture: the run's cycle when it was taken (null = 1 · not a boost capture)
+    ads_boost_cycle: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

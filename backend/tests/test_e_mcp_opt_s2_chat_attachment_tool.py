@@ -76,6 +76,42 @@ async def test_upload_attachments_too_many_rejected():
 
 
 @pytest.mark.anyio
+async def test_4474_over_the_limit_answers_with_a_reason_code_not_unknown():
+    """story #4474 — an agent sending six files got «too many attachments (max 5)» with code UNKNOWN. Now the code says why,
+    with the limit and what was sent; the first line keeps the message."""
+    import json
+
+    from sprintable_mcp.response import err
+
+    atts = [{"content_base64": _b64(1), "name": f"{i}", "content_type": "t"} for i in range(attachments_mod.MAX_ATTACHMENTS + 1)]
+    with pytest.raises(attachments_mod.AttachmentLimitError) as ei:
+        await _upload_attachments("/api/v2/conversations/conv-1/attachments", atts)
+    text = err(ei.value)[0].text
+    first, block = text.split("\n", 1)
+    assert first == f"Error: ATTACHMENT_LIMIT_EXCEEDED: too many attachments (max {attachments_mod.MAX_ATTACHMENTS})"
+    payload = json.loads(block)
+    assert payload["code"] == "ATTACHMENT_LIMIT_EXCEEDED"
+    assert payload["detail"]["files"] == attachments_mod.MAX_ATTACHMENTS + 1
+    assert payload["detail"]["max_files"] == attachments_mod.MAX_ATTACHMENTS
+    # the same code as the server rechecks (one name on both sides)
+    from app.services import mcp_attachment_upload
+    assert attachments_mod.ATTACHMENT_LIMIT_EXCEEDED == mcp_attachment_upload.ATTACHMENT_LIMIT_EXCEEDED
+
+
+@pytest.mark.anyio
+async def test_4474_total_size_over_the_limit_has_the_code_and_the_bytes():
+    from sprintable_mcp.response import err
+
+    per_file = attachments_mod.MAX_ATTACHMENT_BYTES
+    atts = [{"content_base64": _b64(per_file), "name": f"{i}", "content_type": "t"} for i in range(4)]
+    with pytest.raises(attachments_mod.AttachmentLimitError) as ei:
+        await _upload_attachments("/api/v2/conversations/conv-1/attachments", atts)
+    assert ei.value.code == "ATTACHMENT_LIMIT_EXCEEDED"
+    assert ei.value.detail["total_bytes"] == per_file * 4
+    assert err(ei.value)[0].text.startswith("Error: ATTACHMENT_LIMIT_EXCEEDED: attachments total too large")
+
+
+@pytest.mark.anyio
 async def test_upload_attachments_total_size_exceeded_rejected_before_any_network_call():
     """총량 초과는 업로드 시작 前 전부 검증되어 걸러진다 — client.post 가 단 한 번도 안 불림
     (마지막 파일에서만 드러나는 초과였다면 앞선 파일들이 실제 업로드→orphan 되는 낭비 없음)."""

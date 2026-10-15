@@ -1,0 +1,135 @@
+{
+  "desktop_agent_ended_early": {
+    "exit_code": {
+      "required": false,
+      "type": "int32"
+    },
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    },
+    "runtime": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "required": false
+    }
+  },
+  "desktop_agent_needs_sign_in": {
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    },
+    "runtime": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "required": false
+    }
+  },
+  "desktop_agent_restarted": {
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    }
+  },
+  "desktop_agent_sign_in_cleared": {
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    }
+  },
+  "desktop_agent_start_failed": {
+    "code": {
+      "enum": [
+        "adapter_prepare_failed",
+        "bad_reply",
+        "credentials_missing",
+        "ended",
+        "not_connected",
+        "profile_invalid",
+        "session_limit",
+        "spawn_failed",
+        "timeout",
+        "unknown_profile"
+      ],
+      "required": false
+    },
+    "first_member_id": {
+      "required": false,
+      "type": "uuid"
+    },
+    "limit": {
+      "required": false,
+      "type": "int32"
+    },
+    "member_id": {
+      "required": true,
+      "type": "uuid"
+    },
+    "reason": {
+      "enum": [
+        "credentials_refused",
+        "first_not_ready",
+        "key_unreadable",
+        "runtime_missing",
+        "start_refused",
+        "workdir_needed"
+      ],
+      "required": true
+    },
+    "runtime": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "required": false
+    }
+  },
+  "desktop_first_screen_human_input": {
+    "human_hand": {
+      "const": true,
+      "required": true
+    }
+  },
+  "desktop_first_task_handed": {
+    "via": {
+      "enum": [
+        "start",
+        "turn"
+      ],
+      "required": true
+    }
+  },
+  "desktop_setup_blocked": {
+    "reason": {
+      "enum": [
+        "managed_mcp"
+      ],
+      "required": true
+    },
+    "runtime": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "required": false
+    },
+    "when": {
+      "enum": [
+        "after_start",
+        "found"
+      ],
+      "required": false
+    }
+  },
+  "desktop_setup_signed_in": {},
+  "desktop_workdir_fallback": {
+    "hinted": {
+      "required": true,
+      "type": "bool"
+    }
+  }
+}

@@ -14,6 +14,7 @@ non-prod 프로젝트 프로비저닝 완료 후 별도로 붙인다.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -67,7 +68,8 @@ async def mint_session_cookie(
     """이미 검증된 Firebase ID token → 실 세션쿠키 값. 실패 시 None(호출부가 절대 쿠키를
     발급/반환하면 안 됨 — doc §4.4 6단계). 기본 TTL=5일(doc §1.1 POC 기본값, 최대 14일)."""
     try:
-        access_token = _get_access_token()
+        # story #4403 AC1b — 동기 google-auth 네트워크 호출(기본 timeout 120s)이 이벤트 루프를 막지 않게
+        access_token = await asyncio.to_thread(_get_access_token)
     except Exception:
         logger.warning("auth.firebase.session_mint failed reason=adc_token_unavailable")
         return None
@@ -186,7 +188,8 @@ async def mint_session_cookie_for_uid(
     """story 4dee942b: firebase_uid만으로 세션쿠키 발급(네이티브 부트스트랩 소비 시점 전용
     경로) — custom token 발급→ID token 교환→기존 mint_session_cookie() 그대로 재사용
     (S4 발급 로직 재사용, 오르테가군 판정 2026-07-15). 체인 중 어느 단계든 실패하면 None."""
-    custom_token = mint_custom_token(firebase_uid)
+    # story #4403 AC1b — 동기 google-auth 네트워크 호출(기본 timeout 120s)이 이벤트 루프를 막지 않게
+    custom_token = await asyncio.to_thread(mint_custom_token, firebase_uid)
     if custom_token is None:
         return None
     id_token = await exchange_custom_token_for_id_token(custom_token, web_api_key)
@@ -213,7 +216,8 @@ async def revoke_firebase_refresh_tokens(firebase_uid: str, project_id: str) -> 
     실패해도 로컬 auth_valid_after가 이미 authoritative fail-closed 통제이므로 호출부가
     이 결과로 접근을 허용/거부하지 않는다(로깅만). ⛔uid/응답 값은 로그에 남기지 않는다."""
     try:
-        access_token = _get_access_token()
+        # story #4403 AC1b — 동기 google-auth 네트워크 호출(기본 timeout 120s)이 이벤트 루프를 막지 않게
+        access_token = await asyncio.to_thread(_get_access_token)
     except Exception:
         logger.warning("auth.firebase.revoke failed reason=adc_token_unavailable")
         return False

@@ -858,7 +858,7 @@ describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', ()
     // story 3436(묶음 5) — 발행 시각이 이 화면 다른 곳(변형 목록 등)과 같은 §11-2
     // 정본 형식(formatScheduledAt)을 쓰는지 pin — 브라우저 toLocaleString() 잔존 방지.
     const expectedTz = resolveDisplayTimezone().tz;
-    expect(container.textContent).toContain(formatScheduledAt('2026-09-03T18:44:00Z', expectedTz).display);
+    expect(container.textContent).toContain(formatScheduledAt('2026-09-03T18:44:00Z', expectedTz, Intl.DateTimeFormat().resolvedOptions().timeZone).display);
 
     const publishButton = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.content.publishCta);
     expect(publishButton?.hasAttribute('disabled')).toBe(true);
@@ -2077,7 +2077,7 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
     // 있다"로 읽히는 것을 막는 건 상태 문구의 몫이지, 링크를 지우는 게 아니다).
     expect(info.querySelector('a[href="https://blog.example.com/hello"]')).not.toBeNull();
     const expectedTz = resolveDisplayTimezone().tz;
-    expect(info.textContent).toContain(formatScheduledAt('2026-09-04T00:00:00Z', expectedTz).display);
+    expect(info.textContent).toContain(formatScheduledAt('2026-09-04T00:00:00Z', expectedTz, Intl.DateTimeFormat().resolvedOptions().timeZone).display);
   });
 });
 

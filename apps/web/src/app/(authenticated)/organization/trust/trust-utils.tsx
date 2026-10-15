@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 export interface OrgSummaryRow {
   member_id: string;
@@ -286,7 +287,7 @@ export function HistoryDrilldownTrigger({
       type="button"
       variant="outline"
       size="sm"
-      onClick={() => void toggle()}
+      onClick={() => void toggle()} aria-expanded={open}
       data-testid="trust-history-toggle"
       aria-label={t('trustHistoryToggleAriaLabel', { n: index + 1, label: t('trustHistoryToggle') })}
     >
@@ -300,7 +301,7 @@ export function HistoryDrilldownTrigger({
 export function HistoryDrilldownPanel({
   open, snapshots, t,
 }: { open: boolean; snapshots: HistorySnapshot[] | null; t: Translator }) {
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   if (!open) return null;
   return (
     <div className="mt-2 space-y-1" data-testid="trust-history-panel">
@@ -320,7 +321,7 @@ export function HistoryDrilldownPanel({
               안 둔다. */}
           {snapshots.map((s) => (
             <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{formatScheduledAt(s.computed_at, displayTimezone).display}</span>
+              <span>{formatViewerScheduledAt(s.computed_at, displayTimezone).display}</span>
               <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
             </div>
           ))}

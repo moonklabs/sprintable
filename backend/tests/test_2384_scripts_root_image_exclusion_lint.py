@@ -30,6 +30,8 @@ _SCRIPTS_ROOT = Path(__file__).resolve().parent.parent / "scripts"
 _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "ci_alembic_sibling_pr_collision_check.py",   # story #2401 — CI 전용, git+gh api만 사용(운영 DB 무접속)
     "ci_alembic_single_step_promotion_check.py",  # story #2330 — CI 전용 fresh-DB 재현
+    "dump_web_route_shapes.py",                    # story #4445 — 앱 라우트 모양 스냅숏 생성(로컬 · 테스트 전용, DB 무접속)
+    "gen_ads_boost_states_ts.py",                  # story #4447 — 부스트 상태 값 묶음 → 웹 TS 생성(로컬 · 테스트 전용, DB 무접속)
     "lint_business_info_email_footer_drift.py",   # story #3216 — CI lint 게이트(정적 텍스트 대조, 운영 DB 무접속)
     "lint_channel_insight_metrics_drift.py",      # story #3697 — CI lint 게이트(channel_adapters.py↔
                                                    # channel-declared-metrics.ts 정적 텍스트 대조,
@@ -48,8 +50,10 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
                                                    # app/services·ee AST 정적 스캔, 운영 DB 무접속 —
                                                    # lint_project_access_403.py와 동형 관례).
     "lint_no_script_output_artifacts.py",         # story #3008 — CI lint 게이트(scripts/ 파일명·내용 정적 스캔, 운영 DB 무접속)
+    "lint_no_bind_param_cast.py",                 # story #4407 AC5 — CI lint 게이트(app/ee/alembic 문자열 SQL의 `:name::type` 정적 AST 스캔, DB 접속 0)
     "lint_org_today_direct_call.py",              # story #3674 — CI lint 게이트(app/**/*.py 정적
                                                    # 정규식 스캔, 운영 DB 무접속).
+    "lint_destructive_fe_deps_listed.py",          # story 4566 — CI lint 게이트(destructive 시험이 읽는 FE 경로 ↔ infra 목록 대조, 운영 DB 무접속)
     "lint_destructive_schema_weights_registered.py",  # story 23bf1913 — CI lint 게이트(pytest
                                                    # --collect-only + infra/destructive-schema-shard-
                                                    # weights.json 정적 대조, Postgres·운영 DB 무접속 —

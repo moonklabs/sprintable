@@ -993,7 +993,7 @@ describe('ApprovalRequestCard — 저위험 반려는 사유 패널을 거친다
     // 클릭 직후 — 패널만 열렸다, 아직 POST 0건. 이 패널은 다이얼로그가 아니라 카드 안
     // 인라인 렌더(container 안)라 document.body 포탈 스코프가 불요.
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
-    const panelRejectBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges)) as HTMLButtonElement;
+    const panelRejectBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject)) as HTMLButtonElement;
     expect(panelRejectBtn).toBeTruthy();
     expect(panelRejectBtn.disabled).toBe(true); // AC — 사유 입력 前 비활성.
 

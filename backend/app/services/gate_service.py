@@ -118,6 +118,24 @@ def derive_risk_grade(posture: str | None, gate_type: str) -> RiskGrade:
     return "high"
 
 
+# the gate a person's decision request makes (POST /gates/decisions) — its question is the name it is known by
+DECISION_REQUEST_GATE_TYPE = "agent_decision_request"
+GATE_NAME_MAX = 120
+
+
+def _gate_name_payload(gate: Gate) -> dict:
+    """story #4520 — the name a person knows the gate by, for the bell line «결재 요청 · {name}»: a decision request's own
+    question (`POST /gates/decisions` puts it in neutral_facts). Only that kind: neutral_facts is free-form on other gates, so
+    a «question» there is whatever the maker wrote, not a name (Qadir 09:13Z). Other kinds keep their name on the work item
+    (a join) — left out, the line then reads «결재 요청» alone, never a made-up name."""
+    if gate.gate_type != DECISION_REQUEST_GATE_TYPE:
+        return {}
+    question = gate.neutral_facts.get("question") if isinstance(gate.neutral_facts, dict) else None
+    if isinstance(question, str) and question.strip():
+        return {"gate_name": question.strip()[:GATE_NAME_MAX]}
+    return {}
+
+
 async def get_org_posture(session: AsyncSession, org_id: uuid.UUID) -> str | None:
     """org_id 단일 값으로 ``OrgGatePolicy.posture`` 직접 조회(org당 1행). row 없으면 None(미설정).
 
@@ -543,7 +561,7 @@ async def _reopen_rejected_gate(
                     # dashboard.ccGateType*)을 렌더 시점에 조합하도록 event.payload에 싣는다
                     # (conversations.py의 sender_name과 동형 — 이 값이 있으면 FE가 title/body
                     # 를 i18n 키로 다시 조합, 없으면(옛 행) 위 title/body 그대로 폴백).
-                    event={"payload": {"gate_type": gate_type}},
+                    event={"payload": {"gate_type": gate_type, **_gate_name_payload(gate)}},
                     reference_type="gate", reference_id=gate.id,
                     source_project_id=project_id,
                     # story #2688: create_gate()의 신규-gate 경로(:475 부근)와 동일 결함 —
@@ -997,7 +1015,7 @@ async def create_gate(
                     title="결재 대기 중인 게이트가 있어요",
                     body=f"{gate_type} 게이트가 승인/거부를 기다리고 있어요.",
                     # story #4316 CHANGES1 — 위 reopen 경로(:456 부근)와 동일 목적.
-                    event={"payload": {"gate_type": gate_type}},
+                    event={"payload": {"gate_type": gate_type, **_gate_name_payload(gate)}},
                     reference_type="gate", reference_id=gate.id,
                     source_project_id=project_id,
                     # story #2688: 동기 개인 webhook 실POST가 create_gate() 호출부(예:
@@ -1997,6 +2015,35 @@ async def _notify_gate_discussion_requester(
             "approval-discussion 상신자 회신 실패 gate=%s", gate.id, exc_info=True,
         )
         return False
+
+
+# story #4460 (PO 16:30Z ②) — the ads_boost cancel's own transition. A cancel voids an *approved* boost (pending → voided is the only
+# void in `_VALID_TRANSITIONS`): rather than a quiet set_gate_status outside the FSM, this is a named transition — only ads_boost,
+# only from the cancel service (ads_boost_cancel.cancel_ads_boost), and it leaves who and why on the gate (resolver · note · the
+# decision history) like a decision. The activity log line is the cancel service's.
+_ADS_BOOST_CANCELLABLE_STATUSES = frozenset({"approved", "pending", "held", "rejected"})
+
+
+def void_ads_boost_gate_for_cancel(gate: Gate, *, actor_member_id: uuid.UUID, reason: str | None, now: datetime) -> None:
+    if gate.gate_type != "ads_boost":
+        raise ValueError(f"only an ads_boost gate is voided by a boost cancel: {gate.gate_type}")
+    if gate.status not in _ADS_BOOST_CANCELLABLE_STATUSES:
+        raise ValueError(f"an ads_boost gate in {gate.status} is not cancelled")
+    prior = gate.status
+    note = f"ads_boost cancelled{': ' + reason.strip() if reason and reason.strip() else ''}"[:500]
+    set_gate_status(gate, "voided", now=now)
+    gate.resolver_id = actor_member_id
+    gate.resolution_note = note
+    gate.resolved_at = now
+    gate.requires_human = False
+    facts = dict(gate.neutral_facts or {})
+    history = list(facts.get("decision_history") or [])
+    history.append({
+        "action": "ads_boost_cancelled", "from_status": prior, "by_member_id": str(actor_member_id), "at": now.isoformat(),
+        "reason": (reason or "").strip()[:500] or None,
+    })
+    facts["decision_history"] = history
+    gate.neutral_facts = facts
 
 
 async def void_gate(

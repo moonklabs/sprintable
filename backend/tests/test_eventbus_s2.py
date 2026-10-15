@@ -9,6 +9,17 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_sender_org_lookup(monkeypatch):
+    """story 4649: the stream's backfill looks its senders' orgs up in one query of its own. These tests script the
+    session's query results in order, so that lookup answers nothing here (its own tests cover it)."""
+
+    async def _no_orgs(ids, session):
+        return {}
+
+    monkeypatch.setattr("app.routers.events.lookup_members_by_ids", _no_orgs)
 from httpx import ASGITransport, AsyncClient
 
 from app.models.event import Event
@@ -292,9 +303,9 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
                     if queues:
                         sync_status_observed = await _wait_for_event(observer, "sync_status", timeout=15.0)
                     for q in queues:
-                        q.put_nowait({"event_type": "__test_sentinel__"})
+                        q.put_nowait({"event_type": "test_sentinel"})
                     if queues and sync_status_observed:
-                        written_observed = await _wait_for_event(observer, "__test_sentinel__", timeout=5.0)
+                        written_observed = await _wait_for_event(observer, "test_sentinel", timeout=5.0)
                     shutdown_module.shutdown_event.set()
                     resp = await asyncio.wait_for(stream_task, timeout=15.0)
                     assert resp.status_code == 200
@@ -317,7 +328,7 @@ async def test_agent_stream_registers_connection(mock_session, org_id):
     assert registered_observed, f"injector never observed the connection in _agent_connections — timeline: {_timeline}"
     assert sync_status_observed, f"generator never reached the live loop (no sync_status observed) — timeline: {_timeline}"
     assert written_observed, f"generator never actually wrote the sentinel line to the ASGI send() callable — timeline: {_timeline}"
-    assert "__test_sentinel__" in body, f"timeline: {_timeline}"
+    assert "test_sentinel" in body, f"timeline: {_timeline}"
     assert member_id_str not in _agent_connections  # cleanup 계약 — 완주 뒤엔 반드시 비어야 함
 
 
@@ -531,9 +542,9 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
                     if queues:
                         sync_status_observed = await _wait_for_event(observer, "sync_status", timeout=15.0)
                     for q in queues:
-                        q.put_nowait({"event_type": "__test_sentinel__"})
+                        q.put_nowait({"event_type": "test_sentinel"})
                     if queues and sync_status_observed:
-                        written_observed = await _wait_for_event(observer, "__test_sentinel__", timeout=5.0)
+                        written_observed = await _wait_for_event(observer, "test_sentinel", timeout=5.0)
                     shutdown_module.shutdown_event.set()
                     resp = await asyncio.wait_for(stream_task, timeout=15.0)
                     assert resp.status_code == 200
@@ -556,7 +567,7 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
     assert registered_observed, f"injector never observed the connection in _agent_connections — timeline: {_timeline}"
     assert sync_status_observed, f"generator never reached the live loop (no sync_status observed) — timeline: {_timeline}"
     assert written_observed, f"generator never actually wrote the sentinel line to the ASGI send() callable — timeline: {_timeline}"
-    assert "__test_sentinel__" in body, f"timeline: {_timeline}"
+    assert "test_sentinel" in body, f"timeline: {_timeline}"
     assert member_id_str not in _agent_connections  # cleanup 계약
 
     # pending 이벤트가 delivered로 마킹됐는지 (backfill 처리 확인)

@@ -96,6 +96,9 @@ export interface RuntimeCapabilityItem {
   guide_filename: string | null;
   supports_event_push: boolean;
   icon: string | null;
+  /** story 4680 (D2): the desktop app's id for this runtime (`claude` · `codex`) · null/absent = no desktop app runs it. The
+   * recruiter matches the app's «found on this computer» list with it — the table is the server's (agent_runtime.DESKTOP_RUNTIME_TYPES). */
+  desktop_runtime?: string | null;
 }
 
 /** BE `runtime-capabilities` 미배포/장애 동안의 폴백 — 전 런타임 올지원(story 6f6ac081) 후 실
@@ -197,8 +200,8 @@ export function resolveConnectConfirm(runtime: string): RuntimeConnectConfirm {
 }
 
 export const RUNTIME_CAPABILITIES_FALLBACK: RuntimeCapabilityItem[] = [
-  { slug: 'claude-code', display_name: 'Claude Code', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'CLAUDE.md', guide_filename: null, supports_event_push: true, icon: null },
-  { slug: 'codex', display_name: 'Codex', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'claude-code', display_name: 'Claude Code', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'CLAUDE.md', guide_filename: null, supports_event_push: true, icon: null, desktop_runtime: 'claude' },
+  { slug: 'codex', display_name: 'Codex', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null, desktop_runtime: 'codex' },
   { slug: 'connector', display_name: 'Connector', supported: true, tier: 'experimental', transport: null, mcp_transport: [], prompt_file: 'AGENT_INSTRUCTIONS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
   { slug: 'cursor', display_name: 'Cursor', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
   { slug: 'gemini', display_name: 'Gemini', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'GEMINI.md', guide_filename: null, supports_event_push: true, icon: null },

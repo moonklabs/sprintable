@@ -1,0 +1,1 @@
+{"file": "tests/test_4476_reraise_connection_blocked_pause_realdb.py", "sec": 8.0, "source": "story-4476 — a pause stopped on the connection is re-raised by the next press (same row · same key) — new file measured locally (uv run pytest, 4 cases, about 4s — same method as test_4466)"}

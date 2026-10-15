@@ -61,6 +61,24 @@ async def _seed_project(session, org_id, *, slug: str):
     return project.id
 
 
+async def _seed_support_members(session, org_id, project_id):
+    """story #4502 — the configured requester (the «Sprintable 지원» agent) and approver (a person) are members of the target
+    org: an agent with a profile in its project, and an org member."""
+    from sqlalchemy import text
+
+    requester, approver, user = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    await session.execute(text("INSERT INTO members (id, org_id, type, name) VALUES (:i, :o, 'agent', 'Sprintable 지원')"),
+                          {"i": requester, "o": org_id})
+    await session.execute(text("INSERT INTO agent_project_profiles (id, member_id, project_id) VALUES (gen_random_uuid(), :m, :p)"),
+                          {"m": requester, "p": project_id})
+    await session.execute(text("INSERT INTO users (id, email, hashed_password, email_verified) VALUES (:u, :e, 'x', true)"),
+                          {"u": user, "e": f"approver-{user.hex[:8]}@test.dev"})
+    await session.execute(text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:i, :o, :u, 'admin')"),
+                          {"i": approver, "o": org_id, "u": user})
+    await session.commit()
+    return requester, approver
+
+
 def _client_for(app):
     from httpx import ASGITransport, AsyncClient
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
@@ -120,12 +138,13 @@ async def test_creates_standalone_anchor_gate_under_target_org_and_project(monke
             target_org_id = await _seed_org(s, slug=org_slug, name="테스트 moonklabs")
             target_project_id = await _seed_project(s, target_org_id, slug=project_slug)
             customer_org_id = await _seed_org(s, slug=f"customer-{uuid.uuid4().hex[:8]}", name="고객사 A")
+            requester, approver = await _seed_support_members(s, target_org_id, target_project_id)
 
         monkeypatch.setattr(settings, "support_gateway_token_secret", TEST_SECRET)
         monkeypatch.setattr(settings, "support_escalation_target_org_slug", org_slug)
         monkeypatch.setattr(settings, "support_escalation_target_project_slug", project_slug)
-        monkeypatch.setattr(settings, "support_escalation_requester_member_id", str(uuid.uuid4()))
-        monkeypatch.setattr(settings, "support_escalation_approver_member_id", str(uuid.uuid4()))
+        monkeypatch.setattr(settings, "support_escalation_requester_member_id", str(requester))
+        monkeypatch.setattr(settings, "support_escalation_approver_member_id", str(approver))
 
         await _setup_app(app, Session)
         escalation_id = uuid.uuid4()
@@ -179,6 +198,100 @@ async def test_target_org_not_found_fails_closed_503(monkeypatch):
                 "/api/v2/support/escalation-events", headers={"Authorization": f"Bearer {token}"},
             )
         assert resp.status_code == 503
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("who", ["requester", "approver"])
+async def test_a_configured_member_outside_the_target_org_fails_closed_and_makes_no_gate(monkeypatch, who):
+    """story #4502 — a requester or approver setting naming a member of another org (an operator's mistake) → 503 like any
+    other broken setting, and no gate (no card, no conversation with that member). The other setting stays the target org's."""
+    from app.core.config import settings
+    from app.main import app
+    from app.models.gate import Gate
+    from sqlalchemy import func, select
+
+    engine, Session = await _session_factory()
+    try:
+        org_slug = f"moonklabs-t-{uuid.uuid4().hex[:8]}"
+        project_slug = f"sprintable-t-{uuid.uuid4().hex[:8]}"
+        async with Session() as s:
+            target_org_id = await _seed_org(s, slug=org_slug, name="테스트 moonklabs")
+            target_project_id = await _seed_project(s, target_org_id, slug=project_slug)
+            other_org_id = await _seed_org(s, slug=f"other-{uuid.uuid4().hex[:8]}", name="다른 조직")
+            other_project_id = await _seed_project(s, other_org_id, slug=f"op-{uuid.uuid4().hex[:8]}")
+            requester, approver = await _seed_support_members(s, target_org_id, target_project_id)
+            foreign_requester, foreign_approver = await _seed_support_members(s, other_org_id, other_project_id)
+            customer_org_id = await _seed_org(s, slug=f"customer-{uuid.uuid4().hex[:8]}", name="고객사 A")
+        configured = {
+            "requester": (foreign_requester, approver),
+            "approver": (requester, foreign_approver),
+        }[who]
+
+        monkeypatch.setattr(settings, "support_gateway_token_secret", TEST_SECRET)
+        monkeypatch.setattr(settings, "support_escalation_target_org_slug", org_slug)
+        monkeypatch.setattr(settings, "support_escalation_target_project_slug", project_slug)
+        monkeypatch.setattr(settings, "support_escalation_requester_member_id", str(configured[0]))
+        monkeypatch.setattr(settings, "support_escalation_approver_member_id", str(configured[1]))
+
+        await _setup_app(app, Session)
+        token = _escalation_token(escalation_id=uuid.uuid4(), org_id=customer_org_id, user_id=uuid.uuid4())
+        async with _client_for(app) as ac:
+            resp = await ac.post("/api/v2/support/escalation-events", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 503, resp.text
+        assert "not a member of the target org" in resp.text
+        async with Session() as s:
+            assert (await s.execute(select(func.count()).select_from(Gate).where(Gate.org_id == target_org_id))).scalar_one() == 0
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_configured_old_alias_id_of_a_target_org_member_still_works(monkeypatch):
+    """story #4502 — the same alias rule as 4500: an approver setting holding an old id aliased to a living member of the
+    target org is accepted, and the gate's designated approver is that member (canonical id)."""
+    from app.core.config import settings
+    from app.main import app
+    from app.models.gate import Gate
+    from sqlalchemy import select, text
+
+    engine, Session = await _session_factory()
+    try:
+        org_slug = f"moonklabs-t-{uuid.uuid4().hex[:8]}"
+        project_slug = f"sprintable-t-{uuid.uuid4().hex[:8]}"
+        async with Session() as s:
+            target_org_id = await _seed_org(s, slug=org_slug, name="테스트 moonklabs")
+            target_project_id = await _seed_project(s, target_org_id, slug=project_slug)
+            customer_org_id = await _seed_org(s, slug=f"customer-{uuid.uuid4().hex[:8]}", name="고객사 A")
+            requester, _approver = await _seed_support_members(s, target_org_id, target_project_id)
+            person, old = uuid.uuid4(), uuid.uuid4()
+            await s.execute(text("INSERT INTO members (id, org_id, type, name) VALUES (:i, :o, 'human', '결재하는 사람')"),
+                            {"i": person, "o": target_org_id})
+            await s.execute(text(
+                "INSERT INTO project_access (id, project_id, member_id, role) VALUES (gen_random_uuid(), :p, :m, 'member')"
+            ), {"p": target_project_id, "m": person})
+            await s.execute(text(
+                "INSERT INTO member_identity_aliases (alias_id, member_id, org_id, alias_source) VALUES (:a, :m, :o, 'human_team_member')"
+            ), {"a": old, "m": person, "o": target_org_id})
+            await s.commit()
+
+        monkeypatch.setattr(settings, "support_gateway_token_secret", TEST_SECRET)
+        monkeypatch.setattr(settings, "support_escalation_target_org_slug", org_slug)
+        monkeypatch.setattr(settings, "support_escalation_target_project_slug", project_slug)
+        monkeypatch.setattr(settings, "support_escalation_requester_member_id", str(requester))
+        monkeypatch.setattr(settings, "support_escalation_approver_member_id", str(old))
+
+        await _setup_app(app, Session)
+        token = _escalation_token(escalation_id=uuid.uuid4(), org_id=customer_org_id, user_id=uuid.uuid4())
+        async with _client_for(app) as ac:
+            resp = await ac.post("/api/v2/support/escalation-events", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 201, resp.text
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == uuid.UUID(resp.json()["gate_id"])))).scalar_one()
+        assert gate.designated_approver_id == person
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

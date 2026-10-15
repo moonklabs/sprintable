@@ -7,10 +7,10 @@ import { Activity, ChevronRight } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { actorRowLabels, memberDisplayLabel } from '@/lib/member-display';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface ActivityLogItem {
   id: string;
@@ -84,11 +84,11 @@ function formatAction(action: string, entityType: string | null, entityTitle: st
 // 다시 불러야 한다(정본이 새로 제공하는 기능이 아니다, 새 포맷 함수 신설 금지 원칙과
 // 무관 — 재호출 주기는 이 컴포넌트의 몫).
 function RelativeTime({ iso, locale }: { iso: string; locale: string }) {
-  const displayTimezone = resolveDisplayTimezone().tz;
-  const [label, setLabel] = useState(() => formatRelativeTime(iso, locale, displayTimezone));
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
+  const [label, setLabel] = useState(() => formatViewerRelativeTime(iso, locale, displayTimezone));
   useEffect(() => {
     function compute() {
-      setLabel(formatRelativeTime(iso, locale, displayTimezone));
+      setLabel(formatViewerRelativeTime(iso, locale, displayTimezone));
     }
     compute();
     const id = setInterval(compute, 60_000);

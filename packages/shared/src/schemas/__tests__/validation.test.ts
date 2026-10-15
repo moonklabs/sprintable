@@ -6,7 +6,7 @@ import {
   createEpicSchema, updateEpicSchema,
   createSprintSchema, updateSprintSchema,
   createStorySchema, updateStorySchema, bulkUpdateStorySchema,
-  createTaskSchema, updateTaskSchema,
+  updateTaskSchema,
   createDocSchema, updateDocSchema, createDocCommentSchema,
   saveStandupSchema,
   createStandupFeedbackSchema, updateStandupFeedbackSchema,
@@ -214,16 +214,6 @@ describe('Sprintable Zod Schemas', () => {
     });
     it('빈 items 배열 실패', () => {
       expect(bulkUpdateStorySchema.safeParse({ items: [] }).success).toBe(false);
-    });
-  });
-
-  // ─── Task ─────
-  describe('createTaskSchema', () => {
-    it('유효한 task를 통과', () => {
-      expect(createTaskSchema.safeParse({ story_id: 'abc', title: '구현' }).success).toBe(true);
-    });
-    it('story_id 없으면 실패', () => {
-      expect(createTaskSchema.safeParse({ title: '구현' }).success).toBe(false);
     });
   });
 

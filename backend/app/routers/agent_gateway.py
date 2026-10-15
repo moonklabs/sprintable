@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -19,17 +20,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select, text, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_current_user_streaming
 from app.core.database import async_session_factory
 from app.core import shutdown as _shutdown_module
+from app.core.sse_event_name import sse_event_name
 from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
+from app.models.api_key import ApiKey
 from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import TeamMember
-from app.routers.events import _agent_connections, _event_to_payload
+from app.routers.events import _agent_connections, _event_to_payload, _uuid_text_or_none, _with_stream_org
+from app.services.member_resolver import lookup_members_by_ids
 from app.services.agent_onboarding_config import DEFAULT_RUNTIME
 
 logger = logging.getLogger(__name__)
@@ -38,6 +43,14 @@ router = APIRouter(prefix="/api/v2/agent", tags=["agent-gateway", "Organization"
 
 _SSE_HEARTBEAT: float = float(os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
 _BACKFILL_LIMIT: int = int(os.getenv("AGENT_GATEWAY_BACKFILL_LIMIT", "100"))
+
+
+class _SentUnacked(set):
+    """story #4569 — one connection's sent-but-not-acked seqs (see `_send_batches`). `trim(acked)` drops what the client has acked: a
+    wake never rescans below the ack, so those are only memory — its size stays the number not acked yet."""
+
+    def trim(self, acked: int) -> None:
+        self.difference_update([s for s in self if s <= acked])
 
 # 49fed0a1 P1: presence를 실제 SSE 연결에 배선 — online/offline 진실화.
 # SSE dial-out 에이전트(Hermes 등)는 MCP heartbeat를 호출하지 않으므로 연결 lifecycle에서
@@ -234,6 +247,40 @@ async def _mark_agent_disconnected(
 _MAX_AGENT_SSE_CONNECTIONS: int = int(os.getenv("MAX_AGENT_SSE_CONNECTIONS", "100"))
 _agent_sse_connection_count: int = 0
 
+# story #4509 AC1b — a receiver's own id (one desktop install · contract with the daemon, Mirko 10:35Z): not a key, only a name
+# for «the same place reconnecting». The streams this instance holds per (agent, receiver), so a reconnect can hand over.
+RECEIVER_ID_HEADER = "x-sprintable-receiver-id"
+# story #4676 (UX-1 F4): a person's [여기서 받기] on the install that was refused — this connection takes the agent over from the other
+# receivers (the daemon sends it on that one reconnect only); never on the daemon's own reconnects
+RECEIVER_TAKEOVER_HEADER = "x-sprintable-receiver-takeover"
+_RECEIVER_ID_RE = re.compile(r"^rcv_[A-Za-z0-9_-]{22}$")
+_receiver_streams: dict[tuple[str, str], asyncio.Queue] = {}
+
+
+# story #4676 (Kadir 10-14): the `by` of a `superseded` frame when ANOTHER install took the agent over with its header — the only one the
+# daemon reads (it shows the displaced Mac a line instead of just ending). A same-receiver hand-over (4509) says nothing: `data: {}`.
+SUPERSEDED_BY_OTHER_RECEIVER = "other_receiver"
+
+
+def _signal_superseded(queue: asyncio.Queue, by: str | None = None) -> None:
+    """Tell a handed-over stream to end — the wake path's #2530 shape: a full queue (a dead old stream piling up wakes — the very
+    moment a hand-over is needed) drops its oldest signal to make room; if a racer refills it, this signal is given up (Qadir
+    01a101bf T1: an uncaught QueueFull here was a 500 that kept the lease and the old queue registered)."""
+    signal: dict = {"__superseded__": True}
+    if by is not None:
+        signal["by"] = by
+    try:
+        queue.put_nowait(signal)
+    except asyncio.QueueFull:
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(signal)
+        except asyncio.QueueFull:
+            pass
+
 # E-INFRA S5: per-API-key(=agent) 동시 스트림 제한 (tier-aware, abuse/fair-use).
 # 한 키가 무제한 스트림을 열어 메모리/큐를 독점하는 것 방지. per-key 카운트 = _agent_connections[agent_id] size.
 # ⚠️ tier 출처: agent 키는 sk_live_(ApiKey 모델)라 dependencies/rate_limit._resolve_tier
@@ -325,12 +372,20 @@ async def _fetch_events(
     agent_id: uuid.UUID,
     after_seq: int,
     limit: int,
+    org_id: uuid.UUID,
 ) -> list:
     """recipient_seq > after_seqì¸ visible ì´ë²¤í¸ ë°í (raw rows).
 
     ì ë ¬: recipient_seq ASC. per-recipient dense â gap-free.
     gap-free ë³´ì¥ì acked_seq ì¬ì¤ìº(caller)ì´ ë´ë¹; ì´ í¨ìë ë¨ì ì¡°í.
     """
+    # d0bca260: conversation_title — joined only when payload.conversation_id is uuid-shaped (non-conversation events get NULL;
+    # the 36-char uuid pattern guard keeps the ::uuid cast from erroring). d0bca260 AC3: sender_name — events.sender_id is a
+    # team_members FK, joined directly.
+    # story #4497 (Qadir 01a0fc4a · PO 11:29Z): the agent's own org only — an event another org made with this agent as its
+    # recipient (a write path that let it through) never reaches it. No event kind legitimately crosses orgs (events.org_id NOT
+    # NULL · agent grants same-org · A2A org-scoped · verify in the agent's org). The skipped rows leave gaps in recipient_seq:
+    # readers resume from the highest seq they got (no wait for seq+1).
     rows = await session.execute(
         text("""
             SELECT
@@ -348,19 +403,17 @@ async def _fetch_events(
                 c.title               AS conversation_title,
                 tm.name               AS sender_name
             FROM events e
-            -- d0bca260: conversation_title 도출. payload.conversation_id가 uuid 형태일 때만 join
-            -- (비-대화 이벤트는 NULL → 안전). 36자 uuid 패턴 가드로 ::uuid 캐스트 에러 0.
             LEFT JOIN conversations c
                 ON e.payload->>'conversation_id' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
                AND c.id = (e.payload->>'conversation_id')::uuid
-            -- d0bca260 AC3: sender_name. events.sender_id는 team_members FK라 직접 join(canonical 무관).
             LEFT JOIN team_members tm ON tm.id = e.sender_id
             WHERE e.recipient_id = CAST(:agent_id AS uuid)
+              AND e.org_id = CAST(:org_id AS uuid)
               AND e.recipient_seq > :after_seq
             ORDER BY e.recipient_seq ASC
             LIMIT :limit
         """),
-        {"agent_id": str(agent_id), "after_seq": after_seq, "limit": limit},
+        {"agent_id": str(agent_id), "org_id": str(org_id), "after_seq": after_seq, "limit": limit},
     )
     return rows.fetchall()
 
@@ -397,6 +450,27 @@ def _row_to_payload(row: object) -> dict:
     }
 
 
+async def _sender_orgs_for_rows(db: AsyncSession, rows: list) -> dict[str, str | None]:
+    """story 4649 — the senders' orgs for one backfill batch of stream rows: ONE lookup for the whole batch (not per row).
+    Keys are sender ids as text; the value is the sender's own org as a UUID text, or None (orphan · sentinel · not a UUID)."""
+    ids = {uuid.UUID(str(r.sender_id)) for r in rows if r.sender_id is not None}
+    if not ids:
+        return {}
+    members = await lookup_members_by_ids(ids, db)
+    return {str(mid): _uuid_text_or_none(getattr(m, "org_id", None)) for mid, m in members.items()}
+
+
+async def _sender_org_of(sender_id: object) -> str | None:
+    """story 4649 — one sender's org for a frame of the direct push (its signal carries no org): the same lookup, that frame only."""
+    try:
+        sid = uuid.UUID(str(sender_id))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    async with async_session_factory() as db:
+        members = await lookup_members_by_ids({sid}, db)
+    return _uuid_text_or_none(getattr(members.get(sid), "org_id", None))
+
+
 # âââ backward compat: êµ¬ _push_to_agent í¸í ëí¼ ââââââââââââââââââââââââââââ
 
 def _push_to_agent_v2(member_id: str, payload: dict, _from_listener: bool = False) -> bool:
@@ -411,6 +485,91 @@ def _push_to_agent_v2(member_id: str, payload: dict, _from_listener: bool = Fals
 
 
 # âââ GET /api/v2/agent/stream âââââââââââââââââââââââââââââââââââââââââââââââââ
+
+# PO 14:35Z ② — before a batch goes out, recheck when the last check is at least this old: after a disconnect the tail is about
+# this long and nothing queued in the meantime pours out (at most one DB read per stream per this many seconds)
+_ACCESS_RECHECK_BEFORE_BATCH_SEC: float = 5.0
+
+
+def _access_revoked_frame(reason: str) -> str:
+    return f"event: access_revoked\ndata: {json.dumps({'reason': reason})}\n\n"
+
+
+# story #4605 (PO 21:03Z (가)): one event frame's data is bounded here — the one place every row and push leaves through. The desktop
+# daemon ends its connection on a frame past 1 MiB (story 4550 · its SSE_FRAME_MAX_CHARS) and skips that event; a chat message is
+# capped on write (128 KiB) but a dispatch carries a whole doc · story description, an event payload or an `event_context` any
+# caller sends has no bound of its own. Half the daemon's limit leaves room for the envelope. Written without \u-escapes (Hangul
+# 3 bytes, not 6 · an emoji 4, not 12).
+AGENT_FRAME_MAX_BYTES = 512 * 1024
+# a string kept whole in a cut frame — longer ones are cut to this and marked
+_FRAME_STR_KEEP_BYTES = 8 * 1024
+FRAME_CUT_NOTE = " … [truncated — read the full text through the API]"
+
+
+def _cut_strings(value: object) -> object:
+    if isinstance(value, str):
+        raw = value.encode("utf-8")
+        if len(raw) <= _FRAME_STR_KEEP_BYTES:
+            return value
+        return raw[:_FRAME_STR_KEEP_BYTES].decode("utf-8", errors="ignore") + FRAME_CUT_NOTE
+    if isinstance(value, dict):
+        return {k: _cut_strings(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_cut_strings(v) for v in value]
+    return value
+
+
+def _dumps(o: object) -> tuple[str, int]:
+    """JSON without \\u-escapes and its UTF-8 size — a lone surrogate (never storable, only in a pushed dict) keeps the escaped form"""
+    s = json.dumps(o, ensure_ascii=False)
+    try:
+        return s, len(s.encode("utf-8"))
+    except UnicodeEncodeError:
+        s = json.dumps(o)
+        return s, len(s)
+
+
+def _frame_data(data: dict) -> str:
+    """the frame's `data:` — whole when it fits; else every long string cut (`truncated: true` · the full text stays readable through
+    the API by its ids); else, when even that does not fit (a huge list or dict of short strings), the frame's own short fields only."""
+    whole, size = _dumps(data)
+    if size <= AGENT_FRAME_MAX_BYTES:
+        return whole
+    cut, size = _dumps({**_cut_strings(data), "truncated": True})  # type: ignore[dict-item]
+    if size <= AGENT_FRAME_MAX_BYTES:
+        return cut
+    short = {k: v for k, v in data.items() if v is None or isinstance(v, (bool, int, float)) or (isinstance(v, str) and len(v) <= 256)}
+    return _dumps({**short, "truncated": True})[0]
+
+
+async def _stream_access_revoked(api_key_id: object, agent_id: uuid.UUID) -> str | None:
+    """story #4434 (Qadir 4847 ④ · PO) — is this open stream still allowed? The key and the agent are checked when the stream
+    connects; a desktop setup disconnected afterwards (keys revoked · its agents stopped) must also end a stream that is already
+    open, or the device keeps receiving task content the dialog says it no longer gets. Checked on the heartbeat tick, in a
+    short session of its own (never the stream's). None = still allowed; otherwise the reason. Fails closed (PO 14:15Z): a
+    missing or malformed key id is «key_revoked» — never «skip the key check» (a future auth path that carries no id must
+    not slip through quietly). Real agent keys always carry a UUID (dependencies/auth.py)."""
+    try:
+        key_uuid = uuid.UUID(str(api_key_id))
+    except (TypeError, ValueError):
+        return "key_revoked"
+    try:
+        return await _stream_access_revoked_db(key_uuid, agent_id)
+    except (SQLAlchemyError, TimeoutError):
+        # PO 14:35Z ① — the recheck must not add a new way to drop streams: a DB error or a DB timeout skips this check (one log
+        # line) and the next one runs as usual. While the DB errors, the stream's own reads (_fetch_events) fail the same way
+        # anyway. Only those (PO 15:06Z): any other error is a bug in the check itself and must not leave every stream
+        # quietly open — it propagates.
+        logger.warning("agent stream access recheck failed agent_id=%s — skipped this time", agent_id, exc_info=True)
+        return None
+
+
+async def _stream_access_revoked_db(key_uuid: uuid.UUID, agent_id: uuid.UUID) -> str | None:
+    # story #4565: the one check every long-lived connection uses (services/stream_access.py) — the key, then the active agent
+    from app.services.stream_access import key_access_revoked_db
+
+    return await key_access_revoked_db(key_uuid, agent_id, agent_only=True)
+
 
 @router.get("/stream")
 async def agent_stream(
@@ -450,6 +609,17 @@ async def agent_stream(
         )).scalar_one_or_none() or "free"
         org_id_str = str(tm.org_id)  # R2: presence SSE 발행용(generate 클로저 캡처).
 
+        # story #4676 (UX-1 F4): a key a desktop setup made (`ApiKey.desktop_setup_id`) is received in ONE place — read here, decided
+        # below with the receiver header. A hand-made key (no setup) keeps the plan's count. A key id that is not a UUID is not a
+        # setup key (the recheck on the heartbeat fails it closed on its own — 4434).
+        _key_id_claim = auth.claims.get("app_metadata", {}).get("api_key_id")
+        try:
+            _setup_key = (await db.execute(
+                select(ApiKey.desktop_setup_id).where(ApiKey.id == uuid.UUID(str(_key_id_claim)))
+            )).scalar_one_or_none() is not None
+        except (TypeError, ValueError):
+            _setup_key = False
+
         # acked_seq DB ì¡°í
         cursor = (await db.execute(
             select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
@@ -487,14 +657,61 @@ async def agent_stream(
     # #2121: per-key lease(Redis 공유·TTL 자가회수) 주경로·Redis 불가 시 in-process(_agent_connections len) 폴백.
     from app.services import sse_lease
     _lease_conn_id = str(uuid.uuid4())
-    _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _lease_conn_id)
+    # story #4509 AC1b — a receiver (one desktop install) names itself; its reconnect takes back its own slot instead of a 429
+    # read as «another place is receiving» (the old connection's lease outlives a fast reconnect or a daemon restart by up to
+    # the lease TTL). Without the header: a connection id, as before. The slot is the receiver's (`rcv:<id>`) for this agent.
+    _receiver_id = request.headers.get(RECEIVER_ID_HEADER)
+    if _receiver_id is not None and not _RECEIVER_ID_RE.match(_receiver_id):
+        raise HTTPException(status_code=422, detail={"code": "invalid_receiver_id", "message": "X-Sprintable-Receiver-Id must be rcv_ and 22 base64url characters"})
+    _pk_member = f"rcv:{_receiver_id}" if _receiver_id else _lease_conn_id
+    _superseded_queue = _receiver_streams.get((agent_id_str, _receiver_id)) if _receiver_id else None
+    # story #4676 (UX-1 F4): a setup key = one receiver. Any other live member of this agent's lease — another install (`rcv:…`) or a
+    # connection without the header (an old app) — means another place receives: 409 `another_receiver` (not the plan's 429, which
+    # is a count). The same receiver's reconnect hands over as before (4509). A connection without the header follows the same rule:
+    # alone it receives (an old app on a lone Mac is not cut), beside another it is refused. A hand-made key: the plan limit, as before.
+    # `X-Sprintable-Receiver-Takeover: 1` (a person's [여기서 받기] only) ends the others instead: on this instance now (superseded), on
+    # another instance at its next heartbeat (sse_lease.taken_by); their lease members go, so this connection's acquire passes.
+    _took_over = False
+    _open_here = _agent_connections.get(agent_id_str, ())
+    if _setup_key:
+        _scope = f"perkey:{agent_id_str}"
+        _redis_members = await sse_lease.members(_scope)
+        _local_others = [q for q in _open_here if q is not _superseded_queue]
+        _other_members = [m for m in _redis_members if m != _pk_member] if _redis_members is not None else [f"queue:{id(q)}" for q in _local_others]
+        if _other_members:
+            if request.headers.get(RECEIVER_TAKEOVER_HEADER) == "1":
+                for q in list(_local_others):
+                    _agent_connections.get(agent_id_str, set()).discard(q)
+                    for k in [k for k, v in _receiver_streams.items() if v is q]:
+                        _receiver_streams.pop(k, None)
+                    _signal_superseded(q, SUPERSEDED_BY_OTHER_RECEIVER)
+                if _redis_members is not None:
+                    for m in _other_members:
+                        await sse_lease.release(_scope, m)
+                    await sse_lease.mark_taken(_scope, _pk_member)
+                _took_over = True
+                logger.info("agent_stream takeover agent=%s to=%s from=%d", agent_id_str, _pk_member, len(_other_members))
+            else:
+                _retry_after = _AGENT_STREAM_RETRY_AFTER
+                _earliest = await sse_lease.earliest_expiry(_scope)
+                if _earliest is not None:
+                    _retry_after = max(1, round(_earliest - time.time()))
+                logger.info("agent_stream another_receiver agent=%s mine=%s others=%d", agent_id_str, _pk_member, len(_other_members))
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "another_receiver", "message": "another install is receiving this agent's work", "retry_after": _retry_after},
+                    headers={"Retry-After": str(_retry_after)},
+                )
+    _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _pk_member)
     # story #2602: `_agent_connections`는 defaultdict(set) — `[...]` 서브스크립트는 키가 없으면
     # 빈 set을 **만들면서** 반환한다. 이 줄은 판정(길이 체크)일 뿐인데 거부(429)로 끝나는 요청도
     # 매번 agent_id 하나를 이 dict에 영구 등록해버렸다("거부가 자원을 만드는" 결함 — len에는
     # 무해(빈 set)지만 한 번이라도 한도초과 조회를 겪은 모든 agent_id가 dict key로 영구 잔류).
     # `.get(..., ())` 로 조회를 read-only로 고정 — 존재하는 키만 세션 등록 시 만들어진다(L471).
+    _open_here = _agent_connections.get(agent_id_str, ())
     if _pk_lease is False or (
-        _pk_lease is None and len(_agent_connections.get(agent_id_str, ())) >= _per_key_limit
+        # the same receiver's earlier stream on this instance is about to be handed over — it does not count against it
+        _pk_lease is None and len(_open_here) - (1 if _superseded_queue in _open_here else 0) >= _per_key_limit
     ):
         # story #2582: flat _AGENT_STREAM_RETRY_AFTER(기본 5s)는 orphan lease(비정상 종료 —
         # kill -9 등으로 finally/release가 안 돈 연결)의 실제 자가회수 시한(sse_lease._TTL_SEC,
@@ -524,15 +741,25 @@ async def agent_stream(
         _gl_lease is None and _agent_sse_connection_count >= _MAX_AGENT_SSE_CONNECTIONS
     ):
         # 전역 초과로 거부 → 이미 획득한 per-key lease 롤백(누수 방지·미획득이면 no-op).
-        await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
+        if not _receiver_id:  # a receiver's slot may still be its earlier stream's (not handed over yet) — the TTL frees it
+            await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
         raise HTTPException(status_code=503, detail="Agent stream connection limit reached")
     _agent_sse_connection_count += 1  # in-process shadow(Redis 다운 시 폴백용 유지)
 
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
+    if _superseded_queue is not None:
+        # handed over only now — both limits passed, so a refused reconnect never ends the stream it would replace
+        _agent_connections.get(agent_id_str, set()).discard(_superseded_queue)
+        _signal_superseded(_superseded_queue)
     _agent_connections[agent_id_str].add(queue)
+    if _receiver_id:
+        _receiver_streams[(agent_id_str, _receiver_id)] = queue
 
     # story #2128: 연결 시작 시점에 이미 종료 예정 시각을 갖고 태어난다(#2161과 동일 원리).
     # monotonic — 벽시계 조정에 영향 안 받음.
+    def _owns_receiver_slot() -> bool:
+        return not _receiver_id or _receiver_streams.get((agent_id_str, _receiver_id)) is queue
+
     _lifespan_deadline = time.monotonic() + _AGENT_SSE_LIFESPAN_SEC + random.uniform(0, _AGENT_SSE_LIFESPAN_JITTER_SEC)
 
     async def generate():
@@ -580,9 +807,19 @@ async def agent_stream(
                 # 클릭 불요 — 커넥터의 "10초 내 살아있음 신호" 의무는 이 라운드트립의 ack로
                 # 충족된다, sse_bridge.py 의 자동 ack 재사용·발명 0). 이미 verified 인 재연결은
                 # 재트리거 안 함(매 재접속마다 이벤트 스팸 방지).
-                from app.services.agent_verify import get_verification_state, start_verification
-                _prior_verify = await get_verification_state(_pdb, agent_id, transport="stdio")
-                _newly_started = not _prior_verify["verified"]
+                from app.services.agent_verify import get_verification_state, lock_connection_test_decision, start_verification
+                # story #4594 (Qadir · QA on 4975): the read just below and the write after it are ONE decision — a second
+                # connect of the same agent at the same moment waits here until this one has committed, then reads what it
+                # wrote (before: both read «none waiting», both started a test). Released with the commit below.
+                await lock_connection_test_decision(_pdb, agent_id)
+                _prior_verify = await get_verification_state(_pdb, agent_id, org_id=uuid.UUID(org_id_str), transport="stdio")
+                # story #4582 (Damrong · 6,389 rows): at most ONE connection test waits — an agent whose last test is not acked yet
+                # gets no new one on a reconnect. Before, every connect of a never-verified agent added one (the stream reconnects
+                # every ~5 min · a receiver that drops this kind without an ack never moves its cursor past it), so an agent with no
+                # other traffic piled up a test per reconnect for weeks. The person's [확인] button (POST verify-connection) is
+                # unchanged — it still starts a fresh one on purpose.
+                _test_waiting = _prior_verify["verify_seq"] is not None and not _prior_verify["verified"]
+                _newly_started = not _prior_verify["verified"] and not _test_waiting
                 if _newly_started:
                     await start_verification(
                         _pdb, agent_id=agent_id, org_id=tm.org_id, project_id=tm.project_id,
@@ -609,35 +846,29 @@ async def agent_stream(
             from app.services.presence_events import emit_presence
             await emit_presence(org_id_str)
 
-            yield "event: heartbeat\ndata: {}\n\n"
+            # story #4434 — the connect check above is the first access check; the stream rechecks from here on
+            _last_access_check = time.monotonic()
+            _stream_key_id = auth.claims.get("app_metadata", {}).get("api_key_id")
 
-            # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
-            async with async_session_factory() as db:
-                rows = await _fetch_events(db, agent_id, start_seq, _BACKFILL_LIMIT)
+            async def _recheck_if_older_than(age: float) -> str | None:
+                """The access recheck when the last one is at least `age` old (None = still allowed or not due)."""
+                nonlocal _last_access_check
+                if time.monotonic() - _last_access_check < age:
+                    return None
+                _last_access_check = time.monotonic()
+                return await _stream_access_revoked(_stream_key_id, agent_id)
 
-            backfill_floor = start_seq  # ì´ë² ë°±í ë´ ì¤ë³µ ë°©ì§
-            for row in rows:
-                data = _row_to_payload(row)
-                gseq = row.recipient_seq or 0
-                if gseq > backfill_floor:  # ì¤ë³µ ë°©ì§
-                    _sse = json.dumps({**data, "is_backfill": True})
-                    yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
-                    backfill_floor = gseq
-
-            # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
-            # 49fed0a1 AC1: 연결 유지 중 presence를 주기적으로 online 갱신. wake가 잦으면 timeout
-            # heartbeat가 안 떠도(매번 wait_for가 일찍 반환) last_seen이 stale → 거짓 offline 되므로,
-            # 매 iteration 경과를 체크해 _PRESENCE_TICK_INTERVAL마다 throttle write(busy/idle 무관 갱신 보장).
+            # story #4569 — set when a pass ended the stream (access gone, or its lifespan ran out mid-pass): its closing line
+            # already went out, the stream ends
+            _batches_ended = False
+            # the presence tick's clock (49fed0a1 AC1) — starts before the connect backfill, which can be long now (#4569)
             last_presence_tick = datetime.now(timezone.utc)
-            # story c4c72eb1(E-ARCH GCE 이전) PR-A: events.py와 동형 shutdown-aware 종료.
-            while not await request.is_disconnected():
-                # story #2128 ①본체: 좀비가 스스로 늘릴 수 없는 유일한 축 — disconnect 감지
-                # 여부와 완전히 무관하게 발동. "완료로 위장" 안 함 — 특별취급 없이 기존
-                # finally: 하나로 그대로 흘러간다(정상종료·이상종료·수명초과 전부 같은 정리
-                # 경로 — presence offline 강등·세션row 삭제 포함, #2161 CAS 원칙의 적용).
-                if time.monotonic() >= _lifespan_deadline:
-                    yield "event: lifespan_reconnect\ndata: {}\n\n"
-                    return
+
+            async def _presence_tick_if_due() -> None:
+                """The connection's presence / lease tick when it is due (_PRESENCE_TICK_INTERVAL). The outer loop calls it each turn;
+                story #4569 (PO 01:28Z · Qadir ④) — `_send_batches` calls it between batches too, so a long catch-up to a slow reader
+                (a desktop daemon fsyncs + acks each frame: 2,400 × ~40 ms ≈ 96 s) never outlasts the presence / lease TTL (90 s)."""
+                nonlocal last_presence_tick, _heartbeat_armed, _heartbeat_last_observed
                 _now = datetime.now(timezone.utc)
                 if (_now - last_presence_tick).total_seconds() >= _PRESENCE_TICK_INTERVAL:
                     from app.core.config import settings as _settings
@@ -677,8 +908,102 @@ async def agent_stream(
                     # #2121: lease score 재갱신(live 연결이 슬롯 유지·TTL 만료 방지). off/다운 no-op.
                     if not _skip_refresh:
                         await sse_lease.refresh("agent_global", _lease_conn_id)
-                        await sse_lease.refresh(f"perkey:{agent_id_str}", _lease_conn_id)
+                        if _owns_receiver_slot():
+                            # story #4676: a person took this agent over on another install (another instance) — this stream ends
+                            # superseded instead of keeping its slot alive. EVERY stream reads the mark — a connection without the header
+                            # (an old app) too: its refresh is a ZADD, which would put the member the taker released back and leave two
+                            # places receiving (PO 11:56Z). The taker reads it as well (Kadir 01a13a34): its own mark is its own member, so
+                            # it goes on; but when the displaced owner takes the agent BACK from another instance the mark is theirs, and a
+                            # taker that skipped it would refresh itself back into the lease (two receive, the take-back silently lost).
+                            # A hand-made key never has a mark → refresh as before.
+                            _taken = await sse_lease.taken_by(f"perkey:{agent_id_str}")
+                            if _taken is not None and _taken != _pk_member:
+                                _signal_superseded(queue, SUPERSEDED_BY_OTHER_RECEIVER)
+                            else:
+                                await sse_lease.refresh(f"perkey:{agent_id_str}", _pk_member)
                     last_presence_tick = _now
+
+            # story #4569 (PO 01:14Z) — the seqs this connection has sent and the client has not acked yet. A wake still rescans
+            # from acked_seq (late commits are caught that way), but a pass sends the whole tail now, so a wake that comes before
+            # the ack catches up would send that tail again (measured: 2,400 rows + 3 quick wakes, no ack → 9,620 frames for 2,405
+            # seqs). A seq in here is skipped; one not in here (a late commit) still goes out. Trimmed to > acked on every wake.
+            _sent_unacked = _SentUnacked()
+
+            async def _send_batches(after_seq: int, is_backfill: bool):
+                """Every row after `after_seq`, batch after batch, until a batch comes back short — the newest row goes out on
+                this one connect / wake. Before, one batch went out and the next waited for the next wake, so an agent with a
+                long backlog (4543 r2: 2,399 rows) heard a new DM hours late. A batch is still at most `_BACKFILL_LIMIT` rows in
+                seq order; each batch rechecks access first (PO 14:35Z ②); `floor` keeps a seq from going out twice in this
+                pass. The cursor is still the client's ack only."""
+                nonlocal _batches_ended
+                floor = after_seq
+                while True:
+                    async with async_session_factory() as db:
+                        rows = await _fetch_events(db, agent_id, floor, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
+                        sender_orgs = await _sender_orgs_for_rows(db, rows) if rows else {}
+                    if not rows:
+                        return
+                    _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
+                    if _revoked:
+                        _batches_ended = True
+                        yield _access_revoked_frame(_revoked)
+                        return
+                    for row in rows:
+                        gseq = row.recipient_seq or 0
+                        if gseq <= floor:
+                            continue
+                        floor = gseq
+                        if gseq not in _sent_unacked:
+                            _sent_unacked.add(gseq)
+                            # story 4649: the stream's org and the sender's org lead every frame (the daemon compares them)
+                            data = _with_stream_org(
+                                {**_row_to_payload(row), "sender_org_id": sender_orgs.get(str(row.sender_id)) if row.sender_id is not None else None},
+                                uuid.UUID(org_id_str),
+                            )
+                            _sse = _frame_data({**data, "is_backfill": is_backfill})
+                            # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
+                            yield f"event: {sse_event_name(row.event_type)}\nid: {gseq}\ndata: {_sse}\n\n"
+                    await _presence_tick_if_due()  # between batches too (PO 01:28Z) — a long catch-up keeps presence / lease fresh
+                    if len(rows) < _BACKFILL_LIMIT:
+                        return
+                    # #2128 — the lifespan is measured between batches too (PO 01:49Z · Qadir ⑤): a long catch-up to a slow reader never keeps
+                    # the stream past it; the client connects again and goes on from its ack
+                    if time.monotonic() >= _lifespan_deadline:
+                        _batches_ended = True
+                        yield "event: lifespan_reconnect\ndata: {}\n\n"
+                        return
+
+            yield "event: heartbeat\ndata: {}\n\n"
+
+            # ì´ê¸° ë°±í â acked_seq(=start_seq)ë¶í° ì¬ì¤ìº
+            # PO 14:35Z ② — the backfill is batches too (it runs once the first heartbeat is read, which can be later)
+            async for _frame in _send_batches(start_seq, is_backfill=True):
+                yield _frame
+            if _batches_ended:
+                return
+
+            # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
+            # 49fed0a1 AC1: 연결 유지 중 presence를 주기적으로 online 갱신. wake가 잦으면 timeout
+            # heartbeat가 안 떠도(매번 wait_for가 일찍 반환) last_seen이 stale → 거짓 offline 되므로,
+            # 매 iteration 경과를 체크해 _PRESENCE_TICK_INTERVAL마다 throttle write(busy/idle 무관 갱신 보장).
+
+            # story c4c72eb1(E-ARCH GCE 이전) PR-A: events.py와 동형 shutdown-aware 종료.
+            while not await request.is_disconnected():
+                # story #4434 (Qadir 4847 ④) — once per heartbeat period (time-based, so a busy stream is checked too, but not
+                # per event): the key revoked or the agent stopped since connecting → one closing line, then the stream ends
+                # (the finally below does the usual cleanup). A reconnect is refused at connect time as before.
+                _revoked = await _recheck_if_older_than(_SSE_HEARTBEAT)
+                if _revoked:
+                    yield _access_revoked_frame(_revoked)
+                    return
+                # story #2128 ①본체: 좀비가 스스로 늘릴 수 없는 유일한 축 — disconnect 감지
+                # 여부와 완전히 무관하게 발동. "완료로 위장" 안 함 — 특별취급 없이 기존
+                # finally: 하나로 그대로 흘러간다(정상종료·이상종료·수명초과 전부 같은 정리
+                # 경로 — presence offline 강등·세션row 삭제 포함, #2161 CAS 원칙의 적용).
+                if time.monotonic() >= _lifespan_deadline:
+                    yield "event: lifespan_reconnect\ndata: {}\n\n"
+                    return
+                await _presence_tick_if_due()
                 get_task = asyncio.create_task(queue.get())
                 shutdown_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
                 try:
@@ -698,6 +1023,12 @@ async def agent_stream(
                             break
                         continue
                     signal = get_task.result()
+                    if signal.get("__superseded__"):
+                        # story #4509 AC1b — the same receiver reconnected: this stream hands its slot over and ends
+                        _by = signal.get("by")
+                        _data = json.dumps({"by": _by}, separators=(",", ":")) if _by == SUPERSEDED_BY_OTHER_RECEIVER else "{}"
+                        yield f"event: superseded\ndata: {_data}\n\n"
+                        return
                     if signal.get("__wake__"):
                         # ìµì  acked_seq ì¡°í (í´ë¼ì´ì¸í¸ê° ACK ë³´ëì ì ìì)
                         async with async_session_factory() as db:
@@ -705,17 +1036,13 @@ async def agent_stream(
                                 select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
                             )).scalar_one_or_none()
                             scan_from = max(start_seq, cur.acked_seq if cur else 0)
-                            new_rows = await _fetch_events(db, agent_id, scan_from, _BACKFILL_LIMIT)
+                        _sent_unacked.trim(scan_from)
 
-                        wake_floor = scan_from  # ì´ë² wake ë´ ì¤ë³µ ë°©ì§
-                        for row in new_rows:
-                            gseq = row.recipient_seq or 0
-                            if gseq > wake_floor:
-                                data = _row_to_payload(row)
-                                _sse = json.dumps({**data, "is_backfill": False})
-                                # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
-                                yield f"event: {row.event_type}\nid: {gseq}\ndata: {_sse}\n\n"
-                                wake_floor = gseq
+                        # PO 14:35Z ② — batches go out only while access holds (rechecked if the last check is 5 s old)
+                        async for _frame in _send_batches(scan_from, is_backfill=False):
+                            yield _frame
+                        if _batches_ended:
+                            return
                     else:
                         # ë ê±°ì ì§ì  push (AGENT_GATEWAY_V2 ë¯¸ì ì© ê²½ë¡)
                         # story #2143(2026-07-23) root-fix: this branch used to fabricate
@@ -727,9 +1054,14 @@ async def agent_stream(
                         # instead would be worse (a false cursor position) — per SSE spec, omit
                         # `id:` entirely for non-durable events so the client's Last-Event-ID is
                         # simply left unchanged.
+                        _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
+                        if _revoked:
+                            yield _access_revoked_frame(_revoked)
+                            return
                         event_type = signal.get("event_type", "message")
-                        _sse = json.dumps({**signal, "is_backfill": False})
-                        yield f"event: {event_type}\ndata: {_sse}\n\n"
+                        # story 4649: the direct push's frame leads with the same two keys (one lookup for this sender)
+                        _sse = _frame_data({**_with_stream_org({**signal, "sender_org_id": await _sender_org_of(signal.get("sender_id"))}, uuid.UUID(org_id_str)), "is_backfill": False})
+                        yield f"event: {sse_event_name(event_type)}\ndata: {_sse}\n\n"
                 finally:
                     for t in (get_task, shutdown_task):
                         if not t.done():
@@ -742,7 +1074,12 @@ async def agent_stream(
             _agent_sse_connection_count -= 1
             # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
             await sse_lease.release("agent_global", _lease_conn_id)
-            await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
+            if _owns_receiver_slot():  # a superseded stream leaves the slot to the one that took it over
+                await sse_lease.release(f"perkey:{agent_id_str}", _pk_member)
+                if _receiver_id:
+                    _receiver_streams.pop((agent_id_str, _receiver_id), None)
+            if _took_over:  # story #4676: the taker's mark goes with its stream (only its own)
+                await sse_lease.clear_taken(f"perkey:{agent_id_str}", _pk_member)
             _agent_connections[agent_id_str].discard(queue)
             if not _agent_connections[agent_id_str]:
                 _agent_connections.pop(agent_id_str, None)
@@ -783,6 +1120,11 @@ async def ack_event(
 
     agent_id = uuid.UUID(auth.user_id)
     _newly_verified_org_id: uuid.UUID | None = None
+    # story #4500 (AC3 · PO 12:57Z): the ack acts on the key's own org's events only — the org the API key belongs to
+    _key_org = getattr(auth, "org_id", None) or auth.claims.get("app_metadata", {}).get("org_id")
+    if not _key_org:
+        raise HTTPException(status_code=403, detail="API key has no organization")
+    key_org_id = uuid.UUID(str(_key_org))
 
     # UPSERT acked_seq (ë ëì ê°ë§ ê°±ì )
     existing = (await db.execute(
@@ -810,6 +1152,8 @@ async def ack_event(
             Event.recipient_seq.isnot(None),
             Event.recipient_seq <= body.seq,
             Event.status == "pending",
+            # story #4500 (AC3): the key's org's events only — its ack never changes another org's rows
+            Event.org_id == key_org_id,
         )
         .values(status="delivered", delivered_at=datetime.now(timezone.utc))
     )
@@ -827,6 +1171,7 @@ async def ack_event(
                 Event.recipient_seq.isnot(None),
                 Event.recipient_seq > prior_acked,
                 Event.recipient_seq <= body.seq,
+                Event.org_id == key_org_id,
             ).limit(1)
         )).first()
         if _verify_done:

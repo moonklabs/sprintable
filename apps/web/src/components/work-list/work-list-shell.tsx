@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ListFilter } from 'lucide-react';
@@ -114,6 +115,26 @@ function useWorkListFilters(): [WorkListFilters, (next: Partial<WorkListFilters>
   return [filters, setFilters];
 }
 
+/**
+ * story #4456 — where the detail panel sits (the desktop aside or the mobile sheet). It adopts the one host node the panel is
+ * rendered into, so crossing the 1024 px breakpoint moves the panel's DOM without mounting it again: what the person was doing
+ * (the «근거 확인» check · the chosen tab · the gate already read) stays. Adopted in a layout effect — before the sheet's focus
+ * trap looks for the first field — and given back on unmount (the other slot adopts it in the same commit).
+ * story #4462 ⓐ (Kadir 09:14Z): adopted whenever the slot becomes the one in use (`active`), not only when it mounts — the sheet
+ * stays mounted while its closing transition plays, so crossing the width back during it found the sheet's slot already mounted:
+ * it never adopted the host again after the aside gave it back, and the sheet opened empty.
+ */
+function DetailPanelSlot({ host, active = true }: { host: HTMLElement | null; active?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const slot = ref.current;
+    if (!slot || !host || !active) return;
+    slot.appendChild(host);
+    return () => { if (host.parentNode === slot) slot.removeChild(host); };
+  }, [host, active]);
+  return <div ref={ref} className="contents" />;
+}
+
 export function WorkListShell({ projectId }: { projectId: string }) {
   const t = useTranslations('workList');
   const [fetched, setFetched] = useState<FetchedWorkList | null>(null);
@@ -173,6 +194,14 @@ export function WorkListShell({ projectId }: { projectId: string }) {
   // 둘로 나눴다(work-list-detail-actions.ts, 순수함수라 테스트도 따로).
   const selectedContext = findSelectedRowContext(data, selectedRowId);
   const isHiddenByFilter = !!selectedContext && !isRowVisibleInFiltered(filtered, selectedContext.row.id);
+
+  // story #4456 — one host node for the panel for the life of the shell (client only — the panel is never server-rendered).
+  const [panelHost] = useState<HTMLElement | null>(() => {
+    if (typeof document === 'undefined') return null;
+    const el = document.createElement('div');
+    el.className = 'contents';
+    return el;
+  });
 
   const detailPanel = selectedContext ? (
     <WorkListDetailPanel
@@ -350,7 +379,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
         {detailPanel && !isMobile ? (
           // [SID:4369] Esc 규칙의 층 뿌리 — 여러 줄 칸에서 빠져나온 초점이 여기로(tabIndex=-1).
           <aside data-work-list-detail="" tabIndex={-1} className="w-[360px] shrink-0 border-l border-border outline-none">
-            {detailPanel}
+            <DetailPanelSlot host={panelHost} />
           </aside>
         ) : null}
       </div>
@@ -360,10 +389,13 @@ export function WorkListShell({ projectId }: { projectId: string }) {
           창 접근 이름 = 열린 항목 제목(화면 읽기 전용 SheetTitle → 창 aria-labelledby · 보이는 제목은 패널 머리 h2) · 제목이 비면 페이지 이름. */}
       <Sheet open={!!detailPanel && isMobile} onOpenChange={(open) => { if (!open) setSelectedRowId(null); }}>
         <SheetContent side="right" className="w-full p-0 sm:max-w-sm" showCloseButton={false}>
-          {selectedContext ? <SheetTitle className="sr-only">{selectedContext.row.title || t('title')}</SheetTitle> : null}
-          {detailPanel}
+          {/* story #4386 — 선택이 비는 순간에도 창 이름이 남게 늘 그린다(제목이 비면 페이지 이름 — 위 주석 그대로). */}
+          <SheetTitle className="sr-only">{selectedContext?.row.title || t('title')}</SheetTitle>
+          {detailPanel ? <DetailPanelSlot host={panelHost} active={isMobile} /> : null}
         </SheetContent>
       </Sheet>
+      {/* story #4456 — the panel itself, rendered once at this fixed place into the host node a slot above has adopted */}
+      {detailPanel && panelHost ? createPortal(detailPanel, panelHost) : null}
     </>
   );
 }

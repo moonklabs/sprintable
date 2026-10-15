@@ -55,9 +55,10 @@ describe('riskSentenceKey/riskBadgeVariant — gate_type/risk에서만(PO 明示
     expect(riskBadgeVariant(gate({ risk_grade: 'high' }))).toBe('warning');
   });
 
-  it('⭐risk_grade=low → warning 뱃지지만 문장은 0(pill과 같은 사실 두 번 말하지 않는다, CHANGES 3b)', () => {
+  // story #4448 (Yuna 04:13Z) — low risk is the row's neutral chip, not the high-risk warning yellow
+  it('⭐risk_grade=low → chip 뱃지(행과 같은 모양) · 문장은 0(pill과 같은 사실 두 번 말하지 않는다, CHANGES 3b)', () => {
     expect(riskSentenceKey(gate({ risk_grade: 'low' }))).toBeNull();
-    expect(riskBadgeVariant(gate({ risk_grade: 'low' }))).toBe('warning');
+    expect(riskBadgeVariant(gate({ risk_grade: 'low' }))).toBe('chip');
   });
 });
 

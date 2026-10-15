@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,10 @@ class AdsBoostRun(Base):
     __tablename__ = "ads_boost_runs"
     __table_args__ = (
         UniqueConstraint("gate_id", name="uq_ads_boost_runs_gate_id"),
+        # story #4412 (0420) — a Meta object is linked to at most one run (adoption can no longer attach one campaign to two).
+        Index("uq_ads_boost_runs_campaign_id", "campaign_id", unique=True, postgresql_where=text("campaign_id IS NOT NULL")),
+        Index("uq_ads_boost_runs_adset_id", "adset_id", unique=True, postgresql_where=text("adset_id IS NOT NULL")),
+        Index("uq_ads_boost_runs_ad_id", "ad_id", unique=True, postgresql_where=text("ad_id IS NOT NULL")),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -47,9 +51,62 @@ class AdsBoostRun(Base):
     # 재-중지 요청을 안 보내는 멱등 게이트(ads_spend_snapshots.py::_enforce_spend_cap).
     cap_reached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4417 (0421) — the spend could not be checked against the budget (another currency · a currency outside the table ·
+    # repeated read failures): set once, the run is paused by the scheduler and cannot be resumed while this is set.
+    spend_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    spend_blocked_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4417 (0421 · Qadir 01a0eb71 B) — the notice went out (null = not yet: tried again on the next tick)
+    spend_blocked_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4417 (0421) — the ad account's currency as read before the start touched the provider (null = not read yet)
+    account_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4458 (0425) — what the campaign was created with: the budget sent and the seal of the command that created it. A
+    # re-seal can land during the create call; a campaign whose budget is not the current seal's is never switched on (null =
+    # created before this column — no check).
+    created_budget_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_for_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # PO 09:00Z — and the ad connection it was created under (4461 binds pause · resume · spend reads to it)
+    created_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #4404 (0419) — campaign creation at most once: the claim (conditional UPDATE) and the marker committed right before the
+    # create call. Expired claim + marker + no ids = outcome unknown → needs_check, never re-created automatically.
+    create_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4460 (0426) — the current cycle began (null = the run's first): the card's and the cap's spend count this cycle only
+    cycle_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4460 (0426) — a cancel asked for and not finished («취소 중»): the campaign ids stay until the pause is confirmed
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4460 (0426 · Qadir 02:22Z) — the current cycle's number: a cancel's reset raises it; commands carry the number they
+    # were made in (publication_commands.ads_boost_cycle) and the cycle's spend captures carry it too
+    cycle_no: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1", default=1)
+    create_call_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
     )
+
+
+class AdsBoostRunCycle(Base):
+    """story #4460 (0426) — one ended cycle of a boost: the campaign it made, what that campaign was created with, when it ran, why
+    it ended and what it spent. A cancel clears the run for the next cycle; this row keeps the past one (card · history)."""
+
+    __tablename__ = "ads_boost_run_cycles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    gate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    campaign_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    adset_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ad_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_budget_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_for_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spend_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    ended_by_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

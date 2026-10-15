@@ -134,7 +134,7 @@ function DocShareForm({ docId, labels }: { docId: string; labels: ShareLabels })
               readOnly
               value={shareUrl}
               onFocus={(e) => e.currentTarget.select()}
-              className="min-w-0 flex-1 rounded-md border border-border bg-muted/30 px-2.5 py-1.5 font-mono text-xs text-foreground outline-none"
+              className="min-w-0 flex-1 rounded-md border border-border bg-muted/30 px-2.5 py-1.5 font-mono text-base lg:text-xs text-foreground outline-none"
             />
             <Button size="sm" variant="outline" onClick={() => void copy()} className="flex-shrink-0">
               {copied ? <Check className="mr-1 size-3.5 text-success" /> : <Copy className="mr-1 size-3.5" />}

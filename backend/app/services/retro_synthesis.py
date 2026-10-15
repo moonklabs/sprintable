@@ -186,13 +186,22 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
     fallback 결과를 그 자리서 즉시 응답할 뿐 아무것도 지우지 않지만, 여기서는 라우터가
     non-None 반환값을 곧장 `repo.update()`로 **기존 good synthesis 위에 덮어쓴다** — 같은
     "완전 실패 없음" 철학이 정반대 결과(데이터 보존 vs 파괴)를 낳는 컨텍스트라 미러가 틀렸다."""
-    from app.services.llm_client import generate_text
+    return await _synthesize_from_prompt(await _synthesis_prompt(session, retro))
 
+
+async def _synthesis_prompt(session: AsyncSession, retro: RetroSession) -> str | None:
+    """종합 프롬프트의 DB 읽기(가설 · 투표 아이템) — story #4405: LLM 전에 끝내도록 따로 뗌. None = 근거 전무."""
     hypotheses_items = await build_hypotheses_items(
         session, retro.org_id, retro.project_id, retro.sprint_id
     )
     item_texts = await _top_voted_item_texts(session, retro.id)
-    prompt = _build_synthesis_prompt(hypotheses_items, item_texts)
+    return _build_synthesis_prompt(hypotheses_items, item_texts)
+
+
+async def _synthesize_from_prompt(prompt: str | None) -> dict[str, Any] | None:
+    """종합의 LLM 몫 — DB를 만지지 않는다(story #4405). 반환 규칙은 `synthesize`와 같다."""
+    from app.services.llm_client import generate_text
+
     now = datetime.now(timezone.utc)
 
     if prompt is None:
@@ -351,25 +360,38 @@ async def run_retro_generation(db: AsyncSession, *, org_id: uuid.UUID, session_i
     # 실패 본문은 라우트 파일의 한 정본(예전 요청이 받던 그 본문 · 요청 안 409도 같은 것을 씀).
     from app.routers.retros import RECOMMENDATION_FAILED_DETAIL, SYNTHESIS_FAILED_DETAIL, SYNTHESIS_REQUIRED_DETAIL
 
+    # story #4405 — LLM(25s × 2) 동안 retro_sessions 행 잠금 · 열린 트랜잭션을 쥐지 않는다.
+    # ① 읽기는 워커 세션과 같은 엔진의 따로 짧은 세션에서 값으로 받아 닫는다. ② LLM은 세션 없이.
+    # ③ 쓰기는 두 LLM 뒤 한 번, 워커 세션에서(핸들러 안 커밋 금지 · 워커가 결과와 완료를 같이 커밋 — #4336 불변식).
+    # 워커 세션은 claim 커밋 뒤 이 핸들러까지 아무것도 읽지 않고(worker_session_factory expire_on_commit=False라
+    # job 속성 접근도 재조회 없음) 여기서도 ③ 전엔 안 쓰므로, LLM 동안 워커 세션에 열린 트랜잭션은 없다.
+    # 핸들러 안 rollback()으로 트랜잭션을 끝내지 않는 까닭: 공유 세션의 워커 쪽 ORM 객체를 만료시켜 배치 밖에서
+    # MissingGreenlet로 터질 수 있다(#4573 선례).
+    async with AsyncSession(db.bind, expire_on_commit=False) as reader:
+        session = await RetroSessionRepository(reader, org_id).get(session_id)
+        if session is None:
+            raise RetroGenerationError(404, {"code": "RETRO_SESSION_NOT_FOUND", "message": str(session_id)})
+        existing_synthesis = session.synthesis
+        prompt = None if mode == "recommend_next" else await _synthesis_prompt(reader, session)
+
     repo = RetroSessionRepository(db, org_id)
-    session = await repo.get(session_id)
-    if session is None:
-        raise RetroGenerationError(404, {"code": "RETRO_SESSION_NOT_FOUND", "message": str(session_id)})
     if mode == "recommend_next":
         from app.routers.retros import _has_valid_synthesis  # 라우트와 같은 한 판정(아이템 모양까지)
 
-        if not _has_valid_synthesis(session.synthesis):
+        if not _has_valid_synthesis(existing_synthesis):
             raise RetroGenerationError(409, SYNTHESIS_REQUIRED_DETAIL)
-        result = await recommend_next(session.synthesis)
+        result = await recommend_next(existing_synthesis)
         if result is None:
             raise RetroGenerationError(502, RECOMMENDATION_FAILED_DETAIL)
         await repo.update(session_id, next_hypotheses=result)
         return
-    sresult = await synthesize(db, session)
+    sresult = await _synthesize_from_prompt(prompt)
     if sresult is None:
         raise RetroGenerationError(502, SYNTHESIS_FAILED_DETAIL)
-    updated = await repo.update(session_id, synthesis=sresult)
-    if mode == "synthesis" and updated is not None:
-        nresult = await recommend_next(updated.synthesis)
+    values: dict[str, Any] = {"synthesis": sresult}
+    if mode == "synthesis":
+        # 추천 실패(None)는 종합을 살린다 — 종합만 저장(예전과 같음).
+        nresult = await recommend_next(sresult)
         if nresult is not None:
-            await repo.update(session_id, next_hypotheses=nresult)
+            values["next_hypotheses"] = nresult
+    await repo.update(session_id, **values)

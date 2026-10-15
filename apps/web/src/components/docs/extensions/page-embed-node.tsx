@@ -179,7 +179,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
             placeholder={tDocs('pageEmbedPlaceholder')}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="flex-1 bg-transparent text-base lg:text-sm outline-none placeholder:text-muted-foreground"
             autoFocus
           />
           <button

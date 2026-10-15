@@ -190,11 +190,33 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // 'navigate'="이동"과 부분문자열로 겹치는 건 «이동» 섹션 헤더와 «항목별 이동 문구»라
   // 애초에 사람이 헷갈릴 자리가 아니다(#2352·#2365류 "다른 두 셈이 같은 말"이 아니다).
   'label', 'particle',
+  // story #4580 AC2 — {host}: a DNS name the server's one host rule passed (agent_run_profile.clean_host · host-rule-vectors.json:
+  // at least one dot, the last label a letter — never a number). ko.json's three uses read directly (2026-10-07): runProfileAllowedHostRemoved
+  // «뺐어요 · {host}» · agentPermissions.net.confirmTitle · net.allowedGo — every one fills the same host, the slug · channel axis.
+  'host',
+  // story #4583 — {owners}: the org owners' display names joined by remote-off.tsx formatOwners («송윤재» · «A · B» · «A 외 n명» —
+  // the «n» is already inside the names text, never a number this line stands next to) — the `name` axis. {hasOwners}: an ICU
+  // select key ('yes' | 'no') that only decides whether the «({owners})» parenthesis is drawn — renders nothing itself. ko.json's
+  // uses read directly (2026-10-07): the six «… 조직 소유자{hasOwners, select, yes {({owners})} other {}} …» lines of remote control off.
+  'owners', 'hasOwners',
   // story #3900(§⑤ 어조 가드 사각 3) — 플레이스홀더 뒤 받침 의존 조사(이/가·을/를)를
   // korean-particle 헬퍼로 뽑아 넣는 {josa}. 'particle'과 같은 결(한글 문법 조사·절대 수가
   // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"
   // 등 6키가 이 이름을 쓴다. 개별 EXEMPT_PAIRS 대신 규칙(이 이름은 수-인접이 아님)으로 안다.
   'josa',
+  // story #4599 — {folder}: a folder's words. ko.json's three uses read directly (2026-10-07): docs.docTreeMovedIntoFolder
+  // «{title}, {folder} 폴더로 이동했어요.» (a folder's name) · chats.agentSession.line.waitingSystemFolder / …FolderPhone
+  // «macOS가 그 컴퓨터 화면에서 {folder} 쓸지 묻고 있어요 …» filled from a closed list of folder words with their particle
+  // («문서 폴더를» · «데스크탑 폴더를» · «다운로드 폴더를» · «네트워크 볼륨을» · «iCloud Drive를») — the `name` · `channel` axis,
+  // never a count. The pairs it raised (state.stopped «끝» · button.endSession / endDialog.confirm «세션 끝내기» inside that line)
+  // are the line naming the button that stands beside it — the designed copy (Yuna §①), not two counts in one word.
+  'folder',
+  // story #4624 — {phone} · {device}: a phone's label and a computer's name. ko.json's uses read directly (2026-10-08): {phone} only in
+  // desktop.remoteDevices (confirmRemove · confirmRemovePhone · phoneRemoved · removed · alreadyRemoved — «뺐어요 · {phone}» etc., the
+  // phone's own label, Yuna 14:15Z «the name in the label place») · {device} in desktop.disconnect* («{device} 연결 끊기» …), the
+  // device head «{device} · {org}», remoteDevices.pairedWith «짝: {device}» / confirmRemove, phonePairing.confirm / paired — always a
+  // computer's name. The `name` · `channel` axis, never a count.
+  'phone', 'device',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
@@ -380,6 +402,42 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story #4624 (Yuna «미르코 범위» 08:0xZ) — [이 폰 빼기]'s confirmation («… 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가
+  // 비고 …» · {n} = the computers that phone is paired with) contains «원격 기기», the section's own title. Not the shape this guard
+  // is for (#2352/#2365: two counted phrases read as one another): the title counts nothing, and the sentence names the remote
+  // device place — the very thing the section lists — on purpose (the two removals, a pair vs the phone itself, are told apart by
+  // that word). Look again if the title ever carries a count («원격 기기 · {n}»).
+  'desktop.remoteDevices.confirmRemovePhone <-> desktop.remoteDevices.title',
+  // story #4630 (Yuna «4630» ①) — the result line «다른 로그인 {n}개를 끝냈어요 — 길어야 1시간 안에 로그아웃되고, …» contains
+  // «로그아웃», the confirmation dialog's button. Not the shape this guard is for (#2352/#2365: two counted phrases read as one
+  // another): the button is a verb inside the dialog, the line a sentence under the card's own button; «로그아웃» is the same act on
+  // purpose (Yuna split «끝냈어요» now · «로그아웃» within an hour). Look again if the line ever becomes a label or a count title.
+  'settings.otherSessionsConfirmButton <-> settings.otherSessionsDone',
+  // story #4458 (PO 10:56Z · Yuna 11:00Z) — the held campaign's needs_check sentence («…으로 만들어져 시작하지 않았어요 — …» · {amount}
+  // = a money amount) contains «시작», the start dialog's confirm button label. Not the shape
+  // this guard is for (#2352/#2365: two counted phrases read as one another): the sentence and the button are never on the card
+  // at the same time — the sentence shows only in the needs_check state, where the start button and its confirm dialog are not
+  // drawn (no retry, no start). «시작» is the card's own verb on purpose (Yuna). Look again if the needs_check branch ever draws
+  // the start dialog.
+  'cage.boostExecutionStartConfirm <-> cage.boostNeedsCheckCreatedBudgetDiffers',
+  // story #4486 (Yuna 02:54Z) — the cap line («쓴 광고비가 총예산({amount})에 닿아 홍보를 멈췄어요 — …» · {amount} = a money amount)
+  // contains «총예산», the sealed facts' budget label. Not the shape this guard is for (#2352/#2365: two counted phrases read as one
+  // another): the label is drawn only inside the start confirmation (not started) and the link-existing dialog (needs_check), and
+  // the cap line only on a paused card — never on screen together. «총예산» is the same word on purpose (it names that budget).
+  // Look again if the paused card ever draws the sealed facts.
+  'cage.adsBoostBudgetLabel <-> cage.boostPausedCapReached',
+  // story #4532 (명세 B-2 결과 줄 · Yuna «폰 서명 · 권한 창 문구» ③) — the phone app's result line «거부됨 · {tool}» contains «거부», the
+  // [거부] button. Not the shape this guard is for (#2352/#2365: two counted phrases read as one another): the result line replaces
+  // the buttons — once an answer went through, [허용] · [거부] are not drawn (the only lines drawn next to the buttons are «보내지
+  // 않았어요» and «보내지 못했어요»). Same words as the desktop band on purpose. Look again if a sent answer ever keeps its buttons.
+  'agentPermissions.phone.denied <-> agentPermissions.phone.deny',
+  // story #4534 (relay contract v1.12 · Yuna 04:41Z) — the DM strip's «사용 한도» chip and two lines that begin «사용 한도에 걸려 멈췄어요
+  // — {time}…» ({time} = a time). Not the shape this guard is for (#2352/#2365: two counted phrases read as one another): they are
+  // never drawn together — the «사용 한도» chip stands only for waiting_input + self_resume (Claude), `paused` only under the
+  // paused_limit chip («한도로 쉬는 중»), `limitErrorAhead` only under the error chip («오류») (limitLine · agent-session-limit.ts).
+  // Look again if limitLine ever gives one of those lines to a waiting_input row.
+  'chats.agentSession.line.paused <-> chats.agentSession.state.usage_limit',
+  'chats.agentSession.line.limitErrorAhead <-> chats.agentSession.state.usage_limit',
   // story #3592(§22-18 정본, 2026-09-07) — 행 액션 접근 이름 재발 가드가 새로 심은
   // aria-label 템플릿 11쌍. 전부 이 가드가 잡으려는 "화면에 «보이는» 두 문구가
   // 헷갈린다"(#2352·#2365) 모양이 아니다 — aria-label은 스크린리더 전용이라 애초에
@@ -786,6 +844,20 @@ export const EXEMPT_PAIRS = new Set<string>([
   //      `t(view.isRepublish ? 'publishRepublishCta' : 'publishCta')` — 안내 속 이름이
   //      실제 버튼 텍스트와 «같은 키»여야 하는 게 목적, #4015 CHANGES 2) — 겹침이 설계다.
   'content.channelPostsPublicationFailedRepublishNotice <-> content.publishCta',
+  // story #4409 — «다시 시도»(Yuna 23:18Z, the needs-check retry button) sits inside «{seconds}초 뒤 다시 시도할 수 있어요.» (the spend
+  // refresh rate-limit line). Both live in boost-execution-control.tsx but in exclusive states: the button only in the
+  // «확인 필요» state (a start stopped as dead_letter/needs_check), the rate-limit line only while the boost runs or is paused —
+  // never on screen together. Look again if the needs-check state ever renders next to the spend refresh.
+  'cage.boostExecutionSpendRefreshRateLimited <-> cage.boostNeedsCheckRetry',
+  // story #4412 — «총예산» (the approved-conditions label) sits inside the budget-mismatch line on purpose: Yuna aligned the line
+  // to that word (same concept, same word). They are never on screen together: the line lives in the card of a start that
+  // needs a check and is cleared when the «link existing campaign» confirmation (which shows the label) opens; the start
+  // confirmation belongs to another state of the card. Look again if the result line ever stays under an open confirmation.
+  'cage.adsBoostBudgetLabel <-> cage.boostAdoptBudgetMismatch',
+  // story #4429 ③ (Yuna f6cfda19 v5): the rate-limit line names the button it asks to press again — «…다시 «시작»을 눌러
+  // 주세요» sits right under that «시작» on purpose (the same word, so the person knows which one). Not two phrases that could
+  // be mistaken for each other.
+  'desktop.setup.rateLimited <-> desktop.setup.start',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

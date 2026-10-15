@@ -10,9 +10,12 @@ import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { actorRowLabels } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
+import { dayKeyIn } from '@/lib/viewer-time-zone';
+import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
+import { WithheldDeliveryLine } from '@/components/chat/withheld-delivery-line';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import { seedFromCompose } from './chat-v3-compose';
-import { normalizeToMessage, type ChatMessage } from '@/hooks/use-chat-sse';
+import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 // story #4008 CHANGES 2(PO 지적, 2026-09-17) — 이 컴포넌트가 chat-v3-screen.tsx와 각자
@@ -33,12 +36,14 @@ export interface ChatV3MessagesHandle {
  * 이 메시지 배열에서 같이 파생해야 해서(references[] 최근 artifact), ChatView가
  * 그 상태를 밖으로 안 내놓는 이상 블랙박스로 못 쓴다(콜 중복 방지 — 최소 3콜 예산).
  */
-function dayKey(iso: string): string {
-  return iso.slice(0, 10);
+// story #4443 — a message's day is the viewer's day (was `iso.slice(0, 10)`: the UTC day, so a 07:18 KST message sat under
+// the day before). The label names that calendar day as it is, in any runtime (noon UTC of the key, drawn in UTC).
+function dayKey(iso: string, timeZone: string): string {
+  return dayKeyIn(iso, timeZone);
 }
 
 function formatDayLabel(key: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(`${key}T00:00:00`));
+  return new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long', timeZone: 'UTC' }).format(new Date(`${key}T12:00:00Z`));
 }
 
 export interface ChatV3MessagesProps {
@@ -209,16 +214,19 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
     const res = await fetchWithAuth(`/api/conversations/${threadId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, client_nonce: newClientNonce() }), // story #4440 — its echo is dropped here
     });
     setSending(false);
     if (res.ok) {
       setDraft('');
-      const json = (await res.json().catch(() => null)) as { data?: ChatMessage } | null;
-      if (json?.data) addMessage(json.data);
+      // story #4430 — through the same normalizer as every other path (the raw `data` skipped it), with the send answer's
+      // `delivery` on the sender's own line
+      const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (json?.data) addMessage(sentMessageFromAnswer(json));
     }
   };
 
+  const viewerTz = useViewerTimeZone(); // story #4443
   let lastDay: string | null = null;
 
   // [SID:4311 PR 3] 발신자 라벨 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번 · 내 메시지는 «나»라 셈에서 뺌).
@@ -241,13 +249,13 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
         <div className="flex-1 space-y-3 overflow-auto p-5">
           {messages.map((m) => {
             const isMine = m.created_by === meId;
-            const key = dayKey(m.created_at);
+            const key = dayKey(m.created_at, viewerTz ?? 'UTC');
             const showDay = key !== lastDay;
             lastDay = key;
             return (
               <div key={m.id}>
                 {showDay ? (
-                  <p className="mb-3 text-center text-xs text-muted-foreground">{formatDayLabel(key, locale)}</p>
+                  <p className="mb-3 text-center text-xs text-muted-foreground">{viewerTz ? formatDayLabel(key, locale) : <InvisibleSample>{formatDayLabel(key, locale)}</InvisibleSample>}</p>
                 ) : null}
                 <div className={isMine ? 'ml-auto max-w-[78%] text-right' : 'max-w-[78%]'}>
                   <p className="mb-1 text-xs text-muted-foreground">{isMine ? t('meLabel') : (senderLabels.get(m.created_by) ?? m.sender_name)}</p>
@@ -260,6 +268,8 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
                   >
                     {m.content}
                   </Card>
+                  {/* story #4430 — right under the sender's own bubble, above the reference and approval cards */}
+                  <WithheldDeliveryLine withheld={m.delivery_withheld} isMine={isMine} />
                   {(m.references ?? []).map((ref) => (
                     <div key={`${ref.target_type}-${ref.target_id}`} className="mt-1.5">
                       <EmbedCard entity_type={ref.target_type} entity_id={ref.target_id} title={null} status={null} />

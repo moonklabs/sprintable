@@ -139,7 +139,8 @@ async def test_accept_rejects_when_at_cap_ee_on():
     count_result.scalar.return_value = 3  # 이미 cap
 
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[invite_result, MagicMock(), tier_result, offering_result, count_result])
+    # story 4427 (나): accept() takes the first-organization person lock first (one more execute)
+    session.execute = AsyncMock(side_effect=[MagicMock(), invite_result, MagicMock(), tier_result, offering_result, count_result])
 
     repo = OrgInviteRepository(session)
     with patch("app.repositories.org_invite.settings") as mock_settings:
@@ -170,7 +171,8 @@ async def test_accept_oss_skips_cap_check():
 
     session = AsyncMock()
     # OSS 경로: invite 조회 → org_members upsert → om_id 재조회. 락/캡 쿼리 없음(2개 아닌 3개).
-    session.execute = AsyncMock(side_effect=[invite_result, MagicMock(), om_id_result])
+    # story 4427 (나): accept() takes the first-organization person lock first (one more execute)
+    session.execute = AsyncMock(side_effect=[MagicMock(), invite_result, MagicMock(), om_id_result])
     session.flush = AsyncMock()
 
     repo = OrgInviteRepository(session)

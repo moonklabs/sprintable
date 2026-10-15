@@ -85,7 +85,6 @@ const MOVED: readonly string[] = [
   'tasks/[id]/route.ts PATCH',
   'tasks/[id]/route.ts DELETE',
   'tasks/route.ts GET',
-  'tasks/route.ts POST',
   'visual-artifacts/[id]/backlinks/route.ts GET',
   'visual-artifacts/[id]/comments/[commentId]/resolve/route.ts POST',
   'visual-artifacts/[id]/comments/route.ts GET',
@@ -134,10 +133,11 @@ beforeEach(() => {
 });
 
 describe('story #4347 — 옮긴 BFF 핸들러 75곳의 /me 왕복', () => {
-  it('목록이 75곳이다(옛 톱니 가드 목록 = 옮긴 74 + 유지 1)', () => {
-    expect(MOVED.length).toBe(74);
+  // story #4450 — `tasks/route.ts POST` (one of the 74 moved) was later removed (no caller · always 422), so 73 remain.
+  it('목록이 75곳이다(옛 톱니 가드 목록 = 옮긴 74 + 유지 1 · 그 뒤 #4450이 옮긴 하나를 지움 → 73)', () => {
+    expect(MOVED.length).toBe(73);
     expect(MOVED.filter((e) => KEPT.includes(e))).toEqual([]);
-    expect(MOVED.length + KEPT.length).toBe(75);
+    expect(MOVED.length + KEPT.length).toBe(74);
   });
 
   it.each(KEPT)('%s — 유지: 사람 세션 + claim이어도 /me 1(스토리지 직접 쓰기 전 재인가)', async (entry) => {

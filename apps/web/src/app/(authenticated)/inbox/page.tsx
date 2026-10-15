@@ -9,12 +9,12 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
+import { AgentPermissionRequests } from '@/components/inbox/agent-permission-requests';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast } from '@/components/ui/toast';
 import { inboxNotificationsUrl, inboxWorkflowExecutionsUrl, takePrefetchedOrFetch, type InboxPrefetchScope } from '@/components/inbox/inbox-prefetch';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import {
   getInboxNotificationLabel,
   getNotificationReasonKey,
@@ -27,6 +27,8 @@ import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { formatAtLeast } from '@/lib/format-at-least';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { InboxTopBarTitle, useInboxTabLabels } from '@/components/nav/flat-tab-top-bar';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { dayKeyIn, formatViewerDate, shiftDayKey } from '@/lib/viewer-time-zone';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
@@ -76,7 +78,7 @@ function AgentJoinedDetailPanel({
   const [confirming, setConfirming] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   async function handleRevoke() {
     if (!notification.reference_id) return;
@@ -111,7 +113,7 @@ function AgentJoinedDetailPanel({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{t('filter_agent_joined')}</Badge>
             <span className="text-xs text-muted-foreground">
-              {t('receivedAt')} · {formatRelativeTime(notification.created_at, locale, displayTimezone)}
+              {t('receivedAt')} · {formatViewerRelativeTime(notification.created_at, locale, displayTimezone)}
             </span>
           </div>
           <h2 className="text-lg font-semibold text-foreground">{notification.title}</h2>
@@ -209,7 +211,7 @@ export default function InboxPage() {
   // Compiler가 증명할 수 있게 한다(아래 inboxSections useMemo의 dep으로 쓰일 때
   // "may be mutated later"로 메모이제이션 보존을 포기하던 것의 근본 수정 — 이 값
   // 자체의 실제 산출 로직은 그대로, 안정화만 추가).
-  const displayTimezone = useMemo(() => resolveDisplayTimezone().tz, []);
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { currentTeamMemberId, projectId, orgId } = useDashboardContext();
   // story #4276 — 선출발 응답을 넘겨받을 때 범위 대조용(알림 콜백들의 의존성은 그대로 두려고 ref로).
   const prefetchScopeRef = useRef<InboxPrefetchScope>({ memberId: currentTeamMemberId, projectId });
@@ -403,7 +405,7 @@ export default function InboxPage() {
   // story #3493 — 손으로 짠 상대시각(justNow/minutesAgo/hoursAgo)이 3436 묶음 8
   // 정본(formatRelativeTime)과 별개로 존재해 "한 제품에 시각 표기 두 벌"이던
   // 자리. 손대신 정본에 위임 — 폴백도 §11-2(toLocaleDateString 아님)로 통일된다.
-  const formatTime = (iso: string) => formatRelativeTime(iso, locale, displayTimezone);
+  const formatTime = (iso: string) => formatViewerRelativeTime(iso, locale, displayTimezone);
 
   const selectedNotification = useMemo(
     () => notifications.find((n) => n.id === selectedId) ?? null,
@@ -468,9 +470,10 @@ export default function InboxPage() {
 
   // 목업 ③: inboxItems를 날짜 버킷(오늘/어제/날짜)으로 묶어 section 라벨 삽입(dense list 가독).
   const inboxSections = useMemo(() => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfYesterday = startOfToday - 86400000;
+    // story #4443 PR3a — «today» / «yesterday» are the viewer's days (was the runtime's local midnight — the server's UTC in a
+    // server render); not known yet → no bucket label at all
+    const todayKey = displayTimezone ? dayKeyIn(new Date().toISOString(), displayTimezone) : null;
+    const yesterdayKey = todayKey ? shiftDayKey(todayKey, -1) : null;
     // story #3493(페드루 PO 보정) — 오늘/어제보다 오래된 날짜 버킷 라벨은
     // "기록"도 "약속"도 아닌 셋째 자리(날짜만 묶는 section 헤더, 시각 불요).
     // formatScheduledAt(...).display에서 "MM-DD"를 문자열로 발췌하던 첫 처방은
@@ -478,13 +481,13 @@ export default function InboxPage() {
     // 바뀌면 이 구분선이 소리 없이 깨진다 — chat-view.tsx::groupByDate와 같은
     // 형(Intl.DateTimeFormat 직접 호출, schedule-format.ts::toDateKey와 동형
     // 패턴 — 새 포맷 함수 신설 아님)으로 맞춘다.
-    const dateBucketFmt = new Intl.DateTimeFormat(locale, {
-      month: '2-digit', day: '2-digit', timeZone: displayTimezone,
-    });
+    // story #4443 PR2b — the viewer's day through formatViewerDate (not known yet → no label, never the UTC day)
     const labelFor = (time: number) => {
-      if (time >= startOfToday) return t('dateToday');
-      if (time >= startOfYesterday) return t('dateYesterday');
-      return dateBucketFmt.format(new Date(time));
+      if (!displayTimezone) return '';
+      const key = dayKeyIn(new Date(time).toISOString(), displayTimezone);
+      if (key === todayKey) return t('dateToday');
+      if (key === yesterdayKey) return t('dateYesterday');
+      return formatViewerDate(new Date(time), locale, displayTimezone, { month: '2-digit', day: '2-digit' }) ?? '';
     };
     const sections: { label: string; items: InboxItem[] }[] = [];
     for (const item of inboxItems) {
@@ -547,6 +550,7 @@ export default function InboxPage() {
               key={key}
               type="button"
               onClick={() => router.replace(flatHref(`/inbox${key === 'notifications' ? '' : `?tab=${key}`}`), { scroll: false })}
+              aria-current={activeTab === key ? 'page' : undefined}
               className={`border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
                 activeTab === key
                   ? 'border-primary text-foreground'
@@ -568,6 +572,8 @@ export default function InboxPage() {
           </div>
         ) : activeTab === 'gates' ? (
           <div className="flex-1 overflow-y-auto p-4">
+            {/* story #4533 — «에이전트 권한 요청» above the approvals, a group of its own (the web only looks) */}
+            <AgentPermissionRequests />
             <ApprovalsQueue />
           </div>
         ) : (
@@ -592,7 +598,7 @@ export default function InboxPage() {
                     {exec.rule_name ?? exec.event_type}
                   </span>
                   <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {formatRelativeTime(exec.completed_at ?? exec.created_at, locale, displayTimezone)}
+                    {formatViewerRelativeTime(exec.completed_at ?? exec.created_at, locale, displayTimezone)}
                   </span>
                 </div>
               ))}
@@ -753,6 +759,7 @@ export default function InboxPage() {
                           key={notification.id}
                           type="button"
                           onClick={() => void selectNotification(notification)}
+                          aria-current={isSelected ? 'true' : undefined}
                           className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-muted/40'}`}
                         >
                           {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
@@ -838,7 +845,7 @@ export default function InboxPage() {
                       <Badge variant="info">{t(getNotificationReasonKey(selectedNotification.type) as string)}</Badge>
                     ) : null}
                     <span className="text-xs text-muted-foreground">
-                      {t('receivedAt')} · {formatRelativeTime(selectedNotification.created_at, locale, displayTimezone)}
+                      {t('receivedAt')} · {formatViewerRelativeTime(selectedNotification.created_at, locale, displayTimezone)}
                     </span>
                   </div>
                   <h2 className="text-lg font-semibold text-foreground">{selectedDisplay?.title ?? selectedNotification.title}</h2>

@@ -22,10 +22,31 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parent.parent
 _ROUTERS = _BACKEND / "app" / "routers"
 _ROUTE_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
-_ACCESS = re.compile(r"(project_access|accessible|can_access|_scope_filter)")
+_ACCESS = re.compile(r"(project_access|accessible|can_access|_scope_filter|scoped_project_ids|project_scope|project_is_live)")  # story #4688: the live-scope helpers resolve the same set
 
 _KNOWN = {
     "app/routers/account.py::resolve_accounts",
+    # story #4529 — the device relay: a device (an org's desktop setup) authenticated by its own token, never a person or a
+    # project — its stream, session reports and command results are that device's only; the session view is the org's
+    # owners and admins (as the setup's own revoke), not a project read
+    "app/routers/desktop_relay.py::device_stream",
+    "app/routers/desktop_relay.py::get_device_sessions",
+    "app/routers/desktop_relay.py::post_command_result",
+    "app/routers/desktop_relay.py::post_session_state",
+    "app/routers/desktop_relay.py::put_sessions",
+    # story #4533 — the same device token: a permission prompt on that device (its own session · its own agent), its withdrawal
+    # and its list of QR-pinned phone keys — the device's own rows, no project entity
+    "app/routers/desktop_relay.py::post_permission_request",
+    "app/routers/desktop_relay.py::post_permission_withdraw",
+    # story #4580 AC2 — the same device token: a network question's host for its second answer (confirm-host) and the host it then
+    # added (host-added) — that device's own permission request row (setup_id · request_id), its own agent; no project entity
+    "app/routers/desktop_relay.py::post_permission_confirm_host",
+    "app/routers/desktop_relay.py::post_permission_host_added",
+    "app/routers/desktop_relay.py::put_pairings",
+    "app/routers/desktop_relay.py::post_pairing_reveal",  # story #4531 — the device token's own pairing offer (setup-scoped, not project-owned)
+    # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's
+    # setup (an org-level setting, no project entity)
+    "app/routers/remote_control.py::get_device_remote_control",
     "app/routers/agent_gateway.py::ack_event",
     "app/routers/agent_gateway.py::agent_stream",
     "app/routers/agent_inbox.py::receive_inbox_webhook",
@@ -83,8 +104,6 @@ _KNOWN = {
     "app/routers/recipe_repeat_schedules.py::run_repeat_schedule_now",
     "app/routers/sprints.py::close_sprint",
     "app/routers/team_members.py::create_team_member",
-    "app/routers/user_blocks.py::create_user_block",
-    "app/routers/user_blocks.py::list_user_blocks",
     "app/routers/verdict_capture.py::capture_pr_verdict",
     "app/routers/verdict_capture.py::capture_review",
     "app/routers/visual_artifacts.py::add_artifact_comment",

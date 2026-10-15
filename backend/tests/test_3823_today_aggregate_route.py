@@ -185,10 +185,17 @@ async def _make_channel_connection(session, org_id, *, channel="youtube", accoun
 async def _make_publication_command(
     session, org_id, *, destination, status="completed", updated_at=None,
 ):
+    from app.models.gate import Gate
     from app.models.publication_command import PublicationCommand
 
+    # story #4688: a publication command always hangs on a gate (`gate_id` NOT NULL — the code that counts them says so), and the count now
+    # reads the gate for an owner too (the same project rule as for a limited caller). This seed used a made-up gate id with no gate row: an org-level
+    # gate (its work item resolves to no project) is what the old seed meant, and it is still counted.
+    gate_id = uuid.uuid4()
+    session.add(Gate(id=gate_id, org_id=org_id, work_item_id=uuid.uuid4(), work_item_type="story", gate_type="external_publish"))
+    await session.flush()
     pc = PublicationCommand(
-        id=uuid.uuid4(), org_id=org_id, gate_id=uuid.uuid4(), destination=destination,
+        id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=destination,
         approved_version=uuid.uuid4(), status=status, requested_by_member_id=uuid.uuid4(),
         updated_at=updated_at or datetime.now(timezone.utc),
     )

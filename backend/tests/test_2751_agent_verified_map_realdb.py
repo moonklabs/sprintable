@@ -91,7 +91,7 @@ async def test_never_attempted_verification_returns_false():
             org_id, project_id = await _seed_org_project(s)
             agent_id = await _seed_agent(s, org_id, project_id)
 
-            result = await get_verified_map(s, [agent_id])
+            result = await get_verified_map(s, [agent_id], org_id=org_id)
 
             assert result == {agent_id: False}
     finally:
@@ -110,7 +110,7 @@ async def test_verify_sent_but_never_acked_returns_false():
             await start_verification(s, agent_id=agent_id, org_id=org_id, project_id=project_id)
             await s.commit()
 
-            result = await get_verified_map(s, [agent_id])
+            result = await get_verified_map(s, [agent_id], org_id=org_id)
 
             assert result == {agent_id: False}
     finally:
@@ -130,7 +130,7 @@ async def test_verify_acked_at_or_above_seq_returns_true():
             await s.commit()
             await _ack(s, agent_id, seq)
 
-            result = await get_verified_map(s, [agent_id])
+            result = await get_verified_map(s, [agent_id], org_id=org_id)
 
             assert result == {agent_id: True}
     finally:
@@ -155,7 +155,7 @@ async def test_ack_below_seq_returns_false():
             await start_verification(s, agent_id=agent_id, org_id=org_id, project_id=project_id)
             await s.commit()
 
-            result = await get_verified_map(s, [agent_id])
+            result = await get_verified_map(s, [agent_id], org_id=org_id)
 
             assert result == {agent_id: False}
     finally:
@@ -194,7 +194,7 @@ async def test_batch_query_handles_multiple_agents_with_mixed_states_in_constant
 
             s.execute = AsyncMock(side_effect=_counting_execute)
 
-            result = await get_verified_map(s, [never_verified, fully_verified, sent_not_acked])
+            result = await get_verified_map(s, [never_verified, fully_verified, sent_not_acked], org_id=org_id)
 
             assert call_count["n"] == 3  # 에이전트 수(3)와 무관 — 상수 쿼리.
             assert result == {
@@ -214,7 +214,7 @@ async def test_empty_agent_ids_returns_empty_dict_without_query():
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            result = await get_verified_map(s, [])
+            result = await get_verified_map(s, [], org_id=uuid.uuid4())
             assert result == {}
     finally:
         await engine.dispose()
@@ -239,7 +239,7 @@ async def test_http_agent_first_connected_at_marks_verified_durably():
             http_agent = await _seed_agent(s, org_id, project_id)
 
             # verify Event 0건 — 순수 http 시나리오. stdio 레일만이면 여기서 영구 False.
-            result = await get_verified_map(s, [http_agent])
+            result = await get_verified_map(s, [http_agent], org_id=org_id)
             assert result == {http_agent: False}
 
             # heartbeat 1회(choke point) — first_connected_at 채워짐.
@@ -247,13 +247,13 @@ async def test_http_agent_first_connected_at_marks_verified_durably():
                 s, http_agent, last_seen_at=datetime.now(timezone.utc), agent_status="online",
             )
             await s.commit()
-            result = await get_verified_map(s, [http_agent])
+            result = await get_verified_map(s, [http_agent], org_id=org_id)
             assert result == {http_agent: True}
 
             # 연결 종료(offline) 후에도 durable 유지 — freshness가 아니라 "한 번이라도" 판정.
             await sync_agent_profile_presence(s, http_agent, last_seen_at=None, agent_status="offline")
             await s.commit()
-            result = await get_verified_map(s, [http_agent])
+            result = await get_verified_map(s, [http_agent], org_id=org_id)
             assert result == {http_agent: True}
     finally:
         await engine.dispose()
@@ -271,7 +271,7 @@ async def test_never_connected_agent_stays_false_after_first_connected_column_ad
             org_id, project_id = await _seed_org_project(s)
             agent_id = await _seed_agent(s, org_id, project_id)
 
-            result = await get_verified_map(s, [agent_id])
+            result = await get_verified_map(s, [agent_id], org_id=org_id)
 
             assert result == {agent_id: False}
     finally:

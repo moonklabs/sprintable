@@ -1,0 +1,1 @@
+{"file": "tests/test_4517_cap_window_realdb.py", "sec": 8.0, "source": "story-4517 — the cap window between the worker's check and ACTIVE (fresh recheck · capture's fresh status and one-hour follow-up) — new file measured locally (uv run pytest, 5 cases, about 7s — same method as test_4486)"}

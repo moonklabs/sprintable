@@ -19,8 +19,8 @@ from sprintable_mcp.server import mcp  # noqa: E402
 _TOOLS: dict = mcp._tool_manager._tools
 
 EXPECTED_TOOLS = {
-    # stories (7) — E-SECURITY SEC-S1: delete_story 의도적 제거(에이전트 hard-delete 차단)
-    "sprintable_list_stories", "sprintable_list_backlog", "sprintable_add_story",
+    # stories (8) — E-SECURITY SEC-S1: delete_story 의도적 제거(에이전트 hard-delete 차단) · story 4615: get_story
+    "sprintable_list_stories", "sprintable_get_story", "sprintable_list_backlog", "sprintable_add_story",
     "sprintable_update_story",
     "sprintable_assign_story_to_sprint", "sprintable_unassign_story_from_sprint",
     "sprintable_update_story_status",
@@ -61,6 +61,9 @@ EXPECTED_TOOLS = {
     "sprintable_list_conversations",
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
     "sprintable_get_chat_message",
+    "sprintable_get_chat_attachment",  # story 4646 — 채팅 첨부 읽기
+    # story #4430: an agent's own block list (list · remove)
+    "sprintable_list_user_blocks", "sprintable_remove_user_block",
     # meetings (6)
     "sprintable_list_meetings", "sprintable_get_meeting", "sprintable_create_meeting",
     "sprintable_update_meeting", "sprintable_delete_meeting", "sprintable_trigger_ai_summary",
@@ -75,6 +78,8 @@ EXPECTED_TOOLS = {
     "sprintable_change_retro_phase", "sprintable_add_retro_item", "sprintable_export_retro",
     # rewards (3)
     "sprintable_get_wallet", "sprintable_give_reward", "sprintable_get_leaderboard_v2",
+    # watches (3) — story #4536
+    "sprintable_watch", "sprintable_unwatch", "sprintable_list_watches",
     # notifications (3)
     "sprintable_check_notifications", "sprintable_mark_notification_read",
     "sprintable_mark_all_notifications_read",
@@ -124,6 +129,18 @@ EXPECTED_TOOLS = {
     # 콘텐츠 규칙 읽기 (1) — story #3769: content_rules.py docstring이 약속한 「에이전트가
     # GET으로 읽는」 길의 MCP 표면(BE 신설 0, 기존 GET 둘 병합).
     "sprintable_get_content_rules",
+    # 채널 · 사이트 글 (11) — story #4581: 런처 플러그인에만 있던 초안 · 상신 · 결과 · 연결 · 첨부 도구를 호스티드로.
+    "sprintable_create_channel_post_draft",
+    "sprintable_submit_channel_post_draft",
+    "sprintable_get_channel_post_publication",
+    "sprintable_list_channel_connections",
+    "sprintable_get_my_channel_connection_status",
+    "sprintable_attach_channel_post_image",
+    "sprintable_get_channel_post_video_upload_url",
+    "sprintable_confirm_channel_post_video",
+    "sprintable_create_site_post_draft",
+    "sprintable_submit_site_post_draft",
+    "sprintable_get_site_post_publication",
     # smoke
     "ping",
 }
@@ -153,8 +170,9 @@ def test_total_tool_count():
     # story #3614: sprintable_withdraw_channel_post_draft 1종 신설(채널 글 초안 폐기 — 이 도메인
     # 첫 MCP 도구) — 125→126. story #3651: sprintable_get_publication_insights 1종 신설(발행물
     # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127. story #3769:
-    # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128.
-    assert len(_TOOLS) == 128  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128. story #4430:
+    # sprintable_list_user_blocks · sprintable_remove_user_block 2종 신설(에이전트 자기 차단 목록) — 128→130.
+    assert len(_TOOLS) == 146  # story 4646: sprintable_get_chat_attachment 144→145→146 (이전 주석 체인 그대로) · story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():

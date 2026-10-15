@@ -1,5 +1,46 @@
 import { describe, expect, it } from 'vitest';
-import { gateTypeLabel, gateTypeLabelKey } from './gate-type-label';
+import { GATE_CLAIM_GROUPS, GATE_TYPE_LABEL_KEYS, gateClaimGroup, gateClaimLabel, gateTypeLabel, gateTypeLabelKey } from './gate-type-label';
+
+// story #4558(유나 AC0 정본 §2 · 2026-10-07) — 게이트 머리 눈썹 글은 gate_type → 세 묶음. 판단 요청 넷은 «에이전트 질문 · 판단을
+// 기다려요», 진행 승인 여섯은 «진행 승인 · …»(external_publish만 «발행 승인 · …» 유지), 완료 주장 여섯은 기본값, 맵 밖은 «완료» 단정 없이
+// 진행 승인 글. 묶음 표를 지우거나 기본값을 «완료 주장»으로 되돌리면 RED. (t = 키를 그대로 돌려주는 번역자 — 어느 키를 불렀는지 본다)
+describe('gateClaimLabel — story #4558 눈썹 세 묶음', () => {
+  const key = (k: string) => k;
+
+  it('판단 요청 넷 → claim.decisionRequestLabel', () => {
+    for (const type of ['agent_decision_request', 'loop_decision', 'hypothesis_outcome_confirm', 'support_escalation_review']) {
+      expect(gateClaimGroup(type)).toBe('decision_request');
+      expect(gateClaimLabel(key, type)).toBe('claim.decisionRequestLabel');
+    }
+  });
+
+  it('완료 주장 여섯 → claim.label(지금 기본값 그대로)', () => {
+    for (const type of ['qa', 'pr_review', 'merge', 'doc_approval', 'concept_approval', 'artifact_canonicalize']) {
+      expect(gateClaimGroup(type)).toBe('claim');
+      expect(gateClaimLabel(key, type)).toBe('claim.label');
+    }
+  });
+
+  it('진행 승인 여섯 → claim.goAheadLabel · external_publish만 claim.publishApprovalLabel(story #4336 낱말 유지)', () => {
+    for (const type of ['newsletter_send', 'ads_boost', 'generation_budget', 'deploy', 'workflow_config_publish']) {
+      expect(gateClaimGroup(type)).toBe('go_ahead');
+      expect(gateClaimLabel(key, type)).toBe('claim.goAheadLabel');
+    }
+    expect(gateClaimGroup('external_publish')).toBe('go_ahead');
+    expect(gateClaimLabel(key, 'external_publish')).toBe('claim.publishApprovalLabel');
+  });
+
+  it('맵 밖 값 · null · undefined는 «완료했다고 말해요»(claim.label)가 아니라 진행 승인 글', () => {
+    for (const type of ['some_future_unknown_gate', 'merge_gate', null, undefined]) {
+      expect(gateClaimLabel(key, type)).toBe('claim.goAheadLabel');
+      expect(gateClaimLabel(key, type)).not.toBe('claim.label');
+    }
+  });
+
+  it('묶음 표의 종류 집합 == 사람 낱말 표(GATE_TYPE_LABEL_KEYS)의 종류 집합 — 새 gate_type을 한쪽에만 더하면 RED', () => {
+    expect(Object.keys(GATE_CLAIM_GROUPS).sort()).toEqual(Object.keys(GATE_TYPE_LABEL_KEYS).sort());
+  });
+});
 
 // story #3565(유나 §17-24 전수·페드루 PO 確定 2026-09-06) — gate_type 12종
 // (기존 6 + 신규 6) 전부 사람 낱말로 뜨는지·미등재 값은 원시값이 아니라

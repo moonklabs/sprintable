@@ -29,20 +29,20 @@ async def emit_conversation_working(org_id, conversation_id) -> None:
     #2120: chat_presence.list_working이 async(Redis 공유)로 전환돼 이 함수도 async — 호출부는 await.
     """
     try:
-        from app.models.conversation import ConversationParticipant
         from app.routers.events import push_to_org_members
         from app.services import chat_presence
 
         from app.core.database import async_session_factory
-        from sqlalchemy import select
 
         async with async_session_factory() as session:
-            rows = await session.execute(
-                select(ConversationParticipant.member_id).where(
-                    ConversationParticipant.conversation_id == conversation_id,
-                )
-            )
-            participant_ids = {str(r[0]) for r in rows.all()}
+            # story #4500: this org's conversation (its id can come from Redis) · this org's members only
+            import uuid
+
+            from app.services.member_resolver import conversation_member_ids_in_org
+
+            participant_ids = {str(m) for m in await conversation_member_ids_in_org(
+                session, uuid.UUID(str(conversation_id)), uuid.UUID(str(org_id)),
+            )}
 
         await push_to_org_members(
             str(org_id),

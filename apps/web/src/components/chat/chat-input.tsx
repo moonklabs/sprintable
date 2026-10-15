@@ -35,6 +35,7 @@ import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberDisplayLabel, memberRowLabels, type MemberRow } from '@/lib/member-display';
+import { draftOwnerSegment } from '@/lib/tab-owner';
 
 // story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
 // 산다 — 여기선 재-export만 해서 기존 소비부(테스트 등)의 import 경로를 그대로 둔다.
@@ -137,8 +138,10 @@ function mentionMemberRoleLabel(
 // ChatInput을 통째로 리마운트시키므로(page.tsx), threadId가 이 컴포넌트 수명 중에 바뀌는
 // 경우 자체가 없다 — 마운트 시 lazy initializer로 그 대화의 초안을 1회 읽으면 AC3(대화별
 // 분리)가 별도 분기 없이 성립한다.
+// story #4490 — the owner segment (`u:<user>:`): another person on this browser (even in the same conversation) never sees it,
+// and the same person gets it back after switching away and back.
 function draftStorageKey(threadId: string): string {
-  return `sprintable:chat-draft:${threadId}`;
+  return `sprintable:chat-draft:${draftOwnerSegment('local')}${threadId}`;
 }
 
 function loadDraft(threadId: string): string {
@@ -208,10 +211,16 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // 지시 중 오발송이 잦다. 뷰포트가 아니라 입력 capability로 분기(물리 키보드 연결 태블릿은
   // 데스크톱 거동이 자연스러움) — artifact-stage.tsx와 동형 패턴(`(pointer: coarse)` 1회 판정,
   // SSR 안전 lazy initializer, 하이브리드 기기 중간 전환은 희귀 엣지케이스라 리스너 미부착).
+  // story 4510: the blur's delayed close (so a click on a picker row lands first) must not outlive the component — a test that
+  // ended within 150 ms of a blur left it running after the file, where `window` was already gone (CI «window is not defined»)
+  const blurCloseTimer = useRef<number | null>(null);
+  useEffect(() => () => { if (blurCloseTimer.current !== null) window.clearTimeout(blurCloseTimer.current); }, []);
   const [isTouchDevice] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
   // story #2032 AC2/AC3: 대화별 초안 복원(lazy initializer — 마운트 시 1회, 리마운트당 재평가).
   const [text, setText] = useState(() => loadDraft(threadId));
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  // story #4474: how many files the last add left out over the cap — said out loud instead of dropped in silence
+  const [droppedFiles, setDroppedFiles] = useState(0);
   const [uploadFailed, setUploadFailed] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
   const [sending, setSending] = useState(false);
@@ -455,6 +464,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       }
       setText('');
       setPendingFiles([]);
+      setDroppedFiles(0);
       setCommandQuery(null);
       mentionedIdsRef.current = [];
       onMentionIdsChange?.([]);
@@ -571,6 +581,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const addFiles = (files: File[]) => {
     if (files.length === 0) return;
     setUploadFailed(false);
+    // the files already attached and the first of the new ones are kept; the overflow is always the LAST of the files just
+    // picked — counted so the line below can say so (Yuna: the person must know which ones to pick again)
+    setDroppedFiles(Math.max(0, pendingFiles.length + files.length - MAX_ATTACHMENTS));
     setPendingFiles((prev) => [...prev, ...files].slice(0, MAX_ATTACHMENTS));
   };
 
@@ -596,6 +609,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const removePendingFile = (index: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+    setDroppedFiles(0);
     setUploadFailed(false);
   };
 
@@ -663,7 +677,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       {steerError && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{steerError}</p>
       )}
-      {atMaxAttachments && (
+      {droppedFiles > 0 ? (
+        // story #4474 — the files over the cap are named by count and reason (a status, so a screen reader hears it too)
+        <p role="status" data-testid="chat-attachments-dropped" className="mb-1 break-keep text-xs text-muted-foreground">
+          {t('attachmentsDropped', { dropped: droppedFiles, max: MAX_ATTACHMENTS })}
+        </p>
+      ) : atMaxAttachments && (
         <p className="mb-1 text-xs text-muted-foreground">{t('maxAttachmentsReached', { max: MAX_ATTACHMENTS })}</p>
       )}
 
@@ -732,7 +751,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               aria-label={t('steerPanelTargetLabel')}
               value={steerTargetId}
               onChange={(e) => setSteerTargetId(e.target.value)}
-              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs text-foreground"
             >
               <option value="">{t('steerPanelTargetPlaceholder')}</option>
               {steerTargets.map((p) => (
@@ -755,7 +774,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
                 placeholder={t('steerPanelWorkItemPlaceholder')}
                 aria-label={t('steerPanelWorkItemLabel')}
-                className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs text-foreground placeholder:text-muted-foreground"
               />
               {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
                   멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
@@ -976,7 +995,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onBlur={() => {
-            window.setTimeout(() => {
+            // story 4510: one pending close at a time, and cleared when the component goes (blurCloseTimer effect above)
+            if (blurCloseTimer.current !== null) window.clearTimeout(blurCloseTimer.current);
+            blurCloseTimer.current = window.setTimeout(() => {
+              blurCloseTimer.current = null;
               setMentionQuery(null);
               setMentionMembers([]);
               entityPicker.close();
@@ -985,7 +1007,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           }}
           disabled={disabled || sending || steerSending}
           placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
-          className="flex-1 resize-none rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40"
+          className="flex-1 resize-none rounded-xl border border-border bg-muted/30 px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />
 

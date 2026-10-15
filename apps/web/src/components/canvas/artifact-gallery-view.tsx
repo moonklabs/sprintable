@@ -284,6 +284,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           <button
             key={a}
             type="button"
+            aria-pressed={axis === a}
             onClick={() => setAxis(a)}
             className={cn(
               'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
@@ -307,6 +308,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           <button
             key={g.id}
             type="button"
+            aria-pressed={selectedGroupId === g.id}
             onClick={() => setSelectedGroupId(g.id)}
             className={cn(
               'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',

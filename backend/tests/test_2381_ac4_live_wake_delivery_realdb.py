@@ -27,6 +27,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from tests.agent_stream_auth import agent_stream_claims, seed_agent_stream_key
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -116,10 +118,9 @@ class _FakeRequest:
 async def _open_stream(ag, Session, agent_id: uuid.UUID, org_id: uuid.UUID):
     from app.dependencies.auth import AuthContext
 
-    auth = AuthContext(
-        user_id=str(agent_id), email=None,
-        claims={"app_metadata": {"api_key_id": "test-key", "org_id": str(org_id)}},
-    )
+    async with Session() as s:
+        key_id = await seed_agent_stream_key(s, agent_id)  # the stream rechecks its key each tick (story #4434)
+    auth = AuthContext(user_id=str(agent_id), email=None, claims=agent_stream_claims(key_id, org_id))
     resp = await ag.agent_stream(_FakeRequest(), auth=auth)
     assert resp.status_code == 200
     return resp

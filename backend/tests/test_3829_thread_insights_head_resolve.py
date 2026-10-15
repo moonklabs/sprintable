@@ -31,6 +31,15 @@ def anyio_backend():
     return "asyncio"
 
 
+def _caller(user_id):
+    """story #4688 (AC2): the endpoint now checks the publication's story project against the CALLER's scope, so a direct call needs the caller the
+    route always has (`Depends(get_current_user)` → an AuthContext with `user_id`) — here the seeded org owner, who reaches the seeded project.
+    These tests call the endpoint function itself, which skips the auth dependency, and used to pass None."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(user_id=str(user_id))
+
+
 @pytest.fixture(autouse=True)
 async def _dispose_global_engine_after_test():
     yield
@@ -70,13 +79,13 @@ async def test_insights_endpoint_resolves_any_segment_id_to_head_realdb():
             head_id, seq2_id, seq3_id = rows[0].id, rows[1].id, rows[2].id
 
             head_result = await _list_publication_insights_endpoint(
-                org_id, head_id, db=s, verified_org_id=org_id, _auth=None, resolved_locale="ko",
+                org_id, head_id, db=s, verified_org_id=org_id, _auth=_caller(owner_id), resolved_locale="ko",
             )
             assert len(head_result) == 2, "헤드 id 자체로 물으면 원래도 2행이어야 한다(양성대조)"
 
             for seg_id in (seq2_id, seq3_id):
                 result = await _list_publication_insights_endpoint(
-                    org_id, seg_id, db=s, verified_org_id=org_id, _auth=None, resolved_locale="ko",
+                    org_id, seg_id, db=s, verified_org_id=org_id, _auth=_caller(owner_id), resolved_locale="ko",
                 )
                 assert len(result) == 2, f"세그먼트 id({seg_id})로 물었는데 헤드로 해석되지 않았다: {result}"
                 assert {r.id for r in result} == {r.id for r in head_result}
@@ -280,7 +289,7 @@ async def test_mutation_resolve_removed_seq3_query_returns_empty_realdb():
             insight_snapshots_router.resolve_head_publication_id = _identity
             try:
                 result = await insight_snapshots_router._list_publication_insights_endpoint(
-                    org_id, seq3_id, db=s, verified_org_id=org_id, _auth=None, resolved_locale="ko",
+                    org_id, seq3_id, db=s, verified_org_id=org_id, _auth=_caller(owner_id), resolved_locale="ko",
                 )
                 assert result == [], "뮤테이션(해석 비활성화)이 걸렸는데도 seq3 조회가 여전히 결과를 낸다"
             finally:

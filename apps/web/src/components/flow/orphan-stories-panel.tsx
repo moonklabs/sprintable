@@ -29,7 +29,7 @@ export function OrphanStoriesPanel({ orphanStories, activeGoals, onSelectStory, 
     <div className="rounded-lg border border-dashed border-border">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
         className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
       >
         <span className="text-[13px] text-foreground">
@@ -92,7 +92,7 @@ function OrphanRow({
           <select
             value={selectedEpicId}
             onChange={(e) => setSelectedEpicId(e.target.value)}
-            className="rounded border border-border bg-card px-1.5 py-1 text-[11px]"
+            className="rounded border border-border bg-card px-1.5 py-1 text-base lg:text-[11px]"
           >
             <option value="">{t('orphanPickPlaceholder')}</option>
             {activeGoals.map((g) => (

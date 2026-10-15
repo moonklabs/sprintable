@@ -200,6 +200,11 @@ class Settings(BaseSettings):
     # E-EVENTBUS: dev=true, prod=false (기존 웹훅 병행 운영)
     eventbus_enabled: bool = False
 
+    # story #4397 — send push notifications to a person's devices across their orgs (push_devices.user_id), instead of only
+    # the devices last registered in the notification's org. Env PUSH_DEVICES_BY_USER. Default off; dev on; prod on only after
+    # the app build that re-registers on account switch (and opens a notification of another org in that org) is out.
+    push_devices_by_user: bool = False
+
     # E-ARCH S1(2026-07-21, 선생님 "가자" 승인 — 채팅 5초 지연/#2074 근본): REST(api)와
     # 실시간(SSE/LISTEN)이 같은 Cloud Run 서비스에 있어 인스턴스 기아(콜드스타트 경합)로
     # 서로를 굶기던 구조를 분리하는 1단계. 이 플래그를 끄면 이 인스턴스는 pg_pubsub LISTEN을
@@ -494,6 +499,10 @@ class Settings(BaseSettings):
     # story 132e7204(Phase1-S4): Next.js BFF↔FastAPI 세션쿠키 발급 내부 호출 공유시크릿.
     # cron.py CRON_SECRET과 동일 패턴 — 미설정(로컬 개발) 시 인증 생략.
     firebase_bff_internal_secret: str = ""
+
+    # story #4398: 프런트(BFF)가 정한 사용자 IP(`X-Sprintable-Client-IP`)를 믿을지 가르는 공유 비밀(`X-Sprintable-Edge-Key`).
+    # 미설정이면 그 헤더를 안 믿고 Cloud Run 앞단이 붙인 접속 주소(XFF 오른쪽 끝)로 센다 — 배포 순서에 안 막힌다.
+    edge_client_ip_secret: str = ""
 
     # story 4dee942b(Phase1-S5): 네이티브 부트스트랩 — custom token→ID token 교환용 Firebase
     # Web API key(공개 클라이언트 키, ADC와 별개). App Check 검증용 project number(project_id와

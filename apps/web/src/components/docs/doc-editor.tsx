@@ -440,6 +440,7 @@ export function DocEditor({
               <button
                 key={mode}
                 type="button"
+                aria-pressed={viewMode === mode}
                 onClick={() => setViewMode(mode)}
                 className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
                   viewMode === mode
@@ -570,7 +571,7 @@ export function DocEditor({
           value={rawMarkdown}
           onChange={handleTextareaChange}
           readOnly={!editable}
-          className="flex-1 w-full resize-none bg-transparent p-4 font-mono text-sm leading-relaxed outline-none"
+          className="flex-1 w-full resize-none bg-transparent p-4 font-mono text-base lg:text-sm leading-relaxed outline-none"
           placeholder={labels.placeholder}
         />
       ) : (

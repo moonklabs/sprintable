@@ -23,14 +23,12 @@ pass/fail(의도된 실패)로 실증한다.
 """
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-
+# story 4459: imported through the `tests` package — putting tests/ at the front of sys.path made `import mcp` find tests/mcp/
+# for every later file in the same run (test_2188 then failed with «No module named 'mcp.types'»)
 from app.schemas.deeplink_manifest import (  # noqa: E402
     DEEPLINK_MANIFEST,
     MANIFEST_SCHEMA_VERSION,
@@ -39,7 +37,7 @@ from app.schemas.deeplink_manifest import (  # noqa: E402
     UnregisteredDeepLinkTypeError,
     validate_push_payload,
 )
-from deeplink_contract_lib import (  # noqa: E402
+from tests.deeplink_contract_lib import (  # noqa: E402
     scan_dispatch_notification_call_sites,
     target_route_exists,
 )
@@ -99,7 +97,11 @@ def test_manifest_covers_all_30_dispatch_notification_event_types():
     story #2709: agent_decision_resolved 신설로 28→29.
     story #1715: merge_gate_resolved 신설로 29→30.
     story #2789: agent_decision_withdrawn 신설로 30→31.
-    story #2747: doc_draft_discussed_in_chat 신설로 31→32."""
+    story #2747: doc_draft_discussed_in_chat 신설로 31→32.
+    story #4417: ads_boost_spend_unreadable 신설로 32→33.
+    story #4533: agent.permission_request 신설로 33→34.
+    story #4534: agent.turn_ended 신설로 34→35.
+    story #4685: agent.limit_paused · agent.limit_lifted 신설로 35→37."""
     expected = {
         "sprint_closed", "task_completed", "story_assigned", "comment.created",
         "artifact.created", "artifact.exported", "artifact.updated", "artifact.canonicalized",
@@ -110,7 +112,8 @@ def test_manifest_covers_all_30_dispatch_notification_event_types():
         "conversation.unsupervised_chain_expired", "doc_approval_resolved",
         "conversation.circuit_breaker_opened", "doc_approval_discussion_requested",
         "agent_decision_resolved", "merge_gate_resolved", "agent_decision_withdrawn",
-        "doc_draft_discussed_in_chat",
+        "doc_draft_discussed_in_chat", "ads_boost_spend_unreadable", "agent.permission_request", "agent.turn_ended",
+        "agent.limit_paused", "agent.limit_lifted",
     }
     actual = {e.app.type for e in DEEPLINK_MANIFEST.entries}
     missing = expected - actual

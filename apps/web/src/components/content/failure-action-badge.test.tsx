@@ -75,8 +75,9 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it('⭐auto_retry — 버튼 없음(§17-13 "자동 재시도가 예정되면 수동 버튼 없음"), next_retry_at 보간', async () => {
     await render({ kind: 'auto_retry', nextRetryAt: '2026-09-05T00:00:00Z' });
     expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
-    // story #4280 — 시간대 표기가 보는 사람(실행 기계 TZ)에 따라 붙거나 생략되므로 기대값도 같은 포맷터로 만든다(표기 규칙은 schedule-format.test.ts 진리표).
-    expect(container.textContent).toBe(koMessages.content.channelPostsFailureAutoRetryAt.replace('{time}', formatScheduledAt('2026-09-05T00:00:00Z', 'UTC').display));
+    // story #4443 PR3a (Kadir 4871 ①) — the badge draws in the zone it is given and labels it when that is not the viewer's (here,
+    // with no provider, the machine's): the expectation is built the same way
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureAutoRetryAt.replace('{time}', formatScheduledAt('2026-09-05T00:00:00Z', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone).display));
     expect(container.textContent).toContain('09-05 00:00');
   });
 

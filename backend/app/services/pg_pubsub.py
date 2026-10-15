@@ -40,20 +40,24 @@ _MAX_PAYLOAD_BYTES = 7500  # 8KB PG 제한 대비 여유
 _background_tasks: set[asyncio.Task] = set()
 
 
-def fire_and_forget(coro: "Coroutine[Any, Any, Any]") -> None:
+def fire_and_forget(coro: "Coroutine[Any, Any, Any]") -> "asyncio.Task | None":
     """asyncio task를 발사하되 완료까지 강한 참조를 유지한다(GC 조기 수거 방지).
 
     이벤트 루프가 없으면(테스트 등) 조용히 no-op — 기존 호출부들의 `except RuntimeError: pass`
     관례와 동형(호출부가 개별 try/except를 반복할 필요 없음).
+
+    story #4396 — returns the task (None without a loop) so a caller can tell whether its task is still running (e.g. «at most
+    one at a time»). Existing callers ignore the return value.
     """
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         coro.close()  # 이벤트 루프 없음 — "coroutine was never awaited" 경고 방지
-        return
+        return None
     task = loop.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    return task
 
 
 async def drain_background_tasks(timeout: float = 5.0) -> None:

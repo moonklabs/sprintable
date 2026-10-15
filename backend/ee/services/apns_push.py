@@ -24,7 +24,7 @@ import time
 import uuid
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -198,15 +198,11 @@ async def _fetch_apns_targets(
     if not targets:
         return []
 
-    rows = await db.execute(
-        select(PushDevice).where(
-            PushDevice.org_id == org_id,
-            PushDevice.member_id.in_(targets),
-            PushDevice.platform == "macos",
-            PushDevice.is_active.is_(True),
-        )
-    )
-    return [{"apns_device_token": d.apns_device_token} for d in rows.scalars().all()]
+    from ee.services.push_targets import select_active_devices
+
+    # story #4397 — by person when `push_devices_by_user` is on (a device is a person's, not one org's).
+    devices = await select_active_devices(db, org_id, targets, PushDevice.platform == "macos")
+    return [{"apns_device_token": d.apns_device_token} for d in devices]
 
 
 async def _send_apns_targets(
@@ -287,12 +283,10 @@ async def _finalize_apns_dead_tokens(
     별도 짧은 세션에서 호출하는 것을 전제)."""
     if not dead_tokens:
         return
+    # story #4397 — by token alone: a token is globally unique, and with sending by person the row may be homed in another org.
     await db.execute(
         update(PushDevice)
-        .where(
-            PushDevice.org_id == org_id,
-            PushDevice.apns_device_token.in_(dead_tokens),
-        )
+        .where(PushDevice.apns_device_token.in_(dead_tokens))
         .values(is_active=False)
     )
     await db.flush()

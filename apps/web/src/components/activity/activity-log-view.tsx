@@ -10,7 +10,8 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { actorRowLabels, memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -255,7 +256,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 onChange={(e) => setActionFilter(e.target.value || ALL)}
                 placeholder={t('filterAction')}
                 maxLength={ACTION_FILTER_MAX_LENGTH}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                className="rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
             </div>
             <div className="flex items-center gap-2 sm:ml-auto">
@@ -263,7 +264,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none"
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
                 aria-label={t('fromDate')}
               />
               <span className="text-xs text-muted-foreground">~</span>
@@ -271,7 +272,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none"
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
                 aria-label={t('toDate')}
               />
             </div>
@@ -379,10 +380,9 @@ function ActivityRow({ item, rowLabel }: { item: ActivityLogItem; rowLabel?: str
   // 으로 통일. document.documentElement.lang 수동 판독도 useLocale()로 정리(같은 뜻,
   // 정본 훅 사용).
   const locale = useLocale();
-  // story #4280 — 기간(위 ActivityLogView)과 같은 표시 시간대 축(조직 timezone 우선).
-  const { orgTimezone } = useDashboardContext();
-  const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
-  const time = formatRelativeTime(item.created_at, locale, displayTimezone);
+  // story #4443 PR3a (PO 00:07Z) — a row says when it happened: the viewer's zone (was the org's, story #4280). The period above
+  // (ActivityLogView's range) stays the org's — a team looks at the same days.
+  const time = formatViewerRelativeTime(item.created_at, locale, useViewerTimeZone());
   const tc = useTranslations('common');
   const { human, agent } = auditActorProps(item, tc, rowLabel);
   return (

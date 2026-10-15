@@ -20,6 +20,7 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
+import { CommandPaletteProvider } from '@/components/command-palette/command-palette-context';
 import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, livePathProject, navProjectSlug } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
@@ -34,6 +35,7 @@ import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-g
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
+import { OrgHintBanner } from '@/components/nav/org-hint-banner';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { withProjectParam } from '@/lib/with-project-param';
 import { usePendingProjectTarget } from '@/lib/pending-project-switch';
@@ -109,7 +111,9 @@ interface DashboardContext {
   inShell?: boolean;
 }
 
-const DashboardCtx = createContext<DashboardContext>({
+// exported for the #4397 harness (the real context around the org hint banner; mocking this module cannot reach the banner,
+// which this module imports itself)
+export const DashboardCtx = createContext<DashboardContext>({
   projectMemberships: [], orgMemberships: [], orgSyncPending: false,
   bottomDockBannerSlot: null, setBottomDockBannerSlot: () => {},
 });
@@ -268,6 +272,10 @@ function ScrollShell({
         <div className="px-3 pt-3 empty:hidden">
           <ActivationChecklistBanner />
         </div>
+        {/* story #4397 — a notification of another of the person's orgs: offer the switch (never automatic). */}
+        <div className="px-3 pt-3 empty:hidden">
+          <OrgHintBanner />
+        </div>
         {/* story #4130(PO 라이브 실측, 2026-09-21 23:23~23:31Z) — 이 아래 `min-h-0`를 뺐다.
             바깥 스크롤러(위 :199 `overflow-y-auto`) 「안」에서 다시 `min-h-0`+`flex-1`을 쓰면
             이 그리드/콘텐츠 열이 뷰포트 남은 높이에 캡돼(scrollHeight가 박스 높이를 넘쳐도
@@ -326,7 +334,8 @@ function ScrollShell({
  * `useDashboardContext().projectId` 소비부가 이 값으로 자동 URL-aware 가 된다. fetch 인터셉터가
  * 같은 값을 `X-Project-Id` 헤더로 실어 mutation 을 탭의 URL 프로젝트에 바인딩(BE 가 멤버십 검증).
  */
-function useProjectSsot(
+// exported for the #4397 harness (org hint banner + this `?p=` normalization, both replacing the same address)
+export function useProjectSsot(
   serverProjectId: string | undefined,
   memberships: DashboardProjectOption[],
   pathProjectId: string | undefined,
@@ -375,7 +384,9 @@ function useProjectSsot(
     if (pathProjectId || urlProjectId === effectiveProjectId) return;
     const sp = new URLSearchParams(Array.from(searchParams.entries()));
     sp.set('p', effectiveProjectId);
-    router.replace(`${pathname}?${sp.toString()}`);
+    // story 4504: keep the address `#` — a page that reads its values from there (the desktop setup's `#code=…`, put in by the app
+    // in the same document) would otherwise lose them when this replace lands before the page's `hashchange` handler runs.
+    router.replace(`${pathname}?${sp.toString()}${window.location.hash}`);
   }, [effectiveProjectId, urlProjectId, pathProjectId, pathname, searchParams, router]);
 
   return effectiveProjectId;
@@ -532,6 +543,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
+    <CommandPaletteProvider>
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
@@ -581,6 +593,7 @@ export function DashboardShell({
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>
+    </CommandPaletteProvider>
     </ToastProvider>
   );
 }

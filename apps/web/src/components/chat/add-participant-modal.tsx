@@ -128,6 +128,7 @@ export function AddParticipantModal({
                   <button
                     type="button"
                     onClick={() => setSelected((prev) => (prev === m.id ? null : m.id))}
+                    aria-pressed={selected === m.id}
                     className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${
                       selected === m.id
                         ? 'bg-primary/10 text-primary'

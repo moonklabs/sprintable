@@ -11,6 +11,7 @@ IAP + agent SA)이 아니라, **agent lane 하나만**(SA ID token + email allow
 `auth_configured` 원칙과 동일."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -47,8 +48,9 @@ async def require_admin_operator(
         raise _FORBIDDEN
     token = authorization.split(" ", 1)[1].strip()
     try:
-        claims = id_token.verify_oauth2_token(
-            token, _ga_request(), audience=settings.admin_operator_audience
+        # story #4403 AC1b — 동기 google-auth 네트워크 호출(기본 timeout 120s)이 이벤트 루프를 막지 않게
+        claims = await asyncio.to_thread(
+            id_token.verify_oauth2_token, token, _ga_request(), audience=settings.admin_operator_audience
         )
     except Exception as e:  # noqa: BLE001 — 어떤 검증 실패도 403로 닫는다(internal-api와 동형)
         logger.warning("admin operator token verify failed: %s", e)

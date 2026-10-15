@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { actorRowLabels, memberLookup } from '@/lib/member-display';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CheckCircle, ExternalLink, RotateCcw, Shield, ShieldCheck, ShieldX, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -15,6 +14,7 @@ import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-
 import { fetchWithAuth } from '@/lib/db/client';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #2955 §3/§7(doc docs-index-reader-redesign-handoff) — 셸 B "에디토리얼 리더"의
@@ -139,12 +139,12 @@ export function useDocGateData(docId: string, status: string | undefined) {
 export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { docId: string; status: string | undefined; editHref: string; onTransitioned: () => void }) {
   const t = useTranslations('docs');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { currentTeamMemberId } = useDashboardContext();
   const { gate, busy, error, state, isApprover, isSigFlow, resolveName, docTransition, gateTransition } = useDocGateData(docId, status);
   const Icon = STATE_ICON[state];
   // story #3493 — gate 시각은 "기록"(정본 formatRelativeTime).
-  const fmtDate = (s: string | undefined | null) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
+  const fmtDate = (s: string | undefined | null) => (s ? formatViewerRelativeTime(s, locale, displayTimezone) : '');
 
   const errorBanner = error ? (
     <p className="mt-1.5 basis-full break-keep text-xs text-destructive">{error}</p>
@@ -253,7 +253,7 @@ const AUDIT_KIND_PROOF: Record<AuditKind, ProofState> = {
 export function DocEvidenceRail({ docId, status }: { docId: string; status: string | undefined }) {
   const t = useTranslations('docs');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { gate, revisions, resolveName } = useDocGateData(docId, status);
 
   const auditEvents: AuditEvent[] = [];
@@ -275,7 +275,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
   const auditLabels = actorRowLabels(auditEvents.map((ev) => ({ id: ev.actorId, label: ev.name })));
 
   // story #3493 — 감사 이력 항목 시각은 "기록"(정본 formatRelativeTime).
-  const fmtDate = (s: string) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
+  const fmtDate = (s: string) => (s ? formatViewerRelativeTime(s, locale, displayTimezone) : '');
   const auditKindLabel: Record<AuditKind, string> = {
     request: t('docGateAuditRequested'), resubmit: t('docGateAuditResubmitted'),
     approved: t('docGateAuditApproved'), rejected: t('docGateAuditRejected'),

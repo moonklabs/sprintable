@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 import { FileText, MessageSquare, Calendar, BookOpen, ClipboardCheck, Frame } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { fetchWithAuth } from '@/lib/db/client';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { toPlainPreview } from '@/components/chat/entity-ref';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface BacklinkMember { id: string; name: string; type: string }
 
@@ -193,7 +193,7 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
   // 전부 organization 네임스페이스에 산다(recipe-detail-view.tsx 등 기존 소비처와 동일).
   const tOrg = useTranslations('organization');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story-detail-panel처럼 entityId만 바뀌고 이 컴포넌트가 리마운트 안 되는 호출부가 있을 수
   // 있다 — 결과에 entityType+entityId를 같이 담아 렌더 시점에 일치 여부로 판정한다(전환-누출
   // 방지, #2299 원본 회귀테스트와 동형. 동기 setState-in-effect도 그래서 안 씀).
@@ -267,7 +267,7 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
                   )}
                   <div className="text-[10px] text-muted-foreground">
                     {creatorName ? `${creatorName} · ` : ''}
-                    {formatRelativeTime(item.created_at, locale, displayTimezone)}
+                    {formatViewerRelativeTime(item.created_at, locale, displayTimezone)}
                   </div>
                 </div>
               </li>

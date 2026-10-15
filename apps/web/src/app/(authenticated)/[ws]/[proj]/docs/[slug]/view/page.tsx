@@ -16,8 +16,8 @@ import { useDocsLayout } from '../../docs-context';
 import { docUrl, docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface DocDetail {
   id: string;
@@ -53,7 +53,7 @@ export default function DocViewPage() {
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const t = useTranslations('docs');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { wsSlug, projSlug, projectId, tree } = useDocsLayout();
 
   const [doc, setDoc] = useState<DocState>(null);
@@ -162,7 +162,7 @@ export default function DocViewPage() {
             <h1 className="mt-2 font-display font-editorial-heading text-[38px] leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
               {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-border">|</span></>) : null}
-              <span>{doc.updated_at ? formatRelativeTime(doc.updated_at, locale, displayTimezone) : ''}</span>
+              <span>{doc.updated_at ? formatViewerRelativeTime(doc.updated_at, locale, displayTimezone) : ''}</span>
               <span className="text-border">|</span>
               <span>{t('readMinutes', { minutes: readMinutes })}</span>
               {doc.revisions?.count ? (<><span className="text-border">|</span><span>v{doc.revisions.count}</span></>) : null}

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from ..api_client import _api_key_override, _auth_ctx_cache, client
+from ..api_client import _api_key_override, _auth_ctx_cache, as_mapping, client
 from ..response import err, ok
 
 
@@ -47,7 +47,7 @@ async def set_default_project(args: SetDefaultProjectInput) -> list:
         # 즉시 보게 한다(설정했는데 계속 예전 값/에러 나오면 도구의 존재 의미가 없음). effective
         # 키(_effective_ctx와 동형 — override 있으면 그 키, 없으면 stdio 단일 env 키)만 갱신·
         # 다른 테넌트 키 오염 금지.
-        new_default = result.get("resolved_default_project_id")
+        new_default = as_mapping(result).get("resolved_default_project_id")
         if new_default:
             client._project_id = new_default  # stdio(override 無) 경로.
             client._project_id_ambiguous = False

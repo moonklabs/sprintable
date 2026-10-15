@@ -186,6 +186,18 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(`app/core/request_db_timing.py`). 폴링 경로(designated-pending-count 등)
   때문에 양이 커 다른 환경은 미설정 = 기본 끔. 응답 헤더엔 싣지 않는다(존재 여부 누출 · PR 4697 CI). 배포 설정도
   코드라 PR로(PO) — 수동 env 주입 아님.
+- **story #4398 ④ 관측 걷음(PO 판정 2026-09-29 00:18Z)**: `XFF_PROBE_ENABLED`(XFF 칸 수 · 맨 오른쪽 · 소켓 주소 임시 관측 · PR 4798)는
+  «프런트 요청 1277건 전부 hops 2 · 오른쪽 끝 Cloudflare · run.app 직통은 hops 1 · 접속 주소»로 판정이 끝나 코드를 걷었다. 배포 43이
+  dev에 넣은 값은 `--update-env-vars`가 추가형이라 그대로 남으므로 **모든 환경에서 명시 제거**(백엔드 REMOVE_ENV_VARS · 프런트
+  `--remove-env-vars`). 읽는 코드가 없어 남아도 무해하지만 «꺼진 스위치가 켜진 채 남은 설정»을 두지 않는다. 다음 배포 정리 때 이 이름을
+  제거 목록에서도 뺀다.
+- **story #4398 RM_SECRETS(PO 결정 2026-09-29)**: `EDGE_CLIENT_IP_SECRET`은 dev만 `SECRETS_FLAG`(`--update-secrets`)로 붙이고
+  prod는 `RM_SECRETS`=`--remove-secrets=EDGE_CLIENT_IP_SECRET`로 명시 제거(«밖은 명시 제거» 규칙 — 손으로 붙인 값도 다음 배포가 뗀다).
+  SECRETS_FLAG 블록 밖 별도 변수인 이유: infra/check_secrets_flag_env_symmetry.py · cloudbuild_secret_refs.py가 `--update-secrets=` 한
+  따옴표 안을 KEY=VALUE 목록으로 읽는다. 붙은 적 없는 키 제거는 gcloud가 건너뛴다(command_lib/run/config_changes.py `_PruneMapping`:
+  `if var_or_path in mapping: del mapping[var_or_path]`) · `--update-secrets`와 `--remove-secrets`는 같이 쓸 수 있다(flags.py
+  MapFlagsNoFile: «Only --update-{0} and --remove-{0} can be used together … --remove-{0} will be applied first»). dev엔 remove를 넣지
+  않는다(같은 키 update와 겹치지 않게). prod 승격 때 _PROD 시크릿을 SECRETS_FLAG prod 갈래에 넣으면서 이 remove를 걷는다.
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
 
@@ -325,6 +337,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_SUPPORT_ESCALATION_TARGET_ORG_SLUG", "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG",
     # story #4341 — 운영 알림 받는 곳(운영 대화 id). deploy-backend ENV_VARS가 직접 참조.
     "_OPS_ALERT_CONVERSATION_ID",
+    # story #4397 — push by person across orgs (settings.push_devices_by_user). deploy-backend ENV_VARS가 직접 참조.
+    "_PUSH_DEVICES_BY_USER",
     # story #3279(지원v1·후속) — 운영자 회신 배달 착지 URL. _NEXT_PUBLIC_SUPPORT_GATEWAY_URL은
     # 이전엔 deploy-frontend(순수 gcloud args 리스트 — 이 가드가 스캔하는 4개 bash 스텝 밖)
     # 에서만 쓰여 이 목록에 없어도 무해했으나(_APPLE_TEAM_ID와 동형 선례), deploy-backend
@@ -447,6 +461,8 @@ def _run_env_vars_assembly(
         "_PUBLIC_SITE_BASE_URL": "https://sprintable.ai",
         # story #4336 — deploy-backend ENV_VARS가 `--timeout`과 같은 값을 BACKEND_REQUEST_TIMEOUT_SECONDS로 싣는다(set -u).
         "_BACKEND_TIMEOUT": "1800" if deploy_env == "prod" else "3600",
+        # story #4397 — GHA sets prod 'false' · dev 'true' (set -u).
+        "_PUSH_DEVICES_BY_USER": "false" if deploy_env == "prod" else "true",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -803,6 +819,7 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         # story #4341 — 베이스 문자열 맨 끝(PUBLIC_SITE_BASE_URL 다음). 빈 값 = 운영 알림 미설정(not_configured).
         "OPS_ALERT_CONVERSATION_ID=,"
         "BACKEND_REQUEST_TIMEOUT_SECONDS=3600,"  # story #4336 — `--timeout`과 같은 값(워커 틱 예산)
+        "PUSH_DEVICES_BY_USER=true,"  # story #4397 — dev: push by person across orgs
         "REDIS_URL=redis://10.164.120.243:6379,RATE_LIMIT_BACKEND=redis,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
@@ -826,11 +843,60 @@ def test_deploy_backend_removes_db_timing_flag_outside_dev():
     dev는 켜고(제거 목록에 없음) · prod는 제거 목록에 있다 · 옛 REDIS_CONSUME_ENABLED 제거는 두 쪽 다 그대로. 같은 키를 켜면서 지우지 않는다."""
     dev_remove = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="REMOVE_ENV_VARS").split(",")
     prod_remove = _run_env_vars_assembly("prod", "", var="REMOVE_ENV_VARS").split(",")
-    assert dev_remove == ["REDIS_CONSUME_ENABLED"]
-    assert prod_remove == ["REDIS_CONSUME_ENABLED", "DB_TIMING_LOG_ENABLED"]
+    assert dev_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED"]
+    assert prod_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED", "DB_TIMING_LOG_ENABLED"]
     dev_env = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
     assert "DB_TIMING_LOG_ENABLED=true" in dev_env.split(",")
     assert "DB_TIMING_LOG_ENABLED" not in _run_env_vars_assembly("prod", "")
+
+
+def test_deploy_removes_xff_probe_flag_everywhere_after_observation():
+    """story #4398 — 임시 관측(XFF_PROBE_ENABLED) 코드를 걷은 뒤, 배포 43이 dev에 넣은 값은 `--update-env-vars`가 추가형이라 남는다 →
+    백엔드 · 프런트 둘 다 **모든 환경에서** 명시 제거(dev 포함). 켜는 쪽(ENV_VARS)에는 어디에도 없다."""
+    for deploy_env, redis in (("dev", "redis://10.164.120.243:6379"), ("prod", "")):
+        assert "XFF_PROBE_ENABLED" in _run_env_vars_assembly(deploy_env, redis, var="REMOVE_ENV_VARS").split(",")
+        assert "XFF_PROBE_ENABLED" not in _run_env_vars_assembly(deploy_env, redis)
+    cloudbuild = (Path(__file__).resolve().parents[2] / "cloudbuild.yaml").read_text()
+    frontend = cloudbuild[cloudbuild.index("gcloud run deploy sprintable-frontend"):]
+    frontend = frontend[: frontend.index("--quiet")]
+    assert "--remove-env-vars=XFF_PROBE_ENABLED" in frontend, frontend
+    assert "XFF_PROBE_ENABLED=true" not in cloudbuild
+
+
+def _run_frontend_deploy_argv(deploy_env: str) -> list[str]:
+    """deploy-frontend 스텝을 gcloud만 가로채 실행 — `gcloud run deploy`가 실제로 받는 인자 목록(따옴표 · 단어 나눔 적용 뒤)."""
+    script = _apply_cloudbuild_escaping(_extract_step_script("deploy-frontend"))
+    stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
+    env = {
+        **os.environ,
+        "_DEPLOY_ENV": deploy_env, "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
+        "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
+        "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
+        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2",
+    }
+    proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
+    return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
+
+
+def test_deploy_edge_client_ip_secret_attached_on_dev_and_removed_on_prod():
+    """story #4398(PO 2026-09-29) — EDGE_CLIENT_IP_SECRET은 dev만 `--update-secrets`로 붙이고, prod는 프런트 · 백엔드 둘 다
+    `--remove-secrets`로 명시 제거(«밖은 명시 제거» 규칙 · 손으로 붙인 값도 다음 배포가 뗀다). dev엔 remove가 없다(같은 키 update와
+    겹치지 않게). 붙은 적 없는 키 제거는 gcloud `_PruneMapping`(`if var_or_path in mapping: del`)이 건너뛴다."""
+    remove = "--remove-secrets=EDGE_CLIENT_IP_SECRET"
+    fe_dev, fe_prod = _run_frontend_deploy_argv("dev"), _run_frontend_deploy_argv("prod")
+    assert "--update-secrets=EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest" in fe_dev, fe_dev
+    assert not [a for a in fe_dev if a.startswith("--remove-secrets")], fe_dev
+    assert remove in fe_prod, fe_prod
+    assert not [a for a in fe_prod if "EDGE_CLIENT_IP_SECRET_DEV" in a], fe_prod
+
+    dev_flag = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="SECRETS_FLAG")
+    assert "EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest" in dev_flag.split(",")
+    assert _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="RM_SECRETS") == ""
+    assert "EDGE_CLIENT_IP_SECRET" not in _run_env_vars_assembly("prod", "", var="SECRETS_FLAG")
+    assert _run_env_vars_assembly("prod", "", var="RM_SECRETS") == remove
+    script = _extract_deploy_backend_script()
+    call = script[script.index("gcloud run deploy sprintable-backend"):]
+    assert "$${RM_SECRETS}" in call[: call.index("--quiet")], call
 
 
 def test_deploy_backend_gcloud_uses_assembled_remove_list():

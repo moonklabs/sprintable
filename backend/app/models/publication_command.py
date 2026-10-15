@@ -23,9 +23,26 @@ from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.core.database import Base
+
+# story #4447 (Qadir 4870 ①) — every status a publication command can hold, in one place. The boost card's contract
+# (services/ads_boost_states.COMMAND_STATUSES) is this tuple, and tests/test_4447_ads_boost_states_contract.py checks that every
+# value written to `command.status` under app/ is in it.
+STATUS_PENDING = "pending"
+STATUS_IN_PROGRESS = "in_progress"
+STATUS_COMPLETED = "completed"
+STATUS_FAILED = "failed"  # older rows; no current writer
+STATUS_DEAD_LETTER = "dead_letter"
+STATUS_VOIDED = "voided"
+STATUS_BLOCKED = "blocked"  # waiting on a connection fix or an org-wide pause (failure_kind says which)
+STATUS_BLOCKED_UNAPPROVED = "blocked_unapproved"  # stopped before the call: approval gone, connection or source missing
+STATUS_CANCELLED = "cancelled"  # a person cancelled a scheduled post
+PUBLICATION_COMMAND_STATUSES: tuple[str, ...] = (
+    STATUS_PENDING, STATUS_IN_PROGRESS, STATUS_COMPLETED, STATUS_FAILED, STATUS_DEAD_LETTER, STATUS_VOIDED, STATUS_BLOCKED,
+    STATUS_BLOCKED_UNAPPROVED, STATUS_CANCELLED,
+)
 
 
 class PublicationCommand(Base):
@@ -94,8 +111,7 @@ class PublicationCommand(Base):
     # 분기) — FK 없음 관례라 이 컬럼 없이는 워커가 두 도메인을 못 구분한다.
     content_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="channel_post")
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # 'pending'|'in_progress'|'completed'|'failed'|'dead_letter'|'voided'|'blocked'
-    # (blocked=connection 복구 대기, PO 정정2 추가② — 일반 재시도 큐 밖).
+    # PUBLICATION_COMMAND_STATUSES (above). blocked=connection 복구 대기(PO 정정2 추가② — 일반 재시도 큐 밖).
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -120,6 +136,8 @@ class PublicationCommand(Base):
     # null=이 정보를 모르는 기존 행(이 컬럼 도입 전 데이터·다른 content_kind는
     # 채울 이유가 없어 계속 null로 둔다 — ads_boost의 boost_start만 채움).
     initiated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4460 (0426) — ads_boost start/pause/resume: the run's cycle it was made in (null = 1, made before the mark)
+    ads_boost_cycle: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # story #4258(까디르 4621 codex P2 · PO 12:38Z) — 레시피 멈춤 통지 표식. `apply_command_failure`가 dead_letter · 연결
     # blocked로 **전이하는 같은 트랜잭션**에서 `pending`을 세우고, 워커가 행마다 자기 트랜잭션에서 «통지 발행 + `sent`»를 한
     # 커밋으로 한다(사라짐 0 · 같은 멈춤 중복 0). 사람 재시도가 NULL로 되돌려, 다시 멈추면 새 통지다. NULL = 보낼 것 없음(이
@@ -136,3 +154,11 @@ class PublicationCommand(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
     )
+
+    @validates("status")
+    def _status_in_the_contract(self, _key: str, value: str) -> str:
+        """story #4447 (Qadir 4870 ①) — fail-closed at the assignment itself: any name, setattr or the constructor. A status the
+        card's contract (PUBLICATION_COMMAND_STATUSES) does not know is a programming error here, not a row for the card to guess."""
+        if value not in PUBLICATION_COMMAND_STATUSES:
+            raise ValueError(f"publication command status outside PUBLICATION_COMMAND_STATUSES: {value!r}")
+        return value

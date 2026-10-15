@@ -1,13 +1,11 @@
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import text, update
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
-from app.models.user import RefreshToken
 from app.repositories.org_member import OrgMemberRepository
 from app.schemas.org_member import ORG_ROLES, OrgMemberCreate, OrgMemberResponse, OrgMemberUpdate
 
@@ -173,15 +171,14 @@ async def _revoke_user_refresh_tokens(session: AsyncSession, user_id: uuid.UUID)
     """해당 사용자의 refresh token 전량 revoke. story #3649(보안 결함) — auth.py의
     단일 seam(_explicit_revoke_values)을 그대로 써 expires_at도 함께 내린다
     (관리자 강제 폐기, 회전 경합 straggler 아님 — auth.py::refresh_token() 유예창이
-    이 RT들을 재사용 대상에서 뺀다)."""
-    from app.routers.auth import _explicit_revoke_values
+    이 RT들을 재사용 대상에서 뺀다).
 
-    _now = datetime.now(timezone.utc)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
-        .values(**_explicit_revoke_values(_now))
-    )
+    story #4630 (PO 09:50Z) — the same seam as a password reset (`_revoke_other_sessions`, nothing kept): live rows only
+    used to be revoked, so a token a rotation had just revoked (inside the §2449 grace window · expires_at untouched) could
+    still fork a new session for the person removed. Its window is closed too now."""
+    from app.routers.auth import _revoke_other_sessions
+
+    await _revoke_other_sessions(session, user_id, None)
 
 
 @router.patch("/{id}", response_model=OrgMemberResponse)

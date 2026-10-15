@@ -92,7 +92,7 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
 
       <button
         type="button"
-        onClick={() => setDescOpen((v) => !v)}
+        onClick={() => setDescOpen((v) => !v)} aria-expanded={descOpen}
         className="mt-3 flex w-full shrink-0 items-center gap-1 border-t border-border pt-3 text-left text-[11px] text-muted-foreground hover:text-foreground"
       >
         {t('descriptionPaneToggle')}

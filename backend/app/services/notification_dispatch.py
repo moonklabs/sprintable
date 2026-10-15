@@ -233,6 +233,14 @@ async def _send_personal_webhook_targets(
                 logger.error("AU metering(personal webhook) failed org_id=%s", org_id, exc_info=True)
 
 
+
+def _bell_extras(event: dict | None) -> dict:
+    """What the bell line reads from a person's dispatched Event besides title/body/event_type: the gate's name (story #4520),
+    the waiting agent's name (story #4533 «권한 대기 · {에이전트}»)."""
+    payload = (event or {}).get("payload") or {}
+    return {k: payload[k] for k in ("gate_name", "agent_name") if isinstance(payload.get(k), str) and payload[k]}
+
+
 async def dispatch_notification(
     db: AsyncSession,
     *,
@@ -250,7 +258,7 @@ async def dispatch_notification(
     sprint_id: uuid.UUID | None = None,
     via_outbox: bool = True,
     human_event_recorded_for: frozenset[uuid.UUID] = frozenset(),
-) -> None:
+) -> int:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
     ``human_event_recorded_for``: story #4281 — 호출부(`agent_dispatch._finalize_dispatch`)가 이미 사람 몫 Event(dispatched)를
@@ -291,7 +299,7 @@ async def dispatch_notification(
     알고 있는 값을 그대로 실어 보내는 통과 파라미터(신규 조회는 호출부 책임, 여기선 없음).
     """
     if not target_member_ids:
-        return
+        return 0
 
     try:
         # P0(message-loss class fix, 2026-08-08): 이 함수 전체를 SAVEPOINT로 감싼다 — 이전엔
@@ -320,7 +328,7 @@ async def dispatch_notification(
             ]
 
             if not enabled_member_ids:
-                return
+                return 0
 
             # 활성 webhook_configs가 있는 멤버 집합 — 웹훅 채널로 전달되므로 내장 알림 스킵.
             # E-EVENT-1CONFIG: 메시지 경로 SSE-skip과 공용 SSOT(active_webhook_member_ids) —
@@ -398,8 +406,30 @@ async def dispatch_notification(
                 if len(_member_project_ids) == 1:
                     _push_project_id = next(iter(_member_project_ids))
 
+            # story #4507: the project a person's bell Event goes under when they have no roster project — the triggering
+            # project, else the project of what this notification is about (its reference: a gate → its work item's
+            # project, a story, a conversation …, the same resolver the bell list uses). Resolved once, only if needed.
+            _ref_project_cache: dict[str, uuid.UUID | None] = {}
+
+            async def _reference_project() -> uuid.UUID | None:
+                if "v" not in _ref_project_cache:
+                    _ref_project_cache["v"] = None
+                    if reference_type and reference_id:
+                        try:
+                            from app.services.notification_targets import resolve_reference_targets
+
+                            _t = (await resolve_reference_targets(db, org_id, [(reference_type, reference_id)])).get(
+                                (reference_type, reference_id),
+                            )
+                            _ref_project_cache["v"] = _t.project_id if _t is not None else None
+                        except Exception:
+                            logger.warning("dispatch_notification: reference project unresolved %s/%s", reference_type,
+                                           reference_id, exc_info=True)
+                return _ref_project_cache["v"]
+
             inserted = False
             created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
+            created_for: set[uuid.UUID] = set()  # story #4417 — recipients a notice was actually created for
             for member_row in members:
                 if member_row.type == "agent":
                     # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵(단, muted면
@@ -443,6 +473,7 @@ async def dispatch_notification(
                         db.add(dispatch_event)
                         created_events.append(dispatch_event)
                         inserted = True
+                        created_for.add(member_row.id)
                 elif member_row.user_id:
                     # human: Notification + Event 각각 독립 savepoint — 하나 실패해도 다른 쪽 롤백 방지
                     try:
@@ -460,9 +491,41 @@ async def dispatch_notification(
                             )
                             db.add(notification)
                         inserted = True
+                        created_for.add(member_row.id)
                     except Exception:
                         logger.warning("Notification INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
-                    if member_row.project_id and member_row.id not in human_event_recorded_for:
+                    # story #4507 (PO 14:27Z · dev 7 days: 474 of 1,937 notifications, 26 people): the bell reads Event rows
+                    # only. An org_members-only person (an org owner with no project team row — 33 of 34 desktop-setup owners)
+                    # resolves with project_id None above, so no Event was written and their bell stayed empty. The rule: the
+                    # person's roster project, else the project that triggered this notification, else the project of its
+                    # reference (several gate kinds are created with no project — ads boost · channel / site posts · newsletter
+                    # · recipe gates). With none, there is no project for the Event (project_id NOT NULL) — the Notification
+                    # alone, logged.
+                    _human_proj = member_row.project_id or source_project_id
+                    if _human_proj is None and member_row.id not in human_event_recorded_for:
+                        _human_proj = await _reference_project()
+                    # Qadir 4919: a project that is not the person's own roster row (triggering · reference) is used only if they
+                    # can access it — opening the bell item reads it under its project (event_notifications · 403 otherwise),
+                    # so an inaccessible one would sit in the bell unreadable. Then the inbox Notification only, as with none.
+                    if (
+                        _human_proj is not None and _human_proj != member_row.project_id
+                        and member_row.id not in human_event_recorded_for
+                    ):
+                        from app.services.project_auth import has_project_access
+
+                        _uid = getattr(member_row, "user_id", None)
+                        if _uid is None or not await has_project_access(db, _uid, _human_proj, org_id):
+                            logger.info(
+                                "dispatch_notification: no access to project %s for the bell Event member_id=%s — Notification only",
+                                _human_proj, member_row.id,
+                            )
+                            _human_proj = None
+                    if _human_proj is None and member_row.id not in human_event_recorded_for:
+                        logger.info(
+                            "dispatch_notification: no project for the bell Event member_id=%s event_type=%s — Notification only",
+                            member_row.id, event_type,
+                        )
+                    if _human_proj and member_row.id not in human_event_recorded_for:
                         try:
                             async with db.begin_nested():
                                 # story #2380: 이 분기는 human Event를 생성 즉시 status="delivered"로
@@ -475,7 +538,7 @@ async def dispatch_notification(
                                 # story #3903 — `dispatch_event`로 명명(위 agent 분기와 동일
                                 # 이유: 함수 파라미터 `event`를 가리면 안 됨).
                                 dispatch_event = Event(
-                                    project_id=member_row.project_id,
+                                    project_id=_human_proj,
                                     org_id=org_id,
                                     event_type="dispatched",
                                     source_entity_type=reference_type,
@@ -483,7 +546,8 @@ async def dispatch_notification(
                                     sender_id=None,
                                     recipient_id=member_row.id,
                                     recipient_type="human",
-                                    payload={"title": title, "body": body, "event_type": event_type},
+                                    # story #4520 — the bell names an approval request («결재 요청 · {name}»).
+                                    payload={"title": title, "body": body, "event_type": event_type, **_bell_extras(event)},
                                     status="delivered",
                                     # ⛔이 순간이 "배달 시도 순간"과 같다고 볼 수 있는 건 이 분기가
                                     # 지금 동기라서다 — 바로 다음 줄들이 실제 배달 행위(Notification
@@ -497,6 +561,7 @@ async def dispatch_notification(
                                 db.add(dispatch_event)
                             created_events.append(dispatch_event)
                             inserted = True
+                            created_for.add(member_row.id)
                         except Exception:
                             logger.warning("Event INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
 
@@ -561,6 +626,10 @@ async def dispatch_notification(
                     via_outbox=via_outbox,
                 )
 
+        # story #4417 (Qadir 01a0eba4 ③) — how many recipients got a notice: a caller that must know it went out (a
+        # «notified» mark) checks this instead of trusting a return that also happens when nobody got anything
+        return len(created_for)
     except Exception:
         # BUG-1 수정: 에러 삼킴 제거 → 스택 트레이스 로깅
         logger.exception("dispatch_notification failed org_id=%s event_type=%s", org_id, event_type)
+        return 0

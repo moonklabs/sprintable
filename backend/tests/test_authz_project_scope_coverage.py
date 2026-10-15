@@ -30,12 +30,10 @@ CI가 즉시 RED**. baseline 안의 기존 62건(현재는 fix로 줄어든 상�
 그것들을 fix하는 게 이 테스트의 책임이 아니라 각자의 SEC-S8 개별 PR(R~EE류)의 책임이다."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from authz_coverage_lib import (  # noqa: E402
+# story 4459: imported through the `tests` package — putting tests/ at the front of sys.path made `import mcp` find tests/mcp/
+# for every later file in the same run (test_2188 then failed with «No module named 'mcp.types'»)
+from tests.authz_coverage_lib import (  # noqa: E402
     PROJECT_GUARD_FUNCTIONS,
     PROJECT_PARAM_RE,
     enumerate_id_mutation_routes,
@@ -200,7 +198,7 @@ def test_hop_recognition_catches_one_hop_body_helper_synthetic():
 
     from fastapi import FastAPI
 
-    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+    from tests.authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
 
     app = FastAPI()
 
@@ -224,7 +222,7 @@ def test_hop_recognition_misses_two_hop_wrapper_known_gap():
 
     from fastapi import FastAPI
 
-    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+    from tests.authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
 
     app = FastAPI()
 
@@ -262,7 +260,7 @@ def test_list_docs_ids_branch_closed_the_two_hop_known_gap():
     새 2-hop 전용 래퍼가 생기고 그 라우트가 body에서 가드를 직접 안 부르면 이 사각이 다시
     실사례를 갖는다 — 그때 새 known-gap 테스트를 추가할 것."""
     from app.main import app
-    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+    from tests.authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
 
     routes = {r.key: r for r in enumerate_routes_matching(app, PROJECT_PARAM_RE)}
     target = routes.get("app.routers.docs:list_docs")
@@ -284,6 +282,18 @@ def test_list_docs_ids_branch_closed_the_two_hop_known_gap():
 # ── false positive: 실제로는 안전 — org/user-level(project 축 없음)·self-derived·
 #    JWT-project 스코프·인라인/1-hop 가드(v1 정적스캔 미인식). 영구 allowlist(이유 필수). ──
 _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
+    # story #4536 — an agent's watch is the agent's own (agent_watches.agent_member_id = the caller's agent key): the clear
+    # selects by (id, the caller's member id) — another agent's watch is «not found», in the same org and project too.
+    "app.routers.watches:clear_watch": "agent-owned row, selected by the caller's own member id (services.agent_watches.cancel_watch)",
+    # story #4535 — the org's «원격 제어» switch: an org-level setting (organizations row), changed only by that org's owner
+    # (resolve_member of the path org · role owner · a person's session)
+    "app.routers.remote_control:put_remote_control": "org-level setting, owner of the path org only (routers.remote_control._person_of + role check)",
+    # story #4533 — [빼기] one phone ↔ computer pair: the phone is selected in the caller's org (remote_devices.org_id) and must be
+    # the caller's own phone unless the caller is that org's owner/admin; the pair is that phone's — no project axis
+    "app.routers.agent_permissions:delete_remote_device_pair": "person-owned phone in the caller's org, owner or org owner/admin only (services.agent_permissions.remove_pair)",
+    "app.routers.agent_permissions:delete_remote_device": "person-owned phone key in the caller's org, its owner or org owner/admin only — anyone else the same 404 as a missing key (services.agent_permissions.remove_phone · story #4624)",
+    "app.routers.agent_run_profiles:put_agent_profile": "org-level agent in the caller's org, the runtime PATCH's rule (creator · org owner/admin · never the system agent) via assert_agent_owner_mutable (story #4540)",
+    "app.routers.agent_run_profiles:remove_allowed_host": "org-level agent in the caller's org — [빼기] on its «허용 주소» takes the run profile's own rule (creator · org owner/admin · never the system agent) via assert_agent_owner_mutable, before the agent is read (story #4580 AC2)",
     # story #3786 — dependencies.py의 update/delete는 까심 QA CI FAILURE 원칙(2026-07-08,
     # agents.py::get_agent_connection_artifact/_connection_artifact 선례)에 따라 Header() DI
     # 마커를 라우트 진입점(update_dependency/delete_dependency)에서만 받고, 실 로직(가드 호출
@@ -528,7 +538,7 @@ def test_sibling_asymmetry_advisory_surfaces_high_confidence_candidates():
     RED로 만들진 않음(신규 항목 허용)."""
     from app.main import app
 
-    from authz_coverage_lib import sibling_asymmetry_advisory
+    from tests.authz_coverage_lib import sibling_asymmetry_advisory
 
     surfaced = sibling_asymmetry_advisory(app)
     # 계약(paydown-무관 안정 기준): advisory가 surface하는 모든 엔트리는 반드시 (a) id-뮤테이션
@@ -550,7 +560,7 @@ def test_sibling_asymmetry_advisory_has_teeth_on_synthetic_app():
     from fastapi import FastAPI
 
     from app.services.project_auth import has_project_access
-    from authz_coverage_lib import sibling_asymmetry_advisory
+    from tests.authz_coverage_lib import sibling_asymmetry_advisory
 
     app = FastAPI()
 

@@ -590,9 +590,13 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     expect(dialogContent().textContent).toContain(koMessages.organization.definerAdvancedOnlyBadge);
     // 고급 탭이 강제로 열려 JSON textarea가 보인다(기존 #3070 편집기 기능 유지 — 손실 0).
     expect(dialogContent().querySelector('#event-payload-schema')).not.toBeNull();
-    // 기본 탭 버튼은 비활성(disabled) — 표현 못 하는 정의를 폼으로 잘못 편집하게 두지 않는다.
+    // 기본 탭 버튼은 비활성 — 표현 못 하는 정의를 폼으로 잘못 편집하게 두지 않는다.
+    // [SID:4388] 공용 탭(base-ui)은 비활성 탭을 aria-disabled로 두고(초점은 받되 고를 수 없음) 누름을 무시한다.
     const basicTabBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.definerTabBasic) as HTMLButtonElement;
-    expect(basicTabBtn.disabled).toBe(true);
+    expect(basicTabBtn.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { basicTabBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(basicTabBtn.getAttribute('aria-selected')).toBe('false');
+    expect(dialogContent().querySelector('#event-payload-schema')).not.toBeNull();
   });
 });
 
@@ -934,14 +938,71 @@ describe('OrganizationEventsPage — 카탈로그 적용 진입점 + stage_metad
 // story #4370(유나 판정 (가)) — 정의 만들기/고치기 창은 여러 줄 칸(고급 JSON)이 든 폼이라 폼 전체가 초안(만들기 = 조직 · 고치기 = 정의).
 // 창이 Esc로 닫혀도 다시 열면 그대로 · 보이는 «취소»와 성공에서만 지운다. 시험 발행 payload는 초안 제외(PO 처분).
 describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
+  // story #4471 — these tests run on a late-frame clock, so the race that went red now and then under a loaded full run is
+  // made on purpose, every run. Animation frames (what Base UI's enqueueFocus asks for) are held and delivered in request
+  // order — never by elapsed time — only at the moments a real late frame could land:
+  //   · right after the next key the test sends (the worst moment: between the two Escapes of closeByEsc);
+  //   · before the test's own 30 ms timer (a real frame, ~16 ms, always runs before it);
+  //   · when the test itself waits for a frame (frames run in request order: every frame asked for earlier lands first).
+  // cancelAnimationFrame is honoured (enqueueFocus cancels its previous frame). Without the wait in open() below, a draft test
+  // goes red here every run with the dialog still open (data-open).
+  const held = new Map<number, FrameRequestCallback>();
+  const testWaits = new WeakSet<FrameRequestCallback>();
+  let nextFrame = 1;
+  let realRaf: typeof requestAnimationFrame;
+  let realCaf: typeof cancelAnimationFrame;
+  const deliverFrames = () => {
+    const due = [...held.values()];
+    held.clear();
+    due.forEach((cb) => cb(performance.now()));
+  };
+  const afterKey = () => { queueMicrotask(deliverFrames); };
+  beforeEach(() => {
+    realRaf = globalThis.requestAnimationFrame;
+    realCaf = globalThis.cancelAnimationFrame;
+    const lateRaf = ((cb: FrameRequestCallback) => {
+      const id = nextFrame++;
+      held.set(id, cb);
+      if (testWaits.has(cb)) queueMicrotask(deliverFrames);
+      return id;
+    }) as typeof requestAnimationFrame;
+    const lateCaf = ((id: number) => { held.delete(id); }) as typeof cancelAnimationFrame;
+    globalThis.requestAnimationFrame = lateRaf; window.requestAnimationFrame = lateRaf;
+    globalThis.cancelAnimationFrame = lateCaf; window.cancelAnimationFrame = lateCaf;
+    window.addEventListener('keydown', afterKey, true);
+  });
+  afterEach(() => {
+    window.removeEventListener('keydown', afterKey, true);
+    deliverFrames();
+    globalThis.requestAnimationFrame = realRaf; window.requestAnimationFrame = realRaf;
+    globalThis.cancelAnimationFrame = realCaf; window.cancelAnimationFrame = realCaf;
+  });
   const dialog = () => document.body.querySelector('[data-slot="dialog-content"]') as HTMLElement | null;
   const btn = (scope: ParentNode, label: string) => [...scope.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement;
-  const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); };
+  const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(() => { deliverFrames(); r(null); }, 30)); }); };
   function setValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
     const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }
+  // story #4471 — Base UI does a dialog's opening work one animation frame later (it moves focus to the first tabbable element ·
+  // enqueueFocus). A test that acts before that frame races it: under a loaded full run the frame could land between the two
+  // Escapes of closeByEsc, sending focus back into the field that holds text, so the second Escape was spent leaving the field
+  // again and the dialog stayed open. Frames run in request order — waiting for one requested now lets every frame the dialog
+  // asked for before it land first. A condition, not a fixed sleep.
+  const pendingFrames = async () => {
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        const frame = () => resolve();
+        testWaits.add(frame);
+        requestAnimationFrame(frame);
+      });
+    });
+  };
+  const open = async (label: string) => {
+    await act(async () => { btn(container, label).click(); });
+    await pendingFrames();
+  };
   async function closeByEsc(field: HTMLElement) {
     const esc = (t: EventTarget) => t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await act(async () => { field.focus(); });
@@ -953,7 +1014,7 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
   it('만들기: 고급 탭 JSON · 이름을 쓰고 Esc로 닫았다 열면 그대로(탭 포함) · «취소»는 지운다', async () => {
     mockFetches([]);
     await mount();
-    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    await open(koMessages.organization.eventCreateCta);
     await act(async () => { switchToAdvancedTab(); });
     await act(async () => {
       fillName('릴리즈 흐름');
@@ -961,12 +1022,12 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
     });
     await closeByEsc(document.body.querySelector('#event-block-template') as HTMLTextAreaElement);
     expect(dialog()).toBeNull();
-    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    await open(koMessages.organization.eventCreateCta);
     expect((document.body.querySelector('#event-name') as HTMLInputElement).value).toBe('릴리즈 흐름');
     expect((document.body.querySelector('#event-block-template') as HTMLTextAreaElement).value).toBe('{\n  "title": "릴리즈"\n}');
     await act(async () => { btn(dialog()!, koMessages.common.cancel).click(); });
     await settle();
-    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    await open(koMessages.organization.eventCreateCta);
     expect((document.body.querySelector('#event-name') as HTMLInputElement).value).toBe('');
     expect(document.body.querySelector('#event-block-template')).toBeNull();  // 기본 탭으로 새로 시작
   });
@@ -975,13 +1036,76 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
     mockFetches([customWithId({ id: 'def-7', key: 'org.moonklabs.my_event' })]);
     await mount();
     const payload = () => document.body.querySelector('#event-test-publish-payload') as HTMLTextAreaElement;
-    await act(async () => { btn(container, koMessages.organization.eventTestPublishCta).click(); });
+    await open(koMessages.organization.eventTestPublishCta);
     await act(async () => { setValue(payload(), '{\n  "token": "secret-like"\n}'); });
     await closeByEsc(payload());
     expect(dialog()).toBeNull();
     expect(Object.keys(window.sessionStorage).filter((k) => k.includes('event-test-publish'))).toEqual([]);
     expect(JSON.stringify(Object.values(window.sessionStorage))).not.toContain('secret-like');
-    await act(async () => { btn(container, koMessages.organization.eventTestPublishCta).click(); });
+    await open(koMessages.organization.eventTestPublishCta);
     expect(payload().value).toBe('{}');
+  });
+});
+
+function panelFacts(root: ParentNode) {
+  // Each tab points at its panel (aria-controls) and the rendered panel is named by the chosen tab and is a focus stop.
+  const tabs = [...root.querySelectorAll<HTMLElement>('[role="tab"]')];
+  const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+  const chosen = tabs.find((t) => t.getAttribute('aria-selected') === 'true')!;
+  return {
+    panels: panels.length,
+    namedByChosenTab: panels[0]?.getAttribute('aria-labelledby') === chosen.id,
+    chosenControlsIt: chosen.getAttribute('aria-controls') === panels[0]?.id,
+    focusable: panels[0]?.tabIndex === 0,
+  };
+}
+
+describe('[SID:4388] event definer dialog — «기본 · 고급» uses the shared tabs (announced · arrow keys)', () => {
+  it('«기본» starts selected; switching to «고급» moves aria-selected', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    const tabs = () => [...dialog.querySelectorAll('[role="tablist"] [role="tab"]')]
+      .map((el) => `${el.textContent?.startsWith(koMessages.organization.definerTabBasic) ? 'basic' : 'advanced'}:${el.getAttribute('aria-selected')}`);
+
+    expect(tabs()).toEqual(['basic:true', 'advanced:false']);
+    await act(async () => { switchToAdvancedTab(); });
+    expect(tabs()).toEqual(['basic:false', 'advanced:true']);
+  });
+
+  it('arrow keys move the selection between «기본» and «고급»', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    const tab = (i: number) => dialog.querySelectorAll<HTMLElement>('[role="tablist"] [role="tab"]')[i];
+    const selected = () => [tab(0), tab(1)].map((el) => el.getAttribute('aria-selected'));
+
+    await act(async () => { tab(0).focus(); tab(0).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(selected()).toEqual(['false', 'true']);
+    expect(document.body.querySelector('#event-payload-schema')).not.toBeNull(); // the advanced editor is shown
+
+    await act(async () => { tab(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(selected()).toEqual(['true', 'false']);
+  });
+
+  it('each body is the tab panel of the chosen tab (named by it · a focus stop) and follows the choice', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    const full = { panels: 1, namedByChosenTab: true, chosenControlsIt: true, focusable: true };
+    expect(panelFacts(dialog)).toEqual(full);
+    expect(dialog.querySelector('[role="tabpanel"] #event-payload-schema')).toBeNull();
+
+    await act(async () => { switchToAdvancedTab(); });
+    expect(panelFacts(dialog)).toEqual(full);
+    expect(dialog.querySelector('[role="tabpanel"] #event-payload-schema')).not.toBeNull();
+    // the name field stays outside the panels (it belongs to both tabs)
+    expect(dialog.querySelector('[role="tabpanel"] #event-name')).toBeNull();
   });
 });

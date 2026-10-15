@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 export interface RejectedRelationItem {
   id: string;
@@ -54,7 +54,7 @@ type LoadState = { kind: 'loading' } | { kind: 'failed' } | { kind: 'ready'; row
 export function RejectedRelationsSection({ storyId }: { storyId: string }) {
   const t = useTranslations('board');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
   useEffect(() => {
@@ -122,7 +122,7 @@ export function RejectedRelationsSection({ storyId }: { storyId: string }) {
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <span className="text-foreground [overflow-wrap:anywhere]">{title ?? t('rejectedRelationsTargetGone')}</span>
-                <div className="text-[10px] text-muted-foreground">{formatRelativeTime(item.rejected_at, locale, displayTimezone)}</div>
+                <div className="text-[10px] text-muted-foreground">{formatViewerRelativeTime(item.rejected_at, locale, displayTimezone)}</div>
               </div>
               {restored ? (
                 // AC6 — 「다시 후보로 올라올 수 있습니다」까지만 말한다(시점 약속 없음).

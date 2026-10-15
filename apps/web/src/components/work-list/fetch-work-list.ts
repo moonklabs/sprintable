@@ -50,6 +50,17 @@ async function fetchEnvelope<T>(url: string): Promise<Envelope<T>> {
   return (await res.json()) as Envelope<T>;
 }
 
+// story #4448 — GET /api/gates/inbox passes the backend's bare list through (gates/inbox/route.ts: proxyToFastapi). Read as
+// { data } it was always undefined → an empty inbox → no row ever showed «서명 대기 · 승인 대기 · 답 대기». Only the contract's
+// shape is read; anything else is a failed read (thrown, like a non-ok answer), never a silent empty list.
+export async function fetchArray<T>(url: string): Promise<T[]> {
+  const res = await fetchWithAuth(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+  const json: unknown = await res.json();
+  if (!Array.isArray(json)) throw new Error(`not an array: ${url}`);
+  return json as T[];
+}
+
 async function fetchPage<T>(url: string, source: string): Promise<WorkListPageResult<T>> {
   const json = await fetchEnvelope<T[]>(url);
   // 변수명을 `meta`로 두지 않는다 — pagination-envelope-consumers.test.ts의 정적 가드가
@@ -83,7 +94,7 @@ export async function fetchWorkList(projectId: string): Promise<FetchedWorkList>
     fetchPage<WorkListStoryInput>(`/api/stories?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/stories'),
     fetchPage<WorkListTaskInput>(`/api/tasks?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/tasks'),
     fetchPage<WorkListAgentRunInput>(`/api/agent-runs?project_id=${projectId}&limit=${AGENT_RUNS_PAGE_LIMIT}`, '/api/agent-runs'),
-    fetchEnvelope<WorkListInboxItem[]>('/api/gates/inbox?status=pending'),
+    fetchArray<WorkListInboxItem>('/api/gates/inbox?status=pending'),
     fetchEnvelope<WorkListTeamMemberInput[]>('/api/team-members'),
     fetchEnvelope<Array<{ story_id: string | null }>>('/api/visual-artifacts'),
     fetchHypotheses(projectId),
@@ -100,7 +111,7 @@ export async function fetchWorkList(projectId: string): Promise<FetchedWorkList>
     stories,
     tasks,
     agentRuns,
-    inbox: Array.isArray(inboxJson.data) ? inboxJson.data : [],
+    inbox: inboxJson,
     teamMembers: Array.isArray(teamMembersJson.data) ? teamMembersJson.data : [],
     artifactCountByStoryId,
     hypotheses,

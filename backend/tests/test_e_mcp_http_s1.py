@@ -115,6 +115,7 @@ async def test_request_uses_override_key_then_env_fallback():
             status_code = 200
             is_success = True
             headers = {"content-type": "application/json"}
+            content = b"{}"  # story #4430 — as httpx.Response has it
             def json(self): return {}
             @property
             def text(self): return "{}"
@@ -193,7 +194,11 @@ async def _run_asgi(mw, path, headers):
 
     scope = {"type": "http", "path": path,
              "headers": [(k.encode(), v.encode()) for k, v in headers.items()]}
-    await mw(_app)(scope, _recv, _send)
+    # PO 22:51Z (Minh's catch_test_host): the middleware's key-context lookup went out for real (GET http://x/api/v2/auth/me — a
+    # sandbox network question every run). It is non-fatal there and none of these tests is about it
+    from unittest.mock import AsyncMock, patch
+    with patch("sprintable_mcp.http_auth.client.ensure_auth_context", new=AsyncMock()):
+        await mw(_app)(scope, _recv, _send)
     return state
 
 

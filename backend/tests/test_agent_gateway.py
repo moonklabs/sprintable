@@ -85,6 +85,7 @@ async def test_ack_creates_cursor():
     ctx = MagicMock()
     ctx.user_id = str(AGENT_ID)
     ctx.claims = {"app_metadata": {"api_key_id": "ak_test"}}
+    ctx.org_id = str(ORG_ID)  # story #4500: the key's org — the ack acts on its events only
 
     session = AsyncMock()
     existing_result = MagicMock(); existing_result.scalar_one_or_none.return_value = None
@@ -124,6 +125,7 @@ async def test_ack_updates_cursor_if_higher():
     ctx = MagicMock()
     ctx.user_id = str(AGENT_ID)
     ctx.claims = {"app_metadata": {"api_key_id": "ak_test"}}
+    ctx.org_id = str(ORG_ID)  # story #4500: the key's org — the ack acts on its events only
 
     existing_cursor = MagicMock(spec=AgentEventCursor)
     existing_cursor.acked_seq = 10
@@ -162,6 +164,7 @@ async def test_ack_ignores_lower_seq():
     ctx = MagicMock()
     ctx.user_id = str(AGENT_ID)
     ctx.claims = {"app_metadata": {"api_key_id": "ak_test"}}
+    ctx.org_id = str(ORG_ID)  # story #4500: the key's org — the ack acts on its events only
 
     existing_cursor = MagicMock(spec=AgentEventCursor)
     existing_cursor.acked_seq = 100
@@ -211,7 +214,7 @@ async def test_fetch_events_returns_rows_above_seq():
     result = MagicMock(); result.fetchall.return_value = [row]
     session.execute = AsyncMock(return_value=result)
 
-    rows = await _fetch_events(session, AGENT_ID, 100, 100)
+    rows = await _fetch_events(session, AGENT_ID, 100, 100, ORG_ID)
     assert len(rows) == 1
     assert rows[0].recipient_seq == 101
 
@@ -232,7 +235,7 @@ async def test_visibility_gap_covered_by_acked_seq_rescan():
     r1 = MagicMock(); r1.fetchall.return_value = [t2]
     session1.execute = AsyncMock(return_value=r1)
 
-    rows1 = await _fetch_events(session1, AGENT_ID, 100, 100)
+    rows1 = await _fetch_events(session1, AGENT_ID, 100, 100, ORG_ID)
     assert len(rows1) == 1
     assert rows1[0].recipient_seq == 101
 
@@ -244,7 +247,7 @@ async def test_visibility_gap_covered_by_acked_seq_rescan():
     session2.execute = AsyncMock(return_value=r2)
 
     # acked_seq=100 재스캔 → T1(100), T2(101) 둘 다 나옴
-    rows2 = await _fetch_events(session2, AGENT_ID, 99, 100)  # scan_from = acked_seq = 99 기준 예시
+    rows2 = await _fetch_events(session2, AGENT_ID, 99, 100, ORG_ID)  # scan_from = acked_seq = 99 기준 예시
     assert len(rows2) == 2
     seqs = [r.recipient_seq for r in rows2]
     assert 100 in seqs  # T1 잡힘!
@@ -265,7 +268,7 @@ async def test_wake_floor_prevents_intra_wake_duplicates():
     result = MagicMock(); result.fetchall.return_value = rows_data
     session.execute = AsyncMock(return_value=result)
 
-    rows = await _fetch_events(session, AGENT_ID, 99, 100)
+    rows = await _fetch_events(session, AGENT_ID, 99, 100, ORG_ID)
     # wake_floor=99, yield: 100(OK), 101(OK), 102(OK)
     wake_floor = 99
     yielded = []

@@ -17,7 +17,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
-import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt, formatScheduledAt } from '@/components/content/schedule-format';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
@@ -27,6 +27,8 @@ import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { useTeamTimeZone } from '@/components/team-time-zone';
 
 /**
  * story #3402(Phase1·마케팅운영, AC1/AC2/AC3, doc phase1-threads-post-manager-screen-design
@@ -117,6 +119,7 @@ function toStatusTab(status: string | undefined): Exclude<StatusTab, 'all'> {
 }
 
 export default function ChannelPostListPage() {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId } = useDashboardContext();
   // story #4017(PO 확定 2026-09-17) — 아래 대화 CTA(/chats)를 목적지 모듈로.
@@ -132,7 +135,7 @@ export default function ChannelPostListPage() {
   // 있었다면 이 클래스를 CI에서 잡았을 자리(#3739 PR 본문의 「값 실증」).
   const tNav = useTranslations('nav');
   const router = useRouter();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const [drafts, setDrafts] = useState<ChannelPostDraftListItem[]>([]);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -354,9 +357,9 @@ export default function ChannelPostListPage() {
               ? { gateStatus: draft.gate_status ?? null, sealedScheduledAt: draft.scheduled_at ?? null } : undefined)}
           />
         ) : draft.published_at ? (
-          formatScheduledAt(draft.published_at, displayTimezone).display
+          formatViewerScheduledAt(draft.published_at, displayTimezone).display
         ) : scheduled ? (
-          formatScheduledAt(scheduled, displayTimezone).display
+          formatScheduledAt(scheduled, teamTz, displayTimezone).display
         ) : (
           '—'
         );

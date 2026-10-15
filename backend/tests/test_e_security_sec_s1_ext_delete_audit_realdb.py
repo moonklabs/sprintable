@@ -343,6 +343,7 @@ async def test_agent_delete_project_forbidden():
 # 의도적으로 뺐다 — `ProjectRepository.delete()`가 `session.delete(project)`를 호출할 때
 # SQLAlchemy ORM이 `Project.team_members` relationship(cascade 미설정)을 통해 관련
 # `team_members`(뷰) 행의 FK를 먼저 NULL로 UPDATE하려다 "cannot update view"로 죽는 사전 존재
+# [10-14: 고침 — Project 관계 셋에 passive_deletes="all" · 완주 시험은 tests/test_project_delete_realdb.py]
 # 버그를 이 테스트가 우연히 밟았다(ObjectNotInPrerequisiteStateError) — 실 project_access grant가
 # 하나라도 있는 project는 delete_project가 이미 500일 가능성. human-only 게이트 코드 자체(위
 # agent 403 테스트로 검증됨)와는 무관한 별개 결함이라 여기서 안 건드리고 스레드에 별도 플래그.

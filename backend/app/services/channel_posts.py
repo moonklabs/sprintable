@@ -1802,6 +1802,38 @@ async def preflight_channel_post_publish(db: AsyncSession, *, org_id: uuid.UUID,
             )
 
 
+async def _claim_container_creation(db: AsyncSession, row: ChannelPublication, *, gate_id: uuid.UUID) -> None:
+    """story #4404 — claim an existing publication row (no container yet) before creating its container.
+
+    The row is committed as the claim before the provider call (it used to stay uncommitted during the upload, which kept a
+    second publisher waiting on the unique INSERT). Claimable when free or expired (STUCK_IN_PROGRESS_THRESHOLD, longer than a
+    worker request lives). If another publisher holds a live claim → ChannelPublishInProgressError at once; if it created the
+    container meanwhile, the caller carries on from that container."""
+    from sqlalchemy import or_, update
+
+    from app.services.publication_command import STUCK_IN_PROGRESS_THRESHOLD
+
+    now = datetime.now(timezone.utc)
+    won = (await db.execute(
+        update(ChannelPublication)
+        .where(
+            ChannelPublication.id == row.id,
+            ChannelPublication.external_container_id.is_(None),
+            or_(
+                ChannelPublication.container_claimed_at.is_(None),
+                ChannelPublication.container_claimed_at < now - STUCK_IN_PROGRESS_THRESHOLD,
+            ),
+        )
+        .values(container_claimed_at=now)
+        .returning(ChannelPublication.id)
+        .execution_options(synchronize_session=False)
+    )).first() is not None
+    await db.commit()
+    await db.refresh(row)
+    if not won and row.external_container_id is None:
+        raise ChannelPublishInProgressError(gate_id=gate_id)
+
+
 async def publish_channel_post_draft(
     db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, published_by_member_id: uuid.UUID,
 ) -> ChannelPublication:
@@ -1990,6 +2022,9 @@ async def publish_channel_post_draft(
     # 방어(②, _validate_thread_segments와 동형 위치 — 발행 직전 재검사).
     _validate_youtube_metadata(channel=draft.channel, channel_payload=latest.channel_payload or {})
 
+    from app.services.external_call_tx import end_transaction_before_external_call
+
+    await end_transaction_before_external_call(db)  # story #4404 — reads only so far
     try:
         async with provider_client(timeout=20) as client:
             try:
@@ -2017,6 +2052,8 @@ async def publish_channel_post_draft(
                     id=uuid.uuid4(), org_id=org_id, gate_id=gate.id, version_id=latest.id,
                     connection_id=connection.id, channel=draft.channel, status="container_created",
                     sequence=sequence,
+                    # story #4404 — a new row is born claimed; committed before the provider call
+                    container_claimed_at=datetime.now(timezone.utc),
                 )
                 # story #3395(디디 코드 리뷰 발견, PR#3752) — 같은 (gate_id, version_id)로
                 # 진짜 동시 요청 2건이 들어오면 둘 다 위 existing 조회에서 None을 본 뒤 각자
@@ -2101,6 +2138,9 @@ async def publish_channel_post_draft(
                     raise ChannelPublishInProgressError(gate_id=gate.id)
                     return row
 
+            if existing is not None and row.external_container_id is None:
+                # story #4404 — resuming a row without a container: claim it first (a live claim = another publisher is on it)
+                await _claim_container_creation(db, row, gate_id=gate.id)
             just_created_container = row.external_container_id is None
             if just_created_container:
                 try:
@@ -2140,10 +2180,13 @@ async def publish_channel_post_draft(
                                 )
                             except YouTubeQuotaExceededError as exc:
                                 row.status = "failed"
+                                row.container_claimed_at = None  # story #4404 — known failure: released
                                 row.error_code = "YOUTUBE_QUOTA_EXCEEDED"
                                 row.last_error = str(exc)
                                 await db.commit()
                                 raise
+                        # story #4404 — the publication row (container_created) is committed as the claim before the upload
+                        await end_transaction_before_external_call(db)
                         container_id = await create_reels_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
                             text=text_to_post, video_url=video_public_url, cover_url=image_public_url,
@@ -2181,6 +2224,7 @@ async def publish_channel_post_draft(
                                 f"{draft.channel} 채널은 이미지 2장 이상(캐러셀)을 지원하지 않습니다",
                                 status_code=422,
                             )
+                        await end_transaction_before_external_call(db)  # story #4404 — claim row committed
                         container_id = await create_carousel_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
                             text=text_to_post, image_urls=image_public_urls,
@@ -2205,12 +2249,14 @@ async def publish_channel_post_draft(
                             _extra_kwargs["list_id"] = connection.account_label
                             _extra_kwargs["sender_email"] = (connection.provider_config or {}).get("sender_email")
                             _extra_kwargs["sender_name"] = (connection.provider_config or {}).get("sender_name")
+                        await end_transaction_before_external_call(db)  # story #4404 — claim row committed
                         container_id = await create_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
                             text=text_to_post, image_url=image_public_url, **_extra_kwargs,
                         )
                 except ThreadsPublishError as exc:
                     error_code, mapped_exc = _classify_threads_error(exc, connection_id=connection.id)
+                    row.container_claimed_at = None  # story #4404 — known failure: released
                     row.status = "failed"
                     row.error_code = error_code
                     row.last_error = exc.message
@@ -2245,6 +2291,7 @@ async def publish_channel_post_draft(
                 row.status = "container_created"
                 row.error_code = None
                 row.last_error = None
+                row.container_claimed_at = None  # story #4404 — the container exists: the claim is done
                 await db.commit()
                 if has_async_media:
                     # story 620beefc(AC5, PO 決定)·#3554(릴스로 확장) — IMAGE/REELS 컨테이너는 비동기(그라운딩
@@ -2260,6 +2307,7 @@ async def publish_channel_post_draft(
                 # 확인한다. FINISHED여야만 publish 호출로 진행 — Meta 문서: 완료 前
                 # publish는 실패한다.
                 try:
+                    await end_transaction_before_external_call(db)  # story #4404
                     container_status, container_error_message = await get_container_status(
                         client, access_token=access_token, creation_id=row.external_container_id,
                     )
@@ -2353,6 +2401,7 @@ async def publish_channel_post_draft(
                 # FINISHED(관측되면 PUBLISHED도 안전하게 통과) — 아래로 진행.
 
             try:
+                await end_transaction_before_external_call(db)  # story #4404
                 media_id = await publish_container(
                     client, access_token=access_token, threads_user_id=connection.account_id,
                     creation_id=row.external_container_id,
@@ -2382,6 +2431,8 @@ async def publish_channel_post_draft(
             row.last_error = None
 
             try:
+                # story #4404 — commits status=published first: the post is out whether or not the permalink comes back
+                await end_transaction_before_external_call(db)
                 permalink = await get_permalink(client, access_token=access_token, media_id=media_id)
             except ThreadsPublishError:
                 # 발행 자체는 성공(media_id 확보) — permalink 조회 실패는 비치명(threads_
@@ -3068,6 +3119,10 @@ async def _publish_x_thread_draft(
 
     succeeded: list[dict] = []
     failure_exc: ThreadsPublishError | None = None
+    from app.services.external_call_tx import end_transaction_before_external_call
+
+    # story #4404 — reads only so far (rows are inserted after the call); the command claim prevents a second worker
+    await end_transaction_before_external_call(db)
     async with provider_client(timeout=20) as client:
         try:
             succeeded = await publish_x_thread_fn(

@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { draftOwnerSegment } from '@/lib/tab-owner';
 
 /**
  * story #4370 — 창 · 패널 안 **여러 줄 글 칸**의 초안(유나 규칙: 닫는 길과 무관하게 유지 · 보내기/저장 성공 때만 지움 · 버림은 보이는 «취소»로만).
  *
  * 창 · 패널이 ✕ · 바깥 누름 · 다른 대상으로 이동으로 닫히면 글 상태가 창 안(useState)과 함께 사라졌다. 이 훅은 글을 sessionStorage에 둔다:
- * - 키 = 표면 + 대상 id + 칸(`sprintable:field-draft:v1:{surface}:{target}:{field}`) — 다른 대상 칸엔 안 샌다(대상이 바뀌면 그 대상의 초안을 읽음).
+ * - 키 = 주인 + 표면 + 대상 id + 칸(`sprintable:field-draft:v1:u:{owner}:{surface}:{target}:{field}` · 주인은 story #4490) — 다른 대상 칸엔 안 샌다(대상이 바뀌면 그 대상의 초안을 읽음).
  * - `initialValue`(서버 값 · 편집 칸)와 같아지면 키를 지운다(초안 = 서버와 다른 쓴 글만) — 글을 고쳐 같아질 때도 · 서버 값이 초안과 같아질 때도.
  *   빈 칸도 지운다(chat-input 초안과 같은 관례).
  * - `clear()` = 저장/보내기 성공 · 보이는 «취소»에서만 부른다(닫힘에선 안 부름).
@@ -22,8 +23,9 @@ export interface FieldDraftKey {
   field: string;
 }
 
+/** story #4490 — the owner segment (`u:<user>:`) keeps one person's draft away from the next person in this tab. */
 export function fieldDraftStorageKey({ surface, targetId, field }: FieldDraftKey): string {
-  return `sprintable:field-draft:v1:${surface}:${targetId ?? 'new'}:${field}`;
+  return `sprintable:field-draft:v1:${draftOwnerSegment('session')}${surface}:${targetId ?? 'new'}:${field}`;
 }
 
 function read(key: string): string | null {

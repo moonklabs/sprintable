@@ -27,6 +27,9 @@ function wrap(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  // The form is a sessionStorage draft keyed by targetId (story #4370) — clear it so one test's upload or tab does not
+  // leak into the next (the sibling 4370 test file does the same).
+  window.sessionStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -41,6 +44,11 @@ afterEach(async () => {
 async function mount(onImport: (nodes: ArtifactNode[]) => Promise<boolean> = vi.fn(async () => true)) {
   await act(async () => {
     root.render(wrap(<ImportArtifactDialog open onOpenChange={vi.fn()} onImport={onImport} targetId="story-1" />));
+  });
+  // [SID:4388] The dialog moves focus into itself shortly after opening — onto the chosen tab, which the shared tabs
+  // (activateOnFocus) select. Wait for that, as a person cannot click before it: a click earlier than that focus would be undone.
+  await vi.waitFor(() => {
+    expect(document.body.querySelector('[data-slot="dialog-content"]')?.contains(document.activeElement)).toBe(true);
   });
   return onImport;
 }
@@ -128,5 +136,58 @@ describe('ImportArtifactDialog — HTML 탭(story 64010b05 §3)', () => {
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+function panelFacts(root: ParentNode) {
+  // Each tab points at its panel (aria-controls) and the rendered panel is named by the chosen tab and is a focus stop.
+  const tabs = [...root.querySelectorAll<HTMLElement>('[role="tab"]')];
+  const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+  const chosen = tabs.find((t) => t.getAttribute('aria-selected') === 'true')!;
+  return {
+    panels: panels.length,
+    namedByChosenTab: panels[0]?.getAttribute('aria-labelledby') === chosen.id,
+    chosenControlsIt: chosen.getAttribute('aria-controls') === panels[0]?.id,
+    focusable: panels[0]?.tabIndex === 0,
+  };
+}
+
+describe('[SID:4388] ImportArtifactDialog tabs announce the chosen tab', () => {
+  it('«이미지» starts selected in a tablist; clicking «HTML 붙여넣기» moves aria-selected', async () => {
+    await mount();
+    const tabs = () => [...document.body.querySelectorAll('[role="tab"]')].map((el) => `${el.textContent}:${el.getAttribute('aria-selected')}`);
+    expect(document.body.querySelector('[role="tablist"]')).not.toBeNull();
+    expect(tabs()).toHaveLength(2);
+    expect(tabs()[0]).toMatch(/:true$/);
+    expect(tabs()[1]).toBe('HTML 붙여넣기:false');
+
+    const htmlTab = [...document.body.querySelectorAll('[role="tab"]')].find((b) => b.textContent === 'HTML 붙여넣기')!;
+    await act(async () => { htmlTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(tabs()[0]).toMatch(/:false$/);
+    expect(tabs()[1]).toBe('HTML 붙여넣기:true');
+  });
+
+  it('arrow keys move the selection between «이미지» and «HTML 붙여넣기»', async () => {
+    await mount();
+    const tabs = () => [...document.body.querySelectorAll('[role="tab"]')].map((el) => el.getAttribute('aria-selected'));
+    const tab = (i: number) => document.body.querySelectorAll<HTMLElement>('[role="tab"]')[i];
+    await act(async () => { tab(0).focus(); tab(0).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(tabs()).toEqual(['false', 'true']);
+    expect(document.body.querySelector('textarea')).not.toBeNull(); // the HTML tab's body is shown
+
+    await act(async () => { tab(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(tabs()).toEqual(['true', 'false']);
+  });
+
+  it('each body is the tab panel of the chosen tab (named by it · a focus stop) and follows the choice', async () => {
+    await mount();
+    const full = { panels: 1, namedByChosenTab: true, chosenControlsIt: true, focusable: true };
+    expect(panelFacts(document.body)).toEqual(full);
+    expect(document.body.querySelector('[role="tabpanel"] input[type="file"]')).not.toBeNull();
+
+    const htmlTab = [...document.body.querySelectorAll('[role="tab"]')].find((b) => b.textContent === 'HTML 붙여넣기')!;
+    await act(async () => { htmlTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(panelFacts(document.body)).toEqual(full);
+    expect(document.body.querySelector('[role="tabpanel"] textarea')).not.toBeNull();
   });
 });

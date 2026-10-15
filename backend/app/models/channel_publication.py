@@ -73,6 +73,9 @@ class ChannelPublication(Base):
     # 이 열이 그 밖의 별개 사실(FE "게시됨(비공개)" 라벨 조합용). 다른 채널은
     # 절대 안 건드려 server_default false 그대로.
     privacy_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # story #4404 (0419) — the container-creation claim. The row is committed as the claim before the provider call (it used to
+    # stay uncommitted during the upload); a second publisher that finds a live claim and no container gets «in progress».
+    container_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

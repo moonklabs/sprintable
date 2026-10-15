@@ -4,14 +4,12 @@
 dev/prod URL이 확실히 거부되고, 테스트 DB만 허용되는지. realdb 불요(순수 로직 단위 테스트)."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from conftest import assert_disposable_test_db  # noqa: E402
+# story 4459: imported through the `tests` package — putting tests/ at the front of sys.path made `import mcp` find tests/mcp/
+# for every later file in the same run (test_2188 then failed with «No module named 'mcp.types'»)
+from tests.conftest import assert_disposable_test_db  # noqa: E402
 
 
 @pytest.mark.parametrize("url", [

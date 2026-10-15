@@ -30,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.publication_attempt import PublicationAttempt
-from app.models.publication_command import PublicationCommand
+from app.models.publication_command import STATUS_BLOCKED_UNAPPROVED, PublicationCommand  # noqa: F401 — re-exported (importers use this module)
 from app.services.provider_call_mark import (
     provider_call_marked,
     provider_client,
@@ -171,7 +171,11 @@ _CONNECTION_BLOCKED_CODES = frozenset({
 # story 620beefc(PO 決定, 2026-09-04) — IMAGE 컨테이너가 Threads 쪽에서 ERROR/EXPIRED로
 # 끝났다. 폴링을 몇 번 더 반복해도 같은 결과이므로(결정적) transient 백오프가 아니라
 # needs_check(사람 재시도, AC5)로 바로 보낸다.
-_NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
+_NEEDS_CHECK_CODES = frozenset({
+    "CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED",
+    # story #4458 — a boost campaign made on another budget (a re-seal during its create): not switched on, a person decides
+    "ADS_BOOST_CREATED_BUDGET_DIFFERS",
+})
 # story #4272(까디르 codex P1) — 코드 없는 예외가 공급자 쓰기 호출 **전**에 났다(`provider_call_mark` 표시 없음) — 아무것도 안
 # 나갔으니 자동 재시도가 안전하다(이중 발행 0). 호출 뒤의 코드 없는 예외는 예전처럼 needs_check(모름).
 PRE_CALL_ERROR_CODE = "PUBLICATION_COMMAND_PRE_CALL_ERROR"
@@ -204,12 +208,20 @@ _RETRY_SAFE_CODES = frozenset({
     "SANDBOX_PROVIDER_ERROR", "SANDBOX_INSTAGRAM_PROVIDER_ERROR",
     # 캐러셀 자식(부모 게시 전) 실패 sandbox 마커 — 실 `FACEBOOK_/INSTAGRAM_CREATE_CAROUSEL_CHILD_FAILED`와 같은 칸(까디르 codex P2 · PO 18:51Z).
     "SANDBOX_FACEBOOK_CAROUSEL_CHILD_FAILED", "SANDBOX_INSTAGRAM_CAROUSEL_CHILD_FAILED",
+    # story #4417 — reading the ad account's currency before an ads boost start creates or switches on anything (a read: nothing
+    # was written). A currency that differs (`ADS_BOOST_ACCOUNT_CURRENCY_MISMATCH`) stays needs_check by default — deterministic.
+    "META_ADS_ACCOUNT_READ_FAILED",
 })
 # `CHANNEL_PUBLISH_PROVIDER_ERROR`는 읽기 경로(인사이트 · 댓글 수집의 공급자 5xx — 재시도 안전)가 쓰는 코드라 transient 유지. 발행
 # 경로는 이제 이 코드를 내지 않는다(`provider_error_code`가 코드 그대로 · 블로그 쓰기는 `SITE_POST_PROVIDER_ERROR`).
 # 속도 제한(429)은 요청 자체가 거절된 것.
 # 공급자 쓰기 호출 전 코드 없는 예외(4272 `PRE_CALL_ERROR_CODE`)도 «안 나감»의 증거가 있는 재시도 안전 부류.
-_TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE}) | _RETRY_SAFE_CODES
+# story #4404 — another command of the same ads boost run holds the campaign-creation claim: nothing was sent by this one, and a
+# retry finds the winner's ids and skips creation.
+ADS_BOOST_CREATE_IN_PROGRESS_CODE = "ADS_BOOST_CREATE_IN_PROGRESS"
+_TRANSIENT_CODES = frozenset({
+    "CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE, ADS_BOOST_CREATE_IN_PROGRESS_CODE,
+}) | _RETRY_SAFE_CODES
 
 # story #4264(PO 15:18Z) — 실패 코드 → 부류의 **한 표**. 분류(`classify_failure_kind`)와 어댑터 코드 승격(`provider_error_code`)이
 # 같은 두 모음을 읽는다(사본 0). 원칙: `not_sent`는 «안 나간 적극적 증거»가 있을 때만 — HTTP 호출 전 검사에서 막혔거나 공급자가
@@ -276,7 +288,6 @@ def provider_error_code(provider_code: str | None) -> str:
 # command를 즉시 닫는다(백오프 재시도 대상 아님 — "재시도해도 안 되는" 종류가
 # 아니라 "재시도라는 개념 자체가 안 맞는" 종류: 사람이 다시 승인해야 새 커맨드가
 # 생긴다). 기존 'voided'(재승인으로 무효화)와 같은 결의 신규 terminal 상태.
-STATUS_BLOCKED_UNAPPROVED = "blocked_unapproved"
 
 
 def mark_blocked_unapproved(command: PublicationCommand, *, reason_code: str, last_error: str) -> None:
@@ -356,7 +367,7 @@ async def create_or_get_publication_command(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, destination: uuid.UUID,
     approved_version: uuid.UUID, requested_by_member_id: uuid.UUID,
     scheduled_at: datetime | None, operation: str = "publish", content_kind: str = "channel_post",
-    toggle_seq: int = 0, initiated_by: str | None = None,
+    toggle_seq: int = 0, initiated_by: str | None = None, ads_boost_cycle: int | None = None,
 ) -> tuple[PublicationCommand, bool]:
     """멱등 upsert(블루프린트 §3 키: org_id+destination+approved_version+operation+
     toggle_seq — story #3806 PR3가 toggle_seq를 추가, 그 전까지는 항상 0이라
@@ -396,7 +407,7 @@ async def create_or_get_publication_command(
         id=uuid.uuid4(), org_id=org_id, gate_id=gate_id, destination=destination,
         approved_version=approved_version, operation=operation, scheduled_at=scheduled_at,
         status="pending", requested_by_member_id=requested_by_member_id, content_kind=content_kind,
-        toggle_seq=toggle_seq, initiated_by=initiated_by,
+        toggle_seq=toggle_seq, initiated_by=initiated_by, ads_boost_cycle=ads_boost_cycle,
     )
     try:
         async with db.begin_nested():
@@ -429,9 +440,13 @@ async def void_pending_commands_for_gate(db: AsyncSession, *, gate_id: uuid.UUID
     있게). completed·dead_letter·voided 등 이미 종결된 command는 절대 건드리지 않는다
     (그 자체 이력 보존 — "이 게이트의 아무 행이나"가 아니라 "이 게이트의 대기 중인
     행"만, 카디르 QA③ 지적 그대로)."""
+    from app.services.ads_boost_execution import MONEY_STOPPING_OPS
+
     rows = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.gate_id == gate_id, PublicationCommand.status == "pending",
+            # story #4466 (PO 11:51Z · (나)) — a queued pause stops money: a gate going back to review never cancels it
+            PublicationCommand.operation.not_in(MONEY_STOPPING_OPS),
         ).with_for_update()
     )).scalars().all()
     for row in rows:
@@ -521,6 +536,9 @@ async def retry_dead_letter_command(
         select(PublicationCommand).where(
             PublicationCommand.id == command_id, PublicationCommand.org_id == org_id,
         ).with_for_update()
+        # story #4476 (Qadir 2선 ② · PO 16:53Z) — read the row again under the lock: a copy already in this session can be stale
+        # (two presses overlapping while the worker finishes the row) and would put a finished row back to pending
+        .execution_options(populate_existing=True)
     )).scalar_one_or_none()
     if command is None:
         return None
@@ -1235,6 +1253,9 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
 
         _publish_client = get_publish_client_module(comment.channel)
 
+        from app.services.external_call_tx import end_transaction_before_external_call
+
+        await end_transaction_before_external_call(db)  # story #4404 — reads only before the provider call
         try:
             async with provider_client() as client:
                 external_reply_id, external_reply_url = await _publish_client.reply(

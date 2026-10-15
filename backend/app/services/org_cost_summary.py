@@ -63,20 +63,21 @@ async def get_org_ads_cost_summary(db: AsyncSession, *, org_id: uuid.UUID) -> di
     숫자"가 나온다 — 통화가 하나로 안 모이면(0건 제외 — 0은 "더할 게 없다"는
     정직한 사실이지 "섞였다"가 아니다) 세 합계 필드를 전부 None으로 낸다(지어낸
     숫자보다 "모른다"가 정직하다)."""
-    gates = (await db.execute(
-        select(Gate).where(
-            Gate.org_id == org_id, Gate.gate_type == _ADS_BOOST_GATE_TYPE, Gate.status == "approved",
-        )
+    all_gates = (await db.execute(
+        select(Gate).where(Gate.org_id == org_id, Gate.gate_type == _ADS_BOOST_GATE_TYPE)
     )).scalars().all()
-
-    distinct_currencies = {g.sealed_ads_currency for g in gates if g.sealed_ads_currency}
+    gates = [g for g in all_gates if g.status == "approved"]
+    # story #4460 (PO 16:30Z ③) — money that went out stays on the ledger: spend counts every ads_boost gate's captures (a
+    # cancelled boost's gate is voided · a boost under re-review is pending), the budget only the approved ones. The currency
+    # check covers every gate whose spend is counted.
+    distinct_currencies = {g.sealed_ads_currency for g in all_gates if g.sealed_ads_currency}
     # 0건(더할 게 없음)·1건(그 통화로 확정) 둘 다 "섞이지 않음" — 2개 이상만 섞임.
     currency = next(iter(distinct_currencies), None) if len(distinct_currencies) <= 1 else None
     mixed_currencies = len(distinct_currencies) > 1
 
     sealed_budget_minor_sum: int | None = sum(g.sealed_ads_budget_minor or 0 for g in gates)
 
-    publication_ids = [uuid.UUID(g.scope_key) for g in gates if g.scope_key]
+    publication_ids = [uuid.UUID(g.scope_key) for g in all_gates if g.scope_key]
     captured_spend_minor_sum: int | None = 0
     if publication_ids:
         # story #3806 가드(test_3806_organic_snapshots_only_guard.py) 처방(페드루

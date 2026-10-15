@@ -176,7 +176,7 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
                     readOnly
                     value={renderArtifact(mcpFile?.content ?? null, freshApiKey, false) ?? ''}
                     onFocus={(e) => e.currentTarget.select()}
-                    className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+                    className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base lg:text-xs text-foreground"
                     rows={4}
                     data-testid="agent-connection-settings-copy-failed-raw-config"
                   />

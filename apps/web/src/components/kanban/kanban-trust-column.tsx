@@ -187,7 +187,7 @@ export function KanbanTrustColumn({
               }
             }}
             placeholder={t('addStoryPlaceholder')}
-            className="h-8 text-sm"
+            className="h-8 text-base lg:text-sm"
           />
           <div className="mt-2 flex items-center gap-2">
             <Button

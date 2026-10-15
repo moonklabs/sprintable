@@ -4,7 +4,7 @@
 위에 얹은 «집행»(chain_circuit_breaker 테이블 + send_message 발신 차단 + 수동/자동 해제)을
 검증한다:
 - circuit_breaker_mode='block'(기본): 에피소드 시작 시 서킷 open, 알림 event_type이
-  conversation.circuit_breaker_opened로 바뀐다(reference_id=breaker.id).
+  conversation.circuit_breaker_opened로 바뀐다(reference_id=그 대화 id · story #4631 — 전엔 breaker.id).
 - circuit_breaker_mode='notify_only': #2626 원 계약(서킷 안 열림·event_type 그대로) 보존.
 - 서킷 open은 멱등 — 이미 열려 있는 대화에 재폭주가 와도 중복 행이 안 생긴다(부분 unique
   index, 마이그레이션 0244).
@@ -115,6 +115,15 @@ async def _seed_human(session, org_id, project_id=None, *, role="member"):
         name="human", is_active=True,
     ))
     await session.commit()
+    # story #4631: the members row a person has in production (member-sync — the active-admin rule reads it by user_id). An upsert:
+    # whether team_members is its own table here or the projection view over members, the row ends up with this user_id
+    from sqlalchemy import text
+
+    await session.execute(text(
+        "INSERT INTO members (id, org_id, type, user_id, name, is_active) VALUES (:id, :org, 'human', :uid, 'human', true) "
+        "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id"
+    ), {"id": om.id, "org": org_id, "uid": user_id})
+    await session.commit()
     return user_id, om.id
 
 
@@ -135,10 +144,23 @@ async def _add_participant(session, conversation_id, member_id):
 
 
 async def _seed_org_owner(session, org_id, *, role="owner"):
-    from app.models.project import OrgMember
+    """story #4657: the production shape — a users row, the org member, and its active human members anchor (members.id = org member
+    id; ensure_human_member writes the same). The release rule reads the anchor, so a bare OrgMember is not an owner in production."""
+    from sqlalchemy import text
 
-    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=uuid.uuid4(), role=role)
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=f"{user_id.hex[:8]}@test.local", hashed_password="x"))
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role=role)
     session.add(om)
+    await session.commit()
+    await session.execute(text(
+        "INSERT INTO members (id, org_id, type, user_id, name, is_active) VALUES (:id, :org, 'human', :uid, 'owner', true) "
+        "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id"
+    ), {"id": om.id, "org": org_id, "uid": user_id})
     await session.commit()
     return om.id
 
@@ -226,7 +248,11 @@ async def test_block_mode_opens_breaker_and_notification_reflects_it():
                 from app.services.chain_escalation import get_open_circuit_breaker_id
                 breaker_id = await get_open_circuit_breaker_id(s, conv_id)
                 assert breaker_id is not None
-                assert kw["reference_id"] == breaker_id
+                # story #4631 (PO 고름 B): the conversation's id — the deep link (chat_thread) and the release API both take it
+                assert kw["reference_id"] == conv_id and kw["reference_type"] == "conversation"
+                # story #4631 (Yuna §5-1): no promise of a button on the notice — where to resume it (an untitled conversation: bare title)
+                from app.services.i18n_catalog import t
+                assert (kw["title"], kw["body"]) == (t("conversation.agents_paused_notice_title_bare", "ko"), t("conversation.agents_paused_notice_body", "ko"))
     finally:
         await engine.dispose()
 
@@ -542,5 +568,344 @@ async def test_release_endpoint_owner_closes_breaker_idempotently():
                 auth=_human_auth(owner_user_id, org_id), org_id=org_id,
             )
             assert resp2["released"] is False, "중복 해제 호출은 에러 없이 no-op"
+    finally:
+        await engine.dispose()
+
+
+# ─── story #4631 (PO 고름 A): auto 해제가 실제로 돈다 — agent 발신의 423 자리에서 ────────────────
+
+async def _blocked_conversation(s, *, release_mode: str | None, opened_seconds_ago: int, window_seconds: int | None = None):
+    """An agent participant in a human-less conversation whose breaker opened `opened_seconds_ago` (window 300 s by default)."""
+    from sqlalchemy import text
+    from app.services.chain_escalation import _open_circuit_breaker
+
+    org_id, project_id = await _seed_org_project(s)
+    if release_mode is not None:
+        extra = {"window_seconds": window_seconds} if window_seconds is not None else {}
+        await _seed_org_config(s, org_id, circuit_breaker_release_mode=release_mode, **extra)
+    agent_id = await _seed_agent(s, org_id, project_id)
+    conv_id = await _seed_conversation(s, org_id, project_id)
+    await _add_participant(s, conv_id, agent_id)
+    await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+    await s.execute(
+        text("UPDATE chain_circuit_breaker SET opened_at = now() - make_interval(secs => :secs) WHERE conversation_id = :c"),
+        {"secs": opened_seconds_ago, "c": conv_id},
+    )
+    await s.commit()
+    return org_id, agent_id, conv_id
+
+
+async def _agent_send(s, conv_id, agent_id, org_id, content):
+    from app.routers.conversations import SendMessageRequest, send_message
+
+    return await send_message(
+        conv_id, SendMessageRequest(content=content), BackgroundTasks(), db=s,
+        auth=_agent_auth(agent_id, org_id), org_id=org_id,
+    )
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_auto_org_quiet_past_two_windows_releases_at_the_next_agent_send():
+    """auto org · opened 11 min ago (window 5 min ×2 passed) · no episode marker · quiet → the next agent send closes the breaker
+    (released_by NULL · reason «auto: quiet since block») and goes through. Before, nothing ever closed it."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=660)
+            with patch("app.services.redis_shared.get_client", return_value=_fakeredis_client()):
+                resp = await _agent_send(s, conv_id, agent_id, org_id, "조용해진 뒤 한 줄")
+            assert resp["data"]["content"] == "조용해진 뒤 한 줄"
+            assert await _open_breaker_count(s, conv_id) == 0
+            from sqlalchemy import select
+            from app.models.chain_circuit_breaker import ChainCircuitBreaker
+            row = (await s.execute(select(ChainCircuitBreaker).where(ChainCircuitBreaker.conversation_id == conv_id))).scalar_one()
+            assert (row.released_by, row.release_reason) == (None, "auto: quiet since block")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_the_send_that_loses_the_race_to_close_goes_through_too():
+    """Kadir (5015): two sends reach the auto release at once — one closes it (once: the UPDATE is on the open row only), the other
+    finds nothing left to close; it goes through as well instead of meeting a 423 for a block already gone."""
+    from sqlalchemy import update as sa_update
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=660)
+
+            async def _closed_by_the_other(db, conversation_id, *, reason, breaker_id=None):  # the other send won: it closed the row first
+                await db.execute(sa_update(ChainCircuitBreaker).where(
+                    ChainCircuitBreaker.conversation_id == conversation_id, ChainCircuitBreaker.released_at.is_(None),
+                ).values(released_at=sa_func.now(), release_reason="auto: quiet since block"))
+                return False
+
+            from sqlalchemy import func as sa_func
+            with patch("app.services.redis_shared.get_client", return_value=_fakeredis_client()), \
+                 patch("app.services.chain_escalation._auto_close_circuit_breaker", side_effect=_closed_by_the_other):
+                resp = await _agent_send(s, conv_id, agent_id, org_id, "경주에서 진 쪽")
+            assert resp["data"]["content"] == "경주에서 진 쪽"
+            assert await _open_breaker_count(s, conv_id) == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_a_block_opened_in_between_is_never_closed_by_the_send_that_checked_another():
+    """Kadir (5015 · codex 01a11b12): one send checks the old block (old enough · quiet); before its close, another send closes that
+    block and a new burst opens a new one. The close is by the checked block's id — the new block stays open and this send meets
+    its 423. (Before: «every open row of the conversation» was closed, the unchecked new block too.)"""
+    from sqlalchemy import func as sa_func, select as sa_select, update as sa_update
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+    from app.services.chain_escalation import _open_circuit_breaker, get_open_circuit_breaker_id
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=660)
+            old = await get_open_circuit_breaker_id(s, conv_id)
+            project_id = (await s.execute(sa_select(ChainCircuitBreaker.project_id).where(ChainCircuitBreaker.id == old))).scalar_one()
+
+            async def _in_between(db, conversation_id, window_seconds):  # after the age check, before the close
+                await db.execute(sa_update(ChainCircuitBreaker).where(ChainCircuitBreaker.id == old).values(
+                    released_at=sa_func.now(), release_reason="auto: quiet since block"))
+                await _open_circuit_breaker(db, org_id=org_id, conversation_id=conversation_id, project_id=project_id)
+                return 0
+
+            with patch("app.services.redis_shared.get_client", return_value=_fakeredis_client()), \
+                 patch("app.services.chain_escalation._recent_message_velocity", side_effect=_in_between), \
+                 pytest.raises(HTTPException) as ei:
+                await _agent_send(s, conv_id, agent_id, org_id, "새 차단에 막혀야 하는 한 줄")
+            assert ei.value.status_code == 423
+            new = await get_open_circuit_breaker_id(s, conv_id)
+            assert new is not None and new != old, "the block opened in between is still open"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+@pytest.mark.parametrize("case", ["too_soon", "manual", "marker_alive", "redis_down", "still_busy"])
+async def test_4631_the_block_stays_unless_every_condition_holds(case):
+    """The breaker stays (423 · nothing saved) when: opened under two windows ago · the org is manual (the default) · the episode
+    marker is still alive · Redis cannot be read (fail-closed: not knowing never releases) · the window is still above the threshold."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            mode = None if case == "manual" else "auto"
+            ago = 60 if case == "too_soon" else 3600
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode=mode, opened_seconds_ago=ago)
+            if case == "still_busy":
+                await _seed_messages(s, conv_id, agent_id, 20, ages_seconds=10)
+            client = _fakeredis_client()
+            if case == "marker_alive":
+                from app.services import redis_shared
+                await client.set(redis_shared.key("chain_escalation", "episode", str(conv_id)), "1", ex=600)
+            # Redis down = no client (redis_shared.with_fallback → the domain's fallback)
+            with patch("app.services.redis_shared.get_client", return_value=None if case == "redis_down" else client), \
+                 pytest.raises(HTTPException) as ei:
+                await _agent_send(s, conv_id, agent_id, org_id, "막혀야 하는 한 줄")
+            assert ei.value.status_code == 423 and ei.value.detail["code"] == "CIRCUIT_BREAKER_OPEN"
+            assert await _open_breaker_count(s, conv_id) == 1
+            # Yuna «4631» §5: the hint is true to how this org's block is released (the org's language · no users here → ko)
+            from app.services.i18n_catalog import t
+            want = t("conversation.agents_paused_hint_manual", "ko") if case == "manual" else t("conversation.agents_paused_hint_auto", "ko", n=10)
+            assert (ei.value.detail["message"], ei.value.detail["hint"]) == (t("conversation.agents_paused_message", "ko"), want)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_one_quiet_minute_reads_minute_not_minutes():
+    """Yuna «4631» 63행: an auto org whose window is 30 s waits about 1 quiet minute — the 423 hint takes the singular key, so the
+    en words read «about 1 minute», never «1 minutes» (the catalog has no plural forms)."""
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, agent_id, conv_id = await _blocked_conversation(s, release_mode="auto", opened_seconds_ago=10, window_seconds=30)
+            # an en org (ko reads «1분» either way, so only en tells the two keys apart)
+            with patch("app.services.redis_shared.get_client", return_value=_fakeredis_client()), \
+                 patch("app.services.org_locale.resolve_org_locale", AsyncMock(return_value="en")), \
+                 pytest.raises(HTTPException) as ei:
+                await _agent_send(s, conv_id, agent_id, org_id, "막혀야 하는 한 줄")
+            assert ei.value.status_code == 423
+            assert ei.value.detail["hint"] == (
+                "You can send again once the conversation has been quiet for about 1 minute — sending before then is blocked too"
+            )
+        assert "about 10 minutes —" in t("conversation.agents_paused_hint_auto", "en", n=10)
+    finally:
+        await engine.dispose()
+
+
+# ─── story #4631 C: the conversation's open block, as the web's banner reads it ─────────────────────
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_the_open_block_as_the_web_reads_it_and_who_may_release_it():
+    """open_circuit_breaker_state: none open → None · open → opened_at · release_mode «manual» (no settings row = the default) ·
+    can_release only for a human org owner/admin (the release API's own rule): an owner yes · a plain member no · not a human
+    session (an agent) no · released → None again."""
+    from app.services.chain_escalation import _open_circuit_breaker, open_circuit_breaker_state, release_circuit_breaker
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            owner_user_id, owner_member = await _seed_human(s, org_id, project_id, role="owner")
+            member_user_id, _ = await _seed_human(s, org_id, project_id, role="member")
+            conv_id = await _seed_conversation(s, org_id, project_id)
+
+            def state(caller):
+                return open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=caller)
+
+            assert await state(owner_user_id) is None, "no block open"
+            await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+            await s.commit()
+            as_owner = await state(owner_user_id)
+            assert (as_owner["release_mode"], as_owner["can_release"]) == ("manual", True)
+            assert as_owner["opened_at"] is not None
+            assert (await state(member_user_id))["can_release"] is False, "a plain member: the release API's 403"
+            assert (await state(None))["can_release"] is False, "not a human session (an agent): never its own block"
+
+            await release_circuit_breaker(s, conversation_id=conv_id, released_by=owner_member, reason="확인")
+            await s.commit()
+            assert await state(owner_user_id) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_a_deactivated_admin_neither_sees_the_button_nor_releases():
+    """Kadir (5016) · the #4624 rule: an org owner whose members row is deactivated — can_release false and the release API 403,
+    the block stays (the button and the API ask the same question)."""
+    from sqlalchemy import text
+    from app.routers.conversations import CircuitBreakerReleaseRequest, release_circuit_breaker_endpoint
+    from app.services.chain_escalation import _open_circuit_breaker, open_circuit_breaker_state
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            owner_user_id, owner_member = await _seed_human(s, org_id, project_id, role="owner")
+            conv_id = await _seed_conversation(s, org_id, project_id)
+            await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+            await s.commit()
+            assert (await open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=owner_user_id))["can_release"] is True
+
+            await s.execute(text("UPDATE members SET is_active = false WHERE id = :id"), {"id": owner_member})
+            await s.commit()
+            assert (await open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=owner_user_id))["can_release"] is False
+            with pytest.raises(HTTPException) as ei:
+                await release_circuit_breaker_endpoint(
+                    conv_id, CircuitBreakerReleaseRequest(reason="x"), db=s, auth=_human_auth(owner_user_id, org_id), org_id=org_id,
+                )
+            assert ei.value.status_code == 403
+            assert await _open_breaker_count(s, conv_id) == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_get_conversation_carries_it_owner_may_release_agent_may_not():
+    """The wiring: GET /conversations/{id} carries the state — the owner's view can_release · the agent's (its own block) cannot ·
+    and the JSON keys the web reads. The read rule itself is not this story's (stubbed to «readable»; test_2697 owns it)."""
+    from app.routers.conversations import get_conversation
+    from app.services.chain_escalation import _open_circuit_breaker
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            owner_user_id, _ = await _seed_human(s, org_id, project_id, role="owner")
+            agent_id = await _seed_agent(s, org_id, project_id)
+            conv_id = await _seed_conversation(s, org_id, project_id)
+            await _add_participant(s, conv_id, agent_id)
+            with patch("app.routers.conversations._can_read_conversation", AsyncMock(return_value=True)):
+                quiet = await get_conversation(conv_id, db=s, auth=_human_auth(owner_user_id, org_id), org_id=org_id)
+                assert quiet.circuit_breaker is None
+                await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+                await s.commit()
+                as_owner = await get_conversation(conv_id, db=s, auth=_human_auth(owner_user_id, org_id), org_id=org_id)
+                as_agent = await get_conversation(conv_id, db=s, auth=_agent_auth(agent_id, org_id), org_id=org_id)
+            body = as_owner.model_dump(mode="json")["circuit_breaker"]
+            assert set(body) == {"opened_at", "release_mode", "can_release", "auto_release_after_minutes", "no_release_admin"}  # story #4657: + no_release_admin
+            assert (body["release_mode"], body["can_release"], body["auto_release_after_minutes"]) == ("manual", True, None)
+            assert as_agent.model_dump(mode="json")["circuit_breaker"]["can_release"] is False
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_an_auto_org_says_auto():
+    from app.services.chain_escalation import _open_circuit_breaker, open_circuit_breaker_state
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_org_config(s, org_id, circuit_breaker_release_mode="auto")
+            conv_id = await _seed_conversation(s, org_id, project_id)
+            await _open_circuit_breaker(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+            await s.commit()
+            got = await open_circuit_breaker_state(s, conversation_id=conv_id, org_id=org_id, caller_user_id=None)
+            # Yuna «4631» §2: the server's minutes (window 300 s × 2 → 10) — the web shows only this value
+            assert (got["release_mode"], got["auto_release_after_minutes"]) == ("auto", 10)
+            manual_conv = await _seed_conversation(s, org_id, project_id)
+            assert await open_circuit_breaker_state(s, conversation_id=manual_conv, org_id=org_id, caller_user_id=None) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_4631_releasing_clears_the_episode_so_a_new_burst_pauses_again():
+    """Yuna «4631» §3 (BE 확인) · Kadir 5016: released while the episode marker still lived, the same burst's next messages read
+    «continuing» and no new block opened. The release clears the marker and the count starts after it: the burst that opened the
+    block no longer counts (the first message after a release does not undo it), and a new burst pauses the conversation again."""
+    from app.services import redis_shared
+    from app.services.chain_escalation import (
+        evaluate_unsupervised_chain_episode, get_open_circuit_breaker_id, release_circuit_breaker,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_org_owner(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            conv_id = await _seed_conversation(s, org_id, project_id)
+            await _seed_messages(s, conv_id, agent_id, 20, ages_seconds=10)
+            client = _fakeredis_client()
+            marker = redis_shared.key("chain_escalation", "episode", str(conv_id))
+            with patch("app.services.redis_shared.get_client", return_value=client), \
+                 patch("app.services.notification_dispatch.dispatch_notification", AsyncMock()):
+                await evaluate_unsupervised_chain_episode(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+                first = await get_open_circuit_breaker_id(s, conv_id)
+                assert first is not None and await client.exists(marker)
+
+                assert await release_circuit_breaker(s, conversation_id=conv_id, released_by=uuid.uuid4(), reason="확인") is True
+                await s.commit()
+                assert not await client.exists(marker), "released: the episode is over"
+
+                # right after the release: the old burst's 20 messages (inside the window) no longer count — not paused again
+                await evaluate_unsupervised_chain_episode(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+                assert await get_open_circuit_breaker_id(s, conv_id) is None, "the admin's release is not undone by the old burst"
+
+                # a new burst after the release (20 more, stamped after it) → a new episode → paused again, a new row
+                await _seed_messages(s, conv_id, agent_id, 20, ages_seconds=-2)
+                await evaluate_unsupervised_chain_episode(s, org_id=org_id, conversation_id=conv_id, project_id=project_id)
+                second = await get_open_circuit_breaker_id(s, conv_id)
+                assert second is not None and second != first
     finally:
         await engine.dispose()

@@ -137,6 +137,30 @@ async def resolve_member(
     return await _resolve_member_legacy(auth, org_id, session, project_id)
 
 
+async def is_active_owner(session: AsyncSession, member: ResolvedMember) -> bool:
+    """story #4585 · #4598 (PO 01:42Z): who may flip an org-wide switch — «원격 제어» and «묻지 않고 일하기». An owner by
+    `resolve_member` (the branch in use: members.org_role on the anchor branch · org_members.role on the legacy one — 4583's
+    resolver-branches test) whose members row is active and not deleted. Fail closed: no members row is not an owner either.
+    One rule in one place — the remote-control gate and the run profile's gates both call this."""
+    if member.role != "owner":
+        return False
+    return await _member_row_active(session, member)
+
+
+async def is_active_org_admin(session: AsyncSession, member: ResolvedMember) -> bool:
+    """story #4624 (Kadir QA · PO 08:41Z): an owner or admin by `resolve_member` whose members row is active and not deleted — the
+    same rule as `is_active_owner`, for the gates an admin passes too (removing another person's phone key or pair). Fail closed."""
+    if member.role not in ("owner", "admin"):
+        return False
+    return await _member_row_active(session, member)
+
+
+async def _member_row_active(session: AsyncSession, member: ResolvedMember) -> bool:
+    return (await session.execute(
+        select(Member.id).where(Member.id == member.id, Member.is_active.is_(True), Member.deleted_at.is_(None))
+    )).first() is not None
+
+
 async def resolve_member_db_verified(
     auth: AuthContext,
     org_id: uuid.UUID,
@@ -801,6 +825,89 @@ async def resolve_member_display_name(
         select(User).where(User.id == om.user_id)
     )).scalar_one_or_none()
     return user.display_name if user else None
+
+
+async def org_recipient_ids(
+    member_ids: set[uuid.UUID],
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> set[uuid.UUID]:
+    """story #4500 (PO 13:16Z) — the recipients among these ids: each resolved to its canonical member first
+    (`canonicalize_member_ids` — an old id aliased to a living member, e.g. a story's assignee stored under a legacy human id),
+    then only this org's members (`filter_org_member_ids`). Filtering first would drop a person who still receives today
+    (dev: 4 stories' assignees). Returns the canonical ids — who the delivery is for."""
+    if not member_ids:
+        return set()
+    canonical = set((await canonicalize_member_ids(member_ids, session)).values())
+    return await filter_org_member_ids(canonical, org_id, session)
+
+
+async def org_mention_ids(
+    mentioned_ids: list[uuid.UUID],
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> list[uuid.UUID]:
+    """story #4505 — a message's mentions by the recipient rule (`org_recipient_ids`): each resolved to its living member
+    (an old alias id), only this org's members, in the order given and without repeats — the ids stored and sent."""
+    if not mentioned_ids:
+        return []
+    canon = await canonicalize_member_ids(set(mentioned_ids), session)
+    in_org = await filter_org_member_ids(set(canon.values()), org_id, session)
+    out: list[uuid.UUID] = []
+    for mid in (canon[m] for m in mentioned_ids):
+        if mid in in_org and mid not in out:
+            out.append(mid)
+    return out
+
+
+async def conversation_member_ids_in_org(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+    org_id: uuid.UUID,
+    *,
+    humans_only: bool = False,
+) -> set[uuid.UUID]:
+    """story #4500 (AC2) — the participants a delivery may reach: only when the conversation is this org's, and of its
+    participants only this org's members (`filter_org_member_ids`, the rule 4497 checks assignees with). Participant rows are
+    org-checked at most writes, but not all (a config-named approver · a bridge mapping's conversation); the delivery must not
+    depend on that. `humans_only`: of those, the people (story #4505 — judged on the canonical ids, after the alias is
+    resolved: a participant stored under an old human id is a person too)."""
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    ids = set((await session.execute(
+        select(ConversationParticipant.member_id)
+        .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id == conversation_id, Conversation.org_id == org_id)
+    )).scalars().all())
+    recipients = await org_recipient_ids(ids, org_id, session)
+    if humans_only and recipients:
+        from sqlalchemy import column, values
+        from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
+        candidates = values(column("mid", PG_UUID(as_uuid=True)), name="candidates").data([(m,) for m in recipients])
+        recipients = set((await session.execute(
+            select(candidates.c.mid).where(is_human_member_condition(candidates.c.mid))
+        )).scalars().all())
+    return recipients
+
+
+async def conversation_member_ids_of_its_org(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """story #4500 (AC2) — the same rule as `conversation_member_ids_in_org` where the caller holds no org (a message carries
+    none — its conversation does): the participants that are members of the conversation's own org. One query reads the
+    participants with that org."""
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    rows = (await session.execute(
+        select(ConversationParticipant.member_id, Conversation.org_id)
+        .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id == conversation_id)
+    )).all()
+    if not rows:
+        return set()
+    return await org_recipient_ids({r[0] for r in rows}, rows[0][1], session)
 
 
 async def filter_org_member_ids(

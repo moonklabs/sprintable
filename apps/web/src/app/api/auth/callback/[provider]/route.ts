@@ -7,6 +7,7 @@ import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { resolveAppUrl } from '@/services/app-url';
 import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
+import { nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { backendSignal, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -93,6 +94,9 @@ async function handleCallback(request: Request, provider: string, code: string |
   // code/state 자체엔 "로그인이냐 연결이냐" 구분이 없어(authorize 요청 파라미터가 로그인과
   // 동일하게 생겼다, 의도된 설계) 이 쿠키가 유일한 분기 신호다.
   const linkMode = cookieStore.get(`oauth_link_${provider}`)?.value === 'true';
+  // story #4626 — the desktop app that started this sign-in (closed table · none = the default app)
+  const returnApp = nativeReturnApp(cookieStore.get(`oauth_native_return_app_${provider}`)?.value);
+  cookieStore.delete(`oauth_native_return_app_${provider}`);
   cookieStore.delete(`oauth_state_${provider}`);
   cookieStore.delete(`oauth_tos_${provider}`);
   cookieStore.delete(`oauth_invite_token_${provider}`);
@@ -212,6 +216,7 @@ async function handleCallback(request: Request, provider: string, code: string |
 
     const returnUrl = new URL('/native/oauth-return', APP_LINK_ORIGIN());
     returnUrl.searchParams.set('code', issueJson.code);
+    if (returnApp) returnUrl.searchParams.set(RETURN_APP_PARAM, returnApp); // story #4626: the page's button opens that app
     const nativeRes = NextResponse.redirect(returnUrl.toString());
     nativeRes.headers.set('Cache-Control', 'no-store');
     nativeRes.headers.set('Referrer-Policy', 'no-referrer');

@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { pickIGaJosa } from '@/lib/korean-particle';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChatBubble } from './chat-bubble';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
@@ -19,7 +18,7 @@ import { useReadingPanelStack } from './use-reading-panel-stack';
 import { ReadingPanelProvider } from './reading-panel-context';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
 import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
 import type { HitlAnswer } from './hitl-approval-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
@@ -37,6 +36,8 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { actorRowLabels } from '@/lib/member-display';
 import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { formatViewerDate } from '@/lib/viewer-time-zone';
 
 interface ChatViewProps {
   threadId: string;
@@ -87,13 +88,11 @@ const MAX_SCROLL_LOAD_ATTEMPTS = 10;
 // 같은 방식(Intl.DateTimeFormat 직접 호출 — 새 포맷 함수 신설 아님, 기존 정본과 동형 패턴)
 // 으로 하드코딩 'ko-KR'만 실제 locale로 교정한다. PR 분류표에 "기록/약속 밖(날짜 구분선)"으로
 // 별도 표기.
-function groupByDate(messages: ChatMessage[], locale: string, displayTimezone: string): MessageGroup[] {
+// story #4443 PR2b — grouped and labelled by the viewer's day (one zone for both); not known yet → one group, no label (never UTC)
+function groupByDate(messages: ChatMessage[], locale: string, displayTimezone: string | null): MessageGroup[] {
   const groups: Record<string, ChatMessage[]> = {};
-  const dateFmt = new Intl.DateTimeFormat(locale, {
-    year: 'numeric', month: 'long', day: 'numeric', timeZone: displayTimezone,
-  });
   for (const msg of messages) {
-    const date = dateFmt.format(new Date(msg.created_at));
+    const date = formatViewerDate(msg.created_at, locale, displayTimezone, { year: 'numeric', month: 'long', day: 'numeric' }) ?? '';
     (groups[date] ??= []).push(msg);
   }
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
@@ -147,6 +146,11 @@ export function agentNotConnectedBannerText(
   return tChats('agentNotConnectedBanner', { name: p.name, josa: pickIGaJosa(p.name) });
 }
 
+/** story #4444 — a failed block answer that retrying can fix: a server error, a timeout, too many requests. */
+function blockFailureIsRetryable(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429;
+}
+
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
@@ -157,7 +161,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story #3194 — 'agents' 네임스페이스의 viewConnectionSettings 키를 그대로 재사용(발명 0,
   // agent-management-tab.tsx의 동일 CTA와 문구 일치).
   const ta = useTranslations('agents');
@@ -629,7 +633,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         body: JSON.stringify({ blocked_member_id: blockConfirmTarget.memberId }),
       });
       if (!res.ok) {
-        addToast({ type: 'error', title: t('blockUserErrorTitle'), body: t('blockUserErrorBody') });
+        // story #4444 (Yuna 23:01Z) — the body says the cause; «다시 시도해 주세요» only where retrying can work (a network
+        // failure: the catch below). 404 = the person is no longer in this org; any other refusal = they can't be blocked.
+        const body = res.status === 404 ? t('blockUserErrorBodyGone')
+          : blockFailureIsRetryable(res.status) ? t('blockUserErrorBody')
+          : t('blockUserErrorBodyCannot');
+        addToast({ type: 'error', title: t('blockUserErrorTitle'), body });
         return;
       }
       setBlockedMemberIds((prev) => new Set(prev).add(blockConfirmTarget.memberId));
@@ -704,7 +713,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, []);
 
   const handleSend = useCallback(async (content: string, mentionedIds?: string[], attachments?: SendAttachment[]) => {
-    const body: Record<string, unknown> = { content };
+    const body: Record<string, unknown> = { content, client_nonce: newClientNonce() }; // story #4440 — its echo is dropped here
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
     if (attachments && attachments.length > 0) body.attachments = attachments;
     const res = await fetch(`${apiPrefix}/${threadId}/messages`, {
@@ -717,12 +726,15 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     const raw = await res.json() as Record<string, unknown>;
     // AC3: DM fork 응답 감지 → 새 그룹 conversation으로 자동 네비게이션
     if (raw.forked === true && typeof raw.forked_conversation_id === 'string') {
+      // story #4442 (Qadir · PO 00:04Z) — the message belongs to the new group: this tab's lists still hear about it (its
+      // echo is dropped here by the nonce), but this DM's view does not add it
+      const data = (raw.data && typeof raw.data === 'object' ? raw.data : {}) as Record<string, unknown>;
+      sentMessageFromAnswer({ ...raw, data: { ...data, conversation_id: raw.forked_conversation_id } });
       const newPath = pathname.replace(threadId, raw.forked_conversation_id);
       router.push(newPath);
       return;
     }
-    const payload = (raw.data ?? raw) as Record<string, unknown>;
-    const sent = normalizeToMessage(payload);
+    const sent = sentMessageFromAnswer(raw); // story #4430 — the send answer's `delivery` on the sender's own line
     addMessage(sent);
     // S5: 미지원 런타임 차단 hint를 트리거 메시지에 keyed로 적재(차단 발생 시에만 키 존재).
     const gate = raw.command_gate as { blocked?: BlockedHint[] } | undefined;

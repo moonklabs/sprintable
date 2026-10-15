@@ -15,8 +15,8 @@ import {
   DEFAULT_RUN_LOOKBACK_DAYS,
   DEFAULT_RUN_STATUS_FILTER,
   getDefaultRunDateFilters,
-  getLocalDayEndIso,
-  getLocalDayStartIso,
+  getDayEndIso,
+  getDayStartIso,
   getRunFailureDisposition,
   getTriggerMemoHref,
   normalizeRunStatusFilter,
@@ -30,8 +30,8 @@ import {
 } from '@/lib/agent-run-status';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface AgentRun {
   id: string;
@@ -90,8 +90,8 @@ function formatCost(usd: number | null): string {
 }
 
 // story #3493 — run.created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)으로.
-function toLocaleDateStr(iso: string, locale: string, displayTimezone: string): string {
-  return formatRelativeTime(iso, locale, displayTimezone);
+function toLocaleDateStr(iso: string, locale: string, displayTimezone: string | null): string {
+  return formatViewerRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatBillingMode(t: ReturnType<typeof useTranslations>, billingMode: AgentRun['llm_provider']): string {
@@ -114,14 +114,18 @@ export function AgentRunsList() {
   const [loadError, setLoadError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const [statusFilter, setStatusFilter] = useState(DEFAULT_RUN_STATUS_FILTER);
-  const [{ fromDate: initialFromDate, toDate: initialToDate }] = useState(() => getDefaultRunDateFilters());
-  const [fromDate, setFromDate] = useState(initialFromDate);
-  const [toDate, setToDate] = useState(initialToDate);
+  // story #4443 PR3a — the default days are the viewer's (derived until the person picks: no zone yet → empty, then filled)
+  const viewerTz = useViewerTimeZone();
+  const defaults = getDefaultRunDateFilters(viewerTz);
+  const [pickedFrom, setFromDate] = useState<string | null>(null);
+  const [pickedTo, setToDate] = useState<string | null>(null);
+  const fromDate = pickedFrom ?? defaults.fromDate;
+  const toDate = pickedTo ?? defaults.toDate;
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const fetchRuns = useCallback(async (cursor?: string) => {
     if (!projectId) throw new Error('projectId not ready');
@@ -132,8 +136,8 @@ export function AgentRunsList() {
     // 그대로 보내면 status=all이 나가 새로 추가된 BE Literal 검증에 422로 걸린다).
     const normalizedStatus = normalizeRunStatusFilter(statusFilter);
     if (normalizedStatus) params.set('status', normalizedStatus);
-    if (fromDate) params.set('from', getLocalDayStartIso(fromDate));
-    if (toDate) params.set('to', getLocalDayEndIso(toDate));
+    if (fromDate && viewerTz) params.set('from', getDayStartIso(fromDate, viewerTz));
+    if (toDate && viewerTz) params.set('to', getDayEndIso(toDate, viewerTz));
     if (cursor) params.set('cursor', cursor);
 
     const res = await fetchWithAuth(`/api/v1/agent-runs?${params}`);
@@ -151,7 +155,7 @@ export function AgentRunsList() {
       items: (json.data ?? []) as AgentRun[],
       nextCursor: parseCursorMeta(json.meta, 'agent-runs-list').nextCursor,
     };
-  }, [projectId, statusFilter, fromDate, toDate]);
+  }, [projectId, statusFilter, fromDate, toDate, viewerTz]); // story #4443 PR3a — the day bounds are the viewer's zone
 
   // story #2000: 원 raw fetch가 네트워크 단에서 throw하면(오프라인 등) try 없이 setLoading(false)가
   // 영영 안 불려 스켈레톤이 무한행 — try/catch/finally + loadError/retryKey로 봉합(D #1989 패턴).
@@ -229,7 +233,7 @@ export function AgentRunsList() {
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none"
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
                 aria-label={t('fromDate')}
               />
               <span className="text-xs text-muted-foreground">~</span>
@@ -237,7 +241,7 @@ export function AgentRunsList() {
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none"
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
                 aria-label={t('toDate')}
               />
             </div>
@@ -263,7 +267,7 @@ export function AgentRunsList() {
           ) : runs.length === 0 ? (
             // story #3680 AC3 — 기본 창(넓히지 않은 상태)의 0건은 "실행 없음"과 다른
             // 사실이다("창 밖일 수 있다") — 날짜를 한 번이라도 건드렸으면 일반 문구로.
-            fromDate === initialFromDate && toDate === initialToDate ? (
+            fromDate === defaults.fromDate && toDate === defaults.toDate ? (
               <EmptyState
                 title={t('emptyTitleDefaultWindow', { days: DEFAULT_RUN_LOOKBACK_DAYS })}
                 description={t('emptyDescriptionDefaultWindow', { days: DEFAULT_RUN_LOOKBACK_DAYS })}
