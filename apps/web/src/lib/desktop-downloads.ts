@@ -4,8 +4,21 @@
 // macos-electron/latest/manifest.json — this only relays that body as it is.
 // The old Tauri manifest (desktop-updates.ts · /desktop/updates/macos.json) stays as it is: installed old apps update from it.
 
-const GCS_DOWNLOAD_MANIFEST_URL =
-  'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/latest/manifest.json';
+// story 4696 (PO 10-15): the bucket is the SERVER's setting (`DESKTOP_DOWNLOAD_BUCKET`), never a constant here — a constant dev bucket
+// would send a prod customer to the dev app (which talks to the dev server) the moment the prod switch is turned on. No default: a
+// deployment that sets none (prod today) has no download — the card says «지금은 받을 수 없어요» — and can never fall back to dev's.
+export const DESKTOP_DOWNLOAD_BUCKET_ENV = 'DESKTOP_DOWNLOAD_BUCKET';
+/** the response header the manifest route tells the card its bucket in (the card is a client component: it cannot read the server env) */
+export const DESKTOP_DOWNLOAD_BUCKET_HEADER = 'x-desktop-download-bucket';
+const BUCKET_NAME = /^[a-z0-9][a-z0-9_-]{2,62}$/;
+
+/** the configured bucket's name, or null (unset · not a plain bucket name — a «/» or a «.» could point the link elsewhere) */
+export function desktopDownloadBucket(value: string | undefined = process.env[DESKTOP_DOWNLOAD_BUCKET_ENV]): string | null {
+  const v = typeof value === 'string' ? value.trim() : '';
+  return BUCKET_NAME.test(v) ? v : null;
+}
+
+const manifestUrlFor = (bucket: string): string => `https://storage.googleapis.com/${bucket}/macos-electron/latest/manifest.json`;
 
 export class DesktopDownloadUnavailableError extends Error {}
 
@@ -19,9 +32,8 @@ export interface DesktopDownloadManifest {
   pub_date: string;
 }
 
-/** [SID:4619 · Kadir 5004 후속 ①] the one place a download may come from — the bucket publish-dev-setup.mjs writes to */
+/** [SID:4619 · Kadir 5004 후속 ①] the one place a download may come from — the bucket publish-dev-setup.mjs writes to (4696: the configured one) */
 const DOWNLOAD_HOST = 'storage.googleapis.com';
-const DOWNLOAD_PATH_PREFIX = '/sprintable-desktop-releases-dev/';
 
 /**
  * The manifest's url as the card may link it, or null. The manifest is relayed as it is, so its url is not ours until checked:
@@ -29,8 +41,9 @@ const DOWNLOAD_PATH_PREFIX = '/sprintable-desktop-releases-dev/';
  * another bucket). The check is on the parsed URL (a «..», an encoded one, a user-info part or a port are resolved first), and
  * the parsed href is what gets linked.
  */
-export function ourDownloadUrl(url: unknown): string | null {
-  if (typeof url !== 'string') return null;
+export function ourDownloadUrl(url: unknown, bucket: string | null | undefined): string | null {
+  if (typeof url !== 'string' || typeof bucket !== 'string' || !BUCKET_NAME.test(bucket)) return null; // no bucket named = nothing is ours
+  const DOWNLOAD_PATH_PREFIX = `/${bucket}/`;
   let u: URL;
   try { u = new URL(url); } catch { return null; }
   if (u.protocol !== 'https:' || u.host !== DOWNLOAD_HOST || u.username || u.password) return null;
@@ -38,9 +51,11 @@ export function ourDownloadUrl(url: unknown): string | null {
 }
 
 /** The GCS manifest body as it is (no parse · no rebuild), past any front cache (the same cache-busting as desktop-updates.ts). */
-export async function fetchDesktopDownloadManifest(fetchImpl: typeof fetch = fetch): Promise<string> {
+export async function fetchDesktopDownloadManifest(fetchImpl: typeof fetch = fetch, bucket: string | null = desktopDownloadBucket()): Promise<string> {
+  // no bucket configured (prod today): nothing to read — never the dev one
+  if (!bucket) throw new DesktopDownloadUnavailableError('no download bucket is configured (DESKTOP_DOWNLOAD_BUCKET)');
   const nonce = Math.random().toString(36).slice(2);
-  const res = await fetchImpl(`${GCS_DOWNLOAD_MANIFEST_URL}?_t=${Date.now()}-${nonce}`, { cache: 'no-store' });
+  const res = await fetchImpl(`${manifestUrlFor(bucket)}?_t=${Date.now()}-${nonce}`, { cache: 'no-store' });
   if (!res.ok) {
     throw new DesktopDownloadUnavailableError(`GCS download manifest fetch failed: ${res.status} ${res.statusText}`);
   }
