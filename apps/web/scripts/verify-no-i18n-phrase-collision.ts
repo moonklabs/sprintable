@@ -217,6 +217,10 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // device head «{device} · {org}», remoteDevices.pairedWith «짝: {device}» / confirmRemove, phonePairing.confirm / paired — always a
   // computer's name. The `name` · `channel` axis, never a count.
   'phone', 'device',
+  // story 4693 — {file}: one of the two instruction-file names the desktop app looks for in a project's folder — «CLAUDE.md» · «AGENTS.md» (a closed table in
+  // the app, Yuna 10-15 yuna/4693-copy.md). ko/en lines: recruiter.folderTraceTitle / folderTraceBody · nav.switcherFolderTrace — always a file's name before
+  // «파일이» / «파일을», the `filename` axis, never a count.
+  'file',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 

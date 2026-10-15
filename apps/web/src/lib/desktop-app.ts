@@ -25,7 +25,19 @@ export interface SprintableDesktop {
   /** keep a project's folder on this computer — `path` must be one pickFolder returned in this page (else `problem: 'not_picked'`);
    *  the app checks the folder again (inside home · not its own folder). A page never names a folder itself. */
   setProjectFolder(a: { projectId: string; path: string }): Promise<{ ok: true } | { problem: string }>;
+  /** story 4693 (UX-1 · D4): does a folder carry CLAUDE.md / AGENTS.md — only whether those two names exist (the app never opens a file), and
+   *  which of `agentIds` already have a profile in that folder on this computer. `{projectId}` = the folder the app kept for that project;
+   *  `{path}` = one `pickFolder` returned in this page. Absent in an older app (the page then shows nothing new). Read it through
+   *  `readFolderTraces` — never call it from a screen. */
+  folderTraces?(a: { projectId?: string; path?: string; agentIds?: readonly string[] }): Promise<unknown>;
 }
+
+/** story 4693: the two files the app looks for, and the runtime each one means (the app's own table — design 4693 §2) */
+export interface FolderTrace { file: 'CLAUDE.md' | 'AGENTS.md'; runtime: DesktopRuntimeInApp }
+export interface FolderTracesAnswer { traces: FolderTrace[]; agents: string[] }
+export const NO_FOLDER_TRACES: FolderTracesAnswer = Object.freeze({ traces: [], agents: [] }) as FolderTracesAnswer;
+const TRACE_FILES: Record<string, DesktopRuntimeInApp> = { 'CLAUDE.md': 'claude', 'AGENTS.md': 'codex' };
+const MAX_TRACE_AGENTS = 8;
 
 const isRuntime = (v: unknown): v is DesktopRuntimeFound => {
   const r = v as Partial<DesktopRuntimeFound> | null;
@@ -41,7 +53,45 @@ export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined 
   if (typeof d.pickFolder !== 'function' || typeof d.startHere !== 'function' || typeof d.setProjectFolder !== 'function') return undefined;
   // 4691: the fourth hand is OPTIONAL (an older app has none → the page keeps its first read) — but present means a function
   if (d.subscribeRuntimes !== undefined && typeof d.subscribeRuntimes !== 'function') return undefined;
+  // 4693: the same — an older app has no `folderTraces` (the page shows nothing new); present means a function
+  if (d.folderTraces !== undefined && typeof d.folderTraces !== 'function') return undefined;
   return d as SprintableDesktop;
+}
+
+/** story 4693: ask the app about a folder. The answer is read like the first read of the runtimes: anything off the closed shape is dropped (a
+ *  trace of a file that is not in the table · an agent id the page did not ask about · more than eight ids), and an app without the hand, a
+ *  refusal or a throw is the same «nothing there». Never rejects. */
+export async function readFolderTraces(ask: SprintableDesktop['folderTraces'], a: { projectId?: string; path?: string; agentIds?: readonly string[] }): Promise<FolderTracesAnswer> {
+  if (typeof ask !== 'function') return NO_FOLDER_TRACES;
+  try {
+    const raw = (await ask(a)) as { traces?: unknown; agents?: unknown } | null;
+    if (!raw || typeof raw !== 'object') return NO_FOLDER_TRACES;
+    const asked = new Set(a.agentIds ?? []);
+    const traces: FolderTrace[] = [];
+    if (Array.isArray(raw.traces)) {
+      for (const t of raw.traces as Array<{ file?: unknown; runtime?: unknown } | null>) {
+        const file = typeof t?.file === 'string' ? t.file : '';
+        if (Object.prototype.hasOwnProperty.call(TRACE_FILES, file) && t?.runtime === TRACE_FILES[file] && !traces.some((x) => x.file === file)) traces.push({ file: file as FolderTrace['file'], runtime: TRACE_FILES[file]! });
+      }
+    }
+    const agents = Array.isArray(raw.agents)
+      ? [...new Set((raw.agents as unknown[]).filter((x): x is string => typeof x === 'string' && asked.has(x)))].slice(0, MAX_TRACE_AGENTS)
+      : [];
+    return traces.length || agents.length ? { traces, agents } : NO_FOLDER_TRACES;
+  } catch {
+    return NO_FOLDER_TRACES;
+  }
+}
+
+/** story 4693: the one trace a screen names — of the files found, the one whose runtime the app found FIRST on this computer (bridge order = the
+ *  runtime default's rule, D2); none of them found here → undefined (nothing to offer: that runtime cannot start). The recruiter's card and the
+ *  new-project dialog's line both call this, so the two places always name the same file. */
+export function pickFolderTrace(traces: readonly FolderTrace[], found: readonly DesktopRuntimeFound[]): FolderTrace | undefined {
+  for (const f of found) {
+    const t = traces.find((x) => x.runtime === f.runtime);
+    if (t) return t;
+  }
+  return undefined;
 }
 
 const rawBridge = (): SprintableDesktop | undefined => {
