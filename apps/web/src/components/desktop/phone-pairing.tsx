@@ -36,7 +36,7 @@ type View =
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'failed' };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'failed' };
 
 
 /**
@@ -181,6 +181,7 @@ function Pairing() {
       case 'registerAgain': return t('registerAgain');
       case 'limit': return t('limit.title');
       case 'taken': return t('taken');
+      case 'takenOtherOrg': return t('takenOtherOrg');
       case 'failed': return t('failed');
     }
   };

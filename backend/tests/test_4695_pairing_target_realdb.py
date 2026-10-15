@@ -183,7 +183,8 @@ async def test_07_a_key_that_holds_a_live_pairing_stays_where_it_is(world):
         assert first.status_code == 201, first.text
         await _pair(c, device["device_token"], der)  # the computer reports this key as paired
         again = await c.post(PHONES, json={"label": "iPhone", "public_key": key}, headers=_person(OWNER, ORG2))
-        assert (again.status_code, again.json()["error"]["code"]) == (409, "remote_device_taken")
+        # the same person's own key — said as such (not «registered by someone else»): it is paired with a computer of another org of theirs
+        assert (again.status_code, again.json()["error"]["code"]) == (409, "remote_device_other_org")
         row = (await _sql(fetch=f"SELECT member_id FROM remote_devices WHERE id = '{first.json()['id']}'"))[0]
         assert str(row[0]) == str(OWNER_TM)
 

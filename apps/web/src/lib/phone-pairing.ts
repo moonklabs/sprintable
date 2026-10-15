@@ -22,6 +22,7 @@ export type OfferOutcome =
   | { kind: 'alreadyPaired' }
   | { kind: 'limit' } // 409 remote_device_limit — three phones already
   | { kind: 'taken' } // 409 remote_device_taken — this phone's key is registered to another account (story #4624)
+  | { kind: 'takenOtherOrg' } // 409 remote_device_other_org — the SAME person's key, paired with a computer of another organization of theirs (story 4695)
   | { kind: 'noScreenLock' }
   | { kind: 'biometricRequired' }
   | { kind: 'offerUsed' } // 409 — another phone (or an earlier send) took this QR
@@ -134,6 +135,7 @@ export async function sendPairOffer(head: OfferHead, label: string, deps: PairDe
     if (!res.ok) {
       if (code === 'remote_device_limit') return { kind: 'limit' };
       if (code === 'remote_device_taken') return { kind: 'taken' }; // story #4624: its own line, not the general «보내지 못했어요»
+      if (code === 'remote_device_other_org') return { kind: 'takenOtherOrg' }; // story 4695: not «another account» — the same person's phone, another organization
       return { kind: 'failed' };
     }
     if (typeof body.id !== 'string') return { kind: 'failed' };
