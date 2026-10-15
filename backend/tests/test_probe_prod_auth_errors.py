@@ -419,9 +419,10 @@ TEMPLATES = frozenset({
 })
 
 
-def _req(ts: str, path: str, status=200, method="GET", latency="0.250s", service="sprintable-frontend-prod", ua="Mozilla/5.0 (Linux; Android 14; wv) Chrome/120.0 SecretUA") -> dict:
+def _req(ts: str, path: str, status=200, method="GET", latency="0.250s", service="sprintable-frontend-prod", ua="Mozilla/5.0 (Linux; Android 14; wv) Chrome/120.0 SecretUA", size="1234", protocol="HTTP/2.0") -> dict:
     url = f"https://app.example{path}"
-    hr = {"requestUrl": url, "requestMethod": method, "status": status, "latency": latency, "userAgent": ua, "remoteIp": SECRETS[2], "referer": SECRETS[4]}
+    hr = {"requestUrl": url, "requestMethod": method, "status": status, "latency": latency, "userAgent": ua, "remoteIp": SECRETS[2], "referer": SECRETS[4],
+          "responseSize": size, "protocol": protocol}
     return {"timestamp": ts, "resource": {"labels": {"service_name": service}}, "httpRequest": hr}
 
 
@@ -506,28 +507,28 @@ def test_timeline_lists_in_time_order_with_ms_status_and_a_closed_browser_class(
     lines, stats, cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
     assert cut is False
     assert lines == [
-        "  2026-10-15T06:55:01Z  web  GET /inbox  200  80ms  browser=android-webview",
-        "  2026-10-15T06:55:05Z  backend  POST /api/v2/me  401  12ms  browser=android-webview",
-        "  2026-10-15T06:55:06Z  web  GET /api/chat/conversations  200  ?ms  browser=android-webview",
-        "  2026-10-15T06:55:07Z  web  ? /inbox  ?  ?ms  browser=other",
-        "  2026-10-15T06:55:09Z  web  GET /api/chat/conversations  200  11532ms  browser=android-webview",
+        "  2026-10-15T06:55:01Z  web  GET /inbox  200  80ms  1234B  proto=h2  browser=android-webview",
+        "  2026-10-15T06:55:05Z  backend  POST /api/v2/me  401  12ms  1234B  proto=h2  browser=android-webview",
+        "  2026-10-15T06:55:06Z  web  GET /api/chat/conversations  200  ?ms  1234B  proto=h2  browser=android-webview",
+        "  2026-10-15T06:55:07Z  web  ? /inbox  ?  ?ms  ?B  proto=?  browser=other",
+        "  2026-10-15T06:55:09Z  web  GET /api/chat/conversations  200  11532ms  1234B  proto=h2  browser=android-webview",
     ]
-    assert "  web  GET /api/chat/conversations  2건 · p50 11532ms · 최대 11532ms" in stats   # ? 는 통계에서 빠진다
-    assert "  web  GET /inbox  1건 · p50 80ms · 최대 80ms" in stats
+    assert "  web  GET /api/chat/conversations  2건 · p50 11532ms · 최대 11532ms · 크기 합계 2468B" in stats   # ? 는 통계에서 빠진다
+    assert "  web  GET /inbox  1건 · p50 80ms · 최대 80ms · 크기 합계 1234B" in stats
     _no_secret("\n".join(lines + stats))
 
 
 def test_timeline_stats_p50_and_max_by_label():
     es = [_req(f"2026-10-15T06:55:{i:02d}Z", "/api/v2/me", latency=f"{ms / 1000:.3f}s", service="sprintable-backend-prod") for i, ms in enumerate([100, 900, 300, 200])]
     _lines, stats, _cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
-    assert stats == ["  backend  GET /api/v2/me  4건 · p50 200ms · 최대 900ms"]   # 짝수 개 → 아래쪽 중앙값(실제로 있던 값)
+    assert stats == ["  backend  GET /api/v2/me  4건 · p50 200ms · 최대 900ms · 크기 합계 4936B"]   # 짝수 개 → 아래쪽 중앙값(실제로 있던 값)
 
 
 def test_timeline_line_cap_is_reported_not_silent(monkeypatch):
     monkeypatch.setattr(probe, "_TL_MAX_LINES", 3)
     es = [_req(f"2026-10-15T06:55:{i:02d}Z", "/inbox") for i in range(5)]
     lines, stats, cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
-    assert cut is True and len(lines) == 3 and stats == ["  web  GET /inbox  5건 · p50 250ms · 최대 250ms"]
+    assert cut is True and len(lines) == 3 and stats == ["  web  GET /inbox  5건 · p50 250ms · 최대 250ms · 크기 합계 6170B"]
 
 
 def test_cold_starts_print_time_kind_and_a_closed_reason_only():
@@ -599,3 +600,18 @@ def test_the_real_sources_in_this_checkout_yield_the_routes_the_story_is_about()
     assert ("login",) in templates and ("api", "v2", "me") in templates
     assert ("chat",) in templates and ("chats",) in templates and ("today",) in templates   # 홈 · 대화 탭의 페이지
     assert ("api", "conversations", "{}", "messages") in templates                          # 대화 메시지 API(웹 BFF)
+
+
+def test_size_and_protocol_are_numbers_and_closed_words_only():
+    es = [
+        _req("2026-10-15T06:55:01Z", "/inbox", size="48213", protocol="HTTP/1.1"),
+        _req("2026-10-15T06:55:02Z", "/inbox", size="0", protocol="HTTP/3.0"),
+        _req("2026-10-15T06:55:03Z", "/inbox", size=f"12{SECRETS[1]}", protocol=f"HTTP/9 {SECRETS[3]}"),   # 숫자 아님 · 닫힌 낱말 밖
+        _req("2026-10-15T06:55:04Z", "/inbox", size="-5", protocol=None),
+        _req("2026-10-15T06:55:05Z", "/inbox", size="9" * 13, protocol="http/2"),                         # 너무 큼 · 대소문자
+        _req("2026-10-15T06:55:06Z", "/inbox", size=True, protocol=7),
+    ]
+    lines, stats, _cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
+    assert [ln.split("  ")[-3:-1] for ln in lines] == [["48213B", "proto=h1.1"], ["0B", "proto=h3"], ["?B", "proto=?"], ["?B", "proto=?"], ["?B", "proto=?"], ["?B", "proto=?"]]
+    assert stats == ["  web  GET /inbox  6건 · p50 250ms · 최대 250ms · 크기 합계 48213B"]
+    _no_secret("\n".join(lines + stats))

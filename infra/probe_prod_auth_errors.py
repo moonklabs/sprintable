@@ -508,6 +508,20 @@ def route_label(request_url: object, templates: frozenset[tuple[str, ...]]) -> s
     return "/" + "/".join(best[1]) if best else _OTHER
 
 
+_PROTOCOLS = {"HTTP/1.0": "h1.0", "HTTP/1.1": "h1.1", "HTTP/2": "h2", "HTTP/2.0": "h2", "HTTP/3": "h3", "HTTP/3.0": "h3"}
+
+
+def _proto(value: object) -> str:
+    """요청 프로토콜 — 닫힌 낱말만(밖은 «?»). 한 연결 6개 한도(h1.1)와 다중화(h2)를 가르는 칸."""
+    return _PROTOCOLS.get(value, "?") if isinstance(value, str) else "?"
+
+
+def _size_bytes(value: object) -> int | None:
+    """응답 크기(바이트) — Cloud Run 은 문자열 숫자로 준다. 숫자 아닌 것 · 음수 · 과대 → None."""
+    text = str(value) if isinstance(value, (int, str)) else ""   # bool → «True»/«False» 는 숫자가 아니라 걸러진다
+    return int(text) if text.isdigit() and len(text) <= 12 else None
+
+
 def _latency_ms(value: object) -> int | None:
     m = _LATENCY_RE.match(value) if isinstance(value, str) else None
     return round(float(m.group(1)) * 1000) if m else None
@@ -521,8 +535,8 @@ def _kind(entry: dict, web: frozenset[str], backend: frozenset[str]) -> str:
 
 
 def agg_timeline(entries: list[dict], templates: frozenset[tuple[str, ...]], web: frozenset[str], backend: frozenset[str]) -> tuple[list[str], list[str], bool]:
-    """(시간순 줄 · 경로 라벨별 통계 줄 · 줄 한도에 닿았나). 줄 = 시각(초) · 갈래 · 메서드 · 라벨 · 상태 · ms · 브라우저 갈래. 이 밖의 칸은 안 읽는다."""
-    rows: list[tuple[str, str, str, str, str, int | None, str]] = []
+    """(시간순 줄 · 경로 라벨별 통계 줄 · 줄 한도에 닿았나). 줄 = 시각(초) · 갈래 · 메서드 · 라벨 · 상태 · ms · 응답 크기(B) · 프로토콜(닫힌 낱말) · 브라우저 갈래. 이 밖의 칸은 안 읽는다."""
+    rows: list[tuple[str, str, str, str, str, int | None, str, int | None, str]] = []
     for e in entries:
         hr = e.get("httpRequest")
         if not isinstance(hr, dict):
@@ -532,16 +546,19 @@ def agg_timeline(entries: list[dict], templates: frozenset[tuple[str, ...]], web
         status = hr.get("status")
         status_text = str(status) if isinstance(status, int) and 100 <= status <= 599 else "?"
         rows.append((_stamp(e.get("timestamp")), _kind(e, web, backend), method, route_label(hr.get("requestUrl"), templates), status_text,
-                     _latency_ms(hr.get("latency")), classify_browser(hr.get("userAgent"))))
+                     _latency_ms(hr.get("latency")), classify_browser(hr.get("userAgent")), _size_bytes(hr.get("responseSize")), _proto(hr.get("protocol"))))
     rows.sort(key=lambda r: r[0])
     lines = [
-        f"  {t}  {kind}  {method} {label}  {status}  {'?' if ms is None else ms}ms  browser={browser}"
-        for t, kind, method, label, status, ms, browser in rows[:_TL_MAX_LINES]
+        f"  {t}  {kind}  {method} {label}  {status}  {'?' if ms is None else ms}ms  {'?' if size is None else size}B  proto={proto}  browser={browser}"
+        for t, kind, method, label, status, ms, browser, size, proto in rows[:_TL_MAX_LINES]
     ]
     groups: dict[tuple[str, str, str], list[int]] = defaultdict(list)
     counts: Counter[tuple[str, str, str]] = Counter()
-    for _t, kind, method, label, _st, ms, _b in rows:
+    sizes: Counter[tuple[str, str, str]] = Counter()
+    for _t, kind, method, label, _st, ms, _b, size, _p in rows:
         counts[(kind, method, label)] += 1
+        if size is not None:
+            sizes[(kind, method, label)] += size
         if ms is not None:
             groups[(kind, method, label)].append(ms)
     stats: list[str] = []
@@ -549,7 +566,7 @@ def agg_timeline(entries: list[dict], templates: frozenset[tuple[str, ...]], web
         ms_list = sorted(groups.get(key, []))
         p50 = f"{ms_list[(len(ms_list) - 1) // 2]}ms" if ms_list else "?"
         mx = f"{ms_list[-1]}ms" if ms_list else "?"
-        stats.append(f"  {key[0]}  {key[1]} {key[2]}  {n}건 · p50 {p50} · 최대 {mx}")
+        stats.append(f"  {key[0]}  {key[1]} {key[2]}  {n}건 · p50 {p50} · 최대 {mx} · 크기 합계 {sizes.get(key, 0)}B")
     return lines, stats, len(rows) > _TL_MAX_LINES
 
 
