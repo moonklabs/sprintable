@@ -396,6 +396,31 @@ describe('[SID:4427] desktop setup page', () => {
     expect(container.querySelector(`a[href="${SETUP_APP_LINK}"]`)).toBeNull();
   });
 
+  // story 4696 — on the DEV web a page reached without `app` (a plain browser tab) opens the dev setup app's own scheme; the prod web keeps ai.sprintable
+  it('[4696] dev web: no `app` → the buttons open ai.sprintable.dev: · `app=check` keeps its own · the production web keeps the default', async () => {
+    stub(() => new Response('{}'));
+    const hrefs = () => [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    try {
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dev-app.sprintable.ai');
+      sp.value = null;
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable.dev:/desktop/setup?intent=reopen']);
+      await mount(<Failure failure="expired" />);
+      expect(hrefs()).toContain('ai.sprintable.dev:/desktop/setup');
+      expect(hrefs()).not.toContain('ai.sprintable:/desktop/setup');
+      sp.value = new URLSearchParams({ app: 'evil' });
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable.dev:/desktop/setup?intent=reopen']);
+      sp.value = new URLSearchParams('app=check');
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable.check:/desktop/setup?intent=reopen']);
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.sprintable.ai');
+      sp.value = null;
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable:/desktop/setup?intent=reopen']);
+    } finally { sp.value = null; vi.unstubAllEnvs(); }
+  });
+
   // story #4626 — the page the check app opened (`?app=check`) sends its buttons back to the check app; a typed address
   // (no `app`) or a value off the closed table keeps the default links byte for byte
   it('[4626] ?app=check → the buttons open ai.sprintable.check: · off the table → the default links', async () => {
