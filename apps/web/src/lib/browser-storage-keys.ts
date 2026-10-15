@@ -43,7 +43,6 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'sprintable_onboarding_session_id', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-telemetry.ts'] },
   { key: 'sprintable_pending_toast', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/chat/cross-project-toast-provider.tsx'] },
   // dismissed banners carry no organization in the key — kept, they would hide the next account's banner
-  { key: 'au-usage-warn-dismissed-band', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['ee/components/billing/au-usage-banner.tsx'] },
   { key: 'storage-capacity-toast-shown', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/storage/storage-capacity-toast-provider.tsx'] },
   { key: 'storage-capacity-warn-dismissed', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/storage/storage-capacity-banner.tsx'] },
   { key: 'sprintable:chat-draft:', prefix: true, area: 'local', scope: 'account', on: ['signout'], where: ['components/chat/chat-input.tsx', 'lib/tab-owner.ts'] },
