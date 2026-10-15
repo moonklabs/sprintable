@@ -19,6 +19,7 @@ const { phonePub } = vi.hoisted(() => ({ phonePub: { android: true, ios: false }
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: phonePub }));
 
 import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -868,6 +869,177 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect(calls.some((c) => c.url.includes('/api/desktop/setup/agents'))).toBe(false); // not an admin: the list is not asked for
     expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull(); // …so nothing waits for it
     expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+  });
+
+  // ── story 4703 (Yuna 4703-copy-1015): the recruiter's agent (`agent=`) cannot take a row although the list is here ────────────────────
+  // Before: it landed on no row and «시작» went on to the recipe's NEW agents without a word. Now «시작» is off, one line says why — from the
+  // list and the found runtimes — and the person chooses (the way that keeps the agent first; «새로 만들기로 바꾸기» last).
+  const FOREIGN = 'b2222222-0000-4000-8000-000000000001'; // another organization's agent: never in this organization's list
+  const NOBODY = 'b2222222-0000-4000-8000-000000000002'; // an id that exists nowhere
+  const holdBox = () => container.querySelector('[data-testid=setup-preselect-hold]') as HTMLElement | null;
+  const reasonLine = () => container.querySelector('[data-testid=setup-preselect-reason]') as HTMLElement | null;
+  const holdLabels = () => [...(holdBox()?.querySelectorAll('button, a') ?? [])].map((b) => (b.textContent ?? '').trim());
+  const settle = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+  const pressEl = async (el: Element) => { await act(async () => { (el as HTMLElement).click(); }); await settle(); };
+  const confirmCalls = () => calls.filter((c) => c.url.includes('/api/desktop/setup-codes/confirm'));
+  const listOf = (agents: object[]) => () => new Response(JSON.stringify({ agents }), { status: 200 });
+
+  it('[SID:4703] ① the id is not in the list → «시작» off · the one line (no name · no id) · one button · pressing «시작» posts nothing · «새로 만들기로 바꾸기» → the count line, «시작» on and focused, and the body has NO agent_id', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    expect(startButton().disabled).toBe(true); // reverted (no `preselectHold` in canStart) → on, and a press creates new agents
+    expect(reasonLine()?.textContent).toBe('고른 에이전트는 이 컴퓨터에서 시작할 수 없어요');
+    expect(reasonLine()?.getAttribute('role')).toBe('status');
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('unlisted');
+    expect(holdLabels()).toEqual(['새로 만들기로 바꾸기']);
+    for (const a of AGENTS) expect(holdBox()!.textContent).not.toContain(a.name); // no name of anyone
+    expect(holdBox()!.innerHTML).not.toContain(FOREIGN); // and not the id that was asked
+    await act(async () => { startButton().click(); }); await settle();
+    expect(confirmCalls()).toHaveLength(0);
+
+    await pressEl(container.querySelector('[data-testid=setup-preselect-use-new]')!);
+    expect(holdBox()).toBeNull();
+    expect(text()).toContain('에이전트'); // the count line came back
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton()); // Yuna: focus moves to «시작»
+    await pressEl(startButton());
+    const roles = (confirmCalls()[0]!.body as { roles: { agent_id?: string }[] }).roles;
+    expect(roles.every((r) => r.agent_id === undefined)).toBe(true); // a person chose «새로 만들기» — only now
+  });
+
+  it('[SID:4703] ③ another organization\'s agent and an id nobody has → the SAME page (same DOM · same text · no call that carries the id)', async () => {
+    const seen: Record<string, { html: string; start: boolean; calls: string[] }> = {};
+    for (const [name, id] of [['foreign', FOREIGN], ['nobody', NOBODY]] as const) {
+      stub(() => new Response('{}', { status: 200 }));
+      agentsNow = listOf(AGENTS);
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={id} />);
+      seen[name] = { html: holdBox()!.outerHTML, start: startButton().disabled, calls: calls.map((c) => `${c.method ?? 'GET'} ${c.url.replace(id, '<id>')}`) };
+      expect(calls.some((c) => c.url.includes(id) || JSON.stringify(c.body ?? '').includes(id))).toBe(false); // the id is never sent anywhere
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+    expect(seen.foreign).toEqual(seen.nobody);
+  });
+
+  it('[SID:4703] an agent with no desktop runtime or one that is inactive is not in the list either → the same ① (nothing tells «exists» from «does not»)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS); // the server leaves them out of the list — the page cannot tell them from an id nobody has
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={'b2222222-0000-4000-8000-0000000000ff'} />);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('unlisted');
+    expect(reasonLine()?.textContent).toBe('고른 에이전트는 이 컴퓨터에서 시작할 수 없어요');
+  });
+
+  it('[SID:4703] ② outside the project → the line names it · [프로젝트 팀에 넣기] then [새로 만들기로 바꾸기] · putting it on the team lands it on the first agent row · focus «시작»', async () => {
+    let inProject = false;
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS.map((a) => (a.id === OUT ? { ...a, in_project: inProject } : a)) }), { status: 200 });
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) { calls.push({ url, method: init?.method, body: JSON.parse(String(init?.body)) }); inProject = true; return new Response('{}', { status: 201 }); }
+      return base(input, init);
+    }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.textContent).toBe('바깥 · 이 프로젝트 팀에 아직 없어요 — 팀에 넣으면 이 컴퓨터에서 시작할 수 있어요');
+    expect(holdLabels()).toEqual(['프로젝트 팀에 넣기', '새로 만들기로 바꾸기']); // the way that keeps the agent first
+    await pressEl(container.querySelector('[data-testid=setup-preselect-put]')!);
+    expect(calls.some((c) => c.url.includes('/access') && (c.body as { member_id: string }).member_id === OUT)).toBe(true);
+    expect(holdBox()).toBeNull();
+    expect(selectOf('조사').value).toBe(`agent:${OUT}`); // the recruiter's agent, on the first agent row (the preselect was not spent)
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton());
+  });
+
+  it('[SID:4703] ② [프로젝트 팀에 넣기] fails → the failure line under it, focus stays on THAT button (not the list\'s), «시작» stays off', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) { calls.push({ url, method: init?.method }); return new Response('{}', { status: 500 }); }
+      return base(input, init);
+    }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    await pressEl(container.querySelector('[data-testid=setup-preselect-put]')!);
+    expect(container.querySelector('[data-testid=setup-put-on-team-failed]')).not.toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-testid=setup-preselect-put]'));
+    expect(holdBox()).not.toBeNull();
+    expect(startButton().disabled).toBe(true);
+  });
+
+  it('[SID:4703] ③ its runtime is not on this computer → the line · the install row of THAT runtime · [다시 찾기] · [새로 만들기로 바꾸기] (no «프로젝트 팀에 넣기»)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} preselect={MINI} />); // MINI = codex, in the project
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_missing');
+    expect(reasonLine()?.textContent).toBe(`미니 · 이 컴퓨터에서 Codex${pickEulReulJosa('Codex')} 찾지 못했어요 — 설치하고 로그인한 뒤 다시 찾아 주세요`);
+    expect(container.querySelector('[data-testid=setup-preselect-install] code')?.textContent).toContain('codex'); // the codex install command
+    expect(container.querySelector('[data-testid=setup-preselect-install] code')?.textContent).not.toContain('claude.ai');
+    expect(holdLabels()).toEqual(['복사', '다시 찾기', '새로 만들기로 바꾸기']);
+    expect(container.querySelector('[data-testid=setup-preselect-look-again]')?.getAttribute('href')).toBe(SETUP_APP_LINK);
+  });
+
+  it('[SID:4703] ④ its runtime is blocked by the company → the blocked line (not blockedClaudeNote whole) · one button', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} blocked={['claude']} preselect={DAN} />);
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_blocked');
+    expect(reasonLine()?.textContent).toBe(`댄 어윈 · Claude Code${pickEunNeunJosa('Claude Code')} 회사 설정 때문에 이 컴퓨터에서 Sprintable에 연결할 수 없어요`);
+    expect(reasonLine()?.textContent).not.toContain('Codex가 맡아요'); // the second half of blockedClaudeNote would be false here
+    expect(holdLabels()).toEqual(['새로 만들기로 바꾸기']);
+  });
+
+  it('[SID:4703] reasons together: one line — unlisted over blocked over missing over outside the project', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    // outside the project AND its runtime (codex) missing → the runtime line only
+    agentsNow = listOf([{ id: MINI, name: '미니', runtime: 'codex', live_keys: 0, last_used_at: null, in_project: false }]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} preselect={MINI} />);
+    expect(container.querySelectorAll('[data-testid=setup-preselect-reason]')).toHaveLength(1);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_missing');
+    expect(container.querySelector('[data-testid=setup-preselect-put]')).toBeNull();
+  });
+
+  it('[SID:4703] the roads that do not change: it lands (no line) · no preselect · a row set by hand lets the line go', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    expect(holdBox()).not.toBeNull();
+    await choose('조사', 'codex'); // the person sets a row → the recruiter's agent is let go; the line no longer holds «시작»
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+  });
+
+  // ── folded in from PR 5110's non-blocking list (PO 10-15 · Yuna 4703-copy §«Carried over») ─────────────────────────────────────────
+  it('[SID:4701→4703] the retry button looks busy while it re-reads (aria-disabled dims it, like [프로젝트 팀에 넣기]) · after the list arrives focus goes to «시작», or to the first agent row\'s select when «시작» is still off', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    const retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+    expect(retry.className).toContain('aria-disabled:pointer-events-none');
+    expect(retry.className).toContain('aria-disabled:opacity-50');
+    agentsNow = listOf(AGENTS); // the list now arrives — but the recruiter's agent is not in it, so «시작» is off for ①
+    await pressEl(retry);
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    expect(startButton().disabled).toBe(true);
+    expect(document.activeElement).toBe(container.querySelector('section select')); // not the page: the first agent row's select
   });
 
   it('no live key → no line under it (nothing would be cut)', async () => {

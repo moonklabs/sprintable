@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
-import { pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
+import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -21,7 +21,7 @@ import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zon
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
   agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
-  type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst,
+  type AttachableAgent, type DesktopRuntime, type PreselectHold, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, preselectHoldOf, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
   moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -272,6 +272,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // Yuna 4701-copy-1015 §2: after [목록 다시 불러오기] the button stays (aria-disabled while it reads, so focus stays on it); once the list is
   // here it goes and focus moves to «시작»
   const [attachableRetried, setAttachableRetried] = useState(false);
+  // story 4703: the person let the recruiter's agent go — [새로 만들기로 바꾸기], or any row set by hand (setOwner). From then on no reason line
+  // holds «시작» for it (and the preselect is spent: it never lands after this)
+  const [preselectLetGo, setPreselectLetGo] = useState(false);
+  const startFocusAfter = useRef(false);
   const startRef = useRef<HTMLButtonElement | null>(null);
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
@@ -445,15 +449,30 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // story 4701: with the recruiter's agent in the address (`agent=`), «시작» waits for the agents list this page reads (the same condition
   // the read runs on). Still reading → «reading»; the read failed → «failed» (never a quiet fall to «새로 만들기»: [다시 불러오기] reads
   // again). No `agent=` · no read to wait for (a new organization · not an admin · no project yet) → nothing waits — the road as before.
+  const appLinks = useAppSetupLinks();
   const attachableReadKey = chosenProject ? `${chosenProject}:${attachableTick}` : null;
   const attachableWanted = !!preselect && orgMode.kind === 'has-org' && !!chosenProject && isAdmin;
   const attachableHold: 'reading' | 'failed' | null = !attachableWanted ? null
     : attachableRead?.key !== attachableReadKey ? 'reading'
       : attachableRead.ok ? null : 'failed';
-  // the list arrived after [목록 다시 불러오기] (its button went away) → focus «시작», now on, with the recruiter's agent already chosen
+  // story 4703: why the recruiter's agent did not land although the list is here (Yuna 4703-copy-1015) — null while it is read, when the
+  // person let it go, or when it lands. «시작» is off while a reason shows; a reason is never a quiet fall to a new agent.
+  const preselectHold: PreselectHold | null = attachableWanted && attachableHold === null && !preselectLetGo
+    ? preselectHoldOf(attachable, preselect, runtimes, blocked) : null;
+  // «시작» when it is on; else the first agent row's role select — so focus never falls to the page (Yuna 4701 non-blocking ② · 4703 §②)
+  const focusStartOrRoles = () => {
+    const b = startRef.current;
+    if (b && !b.disabled) b.focus(); else rolesRef.current?.querySelector<HTMLElement>('select')?.focus();
+  };
+  // the list arrived after [목록 다시 불러오기] (its button went away) → focus «시작», now on, with the recruiter's agent already chosen —
+  // or, when «시작» is still off for another reason, the first agent row's role select
   useEffect(() => {
-    if (attachableRetried && attachableHold === null) { setAttachableRetried(false); startRef.current?.focus(); }
+    if (attachableRetried && attachableHold === null) { setAttachableRetried(false); focusStartOrRoles(); }
   }, [attachableRetried, attachableHold]);
+  // [새로 만들기로 바꾸기]: the reason line goes, the count line returns, focus moves to «시작»
+  useEffect(() => {
+    if (startFocusAfter.current && preselectHold === null) { startFocusAfter.current = false; focusStartOrRoles(); }
+  }, [preselectHold]);
 
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
@@ -474,11 +493,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [putDone, setPutDone] = useState<string | null>(null);
   const pendingFocus = useRef<string | null>(null);
   const rolesRef = useRef<HTMLElement | null>(null);
-  async function putOnTeam(a: AttachableAgent, order: readonly AttachableAgent[]) {
+  async function putOnTeam(a: AttachableAgent, order: readonly AttachableAgent[], fromHold = false) {
     if (!chosenProject || teamState[a.id] === 'busy') return;
     setTeamState((s) => ({ ...s, [a.id]: 'busy' }));
     setPutDone(null);
-    const failed = () => { pendingFocus.current = `put:${a.id}`; setTeamState((s) => ({ ...s, [a.id]: 'failed' })); };
+    const failed = () => { pendingFocus.current = fromHold ? 'hold-put' : `put:${a.id}`; setTeamState((s) => ({ ...s, [a.id]: 'failed' })); };
     try {
       const res = await fetchWithAuth(`/api/projects/${chosenProject}/access`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -491,7 +510,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       // Yuna §J (필수): the pressed button goes away — focus goes to the next row's button, else where the agent can be picked
       const at = order.findIndex((x) => x.id === a.id);
       const next = order[at + 1] ?? order[at - 1];
-      pendingFocus.current = next ? `put:${next.id}` : moveMode ? `move:${a.id}` : 'select';
+      // story 4703 (Yuna §②): from the reason line, the agent lands on the first agent row — focus «시작» (or the row's select when it is still off)
+      pendingFocus.current = fromHold ? 'start' : next ? `put:${next.id}` : moveMode ? `move:${a.id}` : 'select';
       applyAttachable(body.agents);
       setTeamState((s) => { const rest = { ...s }; delete rest[a.id]; return rest; });
       setPutDone(a.name);
@@ -503,7 +523,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     const target = pendingFocus.current;
     if (!target) return;
     pendingFocus.current = null;
-    const el = target.startsWith('put:') ? document.querySelector<HTMLElement>(`[data-put-on-team="${target.slice(4)}"]`)
+    if (target === 'start') { focusStartOrRoles(); return; }
+    const el = target === 'hold-put' ? document.querySelector<HTMLElement>('[data-preselect-put]')
+      : target.startsWith('put:') ? document.querySelector<HTMLElement>(`[data-put-on-team="${target.slice(4)}"]`)
       : target.startsWith('move:') ? document.getElementById(`setup-move-${target.slice(5)}`)
         : rolesRef.current?.querySelector<HTMLElement>('select');
     el?.focus();
@@ -676,13 +698,15 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   const setOwner = (role: string, key: string) => {
     preselectSpent.current = true; // story 4680 (PO (나)): a person set a row — the recruiter's preselect never lands after this
+    setPreselectLetGo(true); // story 4703: …and no reason line holds «시작» for it any more
     setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
   };
   // agents found but every either row set to «나»: «시작» off with the reason in the count line's place (Yuna v21 — n = 0 there
   // would be false); the server refuses the same with no_agent_role
   const noAgentRow = needsAnAgent(rows);
   const namesOk = firstProject ? !!projectName.trim() : !newOrg || (!!orgName.trim() && !!projectName.trim());
-  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose' && attachableHold === null;  const canMoveStart = !!chosenProject && moveChosen.length > 0 && view.kind === 'choose';
+  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose' && attachableHold === null && preselectHold === null;
+  const canMoveStart = !!chosenProject && moveChosen.length > 0 && view.kind === 'choose';
   const toggleMove = (id: string, on: boolean) => setMoving((ms) => (on ? [...new Set([...ms, id])] : ms.filter((m) => m !== id)));
 
   return (
@@ -1034,6 +1058,40 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             {attachableHold === 'reading' ? <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden /> : null}
             {attachableHold === 'failed' ? t('attachableFailed') : t('attachableReading')}
           </p>
+        ) : preselectHold !== null && !moveMode ? (
+          // story 4703 (Yuna 4703-copy-1015): the list is here and the recruiter's agent cannot take a row — «시작» is off, the line says why
+          // (from the list and the found runtimes — never a guess) and the way that keeps the agent comes before «새로 만들기로 바꾸기». The
+          // line takes the count line's place; the only control that starts is still «시작».
+          <div className="flex flex-col gap-2" data-testid="setup-preselect-hold">
+            <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" role="status" data-testid="setup-preselect-reason" data-reason={preselectHold.reason}>
+              {preselectHold.reason === 'unlisted' ? t('preselect.notListed')
+                : preselectHold.reason === 'outside_project' ? t('preselect.notInProject', { name: preselectHold.agent.name })
+                  : preselectHold.reason === 'runtime_missing'
+                    ? t('preselect.runtimeMissing', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eulReul: pickEulReulJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })
+                    : t('preselect.runtimeBlocked', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eunNeun: pickEunNeunJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })}
+            </p>
+            {preselectHold.reason === 'runtime_missing' ? (
+              <div className="flex items-center justify-between gap-3 rounded-md border p-2" data-testid="setup-preselect-install">
+                <code className="min-w-0 truncate text-xs">{INSTALL[preselectHold.agent.runtime]}</code>
+                <Button
+                  variant="ghost" size="sm" aria-label={t('failure.copyAria', { runtime: RUNTIME_LABEL[preselectHold.agent.runtime] })}
+                  onClick={() => void navigator.clipboard?.writeText(INSTALL[preselectHold.agent.runtime]).catch(() => {})}
+                >{t('failure.copy')}</Button>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {preselectHold.reason === 'outside_project' ? (
+                <PutOnTeamButton agent={preselectHold.agent} state={teamState[preselectHold.agent.id]} onPress={() => void putOnTeam(preselectHold.agent, [preselectHold.agent], true)} fromHold />
+              ) : null}
+              {preselectHold.reason === 'runtime_missing' ? (
+                <Button asChild variant="outline" size="sm" data-testid="setup-preselect-look-again"><a href={appLinks.open}>{t('failure.no-agent.action')}</a></Button>
+              ) : null}
+              <Button
+                type="button" variant="outline" size="sm" data-testid="setup-preselect-use-new"
+                onClick={() => { preselectSpent.current = true; startFocusAfter.current = true; setPreselectLetGo(true); }}
+              >{t('preselect.useNew')}</Button>
+            </div>
+          </div>
         ) : (
           <p className="text-xs text-muted-foreground">
             {moveMode ? (needsProjectPick ? t('projectPick.reason') : !anyMovable ? t('move.noneMovable') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
@@ -1047,7 +1105,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             [프로젝트 팀에 넣기]); the list arriving takes it away and focus goes to «시작» (effect above) */}
         {!moveMode && (attachableHold === 'failed' || (attachableHold === 'reading' && attachableRetried)) ? (
           <Button
-            type="button" variant="outline" size="sm" className="self-start" data-testid="setup-attachable-retry"
+            type="button" variant="outline" size="sm" className="self-start aria-disabled:pointer-events-none aria-disabled:opacity-50" data-testid="setup-attachable-retry"
             aria-disabled={attachableHold === 'reading' || undefined}
             onClick={() => { if (attachableHold !== 'failed') return; setAttachableRetried(true); setAttachableTick((n) => n + 1); }}
           >{t('move.failureChangedAction')}</Button>
@@ -1068,7 +1126,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
  * in place (the page's putOnTeam); while it works the button reads «넣는 중…» and ignores presses — `aria-disabled`, not `disabled`, so
  * keyboard focus stays on it (a disabled button drops focus to the page). A failure says so under the button; the line stays.
  */
-function PutOnTeamButton({ agent, state, onPress }: { agent: AttachableAgent; state?: 'busy' | 'failed'; onPress: () => void }) {
+function PutOnTeamButton({ agent, state, onPress, fromHold = false }: { agent: AttachableAgent; state?: 'busy' | 'failed'; onPress: () => void; /** story 4703: the one under the reason line (its failure focus finds it, not the row's) */ fromHold?: boolean }) {
   const t = useTranslations('desktop.setup');
   const busy = state === 'busy';
   return (
@@ -1079,7 +1137,7 @@ function PutOnTeamButton({ agent, state, onPress }: { agent: AttachableAgent; st
         aria-label={busy ? undefined : t('putOnTeamAria', { name: agent.name })}
         className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
         onClick={() => { if (!busy) onPress(); }}
-        data-put-on-team={agent.id} data-testid="setup-put-on-team"
+        data-put-on-team={fromHold ? undefined : agent.id} data-preselect-put={fromHold ? '' : undefined} data-testid={fromHold ? 'setup-preselect-put' : 'setup-put-on-team'}
       >
         {busy ? t('putOnTeamBusy') : t('putOnTeam')}
       </Button>
@@ -1289,10 +1347,11 @@ export function DesktopSetupEntry() {
   return entry.query ? <SetupOrProgress key={entry.query.code} query={entry.query} /> : <OpenInDesktopApp />;
 }
 
-/** A setup id the server can hold (the same shape the /api/desktop/setups/{id} route lets through). */
 /** story 4701: how long «시작» waits for the existing-agents list before the page says it failed (Yuna 4701-copy-1015 §3: the limit is the implementer's call) */
 export const ATTACHABLE_READ_LIMIT_MS = 10_000;
-const SETUP_ID_SHAPE =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A setup id the server can hold (the same shape the /api/desktop/setups/{id} route lets through). */
+const SETUP_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * story 4492 AC3 (PO 09:23Z (가)): the page opened with a code whose setup was already started (the app reopens it after
