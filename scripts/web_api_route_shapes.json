@@ -3000,6 +3000,11 @@
 "kind": "unknown"
 },
 {
+"method": "GET",
+"path": "/api/v2/remote-devices/pairing-target",
+"kind": "unknown"
+},
+{
 "method": "DELETE",
 "path": "/api/v2/remote-devices/{}",
 "kind": "unknown"

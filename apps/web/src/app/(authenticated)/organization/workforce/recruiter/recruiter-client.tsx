@@ -25,7 +25,9 @@ import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FIL
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
-import { desktopApp, subscribeDesktopApp, type SprintableDesktop, type DesktopRuntimeFound } from '@/lib/desktop-app';
+import { desktopApp, subscribeDesktopApp, pickFolderTrace, type SprintableDesktop, type DesktopRuntimeFound } from '@/lib/desktop-app';
+import { FolderTraceCard } from '@/components/desktop/folder-trace-card';
+import { useFolderTraces } from '@/components/desktop/use-folder-traces';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { copyTextSafely } from '@/lib/clipboard';
@@ -747,6 +749,23 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     })();
   }, [existingAgents, projectId]);
 
+  // story 4693 (UX-1 · D4): inside the app, what the project's folder on this computer says — a CLAUDE.md / AGENTS.md in it (the app looks at two
+  // names, never at a file's content) and which of this project's agents already work in it. Asked once the project's agents are known (the
+  // answer is the intersection with them). A browser · an older app · no folder kept → null, and the page is exactly as it was.
+  const folderSays = useFolderTraces(bridge?.folderTraces, { projectId }, existingAgents ? existingAgents.map((a) => a.id) : null);
+  // the file is picked among the runtimes the app found AND this organization supports (foundHere, bridge order) — a first match this org cannot hire falls through to the next file
+  const folderTrace = folderSays ? pickFolderTrace(folderSays.traces, foundHere.map((f) => f.found)) : undefined;
+  const folderTraceCap = folderTrace ? foundHere.find((f) => f.found.runtime === folderTrace.runtime)?.cap : undefined;
+  const folderAgents = folderSays ? folderSays.agents.flatMap((id) => { const a = existingAgents?.find((x) => x.id === id); return a ? [a] : []; }) : [];
+  // [이 폴더의 에이전트로 채용]: the «역할 없이(키만)» way, at its second step, with that file's runtime already chosen — no role to pick
+  const recruitFromFolder = () => {
+    if (!folderTraceCap) return;
+    chooseRuntime(folderTraceCap.slug);
+    setEquipSkip(true);
+    setSelectedRoleSlug(null);
+    setStep(2);
+  };
+
   // STEP 3 — bundle result
   const [recruitResult, setRecruitResult] = useState<RecruitResponse | null>(null);
   const [copiedGuide, setCopiedGuide] = useState(false);
@@ -999,6 +1018,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── STEP 1 : 직무 선택 ── */}
           {step === 1 && (
             <div className="space-y-3">
+              {bridge && (folderAgents.length > 0 || folderTraceCap) ? (
+                <FolderTraceCard
+                  trace={folderTraceCap ? folderTrace : undefined}
+                  runtimeName={folderTraceCap ? runtimeDisplayName(folderTraceCap) : ''}
+                  agents={folderAgents}
+                  onRecruit={recruitFromFolder}
+                  onStart={(agentId) => bridge.startHere({ agentId })}
+                />
+              ) : null}
               <p className="text-sm font-semibold text-foreground">{t('roleQuestion')}</p>
 
               {roleError ? (
