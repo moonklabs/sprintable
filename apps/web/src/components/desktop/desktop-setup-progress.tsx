@@ -104,12 +104,18 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   }, [setupId, poll, delay]);
 
   if (!progress || !status) {
-    return <Card className="break-keep p-6"><h1 className="text-lg font-semibold">{t('startedTitle')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p></Card>;
+    return (
+      <Card className="break-keep p-6">
+        <h1 className="text-lg font-semibold">{t('startedTitle')}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p>
+        {phoneControlFailed ? <PhoneControlFailedLine /> : null}
+      </Card>
+    );
   }
   // story 4498 (PO 10:50Z · Yuna 10:51Z): a disconnected setup ends here — whatever the steps had reached before (a result
   // shown before the disconnect is not drawn as «done»: nothing continues), and opened again by its address the same card
   if (progress.disconnected) return <Failure failure="disconnected" todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} />;
-  if (move) return <MoveProgressBody move={move} onRetry={() => void poll()} todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} />;
+  if (move) return <MoveProgressBody move={move} onRetry={() => void poll()} todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} phoneControlFailed={phoneControlFailed} isAdmin={isAdmin} app={app} />;
   if (progress.blocked) return <Failure failure="managed" />;
   if (progress.expired) return <Failure failure="expired" />;
   // the folder-trust question is Claude Code's (Codex does not ask it) — Yuna v24 · PO 11:19Z
@@ -156,7 +162,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
         <h1 className="text-lg font-semibold">{progress.result === 'done' ? t('startedDoneTitle') : t('startedTitle')}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p>
         {/* story 4670 (Yuna §E ②): the «폰에서도 다루기» tick was on but the switch did not turn on — the setup went on; the way is the card below */}
-        {phoneControlFailed ? <p className="mt-1 text-xs text-muted-foreground" role="status" data-testid="setup-phone-control-failed">{t('phoneControl.failed')}</p> : null}
+        {phoneControlFailed ? <PhoneControlFailedLine /> : null}
       </header>
       <ol className="flex flex-col gap-3" aria-live="polite">
         {/* a later step done → the earlier one is drawn done (Yuna 12:22Z): ② proves the receiving agent was ready; the pairs line
@@ -267,6 +273,12 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   );
 }
 
+/** story 4670 (Yuna §E ②): the «폰에서도 다루기» tick was on but the switch did not turn on — the setup went on; the way is the card below */
+function PhoneControlFailedLine() {
+  const t = useTranslations('desktop.setup');
+  return <p className="mt-1 text-xs text-muted-foreground" role="status" data-testid="setup-phone-control-failed">{t('phoneControl.failed')}</p>;
+}
+
 /**
  * story 4670 (UX-1 · U2 · design nwachukwu/4670-design.md §2-2 · Yuna §E ③): the end screen's «폰에서도 다루려면» — the phone app's QR
  * (U3's PhoneAppGet, the same block) and, for an owner/admin, [폰 페어링 열기]: the app's deep link `intent=pair`, which the app reads as
@@ -320,7 +332,7 @@ export function PhoneHandoffCard({ isAdmin, app }: { isAdmin: boolean; app: Nati
  * story #4576 (Yuna «② 옮긴 뒤 진행 표시»): a move's two steps — no first task, no result, no [결과 보기]. Agents by their own names
  * (always the `…Bare` forms: name + particle). A moved agent waiting for its folder is ①'s note (as the trust note), not a failure.
  */
-function MoveProgressBody({ move, onRetry, todayHref }: { move: MoveProgress; onRetry: () => void; todayHref: string }) {
+function MoveProgressBody({ move, onRetry, todayHref, phoneControlFailed, isAdmin, app }: { move: MoveProgress; onRetry: () => void; todayHref: string; phoneControlFailed: boolean; isAdmin: boolean; app: NativeReturnApp | null }) {
   const t = useTranslations('desktop.setup');
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
   if (move.blocked) return <Failure failure="managed" />;
@@ -334,6 +346,7 @@ function MoveProgressBody({ move, onRetry, todayHref }: { move: MoveProgress; on
         <p className="text-xs text-muted-foreground">{t('eyebrow')} · {t('move.eyebrowTail')}</p>
         <h1 className="text-lg font-semibold">{done ? t('move.titleDone') : t('move.titleRunning')}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t('startedBody')}</p>
+        {phoneControlFailed ? <PhoneControlFailedLine /> : null}
       </header>
       <ol className="flex flex-col gap-3" aria-live="polite">
         <Step state={readyShown} paused={move.folderWait.length > 0} label={move.ready === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
@@ -392,6 +405,9 @@ function MoveProgressBody({ move, onRetry, todayHref }: { move: MoveProgress; on
         </div>
         <p className="text-xs text-muted-foreground">{done ? t('move.doneNote') : t('move.runningNote')}</p>
       </footer>
+      {/* story 4670 AC1: the usual new-customer road is a move — the phone's way in (QR · [폰 페어링 열기] · the remote-control [켜기]) is
+          there too, and the «아래 카드에서 다시 켤 수 있어요» line points at it */}
+      {move.settled ? <PhoneHandoffCard isAdmin={isAdmin} app={app} /> : null}
     </Card>
   );
 }
