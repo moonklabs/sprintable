@@ -7,7 +7,8 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { desktopApp } from '@/lib/desktop-app';
+import { desktopApp, pickFolderTrace } from '@/lib/desktop-app';
+import { useFolderTraces } from '@/components/desktop/use-folder-traces';
 import { homeAsTilde } from '@/lib/home-tilde';
 
 /** the path as the person reads it: `/Users/<name>` as `~` (homeAsTilde), the middle elided when long — the last folder's name always stays */
@@ -29,6 +30,10 @@ export function ProjectFolderField({ value, onChange, disabled = false, idPrefix
   const t = useTranslations('nav');
   const [picking, setPicking] = useState(false);
   const app = desktopApp();
+  // story 4693 (UX-1 · D4): the folder just picked — does it carry CLAUDE.md / AGENTS.md? The app answers only about a folder this page picked
+  // through its own chooser (never a path the page names); an older app · a browser · no trace → no line. No agent ids asked (the project does not exist yet).
+  const says = useFolderTraces(app?.folderTraces, value ? { path: value } : null, []);
+  const trace = says && app ? pickFolderTrace(says.traces, app.runtimes) : undefined;
   if (!app) return null;
 
   const pick = async () => {
@@ -65,6 +70,10 @@ export function ProjectFolderField({ value, onChange, disabled = false, idPrefix
           never `truncate` — a CSS end-cut would drop the last folder's name, the one part displayFolder keeps */}
       {value && (
         <code className="block break-all rounded bg-muted px-2 py-1 text-xs" title={value} data-testid="project-folder-path">{displayFolder(value)}</code>
+      )}
+      {/* Yuna 4693 ④: information only (no button — the project does not exist yet), under the path; it follows the value (a new pick asks again · [지우기] drops it) */}
+      {value && trace && (
+        <p className="text-xs text-muted-foreground break-keep" data-testid="project-folder-trace">{t('switcherFolderTrace', { file: trace.file })}</p>
       )}
     </div>
   );
