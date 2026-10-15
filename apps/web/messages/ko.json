@@ -6365,6 +6365,7 @@
     "folderTraceRecruit": "이 폴더의 에이전트로 채용",
     "folderAgentTitle": "이 컴퓨터에서 이 프로젝트 폴더로 일하는 에이전트가 있어요",
     "folderAgentBody": "새로 채용하지 않고 그대로 시작할 수 있어요.",
+    "folderAgentStartAria": "이 컴퓨터에서 시작 · {name}",
     "foundHereCardAria": "{n}번째 · {label}",
     "ownMcpNote": "내 MCP 도구도 에이전트가 쓰게 하려면 앱 메뉴 «Sprintable»의 내 MCP 도구 항목을 켜요 — 기본은 꺼짐이에요."
   },

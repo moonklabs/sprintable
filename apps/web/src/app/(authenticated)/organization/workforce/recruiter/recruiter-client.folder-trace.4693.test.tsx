@@ -151,6 +151,7 @@ describe('[SID:4693] RecruiterClient — the folder trace card inside the deskto
     const rows = [...card.querySelectorAll('[data-testid=folder-agent-row]')];
     expect(rows).toHaveLength(1); // the id this project does not have is dropped; a2 has no profile there
     expect(rows[0]!.textContent).toContain('Rin');
+    expect(rows[0]!.querySelector('[data-testid=folder-agent-start]')!.getAttribute('aria-label')).toBe('recruiter.folderAgentStartAria({"name":"Rin"})'); // which agent this starts (the visible label is the same on every row)
     await click(rows[0]!.querySelector('[data-testid=folder-agent-start]')!);
     await flush();
     expect(b.startHere).toHaveBeenCalledWith({ agentId: 'a1' });
@@ -168,6 +169,7 @@ describe('[SID:4693] RecruiterClient — the folder trace card inside the deskto
     const rows = [...container.querySelectorAll('[data-testid=folder-agent-row]')];
     expect(rows).toHaveLength(2); // an agent in the folder with no trace in it still tells
     expect(rows[1]!.textContent).toContain('common.agentUnnamed');
+    expect(rows[1]!.querySelector('button')!.getAttribute('aria-label')).toBe('recruiter.folderAgentStartAria({"name":"common.agentUnnamed"})');
     const buttons = rows.map((r) => r.querySelector('button')!);
     expect(buttons[0]!.className).toBe(buttons[1]!.className);
     expect(buttons[0]!.className).not.toBe(HERO()); // two agents → both outline: the page never has two heroes

@@ -50,8 +50,9 @@ export function FolderTraceCard({ trace, runtimeName, agents, onRecruit, onStart
           {agents.map((a) => (
             <li key={a.id} className="space-y-1" data-testid="folder-agent-row">
               <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-sm font-medium">{a.name || tc('agentUnnamed')}</span>
-                <Button type="button" size="sm" variant={agents.length === 1 ? 'hero' : 'outline'} className="shrink-0 whitespace-nowrap" disabled={rows[a.id] === 'busy'} onClick={() => void start(a.id)} data-testid="folder-agent-start">
+                <span className="min-w-0 truncate text-sm font-medium" title={a.name || undefined}>{a.name || tc('agentUnnamed')}</span>
+                {/* Yuna 4693 (#3592 guard): the same visible label on every row — the aria-label says WHICH agent this starts (the name, not an index: the name is on the row) */}
+                <Button type="button" size="sm" variant={agents.length === 1 ? 'hero' : 'outline'} className="shrink-0 whitespace-nowrap" disabled={rows[a.id] === 'busy'} aria-label={t('folderAgentStartAria', { name: a.name || tc('agentUnnamed') })} onClick={() => void start(a.id)} data-testid="folder-agent-start">
                   {t('startHere')}
                 </Button>
               </div>
