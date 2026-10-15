@@ -12,6 +12,11 @@ describe('[4680] the agent limit answer', () => {
     for (const limit of [undefined, null, '3', 2.5, -1, NaN, Infinity, {}, []]) expect(agentLimitOf(402, env({ limit }))?.limit ?? null, String(limit)).toBeNull();
     expect(agentLimitOf(402, env({ limit: 0 }))?.limit).toBe(0);
   });
+  it('a big number is not printed: 9999 is, 10000 and above (1e21 · MAX_SAFE_INTEGER) are not — the number-less line comes instead', () => {
+    expect(agentLimitOf(402, env({ limit: 9999 }))?.limit).toBe(9999);
+    for (const limit of [10000, 1e6, 1e21, Number.MAX_SAFE_INTEGER]) expect(agentLimitOf(402, env({ limit }))?.limit, String(limit)).toBeNull();
+    expect(agentLimitOf(402, env({ limit: 10000 }))).toEqual({ limit: null, free: true }); // still the agent limit — only the number is withheld
+  });
   it('tier: free · empty · not named → free; any other named tier → paid', () => {
     expect(agentLimitOf(402, env({ tier: undefined }))?.free).toBe(true);
     expect(agentLimitOf(402, env({ tier: '' }))?.free).toBe(true);
