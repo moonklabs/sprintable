@@ -34,6 +34,7 @@ let root: Root;
 let createAnswer: { ok: boolean; status: number; json: () => Promise<unknown> };
 
 beforeEach(() => {
+  vi.stubEnv('NEXT_PUBLIC_EE_ENABLED', 'true'); // story 4680: the billing tab exists unless a test says otherwise
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -46,7 +47,7 @@ beforeEach(() => {
     removeItem: (k: string) => { mem.delete(k); }, clear: () => mem.clear(), key: () => null, length: 0,
   });
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); };
 
@@ -108,6 +109,22 @@ describe('«새 프로젝트» 창 — 요금제 프로젝트 한도(402) (story
     expect(dialog.querySelector('[data-testid="project-folder-path"]')!.textContent).toBe('~/work/a');
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect([...dialog.querySelectorAll('button')].some((b) => b.textContent?.trim() === (koMessages.common as Record<string, string>).cancel)).toBe(true);
+  });
+
+  it('billing closed (prod today · story 4680 · Yuna §N-2): the fact — title «한도에 도달했어요» · the limit sentence only · no way, no «업그레이드»', async () => {
+    vi.stubEnv('NEXT_PUBLIC_EE_ENABLED', 'false');
+    await render();
+    const dialog = await fillAndSubmit();
+    const banner = dialog.querySelector('[data-testid="project-limit-banner"]')!;
+    expect(banner).not.toBeNull();
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain('한도에 도달했어요');
+    expect(banner.textContent).toContain(onb.projectLimitExceededClosed!.replace('{limit}', '1'));
+    expect(banner.textContent).not.toContain('업그레이드');
+    expect(banner.querySelector('a')).toBeNull();
+    expect(banner.querySelectorAll('p').length).toBe(2); // title + the one sentence
+    expect(dialog.textContent).not.toContain(GENERIC);
+    expect((dialog.querySelector('#unified-proj-name') as HTMLInputElement).value).toBe('walk-p2'); // what was typed stays
   });
 
   it('a tier that is not free: the other reason (no «무료 플랜»)', async () => {
