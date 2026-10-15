@@ -264,6 +264,15 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // (what has arrived by then). The preselect is never marked spent on «this list would land» — with no rows yet that spent it
   // on nothing and the recipe's rows came up without it.
   const attachableRef = useRef<readonly AttachableAgent[]>([]);
+  // story 4701: which read of that list has ended — «<project>:<tick>» and how (ok / failed). The recruiter's agent (`agent=` · preselect)
+  // can only land on a row once the list is here, so «시작» waits for it (a press before it made a NEW Creator · Publisher and left the
+  // recruited agent on no setup). Derived from the key, not a flag set in the effect: the first render after a project / tick change is
+  // «reading» too, so there is no frame with «시작» on.
+  const [attachableRead, setAttachableRead] = useState<{ key: string; ok: boolean } | null>(null);
+  // Yuna 4701-copy-1015 §2: after [목록 다시 불러오기] the button stays (aria-disabled while it reads, so focus stays on it); once the list is
+  // here it goes and focus moves to «시작»
+  const [attachableRetried, setAttachableRetried] = useState(false);
+  const startRef = useRef<HTMLButtonElement | null>(null);
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
   const [pickingRecipe, setPickingRecipe] = useState(false); // 4446: the recipe list is folded to the chosen one until [바꾸기]
@@ -415,17 +424,36 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   useEffect(() => {
     if (orgMode.kind !== 'has-org' || !chosenProject || !isAdmin) { attachableRef.current = []; setAttachable([]); return; }
     let off = false;
+    const readKey = `${chosenProject}:${attachableTick}`;
+    // story 4701 (Yuna 4701-copy-1015 §3): a read that never answers is a silent failure — after the limit the page says «failed» (the
+    // button reads again); an answer that comes after that still lands (the list is applied and «시작» turns on)
+    const limit = setTimeout(() => { if (!off) setAttachableRead((cur) => (cur?.key === readKey ? cur : { key: readKey, ok: false })); }, ATTACHABLE_READ_LIMIT_MS);
     fetchWithAuth(`/api/desktop/setup/agents?project_id=${encodeURIComponent(chosenProject)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((body: { agents?: AttachableAgent[] } | null) => {
         if (off) return;
         // the contract's one shape ({agents}) — anything else draws no group (never guessed from another field)
         applyAttachable(Array.isArray(body?.agents) ? body.agents : []);
+        setAttachableRead({ key: readKey, ok: body !== null });
       })
-      .catch(() => { if (!off) { attachableRef.current = []; setAttachable([]); } }); // the group is left out — «새로 만들기» still works
-    return () => { off = true; };
+      .catch(() => { if (!off) { attachableRef.current = []; setAttachable([]); setAttachableRead({ key: readKey, ok: false }); } })
+      .finally(() => clearTimeout(limit)); // the group is left out — «새로 만들기» still works (no preselect: as before; with one «시작» waits — story 4701)
+    return () => { off = true; clearTimeout(limit); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgMode.kind, chosenProject, isAdmin, attachableTick]);
+
+  // story 4701: with the recruiter's agent in the address (`agent=`), «시작» waits for the agents list this page reads (the same condition
+  // the read runs on). Still reading → «reading»; the read failed → «failed» (never a quiet fall to «새로 만들기»: [다시 불러오기] reads
+  // again). No `agent=` · no read to wait for (a new organization · not an admin · no project yet) → nothing waits — the road as before.
+  const attachableReadKey = chosenProject ? `${chosenProject}:${attachableTick}` : null;
+  const attachableWanted = !!preselect && orgMode.kind === 'has-org' && !!chosenProject && isAdmin;
+  const attachableHold: 'reading' | 'failed' | null = !attachableWanted ? null
+    : attachableRead?.key !== attachableReadKey ? 'reading'
+      : attachableRead.ok ? null : 'failed';
+  // the list arrived after [목록 다시 불러오기] (its button went away) → focus «시작», now on, with the recruiter's agent already chosen
+  useEffect(() => {
+    if (attachableRetried && attachableHold === null) { setAttachableRetried(false); startRef.current?.focus(); }
+  }, [attachableRetried, attachableHold]);
 
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
@@ -654,8 +682,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // would be false); the server refuses the same with no_agent_role
   const noAgentRow = needsAnAgent(rows);
   const namesOk = firstProject ? !!projectName.trim() : !newOrg || (!!orgName.trim() && !!projectName.trim());
-  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose';
-  const canMoveStart = !!chosenProject && moveChosen.length > 0 && view.kind === 'choose';
+  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose' && attachableHold === null;  const canMoveStart = !!chosenProject && moveChosen.length > 0 && view.kind === 'choose';
   const toggleMove = (id: string, on: boolean) => setMoving((ms) => (on ? [...new Set([...ms, id])] : ms.filter((m) => m !== id)));
 
   return (
@@ -997,16 +1024,34 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             </label>
           </div>
         ) : null}
-        <Button onClick={() => void (moveMode ? moveStart() : start())} disabled={moveMode ? !canMoveStart : !canStart}>
+        <Button ref={startRef} onClick={() => void (moveMode ? moveStart() : start())} disabled={moveMode ? !canMoveStart : !canStart}>
           {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{moveMode ? t('move.start') : t('start')}
         </Button>
-        <p className="text-xs text-muted-foreground">
-          {moveMode ? (needsProjectPick ? t('projectPick.reason') : !anyMovable ? t('move.noneMovable') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
-            : noAgentRow ? t('noAgentRow')
-            // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
-            : needsProjectPick ? t('projectPick.reason')
-            : startNote(t, agents, moved, humanList, humanRoles.length > 0)}
-        </p>
+        {/* story 4701 (Yuna 4701-copy-1015): the recruiter's agent is not on a row until the list is read — «시작» is off and says why, in the
+            count line's place and before every other reason (the waiting IS the reason at that moment) */}
+        {attachableHold !== null && !moveMode ? (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground" role={attachableHold === 'failed' ? 'alert' : 'status'} data-testid={attachableHold === 'failed' ? 'setup-attachable-failed' : 'setup-attachable-reading'}>
+            {attachableHold === 'reading' ? <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden /> : null}
+            {attachableHold === 'failed' ? t('attachableFailed') : t('attachableReading')}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {moveMode ? (needsProjectPick ? t('projectPick.reason') : !anyMovable ? t('move.noneMovable') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
+              : noAgentRow ? t('noAgentRow')
+              // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
+              : needsProjectPick ? t('projectPick.reason')
+              : startNote(t, agents, moved, humanList, humanRoles.length > 0)}
+          </p>
+        )}
+        {/* directly below the line · stays after a press (aria-disabled while it reads — not `disabled`: keyboard focus stays on it, as 4678's
+            [프로젝트 팀에 넣기]); the list arriving takes it away and focus goes to «시작» (effect above) */}
+        {!moveMode && (attachableHold === 'failed' || (attachableHold === 'reading' && attachableRetried)) ? (
+          <Button
+            type="button" variant="outline" size="sm" className="self-start" data-testid="setup-attachable-retry"
+            aria-disabled={attachableHold === 'reading' || undefined}
+            onClick={() => { if (attachableHold !== 'failed') return; setAttachableRetried(true); setAttachableTick((n) => n + 1); }}
+          >{t('move.failureChangedAction')}</Button>
+        ) : null}
         {rateLine ? <p className="text-xs text-muted-foreground" data-testid="setup-rate-limited">{rateLine}</p>
           : view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
       </footer>
@@ -1245,7 +1290,9 @@ export function DesktopSetupEntry() {
 }
 
 /** A setup id the server can hold (the same shape the /api/desktop/setups/{id} route lets through). */
-const SETUP_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** story 4701: how long «시작» waits for the existing-agents list before the page says it failed (Yuna 4701-copy-1015 §3: the limit is the implementer's call) */
+export const ATTACHABLE_READ_LIMIT_MS = 10_000;
+const SETUP_ID_SHAPE =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * story 4492 AC3 (PO 09:23Z (가)): the page opened with a code whose setup was already started (the app reopens it after
