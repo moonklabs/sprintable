@@ -115,6 +115,18 @@ describe('GET /auth/login — native OAuth-start branch', () => {
     expect(appCookie(), 'not a native start').toBeUndefined();
   });
 
+  // story 4689 — the dev phone app's own name rides the same cookie; case/padding variants stay off the table
+  it('[4689] return_app=dev (native) → the cookie «dev» · look-alikes → no cookie', async () => {
+    const appCookie = () => h.cookiesSetMock.mock.calls.find((c) => c[0] === 'oauth_native_return_app_google');
+    await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', return_app: 'dev' }));
+    expect(appCookie()?.[1]).toBe('dev');
+    for (const off of ['DEV', ' dev', 'dev ', 'ai.sprintable.dev']) {
+      h.cookiesSetMock.mockReset();
+      await GET(makeRequest({ provider: 'google', native: '1', code_challenge: VALID_CHALLENGE, callback_mode: 'custom_scheme', return_app: off }));
+      expect(appCookie(), off).toBeUndefined();
+    }
+  });
+
   it('[4626 · Kadir 08:18Z] a native start without return_app (or off the table) drops a return_app cookie an earlier start left', async () => {
     const starts: Record<string, string>[] = [{}, { return_app: 'evil' }, { return_app: 'Check' }];
     for (const q of starts) {
