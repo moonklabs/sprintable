@@ -44,6 +44,7 @@ import { useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
 import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
+import { HIDDEN_SETTINGS_TABS, resolveSettingsTab as resolveTab } from './settings-tab';
 import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
@@ -133,18 +134,8 @@ function isWebhookUrlAllowed(url: string): boolean {
 //   (BE 라우트 0건 — Sprintable이 고객사 모델키/MCP연결을 호스팅하는 모델을 접었다는
 //   판단, 재노출은 새 구현이 필요·set에서 제거만으론 복원 안 됨). 이 문자열은 과거 딥링크
 //   (?tab=ai) 방어 폴백 용도로만 남긴다.
-const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow', 'org-members']);
-const DEFAULT_SETTINGS_TAB = 'profile';
-
-// ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
-// story #3274 — support 탭은 isSupportWidgetEnabled() 뒤(prod는 아직 false)라 flag off일
-// 때 ?tab=support로 직접 들어오면 트리거/콘텐츠가 아예 안 그려져 빈 화면이 된다 — 그
-// 경우도 기본 탭으로 폴백.
-function resolveSettingsTab(tab: string | null): string {
-  if (!tab || HIDDEN_SETTINGS_TABS.has(tab)) return DEFAULT_SETTINGS_TAB;
-  if (tab === 'support' && !isSupportWidgetEnabled()) return DEFAULT_SETTINGS_TAB;
-  return tab;
-}
+// the tab from ?tab= (pure · tested in settings-tab.test.ts) with this deployment's gates
+const resolveSettingsTab = (tab: string | null): string => resolveTab(tab, { supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
 
 export default function SettingsPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`

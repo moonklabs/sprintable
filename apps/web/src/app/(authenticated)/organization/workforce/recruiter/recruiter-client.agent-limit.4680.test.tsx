@@ -34,6 +34,7 @@ let createAnswer: Response;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  vi.stubEnv('NEXT_PUBLIC_EE_ENABLED', 'true'); // billing open unless a test says otherwise (the closed road has its own describe)
   container = document.createElement('div');
   document.body.appendChild(container);
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -48,7 +49,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('fetch', fetchMock);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 const click = async (el: Element | undefined) => { expect(el).toBeTruthy(); await act(async () => { el!.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); };
 const buttons = (text: string) => Array.from(container.querySelectorAll('button')).filter((b) => b.textContent === text);
@@ -163,6 +164,66 @@ describe('[4680] the full recruit road', () => {
     await recruitCreate();
     expect(banner()).toBeNull();
     expect(container.textContent).toContain(GENERAL);
+  });
+});
+
+describe('[4680] billing closed (prod today · Yuna §N-2): the fact — title «한도에 도달했어요» key · the limit sentence only · no way', () => {
+  beforeEach(() => { vi.stubEnv('NEXT_PUBLIC_EE_ENABLED', 'false'); });
+  it('equip road · 402 free limit 3 → the closed banner: no link, no «upgrade» key, the closed sentence with 3; typed name stays', async () => {
+    createAnswer = limit402();
+    await equipCreate('Kept Closed');
+    expect(banner()).not.toBeNull();
+    expect(banner()!.textContent).toContain('nav.orgLimitBannerTitleClosed');
+    expect(banner()!.textContent).toContain('recruiter.agentLimitExceededClosed({"limit":3})');
+    expect(banner()!.textContent).not.toMatch(/nav\.orgLimitBannerTitle(?!Closed)/); // the open title is not there
+    expect(banner()!.textContent).not.toContain('orgLimitUpgradeLink');
+    expect(banner()!.textContent).not.toContain('agentLimitExceededError');
+    expect(banner()!.querySelector('a')).toBeNull();
+    expect(container.querySelector('a[href*="tab=billing"]')).toBeNull();
+    expect(container.textContent).not.toContain(GENERAL);
+    expect((container.querySelector('input[type="text"]') as HTMLInputElement).value).toBe('Kept Closed');
+  });
+  it('full recruit road · the same closed banner · no recruit call', async () => {
+    createAnswer = limit402();
+    await recruitCreate();
+    expect(banner()!.textContent).toContain('nav.orgLimitBannerTitleClosed');
+    expect(banner()!.textContent).toContain('recruiter.agentLimitExceededClosed({"limit":3})');
+    expect(banner()!.querySelector('a')).toBeNull();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/recruit'))).toBe(false);
+  });
+  it('no limit in the answer → the number-less closed sentence (free or another tier — no paid branch where billing is closed)', async () => {
+    for (const tier of ['free', 'team']) {
+      createAnswer = limit402({ limit: undefined, tier });
+      await equipCreate();
+      expect(banner()!.textContent).toContain('recruiter.agentLimitExceededNoCountClosed');
+      expect(banner()!.querySelector('a')).toBeNull();
+      act(() => root.unmount());
+      container.innerHTML = '';
+    }
+  });
+  it('limit 0 → «the free plan does not include agents» (closed sentence) — not «0개까지», not «모두 만들었어요»', async () => {
+    createAnswer = limit402({ limit: 0 });
+    await equipCreate();
+    expect(banner()!.textContent).toContain('recruiter.agentLimitZeroClosed');
+    expect(banner()!.textContent).not.toContain('"limit":0');
+    expect(banner()!.textContent).not.toContain('NoCount');
+  });
+  it('another kind of failure is the old line here too', async () => {
+    createAnswer = json({ error: { code: 'INTERNAL' } }, 500);
+    await equipCreate();
+    expect(banner()).toBeNull();
+    expect(container.textContent).toContain(GENERAL);
+  });
+});
+
+describe('[4680] billing open · limit 0 (Yuna §N-2): its own sentence + the old second sentence, the way drawn', () => {
+  it('free · limit 0 → agentLimitZero (not the «…Error» with 0, not the number-less line)', async () => {
+    createAnswer = limit402({ limit: 0 });
+    await equipCreate();
+    expect(banner()!.textContent).toContain('recruiter.agentLimitZero');
+    expect(banner()!.textContent).not.toContain('agentLimitExceededError');
+    expect(banner()!.textContent).not.toContain('agentLimitExceededNoCount');
+    expect(banner()!.querySelector('a')?.getAttribute('href')).toContain('/settings?tab=billing');
   });
 });
 
